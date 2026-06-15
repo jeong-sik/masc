@@ -158,7 +158,12 @@ let handle_tool_help ~tool_name ~start_time _ctx args : Tool_result.result =
    With dispatch lifting internally now, these wrappers can pass
    the typed result straight through. *)
 let handle_web_search ~tool_name ~start_time _ctx args : Tool_result.result =
-  Tool_misc_web_search.handle ~tool_name ~start_time args
+  let result = Tool_misc_web_search.handle ~tool_name ~start_time args in
+  Tool_misc_web_enrichment.enrich_result_if_requested
+    ~tool_name
+    ~start_time
+    args
+    result
 
 let handle_web_fetch ~tool_name ~start_time _ctx args : Tool_result.result =
   Tool_misc_web_fetch.handle ~tool_name ~start_time args

@@ -77,6 +77,7 @@ val resolve_overrides :
 
       [turn]
       stream_idle_timeout_sec   = 120
+      execution_idle_timeout_sec = 300
       llm_rerank                  = true
     ]}
 

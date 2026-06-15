@@ -10,7 +10,7 @@ open Alcotest
     so the assertion is direct: top-level [let dispatch = ...] and
     [let dispatch_structured = ...] must not exist in tool_dispatch.ml. *)
 
-let file = "lib/tool_dispatch.ml"
+let file = "lib/tool/tool_dispatch.ml"
 
 let test_no_dispatch_top_level_binding () =
   let n = Ast_grep.count_value_bindings ~module_path:file ~name:"dispatch" in

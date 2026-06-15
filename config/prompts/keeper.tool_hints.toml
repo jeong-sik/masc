@@ -5,8 +5,8 @@
 
 [[hints]]
 name = "keeper_task_claim"
-call = "`keeper_task_claim` {}"
-description = "reserve the next eligible task"
+call = "`keeper_task_claim` {} or { task_id: \"task-123\" }"
+description = "reserve the next eligible task or an explicitly requested task"
 
 [[hints]]
 name = "keeper_tasks_list"
@@ -65,13 +65,13 @@ description = "run one typed argv command; set cwd for git, never type keeper_* 
 
 [[hints]]
 name = "WebSearch"
-call = "`WebSearch` { query: \"current-info query\", limit: 5 }"
-description = "look up current public context before time-sensitive claims"
+call = "`WebSearch` { query: \"current-info query\", limit: 5, includeContent: true, contentMaxChars: 4000 }"
+description = "MASC-owned tool-list alias for current public context; includeContent returns keeper-readable content_text plus raw page_content for top results"
 
 [[hints]]
 name = "WebFetch"
 call = "`WebFetch` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}}, extractMode: \"markdown\" }"
-description = "fetch and read an agent-readable web page before citing it"
+description = "fetch one known URL for deeper reading or citation after search"
 
 [[hints]]
 name = "masc_transition"
@@ -80,8 +80,8 @@ description = "approve or reject an awaiting_verification task after inspecting 
 
 [[hints]]
 name = "keeper_task_done"
-call = "`keeper_task_done` { notes: \"evidence\" }"
-description = "close non-PR task work with evidence"
+call = "`keeper_task_done` { task_id: \"TASK_ID\", result: \"completion evidence\" }"
+description = "close claimed task work with task_id and concrete result evidence"
 
 [[hints]]
 name = "keeper_stay_silent"

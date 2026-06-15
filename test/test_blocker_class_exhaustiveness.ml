@@ -295,6 +295,22 @@ let test_reason_none_provider_error_falls_through () =
     surface.KSB.blocker_class
 ;;
 
+let test_provider_timeout_catch_all_maps_to_turn_timeout () =
+  let surface =
+    provider_runtime_surface_exn
+      ~reason:None
+      ~code:"provider_error_timeout:http_operation"
+      ~detail:
+        "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout"
+      ()
+  in
+  check string
+    "provider timeout catch-all -> turn_timeout"
+    "turn_timeout"
+    surface.KSB.blocker_class;
+  check bool "no continue gate" false surface.KSB.continue_gate
+;;
+
 (* ── Runner ────────────────────────────────────────────────────── *)
 
 let () =
@@ -320,6 +336,8 @@ let () =
             test_typed_provider_reason_falls_through
         ; test_case "reason=None provider error falls through" `Quick
             test_reason_none_provider_error_falls_through
+        ; test_case "provider timeout catch-all maps to timeout" `Quick
+            test_provider_timeout_catch_all_maps_to_turn_timeout
         ] )
     ]
 ;;

@@ -41,7 +41,9 @@ let paused_state_requires_approval (old : keeper_meta) =
   Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
   || blocker_requires_continue_gate old
 
-let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
+let update_keeper ?(preserve_prompt_defaults = false)
+    (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
+    =
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
   | Ok active_goal_ids ->
@@ -55,14 +57,17 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     match p.goal_opt with
     | Some g -> normalize_goal_horizon_text g
     | None ->
-        profile_default_text p.profile_defaults.goal
-          (if String.trim old.goal <> "" then old.goal else "")
+        if preserve_prompt_defaults then old.goal
+        else
+          profile_default_text p.profile_defaults.goal
+            (if String.trim old.goal <> "" then old.goal else "")
   in
   let short_goal_default = if goal_provided then goal else old.short_goal in
   let mid_goal_default = if goal_provided then goal else old.mid_goal in
   let long_goal_default = if goal_provided then goal else old.long_goal in
   let horizon_default profile_opt old_default =
     if goal_provided then old_default
+    else if preserve_prompt_defaults then old_default
     else profile_default_text profile_opt old_default
   in
   let short_goal =
@@ -156,25 +161,28 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~fallback:profile_or_old
   in
   let new_will =
-    Option.value
-      ~default:
-        (if String.trim old.will <> "" then old.will
-         else Option.value ~default:(Env_config_core.keeper_will ()) p.profile_defaults.will)
-      p.will_opt
+    match p.will_opt with
+    | Some w -> w
+    | None ->
+        if preserve_prompt_defaults then old.will
+        else if String.trim old.will <> "" then old.will
+        else Option.value ~default:(Env_config_core.keeper_will ()) p.profile_defaults.will
   in
   let new_needs =
-    Option.value
-      ~default:
-        (if String.trim old.needs <> "" then old.needs
-         else Option.value ~default:(Env_config_core.keeper_needs ()) p.profile_defaults.needs)
-      p.needs_opt
+    match p.needs_opt with
+    | Some n -> n
+    | None ->
+        if preserve_prompt_defaults then old.needs
+        else if String.trim old.needs <> "" then old.needs
+        else Option.value ~default:(Env_config_core.keeper_needs ()) p.profile_defaults.needs
   in
   let new_desires =
-    Option.value
-      ~default:
-        (if String.trim old.desires <> "" then old.desires
-         else Option.value ~default:(Env_config_core.keeper_desires ()) p.profile_defaults.desires)
-      p.desires_opt
+    match p.desires_opt with
+    | Some d -> d
+    | None ->
+        if preserve_prompt_defaults then old.desires
+        else if String.trim old.desires <> "" then old.desires
+        else Option.value ~default:(Env_config_core.keeper_desires ()) p.profile_defaults.desires
   in
   (* Layer 1 boundary check: warn (not truncate) when an update brings a
      persona field above the prompt-render cap.  Skip when the value
@@ -238,11 +246,16 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     needs = new_needs;
     desires = new_desires;
     instructions =
-      Option.value
-        ~default:
-          (if String.trim old.instructions <> "" then old.instructions
-           else Option.value ~default:"" p.profile_defaults.instructions)
-        p.instructions_opt;
+      (match p.instructions_arg with
+       | Some v -> v
+       | None ->
+           if preserve_prompt_defaults then old.instructions
+           else
+             Option.value
+               ~default:
+                 (if String.trim old.instructions <> "" then old.instructions
+                  else Option.value ~default:"" p.profile_defaults.instructions)
+               p.instructions_opt);
     allowed_paths;
     sandbox_profile;
     network_mode;
@@ -365,7 +378,19 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
               err;
             tool_result_error err
           | Ok () ->
-            (match write_meta ctx.config updated with
+            (* CAS-merge instead of a force write: a dashboard/turn-up edit
+               builds [updated] from a meta snapshot ([old]), so a concurrent
+               keeper turn that bumped cumulative usage counters between the
+               read and this write would otherwise be silently rewound
+               (total_turns 385->370, 2026-06-10). [heartbeat_fields_from_disk]
+               keeps the caller's edited fields but takes the monotonic
+               counters as [max latest caller]. *)
+            (match
+               write_meta_with_merge
+                 ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                 ctx.config
+                 updated
+             with
              | Error e ->
                  Otel_metric_store.inc_counter
                    Keeper_metrics.(to_string WriteMetaFailures)

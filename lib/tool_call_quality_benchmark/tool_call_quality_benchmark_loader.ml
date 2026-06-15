@@ -81,6 +81,14 @@ let string_list_field json key =
       |> List.filter_map (function `String s -> Some s | _ -> None)
       |> normalize_string_list)
 
+let selector_list_field json key =
+  let* items = list_field json key in
+  items
+  |> map_m (fun item ->
+         match Eval_tool_selector.of_yojson item with
+         | Ok selector -> Ok selector
+         | Error msg -> errorf "invalid %s entry: %s" key msg)
+
 let parse_json_check json =
   let* path = required_string_field json "path" in
   Ok {
@@ -138,6 +146,7 @@ let benchmark_case_of_yojson json =
   in
   let* prompt = required_string_field json "prompt" in
   let* forbidden_tools = string_list_field json "forbidden_tools" in
+  let* forbidden_selectors = selector_list_field json "forbidden_selectors" in
   let* category =
     Json_util.get_string json "category"
     |> Option.value ~default:"tool_use"
@@ -156,6 +165,7 @@ let benchmark_case_of_yojson json =
     category;
     keeper_profiles;
     forbidden_tools;
+    forbidden_selectors;
     max_tool_calls;
     success_checks;
     arg_checks;
@@ -171,6 +181,7 @@ let tool_call_of_yojson json =
     success = Json_util.get_bool json "success" |> Option.value ~default:false;
     input = (match member_opt "input" json with Some value -> value | None -> `Assoc []);
     output = member_opt "output" json;
+    route_evidence = member_opt "route_evidence" json;
     duration_ms = Json_util.get_float json "duration_ms";
   }
 

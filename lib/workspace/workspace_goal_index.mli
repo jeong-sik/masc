@@ -39,3 +39,36 @@ val build_task_goal_index
   :  ?goal_task_links:(string * string list) list
   -> unit
   -> (string, string list) Hashtbl.t
+
+(** Path to the persistent goal-task link registry. *)
+val goal_task_links_path : Workspace_utils_backend_setup.config -> string
+
+(** Read the persistent goal-task link registry. Missing registry files are
+    treated as an empty link set. *)
+val read_goal_task_links :
+  Workspace_utils_backend_setup.config -> (string * string list) list
+
+val read_goal_task_links_r :
+  Workspace_utils_backend_setup.config ->
+  ((string * string list) list, string) result
+
+(** Persist the goal-task link registry. *)
+val write_goal_task_links :
+  Workspace_utils_backend_setup.config -> (string * string list) list -> unit
+
+(** Add one task-to-goal link to the persistent registry. *)
+val link_task_to_goal :
+  Workspace_utils_backend_setup.config -> goal_id:string -> task_id:string -> unit
+
+(** Add multiple task-to-goal links to the persistent registry. *)
+val link_tasks_to_goals :
+  Workspace_utils_backend_setup.config -> (string * string option) list -> unit
+
+(** Build indexes using the persistent link registry for [config]. *)
+val build_goal_task_index_for_config :
+  Workspace_utils_backend_setup.config ->
+  Masc_domain.task list ->
+  (string, Masc_domain.task list) Hashtbl.t
+
+val build_task_goal_index_for_config :
+  Workspace_utils_backend_setup.config -> (string, string list) Hashtbl.t

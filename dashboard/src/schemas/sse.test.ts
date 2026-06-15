@@ -11,6 +11,12 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('keeper_heartbeat')).toBe('keeper_heartbeat')
   })
 
+  it('accepts MASC wire aliases emitted by server-side SSE publishers', () => {
+    expect(SSEEventTypeSchema.parse('masc/broadcast')).toBe('masc/broadcast')
+    expect(SSEEventTypeSchema.parse('masc/agent_bound')).toBe('masc/agent_bound')
+    expect(SSEEventTypeSchema.parse('masc/agent_unbound')).toBe('masc/agent_unbound')
+  })
+
   it('accepts current and future oas-prefixed event types', () => {
     expect(SSEEventTypeSchema.parse('oas:agent_failed')).toBe('oas:agent_failed')
     expect(SSEEventTypeSchema.parse('oas:context_overflow_imminent')).toBe('oas:context_overflow_imminent')
@@ -172,6 +178,15 @@ describe('parseSSEMessage', () => {
     const msg = parseSSEMessage({ type: 'broadcast', message: 'hi' })
     expect(msg).not.toBeNull()
     expect(msg?.type).toBe('broadcast')
+  })
+
+  it('keeps MASC broadcast wire events instead of dropping them as schema drift', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({ type: 'masc/broadcast', from: 'operator', content: 'hi' })
+    expect(msg).not.toBeNull()
+    expect(msg?.type).toBe('masc/broadcast')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 
   it('keeps unknown oas-prefixed events instead of dropping them', () => {

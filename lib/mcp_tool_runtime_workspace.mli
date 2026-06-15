@@ -35,7 +35,8 @@ val handle_start :
 
     1. **Set project root**: validates the directory exists,
        initialises {!Workspace} when not already initialised, and
-       atomically swaps [state.workspace_config].
+       atomically swaps the active workspace config via
+       {!Mcp_server.set_workspace_config}.
     2. **Bind agent session**: idempotent when already bound.
        Failure surfaces as a startup error.
     3. **Optional task creation**: when [task_title] non-empty,

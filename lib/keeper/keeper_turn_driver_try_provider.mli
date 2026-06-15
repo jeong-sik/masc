@@ -11,13 +11,16 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
+  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
+  ; execution_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
   ; max_input_tokens : int option
   ; max_cost_usd : float option
+  ; accept : Agent_sdk_response.api_response -> bool
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -35,6 +38,7 @@ type try_provider_ctx =
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
@@ -55,6 +59,11 @@ type try_provider_ctx =
   ; seq_ref : int ref
   }
 
+type last_tool_progress_context =
+  { tool_name : string
+  ; tool_effect : string
+  }
+
 val run_try_provider :
   try_provider_ctx ->
   ?resume_checkpoint:Agent_sdk.Checkpoint.t ->
@@ -63,6 +72,12 @@ val run_try_provider :
   (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
   * Agent_sdk.Checkpoint.t option
   * (string * Obj.t) option
+
+val accept_rejected_error :
+  progress_context:string option ->
+  runtime_id:string ->
+  response:Agent_sdk_response.api_response ->
+  Agent_sdk.Error.sdk_error
 
 module For_testing : sig
   val max_execution_time_for_attempt :
@@ -75,4 +90,16 @@ module For_testing : sig
     runtime_mcp_external_tools:bool ->
     Agent_sdk.Hooks.turn_params ->
     Agent_sdk.Hooks.turn_params
+
+  val apply_accept :
+    runtime_id:string ->
+    accept:(Agent_sdk_response.api_response -> bool) ->
+    Runtime_agent.run_result ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val last_tool_progress_context_of_messages :
+    Agent_sdk.Types.message list -> last_tool_progress_context option
+
+  val format_last_tool_progress_context :
+    last_tool_progress_context option -> string option
 end

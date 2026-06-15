@@ -19,6 +19,37 @@ let string_contains haystack needle =
     done;
     !found
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+
+let rec find_source_root_from dir hops rel =
+  if hops > 8 then None
+  else if Sys.file_exists (Filename.concat dir rel) then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_source_root_from parent (hops + 1) rel
+
+let source_root () =
+  let anchor = "config/prompts/keeper.tool_hints.toml" in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when String.trim root <> "" && Sys.file_exists (Filename.concat root anchor) ->
+    root
+  | _ ->
+    (match find_source_root_from (Sys.getcwd ()) 0 anchor with
+     | Some root -> root
+     | None -> Alcotest.fail "could not locate repo source root")
+
+let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
+
+let assert_contains label haystack needle =
+  Alcotest.(check bool) label true (string_contains haystack needle)
+
+let assert_not_contains label haystack needle =
+  Alcotest.(check bool) label false (string_contains haystack needle)
+
 (* ================================================================ *)
 (* Helper: validate via the same pipeline as the pre-hook            *)
 (* ================================================================ *)
@@ -458,6 +489,15 @@ let keeper_board_list_schema =
 let keeper_board_search_schema =
   find_schema_exn "keeper_board_search" Config.raw_all_tool_schemas
 
+let keeper_board_post_get_schema =
+  find_schema_exn "keeper_board_post_get" Config.raw_all_tool_schemas
+
+let keeper_task_done_schema =
+  find_schema_exn "keeper_task_done" Config.raw_all_tool_schemas
+
+let keeper_task_claim_schema =
+  find_schema_exn "keeper_task_claim" Config.raw_all_tool_schemas
+
 let tool_execute_schema =
   find_schema_exn "tool_execute" Config.raw_all_tool_schemas
 
@@ -617,6 +657,15 @@ let param_by_name name params =
 
 let legacy_background_flag_name = "run_" ^ "in_background"
 
+let execute_async_lifecycle_field_names =
+  [ legacy_background_flag_name
+  ; "job_id"
+  ; "request_id"
+  ; "backgroundTaskId"
+  ; "poll"
+  ; "cancel"
+  ]
+
 let check_param_type name expected params =
   match param_by_name name params with
   | Some (param : Agent_sdk.Types.tool_param) ->
@@ -648,7 +697,14 @@ let test_tool_execute_schema_exposes_typed_boundary () =
   Alcotest.(check bool)
     "legacy background flag not exposed"
     true
-    (Option.is_none (param_by_name legacy_background_flag_name params))
+    (Option.is_none (param_by_name legacy_background_flag_name params));
+  List.iter
+    (fun field ->
+      Alcotest.(check bool)
+        (field ^ " async lifecycle field not exposed")
+        true
+        (Option.is_none (param_by_name field params)))
+    execute_async_lifecycle_field_names
 
 let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
   let args = `Assoc [] in
@@ -731,6 +787,38 @@ let test_validate_args_tool_execute_rejects_background_flag () =
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions legacy background flag" true
       (string_contains msg legacy_background_flag_name)
+
+let test_validate_args_tool_execute_rejects_async_lifecycle_fields () =
+  let cases =
+    [ legacy_background_flag_name, `Bool true
+    ; "job_id", `String "job-123"
+    ; "request_id", `String "req-123"
+    ; "backgroundTaskId", `String "bg-123"
+    ; "poll", `Bool true
+    ; "cancel", `Bool true
+    ]
+  in
+  List.iter
+    (fun (field, value) ->
+      let args = `Assoc [ "executable", `String "pwd"; field, value ] in
+      match
+        Tool_input_validation.validate_args
+          ~schema:tool_execute_schema
+          ~name:"tool_execute"
+          ~args
+          ()
+      with
+      | Ok _ ->
+          Alcotest.failf
+            "expected tool_execute async lifecycle field %s to be rejected"
+            field
+      | Error result ->
+          let msg = Yojson.Safe.to_string (Tool_result.data result) in
+          Alcotest.(check bool)
+            ("mentions async lifecycle field " ^ field)
+            true
+            (string_contains msg field))
+    cases
 
 let test_validate_args_tool_execute_accepts_typed_exec () =
   let args =
@@ -1260,6 +1348,193 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
   Alcotest.(check string) "required blank preserved for handler validation" ""
     (assoc_string "mode" forwarded)
 
+let schema_required_fields schema =
+  match Yojson.Safe.Util.member "required" schema with
+  | `List values ->
+    List.filter_map (function `String value -> Some value | _ -> None) values
+  | _ -> []
+
+let assert_schema_requires label schema field =
+  Alcotest.(check bool)
+    (label ^ " requires " ^ field)
+    true
+    (List.mem field (schema_required_fields schema))
+
+let schema_property_names schema =
+  match Yojson.Safe.Util.member "properties" schema with
+  | `Assoc props -> List.map fst props
+  | _ -> []
+
+let assert_validation_rejects ~label ~schema ~tool_name ~args ~snippets =
+  match Tool_input_validation.validate_args ~schema ~name:tool_name ~args () with
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    List.iter
+      (fun snippet ->
+         assert_contains (label ^ " mentions " ^ snippet) msg snippet)
+      snippets
+  | Ok forwarded ->
+    Alcotest.failf
+      "%s: expected validation rejection, got %s"
+      label
+      (Yojson.Safe.to_string forwarded)
+
+let test_high_risk_tool_contract_rejection_corpus () =
+  List.iter
+    (fun (label, tool_name, schema, args, snippets) ->
+       assert_validation_rejects ~label ~tool_name ~schema ~args ~snippets)
+    [ ( "execute empty object"
+      , "tool_execute"
+      , tool_execute_schema
+      , `Assoc []
+      , [ "exactly one of" ] )
+    ; ( "execute raw cmd string"
+      , "tool_execute"
+      , tool_execute_schema
+      , `Assoc [ "cmd", `String "git status --short" ]
+      , [ "cmd"; "executable/argv" ] )
+    ; ( "keeper_task_done notes-only drift"
+      , "keeper_task_done"
+      , keeper_task_done_schema
+      , `Assoc [ "notes", `String "evidence" ]
+      , [ "task_id"; "result" ] )
+    ; ( "keeper_board_post_get missing post_id"
+      , "keeper_board_post_get"
+      , keeper_board_post_get_schema
+      , `Assoc []
+      , [ "post_id" ] )
+    ; ( "masc_transition retired alias fields"
+      , "masc_transition"
+      , masc_transition_schema
+      , `Assoc
+          [ "agent_name", `String "agent_code-local-admin"
+          ; "task_id", `String "task-239"
+          ; "action", `String "claim"
+          ; "to", `String "claimed"
+          ; "note", `String "PR #8308 Draft"
+          ]
+      , [ "to"; "note" ] )
+    ]
+
+let test_keeper_tool_hint_contracts_match_required_fields () =
+  Alcotest.(check bool)
+    "keeper_task_claim schema accepts optional task_id"
+    true
+    (List.mem "task_id" (schema_property_names keeper_task_claim_schema));
+  Alcotest.(check bool)
+    "keeper_task_claim schema does not require task_id"
+    false
+    (List.mem "task_id" (schema_required_fields keeper_task_claim_schema));
+  (match
+     Tool_input_validation.validate_args
+       ~schema:keeper_task_claim_schema
+       ~name:"keeper_task_claim"
+       ~args:(`Assoc [ "task_id", `String "task-123" ])
+       ()
+   with
+   | Ok _ -> ()
+   | Error result ->
+     Alcotest.failf
+       "keeper_task_claim task_id should validate: %s"
+       (Yojson.Safe.to_string (Tool_result.data result)));
+  assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "task_id";
+  assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";
+  assert_schema_requires
+    "keeper_board_post_get schema"
+    keeper_board_post_get_schema
+    "post_id";
+  assert_schema_requires "keeper_board_post schema" keeper_board_post_schema "content";
+  Alcotest.(check bool)
+    "keeper_board_post schema does not require hearth"
+    false
+    (List.mem "hearth" (schema_required_fields keeper_board_post_schema));
+  let hints = read_source_file "config/prompts/keeper.tool_hints.toml" in
+  assert_contains
+    "keeper_task_claim hint names optional task_id"
+    hints
+    "task_id:";
+  assert_contains
+    "keeper_task_done hint names task_id"
+    hints
+    "`keeper_task_done` { task_id:";
+  assert_contains
+    "keeper_task_done hint names result"
+    hints
+    "result:";
+  assert_contains
+    "keeper_task_done hint names evidence"
+    hints
+    "completion evidence";
+  assert_not_contains
+    "keeper_task_done hint does not regress to notes-only"
+    hints
+    "`keeper_task_done` { notes: \"evidence\" }";
+  assert_contains
+    "board get hint uses current tool name"
+    hints
+    "name = \"keeper_board_post_get\"";
+  assert_contains
+    "board get hint names post_id"
+    hints
+    "post_id:";
+  assert_not_contains
+    "board get hint avoids retired name"
+    hints
+    "name = \"keeper_board_get\""
+
+let test_orchestrator_prompt_pins_start_transition () =
+  let prompt = read_source_file "config/prompts/system.orchestrator.md" in
+  assert_contains "orchestrator prompt claims first" prompt "action: \"claim\"";
+  assert_contains "orchestrator prompt starts before work" prompt "action: \"start\"";
+  assert_contains "orchestrator prompt marks done" prompt "action: \"done\""
+
+let test_task_lifecycle_guidance_is_externalized () =
+  let rule =
+    read_source_file "config/prompts/tool_contract.task_lifecycle_rule.md"
+  in
+  let workflow =
+    read_source_file "config/prompts/tool_contract.task_lifecycle_workflow.md"
+  in
+  assert_contains
+    "external rule pins start before done"
+    rule
+    "action='start' before action='done'";
+  assert_contains
+    "external workflow includes start transition"
+    workflow
+    "masc_transition(start)";
+  assert_contains
+    "external workflow keeps worktree guidance"
+    workflow
+    "work in a repo-local worktree";
+  let schema_source = read_source_file "lib/task/tool_task_schemas.ml" in
+  let profile_source =
+    read_source_file "lib/mcp_server_eio_tool_profile.ml"
+  in
+  assert_not_contains
+    "task schema does not own lifecycle prose literal"
+    schema_source
+    "For normal task work, claim first";
+  assert_not_contains
+    "profile does not own workflow prose literal"
+    profile_source
+    "masc_status -> masc_transition(claim) -> masc_transition(start)"
+
+let test_board_prompt_does_not_require_optional_hearth () =
+  let prompt = read_source_file "config/prompts/keeper.capabilities.md" in
+  assert_contains
+    "board prompt says hearth optional"
+    prompt
+    "Hearth is optional";
+  assert_not_contains
+    "board prompt does not claim hearth required"
+    prompt
+    "hearth required";
+  assert_not_contains
+    "board prompt does not forbid omitted hearth"
+    prompt
+    "Never post without hearth"
+
 (* ================================================================ *)
 (* Test: oneOf with empty/null values (regression guard)             *)
 (* ================================================================ *)
@@ -1739,6 +2014,8 @@ let () =
         test_validate_args_tool_execute_rejects_command_string;
       Alcotest.test_case "tool_execute rejects background flag" `Quick
         test_validate_args_tool_execute_rejects_background_flag;
+      Alcotest.test_case "tool_execute rejects async lifecycle fields" `Quick
+        test_validate_args_tool_execute_rejects_async_lifecycle_fields;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
@@ -1779,6 +2056,18 @@ let () =
         test_registered_hook_goal_list_preserves_invalid_enum_for_handler;
       Alcotest.test_case "required enum blanks are not stripped" `Quick
         test_registered_hook_required_enum_blank_is_not_stripped;
+    ]);
+    ("high_risk_contract_harness", [
+      Alcotest.test_case "rejects live high-risk invalid call corpus" `Quick
+        test_high_risk_tool_contract_rejection_corpus;
+      Alcotest.test_case "keeper prompt hints match schema-required fields" `Quick
+        test_keeper_tool_hint_contracts_match_required_fields;
+      Alcotest.test_case "orchestrator prompt includes start transition" `Quick
+        test_orchestrator_prompt_pins_start_transition;
+      Alcotest.test_case "task lifecycle guidance is externalized" `Quick
+        test_task_lifecycle_guidance_is_externalized;
+      Alcotest.test_case "board prompt does not require optional hearth" `Quick
+        test_board_prompt_does_not_require_optional_hearth;
     ]);
     ("oneof_const_discriminator", [
       Alcotest.test_case "alpha branch matches via const" `Quick

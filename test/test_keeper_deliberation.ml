@@ -65,13 +65,13 @@ let test_triage_failed_task () =
       check bool "contains FailedTask" true
         (List.mem D.FailedTask triggers)
 
-let test_triage_agent_change () =
-  let obs = { base_obs with agent_count_changed = true } in
+let test_triage_keeper_fiber_count_change () =
+  let obs = { base_obs with keeper_fiber_count_changed = true } in
   match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for agent change"
+  | D.Skip _ -> fail "expected Triggered for keeper fiber count change"
   | D.Triggered triggers ->
-      check bool "contains AgentSessionBoundOrLeft" true
-        (List.mem D.AgentSessionBoundOrLeft triggers)
+      check bool "contains KeeperFiberStartedOrStopped" true
+        (List.mem D.KeeperFiberStartedOrStopped triggers)
 
 let test_triage_board_mention () =
   let obs = { base_obs with board_mention_count = 2 } in
@@ -994,8 +994,8 @@ let () =
             test_triage_unclaimed_task;
           test_case "failed task triggers" `Quick
             test_triage_failed_task;
-          test_case "agent change triggers" `Quick
-            test_triage_agent_change;
+          test_case "keeper fiber count change triggers" `Quick
+            test_triage_keeper_fiber_count_change;
           test_case "board mention triggers" `Quick
             test_triage_board_mention;
           test_case "idle with goals triggers" `Quick

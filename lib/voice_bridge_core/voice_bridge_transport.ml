@@ -16,12 +16,17 @@ let safe_agent_id value =
     value
 ;;
 
-let make_audio_file ~agent_id =
+let make_audio_file () =
   Voice_bridge_core.ensure_audio_dir ();
-  let timestamp = int_of_float (Time_compat.now ()) in
+  (* The token is both the filename and the HTTP capability for
+     /api/v1/voice/audio/:token (RFC-0235 P1). agent_id is deliberately
+     absent from the filename: a logged-in operator viewing one keeper
+     must not be able to enumerate another keeper's clips by guessing
+     <ts>_<agent>. 16 bytes = 128-bit unguessable. *)
+  let token = Random_id.hex ~bytes:16 in
   Filename.concat
     (Filename.concat (Voice_bridge_core.masc_base_dir ()) "audio")
-    (Printf.sprintf "%d_%s.mp3" timestamp (safe_agent_id agent_id))
+    (token ^ ".mp3")
 ;;
 
 let write_text path content = Fs_compat.save_file path content

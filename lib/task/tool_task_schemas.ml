@@ -206,10 +206,12 @@ Tip: Look for status='todo' tasks to claim.";
       "Move a task through its lifecycle: claim, start, done, cancel, release, \
 submit_for_verification, approve, or reject. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
+%s \
 After %s or %s; pair with masc_deliver before action='done'. \
 Use submit_for_verification only for explicit review of a claimed/in_progress task you own; approve/reject for verifier actions. \
 Tasks created through %s complete via action='done' after LLM completion review; \
 they do not route normal completion through the verifier agent."
+      (Tool_contract_guidance.task_lifecycle_rule ())
       masc_add_task_name
       "keeper_task_claim"
       masc_add_task_name;

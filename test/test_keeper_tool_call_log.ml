@@ -138,14 +138,14 @@ let test_model_field_stored () =
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
-      ~model:"provider_k-4-9b"
+      ~model:"glm-4-9b"
       ~runtime_profile:"local_qwen3_27b_only"
       ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
     Alcotest.(check bool) "raw model absent" false
-      (String_util.contains_substring entry_str "provider_k-4-9b");
+      (String_util.contains_substring entry_str "glm-4-9b");
     Alcotest.(check (option string)) "model redacted to runtime"
       (Some "runtime")
       (Safe_ops.json_string_opt "model" (List.hd entries));
@@ -662,6 +662,33 @@ let test_route_evidence_records_masc_board_descriptor () =
         (Safe_ops.json_string_opt "runtime_handler" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let route_evidence_for_tool tool_name =
+  match
+    Keeper_tool_call_log.route_evidence_json_of_tool_io
+      ~tool_name
+      ~input:(`Assoc [])
+      ~output_text:"{}"
+  with
+  | Some evidence -> evidence
+  | None -> Alcotest.failf "missing route evidence for %s" tool_name
+;;
+
+let check_eval_tags tool_name expected =
+  let evidence = route_evidence_for_tool tool_name in
+  Alcotest.(check (list string))
+    (tool_name ^ " eval tags")
+    expected
+    (Safe_ops.json_string_list "eval_tags" evidence)
+;;
+
+let test_route_evidence_records_descriptor_eval_tags () =
+  check_eval_tags "keeper_tools_list" [ "capability_introspection" ];
+  check_eval_tags "keeper_tool_search" [ "capability_introspection" ];
+  check_eval_tags "keeper_surface_read" [ "surface_context_read" ];
+  check_eval_tags "masc_agent_card" [ "agent_profile_lookup" ];
+  check_eval_tags "keeper_time_now" []
+;;
+
 let test_non_object_input_still_logs_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -701,7 +728,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~keeper_name:"k1" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
-      ~model:"provider_k-5.1" ~lane:"tool_optional"
+      ~model:"glm-5.1" ~lane:"tool_optional"
       ~tool_choice:"auto"
       ~thinking_enabled:false ~thinking_budget:1024
       ~runtime_profile:"primary" ();
@@ -1147,6 +1174,10 @@ let () =
             test_route_evidence_records_internal_descriptor
         ; eio_test "route evidence records masc board descriptor"
             test_route_evidence_records_masc_board_descriptor
+        ; Alcotest.test_case
+            "route evidence records descriptor eval tags"
+            `Quick
+            test_route_evidence_records_descriptor_eval_tags
         ; eio_test "non-object input still logs action radius"
             test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"

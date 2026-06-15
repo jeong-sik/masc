@@ -238,7 +238,7 @@ let test_stronger_trigger_uses_winner_order () =
 
 (** {1 Quality Signal Tests (Phase 3)} *)
 
-module Pv = Post_verifier
+module Pv = Thompson_sampling
 module Ah = Masc.Health
 
 let float_eq ?(eps = 0.001) a b = Float.abs (a -. b) < eps

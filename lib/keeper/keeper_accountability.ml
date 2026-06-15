@@ -725,6 +725,8 @@ let accountability_snapshot_cache :
     (string, float * accountability_snapshot) Hashtbl.t =
   Hashtbl.create 4
 
+let accountability_snapshot_cache_mu = Eio.Mutex.create ()
+
 (* compute_reputation calls accountability_summary_json once per unique post
    author in a board render; rebuilding the windowed claim aggregation
    (read_window_entries + materialize_claims + bucketing) per author was
@@ -761,13 +763,21 @@ let cached_accountability_snapshot (config : Workspace_query.config) :
     accountability_snapshot =
   let key = config.base_path in
   let now = Time_compat.now () in
+  let is_fresh = function
+    | Some (built_at, _snap) -> now -. built_at < accountability_snapshot_ttl_s
+    | None -> false
+  in
   match Hashtbl.find_opt accountability_snapshot_cache key with
-  | Some (built_at, snap) when now -. built_at < accountability_snapshot_ttl_s ->
-      snap
+  | Some (built_at, snap) as cached when is_fresh cached -> snap
   | _ ->
-      let snap = build_accountability_snapshot config in
-      Hashtbl.replace accountability_snapshot_cache key (now, snap);
-      snap
+      Eio.Mutex.use_rw ~protect:true accountability_snapshot_cache_mu
+      @@ fun () ->
+      (match Hashtbl.find_opt accountability_snapshot_cache key with
+       | Some (built_at, snap) as cached when is_fresh cached -> snap
+       | _ ->
+           let snap = build_accountability_snapshot config in
+           Hashtbl.replace accountability_snapshot_cache key (now, snap);
+           snap)
 
 let accountability_summary_lookup (config : Workspace_query.config) =
   let { snap_now = now; by_agent; by_keeper } =

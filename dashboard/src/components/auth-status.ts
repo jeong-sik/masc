@@ -30,6 +30,14 @@ const tokenInput = signal('')
 const actorInput = signal('')
 const bannerDismissed = signal(false)
 
+type AuthBannerAction = 'auth_error' | 'remote_unverified'
+
+export interface AuthWarningBannerModel {
+  action: AuthBannerAction
+  message: string
+  canClearToken: boolean
+}
+
 // Test-only helper. Resets module-level signals so *.test.ts files can
 // guarantee isolation in `beforeEach`. Mirrors use-id.ts:50 pattern.
 export function __resetForTests(): void {
@@ -123,6 +131,40 @@ async function handleClearToken(): Promise<void> {
     ? cleanErrorMessage(summary?.auth_error_detail) ?? 'Token cleared; the session is now unverified.'
     : 'Token cleared; the session is now local.'
   showToast(message, 'warning')
+}
+
+export function authWarningBannerModel(
+  summary: typeof shellAuthSummary.value,
+  remote: boolean,
+): AuthWarningBannerModel | null {
+  if (summary?.token_valid) return null
+
+  const authErrorCode = summary?.auth_error_code
+  const hasStaleToken =
+    authErrorCode === 'invalid_token' || authErrorCode === 'token_expired'
+  if (hasStaleToken) {
+    return {
+      action: 'auth_error',
+      message: 'Stored Bearer token is not verified. Replace it with a fresh token or clear it.',
+      canClearToken: summary?.token_present === true,
+    }
+  }
+
+  if (!remote) return null
+
+  if (authErrorCode === 'actor_mismatch') {
+    return {
+      action: 'remote_unverified',
+      message: 'Token owner and dashboard actor differ, so mutations are blocked. Align the actor or token.',
+      canClearToken: summary?.token_present === true,
+    }
+  }
+
+  return {
+    action: 'remote_unverified',
+    message: 'Remote access detected. Set a verified Bearer token before running mutations.',
+    canClearToken: summary?.token_present === true,
+  }
 }
 
 async function handleApplyActor(): Promise<void> {
@@ -302,19 +344,20 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
 
 export function RemoteWarningBanner() {
   const summary = shellAuthSummary.value
-  if (bannerDismissed.value || !isRemoteAccess() || summary?.token_valid) return null
-
-  const message =
-    summary?.auth_error_code === 'invalid_token' || summary?.auth_error_code === 'token_expired'
-      ? 'Stored Bearer token is not verified. Replace it with a fresh token.'
-      : summary?.auth_error_code === 'actor_mismatch'
-        ? 'Token owner and dashboard actor differ, so mutations are blocked. Align the actor or token.'
-        : 'Remote access detected. Set a verified Bearer token before running mutations.'
+  const model = authWarningBannerModel(summary, isRemoteAccess())
+  if (bannerDismissed.value || !model) return null
 
   return html`
     <div role="alert" class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-xs text-[var(--color-status-warn)]">
-      <span>${message}</span>
+      <span>${model.message}</span>
       <div class="flex items-center gap-2 shrink-0">
+        ${model.canClearToken ? html`
+          <button type="button"
+            class="px-2 py-0.5 rounded-[var(--r-1)] text-2xs border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
+            aria-label="Clear stored bearer token"
+            onClick=${() => { void handleClearToken() }}
+          >Clear token</button>
+        ` : null}
         <button type="button"
           class="px-2 py-0.5 rounded-[var(--r-1)] text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
           aria-label="Open auth panel"

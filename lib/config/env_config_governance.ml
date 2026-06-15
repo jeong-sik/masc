@@ -157,7 +157,7 @@ end
 (** {1 Model Routing Defaults} *)
 
 module Model_defaults = struct
-  (** Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). *)
+  (** Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). *)
   let default_runtime_opt () =
     Sys.getenv_opt "MASC_DEFAULT_RUNTIME" |> trim_opt
 

@@ -113,6 +113,10 @@ let add_task
              }
            in
            write_backlog config new_backlog;
+           Option.iter
+             (fun goal_id ->
+                Workspace_goal_index.link_task_to_goal config ~goal_id ~task_id)
+             goal_id;
            let created_by_json = Json_util.string_opt_to_json created_by in
            Workspace_task_classify.emit_task_activity
              config
@@ -196,6 +200,11 @@ let batch_add_tasks_internal ?created_by config tasks =
            }
          in
          write_backlog config new_backlog;
+         Workspace_goal_index.link_tasks_to_goals
+           config
+           (List.map
+              (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
+              added_tasks_with_goal_ids);
          List.iter
            (fun ((task : Masc_domain.task), goal_id) ->
               let created_by_json = Json_util.string_opt_to_json task.created_by in

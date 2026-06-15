@@ -139,13 +139,28 @@ let test_policy_validation_unknown_tool_misses () =
 let test_public_descriptor_names_resolve () =
   List.iter
     (fun name -> check bool (name ^ " resolves") true (resolves name))
-    [ "Execute"; "Grep"; "Search"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
+    [
+      "Execute";
+      "Grep";
+      "Search";
+      "Read";
+      "Edit";
+      "Write";
+      "WebSearch";
+      "WebFetch";
+    ]
 
 let test_retired_public_names_miss () =
   List.iter
     (fun name -> check bool (name ^ " misses") false (resolves name))
-    [ "Bash"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile";
-      "keeper_task_submit_for_verification" ]
+    [
+      "Bash";
+      "SearchFiles";
+      "ReadFile";
+      "EditFile";
+      "WriteFile";
+      "keeper_task_submit_for_verification";
+    ]
 
 (* ── Core tool names that must resolve ── *)
 

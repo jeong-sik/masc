@@ -19,7 +19,32 @@ let add_checkpoint_sanitize_stats
     dropped_chars = a.dropped_chars + b.dropped_chars;
     truncated_blocks = a.truncated_blocks + b.truncated_blocks;
     truncated_chars = a.truncated_chars + b.truncated_chars;
+    tool_pair_repair =
+      add_tool_pair_repair_stats a.tool_pair_repair b.tool_pair_repair;
   }
+
+let checkpoint_stats_of_tool_pair_repair repair_stats =
+  { empty_checkpoint_sanitize_stats with tool_pair_repair = repair_stats }
+
+let tool_pair_repair_stats_to_json (stats : tool_pair_repair_stats) =
+  let tool_use_samples =
+    List.map
+      (fun (tool_use_id, tool_name) ->
+         `Assoc
+           [ "tool_use_id", `String tool_use_id
+           ; "tool_name", `String tool_name
+           ])
+      stats.dropped_tool_use_samples
+  in
+  let tool_result_ids =
+    List.map (fun tool_use_id -> `String tool_use_id) stats.dropped_tool_result_ids
+  in
+  `Assoc
+    [ "dropped_tool_uses", `Int stats.dropped_tool_uses
+    ; "dropped_tool_results", `Int stats.dropped_tool_results
+    ; "dropped_tool_use_samples", `List tool_use_samples
+    ; "dropped_tool_result_ids", `List tool_result_ids
+    ]
 
 let truncate_checkpoint_text ~max_chars (text : string) : string * int =
   let len = String.length text in
@@ -468,16 +493,19 @@ let sanitize_oas_checkpoint
     (cp : Agent_sdk.Checkpoint.t)
   : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
   let messages, stats = sanitize_checkpoint_messages cp.messages in
-  let messages =
-    if repair_orphans then repair_broken_tool_call_pairs messages
-    else messages
+  let messages, stats =
+    if repair_orphans then (
+      let messages, repair_stats = repair_broken_tool_call_pairs_with_stats messages in
+      messages, add_checkpoint_sanitize_stats stats
+        (checkpoint_stats_of_tool_pair_repair repair_stats))
+    else messages, stats
   in
   ({ cp with messages }, stats)
 
-let capped_checkpoint_messages_of_context
+let capped_checkpoint_messages_of_context_with_stats
       ~(max_checkpoint_messages : int)
       (ctx : working_context)
-  : Agent_sdk.Types.message list
+  : Agent_sdk.Types.message list * checkpoint_sanitize_stats
   =
   (* Shared by checkpoint persistence and pre-dispatch resume: both paths
      must honor the load-time message cap plus content-size guards. *)
@@ -489,6 +517,13 @@ let capped_checkpoint_messages_of_context
   let capped_messages_were_truncated =
     List.length capped_messages < List.length original_messages
   in
+  let capped_stats =
+    if capped_messages_were_truncated then
+      { empty_checkpoint_sanitize_stats with
+        dropped_messages = List.length original_messages - List.length capped_messages
+      }
+    else empty_checkpoint_sanitize_stats
+  in
   let capped_messages =
     Agent_sdk.Context_reducer.reduce
       (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
@@ -497,9 +532,21 @@ let capped_checkpoint_messages_of_context
   let capped_messages, sanitize_stats =
     sanitize_checkpoint_messages capped_messages
   in
+  let stats = add_checkpoint_sanitize_stats capped_stats sanitize_stats in
   if capped_messages_were_truncated || checkpoint_sanitize_changed sanitize_stats
-  then repair_broken_tool_call_pairs capped_messages
-  else capped_messages
+  then (
+    let capped_messages, repair_stats =
+      repair_broken_tool_call_pairs_with_stats capped_messages
+    in
+    capped_messages, add_checkpoint_sanitize_stats stats
+      (checkpoint_stats_of_tool_pair_repair repair_stats))
+  else capped_messages, stats
+
+let capped_checkpoint_messages_of_context
+    ~(max_checkpoint_messages : int)
+    (ctx : working_context)
+  : Agent_sdk.Types.message list =
+  fst (capped_checkpoint_messages_of_context_with_stats ~max_checkpoint_messages ctx)
 
 let resume_checkpoint_of_context
       ~(max_checkpoint_messages : int)
@@ -555,20 +602,37 @@ let save_oas_checkpoint
   let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
+  let checkpoint_messages, checkpoint_stats =
+    capped_checkpoint_messages_of_context_with_stats ~max_checkpoint_messages ctx
+  in
   let checkpoint =
     {
       ctx.checkpoint with
       version = Agent_sdk.Checkpoint.checkpoint_version;
       session_id = session.session_id;
       agent_name;
-      model = "runtime";
+      model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
       system_prompt = Some (system_prompt_of_context ctx);
-      messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
+      messages = checkpoint_messages;
       created_at = Time_compat.now ();
       max_total_tokens = Some (max_tokens_of_context ctx);
       context = checkpoint_context;
     }
   in
+  if checkpoint_sanitize_changed checkpoint_stats then (
+    let pair_repair_json =
+      Yojson.Safe.to_string
+        (tool_pair_repair_stats_to_json checkpoint_stats.tool_pair_repair)
+    in
+    Log.Keeper.info
+      "keeper:%s OAS checkpoint save sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d tool_pair_repair=%s"
+      session.session_id
+      checkpoint_stats.dropped_blocks
+      checkpoint_stats.dropped_messages
+      checkpoint_stats.dropped_chars
+      checkpoint_stats.truncated_blocks
+      checkpoint_stats.truncated_chars
+      pair_repair_json);
   match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
   | Ok () -> Ok checkpoint
   | Error e -> Error e
@@ -630,14 +694,18 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     |> Option.map (fun checkpoint ->
       let sanitized, stats = sanitize_oas_checkpoint checkpoint in
       if checkpoint_sanitize_changed stats then begin
+        let pair_repair_json =
+          Yojson.Safe.to_string (tool_pair_repair_stats_to_json stats.tool_pair_repair)
+        in
         Log.Keeper.info
-          "keeper:%s OAS checkpoint sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
+          "keeper:%s OAS checkpoint sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d tool_pair_repair=%s"
           trace_id
           stats.dropped_blocks
           stats.dropped_messages
           stats.dropped_chars
           stats.truncated_blocks
-          stats.truncated_chars;
+          stats.truncated_chars
+          pair_repair_json;
         (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir sanitized with
          | Ok () -> ()
          | Error detail ->

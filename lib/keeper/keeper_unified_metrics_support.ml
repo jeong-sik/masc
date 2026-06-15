@@ -76,9 +76,9 @@ let classify_usage_trust ~(usage_reported : bool)
    - [zero]  : context_max = 0 (uninitialised / pre-resolve)
    - [64k]   : (0, 64_000]
    - [128k]  : (64_000, 128_000]
-   - [200k]  : (128_000, 200_000]   — provider_a model-a-sonnet
-   - [256k]  : (200_000, 262_144]   — provider_c / agent_llm_a haiku 4.5
-   - [1m]    : (262_144, 1_048_576] — agent_llm_a opus 4.7 / 1M
+   - [200k]  : (128_000, 200_000]
+   - [256k]  : (200_000, 262_144]
+   - [1m]    : (262_144, 1_048_576]
    - [other] : everything else (sanity check / future caps) *)
 let context_max_bucket (n : int) : string =
   if n <= 0 then "zero"

@@ -33,7 +33,7 @@ Mapping target set (perl word-boundary, case-sensitive, both lowercase and capit
 | `openai` / `OpenAI` (word) | `provider-d` / `Provider-D` |
 | `xai` / `xAI` (word) | `provider-e` / `Provider-E` |
 | `gemini` / `Gemini` / `GEMINI` | `provider-f` / `Provider-F` / `PROVIDER-F` |
-| `deepseek` / `DeepSeek` | `provider-g` / `Provider-G` |
+| `deepseek` / `DeepSeek` | `deepseek` / `DeepSeek` |
 | `qwen` / `Qwen` (word) | `provider-h` / `Provider-H` |
 | `groq` / `Groq` (word) | `provider-i` / `Provider-I` |
 | `mistral` / `Mistral` (word) | `provider-j` / `Provider-J` |

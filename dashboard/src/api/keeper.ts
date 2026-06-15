@@ -9,6 +9,10 @@ import type { KeeperConversationDetails } from '../types'
 import {
   currentDashboardActor,
   apiRequestErrorFromResponse,
+  clearStoredToken,
+  getStoredToken,
+  getStoredTokenMeta,
+  isRemoteAccess,
   jsonHeaders,
   runOperatorAction,
   fetchWithTimeout,
@@ -16,6 +20,7 @@ import {
   DEFAULT_POST_TIMEOUT_MS,
   KEEPER_LIFECYCLE_TIMEOUT_MS,
 } from './core'
+import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
 import {
   parseKeeperCompositeSnapshot,
   parseFleetCompositeSnapshot,
@@ -111,8 +116,6 @@ const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatu
   'cancelled',
 ])
 
-const CONTINUATION_CHECKPOINT_PREFIX = 'Continuation checkpoint saved;'
-
 function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
   switch (asString(value, '').trim()) {
     case 'queued':
@@ -184,10 +187,6 @@ function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessag
 
 export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult): boolean {
   return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status)
-}
-
-export function isKeeperContinuationCheckpointText(text: string): boolean {
-  return text.trim().startsWith(CONTINUATION_CHECKPOINT_PREFIX)
 }
 
 // Server no longer enforces an external timeout for keeper_msg.
@@ -379,6 +378,39 @@ export interface KeeperStreamOutcome {
   terminal: boolean
 }
 
+function keeperStreamErrorMessage(raw: string, status: number): string {
+  let message = raw || `스트리밍 요청 실패 (${status})`
+  try {
+    const parsed = JSON.parse(raw) as { error?: string | { message?: string }; message?: string }
+    if (typeof parsed.error === 'string') {
+      message = parsed.error
+    } else {
+      message = parsed.error?.message ?? parsed.message ?? message
+    }
+  } catch {
+    // Keep raw text fallback.
+  }
+  return message
+}
+
+function isTokenMismatchAuthError(raw: string): boolean {
+  const normalized = raw.toLowerCase()
+  return normalized.includes('autherror')
+    && normalized.includes('invalid token')
+    && normalized.includes('token mismatch')
+}
+
+async function refreshLoopbackDevTokenAfterMismatch(): Promise<boolean> {
+  if (isRemoteAccess() || !getStoredToken()) return false
+  const meta = getStoredTokenMeta()
+  if (meta?.source === 'manual') return false
+
+  clearStoredToken()
+  resetDevTokenBootstrap()
+  await ensureDevToken()
+  return getStoredToken() !== null
+}
+
 export async function streamKeeperMessage(
   name: string,
   message: string,
@@ -407,26 +439,36 @@ export async function streamKeeperMessage(
       data: att.data,
     }))
   }
-  const res = await fetch('/api/v1/keepers/chat/stream', {
+  const requestBody = JSON.stringify(body)
+  const postStream = () => fetch('/api/v1/keepers/chat/stream', {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
       Accept: 'text/event-stream',
     },
-    body: JSON.stringify(body),
+    body: requestBody,
     signal,
   })
 
+  let res = await postStream()
+
   if (!res.ok) {
-    const raw = await res.text()
-    let message = raw || `스트리밍 요청 실패 (${res.status})`
-    try {
-      const parsed = JSON.parse(raw) as { error?: { message?: string }; message?: string }
-      message = parsed.error?.message ?? parsed.message ?? message
-    } catch {
-      // Keep raw text fallback.
+    let raw = await res.text()
+    if (
+      res.status === 401
+      && isTokenMismatchAuthError(raw)
+      && await refreshLoopbackDevTokenAfterMismatch()
+    ) {
+      res = await postStream()
+      if (res.ok) {
+        raw = ''
+      } else {
+        raw = await res.text()
+      }
     }
-    throw new Error(message)
+    if (!res.ok) {
+      throw new Error(keeperStreamErrorMessage(raw, res.status))
+    }
   }
 
   if (!res.body) {

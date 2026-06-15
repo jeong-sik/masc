@@ -73,6 +73,19 @@ val keeper_for_channel : channel_id:string -> string option
     Returns [None] when no binding exists, when the channel id is
     blank, or when the binding store is unreadable. *)
 
+type keeper_binding_resolution = {
+  keeper_name : string;
+  incoming_channel_id : string;
+  bound_channel_id : string;
+  via_parent : bool;
+}
+
+val resolve_keeper_for_channel :
+  channel_id:string -> keeper_binding_resolution option
+(** Resolve the keeper for [channel_id]. Exact bindings win. If no
+    exact binding exists and [channel_id] is a Discord thread known
+    in the names side-store, its parent channel binding is used. *)
+
 val bound_channels : keeper_name:string -> string list
 (** Channel snowflakes bound to [keeper_name], freshly read from the
     binding store on each call. Empty on blank name or unreadable
@@ -89,7 +102,43 @@ val record_ready : bot_user_id:string -> unit
     [bot_user_id] / [last_ready_at]. Atomic write — safe to call from
     the gateway fiber while HTTP handlers read. *)
 
-(** Typed failure modes for {!send_message}. Closed sum — adding
+(** {2 Thread registry}
+
+    Thread→parent channel mapping populated from THREAD_CREATE gateway
+    events. Used by {!resolve_keeper_for_channel} to resolve bindings
+    for messages in Discord threads (whose [channel_id] is the thread's
+    snowflake, distinct from the parent channel). *)
+
+val register_thread : thread_id:string -> parent_channel_id:string -> unit
+(** Register a Discord thread's parent channel. Called from the gateway's
+    [Thread_tracked] event handler. Overwrites on duplicate. *)
+
+val parent_channel_of_thread : channel_id:string -> string option
+(** If [channel_id] is a known thread, return its parent channel ID. *)
+
+val is_known_thread : channel_id:string -> bool
+(** [true] when [channel_id] has been registered as a Discord thread. *)
+
+val registered_thread_count : unit -> int
+(** Number of threads currently in the registry. For diagnostics. *)
+
+val unregister_thread : thread_id:string -> unit
+(** Remove a Discord thread from the registry. Called when the gateway
+    receives a THREAD_DELETE dispatch or a THREAD_UPDATE with
+    [thread_metadata.archived = true]. No-op for blank or unknown ids. *)
+
+(** {2 Trigger policy}
+
+    Set once at gateway startup, read by [connectors_json] for dashboard
+    display. Same mutable-ref pattern as [record_ready]. *)
+
+val set_trigger_policy : Discord_gateway_state.trigger_policy -> unit
+(** Store the resolved trigger policy. Called once at gateway startup. *)
+
+val get_trigger_policy : unit -> Discord_gateway_state.trigger_policy option
+(** Current trigger policy. [None] before gateway startup. *)
+
+(** Typed failure modes for Discord REST actions. Closed sum — adding
     a new variant forces every consumer to handle it. *)
 type send_error =
   | Missing_token
@@ -114,3 +163,11 @@ val send_message :
 
     Must be called inside an Eio context (the underlying REST
     client uses the piaf-backed http pool). *)
+
+val trigger_typing :
+  channel_id:string ->
+  unit ->
+  (unit, send_error) result
+(** Trigger Discord's typing indicator for [channel_id]. Bot token is
+    resolved from [DISCORD_BOT_TOKEN] at call time, matching
+    {!send_message}. *)

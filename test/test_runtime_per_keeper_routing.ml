@@ -105,12 +105,12 @@ budgettest = "openai.gpt"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://runpod.example/v1"
 
 [providers.openai]
 display-name = "OpenAI"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
 
 [models.qwen]
@@ -142,12 +142,12 @@ default = "openai.gpt"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://runpod.example/v1"
 
 [providers.openai]
 display-name = "OpenAI"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
 
 [models.qwen]
@@ -341,6 +341,63 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
          (Runtime.get_runtime_by_id "bogus.binding")))
 ;;
 
+(* ---- rerank resolver: resolve the requested runtime, or fail fast ----
+
+   Audit F8: [Runtime_oas_runner.resolve_runtime_providers] used to discard
+   [runtime_id] and always return the default runtime, silently substituting
+   an operator-overridable id (MASC_KEEPER_LLM_RERANK_RUNTIME on the LLM
+   rerank path).  It must resolve the requested id via the RFC-0207 catalog
+   and return [Error] on an unknown id — never the default runtime. *)
+
+let provider_base_url_of_runtime_id runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some rt -> rt.Runtime.provider_config.Llm_provider.Provider_config.base_url
+  | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
+;;
+
+let test_rerank_resolver_resolves_requested_runtime () =
+  with_runtime_initialized (fun () ->
+    (* Known non-default id resolves to that runtime's provider, not the
+       default's. *)
+    (match
+       Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
+     with
+     | Error msg -> Alcotest.failf "expected openai.gpt to resolve: %s" msg
+     | Ok [ provider ] ->
+       Alcotest.(check string)
+         "resolved provider belongs to the requested runtime"
+         (provider_base_url_of_runtime_id "openai.gpt")
+         provider.Llm_provider.Provider_config.base_url
+     | Ok providers ->
+       Alcotest.failf "expected exactly one provider, got %d" (List.length providers));
+    (* Empty id resolves the default runtime. *)
+    match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"" () with
+    | Error msg -> Alcotest.failf "expected empty id to resolve default: %s" msg
+    | Ok [ provider ] ->
+      Alcotest.(check string)
+        "empty id resolves the default runtime's provider"
+        (provider_base_url_of_runtime_id (Runtime.get_default_runtime_id ()))
+        provider.Llm_provider.Provider_config.base_url
+    | Ok providers ->
+      Alcotest.failf "expected exactly one provider, got %d" (List.length providers))
+;;
+
+let test_rerank_resolver_errors_on_unknown_runtime_id () =
+  with_runtime_initialized (fun () ->
+    match
+      Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
+    with
+    | Ok _ ->
+      Alcotest.fail
+        "unknown runtime id must return Error, not the default runtime \
+         (silent substitution)"
+    | Error msg ->
+      Alcotest.(check bool)
+        "error names the unknown runtime id"
+        true
+        (string_contains msg "bogus.binding"))
+;;
+
 let test_context_budget_uses_selected_runtime () =
   with_runtime_initialized (fun () ->
     let default_budget =
@@ -398,10 +455,9 @@ let test_turn_budget_uses_routed_runtime () =
    keeper thinking seed via [Runtime_inference.for_runtime] ----
 
    The keeper turn loop ([Keeper_run_tools_hooks]) treats the seed's
-   [thinking_enabled] as a capability gate: [Some false] forces thinking off,
-   [Some true]/[None] defer to [keeper.turn.enable_thinking].  So a model
-   declared [thinking-support = false] never thinks regardless of the global
-   policy, while a thinking-capable model follows it. *)
+   [thinking_enabled] as the runtime model's explicit policy: [Some false]
+   forces thinking off, [Some true] enables thinking even when the global
+   default is off, and [None] leaves the caller policy unchanged. *)
 
 let runtime_config_thinking =
   {|
@@ -410,7 +466,7 @@ default = "ollama_cloud.think"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://ollama.example/v1"
 
 [models.think]
@@ -418,6 +474,7 @@ api-name = "think"
 max-context = 128000
 tools-support = true
 thinking-support = true
+preserve-thinking = true
 streaming = true
 
 [models.nothink]
@@ -446,13 +503,17 @@ let with_runtime_thinking f =
   f ()
 ;;
 
-let test_thinking_support_true_defers_to_policy () =
+let test_thinking_support_true_enables_thinking_and_preserves () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.think" in
     Alcotest.(check (option bool))
-      "thinking-capable model emits Some true (defer to keeper.turn.enable_thinking)"
+      "thinking-support true emits Some true"
       (Some true)
-      seed.Runtime_inference.thinking_enabled)
+      seed.Runtime_inference.thinking_enabled;
+    Alcotest.(check (option bool))
+      "preserve-thinking true emits Some true"
+      (Some true)
+      seed.Runtime_inference.preserve_thinking)
 ;;
 
 let test_thinking_support_false_forces_off () =
@@ -468,7 +529,7 @@ let test_thinking_unknown_runtime_defers () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"bogus.binding" in
     Alcotest.(check (option bool))
-      "unknown runtime id emits None (no per-model signal, defer to policy)"
+      "unknown runtime id emits None (no per-model signal)"
       None
       seed.Runtime_inference.thinking_enabled)
 ;;
@@ -479,11 +540,11 @@ let test_seed_of_thinking_support_gate_contract () =
     (Some false)
     (Runtime_inference.seed_of_thinking_support (Some false)).Runtime_inference.thinking_enabled;
   Alcotest.(check (option bool))
-    "Some true -> defer to policy"
+    "Some true -> enable thinking"
     (Some true)
     (Runtime_inference.seed_of_thinking_support (Some true)).Runtime_inference.thinking_enabled;
   Alcotest.(check (option bool))
-    "None -> defer to policy"
+    "None -> leave caller policy unchanged"
     None
     (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
 ;;
@@ -531,6 +592,14 @@ let () =
             `Quick
             test_get_runtime_by_id_resolves_and_fails_fast
         ; Alcotest.test_case
+            "rerank resolver resolves the requested runtime (audit F8)"
+            `Quick
+            test_rerank_resolver_resolves_requested_runtime
+        ; Alcotest.test_case
+            "rerank resolver errors on unknown runtime id, no default substitution"
+            `Quick
+            test_rerank_resolver_errors_on_unknown_runtime_id
+        ; Alcotest.test_case
             "context budget uses selected runtime max-context"
             `Quick
             test_context_budget_uses_selected_runtime
@@ -545,9 +614,9 @@ let () =
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case
-            "thinking-support=true defers to keeper policy (Some true)"
+            "thinking-support=true enables thinking and preserve-thinking"
             `Quick
-            test_thinking_support_true_defers_to_policy
+            test_thinking_support_true_enables_thinking_and_preserves
         ; Alcotest.test_case
             "thinking-support=false forces thinking off (Some false)"
             `Quick

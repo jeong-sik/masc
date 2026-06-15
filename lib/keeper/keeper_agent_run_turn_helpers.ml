@@ -48,6 +48,8 @@ let per_provider_timeout_for_turn
   | (Some _ as explicit_timeout), true -> explicit_timeout
   | _, _ -> Some timeout_s
 
+[@@@warning "-11"]
+
 let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   match event with
   | Agent_sdk.Types.MessageStart _ -> Some "sse_message_start"
@@ -60,6 +62,11 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
       Some "sse_thinking_delta"
   | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.InputJsonDelta _; _ } ->
       Some "sse_tool_arg_delta"
+  | Agent_sdk.Types.ContentBlockDelta _ ->
+      (* Future OAS carrier deltas, such as provider-private reasoning signatures,
+         are progress evidence only. They must not be promoted to text/tool
+         progress or keeper-visible output. *)
+      Some "sse_content_delta"
   | Agent_sdk.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
   | Agent_sdk.Types.MessageDelta _ -> Some "sse_message_delta"
   | Agent_sdk.Types.MessageStop -> Some "sse_message_stop"
@@ -67,8 +74,11 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   | Agent_sdk.Types.SSEError _ -> Some "sse_error"
   | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
   | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
+  | Agent_sdk.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
   | Agent_sdk.Types.Connected -> Some "sse_connected"
   | Agent_sdk.Types.Timeout _ -> Some "sse_timeout"
+
+[@@@warning "+11"]
 
 let registry_progress_on_event ~record_turn_progress downstream event =
   Option.iter record_turn_progress (sse_event_progress_kind event);

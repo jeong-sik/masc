@@ -20,6 +20,17 @@ type t =
   | Not_provider_runtime_failure
 
 val classify_sdk_error : Agent_sdk.Error.sdk_error -> t
+
+val classify_provider_runtime_error_record
+  :  code:string
+  -> detail:string
+  -> t
+(** Classify a persisted [Provider_runtime_error] catch-all record.  This is
+    narrower than parsing arbitrary messages: it only recognizes the OAS
+    provider timeout wire markers such as
+    ["provider_error_timeout:http_operation"] and their preserved detail
+    strings. *)
+
 val is_provider_timeout : t -> bool
 val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
 

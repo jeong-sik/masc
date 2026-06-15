@@ -243,6 +243,14 @@ function rosterPresenceDisplay(
     return { status: 'offline', detail: `중단된 작업 ${agent.current_task}` }
   }
 
+  if (state.kind === 'running' && composite?.is_live === true) {
+    return { status: 'busy', detail: `${state.turnPhase} live` }
+  }
+
+  if (state.kind === 'running' && composite?.is_live === false) {
+    return { status: 'idle', detail: '대기 중' }
+  }
+
   return { status: agent.status ?? keeper.status ?? null, detail: null }
 }
 

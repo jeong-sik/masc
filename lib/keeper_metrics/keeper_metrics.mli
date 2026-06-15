@@ -33,7 +33,7 @@ type t =
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
-  | CompactionPairRepairFabrications
+  | CompactionPairRepairDrops
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
@@ -148,6 +148,7 @@ type t =
   | AlertPersistFailures
   | MetricsSseFailures
   | ChatStoreFailures
+  | ChatTransportFailures
   | PersonNoteStoreFailures
   | ObservationQueryFailures
   | OasOnStop

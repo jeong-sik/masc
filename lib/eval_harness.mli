@@ -48,6 +48,7 @@ type grader =
 
 type tool_expectation = {
   tool_name : string;
+  selector : Eval_tool_selector.t;
   required : bool;
   max_calls : int option;
   args_contain : string option;
@@ -128,6 +129,14 @@ val check_tool_expectations :
   grader_result list
 (** Run every tool expectation against the actual tool-call name
     list and return one [grader_result] per expectation. *)
+
+val check_tool_expectations_with_evidence :
+  tool_expectation list ->
+  Eval_tool_selector.call list ->
+  grader_result list
+(** Run every tool expectation against descriptor-aware tool-call
+    evidence. Use this for replay/shadow harnesses that carry
+    [route_evidence]. *)
 
 (** {1 Pass@k + summary} *)
 

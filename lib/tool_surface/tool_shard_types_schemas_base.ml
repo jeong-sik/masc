@@ -145,11 +145,14 @@ let base_tools : Masc_domain.tool_schema list =
     }
   ; (* Tool self-introspection — lets the keeper enumerate its own capabilities *)
     { name = "keeper_tools_list"
-    ; description =
-        "List all tools currently available to you, grouped by category. Use when asked \
-         'what can you do?' or when you need to discover your capabilities. Returns tool \
-         names organized by category. Includes the active runtime schema/descriptor \
-         surface after denylist filtering."
+     ; description =
+         "List all tools currently available to you, grouped by category. Use when asked \
+         'what can you do?' or when you need to discover your capabilities. Do not use \
+         this to answer connector content questions or channel registry questions; use \
+         keeper_surface_read only for current connected-surface lane context and state \
+         the limitation if a connector-wide registry is unavailable. Returns tool names \
+         organized by category. Includes the active runtime schema/descriptor surface \
+         after denylist filtering."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ]

@@ -24,6 +24,8 @@ include
      and type capacity_retry_after = Keeper_internal_error.capacity_retry_after
      and type runtime_exhaustion_reason =
       Keeper_internal_error.runtime_exhaustion_reason
+     and type accept_rejection_kind =
+      Keeper_internal_error.accept_rejection_kind
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Provider error helpers} *)
@@ -89,23 +91,21 @@ val provider_attempt_finished_decision :
 
 val run_named :
   runtime_id:string ->
-  ?base_path:string ->
   ?keeper_name:string ->
   goal:string ->
-  ?provider_filter:string list ->
   ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->
-  ?max_idle_turns:int ->
+  ?max_turns:int ->
+  max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
-  ?wait_timeout_sec:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
@@ -153,4 +153,18 @@ module For_testing : sig
     Agent_sdk.Checkpoint.t option
 
   val success_selected_model_raw : Runtime_candidate.t -> string option
+
+  val apply_accept :
+    runtime_id:string ->
+    accept:(Agent_sdk_response.api_response -> bool) ->
+    Runtime_agent.run_result ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val last_tool_progress_context_string_of_messages :
+    Agent_sdk.Types.message list -> string option
+
+  val sdk_error_of_nonretryable_attempt_error :
+    original_error:Agent_sdk.Error.sdk_error ->
+    Llm_provider.Http_client.http_error ->
+    Agent_sdk.Error.sdk_error
 end

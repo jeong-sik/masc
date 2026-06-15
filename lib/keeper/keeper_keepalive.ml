@@ -308,7 +308,10 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
           }
       }
     in
-    (match write_meta ~force:true ctx.config synced with
+    (match
+       write_meta_with_merge
+         ~merge:Keeper_meta_merge.monotonic_usage_counters ctx.config synced
+     with
      | Ok () -> ()
      | Error e ->
        Otel_metric_store.inc_counter
@@ -453,14 +456,32 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       "start_keepalive skipped %s: identity drift could not be repaired"
       m.name
   | Some m ->
-    let existing_entry = Keeper_registry.get ~base_path:ctx.config.base_path m.name in
-    let reclaim_stale_stopped_entry (entry : Keeper_registry.registry_entry) =
-      entry.phase = Keeper_state_machine.Stopped
-      && Eio.Promise.peek entry.done_p = Some `Stopped
+    let existing_entry =
+      Keeper_registry.get ~base_path:ctx.config.base_path m.name
+    in
+    let reclaimable_stale_entry (entry : Keeper_registry.registry_entry) =
+      let finished = Option.is_some (Eio.Promise.peek entry.done_p) in
+      match entry.phase with
+      | Keeper_state_machine.Stopped -> finished
+      | Keeper_state_machine.Failing
+      | Keeper_state_machine.Overflowed
+      | Keeper_state_machine.Compacting
+      | Keeper_state_machine.HandingOff
+      | Keeper_state_machine.Draining
+      | Keeper_state_machine.Crashed
+      | Keeper_state_machine.Dead
+      | Keeper_state_machine.Zombie -> finished
+      | Keeper_state_machine.Running
+      | Keeper_state_machine.Paused
+      | Keeper_state_machine.Restarting
+      | Keeper_state_machine.Offline -> false
     in
     (match existing_entry with
-     | Some entry when reclaim_stale_stopped_entry entry ->
-       Log.Keeper.info "start_keepalive: reclaiming stale stopped entry %s" m.name;
+     | Some entry when reclaimable_stale_entry entry ->
+       Log.Keeper.info
+         "start_keepalive: reclaiming stale registered entry %s phase=%s"
+         m.name
+         (Keeper_state_machine.phase_to_string entry.phase);
        Keeper_registry.unregister ~base_path:ctx.config.base_path m.name
      | _ -> ());
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name

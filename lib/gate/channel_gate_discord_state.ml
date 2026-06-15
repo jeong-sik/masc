@@ -144,6 +144,59 @@ let rec drop_left n xs =
     | [] -> []
     | _ :: tl -> drop_left (n - 1) tl
 
+(* ── Thread registry ──────────────────────────────────────────────
+   Thread→parent mapping populated from THREAD_CREATE gateway events.
+   Used by [resolve_keeper_for_channel] to resolve bindings for thread
+   messages whose channel_id is the thread's snowflake, not the parent
+   channel's. Module-level mutable state (same pattern as [last_ready]). *)
+
+let thread_parent_table : (string, string) Hashtbl.t =
+  Hashtbl.create 16
+
+let thread_parent_table_mu = Eio.Mutex.create ()
+
+let register_thread ~thread_id ~parent_channel_id =
+  let tid = String.trim thread_id in
+  let pid = String.trim parent_channel_id in
+  if tid <> "" && pid <> "" then
+    Eio.Mutex.use_rw ~protect:true thread_parent_table_mu
+    @@ fun () -> Hashtbl.replace thread_parent_table tid pid
+
+let parent_channel_of_thread ~channel_id : string option =
+  let cid = String.trim channel_id in
+  if cid = "" then None
+  else Eio.Mutex.use_ro thread_parent_table_mu
+    @@ fun () -> Hashtbl.find_opt thread_parent_table cid
+
+let is_known_thread ~channel_id =
+  let cid = String.trim channel_id in
+  cid <> ""
+  && Eio.Mutex.use_ro thread_parent_table_mu
+    @@ fun () -> Hashtbl.mem thread_parent_table cid
+
+let registered_thread_count () =
+  Eio.Mutex.use_ro thread_parent_table_mu
+  @@ fun () -> Hashtbl.length thread_parent_table
+
+let unregister_thread ~thread_id =
+  let tid = String.trim thread_id in
+  if tid <> "" then
+    Eio.Mutex.use_rw ~protect:true thread_parent_table_mu
+    @@ fun () -> Hashtbl.remove thread_parent_table tid
+
+(* ── Trigger policy registry ──────────────────────────────────────
+   Set once at gateway startup by [set_trigger_policy]. Read by
+   [connectors_json] for dashboard display. Same mutable-ref pattern
+   as [record_ready]. *)
+
+let trigger_policy_ref : Discord_gateway_state.trigger_policy option ref =
+  ref None
+
+let set_trigger_policy (policy : Discord_gateway_state.trigger_policy) =
+  trigger_policy_ref := Some policy
+
+let get_trigger_policy () = !trigger_policy_ref
+
 let read_recent_audit ~limit =
   let path = binding_audit_read_path () in
   if limit <= 0 || not (Sys.file_exists path) then
@@ -527,7 +580,20 @@ let unbind ~channel_id ~actor_name =
 (* In-process gateway support — replaces sidecars/discord-bot/      *)
 (* ---------------------------------------------------------------- *)
 
-let keeper_for_channel ~channel_id =
+type keeper_binding_resolution = {
+  keeper_name : string;
+  incoming_channel_id : string;
+  bound_channel_id : string;
+  via_parent : bool;
+}
+
+let binding_for_channel bindings ~channel_id =
+  List.find_map
+    (fun (b : binding) ->
+      if String.equal b.channel_id channel_id then Some b else None)
+    bindings
+
+let resolve_keeper_for_channel ~channel_id =
   let normalized = String.trim channel_id in
   if String.equal normalized "" then None
   else
@@ -537,11 +603,78 @@ let keeper_for_channel ~channel_id =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> []
     in
-    List.find_map
-      (fun (b : binding) ->
-        if String.equal b.channel_id normalized then Some b.keeper_name
-        else None)
-      candidates
+    match binding_for_channel candidates ~channel_id:normalized with
+    | Some b ->
+        Some
+          {
+            keeper_name = b.keeper_name;
+            incoming_channel_id = normalized;
+            bound_channel_id = b.channel_id;
+            via_parent = false;
+          }
+    | None -> (
+        (* Thread fallback: if this channel_id is a known Discord thread,
+           try resolving via its parent channel's binding. *)
+        match parent_channel_of_thread ~channel_id:normalized with
+        | Some parent_id when parent_id <> normalized ->
+            (match binding_for_channel candidates ~channel_id:parent_id with
+             | Some b ->
+                 Some
+                   {
+                     keeper_name = b.keeper_name;
+                     incoming_channel_id = normalized;
+                     bound_channel_id = b.channel_id;
+                     via_parent = true;
+                   }
+             | None -> (
+                 (* Final fallback: names file (legacy sidecar data). *)
+                 let names_parent =
+                   try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | _ -> None
+                 in
+                 match names_parent with
+                 | None -> None
+                 | Some names_parent ->
+                     let names_parent = String.trim names_parent in
+                     match binding_for_channel candidates ~channel_id:names_parent with
+                     | None -> None
+                     | Some b ->
+                         Some
+                           {
+                             keeper_name = b.keeper_name;
+                             incoming_channel_id = normalized;
+                             bound_channel_id = b.channel_id;
+                             via_parent = true;
+                           } ))
+        | _ -> (
+            (* No thread match — try names file (legacy sidecar data). *)
+            let parent_channel_id =
+              try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | _ -> None
+            in
+            match parent_channel_id with
+            | None -> None
+            | Some parent_channel_id -> (
+                let parent_channel_id = String.trim parent_channel_id in
+                match binding_for_channel candidates ~channel_id:parent_channel_id with
+                | None -> None
+                | Some b ->
+                    Some
+                      {
+                        keeper_name = b.keeper_name;
+                        incoming_channel_id = normalized;
+                        bound_channel_id = b.channel_id;
+                        via_parent = true;
+                      } )) )
+
+let keeper_for_channel ~channel_id =
+  match resolve_keeper_for_channel ~channel_id with
+  | None -> None
+  | Some resolution -> Some resolution.keeper_name
 
 (* RFC-0223 P2: presence surface. Both recomputed per call — no cached
    presence state. *)
@@ -588,12 +721,14 @@ let send_message ~channel_id ~content ?reply_to_message_id () =
        | Error e -> Error (Rest_error e))
     else
       let rec send_chunks first rest =
-        let rlen = String.length rest in
-        let chunk, remaining =
-          if rlen <= limit then rest, None
-          else
-            ( String.sub rest 0 limit
-            , Some (String.sub rest limit (rlen - limit)) )
+        (* Split on a codepoint boundary: the Discord limit is in Unicode
+           scalar values, and a mid-codepoint byte cut yields invalid
+           UTF-8 that Discord rejects with a 400. *)
+        let chunk, remaining_str =
+          Discord_rest_client.split_at_codepoint rest ~limit
+        in
+        let remaining =
+          if remaining_str = "" then None else Some remaining_str
         in
         let ref_id = if first then reply_to_message_id else None in
         match Discord_rest_client.send_message ~token ~channel_id ~content:chunk ?reply_to_message_id:ref_id () with
@@ -604,3 +739,11 @@ let send_message ~channel_id ~content ?reply_to_message_id () =
         | Error e -> Error (Rest_error e)
       in
       send_chunks true content
+
+let trigger_typing ~channel_id () =
+  match bot_token_opt () with
+  | None -> Error Missing_token
+  | Some token ->
+      (match Discord_rest_client.trigger_typing ~token ~channel_id () with
+       | Ok () -> Ok ()
+       | Error e -> Error (Rest_error e))

@@ -16,3 +16,11 @@ val filter_environment : string array -> string array
 (** Return a copy of the given [Unix.environment]-shaped array with only
     allowed keys retained. Entries that do not contain ['='] are kept iff
     their key is allowed. *)
+
+val filter_environment_c_messages : string array -> string array
+(** Like {!filter_environment}, but pins system messages to the C locale:
+    drops any host [LC_ALL] / [LC_MESSAGES] and appends [LC_ALL=] (empty,
+    treated by POSIX as unset) and [LC_MESSAGES=C]. Character encoding
+    ([LC_CTYPE] / [LANG]) is left to the host. Use for subprocesses whose
+    textual output MASC classifies — e.g. the EINTR retry marker in
+    [Keeper_turn_sandbox_runtime] depends on [strerror] being English. *)

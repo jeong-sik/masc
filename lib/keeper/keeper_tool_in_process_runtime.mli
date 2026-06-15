@@ -196,6 +196,15 @@ val handle_masc_agent_timeline
   -> args:Yojson.Safe.t
   -> string
 
+(** RFC-0234 — [handle_masc_schedule] is the descriptor-projection
+    cluster handler for [masc_schedule_*] tools. *)
+val handle_masc_schedule
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
 (** RFC-0182 §3.1 — [handle_masc_keeper] is the descriptor-projection
     cluster handler for the [masc_keeper_*] ctx-free tool surface.
     Dispatches via [Keeper_dispatch_ref] registered by [Keeper_tool_surface] at

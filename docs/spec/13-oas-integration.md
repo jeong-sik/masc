@@ -23,7 +23,7 @@ code_refs:
 
 OAS (OCaml Agent SDK)는 MASC 외부의 범용 에이전트 런타임 라이브러리다. MASC는 OAS를 소비자(consumer)로서 사용하며, OAS는 MASC를 알지 못한다.
 
-이 문서는 MASC가 OAS에 의존하는 모든 접점(bridge, adapter, wrapper)을 정의한다.
+이 문서는 MASC가 OAS에 의존하는 모든 접점(bridge, adapter, wrapper)을 정의한다. MASC 측 turn lifecycle(heartbeat → scheduling → `Agent.run` → receipt)의 권위 정의는 [`04-turn-lifecycle.md`](./04-turn-lifecycle.md)에 있으며, 이 문서는 OAS bridge 본연의 역할에 집중한다.
 
 **의존 방향** (불변):
 ```
@@ -184,7 +184,7 @@ type run_result = {
 
 Runtime failsafe fallback (runtime.toml 없을 때):
 - `llama:{MASC_DEFAULT_MODEL}` (로컬)
-- `provider-k:auto` (ZAI_API_KEY 존재 시)
+- `glm:auto` (ZAI_API_KEY 존재 시)
 
 이 fallback은 runtime failsafe다. 저장소에 커밋되는 `config/runtime.toml`
 기본값과 동일시하지 않는다.
@@ -275,7 +275,7 @@ servers, or non-interactive subscription CLI runtimes.
 
 ```json
 {
-  "keeper_models": ["llama:qwen3.5", "provider-k:provider-k-5.1"],
+  "keeper_models": ["llama:qwen3.5", "glm-coding:glm-4.7"],
   "keeper_temperature": 0.7,
   "keeper_max_tokens": 4096,
   "default_temperature": 0.5,
@@ -532,7 +532,7 @@ Detailed implementation checklist lives in
 | `MASC_OAS_SSE_DRAIN_INTERVAL_SEC` | 0.25 | Event_bus -> SSE relay poll 간격 |
 | `MASC_CONTEXT_BUDGET_MAX` | 100,000 | Context budget 상한 |
 | `MASC_CONTEXT_ROUTER_MODE` | heuristic | Intent classification 모드 |
-| `ZAI_API_KEY` | (없음) | Provider-K Cloud runtime fallback 활성화 |
+| `ZAI_API_KEY` | (없음) | GLM Cloud runtime fallback 활성화 |
 
 runtime.toml 기반 변수는 환경변수가 아니라 config 파일에서 관리된다.
 

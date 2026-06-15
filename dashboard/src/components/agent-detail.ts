@@ -11,6 +11,7 @@ import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { resolveUnifiedStatus } from '../lib/unified-status'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
+import { isSubmitEnter } from '../lib/keyboard'
 import { findKeeper } from '../lib/keeper-utils'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
@@ -402,7 +403,7 @@ export function AgentDetailOverlay() {
                 autoComplete="off"
                 placeholder="@멘션 메시지 입력…"
                 onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
-                onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention() }}
+                onKeyDown=${(e: KeyboardEvent) => { if (isSubmitEnter(e)) void submitMention() }}
                 disabled=${sendingMention.value}
               />
               <${ActionButton}

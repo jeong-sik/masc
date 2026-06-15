@@ -9,8 +9,8 @@ code_refs:
 
 # Release Evidence
 
-> Current package version: v0.19.37
-> Updated: 2026-06-05
+> Current package version: v0.19.41
+> Updated: 2026-06-12
 
 `masc`를 production-ready라고 부를 때는 말보다 증거가 먼저여야 한다.  
 기본 증거 형식은 release-evidence bundle이며, 최소한 아래 항목이 함께 있어야 한다.

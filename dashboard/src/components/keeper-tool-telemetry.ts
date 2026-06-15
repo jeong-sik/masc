@@ -3,9 +3,10 @@
 // cross-trace aggregation, and hourly timeline sparklines.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useCallback, useEffect, useState } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
+import { lastEvent } from '../sse'
 import { toolCategory, durationColor, normalizeToolName } from './tool-call-shared'
 import { formatCost, formatMsCompact } from '../lib/format-number'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -15,6 +16,7 @@ import { PanelCard } from './common/panel-card'
 import { ProgressBar } from './common/progress-bar'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
 import { StatusChip } from './common/status-chip'
+import { isKeeperToolActivityEvent, sseEventMatchesKeeper } from './keeper-sse-match'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -162,34 +164,48 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   })
   const [query, setQuery] = useState('')
 
+  const loadToolStats = useCallback(async (signal: AbortSignal): Promise<TelemetryState> => {
+    const data: ToolStatsResponse = await fetchKeeperToolStats(keeperName, 24, { signal })
+    return {
+      source: data.source,
+      producer: data.producer,
+      durable_store: data.durable_store,
+      dashboard_surface: data.dashboard_surface,
+      freshness_slo_s: data.freshness_slo_s,
+      latest_ts_unix: data.latest_ts_unix,
+      latest_ts_iso: data.latest_ts_iso,
+      latest_age_s: data.latest_age_s,
+      health: data.health,
+      stale_reason: data.stale_reason,
+      entry_count: data.entry_count,
+      exists: data.exists,
+      coverage_gaps: data.coverage_gaps,
+      coverage_gap_count: data.coverage_gap_count,
+      tools: data.tools,
+      timeline: data.timeline,
+      totalEntries: data.total_entries,
+      windowHours: data.window_hours,
+    }
+  }, [keeperName])
+
   useEffect(() => {
-    void resource.load(async (signal) => {
-      const data: ToolStatsResponse = await fetchKeeperToolStats(keeperName, 24, { signal })
-      return {
-        source: data.source,
-        producer: data.producer,
-        durable_store: data.durable_store,
-        dashboard_surface: data.dashboard_surface,
-        freshness_slo_s: data.freshness_slo_s,
-        latest_ts_unix: data.latest_ts_unix,
-        latest_ts_iso: data.latest_ts_iso,
-        latest_age_s: data.latest_age_s,
-        health: data.health,
-        stale_reason: data.stale_reason,
-        entry_count: data.entry_count,
-        exists: data.exists,
-        coverage_gaps: data.coverage_gaps,
-        coverage_gap_count: data.coverage_gap_count,
-        tools: data.tools,
-        timeline: data.timeline,
-        totalEntries: data.total_entries,
-        windowHours: data.window_hours,
-      }
-    })
+    void resource.load(loadToolStats)
     return () => {
       resource.cancel()
     }
-  }, [keeperName, resource])
+  }, [loadToolStats, resource])
+
+  useEffect(() => {
+    const unsubscribe = lastEvent.subscribe((event) => {
+      if (!event) return
+      if (!isKeeperToolActivityEvent(event)) return
+      if (!sseEventMatchesKeeper(event, keeperName)) return
+      void resource.load(loadToolStats)
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [keeperName, loadToolStats, resource])
 
   const asyncState = resource.state.value
   const s = asyncState.data ?? {

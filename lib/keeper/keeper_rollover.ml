@@ -47,6 +47,42 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_core
 
+let log_tool_pair_repair
+    ~keeper_name
+    ~site
+    (stats : Keeper_context_core.tool_pair_repair_stats) =
+  if Keeper_context_core.tool_pair_repair_stats_changed stats then
+    Log.Harness.emit
+      Log.Warn
+      ~details:
+        (`Assoc
+            [ "keeper_name", `String keeper_name
+            ; "site", `String site
+            ; "dropped_tool_uses", `Int stats.dropped_tool_uses
+            ; "dropped_tool_results", `Int stats.dropped_tool_results
+            ; ( "dropped_tool_use_samples"
+              , `List
+                  (List.map
+                     (fun (tool_use_id, tool_name) ->
+                        `Assoc
+                          [ "tool_use_id", `String tool_use_id
+                          ; "tool_name", `String tool_name
+                          ])
+                     stats.dropped_tool_use_samples) )
+            ; ( "dropped_tool_result_ids"
+              , `List
+                  (List.map
+                     (fun tool_use_id -> `String tool_use_id)
+                     stats.dropped_tool_result_ids) )
+            ])
+      (Printf.sprintf
+         "tool_pair_repair keeper=%s site=%s dropped_tool_uses=%d \
+          dropped_tool_results=%d"
+         keeper_name
+         site
+         stats.dropped_tool_uses
+         stats.dropped_tool_results)
+
 type handoff_rollover = {
   updated_meta : keeper_meta;
   handoff_json : Yojson.Safe.t option;
@@ -261,14 +297,20 @@ let maybe_rollover_oas_handoff
             create_session ~session_id:new_trace_id ~base_dir
           in
           let save_ctx =
+            let messages, pair_repair_stats =
+              repair_broken_tool_call_pairs_with_stats
+                (messages_of_context ctx)
+            in
+            log_tool_pair_repair
+              ~keeper_name:base_meta.agent_name
+              ~site:"handoff_rollover"
+              pair_repair_stats;
             {
               ctx with
               checkpoint =
                 {
                   (checkpoint_of_context ctx) with
-                  messages =
-                    repair_orphan_tool_result_messages
-                      (messages_of_context ctx);
+                  messages;
                 };
             }
           in

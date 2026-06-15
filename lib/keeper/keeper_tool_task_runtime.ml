@@ -272,7 +272,7 @@ let wip_admission_result_fields rejections =
 ;;
 
 let find_task_goal_id config task_id =
-  let index = Workspace_goal_index.build_task_goal_index () in
+  let index = Workspace_goal_index.build_task_goal_index_for_config config in
   try Some (List.hd (Hashtbl.find index task_id)) with Not_found -> None
 ;;
 
@@ -421,19 +421,47 @@ let handle_keeper_task_tool
          force-released. Example: reason='assignee offline >10 min, no heartbeat'."
     else (
       let agent = keeper_agent_sender ~meta in
-      let _ =
-        Workspace.broadcast
-          config
-          ~from_agent:agent
-          ~content:
-            (Printf.sprintf
-               "Force-releasing task %s (reason: %s)"
-               task_id
-               reason)
+      let outcome_result =
+        Workspace.force_release_task_outcome_r config ~agent_name:agent ~task_id ()
+      in
+      let result =
+        Result.map
+          (fun (o : Workspace.transition_outcome) -> o.message)
+          outcome_result
+      in
+      let is_noop =
+        match outcome_result with
+        | Ok outcome -> outcome.noop
+        | Error _ -> false
+      in
+      let () =
+        if not is_noop then
+          let _ =
+            Workspace.broadcast
+              config
+              ~from_agent:agent
+              ~content:
+                (Printf.sprintf
+                   "Force-releasing task %s (reason: %s)"
+                   task_id
+                   reason)
+          in
+          ()
+        else ()
+      in
+      let typed_outcome =
+        match result with
+        | Ok _ when is_noop ->
+          Keeper_tool_outcome.No_progress
+            { reason = Keeper_tool_outcome.No_work_available }
+        | Ok _ -> Keeper_tool_outcome.Progress
+        | Error e ->
+          Keeper_tool_outcome.Error
+            { reason = Masc_domain.masc_error_to_string e }
       in
       keeper_task_result_json
-        ~typed_outcome:(Some Keeper_tool_outcome.Progress)
-        (Workspace.force_release_task_r config ~agent_name:agent ~task_id ()))
+        ~typed_outcome:(Some typed_outcome)
+        result)
     | Task_force_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
@@ -501,7 +529,7 @@ let handle_keeper_task_tool
            | Ok contract ->
               let capacity_error =
                 let backlog = Workspace.read_backlog config in
-                Workspace_task_capacity.check ?goal_id backlog
+                Workspace_task_capacity.check_for_config config ?goal_id backlog
               in
               (match capacity_error with
                | Some error -> Workspace_task_capacity.error_to_json_string error
@@ -510,7 +538,10 @@ let handle_keeper_task_tool
                 Workspace_task.add_task
                   ?contract
                   ?goal_id
-                  ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id)
+                  ~reject_if:
+                    (Workspace_task_capacity.rejection_for_add_task_for_config
+                       config
+                       ?goal_id)
                   config
                   ~title
                   ~priority
@@ -531,12 +562,12 @@ let handle_keeper_task_tool
     in
     let wip_default_repo = wip_admission_default_repo config in
     let wip_rejections = ref [] in
+    let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let remember_wip_rejection task_id rejection =
       if not (List.exists (fun (existing_id, _) -> String.equal existing_id task_id) !wip_rejections)
       then wip_rejections := (task_id, rejection) :: !wip_rejections
     in
     let wip_admission_filter ~active_tasks task =
-      let task_goal_index = Workspace_goal_index.build_task_goal_index () in
       let active_items =
         Keeper_wip_admission.active_items_of_tasks
           ~task_goal_index
@@ -552,12 +583,66 @@ let handle_keeper_task_tool
         remember_wip_rejection task.id rejection;
         false
     in
+    let requested_task_id =
+      Safe_ops.json_string ~default:"" "task_id" args |> String.trim
+    in
+    let explicit_claim_result () =
+      let tasks = Workspace.get_tasks_raw config in
+      let claim_specific task =
+        let active_tasks =
+          List.filter
+            (fun (active : Masc_domain.task) ->
+               not (String.equal active.id requested_task_id))
+            tasks
+        in
+        if not (wip_admission_filter ~active_tasks task)
+        then
+          Workspace.Claim_next_no_eligible
+            { excluded_count = 1
+            ; blocked_count = 0
+            ; verification_blocked_count = 0
+            ; scope_excluded_count = 0
+            ; explicit_excluded_count = 1
+            ; claim_pool_candidate_count = 1
+            }
+        else (
+          match
+            Workspace.claim_task_r
+              config
+              ~agent_name:meta.agent_name
+              ~task_id:requested_task_id
+              ()
+          with
+          | Ok outcome ->
+            Workspace.Claim_next_claimed
+              { task_id = requested_task_id
+              ; title = task.title
+              ; priority = task.priority
+              ; released_task_id = None
+              ; message = outcome.message
+              ; scope_widened = false
+              }
+          | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e))
+      in
+      match
+        List.find_opt
+          (fun (task : Masc_domain.task) -> String.equal task.id requested_task_id)
+          tasks
+      with
+      | None ->
+        Workspace.Claim_next_error
+          (Printf.sprintf "unknown task_id: %s" requested_task_id)
+      | Some task -> claim_specific task
+    in
     let result =
-      Workspace.claim_next_r config ~agent_name:meta.agent_name
-        ~task_filter:claim_goal_scope.task_filter
-        ~admission_filter:wip_admission_filter
-        ~allow_scope_fallback:true
-        ()
+      if requested_task_id <> "" then
+        explicit_claim_result ()
+      else
+        Workspace.claim_next_r config ~agent_name:meta.agent_name
+          ~task_filter:claim_goal_scope.task_filter
+          ~admission_filter:wip_admission_filter
+          ~allow_scope_fallback:true
+          ()
     in
     let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in
@@ -686,7 +771,8 @@ let handle_keeper_task_tool
     in
     let claim_scope, claimed_task_fields =
       match result with
-      | Workspace.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
+      | Workspace.Claim_next_claimed
+          { task_id; title; priority; released_task_id; scope_widened; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
           ( active_goal_scope_json ~meta ?matched_goal_id
               ~effective_mode:claim_goal_scope.mode
@@ -696,7 +782,7 @@ let handle_keeper_task_tool
               ( "claim_observation",
                 Task.Tool.build_claim_observation_payload
                   ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
-                  ~task_id );
+                  ~task_id ~scope_widened );
               ( "claimed_task",
                 `Assoc
                   [

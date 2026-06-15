@@ -1,7 +1,7 @@
 # MASC (Multi-Agent workspace Collaboration)
 
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
-[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.205.11-blue.svg)](https://github.com/jeong-sik/oas)
+[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.206.1-blue.svg)](https://github.com/jeong-sik/oas)
 
 > **Personal Infrastructure Invariant**  
 > 본 프로젝트는 개발자 1인의 워크플로우를 위해 설계된 개인용 에이전트 오케스트레이션 및 모니터링 시스템입니다. 프로덕션 SLA, 외부 하드웨어 호환성, 혹은 SemVer 기반의 API 호환성을 제공하지 않습니다.

@@ -19,15 +19,20 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
    - task_id: "task-XXX"
    - action: "claim"
 
-4. **Work on the task**: Execute the task description
+4. **Start the task**: Call `mcp__masc__masc_transition` with:
+   - agent_name: "orchestrator"
+   - task_id: "task-XXX"
+   - action: "start"
 
-5. **Mark done**: Call `mcp__masc__masc_transition` with:
+5. **Work on the task**: Execute the task description
+
+6. **Mark done**: Call `mcp__masc__masc_transition` with:
    - agent_name: "orchestrator"
    - task_id: "task-XXX"
    - action: "done"
    - notes: completion summary
 
-6. **Broadcast progress**: Call `mcp__masc__masc_broadcast` to notify others
+7. **Broadcast progress**: Call `mcp__masc__masc_broadcast` to notify others
 
 ## Available MCP Tools:
 - mcp__masc__masc_status - Get project status

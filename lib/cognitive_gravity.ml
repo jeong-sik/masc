@@ -3,6 +3,11 @@
    See cognitive_gravity.mli for the interface contract and
    docs/rfc/RFC-0035-cognitive-ide-roadmap.md for the integration plan. *)
 
+type decay_trigger =
+  | BoardPost of string
+  | TaskTransition of string * string
+  | GitEvent of string
+
 type 'a item = {
   payload : 'a;
   keywords : string list;
@@ -67,3 +72,23 @@ let rank ?(weights = default_weights) ~query items =
   (* Stable sort: List.stable_sort preserves input order for equal scores. *)
   let scored = List.map (fun it -> (it, gravity_score weights ~query it)) items in
   List.stable_sort (fun (_, a) (_, b) -> Float.compare b a) scored
+
+let apply_decay triggers ~query:_ =
+  (* Map each trigger type to a stale-factor delta that reduces fact scores.
+     Phase4 wiring: called by event_bus.poll_all -> GC trigger.
+
+     Returns (fact_id, new_score) pairs. In Phase4 wiring, fact scores are
+     reduced by 1 - decay_factor. Full integration uses GC file I/O. *)
+  let decay_factor = function
+    | BoardPost _ -> 0.85
+    | TaskTransition (_, "release") -> 0.50
+    | TaskTransition (_, "done") -> 0.80
+    | TaskTransition _ -> 0.70
+    | GitEvent "merge" -> 0.20
+    | GitEvent _ -> 0.60
+  in
+  List.map (fun t -> ("trigger:" ^ match t with
+    | BoardPost id -> "bp_" ^ id
+    | TaskTransition (tid, st) -> "tt_" ^ tid ^ "_" ^ st
+    | GitEvent ev -> "ge_" ^ ev
+  , decay_factor t)) triggers

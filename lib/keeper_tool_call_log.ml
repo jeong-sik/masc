@@ -416,6 +416,8 @@ let log_call
       ?thinking_enabled
       ?thinking_budget
       ?prompt_fingerprint
+      ?execution_id
+      ?tool_use_id
       ?trace_id
       ?session_id
       ?generation
@@ -445,7 +447,9 @@ let log_call
          global could attach an unrelated concurrent run's identity. A
          [None] field now persists as absent, which is honest. *)
       let model_field =
-        if model = "" then [] else [ "model", `String "runtime" ]
+        if model = ""
+        then []
+        else [ "model", `String (Boundary_redaction.to_string Boundary_redaction.runtime_model_label) ]
       in
       let runtime_profile_field =
         match runtime_profile with
@@ -491,6 +495,21 @@ let log_call
         match trace_id with
         | Some value -> [ "trace_id", `String value ]
         | None -> []
+      in
+      (* RFC-0233 PR-1: canonical per-execution join key, minted once at
+         the dispatch boundary and shared with the trajectory row. *)
+      let execution_id_field =
+        match execution_id with
+        | Some value ->
+          [ "execution_id", `String (Ids.Execution_id.to_string value) ]
+        | None -> []
+      in
+      (* RFC-0233 PR-2: provider call id — the key the oas-event rows
+         carry, joining this store to oas:tool_called/oas:tool_completed. *)
+      let tool_use_id_field =
+        match tool_use_id with
+        | Some value when value <> "" -> [ "tool_use_id", `String value ]
+        | Some _ | None -> []
       in
       let session_id_field =
         match session_id with
@@ -604,6 +623,8 @@ let log_call
            @ thinking_enabled_field
            @ thinking_budget_field
            @ prompt_fingerprint_field
+           @ execution_id_field
+           @ tool_use_id_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

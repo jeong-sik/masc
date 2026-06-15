@@ -579,9 +579,9 @@ let test_coverage_diagnostics_survive_aggregation () =
     let path = make_keeper_dir base "coverage_diag" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_usage ~model:"provider_k-coding:provider_k-5"
+      success_entry_without_usage ~model:"glm-coding:glm-5"
         ~ts:(ts -. 5.0)
-        ~provider:"provider_k-coding"
+        ~provider:"glm-coding"
         ~turn_lane:"text_only"
         ~stop_reason:"turn_budget_exhausted(3/3)"
         ();
@@ -648,7 +648,7 @@ let test_success_without_model_uses_runtime_attribution () =
     let path = make_keeper_dir base "null_model" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_model ~runtime_id:"runtime.provider_k-coding-with-spark"
+      success_entry_without_model ~runtime_id:"runtime.glm-coding-with-spark"
         ~ts:(ts -. 5.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -656,7 +656,7 @@ let test_success_without_model_uses_runtime_attribution () =
     check int "one attributed bucket" 1 (List.length agg.models);
     let s = List.hd agg.models in
     check string "runtime attribution"
-      "runtime.provider_k-coding-with-spark (runtime)"
+      "runtime.glm-coding-with-spark (runtime)"
       s.model_id;
     check int "success count" 1 s.success_count;
     check int "tool calls preserved" 1 s.total_tool_calls;
@@ -1161,7 +1161,7 @@ let test_provider_rollup_empty_aggregate () =
     (List.length (M.provider_rollup agg))
 
 let test_provider_rollup_skips_unknown_provider () =
-  let m1 = zero_model_stats "provider_k-coding:auto" ~provider:(Some "provider_k-coding")
+  let m1 = zero_model_stats "glm-coding:auto" ~provider:(Some "glm-coding")
              ~entry_count:5 in
   let m2 = zero_model_stats "bare-model" ~provider:None ~entry_count:3 in
   let agg : M.aggregate =
@@ -1171,7 +1171,7 @@ let test_provider_rollup_skips_unknown_provider () =
   let rollup = M.provider_rollup agg in
   check int "only provider=Some survives" 1 (List.length rollup);
   let stats = List.hd rollup in
-  check string "provider" "provider_k-coding" stats.ps_provider;
+  check string "provider" "glm-coding" stats.ps_provider;
   check int "entry_count" 5 stats.ps_entry_count
 
 let test_provider_rollup_weighted_mean () =

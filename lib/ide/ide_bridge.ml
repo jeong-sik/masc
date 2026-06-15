@@ -649,40 +649,75 @@ let ingest_tool_event_from_hook
     ~timestamp_ms
     ~input
 
-let parse_pull_request_link_from_output (output : string) : (int * string) option =
-  let prefix = "https://github.com/" in
-  let prefix_len = String.length prefix in
-  let output_len = String.length output in
-  let rec find_prefix i =
-    if i + prefix_len > output_len then None
-    else if String.sub output i prefix_len = prefix then Some i
-    else find_prefix (i + 1)
+let pull_request_result_from_json (json : Yojson.Safe.t) : (int * string) option =
+  let int_opt = function
+    | `Int n -> Some n
+    | `Intlit s | `String s -> int_of_string_opt s
+    | _ -> None
   in
-  match find_prefix 0 with
-  | None -> None
-  | Some start ->
-    let path_start = start + prefix_len in
-    let path_len = output_len - path_start in
-    let path = String.sub output path_start path_len in
-    let parts = String.split_on_char '/' path in
-    (match parts with
-     | owner :: repo :: "pull" :: number_str :: _ ->
-       (* Extract leading digits from number_str — handles URLs followed by
-          non-numeric characters (e.g., JSON quotes, path segments) *)
-       let number_digits =
-         let buf = Buffer.create 8 in
-         String.iter (fun c -> if c >= '0' && c <= '9' then Buffer.add_char buf c else ()) number_str;
-         Buffer.contents buf
-       in
-       (match int_of_string_opt number_digits with
-        | Some number when number > 0 ->
-          let url = Printf.sprintf "https://github.com/%s/%s/pull/%d" owner repo number in
-          Some (number, url)
-        | _ -> None)
-     | _ -> None)
+  let string_non_empty_opt = function
+    | `String s when String.trim s <> "" -> Some s
+    | _ -> None
+  in
+  let first_string fields =
+    List.find_map (fun field -> Yojson.Safe.Util.member field json |> string_non_empty_opt) fields
+  in
+  match int_opt (Yojson.Safe.Util.member "number" json), first_string [ "html_url"; "url" ] with
+  | Some number, Some url when number > 0 -> Some (number, url)
+  | _ -> None
+
+let parse_pull_request_result_from_output (output : string) : (int * string) option =
+  let rec from_json json =
+    match pull_request_result_from_json json with
+    | Some _ as result -> result
+    | None ->
+      (match Yojson.Safe.Util.member "output" json with
+       | `String nested_output ->
+         (try Yojson.Safe.from_string nested_output |> from_json with
+          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> None)
+       | _ -> None)
+  in
+  try Yojson.Safe.from_string output |> from_json with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> None
+
+let parse_github_pr_url_candidate raw =
+  let candidate = String.trim raw in
+  let parts = String.split_on_char '/' candidate in
+  match parts with
+  | "https:" :: "" :: "github.com" :: _owner :: _repo :: "pull" :: number :: _ ->
+    Option.bind (int_of_string_opt number) (fun n ->
+      if n > 0 then Some (n, candidate) else None)
+  | _ -> None
+
+let descriptor_confirmed_pr_url_from_output output =
+  let raw_output =
+    try
+      match Yojson.Safe.from_string output |> Yojson.Safe.Util.member "output" with
+      | `String nested -> nested
+      | _ -> output
+    with
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> output
+  in
+  raw_output
+  |> String.split_on_char '\n'
+  |> List.find_map parse_github_pr_url_candidate
+
+let explicit_tool_success_from_output output =
+  try
+    let json = Yojson.Safe.from_string output in
+    let bool_field name =
+      match Yojson.Safe.Util.member name json with
+      | `Bool value -> Some value
+      | _ -> None
+    in
+    match bool_field "ok" with
+    | Some value -> value
+    | None -> Option.value ~default:false (bool_field "success")
+  with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> false
 
 (** Ingest PR event from command_descriptor (deterministic).
-    Falls back to heuristic output parsing if descriptor is not available.
+    Reads PR number/URL only from structured result JSON when available.
     Only proceeds when [success] is [true] — failed tool executions
     (auth/network/validation errors) must not produce phantom PR events. *)
 let ingest_pr_event_from_descriptor
@@ -701,10 +736,12 @@ let ingest_pr_event_from_descriptor
   else if String.equal (String.lowercase_ascii tool_name) "execute" then
     match extract_descriptor_from_output output_text with
     | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
-      (* PR was created — try to get PR number from output URL *)
-      let pr_number, pull_request_url = match parse_pull_request_link_from_output output_text with
+      let pr_number, pull_request_url = match parse_pull_request_result_from_output output_text with
         | Some (n, url) -> (n, url)
-        | None -> (0, "")
+        | None ->
+          Option.value
+            ~default:(0, "")
+            (descriptor_confirmed_pr_url_from_output output_text)
       in
       ingest_pr_event
         ~base_path ~pr_number ~pull_request_url ~pr_title:title
@@ -742,7 +779,7 @@ let ingest_pr_event_from_descriptor
         ~comment_count:0 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_api_pr_create { repo; title; base = _ }) ->
-      let pr_number, pull_request_url = match parse_pull_request_link_from_output output_text with
+      let pr_number, pull_request_url = match parse_pull_request_result_from_output output_text with
         | Some (n, url) -> (n, url)
         | None -> (0, "")
       in
@@ -764,38 +801,11 @@ let ingest_pr_event_from_descriptor
         ~comment_count:1 ~review_status:None
         ~timestamp_ms:(now_ms ())
     | Some (Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
-    | None ->
-      (* Not a PR operation — fall back to heuristic output parsing *)
-      if String.equal (String.lowercase_ascii tool_name) "execute" then
-        match parse_pull_request_link_from_output output_text with
-        | Some (pr_number, pull_request_url) ->
-          let repo =
-            let prefix = "https://github.com/" in
-            let prefix_len = String.length prefix in
-            let url_len = String.length pull_request_url in
-            if url_len > prefix_len then
-              let path = String.sub pull_request_url prefix_len (url_len - prefix_len) in
-              let parts = String.split_on_char '/' path in
-              match parts with
-              | owner :: repo_name :: _ -> owner ^ "/" ^ repo_name
-              | _ -> "unknown"
-            else "unknown"
-          in
-          ingest_pr_event
-            ~base_path ~pr_number ~pull_request_url ~pr_title:""
-            ~pr_state:"open" ~repo ~keeper_id ~turn_id
-            ~comment_count:0 ~review_status:None
-            ~timestamp_ms:(now_ms ())
-        | None -> ()
+    | None -> ()
 
-(** Try to detect PR creation from Execute tool output and ingest a PR event.
-    Only fires when [tool_name = "execute"] and output contains a GitHub pull request URL.
-
-    FIXME: This is a heuristic. It parses stdout/stderr for GitHub pull request URLs
-    which is fragile — output format changes, non-GitHub hosts, or URL
-    in unexpected position will silently miss. A dedicated [Pr_create] tool
-    in the keeper vocabulary would make this deterministic. Until then,
-    this is best-effort and may produce false negatives. *)
+(** Ingest PR creation/update events from Execute tool output.
+    This legacy hook entrypoint intentionally delegates to descriptor-backed
+    ingestion only; raw stdout URL scanning is not a reliable PR signal. *)
 let ingest_pr_event_from_hook
     ~base_path
     ~keeper_id
@@ -803,34 +813,13 @@ let ingest_pr_event_from_hook
     ~output_text
     ~tool_name
   =
-  if String.equal (String.lowercase_ascii tool_name) "execute" then
-    match parse_pull_request_link_from_output output_text with
-    | Some (pr_number, pull_request_url) ->
-      let repo =
-        let prefix = "https://github.com/" in
-        let prefix_len = String.length prefix in
-        let url_len = String.length pull_request_url in
-        if url_len > prefix_len then
-          let path = String.sub pull_request_url prefix_len (url_len - prefix_len) in
-          let parts = String.split_on_char '/' path in
-          match parts with
-          | owner :: repo_name :: _ -> owner ^ "/" ^ repo_name
-          | _ -> "unknown"
-        else "unknown"
-      in
-      ingest_pr_event
-        ~base_path
-        ~pr_number
-        ~pull_request_url
-        ~pr_title:""
-        ~pr_state:"open"
-        ~repo
-        ~keeper_id
-        ~turn_id
-        ~comment_count:0
-        ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | None -> ()
+  ingest_pr_event_from_descriptor
+    ~base_path
+    ~keeper_id
+    ~turn_id
+    ~output_text
+    ~tool_name
+    ~success:(explicit_tool_success_from_output output_text)
 
 let install_agent_observation_sinks () =
   Agent_observation.register_tool_event_sink

@@ -40,6 +40,7 @@
   masc_eio_context
   masc.masc_tool_dispatch
   masc.tool_types
+  masc.tool_contract_prompts
   masc.config_dir_resolver
   masc.prompt_registry
   masc_goal

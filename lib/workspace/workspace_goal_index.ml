@@ -5,10 +5,162 @@
     (workspace_task_capacity.ml) by building a Hashtbl-based reverse
     index on demand from explicit goal-task link mappings.
 
-    The index is ephemeral (not persisted): rebuild from the current
-    task list and external link registry each time it is needed. *)
+    The index is rebuilt from the current task list and a small persistent
+    goal-task link registry. *)
 
 open Masc_domain
+open Workspace_utils
+
+let goal_task_links_path config =
+  Filename.concat (tasks_dir config) "goal_task_links.json"
+;;
+
+let goal_task_links_recovery_path config =
+  goal_task_links_path config ^ ".last-good"
+;;
+
+let normalize_link_set links =
+  let tbl = Hashtbl.create 16 in
+  List.iter
+    (fun (goal_id, task_ids) ->
+       let goal_id = String.trim goal_id in
+       if not (String.equal goal_id "") then (
+         let existing = try Hashtbl.find tbl goal_id with Not_found -> [] in
+         let merged =
+           List.fold_left
+             (fun acc task_id ->
+                let task_id = String.trim task_id in
+                if String.equal task_id "" || List.mem task_id acc then acc
+                else task_id :: acc)
+             existing
+             task_ids
+         in
+         Hashtbl.replace tbl goal_id merged))
+    links;
+  Hashtbl.fold
+    (fun goal_id task_ids acc -> (goal_id, List.rev task_ids) :: acc)
+    tbl
+    []
+  |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+;;
+
+let link_to_yojson (goal_id, task_ids) =
+  `Assoc
+    [ "goal_id", `String goal_id
+    ; "task_ids", `List (List.map (fun task_id -> `String task_id) task_ids)
+    ]
+;;
+
+let links_to_yojson links =
+  `Assoc
+    [ "version", `Int 1
+    ; "last_updated", `String (now_iso ())
+    ; "links", `List (List.map link_to_yojson (normalize_link_set links))
+    ]
+;;
+
+let link_of_yojson = function
+  | `Assoc fields ->
+    let goal_id =
+      match List.assoc_opt "goal_id" fields with
+      | Some (`String value) -> String.trim value
+      | _ -> ""
+    in
+    let task_ids =
+      match List.assoc_opt "task_ids" fields with
+      | Some (`List values) ->
+        List.filter_map
+          (function
+            | `String value ->
+              let value = String.trim value in
+              if String.equal value "" then None else Some value
+            | _ -> None)
+          values
+      | _ -> []
+    in
+    if String.equal goal_id "" then None else Some (goal_id, task_ids)
+  | _ -> None
+;;
+
+let links_of_yojson = function
+  | `Assoc fields ->
+    (match List.assoc_opt "links" fields with
+     | Some (`List values) -> normalize_link_set (List.filter_map link_of_yojson values)
+     | _ -> [])
+  | _ -> []
+;;
+
+let read_goal_task_links_r config =
+  let primary_path = goal_task_links_path config in
+  match read_json_result config primary_path with
+  | Ok json -> Ok (links_of_yojson json)
+  | Error primary_msg ->
+    let recovery_path = goal_task_links_recovery_path config in
+    (match read_json_result config recovery_path with
+     | Ok json ->
+       Log.Misc.warn
+         "read_goal_task_links: primary unreadable, recovered from %s (%s)"
+         recovery_path
+         primary_msg;
+       Ok (links_of_yojson json)
+     | Error recovery_msg ->
+       if not (path_exists config primary_path) then Ok []
+       else
+         Error
+           (Printf.sprintf
+              "%s; recovery read failed for %s: %s"
+              primary_msg
+              recovery_path
+              recovery_msg))
+;;
+
+let read_goal_task_links config =
+  match read_goal_task_links_r config with
+  | Ok links -> links
+  | Error msg ->
+    Log.Misc.warn "read_goal_task_links failed: %s" msg;
+    []
+;;
+
+let write_goal_task_links config links =
+  let json = links_to_yojson links in
+  write_json config (goal_task_links_path config) json;
+  write_json config (goal_task_links_recovery_path config) json
+;;
+
+let link_task_to_goal config ~goal_id ~task_id =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  if String.equal goal_id "" || String.equal task_id "" then ()
+  else
+    let lock_path = Filename.concat (tasks_dir config) ".goal-task-links" in
+    with_file_lock config lock_path (fun () ->
+      let links = read_goal_task_links config in
+      let links =
+        let updated = ref false in
+        let links =
+          List.map
+            (fun (candidate_goal_id, task_ids) ->
+               if String.equal candidate_goal_id goal_id then (
+                 updated := true;
+                 if List.mem task_id task_ids then candidate_goal_id, task_ids
+                 else candidate_goal_id, task_ids @ [ task_id ])
+               else candidate_goal_id, task_ids)
+            links
+        in
+        if !updated then links else links @ [ goal_id, [ task_id ] ]
+      in
+      write_goal_task_links config links)
+;;
+
+let link_tasks_to_goals config links =
+  List.iter
+    (fun (task_id, goal_id_opt) ->
+       match goal_id_opt with
+       | None -> ()
+       | Some goal_id -> link_task_to_goal config ~goal_id ~task_id)
+    links
+;;
 
 (** Build a reverse index from goal_id to its linked tasks.
 
@@ -82,4 +234,12 @@ let build_task_goal_index
          task_ids)
     goal_task_links;
   tbl
+;;
+
+let build_goal_task_index_for_config config tasks =
+  build_goal_task_index tasks ~goal_task_links:(read_goal_task_links config)
+;;
+
+let build_task_goal_index_for_config config =
+  build_task_goal_index ~goal_task_links:(read_goal_task_links config) ()
 ;;

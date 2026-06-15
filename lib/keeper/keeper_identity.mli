@@ -23,6 +23,34 @@ val keeper_agent_name : string -> string
     ["keeper-<name>-agent"], stripping one existing ["keeper-"] prefix first so
     callers do not double-prefix keeper names. *)
 
+(** {1 Structural keeper identity (RFC-0232 §3.4)} *)
+
+(** A canonical keeper identity minted once at the parse boundary.
+    Replaces ad-hoc multi-form token-set intersection: any accepted
+    identity shape (bare name, [keeper-X-agent] wrapper in any
+    separator/case variant, generated nickname, [keeper-] prefix form)
+    canonicalizes to one comparable value, and self-checks become
+    {!Keeper_id.equal}.
+
+    Not to be confused with the registry-level [Keeper_id] compilation
+    unit ([lib/keeper_registry/keeper_id.ml]), whose [Uid] / [Trace_id]
+    / [Task_id] wrap runtime instance identifiers — this module answers
+    "who is this name?", that one answers "which run/task is this?". *)
+module Keeper_id : sig
+  type t = private string
+  (** Canonical form: case-folded; wrapper/nickname forms reduced via
+      {!canonical_keeper_name_from_agent_name} then
+      {!canonical_keeper_name}; unrecognized inputs keep their
+      case-folded raw form (non-keeper authors stay comparable). *)
+
+  val of_string : string -> t option
+  (** [None] iff the input is whitespace-only. *)
+
+  val to_string : t -> string
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
+
 type parsed_identity = {
   keeper_name : string;
   agent_name : string;

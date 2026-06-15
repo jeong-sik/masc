@@ -34,9 +34,7 @@ val decide_and_record :
 
 val to_user_message : Llm_provider.Http_client.http_error option -> string
 
-val format_exhausted_error :
-  Llm_provider.Http_client.http_error option ->
-  Llm_provider.Http_client.http_error
+
 
 val provider_outcome_to_string : provider_outcome -> string
 

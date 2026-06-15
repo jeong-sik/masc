@@ -94,13 +94,16 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.text).toBe('Keeper request failed: Timeout after 630.0s')
   })
 
-  it('does not render continuation checkpoint text as a chat reply', () => {
+  // RFC-0232 P2: the checkpoint distinction rides the producer-typed
+  // `turn_outcome` field, not the reply text.
+  it('does not render a declared continuation checkpoint as a chat reply', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_REPLY_DETAILS',
       value: {
         reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
+        turn_outcome: 'continuation_checkpoint',
       },
     })).toBeNull()
 
@@ -111,11 +114,55 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBeNull()
   })
 
+  it('renders checkpoint-shaped text as a reply when not declared a checkpoint', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        reply: 'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('Continuation checkpoint saved; keeper remains scheduled for the next cycle.')
+    expect(entry?.delivery).toBe('sending')
+  })
+
+  it('suppresses a declared checkpoint regardless of reply text', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        reply: '작업을 완료했습니다.',
+        turn_outcome: 'continuation_checkpoint',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('')
+    expect(entry?.delivery).toBe('queued')
+  })
+
   it('extracts error messages from events', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'RUN_ERROR',
       value: { message: 'boom' },
     })).toBe('boom')
+  })
+
+  it('sets thinking state on KEEPER_THINKING_DELTA', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'reasoning about the problem...' },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.streamState).toBe('thinking')
+    expect(entry?.delivery).toBe('streaming')
   })
 })
 

@@ -87,11 +87,15 @@ let run_turn
       ~(runtime_id : string)
       ?world_observation
       ?(turn_affordances = [])
-      ?provider_filter
       ~(generation : int)
       ?(max_turns : int = Keeper_runtime_resolved.reactive_max_turns_per_call ())
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
-      ?(max_idle_turns : int = 3)
+      ~(max_idle_turns : int)
+      (* Required, no default: the OAS loop guard kills the run at this
+         count, so the caller must pick the channel-appropriate threshold
+         (reactive/autonomous). A silent default of 3 sat below the
+         graduated idle hook's skip threshold (4), making graceful Skip
+         unreachable — user chat turns died as IdleDetected errors. *)
       ?(history_user_source = "direct_user")
       ?(history_assistant_source = "direct_assistant")
       ?guardrails
@@ -226,7 +230,6 @@ let run_turn
   in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
-  let session_dir = ctx.session_dir in
   let session = ctx.session in
   let base_system_prompt = ctx.base_system_prompt in
   let resume_oas_checkpoint = ctx.resume_oas_checkpoint in
@@ -422,13 +425,6 @@ let run_turn
     let priority =
       Option.value priority ~default:Llm_provider.Request_priority.Proactive
     in
-    let admission_wait_timeout_sec =
-      if
-        Llm_provider.Request_priority.resolve priority
-        = Llm_provider.Request_priority.Proactive
-      then Some 180.0
-      else None
-    in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =
@@ -488,9 +484,7 @@ let run_turn
                    turn-budget admission. *)
                 Keeper_turn_driver.run_named
                   ~runtime_id:runtime_id_string
-                    ~base_path:config.base_path
                     ~keeper_name:meta.name
-                    ?provider_filter
                     ~goal:user_message
                     ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -516,12 +510,12 @@ let run_turn
               to re-emit. Runaway is bounded by max_idle_turns + token budget,
               not a retry count that halts the turn. *)
                     ~max_idle_turns
+                    ~max_turns
                     ?stream_idle_timeout_s
                     ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
                     ?max_cost_usd
-                    ?wait_timeout_sec:admission_wait_timeout_sec
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ~guardrails:keeper_oas_guardrails
@@ -532,7 +526,6 @@ let run_turn
                     ~allowed_paths:oas_allowed_paths
                     ~cache_system_prompt:true
                     ~yield_on_tool
-                    ~checkpoint_dir:session_dir
                     ~context_injector
                     ~context:shared_context
                     ~approval:
@@ -624,7 +617,7 @@ let run_turn
                           ~acc
                           ~actual_keeper_tool_names
                           ~result ~checkpoint_persistence_error
-                          ~post_turn_t0 ?provider_filter ~runtime_id_string
+                          ~post_turn_t0 ~runtime_id_string
                           ~prompt_metrics ~ctx_composition ~usage
                           ~receipt_response_text_present_ref ~history_assistant_source
                           ~pre_dispatch_compacted:ctx.pre_dispatch_compacted
@@ -634,28 +627,97 @@ let run_turn
                           ~raw_response_text:response_text
                           ())))
                in
-       Keeper_agent_run_receipt.finalize
-         ~config
-         ~meta
-         ~generation
-         ~manifest_keeper_turn_id
-         ~runtime_id
-         ~keeper_visible_sandbox_root
-         ~receipt_started_at
-         ~runtime_manifest_context
-         ~acc
-         ~pre_dispatch_compacted
-         ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
-         ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
-         ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
-         ~degraded_retry_applied
-         ~degraded_retry_runtime
-         ~fallback_reason
-         ~runtime_rotation_attempts
-         ~turn_result
-         ~receipt_turn_count_ref
-         ~receipt_model_used_ref
-         ~receipt_stop_reason_ref
-         ~receipt_runtime_observation_ref
-         ~receipt_response_text_present_ref
-         ())
+       let receipt_result =
+         Keeper_agent_run_receipt.finalize
+           ~config
+           ~meta
+           ~generation
+           ~manifest_keeper_turn_id
+           ~runtime_id
+           ~keeper_visible_sandbox_root
+           ~receipt_started_at
+           ~runtime_manifest_context
+           ~acc
+           ~pre_dispatch_compacted
+           ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
+           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
+           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
+           ~degraded_retry_applied
+           ~degraded_retry_runtime
+           ~fallback_reason
+           ~runtime_rotation_attempts
+           ~turn_result
+           ~receipt_turn_count_ref
+           ~receipt_model_used_ref
+           ~receipt_stop_reason_ref
+           ~receipt_runtime_observation_ref
+           ~receipt_response_text_present_ref
+           ()
+       in
+       (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
+          receipt above. execution_ids come from the trajectory
+          accumulator (every entry of this run carries the id minted at
+          the dispatch boundary); sampling reads the last SDK turn's
+          effective values from the turn context cell. *)
+       (let tctx =
+          Keeper_tool_call_log_context.get_turn_context_record
+            ~cell:turn_ctx_cell ()
+        in
+        let execution_ids =
+          match trajectory_acc with
+          | None -> []
+          | Some tacc ->
+            (* entries are prepended on record; rev restores call order *)
+            List.rev
+              (List.filter_map
+                 (fun (e : Trajectory.tool_call_entry) ->
+                    Option.map Ids.Execution_id.of_string e.execution_id)
+                 tacc.Trajectory.entries)
+        in
+        let usage : Turn_record.usage =
+          match turn_result with
+          | Ok result when result.usage_reported ->
+            { input_tokens = Some result.usage.input_tokens
+            ; output_tokens = Some result.usage.output_tokens
+            }
+          | Ok _ | Error _ -> { input_tokens = None; output_tokens = None }
+        in
+        Keeper_turn_record_writer.write
+          ~config
+          ~keeper_name:meta.name
+          ~trace_id
+          ~absolute_turn:manifest_keeper_turn_id
+          ~runtime_profile:runtime_id_string
+          ~sampling:
+            { temperature = Some temperature
+            ; thinking_budget = tctx.thinking_budget
+            ; enable_thinking = tctx.thinking_enabled
+            }
+          ~usage
+          ~execution_ids
+          ~blocks:acc.prompt_blocks
+          ();
+        (* RFC-0233 §2.3 PR-4: project the same record onto the ambient
+           turn span. Both turn drivers (unified "invoke_agent <keeper>"
+           and direct "keeper_turn") keep their span open across this
+           tail on the same fiber, so one add_attrs covers both. The
+           OTel value type has no array — blocks serialize through the
+           Turn_record codec (single encoding SSOT), execution ids join
+           with commas. *)
+        Otel_spans.add_attrs
+          ~attrs:
+            [ ( Otel_genai.Attr_key.masc_turn_blocks
+              , `String
+                  (Yojson.Safe.to_string
+                     (`List
+                        (List.map Turn_record.prompt_block_to_json
+                           acc.prompt_blocks))) )
+            ; ( Otel_genai.Attr_key.masc_turn_profile
+              , `String runtime_id_string )
+            ; ( Otel_genai.Attr_key.masc_turn_execution_ids
+              , `String
+                  (String.concat ","
+                     (List.map Ids.Execution_id.to_string execution_ids)) )
+            ]
+          ());
+       receipt_result)

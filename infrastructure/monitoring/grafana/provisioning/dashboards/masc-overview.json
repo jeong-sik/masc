@@ -249,8 +249,8 @@
       }
     },
     {
-      "type": "barchart",
-      "title": "Surface Opens \u2014 7d",
+      "type": "timeseries",
+      "title": "Chat Transport Failures / min",
       "gridPos": {
         "x": 12,
         "y": 8,
@@ -261,19 +261,36 @@
         "type": "prometheus",
         "uid": "P4169E866C3094E38"
       },
-      "description": "Top-level dashboard surface openings in the last 7 days.",
+      "description": "User-visible keeper chat request failures persisted as transport_failure rows. This is the signal for dropped-looking conversations that stay pending for retry.",
       "targets": [
         {
-          "expr": "sum by (surface) (increase(dashboard_surface_open_total[7d]))",
-          "legendFormat": "{{surface}}",
+          "expr": "sum by (source) (rate(masc_keeper_chat_transport_failures_total[5m])) * 60",
+          "legendFormat": "{{source}}",
           "refId": "A"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "ops",
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
           }
         }
       },
@@ -1464,6 +1481,199 @@
         }
       ],
       "description": "Connection pool from Pool_metrics.current_snapshot (export wiring restored)."
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Discord Connector",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 169,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Discord Gateway Events / min",
+      "gridPos": {
+        "x": 0,
+        "y": 170,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (event, route) (rate(masc_discord_gateway_events_total[5m])) * 60",
+          "legendFormat": "{{event}} / {{route}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(masc_discord_gateway_ack_timeouts_total[5m])) * 60",
+          "legendFormat": "heartbeat_ack_timeout/min",
+          "refId": "B"
+        }
+      ],
+      "description": "Gateway event flow plus explicit heartbeat ACK timeout source signal."
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Discord Inbound Dispatch / min",
+      "gridPos": {
+        "x": 8,
+        "y": 170,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_discord_inbound_dispatch_total[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Triggered Discord messages by delivery outcome. dispatch_unavailable means the bound keeper was reached but unavailable; reply status is tracked separately."
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Discord Ambient Capture / min",
+      "gridPos": {
+        "x": 16,
+        "y": 170,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_discord_ambient_record_total[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Ambient lane write outcomes. This intentionally excludes Discord channel/user/message identifiers."
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Discord Reconnects, Closes, ACK Timeouts",
+      "gridPos": {
+        "x": 0,
+        "y": 178,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(masc_discord_gateway_reconnect_scheduled_total[5m])) * 60",
+          "legendFormat": "reconnects/min",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (code) (rate(masc_discord_gateway_closes_total[5m])) * 60",
+          "legendFormat": "close {{code}}/min",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(masc_discord_gateway_ack_timeouts_total[5m])) * 60",
+          "legendFormat": "heartbeat_ack_timeout/min",
+          "refId": "C"
+        }
+      ],
+      "description": "Connector stability signal: ACK timeout root cause, reconnect scheduling, and gateway close codes."
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Discord Outbound Replies / min",
+      "gridPos": {
+        "x": 12,
+        "y": 178,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_discord_outbound_replies_total[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Discord REST send outcomes. Pair with inbound dispatch_unavailable to distinguish unavailable notices from real keeper replies."
     }
   ],
   "refresh": "30s",
@@ -1482,5 +1692,5 @@
   "timezone": "browser",
   "title": "MASC Overview",
   "uid": "masc-overview",
-  "version": 2
+  "version": 4
 }

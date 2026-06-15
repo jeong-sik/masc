@@ -61,21 +61,28 @@ let partition_results
 
 (* --- Protocol string -> Runtime_schema.api_format --- *)
 
+let canonical_protocol_of_protocol = function
+  | "messages-cli" | "messages-http" | "openai-compatible-cli"
+  | "openai-compatible-http" | "ollama-http" as protocol -> Some protocol
+  | _ -> None
+;;
+
+let unknown_protocol_error s =
+  Printf.sprintf
+    "unknown protocol %S: expected one of messages-cli, messages-http, \
+     openai-compatible-cli, openai-compatible-http, ollama-http"
+    s
+;;
+
 let api_format_of_protocol (s : string)
   : (Runtime_schema.api_format, string) result
   =
   match s with
-  | "provider_a-cli" | "provider_a-http" -> Ok Runtime_schema.Messages_api
-  | "provider_d-cli" | "provider_d-http" | "provider_f-cli" | "provider_c-cli" ->
+  | "messages-cli" | "messages-http" -> Ok Runtime_schema.Messages_api
+  | "openai-compatible-cli" | "openai-compatible-http" ->
     Ok Runtime_schema.Chat_completions_api
   | "ollama-http" -> Ok Runtime_schema.Ollama_api
-  | _ ->
-    Error
-      (Printf.sprintf
-         "unknown protocol %S: expected one of provider_a-cli, provider_a-http, \
-          provider_d-cli, provider_d-http, provider_f-cli, provider_c-cli, \
-          ollama-http"
-         s)
+  | _ -> Error (unknown_protocol_error s)
 ;;
 
 (* --- Transport extraction --- *)
@@ -177,7 +184,7 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
   ; identity_runtime_mcp_header_keys =
       string_list_field "identity-runtime-mcp-header-keys"
   ; argv_prompt_preflight = b "argv-prompt-preflight"
-  ; uses_anthropic_caching = b "uses-provider_a-caching"
+  ; uses_anthropic_caching = b "uses-messages-caching"
   ; max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt"
   ; tolerates_bound_actor_fallback = b "tolerates-bound-actor-fallback"
   }
@@ -231,7 +238,10 @@ let parse_provider (id : string) (tbl : Otoml.t)
     match Otoml.find_opt tbl Otoml.get_string [ "protocol" ] with
     | Some p ->
       (match api_format_of_protocol p with
-       | Ok fmt -> Ok (p, fmt)
+       | Ok fmt ->
+         (match canonical_protocol_of_protocol p with
+          | Some protocol -> Ok (protocol, fmt)
+          | None -> Error (unknown_protocol_error p))
        | Error e -> Error e)
     | None -> Error "missing required field 'protocol'"
   in
@@ -298,9 +308,11 @@ let parse_thinking_control_format ~(path : string) (raw : string)
     Runtime_schema.No_thinking_control
   | "thinking-object" | "thinking_object" -> Runtime_schema.Thinking_object
   | "chat-template-kwargs" | "chat_template_kwargs" -> Runtime_schema.Chat_template_kwargs
+  | "chat-template-token" | "chat_template_token" -> Runtime_schema.Chat_template_token
+  | "reasoning-effort" | "reasoning_effort" -> Runtime_schema.Reasoning_effort
   | other ->
     Log.Runtime.warn "runtime_toml: %s.capabilities.thinking-control-format = %S — expected one of \
-         none|thinking-object|chat-template-kwargs, defaulting to none"
+         none|thinking-object|chat-template-kwargs|chat-template-token|reasoning-effort, defaulting to none"
         path
         other;
     Runtime_schema.No_thinking_control
@@ -372,6 +384,9 @@ let parse_model (id : string) (tbl : Otoml.t)
     let thinking_support =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "thinking-support" ]
     in
+    let preserve_thinking =
+      Otoml.find_or ~default:false tbl Otoml.get_boolean [ "preserve-thinking" ]
+    in
     let max_thinking_budget =
       Otoml.find_opt tbl Otoml.get_integer [ "max-thinking-budget" ]
     in
@@ -407,6 +422,7 @@ let parse_model (id : string) (tbl : Otoml.t)
       ; tools_support
       ; max_context
       ; thinking_support
+      ; preserve_thinking
       ; max_thinking_budget
       ; streaming
       ; capabilities

@@ -93,6 +93,41 @@ let test_task_id_to_yojson () =
   | `String s -> check string "to json" "task-123" s
   | _ -> fail "expected String"
 
+(* ============================================================
+   Execution_id Tests (RFC-0233)
+   ============================================================ *)
+
+let test_execution_id_generate_prefix () =
+  let s = Masc_domain.Execution_id.(to_string (generate ())) in
+  check bool "starts with exec-" true (String.sub s 0 5 = "exec-")
+
+let test_execution_id_generate_unique () =
+  let id1 = Masc_domain.Execution_id.generate () in
+  let id2 = Masc_domain.Execution_id.generate () in
+  check bool "unique" false (Masc_domain.Execution_id.equal id1 id2)
+
+let test_execution_id_mint_order_sorts () =
+  (* Same-millisecond mints differ by sequence; the lexicographic order
+     of the suffix tracks mint order within a process. *)
+  let ids =
+    List.init 50 (fun _ -> Masc_domain.Execution_id.(to_string (generate ())))
+  in
+  check (list string) "lexicographic order = mint order"
+    ids (List.sort compare ids)
+
+let test_execution_id_yojson_roundtrip () =
+  let id = Masc_domain.Execution_id.of_string "exec-1718150400000-0001" in
+  match Masc_domain.Execution_id.(of_yojson (to_yojson id)) with
+  | Ok back ->
+      check string "roundtrip" "exec-1718150400000-0001"
+        (Masc_domain.Execution_id.to_string back)
+  | Error _ -> fail "expected Ok"
+
+let test_execution_id_of_yojson_rejects_non_string () =
+  match Masc_domain.Execution_id.of_yojson (`Int 42) with
+  | Ok _ -> fail "expected Error for non-string"
+  | Error _ -> check bool "rejected" true true
+
 let test_task_id_of_yojson_ok () =
   let json = `String "my-task" in
   match Masc_domain.Task_id.of_yojson json with
@@ -558,6 +593,131 @@ let test_backlog_of_yojson_error () =
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
+let test_backlog_of_yojson_version_0_sentinel () =
+  (* version=0 is a sentinel value indicating an uninitialised backlog.
+     The decoder should preserve it, not reject. *)
+  let json = `Assoc [
+    ("tasks", `List []);
+    ("last_updated", `String "2024-01-15T12:00:00Z");
+    ("version", `Int 0);
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b ->
+    check int "version preserved as 0" 0 b.version;
+    check int "tasks empty" 0 (List.length b.tasks)
+  | Error e -> fail ("expected Ok for version=0, got: " ^ e)
+
+let test_backlog_of_yojson_version_negative () =
+  (* Version -1 or negative is invalid; decoder should still pass it through
+     as-is since the Yojson int decoder accepts any integer. *)
+  let json = `Assoc [
+    ("tasks", `List []);
+    ("last_updated", `String "2024-01-15T12:00:00Z");
+    ("version", `Int (-1));
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b -> check int "version preserved as -1" (-1) b.version
+  | Error e -> fail ("expected Ok for version=-1, got: " ^ e)
+
+let test_backlog_of_yojson_missing_version () =
+  (* Missing version field should default to 1 *)
+  let json = `Assoc [
+    ("tasks", `List []);
+    ("last_updated", `String "2024-01-15T12:00:00Z");
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b -> check int "version defaults to 1" 1 b.version
+  | Error e -> fail ("expected Ok for missing version, got: " ^ e)
+
+let test_backlog_of_yojson_null_version () =
+  (* Null version should default to 1 (same path as missing) *)
+  let json = `Assoc [
+    ("tasks", `List []);
+    ("last_updated", `String "2024-01-15T12:00:00Z");
+    ("version", `Null);
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b -> check int "version defaults to 1" 1 b.version
+  | Error e -> fail ("expected Ok for null version, got: " ^ e)
+
+let test_backlog_of_yojson_missing_last_updated () =
+  (* Missing last_updated should default to "" *)
+  let json = `Assoc [
+    ("tasks", `List []);
+    ("version", `Int 1);
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b ->
+    check string "last_updated defaults to empty" "" b.last_updated;
+    check int "version preserved" 1 b.version
+  | Error e -> fail ("expected Ok for missing last_updated, got: " ^ e)
+
+let test_backlog_of_yojson_bare_tasks () =
+  (* Backlog may be just {"tasks": [...]} with no metadata fields at all.
+     This is the observed live format in .masc/tasks/backlog.json. *)
+  let json = `Assoc [
+    ("tasks", `List []);
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b ->
+    check int "tasks empty" 0 (List.length b.tasks);
+    check string "last_updated defaults to empty" "" b.last_updated;
+    check int "version defaults to 1" 1 b.version
+  | Error e -> fail ("expected Ok for bare tasks, got: " ^ e)
+
+let test_backlog_of_yojson_truncated_tasks () =
+  (* A valid object with "tasks" missing (truncated JSON).
+     The decoder treats missing tasks key as empty array. *)
+  let json = `Assoc [
+    ("last_updated", `String "2024-01-15T12:00:00Z");
+    ("version", `Int 1);
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b -> check int "tasks empty when missing" 0 (List.length b.tasks)
+  | Error e -> fail ("expected Ok for missing tasks key, got: " ^ e)
+
+let test_backlog_of_yojson_wrong_type () =
+  (* Backlog decoder wraps all exceptions. Passing an int should raise,
+     which is caught and returned as Error. *)
+  let json = `Int 42 in
+  match Masc_domain.backlog_of_yojson json with
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for non-object input"
+
+let test_backlog_of_yojson_nested_list () =
+  (* Degenerate input: tasks is a non-list value. The decoder's
+     match `List l -> l | _ -> [] handles this gracefully. *)
+  let json = `Assoc [
+    ("tasks", `String "not_a_list");
+    ("last_updated", `String "2024-01-15T12:00:00Z");
+    ("version", `Int 1);
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b -> check int "tasks empty for non-list" 0 (List.length b.tasks)
+  | Error e -> fail ("expected Ok for non-list tasks, got: " ^ e)
+
+let test_backlog_of_yojson_corrupt_task_entries () =
+  (* Tasks array contains a mix of valid tasks and corrupt entries.
+     The decoder uses List.filter_map to skip decode failures. *)
+  let corrupt_entry = `Assoc [("id", `Int 0)] in
+  let valid_entry = `Assoc [
+    ("id", `String "task-1");
+    ("title", `String "Valid");
+    ("description", `String "Desc");
+    ("status", `String "todo");
+    ("priority", `Int 1);
+    ("files", `List []);
+    ("created_at", `String "2024-01-15T12:00:00Z");
+  ] in
+  let json = `Assoc [
+    ("tasks", `List [corrupt_entry; valid_entry; corrupt_entry]);
+    ("last_updated", `String "2024-01-15T12:00:00Z");
+    ("version", `Int 1);
+  ] in
+  match Masc_domain.backlog_of_yojson json with
+  | Ok b -> check int "1 valid task survives corruption" 1 (List.length b.tasks)
+  | Error e -> fail ("expected Ok with corrupt entries, got: " ^ e)
+
 (* ============================================================
    masc_error_to_string Tests
    ============================================================ *)
@@ -832,6 +992,7 @@ let test_permissions_for_role_admin () =
 let test_has_permission_worker () =
   check bool "worker can read" true (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReadState);
   check bool "worker can broadcast" true (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanBroadcast);
+  check bool "worker cannot admin" false (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanAdmin);
   check bool "worker cannot reset" false (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReset)
 
 let test_has_permission_admin () =
@@ -1283,6 +1444,14 @@ let () =
       test_case "of_yojson ok" `Quick test_task_id_of_yojson_ok;
       test_case "of_yojson err" `Quick test_task_id_of_yojson_err;
     ];
+    "execution_id", [
+      test_case "generate prefix" `Quick test_execution_id_generate_prefix;
+      test_case "generate unique" `Quick test_execution_id_generate_unique;
+      test_case "mint order sorts" `Quick test_execution_id_mint_order_sorts;
+      test_case "yojson roundtrip" `Quick test_execution_id_yojson_roundtrip;
+      test_case "of_yojson rejects non-string" `Quick
+        test_execution_id_of_yojson_rejects_non_string;
+    ];
     "timestamp", [
       test_case "now_iso format" `Quick test_now_iso_format;
       test_case "parse valid" `Quick test_parse_iso8601_valid;
@@ -1382,6 +1551,16 @@ let () =
       test_case "ok" `Quick test_backlog_of_yojson_ok;
       test_case "with task" `Quick test_backlog_of_yojson_with_task;
       test_case "error" `Quick test_backlog_of_yojson_error;
+      test_case "version 0 sentinel" `Quick test_backlog_of_yojson_version_0_sentinel;
+      test_case "version negative" `Quick test_backlog_of_yojson_version_negative;
+      test_case "missing version" `Quick test_backlog_of_yojson_missing_version;
+      test_case "null version" `Quick test_backlog_of_yojson_null_version;
+      test_case "missing last_updated" `Quick test_backlog_of_yojson_missing_last_updated;
+      test_case "bare tasks only" `Quick test_backlog_of_yojson_bare_tasks;
+      test_case "truncated tasks" `Quick test_backlog_of_yojson_truncated_tasks;
+      test_case "wrong type" `Quick test_backlog_of_yojson_wrong_type;
+      test_case "nested list" `Quick test_backlog_of_yojson_nested_list;
+      test_case "corrupt task entries" `Quick test_backlog_of_yojson_corrupt_task_entries;
     ];
     "masc_error_to_string", [
       test_case "not initialized" `Quick test_masc_error_not_initialized;

@@ -6,8 +6,9 @@
     exactly one Runtime, so the candidate collapses to its provider config and
     the health/capacity/strategy/selection machinery is dropped.
 
-    [type t = Provider_config.t] — no wrapper. The surviving members delegate
-    to {!Runtime_agent} / {!Runtime_provider_binding}; error decoration is
+    [type t] is a record pairing the runtime's [Provider_config.t] with its
+    [max_concurrent] binding limit. The surviving members delegate to
+    {!Runtime_agent} / {!Runtime_provider_binding}; error decoration is
     collapsed to identity. *)
 
 type t =

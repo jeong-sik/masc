@@ -1,6 +1,21 @@
 open Alcotest
 open Masc
 
+module K = Keeper_chat_store
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let temp_base_path prefix =
+  Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
+
 let test_agent_name_for_channel_actor () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
@@ -29,6 +44,7 @@ let test_contextualize_message_includes_external_metadata () =
       ~channel_user_id:"user-42"
       ~channel_user_name:"Alice"
       ~channel_workspace_id:"workspace-9"
+      ~metadata:[]
       ~content:"hello keeper"
   in
   check string "message envelope"
@@ -49,6 +65,7 @@ let test_contextualize_message_sanitizes_context_lines () =
       ~channel_user_id:"user-42"
       ~channel_user_name:"Alice\tOps"
       ~channel_workspace_id:"workspace-9\rthread"
+      ~metadata:[]
       ~content:"hello keeper"
   in
   check string "sanitized context"
@@ -60,6 +77,75 @@ user_name: Alice Ops
 
 [User message]
 hello keeper|}
+    rendered
+
+let test_persist_connector_assistant_reply_records_lane_reply () =
+  let base_dir = temp_base_path "gate-keeper-reply" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "discord-reply-keeper" in
+      K.append_user_message ~base_dir ~keeper_name
+        ~content:"<@bot> factorio?"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
+        ~conversation_id:"discord:guild-1:channel:chan-9" ();
+      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
+        ~keeper_name ~source:"discord"
+        ~conversation_id:"discord:guild-1:channel:chan-9"
+        ~reply:"already answered" ();
+      match K.load ~base_dir ~keeper_name with
+      | [ user; assistant ] ->
+          check string "user line first" "user" (K.Role.to_label user.K.role);
+          check string "assistant reply persisted" "assistant" (K.Role.to_label assistant.K.role);
+          check string "assistant lane" "discord"
+            (Option.value assistant.K.source ~default:"");
+          check string "assistant conversation id"
+            "discord:guild-1:channel:chan-9"
+            (Option.value assistant.K.conversation_id ~default:"");
+          check string "assistant content" "already answered" assistant.K.content
+      | messages ->
+          failf "expected 2 chat messages, got %d" (List.length messages))
+
+let test_persist_connector_assistant_reply_ignores_empty_reply () =
+  let base_dir = temp_base_path "gate-keeper-empty-reply" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "discord-empty-reply-keeper" in
+      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
+        ~keeper_name ~source:"discord" ~reply:"   " ();
+      check int "empty reply does not create chat file" 0
+        (List.length (K.load ~base_dir ~keeper_name)))
+
+let test_contextualize_message_includes_channel_metadata () =
+  let rendered =
+    Gate_keeper_backend.contextualize_message
+      ~channel:"discord"
+      ~channel_user_id:"user-42"
+      ~channel_user_name:"Alice"
+      ~channel_workspace_id:"thread-9"
+      ~metadata:
+        [
+          ("discord.guild_id", "guild-1");
+          ("discord.bound_channel_id", "parent-1");
+          ("discord.binding_via_parent", "true");
+        ]
+      ~content:"hello from a thread"
+  in
+  check string "metadata envelope"
+    {|[External channel context]
+channel: discord
+workspace_id: thread-9
+user_id: user-42
+user_name: Alice
+
+[External channel metadata]
+discord.guild_id: guild-1
+discord.bound_channel_id: parent-1
+discord.binding_via_parent: true
+
+[User message]
+hello from a thread|}
     rendered
 
 let test_parse_keeper_chat_stream_request_accepts_connector_context () =
@@ -89,11 +175,11 @@ let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
   let cases =
     [
       ( "models",
-        {|{"name":"luna","message":"hello","models":["provider_k:legacy"]}|} );
+        {|{"name":"luna","message":"hello","models":["glm:legacy"]}|} );
       ( "allowed_models",
-        {|{"name":"luna","message":"hello","allowed_models":["provider_k:legacy"]}|} );
+        {|{"name":"luna","message":"hello","allowed_models":["glm:legacy"]}|} );
       ( "active_model",
-        {|{"name":"luna","message":"hello","active_model":"provider_k:legacy"}|} );
+        {|{"name":"luna","message":"hello","active_model":"glm:legacy"}|} );
     ]
   in
   List.iter
@@ -233,6 +319,12 @@ let () =
             test_contextualize_message_includes_external_metadata;
           test_case "context envelope sanitizes metadata lines" `Quick
             test_contextualize_message_sanitizes_context_lines;
+          test_case "persists connector assistant reply" `Quick
+            test_persist_connector_assistant_reply_records_lane_reply;
+          test_case "skips empty connector assistant reply" `Quick
+            test_persist_connector_assistant_reply_ignores_empty_reply;
+          test_case "context envelope includes channel metadata" `Quick
+            test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects partial connector context" `Quick

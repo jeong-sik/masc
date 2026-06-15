@@ -101,7 +101,7 @@ let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) 
   | [] -> meta_only_claim_goal_scope meta
   | goal_ids ->
     let tasks = Workspace.get_tasks_safe config in
-    let task_goal_index = Workspace_goal_index.build_task_goal_index () in
+    let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let scoped_claimable_exists =
       List.exists (fun task ->
              task_is_unclaimed_todo task
@@ -156,9 +156,15 @@ let goal_progress_json ?config (meta : keeper_meta) =
           ("convergence", `Null);
         ]
   | Some config ->
+      let task_goal_index =
+        Workspace_goal_index.build_task_goal_index_for_config config
+      in
       let tasks =
         Workspace.get_tasks_safe config
-        |> List.filter (task_is_linked_to_keeper_goals meta.active_goal_ids)
+        |> List.filter
+             (task_is_linked_to_keeper_goals
+                ~task_goal_index
+                meta.active_goal_ids)
       in
       let linked_task_count = List.length tasks in
       let done_task_count =

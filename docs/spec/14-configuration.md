@@ -91,7 +91,7 @@ resolved config root는 별도 탐색 규칙을 가진다: `MASC_CONFIG_DIR` -> 
 | `MASC_SPAWN_TIMEOUT_SEC` | float | 600.0 | 스폰 기본 타임아웃 (10분) |
 | `MASC_SPAWN_CODING_TIMEOUT_SEC` | float | 7200.0 | 코딩 모드 타임아웃 (2시간) |
 | `MASC_SPAWN_GRACE_PERIOD_SEC` | float | 60.0 | SIGTERM 유예 기간 |
-| `LLAMA_SERVER_URL` | string | `Agent_sdk.Defaults.local_llm_url` | 로컬 Provider-D-compatible runtime URL |
+| `LLAMA_SERVER_URL` | string | `Agent_sdk.Defaults.local_llm_url` | 로컬 OpenAI-compatible runtime URL |
 | `LLAMA_DEFAULT_MODEL` | string | `explicit-model-required` | 로컬 기본 모델 |
 | `MASC_LOCAL_MAX_TOKENS` | int | 32768 | 로컬 LLM max_tokens 상한 (fallback: `MASC_LLAMA_MAX_TOKENS`) |
 | `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | float | 3600.0 | 취소 토큰 최대 수명 |
@@ -118,8 +118,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
 | `MASC_TIMEOUT_GCLOUD_AUTH_SEC` | float | 15.0 | GCP 인증 타임아웃 |
-| `MASC_TIMEOUT_PROVIDER-A_SEC` | int | 120 | Provider-A API 타임아웃 |
-| `MASC_TIMEOUT_OPENAI_COMPAT_SEC` | int | 60 | Provider-D 호환 API 타임아웃 |
+| `MASC_TIMEOUT_OPENAI_COMPAT_SEC` | int | 60 | OpenAI-compatible API 타임아웃 |
 | `MASC_TIMEOUT_MODEL_GRACE_SEC` | float | 5.0 | 모델 호출 네트워크 유예 |
 | `MASC_TIMEOUT_GRAPHQL_SEC` | float | 5.0 | GraphQL 쿼리 타임아웃 |
 | `MASC_TIMEOUT_KEEPER_STATUS_SEC` | float | 5.0 | Keeper 상태 확인 타임아웃 |
@@ -133,7 +132,7 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_LOG_TRUNCATION_LEN` | int | 1500 | 로그 출력 절삭 길이 |
 | `MASC_CP_CLEANUP_DAYS` | int | 14 | CP 데이터 정리 임계일 |
 | `MASC_MESSAGE_MAX_COUNT` | int | 200 | Workspace당 메시지 최대 보유 수 |
-| `MASC_CHAIN_JUDGE_MODEL` | string | `"provider-f"` | Chain judge 모델 |
+| `MASC_CHAIN_JUDGE_MODEL` | string | `""` | Chain judge 모델 (legacy; 현재 사용처 없음) |
 
 ### 3.3 Governance (Env_config_governance)
 
@@ -148,16 +147,9 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_INFERENCE_CACHE_MAX_TEMP` | float | 0.0 | 캐시 허용 최대 온도 |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | int | 512 | L1 인메모리 캐시 상한 |
 | `MASC_SPAWN_CACHE_POLICY` | string | `"safe_only"` | Spawn 캐시 정책 (`off`/`safe_only`) |
-| `ZAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-k` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
-| `ZAI_CODING_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-k-coding` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
-| `PROVIDER-F_DEFAULT_MODEL` | string | 없음 | 설정 시 direct `provider-f` provider `auto` 기본 모델로 사용. 미설정이면 direct 기본 동작에 위임한다. |
-| `PROVIDER-F_CLI_DEFAULT_MODEL` | string | 없음 | 설정 시 `cli-tool-b` provider `auto` 기본 모델로 사용. 미설정이면 CLI-Tool-C 기본 동작에 위임한다. |
-| `MASC_PROVIDER-F_CLI_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `cli-tool-b:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 CLI-Tool-C 기본 모델에 위임한다. |
-| `MASC_AGENT-CODE_CLI_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `cli-tool-a:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 CLI-Tool-B 기본 모델에 위임한다. |
-| `MASC_CLI_TOOL_A_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `cli-tool-d:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 CLI-Tool-A 기본 모델에 위임한다. |
-| `PROVIDER-C_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-c` provider `auto` 기본 모델로 사용. |
-| `PROVIDER-A_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `agent-llm-a` provider `auto` 기본 모델로 사용. |
-| `OPENAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-d` provider `auto` 기본 모델로 사용. |
+| `ZAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `glm` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
+| `ZAI_CODING_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `glm-coding` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
+| `OPENAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `openai`/`openai-compatible` provider `auto` 기본 모델로 사용. |
 | `OLLAMA_DEFAULT_MODEL` | string | `""` | `ollama` provider `auto` 기본 모델 (lib/config/env_config_runtime.ml:181) |
 | `LLAMA_DEFAULT_MODEL` | string | `"explicit-model-required"` | `llama` provider legacy local runtime 기본 모델 (lib/config/env_config_runtime.ml:150) |
 | `OPENROUTER_DEFAULT_MODEL` | string | (없음) | `openrouter` provider `auto` 기본 모델 (lib/runtime/runtime_model_resolve.ml:76) |
@@ -325,7 +317,7 @@ Tier는 mode/category와 독립적으로 적용되는 추가 필터 레이어다
 
 ```toml
 [providers.cli-tool-a]
-protocol = "provider-d-cli"
+protocol = "openai-compatible-cli"
 command = "agent-code"
 is-non-interactive = true
 
@@ -365,15 +357,10 @@ Tier member는 `<provider_id>.<model_id>` 또는
 | Provider | Env Config 모듈 | 기본 모델 |
 |----------|----------------|----------|
 | `ollama` | `Local_runtime` | `OLLAMA_DEFAULT_MODEL` (port 11434, 262k context) |
-| `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local Provider-D-compatible runtime) |
-| `provider-k` | `Glm` | `ZAI_DEFAULT_MODEL` |
-| `provider-k-coding` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
-| `provider-f` | `Provider-F` | `PROVIDER-F_DEFAULT_MODEL` |
-| `cli-tool-b` | CLI transport | `MASC_PROVIDER-F_CLI_AUTO_MODELS` when model is `auto` |
-| `cli-tool-a` | CLI transport | `MASC_AGENT-CODE_CLI_AUTO_MODELS` when model is `auto` |
-| `cli-tool-d` | CLI transport | `MASC_CLI_TOOL_A_AUTO_MODELS` when model is `auto` |
-| `agent-llm-a` | `Agent-LLM-A` | `PROVIDER-A_DEFAULT_MODEL` |
-| `provider-d` | `Provider-D` | `OPENAI_DEFAULT_MODEL` |
+| `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local OpenAI-compatible runtime) |
+| `glm` | `Glm` | `ZAI_DEFAULT_MODEL` |
+| `glm-coding` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
+| `openai-compatible` | OpenAI-compatible runtime | `OPENAI_DEFAULT_MODEL` |
 | `openrouter` | `OpenRouter` | `OPENROUTER_DEFAULT_MODEL` |
 
 ### 7.3 Per-runtime 추론 파라미터
@@ -449,7 +436,7 @@ is-default = true
 max-concurrent = 1
 ```
 
-`cli-tool-b:auto`, `cli-tool-a:auto`, `cli-tool-d:auto`는 기본적으로 concrete 후보 목록을 코드에 갖지 않는다. 미설정 기본값은 `auto` 1개이며 각 CLI의 현재 기본 모델 선택에 위임한다. 특정 모델 rotation이 필요하면 `MASC_PROVIDER-F_CLI_AUTO_MODELS`, `MASC_AGENT-CODE_CLI_AUTO_MODELS`, `MASC_CLI_TOOL_A_AUTO_MODELS`에 operator가 명시한 CSV를 넣는다. Direct API provider의 concrete 후보 목록과 기본값은 OAS runtime binding/catalog가 제공하는 값을 projection해서 사용한다. binding이 supported model 목록을 제공하지 않으면 MASC는 `auto`를 임의 concrete model로 확장하지 않는다.
+`cli-tool-a:auto`, `cli-tool-d:auto`는 기본적으로 concrete 후보 목록을 코드에 갖지 않는다. 미설정 기본값은 `auto` 1개이며 각 CLI transport의 현재 기본 모델 선택에 위임한다. 특정 모델 rotation이 필요하면 binding의 `auto_models` 또는 호출 목적 alias를 통해 operator가 명시한 후보를 사용한다. Direct API provider의 concrete 후보 목록과 기본값은 OAS runtime binding/catalog가 제공하는 값을 projection해서 사용한다. binding이 supported model 목록을 제공하지 않으면 MASC는 `auto`를 임의 concrete model로 확장하지 않는다.
 
 ### 7.6 HTTP Probe Capacity (Phase C2, #7619)
 
@@ -460,16 +447,16 @@ capacity 조회 순서: `Runtime_throttle` (llama-server /slots 기반) → `Run
 ### 7.7 예시
 
 ```toml
-[provider-k-coding.provider-k-flashx]
+[glm-coding.glm-4-7-coding]
 is-default = false
 max-concurrent = 2
 
-[cli-tool-b.provider-f-flash]
+[openai-compatible.gpt-4.1-mini]
 is-default = true
-max-concurrent = 1
+max-concurrent = 4
 
 [tier.tier_medium]
-members = ["provider-k-coding.provider-k-flashx", "cli-tool-b.provider-f-flash"]
+members = ["glm-coding.glm-4-7-coding", "openai-compatible.gpt-4.1-mini"]
 strategy = "failover"
 
 [runtime.tier_medium]

@@ -14,7 +14,7 @@ type deliberation_trigger =
   | DirectMention
   | NewUnclaimedTask
   | FailedTask
-  | AgentSessionBoundOrLeft
+  | KeeperFiberStartedOrStopped
   | GoalDeadline
   | BoardActivity of string
   | IdleTimeout
@@ -26,7 +26,7 @@ let deliberation_trigger_to_string = function
   | DirectMention -> "direct_mention"
   | NewUnclaimedTask -> "new_unclaimed_task"
   | FailedTask -> "failed_task"
-  | AgentSessionBoundOrLeft -> "agent_session_bound_or_left"
+  | KeeperFiberStartedOrStopped -> "keeper_fiber_started_or_stopped"
   | GoalDeadline -> "goal_deadline"
   | BoardActivity detail -> "board_activity:" ^ detail
   | IdleTimeout -> "idle_timeout"
@@ -129,8 +129,8 @@ type world_observation = {
   message_content: string;
   unclaimed_task_count: int;
   failed_task_count: int;
-  active_agent_count: int;
-  agent_count_changed: bool;
+  running_keeper_fiber_count: int;
+  keeper_fiber_count_changed: bool;
   active_goal_count: int;
   idle_seconds: int;
   idle_gate: int;
@@ -146,8 +146,8 @@ let empty_world_observation ~keeper_name =
     message_content = "";
     unclaimed_task_count = 0;
     failed_task_count = 0;
-    active_agent_count = 0;
-    agent_count_changed = false;
+    running_keeper_fiber_count = 0;
+    keeper_fiber_count_changed = false;
     active_goal_count = 0;
     idle_seconds = 0;
     idle_gate = 300;
@@ -164,8 +164,8 @@ let world_observation_to_json (obs : world_observation) : Yojson.Safe.t =
       ("message_content_len", `Int (String.length obs.message_content));
       ("unclaimed_task_count", `Int obs.unclaimed_task_count);
       ("failed_task_count", `Int obs.failed_task_count);
-      ("active_agent_count", `Int obs.active_agent_count);
-      ("agent_count_changed", `Bool obs.agent_count_changed);
+      ("running_keeper_fiber_count", `Int obs.running_keeper_fiber_count);
+      ("keeper_fiber_count_changed", `Bool obs.keeper_fiber_count_changed);
       ("active_goal_count", `Int obs.active_goal_count);
       ("idle_seconds", `Int obs.idle_seconds);
       ("idle_gate", `Int obs.idle_gate);
@@ -203,7 +203,7 @@ let triage (obs : world_observation) : triage_result =
   if obs.direct_mention then add DirectMention;
   if obs.unclaimed_task_count > 0 then add NewUnclaimedTask;
   if obs.failed_task_count > 0 then add FailedTask;
-  if obs.agent_count_changed then add AgentSessionBoundOrLeft;
+  if obs.keeper_fiber_count_changed then add KeeperFiberStartedOrStopped;
 
   (* L2 Proactive triggers — goal-directed *)
   if obs.board_mention_count > 0 then
@@ -316,8 +316,8 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     "World state:\n\
     \  - Unclaimed tasks: %d\n\
     \  - Failed tasks: %d\n\
-    \  - Active agents: %d\n\
-    \  - Agent count changed: %b\n\
+    \  - Running keeper fibers: %d\n\
+    \  - Keeper fiber count changed: %b\n\
     \  - Active goals: %d\n\
     \  - Idle seconds: %d (gate: %d)\n\
     \  - Board new posts: %d\n\
@@ -326,8 +326,8 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     \  - Has question: %b"
     obs.unclaimed_task_count
     obs.failed_task_count
-    obs.active_agent_count
-    obs.agent_count_changed
+    obs.running_keeper_fiber_count
+    obs.keeper_fiber_count_changed
     obs.active_goal_count
     obs.idle_seconds obs.idle_gate
     obs.board_new_post_count
@@ -414,7 +414,7 @@ let has_operational_signal (obs : world_observation) =
   has_workspace_signal obs
   || obs.failed_task_count > 0
   || obs.unclaimed_task_count > 0
-  || obs.agent_count_changed
+  || obs.keeper_fiber_count_changed
   || has_board_signal obs
 
 (** Self-directed context: keeper is idle with no goals.

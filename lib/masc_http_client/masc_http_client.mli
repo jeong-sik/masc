@@ -51,6 +51,17 @@ val post_sync :
     Connection-level errors (DNS, TLS, I/O) are caught and surfaced
     as [Error _] rather than propagating as exceptions. *)
 
+val patch_sync :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  body:string ->
+  unit ->
+  ((int * string), string) result
+(** [patch_sync ?clock ?timeout_sec ~url ~headers ~body ()] performs
+    a [PATCH url].  Same error handling as {!post_sync}. *)
+
 val get_response_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->

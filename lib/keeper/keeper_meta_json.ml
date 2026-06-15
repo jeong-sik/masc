@@ -10,8 +10,9 @@ include Keeper_meta_json_scrub
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
-  (* Config/personality/policy fields are TOML-only; JSON persists runtime
-     state plus the canonical tool-access allowlist required to decode it. *)
+  (* Policy fields are TOML-only.  Identity/personality fields are persisted
+     as the effective runtime snapshot so dashboards and meta readers do not
+     show a blank keeper between TOML load and prompt render. *)
   `Assoc
     [ "name", `String m.name
     ; "agent_name", `String m.agent_name
@@ -19,6 +20,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match m.persona with
         | Some s -> `String s
         | None -> `Null )
+    ; "will", `String m.will
+    ; "needs", `String m.needs
+    ; "desires", `String m.desires
+    ; "instructions", `String m.instructions
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; "tool_access", Json_util.json_string_list m.tool_access
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
@@ -106,6 +111,10 @@ let fallback_canonical_keeper_meta_key_names =
   [ "name"
   ; "agent_name"
   ; "persona"
+  ; "will"
+  ; "needs"
+  ; "desires"
+  ; "instructions"
   ; "trace_id"
   ; "tool_access"
   ; "trace_history"

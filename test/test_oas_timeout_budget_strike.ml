@@ -342,6 +342,20 @@ let test_keeper_oas_path_has_no_bridge_total_timeout () =
     false
     (contains_substring source "Keeper_llm_bridge.run_with_timeout_and_fallback")
 
+let test_runtime_provider_path_has_no_cumulative_run_timeout () =
+  let source = read_file "lib/keeper/keeper_turn_driver_try_provider.ml" in
+  Alcotest.(check bool)
+    "runtime provider path does not timeout Runtime_agent.run"
+    false
+    (contains_substring source "Eio.Time.with_timeout_exn clock t run_fn")
+
+let test_runtime_provider_path_does_not_forward_execution_idle_timeout () =
+  let source = read_file "lib/keeper/keeper_turn_driver_try_provider.ml" in
+  Alcotest.(check bool)
+    "runtime provider path does not forward execution idle timeout"
+    false
+    (contains_substring source "execution_idle_timeout_s = ctx.execution_idle_timeout_s")
+
 let () =
   Alcotest.run "provider_timeout_strike"
   [
@@ -394,5 +408,9 @@ let () =
           test_keeper_turn_has_no_total_wall_clock_kill;
         Alcotest.test_case "keeper OAS path has no bridge total timeout" `Quick
           test_keeper_oas_path_has_no_bridge_total_timeout;
+        Alcotest.test_case "runtime provider path has no cumulative timeout" `Quick
+          test_runtime_provider_path_has_no_cumulative_run_timeout;
+        Alcotest.test_case "runtime provider path does not forward idle timeout" `Quick
+          test_runtime_provider_path_does_not_forward_execution_idle_timeout;
       ] );
   ]

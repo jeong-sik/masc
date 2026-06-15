@@ -79,24 +79,30 @@ val text_of_history_jsonl_json : Yojson.Safe.t -> string
 
 (** {1 Message repair} *)
 
-(** Insert dangling-tool-use placeholders + drop orphan tool
-    results so OAS checkpoint replay never sees a mismatched pair. *)
+(** Drop dangling tool-use and orphan tool-result blocks so OAS checkpoint
+    replay never sees a mismatched pair.  The repair is intentionally
+    metadata-only: it must not fabricate visible text that can leak to the
+    model or dashboard. *)
 val repair_broken_tool_call_pairs :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list
 
 type tool_pair_repair_stats =
-  { downgraded_tool_uses : int
-  ; downgraded_tool_results : int
+  { dropped_tool_uses : int
+  ; dropped_tool_results : int
+  ; dropped_tool_use_samples : (string * string) list
+  ; dropped_tool_result_ids : string list
   }
 
 val tool_pair_repair_stats_changed : tool_pair_repair_stats -> bool
+val pair_repair_diagnostic_max_bytes : int
+val bound_pair_repair_diagnostic_string : string -> string
 
 val pair_repair_metadata_key : string
 (** Message metadata key carrying bounded provenance for tool-pair repair
-    fabrications. Repaired messages also carry [was_fabricated=true]. *)
+    drops. Repaired messages also carry [was_repaired=true]. *)
 
 (** Same repair as {!repair_broken_tool_call_pairs}, plus counters for
-    ToolUse/ToolResult blocks downgraded to plain text. This keeps the
+    ToolUse/ToolResult blocks dropped from visible content. This keeps the
     repair path observable without changing the legacy return type. *)
 val repair_broken_tool_call_pairs_with_stats :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
@@ -170,19 +176,24 @@ val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 val repair_orphan_tool_result_messages :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list
 
+val repair_orphan_tool_result_messages_with_stats :
+  Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
+
 type checkpoint_sanitize_stats = {
   dropped_messages : int;
   dropped_blocks : int;
   dropped_chars : int;
   truncated_blocks : int;
   truncated_chars : int;
+  tool_pair_repair : tool_pair_repair_stats;
 }
 
 (** Apply [sanitize_checkpoint_messages] (cap blocks / drop oversize
     payloads) and, when [repair_orphans] is [true] (default), also
     drop orphan tool_use/tool_result pairs so the resulting checkpoint
-    is safe to persist. Returns the cleaned checkpoint plus
-    aggregated stats. *)
+    is safe to persist. Returns the cleaned checkpoint plus aggregated
+    stats, including bounded pair-repair diagnostics so dropped
+    structural blocks are observable without becoming visible text. *)
 val sanitize_oas_checkpoint :
   ?repair_orphans:bool ->
   Agent_sdk.Checkpoint.t ->

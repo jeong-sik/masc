@@ -60,6 +60,7 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
 
@@ -89,6 +90,9 @@ type t =
   ; runtime_handler : runtime_handler
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; receipt_labels : (string * string) list
+  (** Evaluation-only semantic tags emitted in route evidence. These tags
+      support replay/harness scoring and are not runtime selection policy. *)
+  ; eval_tags : string list
   }
 
 val executor_to_string : executor -> string

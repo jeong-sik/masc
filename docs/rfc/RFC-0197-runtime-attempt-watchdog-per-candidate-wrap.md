@@ -1,12 +1,23 @@
 # RFC-0197: Runtime Attempt Watchdog — Per-Candidate Wrap + Shared Deadline
 
-**Status**: Draft
+**Status**: Superseded
 **Date**: 2026-05-27
+**Superseded**: 2026-06-12 — do not implement a MASC wall-clock watchdog around
+`Runtime_agent.run`, even per-candidate. Runtime candidates may execute tools,
+so any cumulative wrapper at this layer can kill active tool execution. Keeper
+liveness must be handled by narrower boundaries: admission/queue wait,
+provider connect/body/stream progress in OAS, and tool-local subprocess or MCP
+budgets owned by the tool substrate.
 **Related**: RFC-0192 (runtime deadline propagation, MERGED), RFC-0022 (runtime attempt liveness)
 **Meta-RFC**: RFC-0194 (Tool Surface Semantic SSOT) — §1 + §4 instantiation
 **Memory anchors**: `feedback-runtime-budget-no-hard-gates`, `feedback-runtime-dual-ssot-diagnosis-must-compare-both-toml`
 
 ## Context
+
+> 2026-06-12 update: this RFC is retained as historical diagnosis only. Its
+> proposed per-candidate wrapper is rejected because it still wraps an execution
+> region that may contain tools. The safe replacement is not "move the timeout";
+> it is "make liveness tool-aware before any cancellation".
 
 2026-05-27 server restart (17:08 KST, RFC-0192 PR-1/2/3 deployed) 직후 fleet observation:
 
@@ -104,11 +115,14 @@ Layer 1 (570s, whole turn) > Layer 2 (disabled in Enforce) > Layer 3 (observer, 
 - 4 tier failover chain (`strict_tool_candidates / ollama_cloud_stable / local_llama / glm-coding-with-spark`) 가 코드는 있는데 *실행 불가*.
 - 사용자 직관: "심하게 잘못된 느낌, 이런 에러를 왜 자꾸 내뿜는거지" — 정확한 진단.
 
-## Proposed (Meta-RFC §1 + §4 정합)
+## Historical Proposal (Rejected)
 
-### Design
+### Rejected Design
 
-**Layer 1 watchdog 의 wrap target 을 per-candidate (try_provider 호출) 로 이동**. budget 은 *remaining turn deadline* 으로 shared.
+The old proposal was to move **Layer 1 watchdog 의 wrap target** to
+per-candidate (`try_provider`). This is rejected: `try_provider` still calls
+`Runtime_agent.run`, and `Runtime_agent.run` may include active tool execution.
+That means the wrapper is still a tool timeout in disguise.
 
 ```
 Before (현재):
@@ -119,7 +133,7 @@ Before (현재):
                 ├── try_provider candidate_2   (unreachable if candidate_1 hangs)
                 └── ...
 
-After (RFC-0197):
+Rejected after (do not implement):
   Outer wrap (turn-level): hard ceiling (예: 30min) — 60min hard ceiling 방지
     └── run_turn
           └── runtime run loop
@@ -141,11 +155,13 @@ where remaining_turn_deadline_at_candidate_start = turn_deadline - clock.now()
 
 이는 정확히 RFC-0192 §2 의 `composed_attempt_budget = min(amplifier, deadline-now())` — *attempt* 가 candidate 별 wrap. RFC-0192 의 *semantic 회복*.
 
-### 호환성
+### Rejected Compatibility Assumptions
 
 - **Layer 2 (`outer_wall_for_attempt` Enforce → None)**: 그대로 유지. Layer 3 observer 의 책임 분리 보존 (RFC-0022 design 무변).
-- **Layer 1 (whole-turn watchdog)**: 제거하지 않고 *turn-level absolute upper bound* (예: 30min hard ceiling) 로 retain. RFC-0192 PR-4 의 후속에서 *60min hard ceiling 자체를 줄임* 가능.
-- **Runtime run loop**: 기존 `keeper_turn_driver_try_runtime.ml` 의 `run` 함수가 candidate 시도 — *그 안* 에 per-candidate watchdog wrap 추가.
+- **Layer 1 (whole-turn watchdog)**: do not retain a turn-level absolute bound
+  around active provider/tool execution.
+- **Runtime run loop**: do not add a per-candidate wrapper unless the wrapped
+  region is proven to exclude active tools.
 
 ### Non-goals (Meta-RFC §4 anti-pattern 회피)
 
@@ -154,13 +170,13 @@ where remaining_turn_deadline_at_candidate_start = turn_deadline - clock.now()
 - **새 counter 0**: 기존 `runtime-fallback` log message 활용 (이미 line 532-533 존재).
 - **N-of-M 회피**: 단일 wrap location 추가 (per-candidate), abstraction 변경 없음.
 
-## Implementation outline
+## Rejected Implementation Outline
 
 ### Phase A — RFC doc + Issue (본 PR)
 
 Doc only, code = 0.
 
-### Phase B — Per-candidate watchdog wrap (single PR)
+### Phase B — Per-candidate watchdog wrap (rejected)
 
 변경 위치:
 1. `lib/keeper/keeper_turn_driver_try_runtime.ml` — `run` 함수 의 `candidate :: rest` 분기에 `Eio.Time.with_timeout_exn` wrap 추가.
@@ -168,8 +184,23 @@ Doc only, code = 0.
 3. 새 helper `Runtime_deadline.budget_for_candidate_at` (RFC-0192 PR-1 의 `composed_attempt_budget_at` 와 동일 시그니처 — 또는 alias).
 
 변경 회피:
-- `Keeper_unified_turn_attempt_watchdog.dispatch` 시그니처 무변 (caller 만 변경, 또는 caller 그대로 두고 *내부* 추가 wrap)
-- `keeper_unified_turn_execution.ml:158-170` 의 outer wrap *유지* (turn-level absolute bound) — 추가 layer 만 도입
+- `Keeper_unified_turn_attempt_watchdog.dispatch` should remain a cancellation
+  observer only; it must not add an internal timeout wrap.
+- `keeper_unified_turn_execution.ml` must not keep a turn-level absolute bound
+  around active tool execution.
+
+## Replacement Direction
+
+1. Provider stalls: use OAS provider connect/body/stream-idle progress
+   boundaries, not a MASC wrapper around `Runtime_agent.run`.
+2. Tool execution: use tool-local subprocess/MCP budgets owned by the tool
+   substrate; MASC should observe `ToolCalled` / `ToolCompleted` and avoid
+   classifying active tool work as provider idle.
+3. Keeper liveness: keep the turn visible through FSM state, EventBus drain,
+   execution receipts, and fleet safety. If a turn appears stuck while a tool is
+   active, report it as active tool execution, not provider timeout.
+4. Future cancellation: only introduce cancellation after the execution region
+   is tool-aware and can prove no active tool call is in flight.
 
 ### Phase C — 신규 test
 

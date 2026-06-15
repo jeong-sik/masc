@@ -16,6 +16,11 @@ val execute_with_observers
   -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
+  -> ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?mcp_session_id:string
   -> failure_counts:Keeper_tools_oas.failure_counts
   -> key:string
   -> input:Yojson.Safe.t

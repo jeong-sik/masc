@@ -91,11 +91,13 @@ let runtime_warning_ctx_ratio =
   Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
 ;;
 
-let pre_compact_store_ref : Dated_jsonl.t option ref = ref None
+let pre_compact_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
+let pre_compact_store_mu = Eio.Mutex.create ()
 
 (** Store for wake-time payload observations. Populated lazily on first
     [record_wake_payload] call when [MASC_PAYLOAD_TELEMETRY] is enabled. *)
-let wake_payload_store_ref : Dated_jsonl.t option ref = ref None
+let wake_payload_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
+let wake_payload_store_mu = Eio.Mutex.create ()
 
 let status_to_string = function
   | Healthy -> "healthy"
@@ -118,13 +120,17 @@ let wake_payload_store_base_dir () =
   Filename.concat (Env_config.base_path ()) "data/keeper-wake-payload"
 ;;
 
-let get_or_create_store store_ref base_dir_fn =
-  match !store_ref with
+let get_or_create_store ~store_ref ~store_mu base_dir_fn =
+  match Atomic.get store_ref with
   | Some store -> store
   | None ->
-    let store = Dated_jsonl.create ~base_dir:(base_dir_fn ()) () in
-    store_ref := Some store;
-    store
+    Eio.Mutex.use_rw ~protect:true store_mu @@ fun () ->
+    (match Atomic.get store_ref with
+     | Some store -> store
+     | None ->
+       let store = Dated_jsonl.create ~base_dir:(base_dir_fn ()) () in
+       Atomic.set store_ref (Some store);
+       store)
 ;;
 
 let append_store_json_fail_open ~store_ref ~store_name get_store json =
@@ -134,29 +140,35 @@ let append_store_json_fail_open ~store_ref ~store_name get_store json =
     (* Health/event persistence is observability only. If the backing JSONL
          append fails, drop the poisoned store so the next call can recreate
          it instead of leaking Eio_mutex.Poisoned into keeper control flow. *)
-    store_ref := None;
+    Atomic.set store_ref None;
     Log.Harness.warn "[%s] append failed: %s" store_name (Printexc.to_string exn)
 ;;
 
 let get_pre_compact_store () =
-  get_or_create_store pre_compact_store_ref pre_compact_store_base_dir
+  get_or_create_store
+    ~store_ref:pre_compact_store_ref
+    ~store_mu:pre_compact_store_mu
+    pre_compact_store_base_dir
 ;;
 
 let get_wake_payload_store () =
-  get_or_create_store wake_payload_store_ref wake_payload_store_base_dir
+  get_or_create_store
+    ~store_ref:wake_payload_store_ref
+    ~store_mu:wake_payload_store_mu
+    wake_payload_store_base_dir
 ;;
 
 let reset_runtime_stores_for_testing () =
-  pre_compact_store_ref := None;
-  wake_payload_store_ref := None
+  Atomic.set pre_compact_store_ref None;
+  Atomic.set wake_payload_store_ref None
 ;;
 
 let set_pre_compact_store_for_testing ~base_dir =
-  pre_compact_store_ref := Some (Dated_jsonl.create ~base_dir ())
+  Atomic.set pre_compact_store_ref (Some (Dated_jsonl.create ~base_dir ()))
 ;;
 
 let set_wake_payload_store_for_testing ~base_dir =
-  wake_payload_store_ref := Some (Dated_jsonl.create ~base_dir ())
+  Atomic.set wake_payload_store_ref (Some (Dated_jsonl.create ~base_dir ()))
 ;;
 
 let string_field json key = Safe_ops.json_string ~default:"" key json

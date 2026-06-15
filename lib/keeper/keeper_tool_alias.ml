@@ -6,7 +6,8 @@
     input translator, and an optional public schema.
 
     Two descriptor-backed surfaces:
-    - LLM native tools: Execute, Grep/Search, Read, Edit, Write, WebSearch, WebFetch
+    - LLM native-style tools: Execute, Grep/Search, Read, Edit, Write,
+      WebSearch, WebFetch
     - MCP tools: names with the masc_ prefix
 
     Internal [keeper_*] names are implementation details of the routing layer,
@@ -59,6 +60,7 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit -> true
   | Tool_execute

@@ -392,7 +392,7 @@ let dispatch_route ~router ~request ~path reqd =
       let format = Option.value ~default:"nested" (query_param request "format") in
       let voter = board_voter_query request in
       let config =
-        Option.map (fun state -> state.Mcp_server.workspace_config) !server_state
+        Option.map (fun state -> (Mcp_server.workspace_config state)) !server_state
       in
       let (status, body) =
         board_post_detail_json ~include_moderation:false ~blind_votes:false
@@ -450,16 +450,15 @@ let make_extended_handler routes =
       | None -> try_internal_error_response reqd msg)
 
 (** Main server loop *)
-let run_server ~sw:_ ~env ~host ~port ~base_path =
-  (* Use a dedicated sub-switch so that ALL fibers spawned by
+let run_server ~sw ~env ~host ~port ~base_path =
+  (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  When
      Eio.Fiber.first cancels the run_server fiber on SIGTERM, the
-     sub-switch is cancelled too, which propagates Cancel to every
+     switch is cancelled too, which propagates Cancel to every
      child fiber — preventing the 10s force-exit timeout. *)
-  Eio.Switch.run @@ fun server_sw ->
   try
-    Server_runtime_bootstrap.run ~sw:server_sw ~env ~host ~port ~base_path ~make_routes
+    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler

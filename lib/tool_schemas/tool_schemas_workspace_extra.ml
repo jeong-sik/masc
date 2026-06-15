@@ -75,6 +75,7 @@ let schemas : tool_schema list =
       name = "masc_goal_list";
       description =
         "List shared planning goals from the Goal Store, optionally filtered by horizon or explicit phase. \
+Valid phases: executing, awaiting_verification, awaiting_approval, blocked, paused, completed, dropped. \
 Use when a PM/planner agent needs current long/mid/short goals before creating tasks or reviews. \
 The dashboard Goal Tree reads the same store. Goal-task links are managed externally. \
 The response includes each goal's explicit lifecycle phase and verification policy.";

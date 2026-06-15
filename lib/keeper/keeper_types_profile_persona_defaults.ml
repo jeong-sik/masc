@@ -50,10 +50,10 @@ let load ~name : keeper_profile_defaults =
                   long_goal =
                     Normalizers.normalize_goal_horizon_opt
                       (Safe_ops.json_string_opt "long_goal" keeper_json);
-                  will = None;
-                  needs = None;
-                  desires = None;
-                  instructions = None;
+                  will = Safe_ops.json_string_opt "will" keeper_json;
+                  needs = Safe_ops.json_string_opt "needs" keeper_json;
+                  desires = Safe_ops.json_string_opt "desires" keeper_json;
+                  instructions = Safe_ops.json_string_opt "instructions" keeper_json;
                   autoboot_enabled = None;
                   mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
                   proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;

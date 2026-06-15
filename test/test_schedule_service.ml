@@ -1,0 +1,196 @@
+open Alcotest
+open Masc
+open Schedule_domain
+open Schedule_service
+
+let temp_dir () =
+  let path = Filename.temp_file "schedule_service_test" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let rm_rf dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  try rm dir with
+  | _ -> ()
+;;
+
+let with_workspace f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  let config = Workspace.default_config dir in
+  ignore (Workspace.init config ~agent_name:(Some "test"));
+  f config
+;;
+
+let human ?display_name id = { id; kind = Human_operator; display_name }
+
+let payload_json () =
+  `Assoc
+    [ "kind", `String "consumer.note"
+    ; "schema_version", `Int 1
+    ; "body", `Assoc [ "text", `String "do later" ]
+    ]
+;;
+
+let has_prefix prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.sub value 0 prefix_len = prefix
+;;
+
+let create_ok
+  ?schedule_id
+  ?(risk_class = Workspace_write)
+  ?approval_required
+  config
+  =
+  match
+    create config ?schedule_id ?approval_required ~requested_at:100.0
+      ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
+      ~due_at:200.0 ~payload:(payload_json ()) ~risk_class
+      ~source:Operator_request ()
+  with
+  | Ok request -> request
+  | Error err -> fail (service_error_to_string err)
+;;
+
+let check_status label expected actual =
+  check string label (schedule_status_to_string expected) (schedule_status_to_string actual)
+;;
+
+let check_service_error label expected = function
+  | Ok _ -> fail (label ^ ": expected error")
+  | Error actual ->
+    check string label (service_error_to_string expected) (service_error_to_string actual)
+;;
+
+let test_create_mints_schedule_id () =
+  with_workspace
+  @@ fun config ->
+  let request = create_ok config in
+  check bool "schedule id prefix" true (has_prefix "sched-" request.schedule_id);
+  check_status "side-effecting starts pending" Pending_approval request.status
+;;
+
+let test_list_and_get_by_status () =
+  with_workspace
+  @@ fun config ->
+  let pending = create_ok ~schedule_id:"pending-1" config in
+  let scheduled =
+    create_ok ~schedule_id:"scheduled-1" ~risk_class:Read_only config
+  in
+  check int "all schedules" 2 (List.length (list config ()));
+  check int "pending only" 1 (List.length (list config ~status:Pending_approval ()));
+  check int "scheduled only" 1 (List.length (list config ~status:Scheduled ()));
+  (match get config ~schedule_id:pending.schedule_id with
+   | Some stored -> check string "pending id" pending.schedule_id stored.schedule_id
+   | None -> fail "pending missing");
+  (match get config ~schedule_id:scheduled.schedule_id with
+   | Some stored -> check string "scheduled id" scheduled.schedule_id stored.schedule_id
+   | None -> fail "scheduled missing")
+;;
+
+let test_approve_separate_human () =
+  with_workspace
+  @@ fun config ->
+  let request = create_ok ~schedule_id:"approve-1" config in
+  match
+    approve config ~grant_id:"grant-approve-1" ~approved_at:150.0
+      ~schedule_id:request.schedule_id ~approved_by:(human "approver") ()
+  with
+  | Ok updated -> check_status "approved" Scheduled updated.status
+  | Error err -> fail (service_error_to_string err)
+;;
+
+let test_requester_cannot_approve () =
+  with_workspace
+  @@ fun config ->
+  let request = create_ok ~schedule_id:"self-approve-1" config in
+  check_service_error "requester self approve"
+    (Store_error
+       (Schedule_store.Grant_validation_failed Approver_is_requester))
+    (approve config ~grant_id:"grant-self-1" ~approved_at:150.0
+       ~schedule_id:request.schedule_id ~approved_by:request.requested_by ())
+;;
+
+let test_reject_marks_rejected () =
+  with_workspace
+  @@ fun config ->
+  let request = create_ok ~schedule_id:"reject-1" config in
+  match
+    reject config ~grant_id:"grant-reject-1" ~approved_at:150.0
+      ~schedule_id:request.schedule_id ~approved_by:(human "approver")
+      ~reason:"not today" ()
+  with
+  | Ok updated -> check_status "rejected" Rejected updated.status
+  | Error err -> fail (service_error_to_string err)
+;;
+
+let test_due_candidates_do_not_execute_and_require_approval () =
+  with_workspace
+  @@ fun config ->
+  let request = create_ok ~schedule_id:"due-1" config in
+  (match due_candidates config ~now:201.0 with
+   | Ok candidates -> check int "no candidate before approval" 0 (List.length candidates)
+   | Error err -> fail (service_error_to_string err));
+  (match
+     approve config ~grant_id:"grant-due-1" ~approved_at:150.0
+       ~schedule_id:request.schedule_id ~approved_by:(human "approver") ()
+   with
+   | Ok _ -> ()
+   | Error err -> fail (service_error_to_string err));
+  match due_candidates config ~now:201.0 with
+  | Ok [ candidate ] ->
+    check string "candidate id" request.schedule_id candidate.schedule_id;
+    check_status "candidate due" Due candidate.status
+  | Ok candidates ->
+    fail (Printf.sprintf "expected one candidate, got %d" (List.length candidates))
+  | Error err -> fail (service_error_to_string err)
+;;
+
+let test_missing_schedule_approval_reports_store_error () =
+  with_workspace
+  @@ fun config ->
+  check_service_error "missing schedule"
+    (Store_error Schedule_store.Schedule_not_found)
+    (approve config ~grant_id:"grant-missing" ~approved_at:150.0
+       ~schedule_id:"missing" ~approved_by:(human "approver") ())
+;;
+
+let () =
+  run "Schedule_service"
+    [
+      ( "create",
+        [
+          test_case "create mints schedule id" `Quick test_create_mints_schedule_id;
+          test_case "list and get by status" `Quick test_list_and_get_by_status;
+        ] );
+      ( "approval",
+        [
+          test_case "approve by separate human" `Quick test_approve_separate_human;
+          test_case "requester cannot approve" `Quick test_requester_cannot_approve;
+          test_case "reject marks rejected" `Quick test_reject_marks_rejected;
+          test_case "missing schedule reports store error" `Quick
+            test_missing_schedule_approval_reports_store_error;
+        ] );
+      ( "due",
+        [
+          test_case "due candidates require approval and do not execute" `Quick
+            test_due_candidates_do_not_execute_and_require_approval;
+        ] );
+    ]
+;;

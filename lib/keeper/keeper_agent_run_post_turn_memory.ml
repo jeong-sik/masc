@@ -5,14 +5,15 @@
 let run
   ~config
   ~meta
+  ~generation
   ~turn
   ~oas_turn_count
   ~response_text
   ~actual_tools
   ~state_snapshot
   ~state_snapshot_source
+  ~librarian_messages
   ~post_turn_t0
-  ?provider_filter
   ~runtime_id
   ~inference_telemetry
   ()
@@ -69,11 +70,22 @@ let run
        ~labels:[ "keeper", meta.name ]
        ());
 
+  (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. *)
+  let librarian_input : Keeper_librarian.input =
+    { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+    ; generation
+    ; messages = librarian_messages
+    }
+  in
+  Keeper_librarian_runtime.run_best_effort
+    ~runtime_id
+    ~keeper_id:meta.name
+    librarian_input;
+
   (* Memory bank compaction: dedup + consolidate if over threshold. *)
   (try
      let memory_summarizer =
        Keeper_memory_llm_summary.make
-         ?provider_filter
          ~runtime_id
          ~keeper_name:meta.name
          ()

@@ -49,6 +49,10 @@ require_normalized_text \
   "docs/EXECUTE-RUNBOOK.md" \
   "old background task lifecycle are not part of the callable surface" \
   "background lifecycle exclusion in Execute runbook"
+require_normalized_text \
+  "docs/EXECUTE-RUNBOOK.md" \
+  "It does not expose \`job_id\`, \`request_id\`, \`poll\`, or \`cancel\` fields." \
+  "async lifecycle field exclusion in Execute runbook"
 
 require_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
@@ -62,6 +66,14 @@ reject_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
   "run_in_background" \
   "legacy Execute background flag"
+reject_text \
+  "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
+  "job_id" \
+  "Execute async job id field"
+reject_text \
+  "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
+  "backgroundTaskId" \
+  "Execute legacy background task id field"
 
 require_text \
   "test/test_tool_input_validation.ml" \
@@ -71,6 +83,18 @@ require_text \
   "test/test_tool_input_validation.ml" \
   "test_validate_args_tool_execute_rejects_background_flag" \
   "validation rejection proof"
+require_text \
+  "test/test_tool_input_validation.ml" \
+  "test_validate_args_tool_execute_rejects_async_lifecycle_fields" \
+  "async lifecycle field rejection proof"
+require_text \
+  "test/test_tool_input_validation.ml" \
+  "job_id" \
+  "async job id rejection proof"
+require_text \
+  "test/test_tool_input_validation.ml" \
+  "backgroundTaskId" \
+  "legacy background task id rejection proof"
 
 require_text \
   "lib/process/bg_task.mli" \

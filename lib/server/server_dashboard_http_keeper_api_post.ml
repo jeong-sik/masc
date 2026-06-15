@@ -61,7 +61,7 @@ let handle_keeper_tools_post state req reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name required"
     else
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       match Keeper_meta_store.read_meta config name with
       | Error msg -> respond_error ~status:`Not_found reqd msg
       | Ok None -> respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
@@ -99,10 +99,15 @@ let handle_keeper_tools_post state req reqd =
              | Error msg ->
                  respond_error reqd msg
              | Ok meta' ->
-                 (* force: user-initiated tool config is authoritative.
-                    Skips version CAS since user intent overrides
-                    concurrent keeper turn updates. *)
-                 (match Keeper_meta_store.write_meta ~force:true config meta' with
+                 (* User-initiated tool config wins for its edited fields, but
+                    persist via CAS merge so a concurrent keeper turn's
+                    cumulative usage counters are not rewound by this
+                    snapshot-derived write. *)
+                 (match
+                    Keeper_meta_store.write_meta_with_merge
+                      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                      config meta'
+                  with
                   | Ok () ->
                       Http.Response.json_value ~compress:true ~request:req
                         (keeper_tools_response_json meta') reqd
@@ -283,7 +288,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
   if String.length name = 0 then
     respond_error ~ok:false reqd "keeper name is required"
   else
-    let config = state.Mcp_server.workspace_config in
+    let config = (Mcp_server.workspace_config state) in
     try
       let args = Yojson.Safe.from_string body_str in
       let action = Safe_ops.json_string ~default:"" "action" args in
@@ -348,7 +353,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = state.Mcp_server.workspace_config in
+    let config = (Mcp_server.workspace_config state) in
     match Keeper_meta_store.read_meta config name with
     | Error msg -> respond_error ~status:`Not_found reqd msg
     | Ok None ->
@@ -396,8 +401,16 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                  | Error result ->
                      respond_error reqd (Keeper_types_profile.tool_result_body result)
                  | Ok parsed ->
+                     (* Dashboard edits are user-initiated and win for the
+                        fields they touch; update_keeper now persists via a
+                        CAS merge ([heartbeat_fields_from_disk]) so a
+                        concurrent keeper turn's cumulative usage counters are
+                        not rewound by this snapshot-derived write.
+                        [preserve_prompt_defaults] keeps existing prompt fields
+                        when the request omits them. *)
                      let result =
-                       Keeper_turn_up_update.update_keeper keeper_ctx parsed meta0
+                       Keeper_turn_up_update.update_keeper
+                         ~preserve_prompt_defaults:true keeper_ctx parsed meta0
                      in
                      if not (Keeper_types_profile.tool_result_success result) then
                        respond_error reqd (Keeper_types_profile.tool_result_body result)
@@ -438,7 +451,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
   | Error msg ->
       respond_error ~ok:false reqd msg
     | Ok directive ->
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let action_str =
           match directive with
           | `Pause -> "pause"
@@ -469,7 +482,13 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                   updated_at = Keeper_meta_contract.now_iso ();
                 }
               in
-              (match Keeper_meta_store.write_meta ~force:true config updated_meta with
+              (* Pause toggle via CAS merge: do not rewind a concurrent
+                 turn's cumulative usage counters. *)
+              (match
+                 Keeper_meta_store.write_meta_with_merge
+                   ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                   config updated_meta
+               with
                | Ok () -> ()
                | Error err ->
                    Log.Keeper.warn
@@ -611,7 +630,7 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
         (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
         reqd
   | Ok (names, directive) ->
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let action_str =
         match directive with
         | `Pause -> "pause"
@@ -661,8 +680,12 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
                      updated_at = Keeper_meta_contract.now_iso ();
                    }
                  in
+                 (* Pause toggle via CAS merge: do not rewind a concurrent
+                    turn's cumulative usage counters. *)
                  (match
-                    Keeper_meta_store.write_meta ~force:true config updated_meta
+                    Keeper_meta_store.write_meta_with_merge
+                      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                      config updated_meta
                   with
                   | Ok () -> ()
                   | Error err ->

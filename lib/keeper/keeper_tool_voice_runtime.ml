@@ -135,6 +135,35 @@ let handle_speak
          in
          if spoken
          then (
+           (* RFC-0235 P1 3b: record the utterance to the keeper's chat so a
+              connected device can read AND hear it, not just the server's
+              speakers. The audio clip carries the token of the synthesized
+              file so the dashboard can fetch /api/v1/voice/audio/<token>. *)
+           let base_dir = config.Workspace.base_path in
+           let surface = Surface_ref.Dashboard { session_id = None } in
+           Keeper_chat_store.append_assistant_message
+             ~base_dir ~keeper_name:meta.name ~content:message ~surface ();
+           let clip =
+             match Json_util.get_string json "audio_file" with
+             | Some path ->
+               let token =
+                 path |> Filename.basename |> Filename.chop_extension
+               in
+               Some
+                 { Keeper_chat_broadcast.token
+                 ; mime = "audio/mpeg"
+                 ; duration_sec = None
+                 ; message_text = message
+                 }
+             | None -> None
+           in
+           (match clip with
+            | Some c ->
+              Keeper_chat_broadcast.chat_appended_with_audio
+                ~keeper_name:meta.name ~source:"agent" ~audio:c
+            | None ->
+              Keeper_chat_broadcast.chat_appended
+                ~keeper_name:meta.name ~source:"agent");
            let memory_status =
              record_voice_output
                ~config

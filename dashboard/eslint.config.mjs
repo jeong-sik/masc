@@ -24,6 +24,7 @@ const TARGET_FILES = [
   'src/components/harness-health.ts',
   'src/components/journey-panel.ts',
   'src/components/journey-waterfall-state.ts',
+  'src/components/keeper-sse-match.ts',
   'src/components/keeper-tool-call-inspector.ts',
   'src/components/keeper-tool-telemetry.ts',
   'src/components/logs.ts',
@@ -39,6 +40,7 @@ const TARGET_FILES = [
   'src/runtime-counts.ts',
   'src/schemas/sse.ts',
   'src/sse.ts',
+  'src/sse-store.ts',
   'src/tab-refresh.ts',
   'src/types/sse.ts',
 ]
@@ -61,6 +63,7 @@ const TEST_FILES = [
   'src/components/ide/ide-activity-panel.test.ts',
   'src/components/journey-panel.test.ts',
   'src/components/journey-waterfall-state.test.ts',
+  'src/components/keeper-sse-match.test.ts',
   'src/components/keeper-tool-call-inspector.test.ts',
   'src/components/logs.test.ts',
   'src/components/session-trace/session-trace-state.test.ts',

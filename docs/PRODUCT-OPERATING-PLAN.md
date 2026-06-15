@@ -9,10 +9,10 @@ code_refs:
 
 # Product Operating Plan
 
-> Current package version: v0.19.40
-> Latest changelog entry: v0.19.40 (2026-06-09)
-> Latest published GitHub release: v0.19.35 (2026-05-27)
-> Updated: 2026-06-09
+> Current package version: v0.19.44
+> Latest changelog entry: v0.19.44 (2026-06-14)
+> Latest published GitHub release: v0.19.41 (2026-06-12)
+> Updated: 2026-06-14
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 
 Execution companion for capsule-only workspace collaboration hardening:
@@ -176,14 +176,14 @@ Keep visible, but defer:
 - broad Eio architecture cleanup
 - cluster mode and other speculative scaling stories
 
-## Provider-K Role
+## GLM Role
 
-Provider-K is part of the operating model, not the core product promise.
+GLM is part of the operating model, not the core product promise.
 
-Use direct `sb provider-k-text` for:
+Use direct `sb glm-text` for:
 
 - cross-model PR review
 - skeptical review of product docs and roadmap text
 - release-note and spec ambiguity checks
 
-Do not describe `sb provider-k-runtime` results as proof that direct Provider-K itself worked. That path is a multi-model chain, not a pure Provider-K call.
+Do not describe `sb glm-cascade --simple` results as proof that direct GLM itself worked. That path is a multi-model chain, not a pure GLM call.

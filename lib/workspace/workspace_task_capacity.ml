@@ -60,6 +60,10 @@ let check ?goal_id ?(goal_task_links = []) (backlog : Masc_domain.backlog) =
       Some { goal_id; open_task_count; limit; message }
 ;;
 
+let check_for_config config ?goal_id backlog =
+  check ?goal_id ~goal_task_links:(Workspace_goal_index.read_goal_task_links config) backlog
+;;
+
 (* Field order matches the pre-RFC-0034.v2 shape produced by
    [Keeper_tool_shared_runtime.error_json ~fields message], which prepends
    ("error", message) before the supplied [fields]. Preserved verbatim
@@ -82,4 +86,8 @@ let error_to_json_string error =
 
 let rejection_for_add_task ?goal_id backlog =
   check ?goal_id backlog |> Option.map (fun err -> err.message)
+;;
+
+let rejection_for_add_task_for_config config ?goal_id backlog =
+  check_for_config config ?goal_id backlog |> Option.map (fun err -> err.message)
 ;;

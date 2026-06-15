@@ -66,7 +66,7 @@ val record_turn_tool_events :
     [Keeper_turn_helpers.record_pre_dispatch_terminal_observation].
 
     [cancel_reason] overrides the inferred reason when provided:
-      - ["attempt_watchdog_safety_deadline"] — wall-clock watchdog timeout
+      - ["attempt_watchdog_safety_deadline"] — legacy watchdog timeout receipt
       - ["supervisor_stop"] — supervisor requested stop
       - ["external_cancel"] — external fiber cancellation (default) *)
 val record_streaming_cancelled_observation :

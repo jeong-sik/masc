@@ -86,6 +86,35 @@ sandbox_profile = "local"
 |}
        name)
 
+let write_keeper_toml_without_goal config_dir ~name ~will =
+  write_file
+    (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
+    (Printf.sprintf
+       {|
+[keeper]
+name = "%s"
+sandbox_profile = "local"
+proactive_enabled = false
+will = "%s"
+needs = "keep fleet safety diagnosable"
+desires = "avoid silent declarative boot failures"
+|}
+       name will);
+  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
+
+let write_empty_keeper_toml_without_goal config_dir ~name =
+  write_file
+    (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
+    (Printf.sprintf
+       {|
+[keeper]
+name = "%s"
+sandbox_profile = "local"
+proactive_enabled = false
+|}
+       name);
+  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
+
 let with_restart_launch_noop f =
   Sup.with_restart_launch_noop_for_test f
 
@@ -240,6 +269,27 @@ let test_supervisor_policy_runtime_error_no_reason_falls_through () =
   in
   check bool "reason=None yields no runtime-exhausted decision" true
     (Sup.failure_reason_policy_decision_for_test (Some r) = None)
+
+let test_supervisor_policy_provider_timeout_catch_all_retries () =
+  let r =
+    Reg.Provider_runtime_error
+      { code = "provider_error_timeout:http_operation"
+      ; detail =
+          "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = None
+      ; reason = None
+      }
+  in
+  let decision = policy_decision_exn (Some r) in
+  check string "scope" "provider"
+    (KFP.failure_scope_to_label decision.failure_scope);
+  check string "lifecycle" "soft_fail_turn"
+    (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+  check string "operator action" "inspect_provider_stream"
+    (KFP.operator_action_to_label decision.operator_action);
+  check string "reason" "provider_timeout:http_operation" decision.reason
 
 (* ── Pure tests: keep_last_n ────────────────────────────── *)
 
@@ -419,7 +469,7 @@ default = "test_provider.test_model"
 
 [providers.test_provider]
 display-name = "Test Provider"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 
 [models.test_model]
@@ -519,6 +569,73 @@ let test_missing_persona_without_profile_or_toml_is_error () =
      with
      | Sup.Persona_drift_error -> true
      | Sup.Persona_drift_warn -> false)
+
+let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
+  {
+    config;
+    agent_name = "supervisor";
+    sw;
+    clock = Eio.Stdenv.clock env;
+    proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    net = Some (Eio.Stdenv.net env);
+  }
+
+let test_declarative_boot_materializes_goal_from_will () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "intent-only" in
+  let will = "watch fleet safety and repair keeper bootstrap" in
+  write_keeper_toml_without_goal config_dir ~name ~will;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let ctx = keeper_runtime_context env sw config in
+  Fun.protect
+    ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
+    (fun () ->
+      match KR.load_or_materialize_boot_meta ctx name with
+      | Error err -> fail err
+      | Ok resolution ->
+      check bool "materialized from declarative TOML" true resolution.materialized;
+      check string "goal derived from will" will resolution.meta.goal;
+      check bool "boot failure cleared" true
+        (Option.is_none
+           (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
+
+let test_declarative_boot_records_goal_required_failure () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "empty-intent" in
+  write_empty_keeper_toml_without_goal config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let ctx = keeper_runtime_context env sw config in
+  (match KR.load_or_materialize_boot_meta ctx name with
+   | Ok _ -> fail "expected declarative keeper without any intent to fail"
+   | Error err ->
+       check bool "failure mentions goal" true
+         (String_util.contains_substring err "goal is required"));
+  match KR.boot_meta_failure_for ~base_path:config.base_path ~name with
+  | None -> fail "expected boot meta failure to be recorded"
+  | Some failure ->
+      check string "failure keeper name" name failure.keeper_name;
+      check string "recorded failure cause" "goal_required"
+        (KR.boot_meta_failure_cause_label failure.cause);
+      check bool "recorded failure keeps raw error" true
+        (String_util.contains_substring failure.error "goal is required")
 
 let registered_entries names =
   Reg.clear ();
@@ -2094,6 +2211,12 @@ let () =
       test_case "missing persona without TOML is ERROR" `Quick
         test_missing_persona_without_profile_or_toml_is_error;
     ];
+    "boot_meta_materialization", [
+      test_case "declarative boot derives missing goal from will" `Quick
+        test_declarative_boot_materializes_goal_from_will;
+      test_case "declarative boot records goal-required failure" `Quick
+        test_declarative_boot_records_goal_required_failure;
+    ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;
       test_case "registry count zero" `Quick test_registry_count_initially_zero;
@@ -2116,6 +2239,8 @@ let () =
         test_supervisor_policy_runtime_exhausted_retryable_reasons;
       test_case "runtime-exhausted capability/unknown reasons are terminal" `Quick
         test_supervisor_policy_runtime_exhausted_terminal_reasons;
+      test_case "provider timeout catch-all is retryable" `Quick
+        test_supervisor_policy_provider_timeout_catch_all_retries;
       test_case "provider error with reason=None falls through to no decision" `Quick
         test_supervisor_policy_runtime_error_no_reason_falls_through;
     ];

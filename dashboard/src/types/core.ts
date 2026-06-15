@@ -707,6 +707,11 @@ interface KeeperConversationUsage {
   totalTokens?: number | null
 }
 
+// RFC-0232 P2: producer-typed turn outcome carried in the reply payload
+// (`turn_outcome`). `continuation_checkpoint` marks the synthetic
+// resume-next-cycle notice; everything else is model output.
+export type KeeperTurnOutcome = 'visible_reply' | 'continuation_checkpoint'
+
 export interface KeeperConversationDetails {
   traceId?: string | null
   generation?: number | null
@@ -718,6 +723,7 @@ export interface KeeperConversationDetails {
   skillReason?: string | null
   stateBlock?: string | null
   replyText?: string | null
+  turnOutcome?: KeeperTurnOutcome | null
   rawPayload?: unknown
 }
 
@@ -732,9 +738,27 @@ export interface KeeperConversationAttachment {
 
 export type KeeperConversationStreamState =
   | 'opening'
+  | 'thinking'
   | 'streaming'
   | 'finalizing'
   | null
+
+export interface SurfaceRef {
+  kind: 'dashboard' | 'discord' | 'slack' | 'github' | 'webhook' | 'agent' | 'gate' | string
+  session_id?: string
+  guild_id?: string
+  channel_id?: string
+  parent_channel_id?: string
+  thread_id?: string
+  team_id?: string
+  thread_ts?: string
+  repo?: string
+  notification_id?: string
+  source?: string
+  event_id?: string
+  label?: string
+  address?: Record<string, string>
+}
 
 export interface KeeperConversationEntry {
   id: string
@@ -749,6 +773,7 @@ export interface KeeperConversationEntry {
   attachments?: KeeperConversationAttachment[]
   details?: KeeperConversationDetails | null
   error?: string | null
+  surface?: SurfaceRef | null
 }
 
 export interface KeeperStatusDetail {
@@ -1219,6 +1244,8 @@ interface KeeperConfigPrompt {
     }
   }
   effective_system_prompt: string
+  unified_system_prompt: string
+  unified_user_message_preview: string
 }
 
 interface KeeperConfigExecution {

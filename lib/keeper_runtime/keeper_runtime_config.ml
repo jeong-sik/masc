@@ -13,9 +13,11 @@ let key_to_env =
     "bootstrap.max_active_keepers",     "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS";
     "bootstrap.autoboot_max",           "MASC_KEEPER_AUTOBOOT_MAX";
     (* [autonomous] *)
+    "autonomous.max_turns_per_call",    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS";
     "autonomous.fairness_cooldown_sec", "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC";
     "autonomous.max_idle_turns",        "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS";
     (* [reactive] *)
+    "reactive.max_turns_per_call",      "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL";
     "reactive.max_idle_turns",          "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE";
     (* [heartbeat] *)
     "heartbeat.interval_sec",           "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC";
@@ -33,6 +35,7 @@ let key_to_env =
     "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";
     "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";
     "turn.stream_idle_timeout_sec",     "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
+    "turn.execution_idle_timeout_sec",  "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC";
     "turn.cli_subprocess_idle_sec",     "MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC";
     "turn.capacity_limit",              "MASC_KEEPER_TURN_CAPACITY_LIMIT";
     "turn.max_consecutive_hb_failures", "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES";

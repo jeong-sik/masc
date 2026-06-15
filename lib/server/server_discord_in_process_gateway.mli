@@ -21,6 +21,19 @@
 
     See: docs/rfc/RFC-0203-discord-builtin-gateway.md §Phase 3. *)
 
+val default_trigger_policy : Discord_gateway_client.trigger_policy
+(** Policy used when none is configured (empty/unset): the quiet,
+    mention-triggered baseline ([Mention_or_thread]). *)
+
+val parse_trigger_policy : string -> Discord_gateway_client.trigger_policy
+(** Resolve a configured trigger-policy string. Empty/whitespace is
+    treated as unset and returns {!default_trigger_policy}. A non-empty
+    value is parsed by the single canonical grammar
+    ({!Discord_gateway_state.parse_trigger_policy}); a value that fails
+    to parse is logged via [Log.Server] and falls back to the default,
+    rather than being silently coerced. Exposed for unit testing the
+    config boundary. *)
+
 val start :
   sw:Eio.Switch.t ->
   env:Eio_unix.Stdenv.base ->

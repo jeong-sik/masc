@@ -4,7 +4,7 @@
    and shared token rotation. *)
 
 let sync_admin_token_env (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.workspace_config.base_path in
+  let base_path = (Mcp_server.workspace_config state).base_path in
   let admin_agent_name =
     match Auth.read_initial_admin base_path with
     | Some name ->
@@ -53,7 +53,7 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
              (Masc_domain.masc_error_to_string err))
 
 let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.workspace_config.base_path in
+  let base_path = (Mcp_server.workspace_config state).base_path in
   let pre_existing =
     match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
     | Some raw when String.trim raw <> "" -> true
@@ -81,12 +81,12 @@ let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
     ()
 
 let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.workspace_config.base_path in
+  let base_path = (Mcp_server.workspace_config state).base_path in
   let keeper_names =
-    Keeper_runtime.bootable_keeper_names state.Mcp_server.workspace_config
+    Keeper_runtime.bootable_keeper_names (Mcp_server.workspace_config state)
   in
   let excluded_keepers =
-    Keeper_runtime.autoboot_excluded_keeper_reasons state.Mcp_server.workspace_config
+    Keeper_runtime.autoboot_excluded_keeper_reasons (Mcp_server.workspace_config state)
   in
   let keeper_agent_names =
     List.map Keeper_identity.keeper_agent_name keeper_names

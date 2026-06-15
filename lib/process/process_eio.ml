@@ -513,6 +513,14 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source argv stdout_b
   | `Exited n -> Unix.WEXITED n
   | `Signaled n -> Unix.WSIGNALED n
 
+let invoke_output_chunk_callback f s =
+  try f s with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Log.Misc.warn
+        "[Process_eio] output chunk callback error, continuing: %s"
+        (Printexc.to_string exn)
+
 let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source argv
     ~on_stdout_chunk ~on_stderr_chunk stdout_buf stderr_buf =
   let stdout_r, stdout_w = Eio.Process.pipe ~sw pm in
@@ -536,7 +544,7 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source arg
     | 0 -> Eio.Flow.close r
     | n ->
       let s = Cstruct.to_string (Cstruct.sub chunk 0 n) in
-      on_chunk s;
+      invoke_output_chunk_callback on_chunk s;
       Buffer.add_string buf s;
       drain r buf ~on_chunk chunk
   in
@@ -685,18 +693,31 @@ let run_argv_with_stdin_and_status_split
     ?(timeout_sec = default_timeout_sec)
     ?env
     ?cwd
+    ?on_stdout_chunk
+    ?on_stderr_chunk
     ~(stdin_content : string)
     (argv : string list) : Unix.process_status * string * string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin_and_status ~argv ?env ();
+  let fallback_with_callbacks () =
+    let status, stdout, stderr =
+      run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
+        ?cwd ~stdin_content argv
+    in
+    Option.iter
+      (fun f -> if stdout <> "" then invoke_output_chunk_callback f stdout)
+      on_stdout_chunk;
+    Option.iter
+      (fun f -> if stderr <> "" then invoke_output_chunk_callback f stderr)
+      on_stderr_chunk;
+    status, stdout, stderr
+  in
   with_spawn_guard (fun () ->
       if not (is_initialized ()) then
-        run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec ?env
-          ?cwd ~stdin_content argv
+        fallback_with_callbacks ()
       else
         match get_proc_mgr (), get_clock (), get_cwd_default () with
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-            run_unix_argv_with_stdin_and_status_split_fallback ~timeout_sec
-              ?env ?cwd ~stdin_content argv
+            fallback_with_callbacks ()
         | Ok pm, Ok clk, Ok default_cwd ->
             let effective_cwd =
               match cwd with
@@ -712,8 +733,34 @@ let run_argv_with_stdin_and_status_split
               Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
                   let unix_status =
                     Eio.Switch.run (fun sw ->
-                        spawn_and_drain_both ~phase_ref ~sw pm ~cwd:effective_cwd ?env
-                          ~stdin_source argv stdout_buf stderr_buf)
+                        match on_stdout_chunk, on_stderr_chunk with
+                        | None, None ->
+                            spawn_and_drain_both ~phase_ref ~sw pm
+                              ~cwd:effective_cwd ?env ~stdin_source argv
+                              stdout_buf stderr_buf
+                        | _ ->
+                            let on_stdout_chunk =
+                              match on_stdout_chunk with
+                              | Some f -> f
+                              | None -> fun _ -> ()
+                            in
+                            let on_stderr_chunk =
+                              match on_stderr_chunk with
+                              | Some f -> f
+                              | None -> fun _ -> ()
+                            in
+                            spawn_and_drain_both_streaming
+                              ~phase_ref
+                              ~sw
+                              pm
+                              ~cwd:effective_cwd
+                              ?env
+                              ~stdin_source
+                              argv
+                              ~on_stdout_chunk
+                              ~on_stderr_chunk
+                              stdout_buf
+                              stderr_buf)
                   in
                   ( unix_status,
                     Buffer.contents stdout_buf,
@@ -739,8 +786,7 @@ let run_argv_with_stdin_and_status_split
                   Log.Misc.warn
                     "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                     label (Printexc.to_string exn);
-                  run_unix_argv_with_stdin_and_status_split_fallback
-                    ~timeout_sec ?env ?cwd ~stdin_content argv
+                  fallback_with_callbacks ()
                 ) else if is_downstream_pipe_closed exn then (
                   (* Downstream reader closed the pipe (head/tail/grep -m
                      finished reading and exited).  Kernel returns EPIPE on
@@ -867,13 +913,23 @@ let run_argv_with_status_split_streaming
     : Unix.process_status * string * string
   =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
+  let fallback_with_callbacks () =
+    let status, stdout, stderr =
+      run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+    in
+    if not (String.equal stdout "")
+    then invoke_output_chunk_callback on_stdout_chunk stdout;
+    if not (String.equal stderr "")
+    then invoke_output_chunk_callback on_stderr_chunk stderr;
+    status, stdout, stderr
+  in
   with_spawn_guard (fun () ->
       if not (is_initialized ())
-      then run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+      then fallback_with_callbacks ()
       else (
         match get_proc_mgr (), get_clock (), get_cwd_default () with
         | Error _, _, _ | _, Error _, _ | _, _, Error _ ->
-          run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+          fallback_with_callbacks ()
         | Ok pm, Ok clk, Ok default_cwd ->
           let effective_cwd =
             match cwd with
@@ -923,7 +979,7 @@ let run_argv_with_status_split_streaming
               Log.Misc.warn
                 "[Process_eio] argv bind error, retrying via Unix fallback: %s — %s"
                 label (Printexc.to_string exn);
-              run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv)
+              fallback_with_callbacks ())
             else if is_downstream_pipe_closed exn
             then (
               Log.Misc.debug
@@ -940,6 +996,7 @@ let run_argv_with_status_split_streaming
                 process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))))
 
 let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
+    ?on_stdout_chunk ?on_stderr_chunk
     (stages : pipeline_stage list) : Unix.process_status * string * string =
   let fallback_buffered () =
     let rec chain prev_stdout = function
@@ -956,17 +1013,29 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
           let final_status = pipeline_status [ status; result_status ] in
           (final_status, result_stdout, stderr ^ result_stderr)
     in
-    match stages with
-    | [] -> (Unix.WEXITED 0, "", "")
-    | [ { argv; env; cwd } ] ->
-        run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
-    | { argv; env; cwd } :: rest ->
-        let status, stdout, stderr =
+    let result =
+      match stages with
+      | [] -> (Unix.WEXITED 0, "", "")
+      | [ { argv; env; cwd } ] ->
           run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
-        in
-        let result_status, result_stdout, result_stderr = chain stdout rest in
-        let final_status = pipeline_status [ status; result_status ] in
-        (final_status, result_stdout, stderr ^ result_stderr)
+      | { argv; env; cwd } :: rest ->
+          let status, stdout, stderr =
+            run_unix_argv_with_status_split_fallback ~timeout_sec ?env ?cwd argv
+          in
+          let result_status, result_stdout, result_stderr = chain stdout rest in
+          let final_status = pipeline_status [ status; result_status ] in
+          (final_status, result_stdout, stderr ^ result_stderr)
+    in
+    let _status, stdout, stderr = result in
+    (match on_stdout_chunk with
+     | Some f when not (String.equal stdout "") ->
+         invoke_output_chunk_callback f stdout
+     | _ -> ());
+    (match on_stderr_chunk with
+     | Some f when not (String.equal stderr "") ->
+         invoke_output_chunk_callback f stderr
+     | _ -> ());
+    result
   in
   with_spawn_guard (fun () ->
       if not (is_initialized ()) then fallback_buffered ()
@@ -981,8 +1050,17 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
               |> String.concat " | "
             in
             let stdout_buf = Buffer.create default_buffer_size in
+            let stderr_buffers =
+              List.map
+                (fun _ -> Buffer.create 256)
+                stages
+            in
+            let stderr_contents () =
+              stderr_buffers
+              |> List.map Buffer.contents
+              |> String.concat ""
+            in
             let phase_ref = ref Timeout_origin.Spawn in
-            let stderr_for_timeout = ref "" in
             (try
                Eio.Time.with_timeout_exn clk timeout_sec (fun () ->
                    Eio.Switch.run (fun sw ->
@@ -997,11 +1075,6 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
                        let stderr_pairs =
                          List.map
                            (fun _ -> Eio.Process.pipe ~sw pm)
-                           stages
-                       in
-                       let stderr_buffers =
-                         List.map
-                           (fun _ -> Buffer.create 256)
                            stages
                        in
                        let procs =
@@ -1042,15 +1115,33 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
                        List.iter
                          (fun (_r, w) -> Eio.Flow.close w)
                          stderr_pairs;
+                       let drain_flow_to_buffer ?on_chunk r buf =
+                         let chunk = Cstruct.create 4096 in
+                         let rec loop () =
+                           match
+                             try Eio.Flow.single_read r chunk
+                             with End_of_file -> 0
+                           with
+                           | 0 -> Eio.Flow.close r
+                           | n ->
+                               let s =
+                                 Cstruct.to_string (Cstruct.sub chunk 0 n)
+                               in
+                               Option.iter
+                                 (fun f -> invoke_output_chunk_callback f s)
+                                 on_chunk;
+                               Buffer.add_string buf s;
+                               loop ()
+                         in
+                         loop ()
+                       in
                        let drain_final_stdout () =
-                         Eio.Flow.copy final_stdout_r
-                           (Eio.Flow.buffer_sink stdout_buf);
-                         Eio.Flow.close final_stdout_r
+                         drain_flow_to_buffer ?on_chunk:on_stdout_chunk
+                           final_stdout_r stdout_buf
                        in
                        let drain_stderr idx (r, _w) =
                          let buf = List.nth stderr_buffers idx in
-                         Eio.Flow.copy r (Eio.Flow.buffer_sink buf);
-                         Eio.Flow.close r
+                         drain_flow_to_buffer ?on_chunk:on_stderr_chunk r buf
                        in
                        let await_all () =
                          List.map Eio.Process.await procs
@@ -1065,12 +1156,7 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
                                  stderr_pairs)
                        in
                        let statuses, () = Eio.Fiber.pair await_all drain_all in
-                       let stderr =
-                         stderr_buffers
-                         |> List.map Buffer.contents
-                         |> String.concat ""
-                       in
-                       stderr_for_timeout := stderr;
+                       let stderr = stderr_contents () in
                        (pipeline_status statuses, Buffer.contents stdout_buf, stderr)))
              with
              | Eio.Time.Timeout ->
@@ -1079,12 +1165,13 @@ let run_argv_pipeline_with_status_split ?(timeout_sec = default_timeout_sec)
                  observe_process_timeout
                    (match stages with [] -> [] | stage :: _ -> stage.argv)
                    ~timeout_sec ~origin:!phase_ref;
+                 let streamed_stderr = stderr_contents () in
                  let stderr =
-                   if String.trim !stderr_for_timeout = "" then
+                   if String.trim streamed_stderr = "" then
                      process_error_output ~label
                        ~reason:(Printf.sprintf "timeout after %.0fs" timeout_sec)
                        ()
-                   else !stderr_for_timeout
+                   else streamed_stderr
                  in
                  (Unix.WEXITED 124, Buffer.contents stdout_buf, stderr)
              | Eio.Cancel.Cancelled _ as exn -> raise exn

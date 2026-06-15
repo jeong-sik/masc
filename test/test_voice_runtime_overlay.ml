@@ -110,6 +110,83 @@ let test_voice_mcp_env_no_longer_overrides_default_session_url () =
               (Voice.default_session_url ~path:"/mcp"))))))
 ;;
 
+let elevenlabs_tts_endpoint : Voice_config.endpoint =
+  { id = "test-tts"
+  ; kind = Voice_config.Elevenlabs_direct
+  ; base_url = Some "https://api.elevenlabs.io/v1"
+  ; mcp_url = None
+  ; health_url = None
+  ; api_key_env = Some "ELEVENLABS_API_KEY"
+  ; enabled = true
+  ; timeout_seconds = Some 30.0
+  ; max_retries = Some 2
+  }
+;;
+
+let default_voice_tuning : Voice_config.voice_tuning =
+  { stability = 0.55; similarity_boost = 0.75; style = 0.0 }
+;;
+
+let test_elevenlabs_voice_id = "testvoiceid0123456789"
+
+let test_tts_request_elevenlabs_accepts_voice_id () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:test_elevenlabs_voice_id
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok req ->
+    check
+      string
+      "url uses configured voice_id"
+      ("https://api.elevenlabs.io/v1/text-to-speech/" ^ test_elevenlabs_voice_id)
+      req.url
+  | Error err -> fail (Printf.sprintf "expected Ok, got Error: %s" err)
+;;
+
+let test_tts_request_elevenlabs_rejects_blank_voice () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:""
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok _ -> fail "expected Error for blank ElevenLabs voice"
+  | Error err ->
+    check
+      bool
+      "error explains configured voice_id requirement"
+      true
+      (String_util.contains_substring err "configured voice_id")
+;;
+
+let test_tts_request_elevenlabs_rejects_unknown_name () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:"Charlotte"
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok _ -> fail "expected Error for unknown ElevenLabs voice name"
+  | Error err ->
+    check
+      bool
+      "error explains voice_id requirement"
+      true
+      (String_util.contains_substring err "voice_id"
+       && String_util.contains_substring err "Charlotte")
+;;
+
 let test_stt_request_elevenlabs_direct () =
   let endpoint : Voice_config.endpoint =
     { id = "test-stt"
@@ -324,6 +401,39 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
   | None -> fail "expected fallback voice_output progress memory row"
 ;;
 
+(* Regression for the 2026-06-14 sangsu voice self-echo loop: the raw
+   voice_output row must stay durable in the memory bank, but it must not
+   appear in the auto-injected recent-note summary that drives the next
+   turn, or the model will answer its own spoken text repeatedly. *)
+let test_voice_output_row_is_excluded_from_memory_recent_notes () =
+  let config = test_config () in
+  let meta = make_keeper_meta "voice-recent-note-filter-keeper" in
+  let message = "this should not echo back as a recent note" in
+  let raw =
+    Masc.Keeper_tool_voice_runtime.handle_voice_tool
+      ~config
+      ~meta
+      ~name:"keeper_voice_speak"
+      ~args:(`Assoc [ "message", `String message ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  check bool "fallback memory recorded" true
+    Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
+  let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let lines = read_lines memory_path in
+  let summary =
+    Masc.Keeper_memory_bank.summarize_memory_bank_lines lines ~recent_limit:4
+  in
+  let has_voice_text =
+    List.exists
+      (fun (row : Masc.Keeper_memory_bank.keeper_memory_line) ->
+         String.equal row.text message)
+      summary.recent_notes
+  in
+  check bool "voice_output source not in recent_notes" false has_voice_text
+;;
+
 let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
   Eio_main.run
   @@ fun env ->
@@ -514,6 +624,20 @@ let () =
         ; test_case "stt request provider_d compat" `Quick test_stt_request_openai_compat
         ; test_case "stt request mcp rejected" `Quick test_stt_request_mcp_rejected
         ] )
+    ; ( "tts"
+      , [ test_case
+            "tts request elevenlabs accepts voice_id"
+            `Quick
+            test_tts_request_elevenlabs_accepts_voice_id
+        ; test_case
+            "tts request elevenlabs rejects blank voice"
+            `Quick
+            test_tts_request_elevenlabs_rejects_blank_voice
+        ; test_case
+            "tts request elevenlabs rejects unknown name"
+            `Quick
+            test_tts_request_elevenlabs_rejects_unknown_name
+        ] )
     ; ( "keeper_voice_speak"
       , [ test_case
             "keeper_voice_speak surfaces TTS failure"
@@ -527,6 +651,10 @@ let () =
             "keeper_voice_speak fallback records memory"
             `Quick
             test_keeper_voice_speak_text_fallback_records_memory_bank_row
+        ; test_case
+            "voice_output row is excluded from memory recent notes"
+            `Quick
+            test_voice_output_row_is_excluded_from_memory_recent_notes
         ; test_case
             "session_start does not store session_name as voice"
             `Quick

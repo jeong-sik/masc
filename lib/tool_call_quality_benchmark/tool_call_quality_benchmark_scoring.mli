@@ -52,7 +52,7 @@ val score_run :
     | Axis | Definition |
     |---|---|
     | `task_pass` | reported [task_success = true] AND every [success_check] passes against [final_result] |
-    | `tool_selection` | [0.0] if any forbidden tool is used; otherwise [1.0]. [Tool_forbidden] cases require zero calls. |
+    | `tool_selection` | [0.0] if any forbidden tool name or forbidden selector is used; otherwise [1.0]. [Tool_forbidden] cases require zero calls. |
     | `arg_validity` | [1.0] if no `arg_checks`; otherwise mean of per-check pass rate (each check passes iff at least one matching tool call satisfies it) |
     | `recovery` | [1.0] for cases without [recovery_policy.required = true]; otherwise [1.0] iff [task_pass = 1.0] AND a successful call exists after at least one failure AND the failure count is within [max_failures_before_success] |
     | `efficiency` | [Tool_forbidden]: [1.0] if zero calls else [0.0]. Otherwise: [1.0 - (over_limit / max_tool_calls)], floored at [0.0]; [max_tool_calls <= 0] forces zero-call requirement |
@@ -62,12 +62,6 @@ val score_run :
     Not part of the composite (separate dashboard column).
     [(forbidden_count + over_limit) / call_count], capped at
     [1.0].  Zero calls -> [0.0].  [Tool_forbidden] case -> [1.0]
-    when any call exists. *)
-
-val to_reward_advice :
-  agent_name:string ->
-  ?task_id:string ->
-  Tool_call_quality_benchmark_types.case_score ->
-  Reward_advice_artifact.reward_advice_artifact
-(** Build a {!Reward_advice_artifact.reward_advice_artifact} from a case score.
-    Maps [composite_score] to a reward multiplier and generates an advisory message. *)
+    when any call exists.  [forbidden_count] counts calls matching either
+    [forbidden_tools] or [forbidden_selectors], with each call counted at
+    most once. *)

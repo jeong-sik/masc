@@ -1,5 +1,10 @@
 # Keeper Turn Lifecycle
 
+> **Superseded by [`docs/spec/04-turn-lifecycle.md`](./spec/04-turn-lifecycle.md).**
+> This file now serves as historical context, tooling notes, and the open-work
+> table for the bloodflow restoration plan. For the authoritative turn lifecycle
+> specification, see `docs/spec/04-turn-lifecycle.md`.
+>
 > Foundation diagram for the bloodflow restoration plan (Step 8).
 > Mirrors the actual code path through `lib/keeper/keeper_unified_turn.ml`
 > and the `record_pre_dispatch_terminal_observation` receipt path

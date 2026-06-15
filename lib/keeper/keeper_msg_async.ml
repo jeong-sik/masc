@@ -30,6 +30,15 @@ type entry =
   ; completed_at : float option
   }
 
+(** Outcome of looking up a request record. [Absent] means no record exists
+    (never submitted, or already GC'd); pollers can stop polling or resubmit.
+    [Unreadable] means a record file exists but cannot be decoded — the
+    request WAS accepted, but its result cannot be recovered. *)
+type load_result =
+  | Found of entry
+  | Absent
+  | Unreadable of string
+
 let mu = Eio.Mutex.create ()
 let pending : (string, entry) Hashtbl.t = Hashtbl.create 16
 let active_switches : (string, Eio.Switch.t) Hashtbl.t = Hashtbl.create 16
@@ -46,6 +55,8 @@ let max_request_id_len = 128
 let is_safe_request_id request_id =
   let len = String.length request_id in
   if len = 0
+  then false
+  else if request_id = "." || request_id = ".."
   then false
   else if len > max_request_id_len
   then false
@@ -117,7 +128,7 @@ let bool_member name json =
   | _ -> None
 ;;
 
-let entry_of_record_json ~base_path json : entry option =
+let entry_of_record_json ~base_path json : (entry, string) result =
   match
     ( string_member "request_id" json
     , string_member "keeper_name" json
@@ -128,10 +139,10 @@ let entry_of_record_json ~base_path json : entry option =
     let completed_at = float_member "completed_at" json in
     let status =
       match status with
-      | "queued" -> Some Queued
-      | "running" -> Some Running
+      | "queued" -> Ok Queued
+      | "running" -> Ok Running
       | "lost" ->
-        Some
+        Ok
           (Lost
              { reason =
                  string_member "reason" json
@@ -146,14 +157,16 @@ let entry_of_record_json ~base_path json : entry option =
           string_member "body" json
           |> Option.value ~default:{|{"error":"result body missing"}|}
         in
-        Some (Done { ok; body })
-      | _ -> None
+        Ok (Done { ok; body })
+      | other -> Error (Printf.sprintf "unknown status %S in record" other)
     in
-    Option.map
+    Result.map
       (fun status ->
          { request_id; keeper_name; base_path; status; submitted_at; completed_at })
       status
-  | _ -> None
+  | _ ->
+    Error
+      "record is missing required fields (request_id/keeper_name/status/submitted_at)"
 ;;
 
 let persist_entry (entry : entry) =
@@ -170,26 +183,31 @@ let persist_entry (entry : entry) =
          err)
 ;;
 
-let load_record ~base_path ~request_id =
+let load_record ~base_path ~request_id : load_result =
   match record_path ~base_path ~request_id with
-  | None -> None
+  | None -> Absent
   | Some path ->
     if not (Fs_compat.file_exists path)
-    then None
+    then Absent
     else (
-      try
-        Fs_compat.load_file path
-        |> Yojson.Safe.from_string
-        |> entry_of_record_json ~base_path
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
+      let decoded =
+        try
+          Fs_compat.load_file path
+          |> Yojson.Safe.from_string
+          |> entry_of_record_json ~base_path
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> Error (Printexc.to_string exn)
+      in
+      match decoded with
+      | Ok entry -> Found entry
+      | Error reason ->
         Log.Keeper.warn
           "keeper_msg_async: load failed request_id=%s path=%s error=%s"
           request_id
           path
-          (Printexc.to_string exn);
-        None)
+          reason;
+        Unreadable reason)
 ;;
 
 let has_suffix ~suffix value =
@@ -244,9 +262,11 @@ let gc_stale_disk ~base_path =
                 then removed
                 else (
                   match load_record ~base_path ~request_id with
-                  | Some entry when should_gc_disk_record ~now entry ->
+                  | Found entry when should_gc_disk_record ~now entry ->
                     if remove_record_file path then removed + 1 else removed
-                  | Some _ | None -> removed))
+                  (* Unreadable records are kept so pollers can still observe
+                     that the request was accepted but its result is lost. *)
+                  | Found _ | Absent | Unreadable _ -> removed))
            0
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -407,19 +427,18 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
 ;;
 
 (** Poll for the result of an async keeper_msg request. *)
-let poll ?base_path request_id : entry option =
+let poll ?base_path request_id : load_result =
   match Eio.Mutex.use_ro mu (fun () -> Hashtbl.find_opt pending request_id) with
-  | Some _ as found -> found
+  | Some entry -> Found entry
   | None ->
     (match base_path with
-     | None -> None
+     | None -> Absent
      | Some base_path ->
        ignore (gc_stale_disk ~base_path);
        (match load_record ~base_path ~request_id with
-        | None -> None
-        | Some ({ status = Queued | Running; _ } as entry) ->
-          Some (mark_lost_after_recovery entry)
-        | Some entry -> Some entry))
+        | Found ({ status = Queued | Running; _ } as entry) ->
+          Found (mark_lost_after_recovery entry)
+        | (Found _ | Absent | Unreadable _) as result -> result))
 ;;
 
 (** List all pending/running requests for a keeper (or all keepers if omitted). *)
@@ -482,7 +501,7 @@ let cancel ?base_path request_id : bool =
     | None -> false
     | Some base_path ->
       match load_record ~base_path ~request_id with
-      | Some ({ status = Queued | Running; _ } as entry) ->
+      | Found ({ status = Queued | Running; _ } as entry) ->
         let reason = "keeper_msg request was cancelled by operator" in
         let cancelled_entry =
           (* NDT-OK: gettimeofday is acceptable for timestamping operator cancelled lost state *)
@@ -490,12 +509,14 @@ let cancel ?base_path request_id : bool =
         in
         persist_entry cancelled_entry;
         true
-      | _ -> false
+      | Found _ | Absent | Unreadable _ -> false
 ;;
 
 module For_testing = struct
+  let is_safe_request_id = is_safe_request_id
   let forget request_id = with_lock (fun () -> Hashtbl.remove pending request_id)
   let clear () = with_lock (fun () -> Hashtbl.clear pending)
   let record_path = record_path
+  let load_record = load_record
   let gc_stale_disk = gc_stale_disk
 end

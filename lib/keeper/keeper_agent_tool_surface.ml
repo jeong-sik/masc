@@ -198,12 +198,14 @@ let tool_search_alias_entries =
   ; "keeper_memory_search", "기억 검색 대화 이전 메시지"
   ; "keeper_library_search", "라이브러리 지식 문서 검색"
   ; "keeper_library_read", "라이브러리 문서 읽기 지식"
-  ; "keeper_surface_read", "커넥터 대화 읽기 디스코드 채널 화자 명부 서피스"
+  ; ( "keeper_surface_read"
+    , "커넥터 대화 읽기 연결된 채널 현재 채널 화자 명부 로스터 서피스 \
+       connected surface lane bound channel current lane participant roster" )
   ; "keeper_surface_post", "커넥터 발화 보내기 디스코드 채널 메시지 전송 서피스"
   ; "keeper_person_note_set", "사람 기억 노트 저장 화자 메모 명부 로스터"
   ; "keeper_time_now", "시간 현재 타임스탬프"
   ; "keeper_context_status", "컨텍스트 상태 토큰 사용량"
-  ; "keeper_tools_list", "도구 목록 기능 할수있는것 능력"
+  ; "keeper_tools_list", "도구 목록 기능 할수있는것 능력 capability introspection"
   ; "keeper_broadcast", "브로드캐스트 알림 공지 전달"
   ; "keeper_tasks_list", "태스크 목록 할일 백로그"
   ; "keeper_tasks_audit", "태스크 감사 고아 방치"

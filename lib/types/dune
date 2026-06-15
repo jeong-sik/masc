@@ -8,6 +8,8 @@
   rate_limit_types
   masc_error
   ids
+  prompt_block_id
+  turn_record
   evidence_claim
   deterministic_evidence_evaluator
   types_core

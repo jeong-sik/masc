@@ -45,7 +45,7 @@ export function DashboardFocusModeToggle() {
   return html`
     <button
       type="button"
-      class=${`fixed bottom-4 right-4 z-50 inline-flex h-9 items-center gap-2 rounded-[var(--r-1)] border border-solid px-3 text-xs font-semibold shadow-[var(--shadow-panel)] backdrop-blur-xl transition-colors max-[520px]:bottom-3 max-[520px]:right-3 ${focusMode ? 'border-[var(--brass-3)] bg-[var(--accent-22)] text-[var(--brass-1)]' : 'border-[var(--color-border-default)] bg-[var(--shell-header-bg)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]'} ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+      class=${`dashboard-focus-mode-toggle fixed bottom-4 right-4 z-50 inline-flex h-9 items-center gap-2 rounded-[var(--r-1)] border border-solid px-3 text-xs font-semibold shadow-[var(--shadow-panel)] backdrop-blur-xl transition-colors max-[520px]:bottom-3 max-[520px]:right-3 ${focusMode ? 'border-[var(--brass-3)] bg-[var(--accent-22)] text-[var(--brass-1)]' : 'border-[var(--color-border-default)] bg-[var(--shell-header-bg)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]'} ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
       title=${`Toggle focus mode (${shortcutHint})`}
       aria-label=${`${focusMode ? 'Exit' : 'Enter'} dashboard focus mode (${shortcutHint})`}
       aria-keyshortcuts=${ariaShortcutHint}

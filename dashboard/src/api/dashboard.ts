@@ -1660,12 +1660,49 @@ export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
   registered_count: number
 }
 
+export interface DashboardScheduledAutomationFsm {
+  state: string
+  active_count: number
+  terminal_count: number
+  next_due_at?: string | null
+}
+
+export interface DashboardScheduledAutomationRequest {
+  schedule_id: string
+  status: string
+  risk_class: string
+  approval_required: boolean
+  source: string
+  requested_at?: number
+  requested_at_iso?: string
+  due_at?: number
+  due_at_iso?: string
+  expires_at?: number | null
+  expires_at_iso?: string | null
+  payload_digest?: string
+  payload_kind?: string | null
+}
+
+export interface DashboardScheduledAutomation {
+  schema?: string
+  source?: string
+  generated_at?: string
+  request_count: number
+  request_limit: number
+  truncated: boolean
+  counts: Record<string, number>
+  derived_counts?: Record<string, number>
+  fsm: DashboardScheduledAutomationFsm
+  requests: DashboardScheduledAutomationRequest[]
+}
+
 export interface DashboardToolsResponse {
   generated_at?: string
   config_resolution?: DashboardConfigResolution
   runtime_resolution?: DashboardRuntimeResolution
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
+  scheduled_automation?: DashboardScheduledAutomation
 }
 
 export type {
@@ -2035,6 +2072,9 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         capabilities: normalizePromptBlock(promptBlocks.capabilities, 'keeper.capabilities'),
       },
       effective_system_prompt: asNullableString(prompt.effective_system_prompt) ?? '',
+      unified_system_prompt: asNullableString(prompt.unified_system_prompt) ?? '',
+      unified_user_message_preview:
+        asNullableString(prompt.unified_user_message_preview) ?? '',
     },
     execution: {
       models: normalizeStringList(execution.models),
@@ -2244,6 +2284,8 @@ export type TrajectoryEntry = {
   ts: number
   ts_iso: string
   turn: number
+  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
+  execution_id?: string
   // Tool-call fields (absent on thinking entries)
   round?: number
   tool_name?: string
@@ -2543,6 +2585,8 @@ export type ToolCallEntry = {
   keeper_turn_id?: number
   task_id?: string
   lane?: string
+  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
+  execution_id?: string
 }
 
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
@@ -2593,6 +2637,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     keeper_turn_id: asNumber(raw.keeper_turn_id),
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
+    execution_id: asString(raw.execution_id),
   }
 }
 
@@ -2622,6 +2667,150 @@ export function fetchKeeperToolCalls(
   ).then((raw) => {
     const decoded = decodeToolCallsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper tool call payload')
+    return decoded
+  })
+}
+
+// ── Keeper turn records (RFC-0233 PR-4) ─────────────────
+
+export type TurnBlock = {
+  block: string
+  bytes: number
+  digest: string
+}
+
+export type TurnRecordEntry = {
+  execution_ids: string[]
+  keeper: string
+  trace_id: string
+  absolute_turn: number
+  blocks: TurnBlock[]
+  runtime_profile: string
+  temperature?: number
+  thinking_budget?: number
+  enable_thinking?: boolean
+  input_tokens?: number
+  output_tokens?: number
+  ts: number
+}
+
+export type TurnBlockDiff = {
+  added: TurnBlock[]
+  removed: TurnBlock[]
+  changed: { prev: TurnBlock; next: TurnBlock }[]
+}
+
+export type TurnRecordRow = {
+  record: TurnRecordEntry
+  // null on the first record of a trace (no same-trace predecessor)
+  diff_vs_prev: TurnBlockDiff | null
+}
+
+export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
+  keeper: string
+  count: number
+  // malformed JSONL rows the server refused to decode (never repaired)
+  skipped_rows: number
+  entries: TurnRecordRow[]
+}
+
+function decodeTurnBlock(raw: unknown): TurnBlock | null {
+  if (!isRecord(raw)) return null
+  const block = asString(raw.block)
+  const digest = asString(raw.digest)
+  const bytes = asNumber(raw.bytes)
+  if (!block || !digest || bytes == null) return null
+  return { block, bytes, digest }
+}
+
+function decodeTurnBlockList(raw: unknown): TurnBlock[] {
+  return asRecordArray(raw)
+    .map(decodeTurnBlock)
+    .filter((block): block is TurnBlock => block !== null)
+}
+
+function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const trace_id = asString(raw.trace_id)
+  const absolute_turn = asNumber(raw.absolute_turn)
+  const runtime_profile = asString(raw.runtime_profile)
+  const ts = asNumber(raw.ts)
+  if (!keeper || !trace_id || absolute_turn == null || !runtime_profile || ts == null) {
+    return null
+  }
+  const execution_ids = Array.isArray(raw.execution_ids)
+    ? raw.execution_ids.filter((id): id is string => typeof id === 'string')
+    : []
+  return {
+    execution_ids,
+    keeper,
+    trace_id,
+    absolute_turn,
+    blocks: decodeTurnBlockList(raw.blocks),
+    runtime_profile,
+    temperature: asNumber(raw.temperature),
+    thinking_budget: asNumber(raw.thinking_budget),
+    enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,
+    input_tokens: asNumber(raw.input_tokens),
+    output_tokens: asNumber(raw.output_tokens),
+    ts,
+  }
+}
+
+function decodeTurnBlockDiff(raw: unknown): TurnBlockDiff | null {
+  if (!isRecord(raw)) return null
+  const changed = asRecordArray(raw.changed)
+    .map((pair) => {
+      const prev = decodeTurnBlock(pair.prev)
+      const next = decodeTurnBlock(pair.next)
+      return prev && next ? { prev, next } : null
+    })
+    .filter((pair): pair is { prev: TurnBlock; next: TurnBlock } => pair !== null)
+  return {
+    added: decodeTurnBlockList(raw.added),
+    removed: decodeTurnBlockList(raw.removed),
+    changed,
+  }
+}
+
+function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
+  if (!isRecord(raw)) return null
+  const record = decodeTurnRecordEntry(raw.record)
+  if (!record) return null
+  return {
+    record,
+    diff_vs_prev: decodeTurnBlockDiff(raw.diff_vs_prev),
+  }
+}
+
+function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  if (!keeper) return null
+  return {
+    ...decodeTelemetryFreshnessMetadata(raw),
+    keeper,
+    count: asNumber(raw.count, 0),
+    skipped_rows: asNumber(raw.skipped_rows, 0),
+    entries: asRecordArray(raw.entries)
+      .map(decodeTurnRecordRow)
+      .filter((row): row is TurnRecordRow => row !== null),
+  }
+}
+
+export function fetchKeeperTurnRecords(
+  name: string,
+  limit?: number,
+  opts?: AbortableRequestOptions,
+): Promise<TurnRecordsResponse> {
+  const params = limit != null ? `?limit=${limit}` : ''
+  return get<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/turn-records${params}`,
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const decoded = decodeTurnRecordsResponse(raw)
+    if (!decoded) throw new Error('유효하지 않은 keeper turn record payload')
     return decoded
   })
 }

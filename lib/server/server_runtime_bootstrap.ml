@@ -56,10 +56,19 @@ let () =
   Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in
+    let gc_space_overhead =
+      try int_of_string (Sys.getenv "MASC_GC_SPACE_OVERHEAD")
+      with Not_found -> 100
+    in
     let ctrl = get () in
     set { ctrl with
       minor_heap_size = 2 * 1024 * 1024;  (* 2M words = 16MB on 64-bit; reduces minor->major promotion rate *)
-      space_overhead = 200;               (* default 120; less frequent major GC slices *)
+      space_overhead = gc_space_overhead;  (* default 120. Configurable via MASC_GC_SPACE_OVERHEAD.
+                                             100 = triggers major GC when free > live (was 200/3x).
+                                             Lower = shorter individual pauses, more frequent slices.
+                                             P0 allocation fixes (PR #20965) reduced broadcast hot-path
+                                             allocation by ~97%, so the increased frequency has negligible
+                                             throughput impact. *)
       max_overhead = 500;                 (* compaction triggers when free memory exceeds 500% of live data *)
     }
   end
@@ -165,12 +174,13 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   let config_resolution =
     startup_config_resolution ~base_path |> Config_dir_resolver.to_json
   in
+  let config = Mcp_server.workspace_config state in
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path
       ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-      ~effective_base_path:state.workspace_config.base_path
-      ~effective_masc_root:(Workspace.masc_root_dir state.workspace_config)
+      ~effective_base_path:config.base_path
+      ~effective_masc_root:(Workspace.masc_root_dir config)
       ()
     |> Server_base_path_diagnostics.to_yojson
   in
@@ -185,19 +195,20 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   state
 
 let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
   Server_base_path_diagnostics.detect
     ?input_base_path
     ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-    ~effective_base_path:state.workspace_config.base_path
-    ~effective_masc_root:(Workspace.masc_root_dir state.workspace_config)
+    ~effective_base_path:config.base_path
+    ~effective_masc_root:(Workspace.masc_root_dir config)
     ()
 
 let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
-    ~agents_path:(Workspace.agents_dir state.workspace_config)
+    ~agents_path:(Workspace.agents_dir (Mcp_server.workspace_config state))
 
 let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
-  Otel_metric_store.reconcile_active_agents_gauge (Workspace.masc_dir state.workspace_config)
+  Otel_metric_store.reconcile_active_agents_gauge (Workspace.masc_dir (Mcp_server.workspace_config state))
 
 
 (* Startup maintenance extracted to
@@ -213,7 +224,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      direct state constructors used by tests and execute contexts can leave a
      stale process-global config resolution in place. *)
   Config_dir_resolver.reset ();
-  let (_init_msg : string) = Workspace.init state.workspace_config ~agent_name:None in
+  let (_init_msg : string) = Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
 
 
@@ -267,14 +278,48 @@ let lazy_startup_task_names () =
   lazy_startup_plan ()
   |> List.concat_map (fun group -> group.task_names)
 
+(* Cap the per-boot file list in the sync log line; full counts are always
+   logged, names are illustrative. *)
+let max_logged_prompt_sync_entries = 10
+
+let sync_prompt_assets_from_binary () =
+  let sync =
+    Prompt_defaults.sync_prompt_assets
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+      ~prompts_dir:(Config_dir_resolver.prompts_dir ())
+      ()
+  in
+  (match sync.Prompt_defaults.copied, sync.Prompt_defaults.overwritten with
+   | [], [] -> ()
+   | copied, overwritten ->
+       let names = copied @ overwritten in
+       let shown =
+         List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
+       in
+       Log.Misc.info
+         "prompt assets synced from binary: %d copied, %d overwritten [%s%s]"
+         (List.length copied) (List.length overwritten)
+         (String.concat ", " shown)
+         (if List.length names > max_logged_prompt_sync_entries then ", …"
+          else ""));
+  List.iter
+    (fun (rel, msg) -> Log.Misc.warn "prompt asset sync failed: %s: %s" rel msg)
+    sync.Prompt_defaults.failed
+
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
+  (* Converge runtime prompt markdown onto the binary-embedded assets
+     before the registry scans the directory (#20929: merged prompt edits
+     never reached the runtime dir otherwise). *)
+  sync_prompt_assets_from_binary ();
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime
-      ~workspace_path:state.workspace_config.workspace_path
-      ~base_path:state.workspace_config.base_path
+      ~workspace_path:config.workspace_path
+      ~base_path:config.base_path
   in
   let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
   if prompt_markdown_dir <> expected_prompt_dir then
@@ -303,7 +348,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
 let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
   (try
      let summary =
-       Telemetry_eio.summarize_tool_usage state.workspace_config
+       Telemetry_eio.summarize_tool_usage (Mcp_server.workspace_config state)
      in
      if summary.telemetry_available then
        (* PR-S3: project the persisted Telemetry_eio summary into the registry's
@@ -335,7 +380,7 @@ let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
 let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
   (try
      let n = Tool_metrics_persist.restore
-       ~base_path:state.workspace_config.base_path in
+       ~base_path:(Mcp_server.workspace_config state).base_path in
      if n > 0 then
        Log.Misc.info "tool metrics: restored %d records from disk" n
    with
@@ -672,7 +717,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Log.Server.info "lazy_task_group: finished %s" group.group_name
       in
       Server_startup_state.activate_lazy
-        ~backend_mode:(Workspace.backend_name state.workspace_config)
+        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state))
         ~tasks:task_names;
       Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
     in
@@ -683,7 +728,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       server_state := Some state;
       Server_startup_state.mark_state_ready
-        ~backend_mode:(Workspace.backend_name state.workspace_config);
+        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state));
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
@@ -730,7 +775,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             tool_name (String.length result_str);
         if success then Ok result_str else Error result_str
       in
-      Masc_grpc_server.start ~sw ~env ~workspace_config:state.workspace_config
+      Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
         ~tool_dispatcher;
       (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
       (match Masc_grpc_transport.from_env () with
@@ -747,7 +792,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "shell" ->
             Some
               (Server_dashboard_http.dashboard_shell_payload_json ~light:true
-                 state.Mcp_server.workspace_config)
+                 (Mcp_server.workspace_config state))
         | "execution" ->
             Some (Server_dashboard_http.dashboard_execution_snapshot_json ())
         | "operator" ->
@@ -768,7 +813,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "composite" ->
             Some
               (Server_dashboard_http.dashboard_fleet_composite_json
-                 ~config:state.Mcp_server.workspace_config ())
+                 ~config:(Mcp_server.workspace_config state) ())
         | "board" ->
             Some
               (Server_dashboard_http.dashboard_board_json
@@ -777,11 +822,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "goals" ->
             Some
               (Server_dashboard_http.dashboard_goals_snapshot_json
-                 ~config:state.Mcp_server.workspace_config)
+                 ~config:(Mcp_server.workspace_config state))
         | "ide" ->
             Some
               (Server_dashboard_http.dashboard_ide_snapshot_json
-                 ~config:state.Mcp_server.workspace_config)
+                 ~config:(Mcp_server.workspace_config state))
         | _ ->
             None);
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)

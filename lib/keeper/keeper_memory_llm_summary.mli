@@ -22,7 +22,6 @@ val messages_for_summary :
 
 val make :
   ?complete:complete_fn ->
-  ?provider_filter:string list ->
   ?timeout_sec:float ->
   runtime_id:string ->
   keeper_name:string ->

@@ -175,6 +175,15 @@ let test_hard_constraints_in_system_only () =
   check bool "no output guard in dynamic" true
     (not (has_in tp.dynamic_context "Output guard:"))
 
+let test_direct_reply_prompt_requires_action_evidence () =
+  let tp = build_separated () in
+  check bool "direct reply prompt binds action claims to tool evidence" true
+    (has_in tp.system_prompt "matching tool-call evidence");
+  check bool "board read claims require same-turn board evidence" true
+    (has_in tp.system_prompt "same-turn board-read evidence");
+  check bool "tool failures must be reported as attempts" true
+    (has_in tp.system_prompt "do not phrase the attempt as a completed check")
+
 let test_soft_context_in_dynamic_only () =
   let tp = build_separated () in
   let has_in s needle =
@@ -268,27 +277,23 @@ let test_state_block_guard_is_runtime_managed_not_absolute_never () =
   let guard = KP.state_block_output_guard_text in
   check bool "guard mentions runtime-managed continuity" true
     (has_in guard "runtime-managed continuity");
-  check bool "guard prefers structured output" true
-    (has_in guard "structured output");
-  check bool "guard names keeper_report_state" true
-    (has_in guard "keeper_report_state");
+  check bool "guard directs bracketed state block output" true
+    (has_in guard "[STATE]...[/STATE]");
   check bool "guard avoids absolute NEVER state wording" false
     (has_in guard ("NEVER output " ^ "[STATE]"));
-  check bool "guard names raw state markers" true
-    (has_in guard "raw [STATE]");
-  check bool "guard mentions runtime persistence" true
-    (has_in guard "persist state metadata")
+  check bool "guard mentions runtime synthesis and persistence" true
+    (has_in guard "synthesize and persist state metadata")
 
 let test_unified_state_instruction_respects_turn_level_guard () =
   let text = KUP.state_block_instruction_text in
+  check bool "instruction names state block template" true
+    (has_in text "State block template");
   check bool "instruction is scoped to non-direct turns" true
-    (has_in text "For non-direct keeper turns");
-  check bool "instruction prefers structured output" true
-    (has_in text "structured output");
-  check bool "instruction names keeper_report_state" true
+    (has_in text "for non-direct keeper turns");
+  check bool "instruction lists canonical fields" true
+    (has_in text "DONE, NEXT, Goal, Decisions, OpenQuestions, and Constraints");
+  check bool "instruction does not depend on keeper_report_state" false
     (has_in text "keeper_report_state");
-  check bool "instruction keeps raw state fallback scoped" true
-    (has_in text "Only if keeper_report_state is unavailable");
   check bool "instruction avoids old unconditional wording" false
     (has_in text
        ("End every response with a "
@@ -302,12 +307,16 @@ let test_state_block_schema_is_canonical_six_field_shape () =
     [
       "DONE: what you accomplished this turn";
       "NEXT: what the next turn should do";
-      "Goal: current active goal";
+      "Goal: active goal id from <available_goals> verbatim";
       "Decisions: key decisions";
       "OpenQuestions: unresolved items";
       "Constraints: active constraints";
     ];
-  check bool "schema excludes old Progress field" false (has_in text "Progress:")
+  check bool "schema excludes old Progress field" false (has_in text "Progress:");
+  (* #20937: prose in the Goal field is cleared by the post-turn sanitizer
+     (active_goal_ids membership), so the instruction must demand the id. *)
+  check bool "goal field demands id, not prose" false
+    (has_in text "Goal: current active goal")
 
 let test_constitution_uses_canonical_state_instruction () =
   let text = KP.keeper_constitution () in
@@ -520,6 +529,8 @@ let () =
         [
           test_case "hard constraints in system only" `Quick
             test_hard_constraints_in_system_only;
+          test_case "direct reply prompt requires action evidence" `Quick
+            test_direct_reply_prompt_requires_action_evidence;
           test_case "soft context in dynamic only" `Quick
             test_soft_context_in_dynamic_only;
           test_case "direct reply prompt matches server-managed heartbeat policy" `Quick

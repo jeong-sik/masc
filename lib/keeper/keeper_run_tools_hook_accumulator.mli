@@ -10,6 +10,9 @@ type hook_accumulator =
   ; mutable requested_tool_names : string list
   ; mutable receipt_completion_contract_result :
       Keeper_execution_receipt.completion_contract_result
+  ; mutable prompt_blocks : Turn_record.prompt_block list
+  ; mutable extra_system_context_digest : string option
+  ; mutable extra_system_context_size : int option
   }
 
 type hook_outputs =

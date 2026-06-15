@@ -288,19 +288,29 @@ let sanitize_dashboard_actor_name raw =
 let warn_cooldown_sec = 300.0
 
 let stale_token_warn_log : (string, float) Hashtbl.t = Hashtbl.create 16
+let stale_token_warn_mu = Eio.Mutex.create ()
 
 let record_dashboard_actor_fallback
     (fb : Auth_error_kind.dashboard_actor_fallback) =
   let now = Time_compat.now () in
   let should_log =
+    Eio.Mutex.use_ro stale_token_warn_mu @@ fun () ->
     match Hashtbl.find_opt stale_token_warn_log fb.token_hash_prefix with
     | Some last_ts -> now -. last_ts >= warn_cooldown_sec
     | None -> true
   in
   if should_log then begin
-    Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
-    Log.Auth.warn "%s"
-      (Auth_error_kind.dashboard_actor_fallback_log_message fb)
+    Eio.Mutex.use_rw ~protect:true stale_token_warn_mu @@ fun () ->
+    (* Re-check under the write lock; another fiber may have just logged. *)
+    let really_should_log =
+      match Hashtbl.find_opt stale_token_warn_log fb.token_hash_prefix with
+      | Some last_ts -> now -. last_ts >= warn_cooldown_sec
+      | None -> true
+    in
+    if really_should_log then (
+      Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
+      Log.Auth.warn "%s"
+        (Auth_error_kind.dashboard_actor_fallback_log_message fb));
   end;
   Otel_metric_store.inc_counter
     Otel_metric_store.metric_silent_dashboard_actor_fallback
@@ -886,7 +896,7 @@ and with_read_auth handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_read_request ~base_path request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -898,7 +908,7 @@ and with_permission_auth ~permission handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_permission_request ~base_path ~permission request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -910,7 +920,7 @@ and with_tool_auth ~tool_name handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_tool_request ~base_path ~tool_name request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -922,7 +932,7 @@ and with_token_permission_auth ~permission handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       (match authorize_token_bound_permission_request ~base_path ~permission request with
       | Ok agent_name ->
           (match check_agent_rate_limit request reqd with

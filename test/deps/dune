@@ -172,6 +172,7 @@
   ;; Phase 2 / LANE 6). Re-export so test code using bare Tool_spec.X /
   ;; Tool_capability.X / Tool_shard_types*.X / Board_tool.X etc. resolves.
   (re_export masc.masc_tool_surface)
+  (re_export masc.tool_contract_prompts)
   ;; Thompson Sampling extracted to lib/thompson/ (masc_thompson). Re-export so
   ;; test code using bare Thompson_sampling.X resolves after the carve.
   (re_export masc_thompson)

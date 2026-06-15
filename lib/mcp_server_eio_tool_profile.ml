@@ -52,16 +52,18 @@ let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =
   in
   List.rev result
 
-let default_instructions =
-  "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
+let default_instructions () =
+  Printf.sprintf
+    "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
 PROJECT: Agents sharing the same base path (.masc/ folder) align together. \
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool surfaces use the configured cluster/default label). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
-WORKFLOW: masc_status → masc_transition(claim) → work in a repo-local worktree → masc_transition(done). \
+WORKFLOW: %s. \
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
 Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
+    (Tool_contract_guidance.task_lifecycle_workflow ())
 
 let tool_schemas_for_profile ?(include_hidden = false)
     ?(include_agent_internal = false) _state

@@ -7,7 +7,7 @@
 
 type t =
   | Read_backlog_counts
-  | Count_active_agents
+  | Count_running_keeper_fibers
   | Cursor_stale
   | Board_events
   | Empty_run_reasons

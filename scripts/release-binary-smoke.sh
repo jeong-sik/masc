@@ -30,17 +30,21 @@ cd "$repo_root"
 
 [ -x "$BINARY" ] || { echo "smoke: binary not executable: $BINARY" >&2; exit "$EXIT_SETUP"; }
 [ -f config/tool_policy.toml ] || { echo "smoke: config/tool_policy.toml missing" >&2; exit "$EXIT_SETUP"; }
+[ -f config/runtime.toml ] || { echo "smoke: config/runtime.toml missing" >&2; exit "$EXIT_SETUP"; }
 
 tmp=$(mktemp -d -t masc-smoke.XXXXXX)
 trap 'rm -rf "$tmp"; [ -n "${PID:-}" ] && kill "$PID" 2>/dev/null || true' EXIT
 
 mkdir -p "$tmp/.masc/config"
 cp config/tool_policy.toml "$tmp/.masc/config/tool_policy.toml"
+cp config/runtime.toml "$tmp/.masc/config/runtime.toml"
 
 log="$tmp/boot.log"
 echo "smoke: booting $BINARY on :$PORT under $tmp"
+# Release smoke validates boot/listening and README drift; CI has no OTLP collector.
 MASC_BASE_PATH="$tmp" \
 MASC_BASE_PATH_INPUT="$tmp" \
+MASC_OTEL_ENABLED=0 \
   "$BINARY" --base-path "$tmp" --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
@@ -74,6 +78,7 @@ esac
 help_txt="$tmp/help.txt"
 MASC_BASE_PATH="$tmp" \
 MASC_BASE_PATH_INPUT="$tmp" \
+MASC_OTEL_ENABLED=0 \
 TERM=dumb \
   "$BINARY" --help=plain >"$help_txt" 2>/dev/null || true
 
@@ -103,7 +108,7 @@ readme_subcmds=$(awk '
     }
   }
 ' README.md \
-  | grep -hoE '(main_eio\.exe|masc) +[a-z][a-z0-9_-]*' \
+  | { grep -hoE '(main_eio\.exe|masc) +[a-z][a-z0-9_-]*' || true; } \
   | awk '{print $2}' | sort -u)
 
 drift=0

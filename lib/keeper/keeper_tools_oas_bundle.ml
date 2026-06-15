@@ -155,24 +155,32 @@ let make_tool_bundle
              | Some internal_def -> internal_def.input_schema
              | None -> descriptor.input_schema
            in
-           let h =
-             Keeper_tools_oas_handler.make_keeper_tool_handler
-               ~name:internal
-               ~input_schema:handler_input_schema
-               ~config
-                 ~meta
-                 ~ctx_snapshot
-                 ?turn_sandbox_factory
-                 ~exec_cache
-               ?search_fn
-               ?on_tool_called
-               ?clock
-               ~translate_input:descriptor.translate
-               ~failure_counts
-               ()
-           in
            Keeper_tool_descriptor.public_names_of_descriptor descriptor
            |> List.map (fun public_name ->
+             let h =
+               Keeper_tools_oas_handler.make_keeper_tool_handler
+                 ~name:internal
+                 ~input_schema:handler_input_schema
+                 ~config
+                   ~meta
+                   ~ctx_snapshot
+                   ?turn_sandbox_factory
+                   ~exec_cache
+                 ?search_fn
+                 ?on_tool_called
+                 ?clock
+                 ~pre_validate_input:(fun input ->
+                   match
+                     Keeper_tool_descriptor_resolution.validate_public_input_for_tool_call
+                       ~tool_name:public_name
+                       ~input
+                   with
+                   | Some result -> result
+                   | None -> Ok input)
+                 ~translate_input:descriptor.translate
+                 ~failure_counts
+                 ()
+             in
              Tool_bridge.oas_tool_of_masc
                ~name:public_name
                ~description:descriptor.description

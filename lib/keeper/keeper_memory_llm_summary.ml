@@ -220,7 +220,6 @@ let summarize_with_providers
 
 let make
     ?complete
-    ?provider_filter
     ?timeout_sec
     ~(runtime_id : string)
     ~(keeper_name : string)
@@ -230,7 +229,6 @@ let make
     match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
     | Some sw, Some net ->
         let clock = Eio_context.get_clock_opt () in
-        ignore provider_filter;
         (* RFC-0206: named-runtime provider resolution is gone; the memory
            summary uses the single default runtime's provider config. *)
         (match

@@ -79,6 +79,10 @@ let of_wire wire =
   else if
     String.starts_with ~prefix:"api_error_" lowered
     || String.equal lowered "provider_error"
+    || String.equal lowered "provider_error_timeout"
+    || String.starts_with ~prefix:"provider_error_timeout:" lowered
+    || String.equal lowered "provider_error_network:timeout"
+    || String.starts_with ~prefix:"provider_error_network:timeout:" lowered
   then Provider_runtime_failure wire
   else if String.starts_with ~prefix:"completion_contract_violation:" lowered
   then Completion_contract_violation wire
@@ -128,6 +132,10 @@ let is_transient_provider_runtime_failure = function
     let lowered = String.lowercase_ascii wire in
     String.equal lowered wire_api_error_timeout
     || String.equal lowered wire_api_error_network
+    || String.equal lowered "provider_error_timeout"
+    || String.starts_with ~prefix:"provider_error_timeout:" lowered
+    || String.equal lowered "provider_error_network:timeout"
+    || String.starts_with ~prefix:"provider_error_network:timeout:" lowered
   | Runtime_exhausted _
   | Config_or_auth _
   | Completion_contract_violation _

@@ -30,6 +30,61 @@ let find_row ~provider ~model ~keeper rows =
       && row.keeper_profile = keeper)
     rows
 
+let json_check_status_completed : Tool_call_quality_benchmark.json_check =
+  {
+    path = "$.status";
+    equals = Some (`String "completed");
+    contains = None;
+    min_int = None;
+    present = None;
+  }
+
+let selector_case ?(forbidden_tools = []) ?(forbidden_selectors = []) () :
+    Tool_call_quality_benchmark.benchmark_case =
+  {
+    id = "selector_case";
+    prompt = "synthetic selector scoring case";
+    category = Tool_call_quality_benchmark.Tool_use;
+    keeper_profiles = [ "bench-selector" ];
+    forbidden_tools;
+    forbidden_selectors;
+    max_tool_calls = 3;
+    success_checks = [ json_check_status_completed ];
+    arg_checks = [];
+    recovery_policy = None;
+  }
+
+let selector_tool_call ?route_evidence tool_name :
+    Tool_call_quality_benchmark.tool_call =
+  {
+    tool_name;
+    success = true;
+    input = `Assoc [];
+    output = None;
+    route_evidence;
+    duration_ms = None;
+  }
+
+let selector_run tool_calls : Tool_call_quality_benchmark.evidence_run =
+  {
+    case_id = "selector_case";
+    provider = "provider-d";
+    model = "model-d-5.4";
+    keeper_profile = "bench-selector";
+    run_id = None;
+    repeat_index = None;
+    prompt_fingerprint = None;
+    task_success = Some true;
+    final_output = Some "completed";
+    final_result = Some (`Assoc [ ("status", `String "completed") ]);
+    latency_ms = None;
+    input_tokens = None;
+    output_tokens = None;
+    cost_usd = None;
+    status = Tool_call_quality_benchmark.Run_ok;
+    tool_calls;
+  }
+
 let test_load_cases_and_runs () =
   let cases, runs = load_fixture () in
   check int "case count" 4 (List.length cases);
@@ -103,6 +158,84 @@ let test_csv_render_has_headers () =
   check bool "csv contains analyst keeper row" true
     (String_util.contains_substring csv "bench-analyst")
 
+let test_forbidden_selector_matches_descriptor_evidence () =
+  let route_evidence =
+    `Assoc
+      [
+        ("descriptor_id", `String "masc.agent.card");
+        ("runtime_handler", `String "Tool_masc_agent_dispatch");
+      ]
+  in
+  let case =
+    selector_case
+      ~forbidden_selectors:[ Eval_tool_selector.Descriptor_id "masc.agent.card" ]
+      ()
+  in
+  let run = selector_run [ selector_tool_call ~route_evidence "masc_agent_card" ] in
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  | Some score ->
+      check bool "selector degrades pass" false score.passed;
+      check (float 0.0001) "tool selection failed" 0.0 score.tool_selection;
+      check (float 0.0001) "unnecessary tool counted" 1.0
+        score.unnecessary_tool_rate
+  | None -> fail "score_run unexpectedly returned None"
+
+let test_forbidden_selector_matches_eval_tag_evidence () =
+  let route_evidence =
+    `Assoc
+      [
+        ("descriptor_id", `String "masc.agent.card");
+        ("eval_tags", `List [ `String "agent_profile_lookup" ]);
+      ]
+  in
+  let case =
+    selector_case
+      ~forbidden_selectors:[ Eval_tool_selector.Eval_tag "agent_profile_lookup" ]
+      ()
+  in
+  let run = selector_run [ selector_tool_call ~route_evidence "renamed_agent_card" ] in
+  match Tool_call_quality_benchmark.score_run ~cases:[ case ] run with
+  | Some score ->
+      check bool "eval tag degrades pass" false score.passed;
+      check (float 0.0001) "tool selection failed" 0.0 score.tool_selection
+  | None -> fail "score_run unexpectedly returned None"
+
+let test_loader_parses_forbidden_selectors () =
+  let path = Filename.temp_file "tool-call-quality-selectors" ".json" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      Fs_compat.save_file path
+        {|{
+  "cases": [
+    {
+      "id": "selector_case",
+      "prompt": "synthetic selector case",
+      "category": "tool_use",
+      "keeper_profiles": ["bench-selector"],
+      "forbidden_tools": [],
+      "forbidden_selectors": [
+        {"type": "descriptor_id", "value": "masc.agent.card"},
+        {"type": "receipt_label", "key": "family", "value": "profile_lookup"}
+      ],
+      "max_tool_calls": 3,
+      "success_checks": [
+        {"path": "$.status", "equals": "completed"}
+      ],
+      "arg_checks": []
+    }
+  ]
+}|};
+      match Tool_call_quality_benchmark.load_cases_from_file path with
+      | Ok [ case ] ->
+          check int "selector count" 2
+            (List.length case.Tool_call_quality_benchmark.forbidden_selectors)
+      | Ok cases ->
+          fail
+            (Printf.sprintf "expected one parsed case, got %d"
+               (List.length cases))
+      | Error msg -> fail ("load_cases_from_file failed: " ^ msg))
+
 let () =
   run "tool_call_quality_benchmark"
     [
@@ -111,5 +244,11 @@ let () =
            test_case "summarizes rollups and stability" `Quick
              test_summary_rollups_and_stability;
            test_case "renders csv" `Quick test_csv_render_has_headers;
+           test_case "forbidden selector matches descriptor evidence" `Quick
+             test_forbidden_selector_matches_descriptor_evidence;
+           test_case "forbidden selector matches eval tag evidence" `Quick
+             test_forbidden_selector_matches_eval_tag_evidence;
+           test_case "loader parses forbidden selectors" `Quick
+             test_loader_parses_forbidden_selectors;
          ]);
     ]

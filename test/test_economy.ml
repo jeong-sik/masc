@@ -149,7 +149,7 @@ let test_spend_model_call () =
       match Economy.spend
         ~base_path:dir ~agent_name:"spender"
         ~amount:0.05 ~kind:Spend_model_call
-        ~reason:"provider_k call" () with
+        ~reason:"glm call" () with
       | Error msg -> Alcotest.fail msg
       | Ok balance ->
         Alcotest.(check (float 0.001)) "10.0 - 0.05 = 9.95" 9.95 balance));

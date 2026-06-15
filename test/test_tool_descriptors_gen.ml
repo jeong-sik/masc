@@ -162,8 +162,8 @@ let descriptor_internal_schema name : tool_schema =
   | None -> Alcotest.failf "descriptor for internal tool %S not found" name
 ;;
 
-(* Regression guard for PR #19864 -> keeper "AllowList pruned ... WebSearch,
-   WebFetch" spam. Web tools are descriptor-backed keeper tools: they MUST be
+(* Regression guard for PR #19864 -> keeper web alias pruning spam.
+   Web tools are descriptor-backed keeper tools: they MUST be
    present in the raw substrate inventory, but their schema owner is
    [Keeper_tool_descriptor.public_descriptors], not [Tool_descriptors_gen]. *)
 let test_web_tools_owned_by_keeper_descriptors () =

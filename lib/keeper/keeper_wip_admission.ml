@@ -115,6 +115,12 @@ let reject_reason_to_string = function
   | Goal_cap -> "goal_cap"
   | Category_cap -> "category_cap"
 
+let reject_reason_axis = function
+  | Global_cap -> "global"
+  | Repo_cap -> "repo"
+  | Goal_cap -> "goal"
+  | Category_cap -> "category"
+
 type rejection = {
   reason : reject_reason;
   current : int;
@@ -215,6 +221,7 @@ let decision_to_json = function
     `Assoc
       [ ("admitted", `Bool false)
       ; ("reason", `String (reject_reason_to_string reason))
+      ; ("axis", `String (reject_reason_axis reason))
       ; ("current", `Int current)
       ; ("limit", `Int limit)
       ; ("scope_key", `String scope_key)

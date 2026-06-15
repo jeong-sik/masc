@@ -135,7 +135,6 @@ let register_with_state
     ; last_error = None
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
-    ; last_agent_count = 0
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
@@ -218,7 +217,6 @@ let register_restarting ~base_path name meta
     ; last_error = None
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
-    ; last_agent_count = 0
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None

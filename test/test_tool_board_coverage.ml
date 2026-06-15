@@ -1124,7 +1124,7 @@ let test_board_curation_submit_roundtrips_to_read () =
 
 let mcp_runtime_board_dispatch ~sw ~clock name args =
   let state = Mcp_server.create_state ~base_path:_test_base_path in
-  Mcp_tool_runtime_board.dispatch ~config:state.Mcp_server.workspace_config
+  Mcp_tool_runtime_board.dispatch ~config:(Mcp_server.workspace_config state)
     ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~sw ~clock ~name
     ~start_time:(Unix.gettimeofday ())
 
@@ -1406,7 +1406,7 @@ let test_post_get_success () =
     |> Yojson.Safe.Util.to_string
   in
   Alcotest.(check bool) "post_id not empty" true (String.length post_id > 0);
-  let ok2, body2 = dispatch "masc_board_get"
+  let ok2, body2 = dispatch "masc_board_post_get"
     (make_args [("post_id", `String post_id)]) in
   Alcotest.(check bool) "get ok" true ok2;
   Alcotest.(check bool) "get has content" true (String.length body2 > 0)
@@ -1415,7 +1415,7 @@ let test_post_get_not_found () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let ok, body = dispatch "masc_board_get"
+  let ok, body = dispatch "masc_board_post_get"
     (make_args [("post_id", `String "nonexistent-id")]) in
   Alcotest.(check bool) "not found is idempotent success" true ok;
   Alcotest.(check bool) "body mentions gone" true

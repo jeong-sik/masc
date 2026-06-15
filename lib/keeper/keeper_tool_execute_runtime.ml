@@ -178,9 +178,24 @@ let handle_tool_execute_typed
         let sandbox_profile, _sandbox_network_mode =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
+        let local_dispatch_sandbox ?(extra_fields = []) () =
+          match
+            Keeper_secret_projection.local_env_for_keeper
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
+              ()
+          with
+          | Error err ->
+            Error
+              (Keeper_sandbox_shell_ir_target.target_error
+                 ~fields:extra_fields
+                 ("local_secret_projection_failed: " ^ err))
+          | Ok base_host_env ->
+            Ok (Masc_exec.Sandbox_target.host (), extra_fields, base_host_env)
+        in
         let dispatch_sandbox =
           match sandbox_profile with
-          | Local -> Ok (Masc_exec.Sandbox_target.host (), [])
+          | Local -> local_dispatch_sandbox ()
           | Docker ->
             if typed_input_has_env input
             then
@@ -189,7 +204,11 @@ let handle_tool_execute_typed
                    "typed Shell IR Docker dispatch does not support env yet")
             else (
               match docker_local_fallback_target ~meta with
-              | Some fallback when in_playground -> Ok fallback
+              | Some (target, fields) when in_playground ->
+                (match target with
+                 | Masc_exec.Sandbox_target.Host ->
+                   local_dispatch_sandbox ~extra_fields:fields ()
+                 | Docker _ -> Ok (target, fields, None))
               | Some _ | None ->
                 docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
                 |> Result.map (fun target ->
@@ -197,7 +216,8 @@ let handle_tool_execute_typed
                   , [ "requested_sandbox", `String "docker"
                     ; "via", `String "docker"
                     ; "sandbox_profile", `String "docker"
-                    ] )))
+                    ]
+                  , None )))
         in
         (match dispatch_sandbox with
          | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->
@@ -207,7 +227,7 @@ let handle_tool_execute_typed
                 @ execution_location_fields cwd
                 @ fields)
              message
-         | Ok (dispatch_sandbox, sandbox_extra_fields) ->
+         | Ok (dispatch_sandbox, sandbox_extra_fields, base_host_env) ->
         let response_cwd_json =
           typed_execute_response_cwd_json
             ~turn_sandbox_factory
@@ -380,6 +400,7 @@ let handle_tool_execute_typed
               ~base_path:root
               ~workdir:cwd
               ~sandbox:dispatch_sandbox
+              ?base_host_env
               ~on_output_chunk
               envelope
           in

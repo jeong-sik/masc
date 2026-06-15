@@ -139,7 +139,7 @@ default = "transport_harness.smoke"
 
 [providers.transport_harness]
 display-name = "Transport Harness Smoke"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.smoke]

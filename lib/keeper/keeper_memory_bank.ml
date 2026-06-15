@@ -905,9 +905,9 @@ let append_voice_output
 let summarize_memory_bank_lines
     (lines : string list)
     ~(recent_limit : int) : keeper_memory_summary =
+  let raw_rows = lines |> List.filter_map parse_memory_bank_row in
   let parsed =
-    lines
-    |> List.filter_map parse_memory_bank_row
+    raw_rows
     |> List.map (fun (row : keeper_memory_row_raw) ->
          { kind = row.kind
          ; text = row.text
@@ -955,8 +955,21 @@ let summarize_memory_bank_lines
     | (kind, _) :: _ -> Some kind
     | [] -> None
   in
+  (* Voice output is self-generated speech.  If it surfaces as the most
+     recent note, the model treats its own spoken text as a fresh user
+     request and re-enters the voice tool in a self-echo loop (2026-06-14
+     sangsu voice repeat incident).  Keep the row in the bank for search,
+     but exclude it from the auto-injected recent-note preview. *)
   let recent_notes =
-    parsed
+    raw_rows
+    |> List.filter (fun (row : keeper_memory_row_raw) ->
+         not (String.equal row.source "voice_output"))
+    |> List.map (fun (row : keeper_memory_row_raw) ->
+         { kind = row.kind
+         ; text = row.text
+         ; priority = row.priority
+         ; ts_unix = row.ts_unix
+         })
     |> List.rev
     |> take (max 0 recent_limit)
   in

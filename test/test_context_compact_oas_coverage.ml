@@ -13,6 +13,10 @@ module Scoring = Masc.Context_compact_oas
 let msg role text : Agent_sdk.Types.message =
   { role; content = [Types.Text text]; name = None; tool_call_id = None; metadata = [] }
 
+let starts_with ~prefix s =
+  let prefix_len = String.length prefix in
+  String.length s >= prefix_len && String.sub s 0 prefix_len = prefix
+
 let tool_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
   { role = Types.Tool;
     content =
@@ -104,7 +108,17 @@ let test_compact_summarize_old () =
     ~messages:msgs
     ~strategies:[Compact.SummarizeOld] () in
   check bool "message count reduced" true
-    (List.length result < List.length msgs)
+    (List.length result < List.length msgs);
+  let summary_text = Agent_sdk.Types.text_of_message (List.hd result) in
+  check bool "summary uses sticky memory anchor" true
+    (starts_with ~prefix:"[MEMORY_SUMMARY]" summary_text);
+  let summary_score =
+    result
+    |> Scoring.score_messages
+    |> List.assoc 0
+  in
+  check bool "summary survives importance scoring" true
+    (summary_score >= 0.95)
 
 (* ================================================================ *)
 (* Shared Scoring Consistency Tests (C3)                            *)

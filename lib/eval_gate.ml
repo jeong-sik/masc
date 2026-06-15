@@ -478,6 +478,9 @@ let guarded_execute
           duration_ms;
           error;
           cost_usd = Trajectory.tool_cost_estimate tool_name;
+          (* RFC-0233: this gate path has no paired tool_calls row to join
+             against; id adoption for worker-gate executions is deferred. *)
+          execution_id = None;
         } in
         Trajectory.record_entry acc entry
   in

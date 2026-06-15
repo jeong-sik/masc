@@ -4,8 +4,11 @@
     normalized before [keeper_meta] decoding. *)
 
 
-(* Config fields owned by TOML only.  Never written to JSON; scrubbed
-   from existing JSON on first write.
+(* Config/policy fields owned by TOML only.  Never written to JSON; scrubbed
+   from existing JSON on first write.  Keeper self-model fields
+   [will/needs/desires/instructions] are identity snapshot fields, not policy
+   config: meta JSON must keep them so dashboards and status readers can show
+   the effective keeper persona without re-running prompt construction.
 
    Defined here (not in keeper_meta_json.ml) to avoid a cycle:
    keeper_meta_json.ml includes this module, so referencing a value
@@ -14,9 +17,8 @@
 let config_field_names =
   [ "goal"; "short_goal"; "mid_goal"; "long_goal"
   ; "social_model"; "runtime_id"
-  ; "will"; "needs"; "desires"; "instructions"
   ; "sandbox_profile"; "sandbox_image"; "network_mode"; "allowed_paths"
-  ; "tool_access"; "tool_denylist"
+  ; "tool_denylist"
   ; "mention_targets"
   ; "proactive_enabled"; "proactive_idle_sec"; "proactive_cooldown_sec"
   ; "compaction_profile"; "compaction_ratio_gate"

@@ -1,6 +1,5 @@
 (* RFC-0166: the previous body of [inference_model_bucket] was a
-   substring classifier over upstream LLM provider names
-   ("provider_c"/"agent_llm_a"/"provider_d"/"provider_f"/"provider_k"/"provider_h"/"llama"). The
+   substring classifier over upstream LLM provider names. The
    server-side enumeration is removed: histogram label cardinality
    becomes 1 ("upstream") rather than a closed enum of providers.
    Per-provider partitioning, if needed, is now the dashboard's

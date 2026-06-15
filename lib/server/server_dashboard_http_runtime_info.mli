@@ -20,6 +20,7 @@
       {!dashboard_runtime_probe_http_json},
       {!runtime_inventory_json},
       {!dashboard_perf_http_json},
+      {!scheduled_automation_dashboard_json},
       {!dashboard_tools_http_json}).
     - {b runtime probe test seams}
       ({!set_dashboard_runtime_probe_runner_for_tests},
@@ -103,6 +104,11 @@ val dashboard_tools_http_json :
     provided, internal phases (config_resolution, runtime_resolution,
     tools_compute) are accumulated into the [Server_timing.t] for surfacing
     via the [Server-Timing] response header. *)
+
+val scheduled_automation_dashboard_json : Workspace.config -> Yojson.Safe.t
+(** Renders the read-only dashboard projection for scheduled internal
+    automation. This summarizes the schedule store as a small FSM envelope
+    plus recent request rows; it does not refresh due state or run work. *)
 
 (** {1 Runtime-probe test seams} *)
 

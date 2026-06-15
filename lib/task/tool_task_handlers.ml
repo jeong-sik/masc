@@ -311,7 +311,11 @@ let handle_add_task ~tool_name ~start_time ctx args =
     | Ok contract ->
         Tool_result.ok ~tool_name ~start_time
           (Workspace.add_task ?contract
-            ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id)
+            ?goal_id
+            ~reject_if:
+              (Workspace_task_capacity.rejection_for_add_task_for_config
+                 ctx.config
+                 ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description)
 
@@ -490,11 +494,11 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
      agents_dir. *)
   let result = Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
   match result with
-  | Workspace.Claim_next_claimed { message; task_id; _ } ->
+  | Workspace.Claim_next_claimed { message; task_id; scope_widened } ->
     sync_owner_current_task_binding ctx;
     sync_planning_current_task_with_owned_task ctx;
     append_claim_observation message ~now:(Time_compat.now ())
-      ~agent_name:ctx.agent_name ~task_id
+      ~agent_name:ctx.agent_name ~task_id ~scope_widened
     |> Tool_result.ok ~tool_name ~start_time
   | Workspace.Claim_next_no_unclaimed ->
     Tool_result.ok ~tool_name ~start_time "No unclaimed tasks available"

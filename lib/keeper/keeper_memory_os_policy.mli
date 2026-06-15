@@ -13,13 +13,30 @@ type retention_verdict =
   | KeepVerbatim
   | Discard
 
+(** Tokenise fact content into lowercase alphanumeric words >= 3 chars. *)
+val fact_tokens : string -> string list
+
+(** Jaccard-like overlap ratio between two token sets. *)
+val token_overlap_ratio : string list -> string list -> float
+
+(** Compute contradict multiplier for a fact given other candidate facts.
+    Returns 1.0 (no penalty) when no contradict evidence is found. *)
+val contradict_multiplier : ?other_facts:fact list -> fact -> float
+
 (** Composite importance score for a fact.
 
     Score = confidence × access_recency × truth_recency ×
-    stale_penalty × access_boost.  [access_recency] uses
-    [last_accessed], while [truth_recency] uses [last_verified_at] or
-    [first_seen] so recall cannot make an unverified claim fresh again. *)
-val score_fact : ?lambda:float -> ?alpha:float -> now:float -> fact -> float
+    stale_penalty × access_boost × contradict_mult.
+
+    [other_facts] feeds the contradict detection — any fact with >= 30%
+    token overlap and higher confidence reduces the score proportionally. *)
+val score_fact
+  :  ?lambda:float
+  -> ?alpha:float
+  -> ?other_facts:fact list
+  -> now:float
+  -> fact
+  -> float
 
 val truth_recency_factor : ?lambda:float -> now:float -> fact -> float
 val stale_penalty : fact -> float
@@ -36,29 +53,17 @@ val score_tool_result
   -> unit
   -> float
 
-(** Lightweight keyword access bump.
-
-    Increments [access_count] and updates [last_accessed] for facts
-    whose claims contain at least one keyword from [turn_text]. This is
-    a cheap, deterministic heuristic to approximate recall without an
-    embedding model. *)
+(** Lightweight keyword access bump. *)
 val bump_access_for_turn
   :  now:float
   -> fact list
   -> turn_text:string
   -> fact list
 
-(** RFC-0243: bounded EMA weight for a single re-observation (see [blend_confidence]). *)
-val reaffirm_weight : float
-
-(** Blend a prior confidence with a re-observed confidence (bounded EMA). The
-    result is a convex combination of the two, so it stays in [0, 1] and moves a
-    fixed fraction toward [observed]. *)
-val blend_confidence : prior:float -> observed:float -> float
-
-(** Fold a re-observation into an existing fact: blends confidence toward the
-    re-observed value, increments [access_count], and refreshes [last_accessed]
-    and [last_verified_at]. Identity and first-seen provenance are preserved.
-    This is the write-time merge law that makes the score's re-observation
-    signals live (RFC-0243). *)
-val reobserve_fact : now:float -> existing:fact -> incoming:fact -> fact
+(** Find facts that contradict a given observation token set.
+    Returns facts with >= [min_overlap] token overlap and confidence > 0.5. *)
+val find_contradictors
+  :  ?min_overlap:float
+  -> string list
+  -> fact list
+  -> fact list

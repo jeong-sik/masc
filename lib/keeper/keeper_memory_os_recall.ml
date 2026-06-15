@@ -89,8 +89,8 @@ let fact_is_current ~now fact =
   | Some ts -> ts >= now
 ;;
 
-let render_fact ~now fact =
-  let score = Keeper_memory_os_policy.score_fact ~now fact in
+let render_fact ~now ?(other_facts = []) fact =
+  let score = Keeper_memory_os_policy.score_fact ~now ~other_facts fact in
   let source = fact.source in
   Printf.sprintf
     "- [category=%s confidence=%.2f stale=%.2f score=%.3f turn=%d] %s"
@@ -160,9 +160,10 @@ let dedup_by_claim scored =
 ;;
 
 let scored_facts ~now facts =
+  let other_facts = facts in
   facts
   |> List.filter (fact_is_current ~now)
-  |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~now fact, fact)
+  |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~now ~other_facts fact, fact)
   |> List.sort (fun (a, _) (b, _) -> compare b a)
   |> dedup_by_claim
   |> List.map snd

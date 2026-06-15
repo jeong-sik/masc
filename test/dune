@@ -1533,6 +1533,8 @@
 
 (include stanzas/test_keeper_memory_write.inc)
 
+(include stanzas/test_keeper_memory_row_source.inc)
+
 (include stanzas/test_memory_facade.inc)
 
 (include stanzas/test_keeper_tool_emission_hook.inc)

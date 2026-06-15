@@ -48,14 +48,16 @@ let align_keeper_runtime_status
   if not keepalive_running
   then surface_status
   else (
-    let normalized_surface = String.lowercase_ascii (String.trim surface_status) in
     let runtime_status =
       if health_state_allows_runtime_status_override diagnostic
       then runtime_status_from_live_signal agent_status_json
       else None
     in
-    match normalized_surface, runtime_status with
-    | ("inactive" | "offline"), Some status -> status
+    (* RFC-0089: override only when the surface status is inactive/offline.
+       Classify via the typed surface_status SSOT instead of string literals. *)
+    match Keeper_status_runtime.surface_status_of_string_opt surface_status, runtime_status with
+    | Some (Keeper_status_runtime.Surface_inactive | Keeper_status_runtime.Surface_offline), Some status ->
+      status
     | _ -> surface_status)
 ;;
 

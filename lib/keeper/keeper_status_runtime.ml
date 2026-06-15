@@ -507,6 +507,40 @@ let augment_keeper_diagnostic_json
         :: filtered)
   | other -> other
 
+(* RFC-0089 — the keeper "surface status" is the display status that
+   [keeper_surface_status] derives from (keeper_health × agent_status). It is
+   carried on the wire as a string and re-classified by literal in the operator
+   align step, the server row patcher, and the dashboard pressure ranker. Close
+   it into a sum so the producer builds it exhaustively and those consumers
+   match it via [surface_status_of_string_opt] instead of comparing literals.
+   "paused" is NOT part of this domain — it is a control-plane override
+   (meta.paused) applied one layer above, at operator_control_snapshot. *)
+type surface_status =
+  | Surface_active
+  | Surface_busy
+  | Surface_listening
+  | Surface_inactive
+  | Surface_offline
+  | Surface_idle
+
+let surface_status_to_string = function
+  | Surface_active -> "active"
+  | Surface_busy -> "busy"
+  | Surface_listening -> "listening"
+  | Surface_inactive -> "inactive"
+  | Surface_offline -> "offline"
+  | Surface_idle -> "idle"
+
+let surface_status_of_string_opt s =
+  match String.lowercase_ascii (String.trim s) with
+  | "active" -> Some Surface_active
+  | "busy" -> Some Surface_busy
+  | "listening" -> Some Surface_listening
+  | "inactive" -> Some Surface_inactive
+  | "offline" -> Some Surface_offline
+  | "idle" -> Some Surface_idle
+  | _ -> None
+
 let keeper_surface_status
     ~(agent_status : Yojson.Safe.t)
     ~(diagnostic : Yojson.Safe.t) =
@@ -516,16 +550,20 @@ let keeper_surface_status
     |> keeper_health_or_offline ~source:"keeper_surface_status"
   in
   let agent_runtime_status = agent_runtime_status_opt agent_status in
-  match health_state with
-  | KH_healthy -> (
-      match agent_runtime_status with
-      | Some ((Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening) as s) ->
-          Masc_domain.string_of_agent_status s
-      | Some Masc_domain.Inactive -> "offline"
-      | None -> "active")
-  | KH_idle -> "idle"
-  | KH_stale | KH_degraded | KH_zombie | KH_dead -> "inactive"
-  | KH_offline -> "offline"
+  let surface =
+    match health_state with
+    | KH_healthy -> (
+        match agent_runtime_status with
+        | Some Masc_domain.Active -> Surface_active
+        | Some Masc_domain.Busy -> Surface_busy
+        | Some Masc_domain.Listening -> Surface_listening
+        | Some Masc_domain.Inactive -> Surface_offline
+        | None -> Surface_active)
+    | KH_idle -> Surface_idle
+    | KH_stale | KH_degraded | KH_zombie | KH_dead -> Surface_inactive
+    | KH_offline -> Surface_offline
+  in
+  surface_status_to_string surface
 
 let keeper_diagnostic_json
     ~(meta : keeper_meta)

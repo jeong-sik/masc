@@ -177,12 +177,14 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
        , string_field "category" fields
        , int_field "source_turn" fields
      with
-     | Some claim, Some confidence, Some category, Some turn when turn >= 0 ->
+     | Some claim, Some confidence, Some category_str, Some turn when turn >= 0 ->
        let tool_call_id = optional_string_field "source_tool_call_id" fields in
        Some
          { claim
          ; confidence
-         ; category
+         (* RFC-0244 §2.3 / #21241: parse the LLM's free-text category label into
+            the closed [category] sum once here at the producer boundary. *)
+         ; category = category_of_string category_str
          ; source = claim_source ~trace_id turn tool_call_id
          (* Tier-1 (per-keeper) facts carry no distinct-keeper corroboration set;
             the consolidator populates observed_by only on promotion (RFC-0244). *)

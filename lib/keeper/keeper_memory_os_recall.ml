@@ -99,7 +99,7 @@ let render_fact ~now ?(seed_tokens = []) fact =
   let source = fact.source in
   Printf.sprintf
     "- [category=%s confidence=%.2f stale=%.2f score=%.3f turn=%d] %s"
-    (sanitize_atom fact.category)
+    (sanitize_atom (category_to_string fact.category))
     fact.confidence
     fact.stale_factor
     score
@@ -120,7 +120,7 @@ let render_shared_fact ~now ?(seed_tokens = []) fact =
   Printf.sprintf
     "- [%s category=%s confidence=%.2f score=%.3f] %s"
     provenance
-    (sanitize_atom fact.category)
+    (sanitize_atom (category_to_string fact.category))
     fact.confidence
     score
     (sanitize_text ~max_len:max_fact_text_len fact.claim)

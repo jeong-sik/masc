@@ -70,6 +70,12 @@ let typed_input_command_text = Keeper_tool_execute_input.typed_input_command_tex
 let typed_input_has_env = Keeper_tool_execute_input.typed_input_has_env
 let typed_validation_error_text = Keeper_tool_execute_input.typed_validation_error_text
 
+let typed_validation_deterministic_retry_fields
+      (_ : Keeper_tool_execute_typed_input.validation_error)
+  =
+  Keeper_tool_deterministic_error.deterministic_retry_fields
+    Keeper_tool_deterministic_error.Command_shape_blocked
+
 let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
@@ -150,6 +156,7 @@ let handle_tool_execute_typed
            let fields =
              [ "typed", `Bool true; "cwd", `String cwd ]
              @ execution_location_fields cwd
+             @ typed_validation_deterministic_retry_fields e
              @
              (match alts with
               | [] -> []
@@ -256,6 +263,7 @@ let handle_tool_execute_typed
             [ "typed", `Bool true; "cmd", `String cmd ]
             @ response_cwd_field
             @ execution_location_fields cwd
+            @ typed_validation_deterministic_retry_fields e
             @
             (match alts with
              | [] -> []

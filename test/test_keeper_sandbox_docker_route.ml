@@ -715,7 +715,14 @@ let check_typed_validation_error needle raw =
   Alcotest.(check (option bool)) "typed response" (Some true)
     (parse_bool_field raw "typed");
   Alcotest.(check bool) "validation error surfaced" true
-    (response_mentions raw "error" needle)
+    (response_mentions raw "error" needle);
+  let deterministic_retry = parse_field raw "deterministic_retry" in
+  Alcotest.(check (option string)) "deterministic reason"
+    (Some "command_shape_blocked")
+    (Json.member "reason" deterministic_retry |> Json.to_string_option);
+  Alcotest.(check (option bool)) "same args retry disabled"
+    (Some false)
+    (Json.member "retry_same_args" deterministic_retry |> Json.to_bool_option)
 
 let test_execute_typed_env_wrapper_target_allowed () =
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Local
@@ -746,6 +753,23 @@ let test_execute_typed_single_stage_pipeline_rejected () =
     ~args:(tool_execute_typed_single_stage_pipeline_args ~cwd:playground)
     ()
   |> check_typed_validation_error "Pipeline.stages requires at least two stages"
+
+let test_execute_typed_repeated_executable_is_deterministic () =
+  setup ~sandbox:Keeper_types_profile_sandbox.Local
+  @@ fun ~config ~meta ~playground ->
+  Keeper_tool_command_runtime.handle_tool_execute
+    ~turn_sandbox_factory:None
+    ~exec_cache:None
+    ~config
+    ~meta
+    ~args:
+      (tool_execute_typed_exec_args
+         ~cwd:playground
+         ~argv:[ "find"; "."; "-name"; "*.ml" ]
+         "find")
+    ()
+  |> check_typed_validation_error
+       "executable \"find\" is repeated as argv[0]"
 
 let test_execute_typed_pipeline_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
@@ -2237,6 +2261,9 @@ let () =
           Alcotest.test_case
             "tool_execute typed single-stage pipeline is rejected"
             `Quick test_execute_typed_single_stage_pipeline_rejected;
+          Alcotest.test_case
+            "tool_execute typed repeated executable is deterministic"
+            `Quick test_execute_typed_repeated_executable_is_deterministic;
           Alcotest.test_case
             "tool_execute typed pipeline falls back to local playground"
             `Quick test_execute_typed_pipeline_falls_back_to_local_playground;

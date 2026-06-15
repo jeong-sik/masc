@@ -50,11 +50,38 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+(* RFC-0020 — type the memory-bank provenance carrier. [source] is persisted as
+   a free string in memory_bank.jsonl by several producers; parsing it into a
+   closed variant on read lets the priority/metric/preview consumers match
+   exhaustively instead of comparing string literals. [Other] carries a
+   provenance string written by an out-of-band producer so the wire value still
+   round-trips (parse-don't-validate). *)
+type memory_row_source =
+  | Progress_consolidation
+  | Cross_trace_recurrence
+  | Tool_result
+  | Voice_output
+  | Other of string
+
+let memory_row_source_of_string = function
+  | "progress_consolidation" -> Progress_consolidation
+  | "cross_trace_recurrence" -> Cross_trace_recurrence
+  | "tool_result" -> Tool_result
+  | "voice_output" -> Voice_output
+  | other -> Other other
+
+let memory_row_source_to_string = function
+  | Progress_consolidation -> "progress_consolidation"
+  | Cross_trace_recurrence -> "cross_trace_recurrence"
+  | Tool_result -> "tool_result"
+  | Voice_output -> "voice_output"
+  | Other other -> other
+
 type keeper_memory_row_raw = {
   json: Yojson.Safe.t;
   kind: string;
   horizon: string;
-  source: string;
+  source: memory_row_source;
   generation: int;
   text: string;
   priority: int;
@@ -79,7 +106,7 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
     let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
     let horizon = memory_horizon_of_json_opt j in
     let expected_horizon = memory_horizon_of_kind_opt kind in
-    let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
+    let source_raw = Safe_ops.json_string ~default:"" "source" j |> String.trim in
     let trace_id = Safe_ops.json_string ~default:"" "trace_id" j |> String.trim in
     let generation = Safe_ops.json_int ~default:0 "generation" j in
     let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
@@ -92,11 +119,20 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
     | Some expected_horizon, Some horizon
       when String.equal expected_horizon horizon
            && kind <> ""
-           && source <> ""
+           && source_raw <> ""
            && trace_id <> ""
            && text <> ""
            && is_meaningful_memory_text text ->
-      Some { json = j; kind; horizon; source; generation; text; priority; ts_unix }
+      Some
+        { json = j
+        ; kind
+        ; horizon
+        ; source = memory_row_source_of_string source_raw
+        ; generation
+        ; text
+        ; priority
+        ; ts_unix
+        }
     | _ -> None
   with Yojson.Json_error _ ->
     None
@@ -225,7 +261,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
         ("ts_unix", `Float now);
         ("kind", `String "long_term");
         ("horizon", `String long_term_horizon);
-        ("source", `String "progress_consolidation");
+        ("source", `String (memory_row_source_to_string Progress_consolidation));
         ("schema_version", `Int keeper_memory_schema_version);
         ("priority", `Int consolidation_progress_priority);
         ("text", `String summary_text);
@@ -237,7 +273,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
         json = summary_json;
         kind = "long_term";
         horizon = long_term_horizon;
-        source = "progress_consolidation";
+        source = Progress_consolidation;
         generation;
         text = summary_text;
         priority = consolidation_progress_priority;
@@ -278,7 +314,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
           ("ts_unix", `Float now);
           ("kind", `String "long_term");
           ("horizon", `String long_term_horizon);
-          ("source", `String "cross_trace_recurrence");
+          ("source", `String (memory_row_source_to_string Cross_trace_recurrence));
           ("schema_version", `Int keeper_memory_schema_version);
           ("priority", `Int consolidation_recurrence_priority);
           ("text", `String row.text);
@@ -289,7 +325,7 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
           json = lt_json;
           kind = "long_term";
           horizon = long_term_horizon;
-          source = "cross_trace_recurrence";
+          source = Cross_trace_recurrence;
           generation = row.generation;
           text = row.text;
           priority = consolidation_recurrence_priority;
@@ -348,9 +384,9 @@ let compaction_priority
   in
   let source_bonus =
     match row.source with
-    | "cross_trace_recurrence" -> 4
-    | "progress_consolidation" -> 2
-    | _ -> 0
+    | Cross_trace_recurrence -> 4
+    | Progress_consolidation -> 2
+    | Tool_result | Voice_output | Other _ -> 0
   in
   max 1 (min 120 (row.priority + horizon_bonus + source_bonus))
 
@@ -385,8 +421,9 @@ let drop_memory_rows n rows =
 
 let consolidation_metric_source source =
   match source with
-  | "progress_consolidation" | "cross_trace_recurrence" -> source
-  | _ -> "other"
+  | (Progress_consolidation | Cross_trace_recurrence) as s ->
+    memory_row_source_to_string s
+  | Tool_result | Voice_output | Other _ -> "other"
 
 let memory_row_identity (row : keeper_memory_row_raw) =
   Yojson.Safe.to_string row.json
@@ -844,7 +881,7 @@ let append_memory_notes_from_tool_results
                  ; ("turn", `Int turn)
                  ; ("kind", `String "long_term")
                  ; ("horizon", `String long_term_horizon)
-                 ; ("source", `String "tool_result")
+                 ; ("source", `String (memory_row_source_to_string Tool_result))
                  ; ("schema_version", `Int keeper_memory_schema_version)
                  ; ( "priority",
                      `Int (tuned_priority_for_candidate ~kind:"long_term" ~text) )
@@ -890,7 +927,7 @@ let append_voice_output
       ; "turn", `Int turn
       ; "kind", `String kind
       ; "horizon", `String short_term_horizon
-      ; "source", `String "voice_output"
+      ; "source", `String (memory_row_source_to_string Voice_output)
       ; "schema_version", `Int keeper_memory_schema_version
       ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
       ; "text", `String text
@@ -969,7 +1006,9 @@ let summarize_memory_bank_lines
   let recent_notes =
     raw_rows
     |> List.filter (fun (row : keeper_memory_row_raw) ->
-         not (String.equal row.source "voice_output"))
+         match row.source with
+         | Voice_output -> false
+         | Progress_consolidation | Cross_trace_recurrence | Tool_result | Other _ -> true)
     |> List.map (fun (row : keeper_memory_row_raw) ->
          { kind = row.kind
          ; text = row.text

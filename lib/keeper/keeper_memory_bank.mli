@@ -265,11 +265,29 @@ val memory_candidates_from_snapshot_gated :
 
 (** {1 Bank wire format} *)
 
+type memory_row_source =
+  | Progress_consolidation
+  | Cross_trace_recurrence
+  | Tool_result
+  | Voice_output
+  | Other of string
+      (** Provenance of a memory-bank row. Parsed from the JSONL [source]
+          string on read; [Other] carries an out-of-band producer's literal so
+          the wire value round-trips (parse-don't-validate). *)
+
+val memory_row_source_of_string : string -> memory_row_source
+(** Total parse of a persisted [source] string. Unknown values become
+    [Other s]; never raises. *)
+
+val memory_row_source_to_string : memory_row_source -> string
+(** Inverse of {!memory_row_source_of_string} for the wire format.
+    [to_string (of_string s) = s] for every [s]. *)
+
 type keeper_memory_row_raw = {
   json : Yojson.Safe.t;
   kind : string;
   horizon : string;
-  source : string;
+  source : memory_row_source;
   generation : int;
   text : string;
   priority : int;

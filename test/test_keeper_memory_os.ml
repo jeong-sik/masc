@@ -1600,6 +1600,29 @@ let () =
             `Quick
             test_recall_dedups_repeated_claim
         ] )
+    ; ( "episode_ttl"
+      , [ Alcotest.test_case
+            "fact_is_current returns false for expired fact (valid_until < now)"
+            `Quick
+            (fun () ->
+              let now = 1_000_000.0 in
+              let f = { (fact_fixture ~now ()) with Types.valid_until = Some (now -. 1.0) } in
+              Alcotest.(check bool) "expired fact is not current" false (Keeper_memory_os_recall.fact_is_current ~now f))
+        ; Alcotest.test_case
+            "fact_is_current returns true for active fact (valid_until >= now)"
+            `Quick
+            (fun () ->
+              let now = 1_000_000.0 in
+              let f = { (fact_fixture ~now ()) with Types.valid_until = Some (now +. 1.0) } in
+              Alcotest.(check bool) "active fact is current" true (Keeper_memory_os_recall.fact_is_current ~now f))
+        ; Alcotest.test_case
+            "fact_is_current returns true for fact without TTL (valid_until = None)"
+            `Quick
+            (fun () ->
+              let now = 1_000_000.0 in
+              let f = { (fact_fixture ~now ()) with Types.valid_until = None } in
+              Alcotest.(check bool) "no-TTL fact is current" true (Keeper_memory_os_recall.fact_is_current ~now f))
+        ] )
     ; ( "retention"
       , [ Alcotest.test_case
             "cap_facts keeps top-ranked (RFC-0239 Q4)"

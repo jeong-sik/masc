@@ -88,7 +88,6 @@ let need_of_phase ~(phase : Fsm.phase)
       | _ -> None)
 
 let should_overlay_ledger = function
-  | Types.Tool_only_stay_silent
   | Types.Tool_only_comment_board
   | Types.Tool_only_post_board
   | Types.Tool_only_broadcast
@@ -159,7 +158,6 @@ let adapt_tool_only_turn (state : Types.social_state)
         },
         Types.Tool_only_progress_ledger,
         true )
-  | Types.Tool_only_stay_silent
   | Types.Tool_only_comment_board
   | Types.Tool_only_post_board
   | Types.Tool_only_broadcast

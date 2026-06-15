@@ -36,7 +36,6 @@ type t =
   | Memory_search
   | Memory_write
   | Search_files
-  | Stay_silent
   | Surface_read
   | Surface_post
   | Person_note_set
@@ -86,7 +85,6 @@ let to_string = function
   | Memory_search -> "keeper_memory_search"
   | Memory_write -> "keeper_memory_write"
   | Search_files -> "tool_search_files"
-  | Stay_silent -> "keeper_stay_silent"
   | Surface_read -> "keeper_surface_read"
   | Surface_post -> "keeper_surface_post"
   | Person_note_set -> "keeper_person_note_set"
@@ -137,7 +135,6 @@ let of_string = function
   | "keeper_memory_search" -> Some Memory_search
   | "keeper_memory_write" -> Some Memory_write
   | "tool_search_files" -> Some Search_files
-  | "keeper_stay_silent" -> Some Stay_silent
   | "keeper_surface_read" -> Some Surface_read
   | "keeper_surface_post" -> Some Surface_post
   | "keeper_person_note_set" -> Some Person_note_set
@@ -205,7 +202,6 @@ let is_keeper_board_tool = function
   | Memory_search
   | Memory_write
   | Search_files
-  | Stay_silent
   | Surface_read
   | Surface_post
   | Person_note_set

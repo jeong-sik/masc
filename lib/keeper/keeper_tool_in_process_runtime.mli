@@ -16,8 +16,6 @@ open Keeper_types_profile
 
 val handle_time_now : args:Yojson.Safe.t -> string
 
-val handle_stay_silent : args:Yojson.Safe.t -> string
-
 val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
 val handle_tool_search

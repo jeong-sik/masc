@@ -1,4 +1,4 @@
-(** Stay-silent loop recovery helpers for the unified keeper turn. *)
+(** No-progress loop recovery helpers for the unified keeper turn. *)
 
 val mark_loop_detected
   :  config:Workspace.config

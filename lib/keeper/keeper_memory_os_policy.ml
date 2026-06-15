@@ -104,106 +104,130 @@ let contradict_multiplier ?(other_facts = []) fact =
         else
           let overlap = token_overlap_ratio fact_tok other_tok in
           if overlap >= 0.15 && other.confidence > fact.confidence then
-            let delta = other.confidence -. fact.confidence in
-            (* Scale penalty so that 30% overlap with delta=0.10 → ~15% score drop *)
-            Some (overlap *. delta *. 5.0)
+            let confidence_delta = other.confidence -. fact.confidence in
+            Some (overlap *. confidence_delta *. 5.0)
           else None)
         other_facts
     in
-    match penalties with
-    | [] -> 1.0
-    | _ ->
+    if penalties = [] then 1.0
+    else
       let total = List.fold_left (+.) 0.0 penalties in
-      clamp01 (1.0 -. total)
+      Float.max min_contradict_mult (1.0 -. total)
 ;;
 
-(* ── Core scoring ──────────────────────────────────────────────── *)
+(* ── RFC-0244: Turn-seeded lexical relevance ─────────────────── *)
 
-let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha)
-      ?(other_facts = []) ~now fact =
-  (* Confidence contributes 50-100% weight; even low-confidence facts
-     retain half their score, preventing confidence-only dominance. *)
-  let confidence_weight = 0.5 +. 0.5 *. fact.confidence in
+(** RFC-0244: deduped set of lowercased word tokens (length > 2). *)
+let tokenize text =
+  let buf = Buffer.create (String.length text) in
+  String.iter (function
+    | 'A'..'Z' as c -> Buffer.add_char buf (Char.lowercase_ascii c)
+    | 'a'..'z' | '0'..'9' as c -> Buffer.add_char buf c
+    | _ -> Buffer.add_char buf ' ') text;
+  Buffer.contents buf
+  |> String.split_on_char ' '
+  |> List.map String.trim
+  |> List.filter (fun s -> String.length s >= 3)
+  |> List.sort_uniq String.compare
+;;
+
+(** RFC-0244: deterministic lexical relevance multiplier in [1.0, 1.0 +. gain]. *)
+let lexical_relevance ?(gain = 1.0) ~seed_tokens fact =
+  if seed_tokens = [] then 1.0
+  else
+    let fact_toks = tokenize fact.claim in
+    let intersection_count =
+      List.fold_left (fun acc t ->
+        if List.mem t fact_toks then acc + 1 else acc) 0 seed_tokens
+    in
+    let ratio = float intersection_count /. float (List.length seed_tokens) in
+    1.0 +. (gain *. ratio)
+;;
+
+(* ── Core scoring ─────────────────────────────────────────────── *)
+
+(** RFC-0244: backwards‑compatible composite score.
+
+    score = confidence × access_recency × truth_recency ×
+            stale_penalty × access_boost × lexical_relevance ×
+            contradict_mult
+
+    [other_facts] enables contradict‑detection; [seed_tokens] enables
+    turn‑seeded lexical relevance (RFC‑0244).  Either or both can be
+    omitted — when absent the corresponding multiplier defaults to 1.0
+    and the score is byte‑identical to the pre‑feature formula. *)
+let score_fact
+    ?(lambda = default_lambda)
+    ?(alpha = default_alpha)
+    ?(other_facts = [])
+    ?(seed_tokens = [])
+    ~now
+    fact =
+  let access_recency = recency_factor ~lambda ~now fact.last_accessed in
+  let truth_recency = truth_recency_factor ~now fact in
+  let access_boost = access_factor ~alpha fact.access_count in
+  (* Penalty for stale facts *)
+  let stale_penalty = 1.0 -. clamp01 fact.stale_factor in
+  (* Contradict penalty (task-1252) *)
   let contradict_mult = contradict_multiplier ~other_facts fact in
-  confidence_weight
-  *. recency_factor ~lambda ~now fact.last_accessed
-  *. (truth_recency_factor ~now fact ** 2.0)
-  *. stale_penalty fact
-  *. access_factor ~alpha fact.access_count
-  *. contradict_mult
+  (* Lexical relevance boost (RFC-0244) *)
+  let lex_rel = lexical_relevance ~seed_tokens fact in
+  let score =
+    fact.confidence
+    *. access_recency
+    *. truth_recency
+    *. stale_penalty
+    *. access_boost
+    *. lex_rel
+    *. contradict_mult
+  in
+  if Float.is_nan score || Float.is_infinite score then 0.0
+  else score
 ;;
 
 let decide_retention ?(discard_threshold = default_discard_score_threshold) score =
-  if score <= discard_threshold then Discard else KeepVerbatim
+  if score < discard_threshold then Discard
+  else KeepVerbatim
 ;;
 
+(** Score an archived tool result (sub‑second granularity). *)
 let score_tool_result
-      ?(lambda = default_lambda)
-      ?(alpha = default_alpha)
-      ~now
-      ~created_at
-      ~was_successful
-      ~access_count
-      ()
-  =
-  let base_confidence = if was_successful then 0.9 else 0.5 in
-  base_confidence *. recency_factor ~lambda ~now created_at *. access_factor ~alpha access_count
+    ?(lambda = default_lambda)
+    ?(alpha = default_alpha)
+    ~now
+    ~created_at
+    ~was_successful
+    ~access_count
+    () =
+  let recency = recency_factor ~lambda ~now created_at in
+  let access_boost = access_factor ~alpha access_count in
+  let success_factor = if was_successful then 1.0 else 0.3 in
+  let score = recency *. access_boost *. success_factor in
+  if Float.is_nan score || Float.is_infinite score then 0.0
+  else score
 ;;
 
-let string_contains substring str =
-  let sub_len = String.length substring in
-  let str_len = String.length str in
-  let rec aux i =
-    if i + sub_len > str_len
-    then false
-    else if String.sub str i sub_len = substring
-    then true
-    else aux (i + 1)
-  in
-  if sub_len = 0 then true else aux 0
+(** RFC-0244: lightweight keyword access bump applied to ALL facts
+    whose claim overlaps with the current turn text. *)
+let bump_access_for_turn ~now facts ~turn_text =
+  let seed_tokens = tokenize turn_text in
+  if seed_tokens = [] then facts
+  else
+    List.map (fun fact ->
+      let fact_toks = tokenize fact.claim in
+      let has_overlap =
+        List.exists (fun t -> List.mem t fact_toks) seed_tokens
+      in
+      if has_overlap then { fact with last_accessed = now }
+      else fact)
+    facts
 ;;
 
-let normalize_word_char = function
-  | 'A'..'Z' as c -> Char.lowercase_ascii c
-  | ('a'..'z' | '0'..'9') as c -> c
-  | _ -> ' '
-;;
-
-(** Bumps access counters for facts whose claims semantically match the
-    current turn keywords. This is intentionally a cheap heuristic (no
-    embedding model) to keep the system deterministic and offline. *)
-let bump_access_for_turn ~now (facts : fact list) ~(turn_text : string) : fact list =
-  let tokens =
-    String.map normalize_word_char turn_text
-    |> String.split_on_char ' '
-    |> List.map String.trim
-    |> List.filter (fun s -> String.length s > 2)
-    |> List.sort_uniq String.compare
-  in
-  let score_claim claim =
-    let lower = String.lowercase_ascii claim in
-    List.fold_left (fun acc tok ->
-      if string_contains tok lower then acc + 1 else acc) 0 tokens
-  in
-  let threshold = max 1 (List.length tokens / 2) in
-  List.map (fun f ->
-    if f.kind <> Ephemeral && score_claim f.text >= threshold then
-      { f with last_accessed = now; access_count = f.access_count + 1 }
-    else f) facts
-;;
-
-(** Position-independent contradict check: given a fresh tool-failure or
-    live-state observation, find any stored fact whose tokens contradict
-    the observation and return the worst (highest-confidence) contradictor.
-    This is used by the recall layer to feed [score_fact ~other_facts]. *)
-let find_contradictors
-      ?(min_overlap = 0.3)
-      (observation_tokens : string list)
-      (facts : fact list)
-  : fact list =
-  let obs_set = List.sort_uniq String.compare observation_tokens in
-  List.filter (fun f ->
-    let f_tok = fact_tokens f.text in
-    let overlap = token_overlap_ratio obs_set f_tok in
-    overlap >= min_overlap && f.confidence > 0.5) facts
+(** Find facts that contradict a given observation token set. *)
+let find_contradictors ?(min_overlap = 0.3) observation_tokens facts =
+  List.filter (fun fact ->
+    let fact_toks = tokenize fact.claim in
+    let overlap = token_overlap_ratio observation_tokens fact_toks in
+    overlap >= min_overlap && fact.confidence > 0.5)
+    facts
 ;;

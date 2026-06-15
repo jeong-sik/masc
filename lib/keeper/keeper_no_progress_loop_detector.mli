@@ -1,8 +1,8 @@
-(** Stay-silent loop detector for keeper lifecycle (#9926).
+(** No-progress loop detector for keeper lifecycle (#9926).
 
     masc-improver evidence from 2026-04-24: a single keeper spent
     13.3 hours of LLM time and burned 4.19M tokens across 40+
-    consecutive [stay_silent] turns, because the scheduler kept
+    consecutive no-progress turns, because the scheduler kept
     firing ticks on a keeper whose effective tool surface could not satisfy
     any backlog task.
 
@@ -14,14 +14,13 @@
     Pure in-memory; no file I/O. The caller owns durable recovery wiring
     because it has access to keeper meta, registry, and base path.
 
-    Threshold source: code constant [10]. The retired
-    [MASC_STAY_SILENT_LOOP_THRESHOLD] env knob is intentionally ignored so
-    runtime behavior cannot drift per process.
+    Threshold source: code constant [10]. The retired threshold env knob is
+    intentionally ignored so runtime behavior cannot drift per process.
 
     Observability contract:
-    - [masc_keeper_stay_silent_streak{keeper=X}] gauge carries the
+    - [masc_keeper_no_progress_streak{keeper=X}] gauge carries the
       current streak length (0..N).
-    - [masc_keeper_stay_silent_loop_detected_total{keeper=X}]
+    - [masc_keeper_no_progress_loop_detected_total{keeper=X}]
       counter increments each time the streak crosses the
       threshold. Latched: does not increment again until the
       streak resets to 0.
@@ -46,7 +45,7 @@ val turn_made_progress :
 (** Update the per-keeper streak from the latest turn. [made_progress] is the
     caller's verdict (see {!turn_made_progress}): the streak increments on a
     no-progress turn and resets when a turn makes progress. Generalises the
-    earlier literal ["stay_silent"] match so a keeper that re-posts its
+    earlier literal silent speech-act match so a keeper that re-posts its
     "nothing to do" conclusion (a no-progress board post) also accrues the
     streak. *)
 val record_turn : keeper_name:string -> made_progress:bool -> record_outcome

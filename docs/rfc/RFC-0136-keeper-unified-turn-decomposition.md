@@ -301,7 +301,7 @@ PR-3 (retry loop body) 가 *전체 LOC delta 의 60%+ 차지* — 별도 RFC sub
 
 - `lib/keeper/keeper_unified_turn.ml` = 1641 LOC (post-PR-4-c).
 - `run_keeper_cycle` body (L22-L1640) = 1618 LOC — still single mega-function.
-- Sibling sub-modules total: 1858 LOC across 13 files (`keeper_unified_turn_{phase_gate, runtime_resolution, pre_dispatch, retry_setup, terminal_error, attempt_watchdog, livelock_block, phase_plan, event_bus, failure, stay_silent, success, types}`).
+- Sibling sub-modules total: 1858 LOC across 13 files (`keeper_unified_turn_{phase_gate, runtime_resolution, pre_dispatch, retry_setup, terminal_error, attempt_watchdog, livelock_block, phase_plan, event_bus, failure, no_progress, success, types}`).
 
 ### 8.3 PR-4-d / PR-4-e 보류 결정
 

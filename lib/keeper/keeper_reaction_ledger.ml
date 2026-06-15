@@ -6,7 +6,7 @@ type cursor =
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | Stay_silent_recovery
+  | No_progress_recovery
 
 type reaction_kind =
   | Turn_started
@@ -22,7 +22,7 @@ let schema = "keeper.reaction_ledger.v1"
 let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
-  | Stay_silent_recovery -> "stay_silent_recovery"
+  | No_progress_recovery -> "no_progress_recovery"
 ;;
 
 let reaction_kind_to_string = function
@@ -49,7 +49,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
   | Keeper_event_queue.Board_signal _ -> Board_signal
   | Keeper_event_queue.Bootstrap -> Bootstrap
-  | Keeper_event_queue.Stay_silent_recovery -> Stay_silent_recovery
+  | Keeper_event_queue.No_progress_recovery -> No_progress_recovery
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -116,7 +116,7 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       bs.author
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"
-  | Keeper_event_queue.Stay_silent_recovery -> "stay_silent_recovery"
+  | Keeper_event_queue.No_progress_recovery -> "no_progress_recovery"
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -126,7 +126,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let board_updated_at =
     match stimulus.payload with
     | Keeper_event_queue.Board_signal bs -> bs.updated_at
-    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Stay_silent_recovery -> None
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.No_progress_recovery -> None
   in
   `Assoc
     (base_fields
@@ -466,7 +466,7 @@ let summarize_rows ~keeper_name ~limit rows =
   let note_stimulus_kind = function
     | Some "board_signal"
     | Some "bootstrap"
-    | Some "stay_silent_recovery" -> ()
+    | Some "no_progress_recovery" -> ()
     | Some _ | None -> incr unsupported_stimulus_count
   in
   let note_payload_parse_error row =

@@ -72,6 +72,52 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
+  (* RFC-0244 Tier 2: memory-os cross-keeper consolidation. Off the keeper hot
+     path — every [interval]s it reads each keeper's Tier-1 store and rewrites the
+     shared semantic store (keepers/_shared.facts.jsonl) atomically; it never
+     mutates a keeper's own store, so it cannot race keeper writes (which only
+     touch their own file). This is the production caller that makes the shared
+     tier live; without it the consolidator is dead like [run_gc]. Per-tick
+     failures are caught so a corrupt store cannot cancel sibling fibers. The
+     kill switch mirrors the recall gate ([MASC_KEEPER_MEMORY_OS_RECALL]); when
+     disabled the shared store simply stops being refreshed (recall still reads
+     whatever is there). *)
+  if
+    Keeper_memory_bank_env.memory_env_bool_logged
+      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+      ~default:true
+  then
+    fork_logged_fiber
+      ~sw
+      ~on_error:(log_server_fiber_crash "memory_os_consolidation")
+      (fun () ->
+      (* Coarse cadence: consolidation is advisory and off the hot path, so a
+         full fleet rescan every 5 minutes is ample. *)
+      let interval = 300.0 in
+      let rec loop () =
+        (try
+           let report =
+             Keeper_memory_os_consolidator.run
+               ~keeper_ids:(Keeper_memory_os_io.list_fact_store_keeper_ids ())
+               ~now:(Time_compat.now ())
+               ()
+           in
+           if report.Keeper_memory_os_consolidator.promoted > 0
+           then
+             Log.Server.info
+               "memory_os_consolidation: keepers=%d promoted=%d"
+               report.Keeper_memory_os_consolidator.keepers_scanned
+               report.Keeper_memory_os_consolidator.promoted
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.warn
+             "memory_os_consolidation: tick crashed: %s"
+             (Printexc.to_string exn));
+        Eio.Time.sleep clock interval;
+        loop ()
+      in
+      loop ());
   (* Bare-alias audit fiber (PR #15112 surface refresh): re-run the
      classifier every minute so the [masc_auth_bare_alias] gauges
      reflect mid-run regressions, not only the boot snapshot. The

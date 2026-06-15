@@ -1385,7 +1385,7 @@ export function DashboardMain() {
     `
   }
 
-  if (immersiveSurface) {
+  if (immersiveSurface || keeperDetailRoute) {
     return html`
       <div class=${`animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both h-full min-h-0 overflow-hidden ${namespaceTruthInitializing.value ? 'grid grid-rows-[auto_minmax(0,1fr)]' : ''}`}>
         ${warmingBanner}

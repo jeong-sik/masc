@@ -23,7 +23,7 @@ function mkStat(name: string, overrides: Partial<ToolStat> = {}): ToolStat {
 const sample: readonly ToolStat[] = [
   mkStat('masc_status'),
   mkStat('masc_dashboard'),
-  mkStat('keeper_stay_silent'),
+  mkStat('keeper_board_post'),
   mkStat('fs_read'),
   mkStat('browser_navigate'),
   mkStat('playwright_click'),
@@ -42,8 +42,8 @@ describe('filterToolStats', () => {
   })
 
   it('matches exact name segments', () => {
-    const out = filterToolStats(sample, 'stay_silent')
-    expect(out.map(s => s.name)).toEqual(['keeper_stay_silent'])
+    const out = filterToolStats(sample, 'board_post')
+    expect(out.map(s => s.name)).toEqual(['keeper_board_post'])
   })
 
   it('matches via substring on name (read)', () => {
@@ -62,7 +62,7 @@ describe('filterToolStats', () => {
 
   it('matches via derived category label (status)', () => {
     // 'masc_status' matches by name-substring AND category='status'.
-    // keeper_stay_silent has no 'status' in its name; category defaults to 'tool'.
+    // keeper_board_post has no 'status' in its name; category defaults to 'tool'.
     // So only masc_status should match.
     const out = filterToolStats(sample, 'status')
     expect(out.map(s => s.name)).toEqual(['masc_status'])

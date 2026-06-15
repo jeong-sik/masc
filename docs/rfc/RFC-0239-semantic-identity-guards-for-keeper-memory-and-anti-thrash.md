@@ -30,7 +30,7 @@ root and wrong about its own status claims**:
   memory bug. The `stay_silent` loop detector that should pause them keys on the literal
   `speech_act="stay_silent"` token, but the keepers *post* their "I'll stay quiet" message
   (a `Post_board` act), which **resets the silence streak every cycle** — the detector can
-  never fire (`keeper_stay_silent_loop_detector.ml:48,66-74`).
+  never fire (`keeper_no_progress_loop_detector.ml:48,66-74`).
 - Memory OS is a real **amplifier** (immortal, append-only facts re-inject the conclusion)
   but not the root: if the wake cascade stopped, the loop dies.
 - The keepers' status claims are mostly fabricated/stale: "5 PRs blocked only by operator
@@ -46,7 +46,7 @@ termination check in the system. This RFC fixes the five guards that share that 
 
 | Root | State | Reference |
 |---|---|---|
-| R3 no-progress loop detector | **Implemented + tested** | `keeper_stay_silent_loop_detector`, commit `R3` |
+| R3 no-progress loop detector | **Implemented + tested** | `keeper_no_progress_loop_detector`, commit `R3` |
 | R4 wake content-fingerprint debounce | **Implemented + tested** | `keeper_keepalive_signal` / `keeper_registry`, commit `R4` |
 | R2 recall-time claim dedup | **Implemented + tested** | `keeper_memory_os_recall`, commit `R2` |
 | Retention sweep (supersedes RFC-0238) | **Implemented + tested** | `keeper_memory_os_io.cap_facts`, Q4 commit |
@@ -101,7 +101,7 @@ Every termination/dedup/expiry guard in the path observes the wrong thing:
 |---|---|---|---|---|---|
 | R1 | fact expiry | `valid_until` written `None` always | a TTL/lifetime set at write | 100% immortal (§1.2) | `keeper_librarian.ml:141-144` |
 | R2 | fact store write | append-only, no compare | claim fingerprint | 8.2% dup, reworded twins (§1.2) | `keeper_memory_os_io.ml:125-127` |
-| R3 | thrash detector | `speech_act="stay_silent"` literal | no-progress (no new tool evidence + near-dup body) | streak resets on every `Post_board` (§3) | `keeper_stay_silent_loop_detector.ml:48,66-74` |
+| R3 | thrash detector | `speech_act="stay_silent"` literal | no-progress (no new tool evidence + near-dup body) | streak resets on every `Post_board` (§3) | `keeper_no_progress_loop_detector.ml:48,66-74` |
 | R4 | wake debounce | `post_id` (60 s) | `(keeper, content fingerprint)` | each cycle mints a new `post_id` | `keeper_registry.ml:402-412`, `keeper_keepalive_signal.ml:229` |
 | R5 | board write dedup | exact body bytes | normalized/near-dup body | reworded re-posts pass | `board_core_persist.ml:426-457` |
 
@@ -122,7 +122,7 @@ problem.
 
 ## §3 Why the existing detector cannot fire (the single most important defect)
 
-`keeper_stay_silent_loop_detector.ml` bumps a streak **only** when `speech_act = "stay_silent"`
+`keeper_no_progress_loop_detector.ml` bumps a streak **only** when `speech_act = "stay_silent"`
 (line 48) and **resets the streak to 0 on any other speech act** (lines 66-74).
 `speech_act` is an 8-variant type (`keeper_social_model_types.ml:1-9`) in which `Stay_silent`
 is distinct from `Post_board`/`Comment_board`/`Broadcast`/`Inform`.
@@ -184,7 +184,7 @@ is in-scope to add, not to sunset.
 
 ### R3 — Make the no-progress detector semantic (coordination — highest leverage)
 
-Extend `keeper_stay_silent_loop_detector` (or the turn classifier feeding it) so a turn
+Extend `keeper_no_progress_loop_detector` (or the turn classifier feeding it) so a turn
 counts toward the loop streak when it is **no-progress**, defined as:
 
 ```

@@ -35,8 +35,7 @@ let keeper_voice_tool_schemas =
 
 (** Tools that bypass policy restrictions.  Survival-critical only:
     session control (extend_turns), token budget awareness
-    (context_status), tool discovery (tool_search), and the
-    no-op safety valve (stay_silent).
+    (context_status), and tool discovery (tool_search).
     keeper_tools_list moved to BM25-discoverable: it is a debugging
     aid, not survival-critical, and occupied a slot that small models
     wasted on meta-introspection instead of productive action.
@@ -44,7 +43,7 @@ let keeper_voice_tool_schemas =
 let core_always_tools =
   List.map
     Keeper_tool_name.to_string
-    Keeper_tool_name.[ Context_status; Stay_silent; Tool_search ]
+    Keeper_tool_name.[ Context_status; Tool_search ]
   @ [ "extend_turns" ]
 ;;
 

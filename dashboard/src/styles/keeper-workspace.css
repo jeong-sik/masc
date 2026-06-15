@@ -1,0 +1,288 @@
+/* Keeper Workspace — 3-pane chat surface (roster | conversation | context rail).
+ *
+ * Ported from the v2 design package (keeper-v2/styles/v2.css + craft.css,
+ * "spacious" density). The design's raw palette vars (--bg-deep, --volt,
+ * --text-mid …) are mapped onto the dashboard's token system here so the
+ * layout inherits theme/skin changes:
+ *
+ *   --bg-deep        → --color-bg-page          --volt        → --color-accent-fg
+ *   --bg-panel       → --color-bg-panel-alt     --volt-dim    → --color-accent-fg-dim
+ *   --bg-card        → --color-bg-surface       --volt-wash   → --accent-10
+ *   --bg-card-hover  → --color-bg-hover         --volt-glow   → --color-accent-glow
+ *   --border-main    → --color-border-default   --status-ok   → --color-status-ok
+ *   --border-soft    → --color-border-divider   --status-warn → --color-status-warn
+ *   --border-strong  → --color-border-strong    --status-bad  → --color-status-err
+ *   --text-bright    → --color-fg-primary       --text-mid    → --color-fg-secondary
+ *   --text-dim       → --color-fg-muted
+ *
+ * Component markup lives in src/components/keeper-workspace/*. Structural and
+ * spacing rules sit here (rather than inline utilities) because the design is
+ * spacing-dense and reads 1:1 against the source CSS this way — matching the
+ * dashboard's existing chat.css / rail.css / center.css convention.
+ */
+
+/* ── Shell grid: roster | conversation | context rail ───────────── */
+.kw-grid {
+  display: grid;
+  grid-template-columns:
+    var(--kw-roster-w, 286px)
+    minmax(0, 1fr)
+    var(--kw-rail-w, 312px);
+  height: 100%;
+  min-height: 0;
+  background: var(--color-bg-page);
+  color: var(--color-fg-primary);
+}
+
+/* Detail ("상세 보기") takes over the conversation + rail span as a
+ * single scrollable column; roster stays for keeper switching. */
+.kw-grid[data-detail="open"] { grid-template-columns: var(--kw-roster-w, 286px) minmax(0, 1fr); }
+
+@media (max-width: 1180px) {
+  .kw-grid { grid-template-columns: var(--kw-roster-w, 248px) minmax(0, 1fr); }
+  .kw-grid .kw-rail { display: none; }
+}
+/* Below 860px the rail is already gone; roster + conversation stack in one
+ * column. A dedicated mobile pane-switcher is deferred (no JS sets it yet),
+ * so we do not ship the unreachable data-mobile-pane hide rules. */
+@media (max-width: 860px) {
+  .kw-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ════ ROSTER (left) ════════════════════════════════════════════ */
+.kw-roster {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--color-border-default);
+  background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-page) 60%);
+}
+.kw-roster-head { padding: 15px 14px; border-bottom: 1px solid var(--color-border-divider); }
+.kw-roster-search {
+  width: 100%;
+  font-size: 13px;
+  padding: 8px 11px;
+  background: var(--color-bg-page);
+  color: var(--color-fg-primary);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  outline: none;
+}
+.kw-roster-search:focus { border-color: var(--color-accent-fg-dim); box-shadow: 0 0 0 2px var(--accent-10); }
+.kw-roster-search::placeholder { color: var(--color-fg-muted); }
+
+.kw-roster-filters { display: flex; gap: 5px; padding: 10px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-divider); }
+.kw-rfilter {
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 4px 10px; border-radius: 9999px; cursor: pointer;
+  border: 1px solid var(--color-border-default); background: transparent; color: var(--color-fg-muted);
+  display: inline-flex; gap: 5px; align-items: center;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.kw-rfilter:hover { color: var(--color-fg-secondary); border-color: var(--color-border-strong); }
+.kw-rfilter[aria-pressed="true"] { color: var(--color-bg-page); background: var(--color-accent-fg); border-color: var(--color-accent-fg); font-weight: 600; }
+.kw-rfilter .n { opacity: 0.75; }
+
+.kw-roster-list { flex: 1; overflow-y: auto; padding: 9px 8px; }
+.kw-roster-group {
+  font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--color-fg-muted);
+  padding: 12px 8px 5px;
+}
+.kw-roster-empty { padding: 30px 12px; text-align: center; color: var(--color-fg-muted); font-size: 12.5px; }
+
+.kw-kp-row {
+  display: grid; grid-template-columns: 40px 1fr auto; gap: 11px; align-items: start;
+  width: 100%; text-align: left;
+  padding: 11px 10px; border-radius: var(--r-2); cursor: pointer;
+  border: 1px solid transparent; background: transparent;
+  transition: background .14s, border-color .14s;
+  position: relative;
+}
+.kw-kp-row:hover { background: var(--color-bg-surface); }
+.kw-kp-row[aria-current="true"] { background: var(--color-bg-surface); border-color: var(--color-accent-fg-dim); box-shadow: inset 0 0 0 1px var(--accent-10); }
+.kw-kp-row[aria-current="true"]::before {
+  content: ""; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 3px;
+  background: var(--color-accent-fg); border-radius: 0 3px 3px 0;
+  box-shadow: 0 0 10px rgb(var(--color-accent-glow) / 0.6);
+}
+.kw-kp-meta { min-width: 0; }
+.kw-kp-name { font-weight: 600; font-size: 15px; color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--color-fg-muted); margin-top: 3px; min-width: 0; }
+.kw-kp-state { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.kw-kp-handle { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.kw-kp-work { margin-top: 4px; font-size: 11.5px; color: var(--color-fg-muted); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kw-kp-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; padding-top: 2px; }
+.kw-kp-time { font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted); }
+.kw-kp-att {
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  min-width: 16px; text-align: center; padding: 1px 5px; border-radius: 9999px;
+  color: var(--color-status-err);
+  background: rgb(var(--color-status-err-glow) / 0.16);
+  border: 1px solid rgb(var(--color-status-err-glow) / 0.35);
+}
+
+/* shared sigil avatar (roster + chat hero) — color from --color-keeper-N */
+.kw-sigil {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-2); font-family: var(--font-mono); font-weight: 700;
+  color: var(--color-bg-page); flex: none;
+}
+
+/* status dot */
+.kw-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex: none; background: var(--color-fg-muted); }
+.kw-dot.ok { background: var(--color-status-ok); box-shadow: 0 0 7px var(--color-status-ok); }
+.kw-dot.warn { background: var(--color-status-warn); box-shadow: 0 0 7px var(--color-status-warn); }
+.kw-dot.bad { background: var(--color-status-err); box-shadow: 0 0 7px var(--color-status-err); }
+.kw-dot.pulse { animation: kw-dot-pulse 1.8s ease-in-out infinite; }
+@keyframes kw-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ════ CONVERSATION (center) ════════════════════════════════════ */
+.kw-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-bg-page); }
+
+.kw-chat-head {
+  flex: none; padding: 18px 28px 16px;
+  border-bottom: 1px solid var(--color-border-default);
+  background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-page));
+  display: flex; align-items: center; gap: 16px;
+}
+.kw-chat-id { min-width: 0; flex: 1; }
+.kw-chat-name-row { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+.kw-chat-name { font-size: 20px; font-weight: 600; letter-spacing: 0.01em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
+.kw-chat-sub { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 12px; color: var(--color-fg-muted); flex-wrap: wrap; }
+.kw-chat-sub > span { white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.kw-chat-sub .k { font-size: 9.5px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--color-fg-muted); }
+.kw-chat-sub .mono { font-family: var(--font-mono); color: var(--color-fg-secondary); }
+
+.kw-state-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; letter-spacing: 0.04em; padding: 4px 10px; border-radius: 9999px;
+  background: var(--color-bg-surface); border: 1px solid var(--color-border-default); color: var(--color-fg-secondary);
+}
+.kw-state-pill.run { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.45); background: rgb(var(--color-status-ok-glow) / 0.10); }
+.kw-state-pill.warn { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.45); }
+.kw-state-pill.off { color: var(--color-fg-muted); }
+
+.kw-tps-live { display: inline-flex; align-items: center; gap: 5px; color: var(--color-status-ok); }
+.kw-tps-live .mono { color: var(--color-status-ok); }
+.kw-tps-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-status-ok); box-shadow: 0 0 6px var(--color-status-ok); animation: kw-tps-pulse 1.1s ease-in-out infinite; }
+@keyframes kw-tps-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+
+.kw-chat-actions { display: flex; gap: 7px; align-items: center; flex: none; }
+.kw-act {
+  font-size: 11px; letter-spacing: 0.04em;
+  padding: 7px 12px; border-radius: var(--r-1); cursor: pointer;
+  border: 1px solid var(--color-border-default); background: var(--color-bg-surface); color: var(--color-fg-secondary);
+  white-space: nowrap; transition: color .15s, border-color .15s, background .15s;
+}
+.kw-act:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); background: var(--color-bg-hover); }
+.kw-act:disabled { opacity: 0.5; cursor: not-allowed; }
+.kw-act.danger:hover { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.5); }
+
+/* thread: the conversation panel renders ChatTranscript + composer inside.
+ * Provide the spacious rhythm + centered max-width column here. */
+.kw-thread {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  padding: 0;
+}
+.kw-thread-inner {
+  width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto;
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+}
+/* Spacious overrides for the reused ChatTranscript (chat/primitives.ts).
+ * Two-class specificity beats its single-class Tailwind gap/padding. */
+.kw-thread-inner .chat-transcript {
+  gap: 30px;
+  padding-left: 40px;
+  padding-right: 40px;
+  padding-top: 34px;
+}
+.kw-composer-wrap {
+  flex: none;
+  border-top: 1px solid var(--color-border-default);
+  background: linear-gradient(0deg, var(--color-bg-panel-alt), var(--color-bg-page));
+  padding: 14px 0 18px;
+}
+.kw-composer-inner { width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto; padding: 0 40px; }
+
+.kw-chat-toolbar {
+  flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 40px; border-bottom: 1px solid var(--color-border-divider);
+  background: var(--color-bg-page);
+}
+.kw-chat-toolbar .spacer { flex: 1; }
+
+/* ════ CONTEXT RAIL (right) ═════════════════════════════════════ */
+.kw-rail {
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  border-left: 1px solid var(--color-border-default);
+  background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-page) 70%);
+}
+.kw-rail-scroll { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 22px; }
+.kw-sec h4 {
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.16em;
+  font-size: 12px; color: var(--color-fg-secondary); margin: 0 0 9px;
+  display: flex; align-items: center; gap: 7px;
+}
+.kw-card { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-2); padding: 12px 13px; }
+
+.kw-vitals { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--color-border-divider); border: 1px solid var(--color-border-default); border-radius: var(--r-2); overflow: hidden; }
+.kw-vital { background: var(--color-bg-surface); padding: 9px 11px; min-width: 0; }
+.kw-vital .vk { font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-fg-secondary); font-weight: 600; }
+.kw-vital .vv { font-family: var(--font-mono); font-size: 14px; color: var(--color-fg-primary); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.kw-meter-wrap { position: relative; margin-top: 18px; }
+.kw-meter { height: 7px; border-radius: 9999px; background: var(--color-bg-page); border: 1px solid var(--color-border-divider); overflow: hidden; }
+.kw-meter > span { display: block; height: 100%; background: linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg)); }
+.kw-meter.hot > span { background: linear-gradient(90deg, var(--color-status-warn), var(--color-status-err)); }
+.kw-meter-mark { position: absolute; top: -2px; width: 1px; height: 11px; background: rgb(var(--color-status-warn-glow) / 0.75); transform: translateX(-50%); pointer-events: none; }
+.kw-meter-mark-lbl {
+  position: absolute; bottom: 11px; left: 50%; transform: translateX(-50%);
+  font-style: normal; font-size: 8.5px; letter-spacing: 0.04em; white-space: nowrap;
+  color: var(--color-status-warn); opacity: 0.85;
+}
+.kw-ctx-tok { display: flex; align-items: baseline; gap: 5px; margin-top: 8px; font-size: 11.5px; }
+.kw-ctx-tok .mono { font-family: var(--font-mono); color: var(--color-fg-secondary); }
+.kw-ctx-tok .lbl { margin-left: auto; color: var(--color-fg-muted); font-size: 10.5px; }
+
+.kw-list { display: flex; flex-direction: column; gap: 7px; }
+.kw-list-empty { font-size: 12.5px; color: var(--color-fg-muted); }
+.kw-tasktag { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r-1); background: var(--color-bg-page); border: 1px solid var(--color-border-divider); font-size: 12.5px; color: var(--color-fg-primary); }
+.kw-tasktag .tid { font-family: var(--font-mono); font-size: 11px; color: var(--color-accent-fg); flex: none; }
+.kw-tasktag .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.kw-tasktag .tstate { font-size: 10px; flex: none; color: var(--color-fg-muted); }
+.kw-tasktag .tstate.review { color: var(--color-status-warn); }
+
+.kw-tool { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--color-fg-secondary); }
+.kw-tool .nm { font-family: var(--font-mono); font-size: 12px; color: var(--color-fg-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.kw-detail-btn {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 11px 13px; border-radius: var(--r-2); cursor: pointer;
+  border: 1px solid var(--color-border-default); background: var(--color-bg-surface); color: var(--color-fg-primary);
+  font-size: 12.5px; font-weight: 600; transition: background .15s, border-color .15s;
+}
+.kw-detail-btn:hover { background: var(--color-bg-hover); border-color: var(--color-border-strong); }
+.kw-detail-btn .sub { font-weight: 400; color: var(--color-fg-muted); font-size: 11px; }
+
+/* ════ DETAIL ("상세 보기") — reuse KeeperDetailBody, scrollable column ══ */
+.kw-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-bg-page); }
+.kw-detail-head {
+  flex: none; display: flex; align-items: center; gap: 10px;
+  padding: 12px 18px; border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-bg-panel-alt);
+}
+.kw-detail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 18px; }
+
+/* ════ ATTENTION (rail, top) ════════════════════════════════════ */
+.kw-att-list { display: flex; flex-direction: column; gap: 6px; }
+.kw-att-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--r-1); font-size: 12px;
+  background: var(--color-bg-page); border: 1px solid var(--color-border-divider); color: var(--color-fg-secondary);
+}
+.kw-att-item.bad { border-color: rgb(var(--color-status-err-glow) / 0.35); background: rgb(var(--color-status-err-glow) / 0.08); color: var(--color-fg-primary); }
+.kw-att-item.warn { border-color: rgb(var(--color-status-warn-glow) / 0.35); background: rgb(var(--color-status-warn-glow) / 0.08); }
+.kw-att-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--color-fg-muted); }
+.kw-att-item.bad .kw-att-dot { background: var(--color-status-err); box-shadow: 0 0 6px var(--color-status-err); }
+.kw-att-item.warn .kw-att-dot { background: var(--color-status-warn); box-shadow: 0 0 6px var(--color-status-warn); }
+.kw-att-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

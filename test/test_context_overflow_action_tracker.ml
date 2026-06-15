@@ -1,7 +1,7 @@
 (* test/test_context_overflow_action_tracker.ml
 
    #9935: detector for imminent→action pairing on context
-   overflow events. Mirrors the #9931 stay_silent detector
+   overflow events. Mirrors the #9931 no-progress detector
    pattern (latched per-episode counter + per-keeper state).
 
    Invariants:

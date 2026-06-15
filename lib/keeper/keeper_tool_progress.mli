@@ -48,16 +48,12 @@ val classify_tool_progress_with_outcome
 (** Canonical names of claim-context tools (Task_claim). *)
 val claim_context_tool_names : string list
 
-(** Canonical names of completion tools (Task_done variants, Stay_silent,
-    Deliver, etc.). *)
+(** Canonical names of completion tools (Task_done variants, Deliver, etc.). *)
 val completion_tool_names : string list
 
 val is_claim_tool_name : string -> bool
 val is_claim_context_tool_name : string -> bool
 val is_completion_tool_name : string -> bool
-
-(** [true] iff the canonicalized name is the historical keeper_stay_silent tool. *)
-val is_stay_silent_tool_name : string -> bool
 
 (** Extract OAS completion-contract satisfying-tool hints from an error reason.
     Returns [] when the reason has no hint or the hint is empty. *)

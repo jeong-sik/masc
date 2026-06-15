@@ -37,6 +37,11 @@ val setup_exporter_with :
     No-op when OTel is explicitly disabled. *)
 val setup_exporter : sw:Eio.Switch.t -> Eio_unix.Stdenv.base -> unit
 
+(** [port_of_uri uri] returns the explicit port of [uri], or the configured
+    OTLP default ([Masc_network_defaults.otel_default_port]) when the URI omits
+    one. Pure; keeps the OTLP port in a single source of truth. *)
+val port_of_uri : Uri.t -> int
+
 (** Flush pending spans and remove the OTLP backend.
     Safe to call when disabled (no-op). Resets [is_exporter_active] to [false]. *)
 val shutdown : ?enabled:bool -> unit -> unit

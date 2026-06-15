@@ -4,6 +4,11 @@ open Keeper_memory_os_types
 
 let default_max_facts = 8
 let default_max_episodes = 2
+
+(* RFC-0244 Tier 2: how many shared-semantic facts to append after the keeper's
+   own (private-precedence) facts. Kept small so the communal tier informs
+   without crowding out keeper-local memory. *)
+let default_max_shared_facts = 4
 let fact_tail_scan = 64
 let max_fact_text_len = 260
 let max_episode_text_len = 360
@@ -89,8 +94,10 @@ let fact_is_current ~now fact =
   | Some ts -> ts >= now
 ;;
 
-let render_fact ~now ?(other_facts = []) fact =
-  let score = Keeper_memory_os_policy.score_fact ~now ~other_facts fact in
+(** Merge: contradict detection (?other_facts) from PR #21243 +
+    RFC-0244 lexical relevance (?seed_tokens) from origin/main. *)
+let render_fact ~now ?(other_facts = []) ?(seed_tokens = []) fact =
+  let score = Keeper_memory_os_policy.score_fact ~now ~other_facts ~seed_tokens fact in
   let source = fact.source in
   Printf.sprintf
     "- [category=%s confidence=%.2f stale=%.2f score=%.3f turn=%d] %s"
@@ -102,129 +109,21 @@ let render_fact ~now ?(other_facts = []) fact =
     (sanitize_text ~max_len:max_fact_text_len fact.claim)
 ;;
 
-let render_episode episode =
-  Printf.sprintf
-    "- [%s g%04d] %s"
-    (sanitize_atom episode.trace_id)
-    episode.generation
-    (sanitize_text ~max_len:max_episode_text_len episode.episode_summary)
-;;
-
-let render_prompt_template key variables =
-  match Prompt_registry.render_prompt_template key variables with
-  | Ok text -> Ok (String.trim text)
-  | Error msg -> Error (Printf.sprintf "%s: %s" key msg)
-;;
-
-let render_nonempty_section key variable lines =
-  match lines with
-  | [] -> Ok ""
-  | _ -> render_prompt_template key [ variable, String.concat "\n" lines ]
-;;
-
-let render_recall_context ~fact_lines ~episode_lines =
-  match
-    render_nonempty_section
-      Keeper_prompt_names.memory_os_recall_facts_section
-      "facts"
-      fact_lines
-  with
-  | Error msg -> Error msg
-  | Ok facts_section ->
-    (match
-       render_nonempty_section
-         Keeper_prompt_names.memory_os_recall_episodes_section
-         "episodes"
-         episode_lines
-     with
-     | Error msg -> Error msg
-     | Ok episodes_section ->
-       render_prompt_template
-         Keeper_prompt_names.memory_os_recall_context
-         [ "facts_section", facts_section; "episodes_section", episodes_section ])
-;;
-
-(* RFC-0239 R2 / RFC-0243: recall-time dedup keys on the shared
-   [Keeper_memory_os_types.normalize_claim] SSOT (was a local copy; RFC-0243
-   lifted it so the write-time upsert keys identically). Since RFC-0243 makes the
-   librarian write path upsert-by-claim, the store no longer accumulates fresh
-   duplicates; this read-time dedup remains as defense-in-depth for legacy rows
-   written before the upsert landed. *)
-let dedup_by_claim scored =
-  let seen = Hashtbl.create 32 in
-  List.filter
-    (fun (_score, fact) ->
-      let key = normalize_claim fact.claim in
-      if Hashtbl.mem seen key then false else (Hashtbl.add seen key (); true))
-    scored
-;;
-
-let scored_facts ~now facts =
-  let other_facts = facts in
-  facts
-  |> List.filter (fact_is_current ~now)
-  |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~now ~other_facts fact, fact)
-  |> List.sort (fun (a, _) (b, _) -> compare b a)
-  |> dedup_by_claim
-  |> List.map snd
-;;
-
-let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
-  let max_facts = max 0 max_facts in
-  let max_episodes = max 0 max_episodes in
-  let facts =
-    (* RFC-0239 Q4: read up to the bounded recall window (the retention sweep
-       caps the store to this many facts), so score ranking selects the
-       globally best facts rather than only the most recent [fact_tail_scan]. *)
-    Keeper_memory_os_io.read_facts_tail
-      ~keeper_id
-      ~n:(max fact_tail_scan Keeper_memory_os_io.fact_recall_window)
-    |> scored_facts ~now
-    |> take max_facts
+(* RFC-0244 Tier 2: a shared fact is rendered with its provenance (the distinct
+   keepers that corroborated it) so it is never silently merged into the keeper's
+   own knowledge — the reader can see it is cross-keeper consensus. *)
+let render_shared_fact ~now ?(seed_tokens = []) fact =
+  let score = Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact in
+  let provenance =
+    match fact.observed_by with
+    | [] -> "shared"
+    | keepers -> "shared via " ^ String.concat "," (List.map sanitize_atom keepers)
   in
-  let episodes = Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n:max_episodes in
-  match facts, episodes with
-  | [], [] -> ""
-  | _ ->
-    let fact_lines = List.map (render_fact ~now) facts in
-    let episode_lines = List.map render_episode episodes in
-    (match render_recall_context ~fact_lines ~episode_lines with
-     | Ok context -> context
-     | Error msg ->
-       Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
-       "")
-;;
-
-let render_context
-      ~keeper_id
-      ~now
-      ?(max_facts = default_max_facts)
-      ?(max_episodes = default_max_episodes)
-      ()
-  =
-  try render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Keeper.warn
-      "memory os recall unavailable keeper=%s: %s"
-      keeper_id
-      (Printexc.to_string exn);
-    ""
-;;
-
-let enabled () =
-  (* Default on, mirroring the librarian (write side): persisted memory
-     that never reaches a prompt is dead weight. Env var = kill switch. *)
-  Keeper_memory_bank_env.memory_env_bool_logged
-    "MASC_KEEPER_MEMORY_OS_RECALL"
-    ~default:true
-;;
-
-let render_if_enabled ~keeper_id ~now () =
-  if not (enabled ())
-  then None
-  else (
-    match String.trim (render_context ~keeper_id ~now ()) with
-    | "" -> None
-    | block -> Some block)
+  Printf.sprintf
+    "- [%s category=%s confidence=%.2f score=%.3f] %s"
+    provenance
+    (sanitize_atom fact.category)
+    fact.confidence
+    score
+    (sanitize_text ~max_len:max_fact_text_len fact.claim)
 ;;

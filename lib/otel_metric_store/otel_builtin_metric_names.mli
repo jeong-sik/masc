@@ -119,7 +119,7 @@ include module type of Otel_policy_metric_names
 
 (** Total stimuli consumed at turn entry, classified by [stimulus_class].
     Labels: [keeper], [class]
-    (board_signal|bootstrap|stay_silent_recovery|unsupported).
+    (board_signal|bootstrap|no_progress_recovery|unsupported).
     Pairs with [masc_keeper_unsupported_stimulus_total] for unsupported-only
     drill-down with payload prefix. *)
 

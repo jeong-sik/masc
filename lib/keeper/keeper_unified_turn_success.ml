@@ -67,24 +67,24 @@ let apply_loop_detectors ~config ~social_state updated_meta result =
     | Social.Visible_reply | Social.Task_claim_surface -> false
   in
   let made_progress =
-    Keeper_stay_silent_loop_detector.turn_made_progress
+    Keeper_no_progress_loop_detector.turn_made_progress
       ~strong_evidence
       ~surface_requires_evidence
   in
   match
-    Keeper_stay_silent_loop_detector.record_turn
+    Keeper_no_progress_loop_detector.record_turn
       ~keeper_name:updated_meta.Keeper_meta_contract.name
       ~made_progress
   with
-  | Keeper_stay_silent_loop_detector.Normal -> updated_meta
-  | Keeper_stay_silent_loop_detector.Loop_detected { streak; threshold } ->
-    Keeper_unified_turn_stay_silent.mark_loop_detected
+  | Keeper_no_progress_loop_detector.Normal -> updated_meta
+  | Keeper_no_progress_loop_detector.Loop_detected { streak; threshold } ->
+    Keeper_unified_turn_no_progress.mark_loop_detected
       ~config
       updated_meta
       ~streak
       ~threshold
-  | Keeper_stay_silent_loop_detector.Loop_reset { previous_streak; was_latched } ->
-    Keeper_unified_turn_stay_silent.clear_if_recovered
+  | Keeper_no_progress_loop_detector.Loop_reset { previous_streak; was_latched } ->
+    Keeper_unified_turn_no_progress.clear_if_recovered
       ~config
       updated_meta
       ~previous_streak

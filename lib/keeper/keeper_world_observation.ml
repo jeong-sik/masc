@@ -207,7 +207,7 @@ let pending_board_event_of_stimulus
          ~meta
          ~arrived_at:stimulus.arrived_at
          (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
-  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Stay_silent_recovery -> None
+  | Keeper_event_queue.Bootstrap | Keeper_event_queue.No_progress_recovery -> None
 ;;
 
 (** Collect recent board activity using cursor-based tracking.

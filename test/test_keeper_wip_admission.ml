@@ -244,6 +244,55 @@ let test_active_items_only_include_claimed_or_in_progress () =
        (fun item -> Admission.category_to_string item.Admission.scope.category)
        active)
 
+let test_goalless_task_exempt_from_goal_cap () =
+  (* RFC-0245: a goalless claim must not be rejected by the per-goal cap even
+     when the goalless ([None]) bucket is at/over [max_per_goal]. With
+     max_per_goal=1 and one goalless active item, the old behavior rejected;
+     the exemption must now admit. *)
+  let active = [ item "repo-a" "one" ] in
+  match Admission.decide ~caps active ~scope:(scope "repo-b") with
+  | Admission.Admit { active_count_after_admit } ->
+    check int "active after admit" 2 active_count_after_admit
+  | Reject rejection ->
+    fail
+      (Printf.sprintf "goalless claim unexpectedly rejected: %s"
+         (Admission.reject_reason_to_string rejection.reason))
+
+let test_goalless_tasks_never_goal_capped () =
+  (* RFC-0245: many goalless active items, each in a distinct repo/category so
+     only the per-goal cap could fire — it must not, because goalless tasks
+     share no goal scope to collide on. *)
+  let active =
+    [ item ~category:Admission.Fix "repo-a" "one"
+    ; item ~category:Admission.Docs "repo-b" "two"
+    ; item ~category:Admission.Refactor "repo-c" "three"
+    ]
+  in
+  match
+    Admission.decide ~caps active
+      ~scope:(scope ~category:Admission.Test "repo-d")
+  with
+  | Admission.Admit _ -> ()
+  | Reject rejection ->
+    fail
+      (Printf.sprintf "goalless claim unexpectedly rejected by %s"
+         (Admission.reject_reason_to_string rejection.reason))
+
+let test_goalless_still_bounded_by_global_cap () =
+  (* RFC-0245 non-goal: exempting goalless from the *goal* cap must NOT remove
+     the global blast-radius cap. With max_global=1 and one active item, a
+     goalless claim is still rejected — by global_cap, not goal_cap. *)
+  let active = [ item "repo-a" "one" ] in
+  match
+    Admission.decide
+      ~caps:{ caps with max_global = Some 1 }
+      active ~scope:(scope "repo-b")
+  with
+  | Admission.Admit _ -> fail "expected global cap rejection for goalless claim"
+  | Reject rejection ->
+    check string "reason" "global_cap"
+      (Admission.reject_reason_to_string rejection.reason)
+
 let () =
   run "Keeper_wip_admission"
     [ ( "caps"
@@ -263,5 +312,11 @@ let () =
             test_keeper_task_claim_wip_cap_reports_claim_admission
         ; test_case "active items include active WIP only" `Quick
             test_active_items_only_include_claimed_or_in_progress
+        ; test_case "goalless task exempt from goal cap" `Quick
+            test_goalless_task_exempt_from_goal_cap
+        ; test_case "goalless tasks never goal-capped" `Quick
+            test_goalless_tasks_never_goal_capped
+        ; test_case "goalless still bounded by global cap" `Quick
+            test_goalless_still_bounded_by_global_cap
         ] )
     ]

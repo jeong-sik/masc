@@ -109,10 +109,31 @@ let empty_keeper_state_snapshot = {
   constraints = [];
 }
 
-let state_snapshot_source_is_synthetic source =
-  let source = String.trim source in
-  String.equal source "synthesized"
-  || String.starts_with ~prefix:"synthesized_" source
+(* Provenance of a turn's continuity snapshot, produced by the four-way
+   extraction cascade in [Keeper_agent_run_response_text]. Serialized to the turn
+   sidecar via [state_snapshot_source_to_string]; nothing parses it back in OCaml,
+   so there is no [of_string]. RFC-0242 §3.2 replaces the prior untyped string +
+   [String.starts_with ~prefix:"synthesized_"] classifier (the prefix matched no
+   producer — dead permissive match). *)
+type state_snapshot_source =
+  | Structured_state_tool
+      (* Reported by the removed [keeper_report_state] tool. Currently
+         unreachable: [reported_state_snapshot] is hard-[None]
+         (keeper_agent_run_finalize_response.ml:reported_state_snapshot_from_checkpoint).
+         Removed when RFC-0242 §3.1 wires an enforced structured producer. *)
+  | Structured_state_reply (* Parsed from a JSON object in the model's reply. *)
+  | State_block (* Parsed from a [STATE] prose block in the reply. *)
+  | Synthesized (* Fabricated from run metadata when no state was emitted. *)
+
+let state_snapshot_source_to_string = function
+  | Structured_state_tool -> "model_structured_state_tool"
+  | Structured_state_reply -> "model_structured_state"
+  | State_block -> "model_state_block"
+  | Synthesized -> "synthesized"
+
+let state_snapshot_source_is_synthetic = function
+  | Synthesized -> true
+  | Structured_state_tool | Structured_state_reply | State_block -> false
 
 type keeper_memory_line = {
   kind: string;

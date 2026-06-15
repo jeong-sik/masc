@@ -237,7 +237,7 @@
   test_keeper_sandbox_docker_route
   test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
-  test_stay_silent_loop_detector
+  test_no_progress_loop_detector
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
@@ -518,7 +518,7 @@
   test_keeper_sandbox_docker_route
   test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
-  test_stay_silent_loop_detector
+  test_no_progress_loop_detector
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
@@ -1335,7 +1335,11 @@
 
 (include stanzas/test_otel_runtime_observables.inc)
 
+(include stanzas/test_otel_port_ssot.inc)
+
 (include stanzas/test_otel_zero_fill.inc)
+
+(include stanzas/test_nickname_words_ssot.inc)
 
 (include stanzas/test_workspace_bootstrap.inc)
 
@@ -1535,6 +1539,8 @@
 
 (include stanzas/test_keeper_memory_write.inc)
 
+(include stanzas/test_keeper_memory_row_source.inc)
+
 (include stanzas/test_memory_facade.inc)
 
 (include stanzas/test_keeper_tool_emission_hook.inc)
@@ -1650,6 +1656,8 @@
 (include stanzas/test_social_state_cap.inc)
 
 (include stanzas/test_social_state_cap_on_load.inc)
+
+(include stanzas/test_sse_retry_ssot.inc)
 
 (include stanzas/test_sse_storm_e2e.inc)
 

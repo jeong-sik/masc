@@ -21,7 +21,6 @@ type model_id =
   | Magentic_ledger_v1
 
 type transition_reason =
-  | Tool_only_stay_silent
   | Tool_only_comment_board
   | Tool_only_post_board
   | Tool_only_broadcast
@@ -130,7 +129,6 @@ let normalize_social_model value =
       | None -> model_id_to_string default_model_id
 
 let transition_reason_to_string = function
-  | Tool_only_stay_silent -> "tool_only:stay_silent"
   | Tool_only_comment_board -> "tool_only:comment_board"
   | Tool_only_post_board -> "tool_only:post_board"
   | Tool_only_broadcast -> "tool_only:broadcast"

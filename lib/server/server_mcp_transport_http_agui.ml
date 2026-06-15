@@ -210,7 +210,12 @@ let handle_presence_events ~deps request reqd =
             }
           in
           register_sse_conn ~session_id ~info;
-          if not (send_raw info ": presence-stream\nretry: 3000\n\n") then
+          if
+            not
+              (send_raw info
+                 (Server_mcp_transport_http_headers.sse_comment_with_retry
+                    ~comment:"presence-stream"))
+          then
             Log.Server.debug "presence prime send failed for session %s"
               info.session_id;
           match deps.get_runtime_result () with

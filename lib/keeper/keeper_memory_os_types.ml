@@ -6,6 +6,12 @@
 
 let schema_version = "rfc0231-v2"
 
+(* RFC-0244 Tier 2: the shared semantic store reuses the per-keeper IO/codec
+   under a reserved id. A leading underscore is not produced by keeper naming, so
+   no real keeper collides with its file (keepers/_shared.facts.jsonl); the
+   consolidator additionally filters this id out of its source keeper list. *)
+let shared_store_id = "_shared"
+
 type provenance_event =
   { trace_id : string
   ; turn : int
@@ -17,6 +23,13 @@ type fact =
   ; confidence : float
   ; category : string
   ; source : provenance_event
+  ; observed_by : string list
+    (* RFC-0244 Tier 2 (shared semantic store) ONLY: the sorted set of distinct
+       keeper ids that have corroborated this claim. Empty for Tier-1 per-keeper
+       facts — a single keeper's store has no distinct keeper-source to track, so
+       it is omitted from their JSON. This is the consolidator-populated field
+       that makes cross-keeper confidence live: a shared fact's confidence rises
+       only per NEW distinct keeper, never on a same-keeper repeat. *)
   ; access_count : int
   ; first_seen : float
   ; last_accessed : float
@@ -164,6 +177,11 @@ let fact_to_json f =
     @ optional_float_field "valid_until" f.valid_until
     @ optional_float_field "last_verified_at" f.last_verified_at
     @ optional_int_field "expected_lifetime_cycles" f.expected_lifetime_cycles
+    (* Tier-1 facts carry [], which is omitted so per-keeper stores stay
+       byte-identical to pre-RFC-0244; only Tier-2 shared facts emit it. *)
+    @ (match f.observed_by with
+       | [] -> []
+       | keepers -> [ "observed_by", `List (List.map (fun k -> `String k) keepers) ])
   in
   `Assoc fields
 ;;
@@ -196,6 +214,10 @@ let fact_of_json (json : Yojson.Safe.t) =
               0.0
           in
           let last_verified_at = json_float_field "last_verified_at" fields in
+          (* DET-OK: absent observed_by defaults to empty (Tier-1 / legacy facts). *)
+          let observed_by =
+            Option.value (json_string_list_field "observed_by" fields) ~default:[]
+          in
           let expected_lifetime_cycles =
             match json_int_field "expected_lifetime_cycles" fields with
             | Some cycles when cycles > 0 -> Some cycles
@@ -206,6 +228,7 @@ let fact_of_json (json : Yojson.Safe.t) =
             ; confidence = clamp01 confidence
             ; category
             ; source
+            ; observed_by
             ; access_count
             ; first_seen
             ; last_accessed

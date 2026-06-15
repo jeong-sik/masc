@@ -7,6 +7,11 @@
 (** Current schema version written to disk. *)
 val schema_version : string
 
+(** RFC-0244 Tier 2: reserved keeper id for the shared semantic store
+    (keepers/_shared.facts.jsonl). Not a legal keeper name, so no real keeper
+    collides; the consolidator filters it out of its source keeper list. *)
+val shared_store_id : string
+
 (** Source attribution for a single extracted fact. *)
 type provenance_event =
   { trace_id : string
@@ -20,6 +25,11 @@ type fact =
   ; confidence : float
   ; category : string
   ; source : provenance_event
+  ; observed_by : string list
+    (** RFC-0244 Tier 2 (shared semantic store) only: the sorted set of distinct
+        keeper ids that have corroborated this claim. Empty for Tier-1 per-keeper
+        facts (omitted from their JSON). Populated by the consolidator; a shared
+        fact's confidence rises only per new distinct keeper. *)
   ; access_count : int
   ; first_seen : float
   ; last_accessed : float

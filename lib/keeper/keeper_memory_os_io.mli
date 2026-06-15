@@ -8,6 +8,11 @@ open Keeper_memory_os_types
 (** {1 Path helpers} *)
 
 val facts_path : keeper_id:string -> string
+
+(** RFC-0244 Tier 2: keeper ids that currently have a [*.facts.jsonl] store, for
+    the cross-keeper consolidation sweep. Excludes the reserved shared id; sorted. *)
+val list_fact_store_keeper_ids : unit -> string list
+
 val events_path : keeper_id:string -> string
 val episodes_dir : keeper_id:string -> string
 val tool_results_dir : keeper_id:string -> string

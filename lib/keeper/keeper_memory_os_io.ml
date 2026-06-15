@@ -45,6 +45,26 @@ let facts_path ~keeper_id =
   Filename.concat (keepers_dir ()) (keeper_id ^ ".facts.jsonl")
 ;;
 
+(* RFC-0244 Tier 2: the keeper ids that currently have a Tier-1 fact store, for
+   the cross-keeper consolidation sweep. Derived from the [*.facts.jsonl] files
+   in the keepers dir (the same path keeper writes use), so it tracks exactly the
+   keepers with persisted facts. The reserved shared id is excluded so a prior
+   sweep's output is never folded back in as a source keeper. Sorted for
+   deterministic sweep order. *)
+let list_fact_store_keeper_ids () =
+  let dir = keepers_dir () in
+  if not (Sys.file_exists dir && Sys.is_directory dir)
+  then []
+  else
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter_map (fun name ->
+      match Filename.chop_suffix_opt ~suffix:".facts.jsonl" name with
+      | Some id when not (String.equal id shared_store_id) -> Some id
+      | Some _ | None -> None)
+    |> List.sort String.compare
+;;
+
 let events_path ~keeper_id =
   Filename.concat (keepers_dir ()) (keeper_id ^ ".events.jsonl")
 ;;

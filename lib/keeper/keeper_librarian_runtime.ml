@@ -37,6 +37,17 @@ let default_timeout_sec () =
     ~default:Env_config_governance.Inference.timeout_seconds
 ;;
 
+let provider_slot_busy = "librarian provider slot busy"
+
+let provider_slot = Eio.Semaphore.make 1
+
+let provider_slot_wait_sec () =
+  Keeper_memory_bank_env.memory_env_float_logged
+    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_SLOT_WAIT_SEC"
+    ~default:0.25
+  |> max 0.001
+;;
+
 let runtime_id_for_librarian ~runtime_id =
   match Sys.getenv_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" with
   | Some value ->
@@ -143,6 +154,18 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> None)
 ;;
 
+let with_provider_slot ?clock f =
+  match
+    with_timeout ?clock ~timeout_sec:(provider_slot_wait_sec ()) (fun () ->
+      Eio.Semaphore.acquire provider_slot)
+  with
+  | None -> Error provider_slot_busy
+  | Some () ->
+    (* fun-protect-finally-ok: [Eio.Semaphore.release] only returns the
+       provider slot; it does not wait, acquire, or perform I/O. *)
+    Fun.protect ~finally:(fun () -> Eio.Semaphore.release provider_slot) f
+;;
+
 let extract_with_provider
     ?(complete = default_complete)
     ?clock
@@ -156,20 +179,21 @@ let extract_with_provider
   | Error _ as e -> e
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
-    (match
-       with_timeout ?clock ~timeout_sec (fun () ->
-         complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
-     with
-     | None -> Error "librarian provider timed out"
-     | Some (Error err) -> Error (http_error_message err)
-     | Some (Ok response) ->
-       let raw = Agent_sdk_response.text_of_response response |> String.trim in
-       if String.equal raw ""
-       then Error "librarian provider returned empty response"
-       else (
-         match Keeper_librarian.episode_of_output inp raw with
-         | Some episode -> Ok episode
-         | None -> Error "librarian provider returned invalid episode JSON"))
+    with_provider_slot ?clock (fun () ->
+      match
+        with_timeout ?clock ~timeout_sec (fun () ->
+          complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+      with
+      | None -> Error "librarian provider timed out"
+      | Some (Error err) -> Error (http_error_message err)
+      | Some (Ok response) ->
+        let raw = Agent_sdk_response.text_of_response response |> String.trim in
+        if String.equal raw ""
+        then Error "librarian provider returned empty response"
+        else (
+          match Keeper_librarian.episode_of_output inp raw with
+          | Some episode -> Ok episode
+          | None -> Error "librarian provider returned invalid episode JSON"))
 ;;
 
 let extract_and_append_with_provider
@@ -269,6 +293,10 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id inp =
                  episode.Keeper_memory_os_types.trace_id
                  episode.generation
                  (List.length episode.claims)
+             | Error err when String.equal err provider_slot_busy ->
+               Log.Keeper.info ~keeper_name:keeper_id
+                 "memory os librarian skipped runtime=%s: provider slot busy"
+                 runtime_id
              | Error err ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)

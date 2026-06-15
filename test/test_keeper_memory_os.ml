@@ -166,6 +166,16 @@ let with_eio f =
   @@ fun sw -> f ~sw ~net:(Eio.Stdenv.net env) ~clock:(Eio.Stdenv.clock env)
 ;;
 
+let wait_for_ref ~clock label r =
+  try
+    Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+      while Option.is_none !r do
+        Eio.Fiber.yield ()
+      done)
+  with
+  | Eio.Time.Timeout -> Alcotest.failf "timed out waiting for %s" label
+;;
+
 let episode_fixture ~now ~trace_id ~generation ~summary =
   let fact =
     { (fact_fixture ~now ()) with
@@ -784,6 +794,78 @@ let test_librarian_runtime_appends_episode_bundle () =
             "Integer confidence survives parsing"
             fact.Types.claim
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
+;;
+
+let test_librarian_runtime_provider_slot_gate () =
+  with_prompt_registry (fun () ->
+    with_eio (fun ~sw ~net ~clock ->
+      let env_name = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_SLOT_WAIT_SEC" in
+      let previous = Sys.getenv_opt env_name in
+      Fun.protect
+        ~finally:(fun () ->
+          match previous with
+          | Some value -> Unix.putenv env_name value
+          | None -> Unix.putenv env_name "")
+        (fun () ->
+          Unix.putenv env_name "0.01";
+          let entered, resolve_entered = Eio.Promise.create () in
+          let release, resolve_release = Eio.Promise.create () in
+          let provider_calls = Atomic.make 0 in
+          let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+            let n = Atomic.fetch_and_add provider_calls 1 in
+            if n = 0
+            then (
+              Eio.Promise.resolve resolve_entered ();
+              Eio.Promise.await release;
+              Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string)))
+            else
+              Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+          in
+          let input trace_id : Librarian.input =
+            { Librarian.trace_id
+            ; generation = 1
+            ; messages = [ text_message "remember this bounded fact" ]
+            }
+          in
+          let first = ref None in
+          let second = ref None in
+          Eio.Fiber.fork ~sw (fun () ->
+            first
+            := Some
+                 (Librarian_runtime.extract_with_provider
+                    ~complete
+                    ~clock
+                    ~timeout_sec:1.0
+                    ~sw
+                    ~net
+                    ~provider_cfg:(test_provider_cfg ())
+                    (input "trace-slot-a")));
+          Eio.Promise.await entered;
+          Eio.Fiber.fork ~sw (fun () ->
+            second
+            := Some
+                 (Librarian_runtime.extract_with_provider
+                    ~complete
+                    ~clock
+                    ~timeout_sec:1.0
+                    ~sw
+                    ~net
+                    ~provider_cfg:(test_provider_cfg ())
+                    (input "trace-slot-b")));
+          wait_for_ref ~clock "second librarian result" second;
+          Eio.Promise.resolve resolve_release ();
+          wait_for_ref ~clock "first librarian result" first;
+          (match !second with
+           | Some (Error "librarian provider slot busy") -> ()
+           | Some (Error msg) -> Alcotest.failf "unexpected busy error: %s" msg
+           | Some (Ok _) -> Alcotest.fail "expected second librarian call to skip"
+           | None -> Alcotest.fail "second result missing");
+          (match !first with
+           | Some (Ok episode) ->
+             Alcotest.(check string) "first trace" "trace-slot-a" episode.Types.trace_id
+           | Some (Error msg) -> Alcotest.failf "first call failed: %s" msg
+           | None -> Alcotest.fail "first result missing");
+          Alcotest.(check int) "only one provider call entered" 1 (Atomic.get provider_calls))))
 ;;
 
 let test_policy_score () =
@@ -1531,6 +1613,10 @@ let () =
             "librarian runtime appends episode bundle"
             `Quick
             test_librarian_runtime_appends_episode_bundle
+        ; Alcotest.test_case
+            "librarian runtime provider slot gate"
+            `Quick
+            test_librarian_runtime_provider_slot_gate
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score ordering" `Quick test_policy_score

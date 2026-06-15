@@ -43,6 +43,18 @@ function keeperScope(keeper: Keeper): string | null {
   return keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? null
 }
 
+/** One-line "what is this keeper doing" preview so rows carry real content
+ *  instead of reading bare. Same precedence as the detail page's work
+ *  preview (recent output → input → goal → current task). */
+function keeperWorkPreview(keeper: Keeper): string | null {
+  return keeper.recent_output_preview
+    ?? keeper.recent_input_preview
+    ?? keeper.short_goal
+    ?? keeper.goal
+    ?? keeper.agent?.current_task
+    ?? null
+}
+
 function matchesQuery(keeper: Keeper, q: string): boolean {
   if (!q) return true
   const hay = `${keeper.name} ${keeper.koreanName ?? ''} ${keeperScope(keeper) ?? ''} ${keeper.model ?? ''}`.toLowerCase()
@@ -55,6 +67,7 @@ function RosterRow({ keeper, active, onSelect }: { keeper: Keeper; active: boole
   const att = attentionCount(keeper)
   const scope = keeperScope(keeper)
   const activity = keeperActivityDisplay(keeper)
+  const work = keeperWorkPreview(keeper)
   return html`
     <button
       type="button"
@@ -62,13 +75,14 @@ function RosterRow({ keeper, active, onSelect }: { keeper: Keeper; active: boole
       aria-current=${active ? 'true' : 'false'}
       onClick=${() => onSelect(keeper.name)}
     >
-      <${WorkspaceSigil} id=${keeper.name} size=${38} beat=${bucket === 'running'} />
+      <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${bucket === 'running'} />
       <div class="kw-kp-meta">
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
           <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${bucket === 'running'} />${keeperPhaseLabel(keeper)}</span>
           ${scope ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle">${scope}</span>` : null}
         </div>
+        <div class="kw-kp-work" title=${work ?? ''}>${work ?? '최근 작업 요약 없음'}</div>
       </div>
       <div class="kw-kp-right">
         ${activity.source !== 'none' ? html`<span class="kw-kp-time">${activity.label}</span>` : null}

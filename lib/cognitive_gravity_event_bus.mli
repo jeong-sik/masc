@@ -4,6 +4,10 @@
     transitions, and Git events, then feeds them to
     {!Cognitive_gravity.apply_decay}.
 
+    Phase5: GC trigger wiring — [poll_all_with_gc] automatically runs
+    {!Keeper_memory_os_gc.run_gc} for any keeper whose facts decay
+    below the threshold.
+
     This module is the bridge between MASC workspace activity and the
     pure decay engine in {!Cognitive_gravity}. Each source function
     returns a list of [Cognitive_gravity.decay_trigger] values that
@@ -30,3 +34,20 @@ val source_git : ?since_ref:string -> unit -> Cognitive_gravity.decay_trigger li
     Returns (fact_id, decay_factor) pairs from the cognitive gravity
     engine. Use as the main entry point for a periodic decay sweep. *)
 val poll_all : unit -> (string * float) list
+
+(** [extract_keeper_id fact_id] extracts the keeper name prefix from a
+    fact_id formatted as \"keeper_name:rest\". Returns None on
+    malformed input. *)
+val extract_keeper_id : string -> string option
+
+(** [poll_all_with_gc ?threshold ~now ()] runs [poll_all] and
+    automatically triggers {!Keeper_memory_os_gc.run_gc} for every
+    keeper whose facts have decayed below [threshold] (default: 0.7).
+
+    Logs GC events to the keeper's event log. Returns the raw decay
+    results regardless of whether GC was triggered. *)
+val poll_all_with_gc : ?threshold:float -> now:float -> unit -> (string * float) list
+
+(** Default decay threshold below which a fact is considered stale
+    enough to trigger a GC sweep for its owning keeper. *)
+val gc_threshold : float

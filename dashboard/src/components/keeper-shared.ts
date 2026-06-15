@@ -27,6 +27,7 @@ import {
   keeperThreads,
   probeKeeperRuntime,
   recoverKeeperRuntime,
+  resumePendingKeeperChatRequests,
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
 import { isVisibleDirectConversationEntry } from '../keeper-state'
@@ -443,6 +444,7 @@ export function KeeperConversationPanel({
   // survives full page reloads. Once-per-keeper inside the action.
   useEffect(() => {
     void hydrateKeeperChatHistory(keeperName)
+    void resumePendingKeeperChatRequests(keeperName)
   }, [keeperName])
 
   const rawThread = keeperThreads.value[keeperName] ?? []

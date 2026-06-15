@@ -3,6 +3,10 @@ import { runOperatorAction } from './api/core'
 import {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchQueuedKeeperMessageResult,
+  isTerminalQueuedKeeperMessage,
+  queuedKeeperMessageError,
+  queuedKeeperMessageToReply,
   streamKeeperMessage,
 } from './api/keeper'
 import { asString, isRecord } from './components/common/normalize'
@@ -41,6 +45,13 @@ import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-strea
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
 } from './config/constants'
+import {
+  hasPendingKeeperChatRequest,
+  pendingKeeperChatRequestsForKeeper,
+  removePendingKeeperChatRequest,
+  type PendingKeeperChatRequest,
+  upsertPendingKeeperChatRequest,
+} from './keeper-chat-pending'
 
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
@@ -165,6 +176,121 @@ export async function hydrateKeeperChatHistory(
 // one history refetch instead of one round-trip per message.
 const chatRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const CHAT_APPENDED_REFRESH_DELAY_MS = 400
+const PENDING_KEEPER_CHAT_POLL_MS = 2_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function pendingUserEntryId(requestId: string): string {
+  return `pending-user-${requestId}`
+}
+
+function pendingAssistantEntryId(requestId: string): string {
+  return `pending-assistant-${requestId}`
+}
+
+function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
+  const existing = keeperThreads.value[request.keeperName] ?? []
+  const userId = pendingUserEntryId(request.requestId)
+  const assistantId = pendingAssistantEntryId(request.requestId)
+  if (!existing.some(entry => entry.id === userId)) {
+    appendThreadEntry(request.keeperName, {
+      id: userId,
+      role: 'user',
+      source: 'direct_user',
+      label: 'You',
+      text: request.message,
+      timestamp: new Date(request.submittedAt).toISOString(),
+      delivery: 'delivered',
+      streamState: null,
+      attachments: request.attachments,
+      details: null,
+    })
+  }
+  if (!existing.some(entry => entry.id === assistantId)) {
+    appendThreadEntry(request.keeperName, {
+      id: assistantId,
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: request.keeperName,
+      text: '',
+      rawText: '',
+      timestamp: null,
+      delivery: 'queued',
+      streamState: 'opening',
+      details: null,
+    })
+  }
+  return assistantId
+}
+
+const resumingKeeperChatRequests = new Set<string>()
+
+async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
+  const key = `${request.keeperName}:${request.requestId}`
+  if (resumingKeeperChatRequests.has(key)) return
+  resumingKeeperChatRequests.add(key)
+  const assistantId = ensurePendingThreadEntries(request)
+  setRecordValue(keeperSending, request.keeperName, true)
+  setRecordValue(keeperActionErrors, request.keeperName, null)
+  setRecordValue(keeperStreamStartedAt, request.keeperName, request.submittedAt)
+  setRecordValue(keeperStreamLastEventAt, request.keeperName, Date.now())
+  try {
+    for (;;) {
+      const result = await fetchQueuedKeeperMessageResult(request.requestId)
+      setRecordValue(keeperStreamLastEventAt, request.keeperName, Date.now())
+      if (!isTerminalQueuedKeeperMessage(result)) {
+        await sleep(PENDING_KEEPER_CHAT_POLL_MS)
+        continue
+      }
+
+      const reply = queuedKeeperMessageToReply(result)
+      const isCheckpoint = reply.details?.turnOutcome === 'continuation_checkpoint'
+      const isError = result.status !== 'done' || result.ok === false
+      const errorMessage = isError ? queuedKeeperMessageError(result) : null
+      let assistantDelivery: KeeperConversationDelivery = 'delivered'
+      if (isCheckpoint) {
+        assistantDelivery = 'queued'
+      } else if (isError) {
+        assistantDelivery = 'error'
+      }
+      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+        delivery: isError ? 'error' : 'delivered',
+        error: errorMessage,
+      })
+      finalizeAssistantEntry(request.keeperName, assistantId, {
+        text: isCheckpoint ? '' : reply.text,
+        rawText: reply.details?.replyText ?? reply.text,
+        delivery: assistantDelivery,
+        streamState: null,
+        timestamp: new Date().toISOString(),
+        details: reply.details,
+        error: errorMessage,
+      })
+      if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
+      removePendingKeeperChatRequest(request.requestId)
+      await hydrateKeeperChatHistory(request.keeperName, { force: true })
+      return
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
+    setRecordValue(keeperActionErrors, request.keeperName, `대기 중 메시지 복구 실패: ${message}`)
+  } finally {
+    resumingKeeperChatRequests.delete(key)
+    if (!hasPendingKeeperChatRequest(request.keeperName)) {
+      setRecordValue(keeperSending, request.keeperName, false)
+      setRecordValue(keeperStreamStartedAt, request.keeperName, null)
+      setRecordValue(keeperStreamLastEventAt, request.keeperName, null)
+    }
+  }
+}
+
+export async function resumePendingKeeperChatRequests(name: string): Promise<void> {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  await Promise.all(pendingKeeperChatRequestsForKeeper(keeperName).map(resumePendingKeeperChatRequest))
+}
 
 /** React to a server `keeper_chat_appended` push: re-merge the
  *  persisted transcript so messages arriving through other connectors
@@ -266,6 +392,7 @@ export async function sendKeeperThreadMessage(
   const controller = new AbortController()
   setActiveStream(keeperName, assistantId, controller)
   let requestId: string | null = null
+  let requestTerminalSeen = false
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
@@ -276,6 +403,20 @@ export async function sendKeeperThreadMessage(
         setRecordValue(keeperStreamLastEventAt, keeperName, Date.now())
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {
           requestId = asString(event.value.request_id, '').trim() || requestId
+          if (requestId) {
+            upsertPendingKeeperChatRequest({
+              requestId,
+              keeperName,
+              message,
+              submittedAt: Date.now(),
+              ...(attachments ? { attachments } : {}),
+            })
+          }
+        }
+        if (event.type === 'CUSTOM' && event.name === 'KEEPER_REQUEST_TERMINAL' && isRecord(event.value)) {
+          requestTerminalSeen = true
+          const terminalRequestId = asString(event.value.request_id, '').trim()
+          if (terminalRequestId) removePendingKeeperChatRequest(terminalRequestId)
         }
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
@@ -316,6 +457,7 @@ export async function sendKeeperThreadMessage(
       timestamp: new Date().toISOString(),
       error: null,
     })
+    if (requestId) removePendingKeeperChatRequest(requestId)
   } catch (err) {
     if (isAbortError(err)) {
       if (requestId) {
@@ -324,6 +466,7 @@ export async function sendKeeperThreadMessage(
         } catch (cancelErr) {
           console.warn(`[keeper] queue cancel failed for ${keeperName}`, cancelErr instanceof Error ? cancelErr.message : cancelErr)
         }
+        removePendingKeeperChatRequest(requestId)
       }
       finalizeAssistantEntry(keeperName, assistantId, {
         delivery: 'timeout',
@@ -347,6 +490,7 @@ export async function sendKeeperThreadMessage(
       delivery: 'error' as KeeperConversationDelivery,
       error: errorMessage,
     })
+    if (requestTerminalSeen && requestId) removePendingKeeperChatRequest(requestId)
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {

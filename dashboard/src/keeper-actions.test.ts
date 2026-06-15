@@ -6,9 +6,29 @@ const { invalidateDashboardCache, refreshDashboard } = vi.hoisted(() => ({
   invalidateDashboardCache: vi.fn(),
   refreshDashboard: vi.fn(async () => undefined),
 }))
-const { cancelQueuedKeeperMessage, fetchKeeperChatHistory, streamKeeperMessage } = vi.hoisted(() => ({
+const {
+  cancelQueuedKeeperMessage,
+  fetchKeeperChatHistory,
+  fetchQueuedKeeperMessageResult,
+  isTerminalQueuedKeeperMessage,
+  queuedKeeperMessageError,
+  queuedKeeperMessageToReply,
+  streamKeeperMessage,
+} = vi.hoisted(() => ({
   cancelQueuedKeeperMessage: vi.fn(async () => undefined),
   fetchKeeperChatHistory: vi.fn(),
+  fetchQueuedKeeperMessageResult: vi.fn(),
+  isTerminalQueuedKeeperMessage: vi.fn((result: { status: string }) => (
+    result.status === 'done'
+    || result.status === 'error'
+    || result.status === 'lost'
+    || result.status === 'cancelled'
+  )),
+  queuedKeeperMessageError: vi.fn((result: { status: string }) => `request ${result.status}`),
+  queuedKeeperMessageToReply: vi.fn((result: { result?: { reply?: string } }) => ({
+    text: result.result?.reply ?? '(empty reply)',
+    details: null,
+  })),
   streamKeeperMessage: vi.fn(),
 }))
 
@@ -17,6 +37,10 @@ vi.mock('./api/core', () => ({ runOperatorAction }))
 vi.mock('./api/keeper', () => ({
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchQueuedKeeperMessageResult,
+  isTerminalQueuedKeeperMessage,
+  queuedKeeperMessageError,
+  queuedKeeperMessageToReply,
   streamKeeperMessage,
 }))
 vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard }))
@@ -39,9 +63,15 @@ import {
   noteKeeperChatAppended,
   probeKeeperRuntime,
   recoverKeeperRuntime,
+  resumePendingKeeperChatRequests,
   selectKeeper,
   sendKeeperThreadMessage,
 } from './keeper-actions'
+import {
+  _clearPendingKeeperChatRequestsForTests,
+  pendingKeeperChatRequestsForKeeper,
+  upsertPendingKeeperChatRequest,
+} from './keeper-chat-pending'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperStatusDetail } from './types'
@@ -133,7 +163,18 @@ describe('sendKeeperThreadMessage stream outcome', () => {
   beforeEach(() => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
+    _clearPendingKeeperChatRequestsForTests()
     streamKeeperMessage.mockReset()
+    fetchKeeperChatHistory.mockReset()
+    fetchQueuedKeeperMessageResult.mockReset()
+    isTerminalQueuedKeeperMessage.mockClear()
+    queuedKeeperMessageError.mockClear()
+    queuedKeeperMessageToReply.mockClear()
+    queuedKeeperMessageError.mockImplementation((result: { status: string }) => `request ${result.status}`)
+    queuedKeeperMessageToReply.mockImplementation((result: { result?: { reply?: string } }) => ({
+      text: result.result?.reply ?? '(empty reply)',
+      details: null,
+    }))
     refreshDashboard.mockClear()
     invalidateDashboardCache.mockClear()
   })
@@ -183,6 +224,48 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+
+  it('keeps a queued request resumable when the stream cuts before terminal', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      {
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+      },
+    ], false))
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toMatchObject([
+      { requestId: 'kmsg_echo_1', keeperName: 'echo', message: '진행 상황?' },
+    ])
+  })
+
+  it('resumes a pending request from storage and finalizes the transcript', async () => {
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: '어디까지 했어?',
+      submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+    })
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      status: 'done',
+      ok: true,
+      result: { reply: '여기까지 했습니다.' },
+    })
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '어디까지 했어?', 'delivered'],
+      ['assistant', '여기까지 했습니다.', 'delivered'],
+    ])
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
   })
 })
 

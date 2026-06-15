@@ -1834,33 +1834,77 @@ let test_consolidator_unknown_category_default_deny () =
   Alcotest.(check int) "unknown category not promoted" 0 (List.length shared)
 ;;
 
-(* The category codec round-trips known tokens, lowercases on parse, and carries
-   any out-of-taxonomy label verbatim in [Unknown]. *)
-let test_category_roundtrip () =
-  let known = [ "code_change"; "fact"; "preference"; "blocker"; "goal"; "constraint" ] in
+(* RFC-0246 §2.5: the category codec round-trips every known arm, and an
+   unrecognized label degrades to [Unknown raw] carrying the original string so a
+   read/write cycle is lossless (legacy free-string facts on disk survive). *)
+let test_category_codec_roundtrip () =
+  let known =
+    [ "fact", Types.Fact
+    ; "constraint", Types.Constraint
+    ; "preference", Types.Preference
+    ; "blocker", Types.Blocker
+    ; "goal", Types.Goal
+    ; "code_change", Types.Code_change
+    ; "ephemeral", Types.Ephemeral
+    ]
+  in
   List.iter
-    (fun s ->
-      Alcotest.(check string)
-        (Printf.sprintf "round-trip %s" s)
-        s
-        (Types.category_to_string (Types.category_of_string s)))
+    (fun (s, expected) ->
+       Alcotest.(check bool)
+         (Printf.sprintf "of_string %s" s)
+         true
+         (Types.category_of_string s = expected);
+       Alcotest.(check string)
+         (Printf.sprintf "to_string round-trip %s" s)
+         s
+         (Types.category_to_string (Types.category_of_string s)))
     known;
   Alcotest.(check string)
     "case-insensitive parse"
     "fact"
     (Types.category_to_string (Types.category_of_string "FACT"));
+  (* Unknown preserves the raw string both ways. *)
   Alcotest.(check bool)
-    "out-of-taxonomy becomes Unknown"
+    "unknown label parses to Unknown"
     true
-    (match Types.category_of_string "observation" with
-     | Types.Unknown "observation" -> true
-     | _ -> false);
+    (Types.category_of_string "checkpoint_saved" = Types.Unknown "checkpoint_saved");
   Alcotest.(check string)
-    "Unknown carries the raw label"
-    "observation"
-    (Types.category_to_string (Types.Unknown "observation"))
+    "unknown round-trips losslessly"
+    "checkpoint_saved"
+    (Types.category_to_string (Types.category_of_string "checkpoint_saved"))
 ;;
 
+(* Only [Fact] and [Constraint] promote — exhaustively, so a new arm cannot
+   silently join the shared tier (the prior ["fact";"constraint"] whitelist). *)
+let test_is_promotable_only_fact_constraint () =
+  let promotable = [ Types.Fact; Types.Constraint ] in
+  let blocked =
+    [ Types.Preference; Types.Blocker; Types.Goal; Types.Code_change
+    ; Types.Ephemeral; Types.Unknown "novel"
+    ]
+  in
+  List.iter
+    (fun c -> Alcotest.(check bool) (Types.category_to_string c ^ " promotes") true (Types.is_promotable c))
+    promotable;
+  List.iter
+    (fun c -> Alcotest.(check bool) (Types.category_to_string c ^ " blocked") false (Types.is_promotable c))
+    blocked
+;;
+
+(* RFC-0246 §2.5 / #21244 regression guard: an Ephemeral claim corroborated by
+   >=2 distinct keepers above threshold is NOT promoted. This is the exact failure
+   the #21244 dry-run found (coordination boilerplate mislabeled and promoted);
+   the typed non-promotable category makes it structurally impossible. *)
+let test_consolidator_ephemeral_not_promoted () =
+  let now = 1_000_000.0 in
+  let keeper_facts =
+    [ "alpha", [ mk_shared_fixture ~now ~category:"ephemeral" ~confidence:0.9 "checkpoint saved" ]
+    ; "beta", [ mk_shared_fixture ~now ~category:"ephemeral" ~confidence:0.9 "checkpoint saved" ]
+    ]
+  in
+  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
+  Alcotest.(check int) "ephemeral corroborated claim not promoted" 0 (List.length shared)
+;;
 (* A contributor below the confidence floor does not count toward corroboration,
    so a 2-keeper claim with only one eligible contributor is not promoted. *)
 let test_consolidator_below_threshold_excluded () =
@@ -2140,9 +2184,17 @@ let () =
             `Quick
             test_consolidator_unknown_category_default_deny
         ; Alcotest.test_case
-            "category codec round-trips (#21241)"
+            "category codec round-trips (RFC-0246 §2.5)"
             `Quick
-            test_category_roundtrip
+            test_category_codec_roundtrip
+        ; Alcotest.test_case
+            "only fact/constraint promote (RFC-0246 §2.5)"
+            `Quick
+            test_is_promotable_only_fact_constraint
+        ; Alcotest.test_case
+            "ephemeral corroborated claim not promoted (#21244)"
+            `Quick
+            test_consolidator_ephemeral_not_promoted
         ; Alcotest.test_case
             "below-threshold contributor excluded"
             `Quick

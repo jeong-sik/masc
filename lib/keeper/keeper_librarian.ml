@@ -182,8 +182,10 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
        Some
          { claim
          ; confidence
-         (* RFC-0244 §2.3 / #21241: parse the LLM's free-text category label into
-            the closed [category] sum once here at the producer boundary. *)
+         (* Parse-once at the producer boundary (RFC-0244 §2.3 / #21241; RFC-0246
+            §2.5): the LLM's free-text category becomes a typed [category] here, so
+            no surface string reaches the store or the consolidator — and an
+            [Ephemeral] label is born structurally non-promotable. *)
          ; category = category_of_string category_str
          ; source = claim_source ~trace_id turn tool_call_id
          (* Tier-1 (per-keeper) facts carry no distinct-keeper corroboration set;

@@ -189,7 +189,7 @@ val board_signal_wake_reason :
   continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   signal:Board_dispatch.board_signal ->
-  string option
+  Keeper_world_observation_board_signal.wake_reason option
 
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. Returns [None] for non-board stimuli. *)

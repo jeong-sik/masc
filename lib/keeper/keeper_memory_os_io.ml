@@ -266,6 +266,64 @@ let read_facts_tail ~keeper_id ~n =
   |> take_last n
 ;;
 
+(* RFC-0239 Q4: the per-keeper fact recall window / retention target. The store
+   is bounded to this many facts by the retention sweep, and recall reads up to
+   this many candidates (no longer just the last 64), so score ranking selects
+   the globally best facts within the bounded store rather than the most recent
+   few. *)
+let fact_recall_window = 256
+
+let take_first n xs =
+  let rec aux k = function
+    | x :: tl when k > 0 -> x :: aux (k - 1) tl
+    | _ -> []
+  in
+  if n <= 0 then [] else aux n xs
+;;
+
+let read_all_facts ~keeper_id =
+  let path = facts_path ~keeper_id in
+  if not (Sys.file_exists path)
+  then []
+  else (
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         really_input_string ic (in_channel_length ic)
+         |> split_lines
+         |> List.filter_map (parse_json_line fact_of_json)))
+;;
+
+(* RFC-0239 Q4 (supersedes RFC-0238 Capped_by_score): bound the append-only
+   fact store. When the store exceeds [trigger], keep the [keep] highest-ranked
+   facts and atomically rewrite the file; otherwise leave it untouched. The
+   hysteresis ([trigger] > [keep]) keeps this off the per-turn hot path — a
+   rewrite happens only once every ([trigger] - [keep]) appended facts. Returns
+   the number of facts dropped. *)
+let cap_facts ~keeper_id ~keep ~trigger ~rank =
+  let path = facts_path ~keeper_id in
+  let all = read_all_facts ~keeper_id in
+  let total = List.length all in
+  if total <= trigger
+  then 0
+  else (
+    let kept =
+      all
+      |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
+      |> take_first keep
+    in
+    let content =
+      match kept with
+      | [] -> ""
+      | _ ->
+        (kept |> List.map (fun f -> Yojson.Safe.to_string (fact_to_json f)) |> String.concat "\n")
+        ^ "\n"
+    in
+    write_file_atomically path content;
+    total - List.length kept)
+;;
+
 let read_events_tail ~keeper_id ~n =
   read_lines_tail (events_path ~keeper_id) ~n
   |> List.filter_map (parse_json_line episode_of_json)

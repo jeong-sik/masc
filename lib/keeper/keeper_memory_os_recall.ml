@@ -194,7 +194,12 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
   let facts =
-    Keeper_memory_os_io.read_facts_tail ~keeper_id ~n:(max fact_tail_scan max_facts)
+    (* RFC-0239 Q4: read up to the bounded recall window (the retention sweep
+       caps the store to this many facts), so score ranking selects the
+       globally best facts rather than only the most recent [fact_tail_scan]. *)
+    Keeper_memory_os_io.read_facts_tail
+      ~keeper_id
+      ~n:(max fact_tail_scan Keeper_memory_os_io.fact_recall_window)
     |> scored_facts ~now
     |> take max_facts
   in

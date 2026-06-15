@@ -132,6 +132,51 @@ let test_drops_stale_goal_capacity_claims () =
   Alcotest.(check bool) "live task-specific action kept"
     true (Astring.String.is_infix ~affix:"task-952" filtered)
 
+let mixed_all_kinds_summary =
+  {|Goal: keep this forward goal
+
+Done: backward retrospective line
+Next plan: stay silent until new actionable work appears
+Constraints: tool surface: masc_* only
+Next: current goal cap 4/3 means 새 작업 못 받음
+Next: claim task-952 directly|}
+
+(* The typed [line_kind] classifier maps every line to exactly one
+   constructor; this exercises all drop-kinds (Backward / Inert_next /
+   Stale_tool_surface / Stale_goal_capacity) plus Forward_content in a single
+   input so a missing kind would surface as a kept drop-line. *)
+let test_classifies_all_drop_kinds_in_one_input () =
+  let filtered =
+    Masc.Keeper_memory_policy.filter_forward_looking_summary
+      mixed_all_kinds_summary
+  in
+  Alcotest.(check bool) "backward dropped"
+    false (Astring.String.is_infix ~affix:"Done:" filtered);
+  Alcotest.(check bool) "inert next dropped"
+    false (Astring.String.is_infix ~affix:"stay silent" filtered);
+  Alcotest.(check bool) "stale tool surface dropped"
+    false (Astring.String.is_infix ~affix:"masc_* only" filtered);
+  Alcotest.(check bool) "stale goal cap dropped"
+    false (Astring.String.is_infix ~affix:"goal cap" filtered);
+  Alcotest.(check bool) "forward goal kept"
+    true (Astring.String.is_infix ~affix:"keep this forward goal" filtered);
+  Alcotest.(check bool) "live task-specific next kept"
+    true (Astring.String.is_infix ~affix:"task-952" filtered)
+
+(* Blank constructor: whitespace-only lines never survive, even when they sit
+   between forward-looking content. *)
+let test_drops_blank_lines () =
+  let filtered =
+    Masc.Keeper_memory_policy.filter_forward_looking_summary
+      "Goal: alpha\n\n   \nNext: keep beta"
+  in
+  Alcotest.(check bool) "no empty line block remains"
+    false (Astring.String.is_infix ~affix:"\n\n" filtered);
+  Alcotest.(check bool) "forward goal kept"
+    true (Astring.String.is_infix ~affix:"alpha" filtered);
+  Alcotest.(check bool) "forward next kept"
+    true (Astring.String.is_infix ~affix:"beta" filtered)
+
 let () =
   Alcotest.run "continuity forward filter"
     [ ( "filter_forward_looking_summary",
@@ -149,5 +194,9 @@ let () =
             test_drops_stale_tool_surface_claims;
           Alcotest.test_case "drops stale goal-cap claims" `Quick
             test_drops_stale_goal_capacity_claims;
+          Alcotest.test_case "classifies all drop-kinds in one input" `Quick
+            test_classifies_all_drop_kinds_in_one_input;
+          Alcotest.test_case "drops blank lines" `Quick
+            test_drops_blank_lines;
         ] );
     ]

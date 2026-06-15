@@ -440,6 +440,8 @@ let handle_event ~received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_
       correlation_id;
       run_id;
     } in
+    (* Notify the Cognitive Gravity Event Bus so it can decay stale facts *)
+    let _decayed = Cognitive_gravity_event_bus.dispatch agent_name in
     (match persist_complete ~base_path ~retention_days r with
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->

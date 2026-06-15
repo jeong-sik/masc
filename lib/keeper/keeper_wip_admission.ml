@@ -196,12 +196,25 @@ let decide ?(caps = default_caps) active ~scope =
       (fun item -> same_category item.scope.category scope.category)
       active
   in
+  (* The per-goal cap exists to prevent *scope collisions* — multiple keepers
+     working the same goal at once (merge conflicts, duplicated work). A task
+     with no goal_id ([goal:<none>]) shares no goal scope with any other, so
+     there is nothing to collide on. Applying [max_per_goal] to the [None]
+     bucket instead lumps every unrelated goalless task into one fleet-wide
+     cap, which starves claims once that bucket fills. Exempt [None] from the
+     goal cap; the global/repo/category caps still bound goalless WIP. (RFC-0245) *)
+  let goal_cap_check =
+    match scope.goal_id with
+    | Some _ ->
+      reject_if_at_cap Goal_cap (goal_key scope.goal_id) goal_count
+        caps.max_per_goal
+    | None -> None
+  in
   match
     first_rejection
       [ reject_if_at_cap Global_cap global_key global_count caps.max_global
       ; reject_if_at_cap Repo_cap (repo_key scope.repo) repo_count caps.max_per_repo
-      ; reject_if_at_cap Goal_cap (goal_key scope.goal_id) goal_count
-          caps.max_per_goal
+      ; goal_cap_check
       ; reject_if_at_cap Category_cap
           (category_key scope.category)
           category_count

@@ -20,12 +20,6 @@ export function keeperBucket(keeper: Keeper): KeeperBucket {
 
 export type DotTone = 'ok' | 'warn' | 'bad' | 'idle'
 
-export function bucketDotTone(bucket: KeeperBucket): DotTone {
-  if (bucket === 'running') return 'ok'
-  if (bucket === 'paused') return 'warn'
-  return 'idle'
-}
-
 const DOT_CLASS: Record<DotTone, string> = {
   ok: 'kw-dot ok',
   warn: 'kw-dot warn',
@@ -61,16 +55,64 @@ export function WorkspaceSigil({
   return html`<span class="kw-sigil" style=${style} title=${id} aria-label=${id}>${sigil}</span>`
 }
 
-/** Phase label shown in the roster sub-row and the chat header state pill.
- *  Prefers the typed FSM phase, falls back to the display-status mapper. */
-export function keeperPhaseLabel(keeper: Keeper): string {
-  return keeper.lifecycle_phase ?? keeper.phase ?? keeperDisplayStatus(keeper)
+/** Friendly (Korean) label per canonical status token. Keyed on the tokens
+ *  keeperDisplayStatus emits (lib/keeper-runtime-display.ts keeperLifecycleStatus),
+ *  so the roster row + header pill read the same vocabulary as the rest of the
+ *  dashboard instead of the raw PascalCase FSM enum (e.g. "Compacting"). */
+const PHASE_LABEL_KO: Record<string, string> = {
+  running: '실행 중',
+  paused: '일시정지',
+  compacting: '압축 중',
+  handoff: '인계 중',
+  draining: '정리 중',
+  restarting: '재시작 중',
+  failing: '오류 발생',
+  overflowed: '컨텍스트 초과',
+  stopped: '중지됨',
+  unbooted: '미기동',
+  crashed: '비정상 종료',
+  dead: '종료됨',
+  zombie: '응답 없음',
+  unknown: '알 수 없음',
 }
 
-/** The state-pill modifier class for the chat header. */
-export function statePillTone(bucket: KeeperBucket): 'run' | 'warn' | 'off' {
-  if (bucket === 'running') return 'run'
-  if (bucket === 'paused') return 'warn'
+/** Phase label shown in the roster sub-row and the chat header state pill.
+ *  Routes through keeperDisplayStatus so error/transient phases surface with
+ *  the same token vocabulary the rest of the dashboard uses, then maps to a
+ *  Korean label. Previously returned the raw `lifecycle_phase` enum, which
+ *  leaked "Running"/"Compacting"/"HandingOff" into the UI. */
+export function keeperPhaseLabel(keeper: Keeper): string {
+  const token = keeperDisplayStatus(keeper)
+  return PHASE_LABEL_KO[token] ?? token
+}
+
+/** Error phases that must not render as a healthy green dot. */
+const ERROR_STATUS_TOKENS = new Set(['failing', 'overflowed', 'crashed', 'dead', 'zombie'])
+/** Transient / attention phases that warrant a warn (amber) dot. */
+const WARN_STATUS_TOKENS = new Set(['paused', 'compacting', 'handoff', 'draining', 'restarting'])
+
+/** Health tone for the status dot + header pill.
+ *
+ *  Distinct from keeperBucket, which only groups running/paused/offline for
+ *  the roster: a Failing or Overflowed keeper is neither offline nor paused,
+ *  so the bucket classifies it as "running" and it would render a green dot
+ *  while actually degraded. This maps the canonical status token to a tone so
+ *  error phases surface as `bad` (the .kw-dot.bad / .kw-state-pill.bad styles
+ *  that were otherwise unreachable). */
+export function keeperStatusTone(keeper: Keeper): DotTone {
+  const token = keeperDisplayStatus(keeper)
+  if (ERROR_STATUS_TOKENS.has(token)) return 'bad'
+  if (WARN_STATUS_TOKENS.has(token)) return 'warn'
+  if (token === 'running') return 'ok'
+  return 'idle'
+}
+
+/** The state-pill modifier class for the chat header, derived from the health
+ *  tone so error phases get the `bad` pill rather than collapsing to `off`. */
+export function statePillTone(tone: DotTone): 'run' | 'warn' | 'bad' | 'off' {
+  if (tone === 'ok') return 'run'
+  if (tone === 'warn') return 'warn'
+  if (tone === 'bad') return 'bad'
   return 'off'
 }
 

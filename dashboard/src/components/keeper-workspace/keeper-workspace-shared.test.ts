@@ -2,7 +2,7 @@ import { render } from 'preact'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   keeperBucket,
-  bucketDotTone,
+  keeperStatusTone,
   statePillTone,
   keeperModelLabel,
   keeperRuntimeLabel,
@@ -28,16 +28,36 @@ describe('keeperBucket', () => {
   })
 })
 
-describe('bucketDotTone / statePillTone', () => {
-  it('maps buckets to dot tones', () => {
-    expect(bucketDotTone('running')).toBe('ok')
-    expect(bucketDotTone('paused')).toBe('warn')
-    expect(bucketDotTone('offline')).toBe('idle')
+describe('keeperStatusTone', () => {
+  it('maps a running keeper to ok', () => {
+    expect(keeperStatusTone(mk({ status: 'running' }))).toBe('ok')
   })
-  it('maps buckets to pill tones', () => {
-    expect(statePillTone('running')).toBe('run')
-    expect(statePillTone('paused')).toBe('warn')
-    expect(statePillTone('offline')).toBe('off')
+  it('surfaces error phases as bad (not a healthy green dot)', () => {
+    // Failing/Overflowed are neither offline nor paused, so keeperBucket
+    // classifies them as "running"; the tone must still flag them.
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Failing' }))).toBe('bad')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Overflowed' }))).toBe('bad')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Crashed' }))).toBe('bad')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Dead' }))).toBe('bad')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Zombie' }))).toBe('bad')
+  })
+  it('maps transient / attention phases to warn', () => {
+    expect(keeperStatusTone(mk({ status: 'running', paused: true }))).toBe('warn')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Compacting' }))).toBe('warn')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'HandingOff' }))).toBe('warn')
+  })
+  it('maps stopped / unbooted to idle', () => {
+    expect(keeperStatusTone(mk({ status: 'stopped' }))).toBe('idle')
+    expect(keeperStatusTone(mk({ lifecycle_phase: 'Offline' }))).toBe('idle')
+  })
+})
+
+describe('statePillTone', () => {
+  it('maps health tones to pill modifier classes', () => {
+    expect(statePillTone('ok')).toBe('run')
+    expect(statePillTone('warn')).toBe('warn')
+    expect(statePillTone('bad')).toBe('bad')
+    expect(statePillTone('idle')).toBe('off')
   })
 })
 
@@ -59,9 +79,15 @@ describe('keeperRuntimeLabel', () => {
 })
 
 describe('keeperPhaseLabel', () => {
-  it('prefers the typed lifecycle phase', () => {
-    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Running' }))).toBe('Running')
-    expect(keeperPhaseLabel(mk({ phase: 'Compacting' }))).toBe('Compacting')
+  it('maps the FSM phase to a Korean label (no raw PascalCase enum leak)', () => {
+    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Running' }))).toBe('실행 중')
+    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Compacting' }))).toBe('압축 중')
+    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'Failing' }))).toBe('오류 발생')
+    expect(keeperPhaseLabel(mk({ lifecycle_phase: 'HandingOff' }))).toBe('인계 중')
+  })
+  it('falls back to the status token when no friendly label exists', () => {
+    // keeperDisplayStatus returns the raw status string for unmapped tokens.
+    expect(keeperPhaseLabel(mk({ status: 'bootstrapping' }))).toBe('bootstrapping')
   })
 })
 

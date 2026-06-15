@@ -120,6 +120,37 @@ let test_transport_status_reports_streamable_http_protocol () =
   check bool "enabled_protocols includes canonical json-rpc path" true
     (List.mem "json-rpc" enabled_protocols)
 
+let test_websocket_discovery_uses_same_origin_upgrade_url () =
+  let json = TRM.websocket_discovery_json (make_context ()) in
+  check string "mode" "same_origin_upgrade"
+    Yojson.Safe.Util.(json |> member "mode" |> to_string);
+  check string "upgrade path" "/ws"
+    Yojson.Safe.Util.(json |> member "upgrade_path" |> to_string);
+  check string "ws_url uses http listener" "ws://127.0.0.1:8935/ws"
+    Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
+  check string "standalone retained for diagnostics" "ws://127.0.0.1:8937/"
+    Yojson.Safe.Util.(json |> member "standalone_ws_url" |> to_string)
+
+let test_websocket_discovery_uses_wss_for_https_base_url () =
+  let ctx =
+    TRM.make_http_context
+      ~base_url:"https://example.com/root/"
+      ~host:"example.com"
+      ()
+  in
+  let json = TRM.websocket_discovery_json ctx in
+  check string "wss preserves base path" "wss://example.com/root/ws"
+    Yojson.Safe.Util.(json |> member "ws_url" |> to_string)
+
+let test_advertised_base_url_uses_forwarded_proto_without_internal_port () =
+  let headers =
+    Httpun.Headers.of_list
+      [ "host", "masc.example.com"; "x-forwarded-proto", "https" ]
+  in
+  let request = Httpun.Request.create ~headers `GET "/ws" in
+  check string "forwarded https base" "https://masc.example.com"
+    (Server_routes_http_runtime.advertised_base_url request)
+
 let test_context_from_env_uses_default_loopback_base_url () =
   with_env "MASC_HTTP_BASE_URL" None (fun () ->
       with_env "MASC_HOST" (Some "0.0.0.0") (fun () ->
@@ -165,6 +196,12 @@ let () =
              test_transport_status_http_shape_extends_tool_shape;
            test_case "transport status includes json-rpc protocol" `Quick
              test_transport_status_reports_streamable_http_protocol;
+           test_case "websocket same-origin URL" `Quick
+             test_websocket_discovery_uses_same_origin_upgrade_url;
+           test_case "websocket HTTPS URL" `Quick
+             test_websocket_discovery_uses_wss_for_https_base_url;
+           test_case "forwarded base URL" `Quick
+             test_advertised_base_url_uses_forwarded_proto_without_internal_port;
          ] );
       ( "env",
         [

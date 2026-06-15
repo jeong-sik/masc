@@ -90,9 +90,9 @@ val context_from_env :
 val websocket_discovery_json : http_context -> Yojson.Safe.t
 (** [websocket_discovery_json ctx] returns the WebSocket
     discovery payload used by browser dashboards to learn the
-    [ws://]/[wss://] URL.  Includes the configured-port +
-    runtime-listening fields when [ctx.include_configured] is
-    [true]. *)
+    same-origin [ws://]/[wss://] upgrade URL.  Includes the
+    legacy standalone configured-port + runtime-listening fields
+    when [ctx.include_configured] is [true]. *)
 
 val transport_status_json : http_context -> Yojson.Safe.t
 (** [transport_status_json ctx] returns the full transport
@@ -117,4 +117,3 @@ type webrtc_status =
 val register_grpc_service_name : string -> unit
 val register_grpc_health_service_name : string -> unit
 val register_webrtc_status : (unit -> webrtc_status) -> unit
-

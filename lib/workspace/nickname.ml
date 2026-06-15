@@ -1,24 +1,9 @@
 (** Nickname generator for MASC agents - Docker-style adjective+animal *)
 
-(* Adjectives - positive, memorable, easy to pronounce *)
-let adjectives = [|
-  "swift"; "brave"; "calm"; "eager"; "fierce";
-  "gentle"; "happy"; "jolly"; "keen"; "lucky";
-  "merry"; "noble"; "proud"; "quick"; "witty";
-  "bold"; "cool"; "deft"; "fair"; "grand";
-  "hale"; "jade"; "kind"; "lean"; "neat";
-  "pale"; "rare"; "sage"; "tame"; "warm";
-|]
-
-(* Animals - recognizable, memorable *)
-let animals = [|
-  "fox"; "bear"; "wolf"; "hawk"; "lion";
-  "tiger"; "eagle"; "otter"; "panda"; "koala";
-  "raven"; "falcon"; "badger"; "beaver"; "whale";
-  "shark"; "crane"; "heron"; "moose"; "viper";
-  "cobra"; "gecko"; "lemur"; "llama"; "manta";
-  "orca"; "rhino"; "sloth"; "tapir"; "zebra";
-|]
+(* Adjective/animal vocabulary is the shared [Nickname_words] SSOT (masc.config)
+   so the generator and the auth-side classifier cannot drift. *)
+let adjectives = Nickname_words.adjectives
+let animals = Nickname_words.animals
 
 (* RNG for nickname generation.  [Random.State.t] is NOT fiber-safe —
    the previous doc comment claiming otherwise was incorrect.  Guard

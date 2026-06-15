@@ -324,9 +324,28 @@ let read_alternative =
     ]
 ;;
 
-let tool_tutor_for_unknown_name requested_tool =
+(* Closed vocabulary of the hallucinated/typo'd tool names this tutor
+   recognizes. These names intentionally have no [Tool_name]/[runtime_handler]
+   variant: they are *not* tools, they are common model mistakes routed to the
+   rejection path. Modelling them as their own closed sum keeps the guidance
+   match exhaustive (no catch-all swallow) while not polluting the real tool
+   enums. #21087 introduced these as lowercased string literals. *)
+type tutor_alias =
+  | Glob
+  | Search_files_alias
+  | Read_file_alias
+
+let tutor_alias_of_requested_name requested_tool =
   match String.lowercase_ascii (String.trim requested_tool) with
-  | "glob" ->
+  | "glob" -> Some Glob
+  | "searchfiles" | "search_files" -> Some Search_files_alias
+  | "readfile" | "read_file" -> Some Read_file_alias
+  | _ -> None
+;;
+
+let tool_tutor_for_unknown_name requested_tool =
+  match tutor_alias_of_requested_name requested_tool with
+  | Some Glob ->
     Some
       (tool_tutor_json
          ~kind:"unknown_tool"
@@ -335,7 +354,7 @@ let tool_tutor_for_unknown_name requested_tool =
            "Glob is not an active MASC keeper tool. Use Grep only for content \
             search; use Execute with find/ls for file listing."
          ~alternatives:[ grep_alternative; execute_find_alternative ])
-  | "searchfiles" | "search_files" ->
+  | Some Search_files_alias ->
     Some
       (tool_tutor_json
          ~kind:"tool_name_alias"
@@ -344,42 +363,84 @@ let tool_tutor_for_unknown_name requested_tool =
            "Use Grep or search_files with the public search-files schema: \
             provide pattern, not query."
          ~alternatives:[ grep_alternative ])
-  | "readfile" | "read_file" ->
+  | Some Read_file_alias ->
     Some
       (tool_tutor_json
          ~kind:"tool_name_alias"
          ~requested_tool
          ~message:"Use Read with file_path; Read has no start_line or offset."
          ~alternatives:[ read_alternative ])
-  | _ -> None
+  | None -> None
 ;;
 
+(* Tutor guidance is keyed on the descriptor's typed [runtime_handler] rather
+   than its internal-name string. Resolving to the descriptor and matching the
+   variant keeps the compiler exhaustive: a new handler forces a decision here
+   instead of silently falling through a string default. #21087 introduced this
+   as a [canonical_internal_name_for_tool_name] string match; the typed handler
+   is the same canonical signal carried by the descriptor. *)
 let tool_tutor_for_validation ~tool_name ~input =
-  match
-    Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name
-  with
-  | Some "tool_read_file"
-    when args_has_any_field
-           [ "offset"; "start_line"; "end_line"; "line"; "line_start"; "line_end" ]
-           input ->
-    Some
-      (tool_tutor_json
-         ~kind:"invalid_arguments"
-         ~requested_tool:tool_name
-         ~message:
-           "Read does not support line offsets. Use file_path plus optional cwd/limit; \
-            use Grep or Execute for locating a smaller target first."
-         ~alternatives:[ read_alternative; grep_alternative; execute_find_alternative ])
-  | Some "tool_search_files" when args_has_any_field [ "query" ] input ->
-    Some
-      (tool_tutor_json
-         ~kind:"invalid_arguments"
-         ~requested_tool:tool_name
-         ~message:
-           "Grep/search_files requires pattern. Rename query to pattern for \
-            content search."
-         ~alternatives:[ grep_alternative ])
-  | Some _ | None -> None
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  | None -> None
+  | Some descriptor ->
+    (match descriptor.Keeper_tool_descriptor.runtime_handler with
+     | Keeper_tool_descriptor.Tool_read_file
+       when args_has_any_field
+              [ "offset"; "start_line"; "end_line"; "line"; "line_start"; "line_end" ]
+              input ->
+       Some
+         (tool_tutor_json
+            ~kind:"invalid_arguments"
+            ~requested_tool:tool_name
+            ~message:
+              "Read does not support line offsets. Use file_path plus optional \
+               cwd/limit; use Grep or Execute for locating a smaller target first."
+            ~alternatives:[ read_alternative; grep_alternative; execute_find_alternative ])
+     | Keeper_tool_descriptor.Tool_search_files when args_has_any_field [ "query" ] input
+       ->
+       Some
+         (tool_tutor_json
+            ~kind:"invalid_arguments"
+            ~requested_tool:tool_name
+            ~message:
+              "Grep/search_files requires pattern. Rename query to pattern for \
+               content search."
+            ~alternatives:[ grep_alternative ])
+     (* Handlers below carry no tutor; listed explicitly so a new runtime_handler
+        variant forces a compile-time choice instead of a string catch-all. *)
+     | Keeper_tool_descriptor.Tool_read_file
+     | Keeper_tool_descriptor.Tool_search_files
+     | Keeper_tool_descriptor.Tool_execute
+     | Keeper_tool_descriptor.Tool_edit_file
+     | Keeper_tool_descriptor.Tool_write_file
+     | Keeper_tool_descriptor.Tool_time_now
+     | Keeper_tool_descriptor.Tool_stay_silent
+     | Keeper_tool_descriptor.Tool_tools_list
+     | Keeper_tool_descriptor.Tool_tool_search
+     | Keeper_tool_descriptor.Tool_context_status
+     | Keeper_tool_descriptor.Tool_memory_search
+     | Keeper_tool_descriptor.Tool_memory_write
+     | Keeper_tool_descriptor.Tool_library_search
+     | Keeper_tool_descriptor.Tool_library_read
+     | Keeper_tool_descriptor.Tool_surface_read
+     | Keeper_tool_descriptor.Tool_surface_post
+     | Keeper_tool_descriptor.Tool_person_note_set
+     | Keeper_tool_descriptor.Tool_ide_annotate
+     | Keeper_tool_descriptor.Tool_voice_dispatch
+     | Keeper_tool_descriptor.Tool_task_dispatch
+     | Keeper_tool_descriptor.Board_tool_dispatch
+     | Keeper_tool_descriptor.Tool_masc_board_dispatch
+     | Keeper_tool_descriptor.Tool_masc_task_dispatch
+     | Keeper_tool_descriptor.Tool_masc_plan_dispatch
+     | Keeper_tool_descriptor.Tool_masc_run_dispatch
+     | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+     | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+     | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+     | Keeper_tool_descriptor.Tool_masc_control_dispatch
+     | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+     | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+     | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+     | Keeper_tool_descriptor.Tool_masc_surface_audit -> None)
 ;;
 
 let append_assoc_fields json extra_fields =

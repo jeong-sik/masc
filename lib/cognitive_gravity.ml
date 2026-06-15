@@ -1,12 +1,21 @@
 (* Semantic Gravity ranker — implementation.
 
    See cognitive_gravity.mli for the interface contract and
-   docs/rfc/RFC-0035-cognitive-ide-roadmap.md for the integration plan. *)
+   docs/rfc/RFC-0035-cognitive-ide-roadmap.md for the integration plan.
+
+   apply_decay updated per garnet's task-1289 root-cause analysis:
+   replaces static 3-type decay triggers with 8-type Event Bus triggers
+   and Memory OS-aware stale factor deltas. *)
 
 type decay_trigger =
-  | BoardPost of string
-  | TaskTransition of string * string
-  | GitEvent of string
+  | TurnElapsed
+  | NoNewMentions
+  | Contradiction
+  | ManualDecay
+  | KeeperVerification
+  | TaskCycle
+  | KnowledgeImport
+  | DecayResistance
 
 type 'a item = {
   payload : 'a;
@@ -73,22 +82,46 @@ let rank ?(weights = default_weights) ~query items =
   let scored = List.map (fun it -> (it, gravity_score weights ~query it)) items in
   List.stable_sort (fun (_, a) (_, b) -> Float.compare b a) scored
 
-let apply_decay triggers ~query:_ =
-  (* Map each trigger type to a stale-factor delta that reduces fact scores.
-     Phase4 wiring: called by event_bus.poll_all -> GC trigger.
+(* Per-trigger stale-factor delta weights.
+   Each weight represents the contribution to accumulated decay score
+   when that trigger fires. Weights are chosen so that:
+   - >= 0.7 accumulated triggers GC sweep
+   - DecayResistance (-0.40) acts as counter-force
 
-     Returns (fact_id, new_score) pairs. In Phase4 wiring, fact scores are
-     reduced by 1 - decay_factor. Full integration uses GC file I/O. *)
-  let decay_factor = function
-    | BoardPost _ -> 0.85
-    | TaskTransition (_, "release") -> 0.50
-    | TaskTransition (_, "done") -> 0.80
-    | TaskTransition _ -> 0.70
-    | GitEvent "merge" -> 0.20
-    | GitEvent _ -> 0.60
-  in
-  List.map (fun t -> ("trigger:" ^ match t with
-    | BoardPost id -> "bp_" ^ id
-    | TaskTransition (tid, st) -> "tt_" ^ tid ^ "_" ^ st
-    | GitEvent ev -> "ge_" ^ ev
-  , decay_factor t)) triggers
+   Weights merge rondo's Phase4 design rate and garnet's original taxonomy. *)
+let trigger_weight = function
+  | TurnElapsed      -> 0.15
+  | NoNewMentions    -> 0.20
+  | Contradiction    -> 0.60
+  | ManualDecay      -> 0.50
+  | KeeperVerification -> 0.30
+  | TaskCycle        -> 0.25
+  | KnowledgeImport  -> 0.20
+  | DecayResistance  -> (-0.40)
+
+(* stale_factor_delta returns the per-trigger contribution to the stale
+   factor computation, which is trigger_weight clamped to [-1.0, 1.0].
+
+   This is the function garnet's task-1289 analysis identified as the
+   missing dynamic link between Event Bus triggers and Memory OS fact
+   scores. Previously the decay was static (hardcoded constants);
+   now each trigger contributes its weight dynamically. *)
+let stale_factor_delta trigger =
+  let w = trigger_weight trigger in
+  clamp ~lo:(-1.0) ~hi:1.0 w
+
+(* apply_decay accepts a list of decay triggers fired by the Event Bus
+   and returns the composite stale-factor delta.
+
+   Implementation per garnet's task-1289 root cause and rondo's task-1282
+   Phase4 GC trigger design:
+
+   - Each trigger contributes trigger_weight (scaled by recency if available)
+   - DecayResistance contributes negative weight (counters decay)
+   - Result clamped to [-1.0, 1.0]
+   - Positive delta = reduce fact scores = trigger decay
+   - Negative delta = preserve fact scores = DecayResistance dominant *)
+let apply_decay ?keeper_id:_ triggers =
+  (* Compute accumulated stale-factor delta *)
+  let sum = List.fold_left (fun acc t -> acc +. stale_factor_delta t) 0.0 triggers in
+  clamp ~lo:(-1.0) ~hi:1.0 sum

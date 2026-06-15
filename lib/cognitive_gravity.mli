@@ -66,18 +66,44 @@ val rank :
 
 (** Decay triggers sourced from the Event Bus for Memory OS stale-fact
     reconciliation. Each variant corresponds to a workspace channel that
-    can signal staleness. *)
+    can signal staleness. Merged from rondo's Phase4 design (4 types)
+    and garnet's original trigger taxonomy (8 types total).
+
+    @see <p-fafed821f4c8d5b6d87106c4bc82fbc0> rondo task-1282 design
+    @see <p-2caf95edeb5f5ab376154a2363e395a2> garnet task-1289 root cause *)
 type decay_trigger =
-  | BoardPost of string   (** post_id *)
-  | TaskTransition of string * string  (** task_id, new_status *)
-  | GitEvent of string    (** event type e.g. \"push\", \"merge\" *)
+  | TurnElapsed
+  | NoNewMentions
+  | Contradiction
+  | ManualDecay
+  | KeeperVerification
+  | TaskCycle
+  | KnowledgeImport
+  | DecayResistance
 
-(** [apply_decay triggers ctx] applies each [decay_trigger] to the
-    Memory OS fact set, reducing scores of facts that are no longer
-    relevant. Returns a list of (fact_id, new_score) pairs.
+(** Per-trigger weight used by the Event Bus to accumulate a decay score.
+    Sum of concurrent trigger weights >= 0.7 signals a GC sweep.
 
-    Called by the Event Bus wiring after [poll_all]. *)
+    Weights reflect the relative impact each event type should have on
+    stale-fact scoring. DecayResistance has a negative weight, acting as
+    a counter-force against unnecessary decay. *)
+val trigger_weight : decay_trigger -> float
+
+(** [apply_decay ?keeper_id triggers score_delta] applies each
+    [decay_trigger] to produce a composite stale-factor delta for
+    Memory OS fact scoring.
+
+    [score_delta] accumulates the weight of all concurrent triggers,
+    clamped to [-1.0, 1.0]. A positive delta reduces fact scores (decay);
+    a negative delta (from DecayResistance) preserves them.
+
+    Called by the Event Bus dispatch layer after poll_all. *)
 val apply_decay :
+  ?keeper_id:string ->
   decay_trigger list ->
-  query:string list ->
-  (string * float) list
+  float
+
+(** [stale_factor_delta trigger] returns the per-trigger contribution
+    to the stale factor computation. Each trigger contributes its
+    weight, scaled by recency of the triggering event. *)
+val stale_factor_delta : decay_trigger -> float

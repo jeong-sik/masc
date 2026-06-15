@@ -324,9 +324,28 @@ let read_alternative =
     ]
 ;;
 
-let tool_tutor_for_unknown_name requested_tool =
+(* Closed vocabulary of the hallucinated/typo'd tool names this tutor
+   recognizes. These names intentionally have no [Tool_name]/[runtime_handler]
+   variant: they are *not* tools, they are common model mistakes routed to the
+   rejection path. Modelling them as their own closed sum keeps the guidance
+   match exhaustive (no catch-all swallow) while not polluting the real tool
+   enums. #21087 introduced these as lowercased string literals. *)
+type tutor_alias =
+  | Glob
+  | Search_files_alias
+  | Read_file_alias
+
+let tutor_alias_of_requested_name requested_tool =
   match String.lowercase_ascii (String.trim requested_tool) with
-  | "glob" ->
+  | "glob" -> Some Glob
+  | "searchfiles" | "search_files" -> Some Search_files_alias
+  | "readfile" | "read_file" -> Some Read_file_alias
+  | _ -> None
+;;
+
+let tool_tutor_for_unknown_name requested_tool =
+  match tutor_alias_of_requested_name requested_tool with
+  | Some Glob ->
     Some
       (tool_tutor_json
          ~kind:"unknown_tool"
@@ -335,7 +354,7 @@ let tool_tutor_for_unknown_name requested_tool =
            "Glob is not an active MASC keeper tool. Use Grep only for content \
             search; use Execute with find/ls for file listing."
          ~alternatives:[ grep_alternative; execute_find_alternative ])
-  | "searchfiles" | "search_files" ->
+  | Some Search_files_alias ->
     Some
       (tool_tutor_json
          ~kind:"tool_name_alias"
@@ -344,14 +363,14 @@ let tool_tutor_for_unknown_name requested_tool =
            "Use Grep or search_files with the public search-files schema: \
             provide pattern, not query."
          ~alternatives:[ grep_alternative ])
-  | "readfile" | "read_file" ->
+  | Some Read_file_alias ->
     Some
       (tool_tutor_json
          ~kind:"tool_name_alias"
          ~requested_tool
          ~message:"Use Read with file_path; Read has no start_line or offset."
          ~alternatives:[ read_alternative ])
-  | _ -> None
+  | None -> None
 ;;
 
 (* Tutor guidance is keyed on the descriptor's typed [runtime_handler] rather

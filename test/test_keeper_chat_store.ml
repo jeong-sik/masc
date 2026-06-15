@@ -249,6 +249,32 @@ let test_recent_direct_context_omits_transport_failure_as_self_reply () =
       Alcotest.(check bool) "failure text is not a self utterance" false
         (contains_substring rendered "Keeper request failed"))
 
+let test_recent_direct_context_omits_voice_audio_self_echo () =
+  let base_dir = temp_base_path "keeper-chat-recent-voice" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-recent-voice" in
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:"I will say this out loud now."
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~audio:
+          { K.token = "voice-token-1"
+          ; mime = "audio/mpeg"
+          ; duration_sec = None
+          ; message_text = "I will say this out loud now."
+          }
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages
+      in
+      Alcotest.(check (list string)) "voice self-output is not prompt context"
+        [] (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "spoken text is not re-injected" false
+        (contains_substring rendered "I will say this out loud now."))
+
 let test_direct_owner_context_excludes_connector_turns () =
   let base_dir = temp_base_path "keeper-chat-direct-owner-gate" in
   Fun.protect
@@ -840,6 +866,8 @@ let () =
             test_recent_direct_context_renders_prior_reply_and_tool_evidence;
           Alcotest.test_case "recent context omits transport failure as reply" `Quick
             test_recent_direct_context_omits_transport_failure_as_self_reply;
+          Alcotest.test_case "recent context omits voice audio self echo" `Quick
+            test_recent_direct_context_omits_voice_audio_self_echo;
           Alcotest.test_case "recent context is owner-direct only" `Quick
             test_direct_owner_context_excludes_connector_turns;
           Alcotest.test_case "append_turn redacts projected secrets" `Quick

@@ -27,7 +27,9 @@ type recent_direct_line = {
 }
 (** Bounded transcript line for direct-chat continuity. Tool rows retain
     only the call name; assistant transport failures are omitted because
-    they are server failures, not keeper utterances. *)
+    they are server failures, not keeper utterances. Assistant rows carrying
+    synthesized voice audio are also omitted from this prompt context so the
+    keeper does not quote its own spoken output back into the next turn. *)
 
 val recent_direct_conversation_of_messages
   :  ?limit:int

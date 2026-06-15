@@ -1439,6 +1439,8 @@
 
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 
+(include stanzas/test_keeper_agent_runtime_status.inc)
+
 (include stanzas/test_keeper_autoboot_supervisor_start_10125.inc)
 
 (include stanzas/test_keeper_checkpoint_classify.inc)

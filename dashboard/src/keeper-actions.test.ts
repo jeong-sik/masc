@@ -226,7 +226,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
   })
 
-  it('keeps a queued request resumable when the stream cuts before terminal', async () => {
+  it('polls a queued request immediately when the stream cuts before terminal', async () => {
     streamKeeperMessage.mockImplementation(emitting([
       {
         type: 'CUSTOM',
@@ -234,11 +234,23 @@ describe('sendKeeperThreadMessage stream outcome', () => {
         value: { request_id: 'kmsg_echo_1', status: 'queued' },
       },
     ], false))
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      status: 'done',
+      ok: true,
+      result: { reply: 'polling으로 복구됨' },
+    })
+    fetchKeeperChatHistory.mockResolvedValue([])
 
     await sendKeeperThreadMessage('echo', '진행 상황?')
 
-    expect(pendingKeeperChatRequestsForKeeper('echo')).toMatchObject([
-      { requestId: 'kmsg_echo_1', keeperName: 'echo', message: '진행 상황?' },
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_1')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '진행 상황?', 'delivered'],
+      ['assistant', 'polling으로 복구됨', 'delivered'],
     ])
   })
 
@@ -268,7 +280,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
   })
 
-  it('drops a stale pending request when the server no longer knows request_id', async () => {
+  it('keeps the user message visible when the server no longer knows request_id', async () => {
     upsertPendingKeeperChatRequest({
       requestId: 'kmsg_echo_1',
       keeperName: 'echo',
@@ -285,8 +297,12 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     await resumePendingKeeperChatRequests('echo')
 
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
-    expect(keeperThreads.value.echo).toEqual([])
-    expect(keeperActionErrors.value.echo).toBeNull()
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '어디까지 했어?', 'error'],
+      ['assistant', '', 'error'],
+    ])
+    expect(keeperActionErrors.value.echo).toContain('서버 재시작')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
   })
 })

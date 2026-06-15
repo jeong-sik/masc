@@ -399,16 +399,20 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts ~cr
     ~update_entry
 ;;
 
-let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
+(* [dedup_key] is the key under which a board wakeup is deduped. RFC-0239 R4
+   keys it on a content fingerprint rather than the raw post_id, so identical
+   re-posts (each with a fresh post_id) collapse into one wake per window. The
+   map is otherwise a generic (key -> last_ts) debounce. *)
+let board_wakeup_allowed ~base_path name ~dedup_key ~debounce_sec =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> true
   | Some entry ->
     let now_ts = Time_compat.now () in
-    (match StringMap.find_opt post_id entry.board_wakeups with
+    (match StringMap.find_opt dedup_key entry.board_wakeups with
      | Some last_ts when now_ts -. last_ts < debounce_sec -> false
      | _ ->
        update_entry ~base_path name (fun e ->
-         { e with board_wakeups = StringMap.add post_id now_ts e.board_wakeups });
+         { e with board_wakeups = StringMap.add dedup_key now_ts e.board_wakeups });
        true)
 ;;
 

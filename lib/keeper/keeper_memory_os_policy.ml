@@ -9,9 +9,9 @@ open Keeper_memory_os_types
 
 let default_lambda = 1.0 /. (86400.0 *. 7.0) (* half-life ~7 days *)
 let default_alpha = 0.5
-let default_truth_lambda = 1.0 /. (86400.0 *. 30.0)
+let default_truth_lambda = 1.0 /. (86400.0 *. 7.0)
 let default_cycle_seconds = 3600.0
-let default_max_access_factor = 4.0
+let default_max_access_factor = 2.0
 let default_discard_score_threshold = 0.02
 
 type retention_verdict =
@@ -58,9 +58,12 @@ let truth_recency_factor ?(lambda = default_truth_lambda) ~now fact =
 ;;
 
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
-  fact.confidence
+  (* Confidence contributes 50-100% weight; even low-confidence facts
+     retain half their score, preventing confidence-only dominance. *)
+  let confidence_weight = 0.5 +. 0.5 *. fact.confidence in
+  confidence_weight
   *. recency_factor ~lambda ~now fact.last_accessed
-  *. truth_recency_factor ~now fact
+  *. (truth_recency_factor ~now fact ** 2.0)
   *. stale_penalty fact
   *. access_factor ~alpha fact.access_count
 ;;

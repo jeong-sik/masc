@@ -37,6 +37,7 @@ import {
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
+  removeThreadEntries,
   setActiveStream,
   setRecordValue,
   setStatusDetail,
@@ -190,6 +191,19 @@ function pendingAssistantEntryId(requestId: string): string {
   return `pending-assistant-${requestId}`
 }
 
+function isMissingQueuedKeeperRequestError(err: unknown): boolean {
+  const record = isRecord(err) ? err : null
+  const method = asString(record?.method, '').trim().toUpperCase()
+  const status = typeof record?.status === 'number' ? record.status : null
+  const path = asString(record?.path, '').trim()
+  const message = err instanceof Error ? err.message : ''
+  if (method === 'GET' && status === 404 && path.startsWith('/api/v1/gate/message/requests/')) {
+    return message.includes('request_id not found')
+  }
+  return message.includes('/api/v1/gate/message/requests/')
+    && message.includes('request_id not found')
+}
+
 function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
   const existing = keeperThreads.value[request.keeperName] ?? []
   const userId = pendingUserEntryId(request.requestId)
@@ -274,6 +288,15 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       return
     }
   } catch (err) {
+    if (isMissingQueuedKeeperRequestError(err)) {
+      removePendingKeeperChatRequest(request.requestId)
+      removeThreadEntries(request.keeperName, [
+        pendingUserEntryId(request.requestId),
+        assistantId,
+      ])
+      await hydrateKeeperChatHistory(request.keeperName, { force: true })
+      return
+    }
     const message = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
     setRecordValue(keeperActionErrors, request.keeperName, `대기 중 메시지 복구 실패: ${message}`)
   } finally {

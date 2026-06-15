@@ -279,6 +279,18 @@ export function appendThreadEntry(name: string, entry: KeeperConversationEntry):
   }
 }
 
+export function removeThreadEntries(name: string, entryIds: readonly string[]): void {
+  if (entryIds.length === 0) return
+  const removeIds = new Set(entryIds)
+  const existing = keeperThreads.value[name] ?? []
+  const next = existing.filter(entry => !removeIds.has(entry.id))
+  if (next.length === existing.length) return
+  keeperThreads.value = {
+    ...keeperThreads.value,
+    [name]: next,
+  }
+}
+
 /** Insert [entry] immediately before the entry with id [beforeId].
  *  Falls back to append when [beforeId] is absent. Used to keep live
  *  tool-call entries above the streaming assistant bubble so the final

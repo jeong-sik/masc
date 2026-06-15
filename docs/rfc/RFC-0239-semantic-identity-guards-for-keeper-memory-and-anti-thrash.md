@@ -42,6 +42,23 @@ semantic identity*, so a semantically-identical event (a reworded post, a new `p
 non-literal speech act, an unchanged claim) evades every dedup / expiry / debounce /
 termination check in the system. This RFC fixes the five guards that share that flaw.
 
+### Implementation status (this branch)
+
+| Root | State | Reference |
+|---|---|---|
+| R3 no-progress loop detector | **Implemented + tested** | `keeper_stay_silent_loop_detector`, commit `R3` |
+| R4 wake content-fingerprint debounce | **Implemented + tested** | `keeper_keepalive_signal` / `keeper_registry`, commit `R4` |
+| R2 recall-time claim dedup | **Implemented + tested** | `keeper_memory_os_recall`, commit `R2` |
+| R1 per-fact lifetime at write | **Ratification required** | naive category→TTL is a string-classifier workaround (§2 principle 1); needs a typed taxonomy or a librarian-contract + eval — §9 Q5 |
+| R0 wire inert recall signals | **Ratification required** | naive `bump_access_for_turn` wiring *worsens* the inversion (frequently-recalled stale facts would score higher); needs a stale-lowering signal — §9 Q3 |
+| Retention sweep (supersedes RFC-0238) | **Ratification required** | `Capped_by_score` defaults + legacy 17,426-fact handling — §9 Q4 |
+
+R3 + R4 are the loop engine: together they stop the cross-keeper thrash (R3 pauses a
+keeper after a threshold of no-progress turns; R4 stops identical re-posts re-waking peers).
+R2 stops duplicate conclusions crowding recall. The three ratification-required roots are
+the memory-os write/scoring/retention design choices that should not be hacked in — a naive
+version of each is exactly a workaround this RFC's own §2 forbids.
+
 ## §1 Problem (with live evidence)
 
 ### 1.1 The observable
@@ -254,17 +271,30 @@ surfaces.
 
 ## §9 Open questions (ratification needed)
 
-1. **Q1 — R3 placement.** Put the no-progress predicate in the loop detector, or in the
-   turn classifier that feeds `speech_act`? (Detector is the smaller change; classifier is
-   the more correct layer.)
-2. **Q2 — dedup aggressiveness (R2).** Exact-claim only, or normalized fingerprint that
-   folds "would"/"will" twins? Folding is more effective but risks merging genuinely
-   distinct claims; propose normalized-but-conservative (case+whitespace+trailing-punct).
-3. **Q3 — R0.** Wire `bump_access_for_turn`, or re-tune `λ` to session scale, or both?
-   Wiring preserves the 7-day cross-session curve; re-tuning fixes in-session ranking.
-4. **Q4 — retention defaults (inherited from RFC-0238).** `Capped_by_score` `max_items`
+1. **Q1 — R3 placement.** *Resolved: detector layer.* `speech_act` is social intent, not
+   progress; the no-progress predicate (`turn_made_progress`) lives in the detector and the
+   caller maps `delivery_surface` (exhaustive) to it. Keeping it out of the classifier avoids
+   re-coupling the two concepts.
+2. **Q2 — dedup aggressiveness (R2).** *Resolved: normalized-conservative.* Implemented as
+   lowercase + whitespace-collapse fingerprint at recall time (folds case/spacing twins; does
+   not fold genuinely different wordings like "would"/"will" — those still collapse only if a
+   future write-side dedup normalizes further).
+3. **Q3 — R0 (open).** Wiring `bump_access_for_turn` as-is *worsens* the inversion: it raises
+   the score of frequently-recalled facts, and stale conclusions are the most-recalled. R0
+   needs a signal that *lowers* a fact that keeps being recalled but never re-validated
+   (e.g. decay on recall-without-write, or contradiction tracking), not a naive access boost.
+   Alternatively re-tune `λ` to session scale (fixes in-session ranking but flattens the
+   7-day cross-session curve). Decision required before any code.
+4. **Q4 — retention defaults (inherited from RFC-0238, open).** `Capped_by_score` `max_items`
    per keeper and `half_life_days`; legacy handling for the existing 17,426 facts
-   (archive-and-restart vs fold-into-partitions).
+   (archive-and-restart vs fold-into-partitions). Re-measure store size per type first
+   (RFC-0238's 1.4 G `decisions.jsonl` premise is disputed).
+5. **Q5 — R1 lifetime determination (open).** How is a fact's lifetime assigned without a
+   string classifier on the free-text `category` (forbidden by §2 principle 1)? Options:
+   (a) a typed category taxonomy (closed sum) with a lifetime per variant; (b) extend the
+   librarian JSON contract so the LLM emits an explicit `ttl_seconds`/`lifetime`, validated
+   like `confidence`, with an eval harness; (c) drop per-fact TTL entirely and bound the
+   store only by the Q4 retention sweep. Decision required before any code.
 
 ## §10 Evidence record
 

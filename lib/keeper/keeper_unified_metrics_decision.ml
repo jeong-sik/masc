@@ -155,7 +155,10 @@ let append_decision_record
         ("tool_surface", tool_surface_json result);
         ("pending_approval_count", `Int pending_approval_count);
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
-        ("channel", `String (decision_channel_of_observation observation));
+        ( "channel",
+          `String
+            (Keeper_world_observation.channel_to_string
+               (decision_channel_of_observation observation)) );
         ("outcome", `String outcome);
         ("degraded_retry_applied", `Bool degraded_retry_applied);
         ( "degraded_retry_runtime",

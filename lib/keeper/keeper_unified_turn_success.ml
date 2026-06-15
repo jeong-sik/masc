@@ -84,16 +84,24 @@ let append_metrics_snapshot
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~last_provider_timeout_budget
   =
-  try
-    let any_pending =
-      observation.Keeper_world_observation.pending_mentions <> []
-      || observation.pending_board_events <> []
-      || observation.pending_scope_messages <> []
-    in
-    let channel = if any_pending then "turn" else "scheduled_autonomous" in
+  let any_pending =
+    observation.Keeper_world_observation.pending_mentions <> []
+    || observation.pending_board_events <> []
+    || observation.pending_scope_messages <> []
+  in
+  (* Single typed channel for the whole cycle: post helpers + the metrics
+     snapshot + the failure-path label all derive from one value, so the
+     reactive/autonomous decision can no longer drift between sites. *)
+  let channel =
     if any_pending
-    then Keeper_turn_helpers.post_assign_task ~any_pending ~channel
-    else Keeper_turn_helpers.post_empty_queue_sleep ~any_pending ~channel;
+    then Keeper_world_observation.Reactive
+    else Keeper_world_observation.Scheduled_autonomous
+  in
+  let channel_tag = Keeper_world_observation.channel_to_string channel in
+  try
+    if any_pending
+    then Keeper_turn_helpers.post_assign_task ~any_pending ~channel:channel_tag
+    else Keeper_turn_helpers.post_empty_queue_sleep ~any_pending ~channel:channel_tag;
     KUM.append_metrics_snapshot
       ~config
       ~meta:updated_meta
@@ -116,19 +124,11 @@ let append_metrics_snapshot
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    let channel =
-      if
-        observation.pending_mentions <> []
-        || observation.pending_board_events <> []
-        || observation.pending_scope_messages <> []
-      then "turn"
-      else "scheduled_autonomous"
-    in
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string MetricEmitDropped)
       ~labels:
         [ "keeper", updated_meta.name
-        ; "channel", channel
+        ; "channel", channel_tag
         ; "site", Keeper_metric_emit_dropped_site.(to_label Keeper_unified_turn)
         ]
       ();

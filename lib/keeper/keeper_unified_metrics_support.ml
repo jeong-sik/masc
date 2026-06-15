@@ -14,23 +14,20 @@ let string_contains_substring_ci = String_util.string_contains_substring_ci
 (* ── Observation / decision helpers ─────────────── *)
 
 let decision_channel_of_observation
-    (observation : Keeper_world_observation.world_observation) : string =
+    (observation : Keeper_world_observation.world_observation) :
+    Keeper_world_observation.keeper_cycle_channel =
   if observation.pending_mentions <> []
      || observation.pending_board_events <> []
      || observation.pending_scope_messages <> []
   then
-    "turn"
+    Keeper_world_observation.Reactive
   else
-    "scheduled_autonomous"
-
-let is_scheduled_autonomous_channel =
-  Keeper_world_observation.is_autonomous_channel
+    Keeper_world_observation.Scheduled_autonomous
 
 let is_scheduled_autonomous_cycle_of_observation
     (observation : Keeper_world_observation.world_observation) : bool =
-  String.equal
+  Keeper_world_observation.is_autonomous
     (decision_channel_of_observation observation)
-    "scheduled_autonomous"
 
 let scheduled_autonomous_outcome_of_result
     ~(has_text : bool) ~(has_tool_calls : bool) :

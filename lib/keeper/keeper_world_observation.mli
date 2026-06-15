@@ -133,12 +133,15 @@ val turn_reason_to_string : turn_reason -> string
     Variant payloads are intentionally omitted. *)
 val skip_reason_to_string : skip_reason -> string
 
-(** Convert channel to string tag. *)
+(** Convert channel to its canonical wire tag ("turn" / "scheduled_autonomous"). *)
 val channel_to_string : keeper_cycle_channel -> string
 
-(** Check if a string channel tag represents an autonomous cycle
-    (scheduled_autonomous or proactive). *)
-val is_autonomous_channel : string -> bool
+(** Strict inverse of {!channel_to_string}; [None] for any non-canonical
+    string (legacy "reactive"/"proactive", "heartbeat" status-tick, …). *)
+val channel_of_string : string -> keeper_cycle_channel option
+
+(** Whether a typed channel represents an autonomous (scheduled) cycle. *)
+val is_autonomous : keeper_cycle_channel -> bool
 
 (** Extract all reasons as flat string tags from a verdict.
     Tags map 1:1 to the typed reasons carried by the verdict and do not

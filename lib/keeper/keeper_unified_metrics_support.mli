@@ -102,9 +102,8 @@ val work_kind_of_turn_mode : turn_mode -> string
 val work_kind_of_json : Yojson.Safe.t -> string option
 
 val decision_channel_of_observation :
-  Keeper_world_observation.world_observation -> string
-
-val is_scheduled_autonomous_channel : string -> bool
+  Keeper_world_observation.world_observation ->
+  Keeper_world_observation.keeper_cycle_channel
 
 val is_scheduled_autonomous_cycle_of_observation :
   Keeper_world_observation.world_observation -> bool

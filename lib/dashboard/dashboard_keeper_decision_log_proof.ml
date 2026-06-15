@@ -93,11 +93,13 @@ let scheduled_evidence_json stat =
     ( "latest_ts", Json_util.string_opt_to_json stat.latest_ts );
   ]
 
+(* A turn-exchange row is any cycle whose channel parses to a known typed
+   channel (Reactive / Scheduled_autonomous). Legacy spellings
+   ("reactive"/"proactive") and the non-interaction "heartbeat" marker no
+   longer count (RFC-0020 Phase 1 PR-3, owner decision 2026-06-15). *)
 let is_turn_exchange_channel = function
-  | Some "reactive" | Some "scheduled_autonomous" | Some "turn"
-  | Some "proactive" ->
-    true
-  | _ -> false
+  | Some s -> Option.is_some (Keeper_world_observation.channel_of_string s)
+  | None -> false
 
 let update_turn_span stat ts =
   {

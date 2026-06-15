@@ -85,13 +85,29 @@ let skip_reason_to_string = function
   | No_signal -> "no_signal"
 ;;
 
+(* Canonical wire encoding. [Reactive] serialises as "turn" (the value the
+   majority of producers + the JSON default already emit); the prior
+   "reactive" spelling is dropped (RFC-0020 Phase 1 PR-3, owner decision
+   2026-06-15). *)
 let channel_to_string = function
-  | Reactive -> "reactive"
+  | Reactive -> "turn"
   | Scheduled_autonomous -> "scheduled_autonomous"
 ;;
 
-let is_autonomous_channel (channel : string) : bool =
-  String.equal channel "scheduled_autonomous" || String.equal channel "proactive"
+(* Strict parse at the persistence/telemetry read boundary: only the
+   canonical strings produced by [channel_to_string] round-trip. Legacy
+   aliases ("reactive"/"proactive") and the non-interaction "heartbeat"
+   status-tick marker return [None] — callers decide how to treat an
+   unrecognised channel rather than silently coercing it. *)
+let channel_of_string = function
+  | "turn" -> Some Reactive
+  | "scheduled_autonomous" -> Some Scheduled_autonomous
+  | _ -> None
+;;
+
+let is_autonomous = function
+  | Reactive -> false
+  | Scheduled_autonomous -> true
 ;;
 
 let verdict_reasons_to_strings = function

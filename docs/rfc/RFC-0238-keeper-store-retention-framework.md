@@ -135,11 +135,12 @@ not sit on the hot tool-exec path.
    `read_recent` (same bounded semantics they have today).
 3. Register `{ id = "decisions"; policy = Dated_prune { keep_days }; … }` with
    `keep_days` from a config knob (`MASC_KEEPER_DECISIONS_KEEP_DAYS`, default
-   chosen so a 9 MB/keeper file maps to a small bounded window — see §6).
+   **30** — see §6).
 4. One-time migration of the existing flat file: on first boot, if a legacy
-   `<keeper>.decisions.jsonl` exists, fold it into dated partitions (or archive
-   it under `_archive/` and start fresh). Behaviour selected by a flag; the
-   archive path is the conservative default (no in-place rewrite of 1.4 GB).
+   `<keeper>.decisions.jsonl` exists, rename it once to
+   `<keeper>.decisions.jsonl.archive` and start appending into empty dated
+   partitions (archive-and-start-fresh, ratified §6). No in-place rewrite of
+   1.4 GB; the archive stays readable on disk.
 
 Memory OS (`Capped_by_score`) and attention (`Compact_event_log`) are
 **registered as defined-not-wired** in Phase 1 — the policy is declared, the
@@ -164,14 +165,21 @@ to `Dated_jsonl` itself (used as-is).
   without an arm must fail to compile (closed sum, no catch-all).
 - `dune build --root . @check` / `dune build --root .` exit 0.
 
-## §6 Open questions (for review)
+## §6 Resolved decisions
 
-- `keep_days` default. A keeper at ~9 MB over its lifetime, partitioned daily,
-  suggests retaining ~14–30 days bounds each keeper to low-MB while keeping
-  accountability history. Proposed default: 30 days; needs ratification.
-- Legacy 1.4 GB: archive-and-start-fresh (default) vs fold-into-partitions. Fold
-  preserves full history at the cost of rewriting 1.4 GB once; archive is O(1)
-  and keeps the old file readable under `_archive/`.
+Both ratified by the owner (2026-06-15):
+
+- **`keep_days` default = 30.** A keeper at ~9 MB over its lifetime, partitioned
+  daily, retains ~30 low-MB partitions — enough to reverse-trace a turn-incident
+  (≈ one month) while bounding each keeper's disk. Overridable per-deployment via
+  `MASC_KEEPER_DECISIONS_KEEP_DAYS`.
+- **Legacy 1.4 GB = archive-and-start-fresh.** On first boot, an existing flat
+  `<keeper>.decisions.jsonl` is renamed once to `<keeper>.decisions.jsonl.archive`
+  and the keeper starts appending into empty dated partitions. O(1), zero
+  parsing, no data loss (the archive stays on disk, readable). Folding the legacy
+  lines into dated partitions was rejected: parsing 1.4 GB on boot adds latency
+  and a parse-failure path for no operational gain, since the archive remains
+  available for one-off forensics. Archive cleanup is manual / out of scope.
 
 ## §7 Alternatives considered
 

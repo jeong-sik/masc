@@ -36,7 +36,6 @@ type runtime_handler =
   | Tool_edit_file
   | Tool_write_file
   | Tool_time_now
-  | Tool_stay_silent
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status

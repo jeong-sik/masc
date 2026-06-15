@@ -29,7 +29,7 @@ Status: Draft · Extends RFC-0239 (semantic-identity guards) · Drafted 2026-06-
 > the scrubber smarter.
 >
 > v2 also corrects four factual errors in v1 (call-site count, marker-list
-> inventory, #21065 attribution, and the stay_silent loop-detector state) and
+> inventory, #21065 attribution, and the no-progress loop-detector state) and
 > redesigns the inert-next-item handling (§3.6) after an adversarial audit showed v1
 > would have relocated the `inert_next_markers` list rather than removed it.
 
@@ -88,7 +88,7 @@ What does **not** disappear, and which this RFC refuses to disguise: deciding
 whether a turn was substantive is a real judgment. The honest part is that it has a
 **structural** answer that already exists in the codebase — RFC-0239 R3's
 tool-evidence signal (`turn_made_progress`,
-`keeper_stay_silent_loop_detector.ml:57`) — so the inert judgment moves off the
+`keeper_no_progress_loop_detector.ml:57`) — so the inert judgment moves off the
 `next_items` *text* entirely (§3.6), rather than relocating the substring list. The
 genuinely irreducible residue (§5) is narrow.
 
@@ -178,8 +178,8 @@ Consequences of the current shape:
 - The compiler cannot see that `decisions` is being filtered, so a new backward
   field is silently un-filtered until someone adds a marker.
 - The continuity filter is a **laggard**: RFC-0239 R3 already moved the sibling
-  `stay_silent` loop detector off the literal token. The detector's comment
-  (`keeper_stay_silent_loop_detector.ml:45-56`) records that the
+  no-progress loop detector off the literal token. The detector's comment
+  (`keeper_no_progress_loop_detector.ml:45-56`) records that the
   `speech_act="stay_silent"` predicate was **retired** because a keeper could evade
   it by *posting* its "nothing to do" conclusion; it now uses the structural bools
   `turn_made_progress ~strong_evidence ~surface_requires_evidence` (line 57). The
@@ -267,7 +267,7 @@ to snapshot-build. That is the same list wearing a type.
 
 The correct signal already exists and is structural: RFC-0239 R3's
 `turn_made_progress ~strong_evidence ~surface_requires_evidence`
-(`keeper_stay_silent_loop_detector.ml:57`) decides whether a turn produced durable
+(`keeper_no_progress_loop_detector.ml:57`) decides whether a turn produced durable
 work (substantive tool calls / validated output) **without reading any prose**. The
 continuity path adopts the same signal:
 
@@ -397,7 +397,7 @@ target: §7 step 5.)
 ## §9 Relation to RFC-0239
 
 RFC-0239 fixes five guards that key on surface tokens, and its R3 already replaced
-the `stay_silent` loop detector's literal-token predicate with a structural
+the no-progress loop detector's literal-token predicate with a structural
 tool-evidence signal (`turn_made_progress`). This RFC fixes the continuity-summary
 content filter — the laggard that still keys on the token R3 abandoned — by (a)
 removing the structural cause (the unenforced record and its prose round-trip) and

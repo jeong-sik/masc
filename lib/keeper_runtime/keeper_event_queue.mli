@@ -54,7 +54,7 @@ type board_stimulus = {
 type stimulus_payload =
   | Board_signal of board_stimulus
   | Bootstrap
-  | Stay_silent_recovery
+  | No_progress_recovery
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -98,7 +98,7 @@ val summary : t -> string
 
 val payload_kind_label : stimulus_payload -> string
 (** Stable short label for logs/metrics: ["board_signal"], ["bootstrap"],
-    or ["stay_silent_recovery"]. *)
+    or ["no_progress_recovery"]. *)
 
 val is_board_signal : stimulus_payload -> bool
 (** [true] iff the payload is a [Board_signal]. *)

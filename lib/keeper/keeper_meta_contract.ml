@@ -108,7 +108,7 @@ type proactive_runtime =
   ; last_preview : string
   ; consecutive_noop_count : int
     (** Consecutive autonomous cycles where only observation tools
-          (board_list, stay_silent, context_status) were used with no
+          (board_list, context_status, other passive reads) were used with no
           substantive action.  Resets to 0 on any productive cycle.
           Used by [effective_scheduled_autonomous_cooldown] for exponential
           backoff: cooldown *= 2^min(n, 3), capping at 8x. *)
@@ -154,7 +154,7 @@ type blocker_class =
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | Stay_silent_loop
+  | No_progress_loop
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
         (cancelled mid-turn, raised an exception not handled by the
@@ -199,7 +199,7 @@ let blocker_class_to_string = function
   | Turn_timeout -> "turn_timeout"
   | Turn_livelock_blocked -> "turn_livelock_blocked"
   | Completion_contract_violation -> "completion_contract_violation"
-  | Stay_silent_loop -> "stay_silent_loop"
+  | No_progress_loop -> "no_progress_loop"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Stale_fleet_batch -> "stale_fleet_batch"
@@ -225,7 +225,7 @@ let blocker_class_of_serialized_string = function
   | "turn_timeout" -> Some Turn_timeout
   | "turn_livelock_blocked" -> Some Turn_livelock_blocked
   | "completion_contract_violation" -> Some Completion_contract_violation
-  | "stay_silent_loop" -> Some Stay_silent_loop
+  | "no_progress_loop" -> Some No_progress_loop
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "stale_fleet_batch" -> Some Stale_fleet_batch
@@ -272,7 +272,7 @@ let blocker_class_continue_gate = function
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | Stay_silent_loop
+  | No_progress_loop
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch

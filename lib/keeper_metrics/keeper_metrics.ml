@@ -203,7 +203,7 @@ type t =
   | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
-  | StaySilentLoopDetected
+  | NoProgressLoopDetected
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
@@ -436,7 +436,7 @@ let to_string = function
   | ExecuteLocalExecution -> "masc_keeper_execute_local_execution_total"
   | DockerRuntimeDiscarded -> "masc_keeper_docker_runtime_discarded_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
-  | StaySilentLoopDetected -> "masc_keeper_stay_silent_loop_detected_total"
+  | NoProgressLoopDetected -> "masc_keeper_no_progress_loop_detected_total"
   | UsageTrust -> "masc_keeper_usage_trust_total"
   | UsageAnomalyReason -> "masc_keeper_usage_anomaly_reason_total"
   | ConfigEnvParseFailures -> "masc_keeper_config_env_parse_failures_total"
@@ -511,7 +511,7 @@ let all : t list =
     ProviderTimeoutWatchdogTermination; StaleTerminationThresholdBreached; StaleTerminationBatch; StaleBroadcastEmitFailures;
     OasRunTimeout; RuntimeSaturationSignal; ToolUseFailure; ToolNotAllowed;
     TurnGateRejectedTerminal; ReceiptUnmappedDisposition; ExecuteNetworkUpgrade; ExecuteLocalExecution;
-    DockerRuntimeDiscarded; ProactiveSkip; StaySilentLoopDetected; UsageTrust;
+    DockerRuntimeDiscarded; ProactiveSkip; NoProgressLoopDetected; UsageTrust;
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; RuntimeHttpProbeJsonParseFailures;
     PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;

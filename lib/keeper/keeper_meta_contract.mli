@@ -151,7 +151,7 @@ type blocker_class =
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | Stay_silent_loop
+  | No_progress_loop
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch

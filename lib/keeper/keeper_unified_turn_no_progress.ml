@@ -1,26 +1,26 @@
-(** Stay-silent loop recovery helpers for the unified keeper turn. *)
+(** No-progress loop recovery helpers for the unified keeper turn. *)
 
-(* RFC-0020: the stay-silent recovery stimulus carries no data — the consumer
+(* RFC-0020: the no-progress recovery stimulus carries no data — the consumer
    only branches on the kind. streak/threshold are recorded in the failure
    reason / blocker detail by the caller, not in the stimulus payload. *)
 let recovery_stimulus ~now ~keeper_name =
-  { Keeper_event_queue.post_id = "stay-silent-loop:" ^ keeper_name
+  { Keeper_event_queue.post_id = "no-progress-loop:" ^ keeper_name
   ; urgency = Keeper_event_queue.Immediate
   ; arrived_at = now
-  ; payload = Keeper_event_queue.Stay_silent_recovery
+  ; payload = Keeper_event_queue.No_progress_recovery
   }
 ;;
 
 let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   let detail =
     Printf.sprintf
-      "stay_silent loop detected: streak=%d threshold=%d; manual pause applied"
+      "no_progress loop detected: streak=%d threshold=%d; manual pause applied"
       streak
       threshold
   in
   let failure_reason =
     Keeper_registry.Provider_runtime_error
-      { code = "stay_silent_loop"
+      { code = "no_progress_loop"
       ; detail
       ; provider_id = None
       ; http_status = None
@@ -48,7 +48,7 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
    | Eio.Cancel.Cancelled _ as exn -> raise exn
    | exn ->
      Log.Keeper.warn
-       "%s: failed to persist stay-silent recovery stimulus in reaction ledger: %s"
+       "%s: failed to persist no-progress recovery stimulus in reaction ledger: %s"
        meta.name
          (Printexc.to_string exn));
   let blocked_meta =
@@ -59,7 +59,7 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
            Some
              (Keeper_meta_contract.blocker_info_of_class
                 ~detail
-                Keeper_meta_contract.Stay_silent_loop)
+                Keeper_meta_contract.No_progress_loop)
        })
     meta
   in
@@ -72,7 +72,7 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   with
   | Ok paused_meta ->
     Log.Keeper.warn
-      "%s: stay_silent loop escalated to blocker and manual pause \
+      "%s: no_progress loop escalated to blocker and manual pause \
        (streak=%d threshold=%d)"
       meta.name
       streak
@@ -81,7 +81,7 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   | Error pause_err ->
     Keeper_registry.wakeup ~base_path:config.base_path meta.name;
     Log.Keeper.error
-      "%s: stay_silent loop pause sync failed: %s; recovery stimulus queued \
+      "%s: no_progress loop pause sync failed: %s; recovery stimulus queued \
        instead (streak=%d threshold=%d)"
       meta.name
       pause_err
@@ -97,20 +97,20 @@ let clear_if_recovered ~(config : Workspace.config) meta ~previous_streak ~was_l
                Some (Keeper_registry.Provider_runtime_error { code; _ })
            ; _
            }
-      when String.equal code "stay_silent_loop" ->
+      when String.equal code "no_progress_loop" ->
       Keeper_registry.set_failure_reason
         ~base_path:config.base_path
         meta.name
         None;
       Log.Keeper.info
-        "%s: stay_silent loop recovered after non-silent turn \
+        "%s: no_progress loop recovered after progress turn \
          (previous_streak=%d)"
         meta.name
         previous_streak
     | _ -> ()
   end;
   match meta.runtime.last_blocker with
-  | Some { Keeper_meta_contract.klass = Keeper_meta_contract.Stay_silent_loop; _ } ->
+  | Some { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop; _ } ->
     Keeper_meta_contract.map_runtime (fun rt -> { rt with last_blocker = None }) meta
   | _ -> meta
 ;;

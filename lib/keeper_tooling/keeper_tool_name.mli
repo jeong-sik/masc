@@ -34,7 +34,6 @@ type t =
   | Memory_search
   | Memory_write
   | Search_files
-  | Stay_silent
   | Surface_read
   | Surface_post
   | Person_note_set

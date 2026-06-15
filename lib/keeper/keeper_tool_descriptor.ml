@@ -31,7 +31,6 @@ type runtime_handler =
   | Tool_edit_file
   | Tool_write_file
   | Tool_time_now
-  | Tool_stay_silent
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status
@@ -121,7 +120,6 @@ let runtime_handler_to_string = function
   | Tool_edit_file -> "tool_edit_file"
   | Tool_write_file -> "tool_write_file"
   | Tool_time_now -> "tool_time_now"
-  | Tool_stay_silent -> "tool_stay_silent"
   | Tool_tools_list -> "tool_tools_list"
   | Tool_tool_search -> "tool_tool_search"
   | Tool_context_status -> "tool_context_status"

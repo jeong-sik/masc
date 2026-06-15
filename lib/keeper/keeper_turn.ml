@@ -666,16 +666,13 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                     tool_names
                     |> List.exists (fun tool_name ->
                            let trimmed = String.trim tool_name in
-                           trimmed <> ""
-                           && not (String.equal trimmed "keeper_stay_silent"))
+                           trimmed <> "")
                   in
                   let tool_refs =
                     tool_names
                     |> List.filter_map (fun tool_name ->
                            let trimmed = String.trim tool_name in
-                           if trimmed = ""
-                              || String.equal trimmed "keeper_stay_silent"
-                           then None
+                           if trimmed = "" then None
                            else Some ("tool:" ^ trimmed))
                   in
                   let turn_refs =

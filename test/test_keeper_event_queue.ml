@@ -17,7 +17,7 @@ let () =
   assert (not (is_board_signal Bootstrap));
   assert (String.equal (payload_kind_label (board_payload ())) "board_signal");
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
-  assert (String.equal (payload_kind_label Stay_silent_recovery) "stay_silent_recovery");
+  assert (String.equal (payload_kind_label No_progress_recovery) "no_progress_recovery");
 
   (* --- queue operations preserved --- *)
   let board_stim =

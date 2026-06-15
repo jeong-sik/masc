@@ -414,7 +414,6 @@ let tool_tutor_for_validation ~tool_name ~input =
      | Keeper_tool_descriptor.Tool_edit_file
      | Keeper_tool_descriptor.Tool_write_file
      | Keeper_tool_descriptor.Tool_time_now
-     | Keeper_tool_descriptor.Tool_stay_silent
      | Keeper_tool_descriptor.Tool_tools_list
      | Keeper_tool_descriptor.Tool_tool_search
      | Keeper_tool_descriptor.Tool_context_status

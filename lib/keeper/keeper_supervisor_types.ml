@@ -137,7 +137,7 @@ let paused_meta_legacy_auto_resume_after_sec (meta : keeper_meta) =
           | Turn_timeout_after_queue_wait
           | Turn_livelock_blocked
           | Completion_contract_violation
-          | Stay_silent_loop
+          | No_progress_loop
           | Fiber_unresolved
           | Stale_turn_timeout
           | Stale_fleet_batch

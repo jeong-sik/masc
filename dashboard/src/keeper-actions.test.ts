@@ -267,6 +267,28 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     ])
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
   })
+
+  it('drops a stale pending request when the server no longer knows request_id', async () => {
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: '어디까지 했어?',
+      submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+    })
+    fetchQueuedKeeperMessageResult.mockRejectedValue(
+      new Error(
+        'GET /api/v1/gate/message/requests/kmsg_echo_1: {"error":{"message":"request_id not found"}}',
+      ),
+    )
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    expect(keeperThreads.value.echo).toEqual([])
+    expect(keeperActionErrors.value.echo).toBeNull()
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+  })
 })
 
 // ─── Status / runtime actions (exports untested before this block) ──

@@ -44,6 +44,7 @@ let test_empty_targets () =
 ;;
 
 let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
+    ?(audio = None)
     ?(kind = Store.Row_kind.Utterance) content
   : Store.chat_message
   =
@@ -60,7 +61,7 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
   ; speaker
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
   ; kind
-  ; audio = None
+  ; audio
   }
 ;;
 
@@ -233,6 +234,31 @@ let test_transport_failure_does_not_clear () =
     (contents (MS.pending_mentions_of_messages ~targets answered))
 ;;
 
+let test_voice_audio_self_output_is_not_recent_context () =
+  let audio =
+    Some
+      { Store.token = "voice-token-1"
+      ; mime = "audio/mpeg"
+      ; duration_sec = None
+      ; message_text = "saying this out loud"
+      }
+  in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "please say it out loud"
+    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~audio
+        "saying this out loud"
+    ; msg ~role:Store.Role.Assistant ~ts:(Some 12.0) "text follow-up"
+    ]
+  in
+  let lines = MS.recent_direct_conversation_of_messages messages in
+  check (list string) "voice audio assistant row omitted from prompt context"
+    [ "user"; "assistant" ]
+    (List.map (fun (line : MS.recent_direct_line) -> line.role_label) lines);
+  check (list string) "spoken text is not quoted back"
+    [ "please say it out loud"; "text follow-up" ]
+    (List.map (fun (line : MS.recent_direct_line) -> line.content) lines)
+;;
+
 let test_assistant_append_empties_pending () =
   (* Appending the keeper's own line can only shrink pending — for any
      prefix of a lane, prefix @ [assistant] has no pending mentions or
@@ -291,6 +317,8 @@ let () =
         ; test_case "tool_lines_do_not_clear" `Quick test_tool_lines_do_not_clear
         ; test_case "transport_failure_does_not_clear" `Quick
             test_transport_failure_does_not_clear
+        ; test_case "voice_audio_self_output_not_recent_context" `Quick
+            test_voice_audio_self_output_is_not_recent_context
         ; test_case "assistant_append_empties_pending" `Quick
             test_assistant_append_empties_pending
         ] )

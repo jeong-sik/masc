@@ -101,11 +101,14 @@ let recent_direct_conversation_of_messages
         (match m.kind with
          | Keeper_chat_store.Row_kind.Transport_failure -> None
          | Keeper_chat_store.Row_kind.Utterance ->
-           Some
-             { role_label = "assistant"
-             ; speaker_label = None
-             ; content
-             })
+           (match m.audio with
+            | Some _ -> None
+            | None ->
+              Some
+                { role_label = "assistant"
+                ; speaker_label = None
+                ; content
+                }))
       | Keeper_chat_store.Role.Tool ->
         (match m.tool_call_name with
          | None -> None

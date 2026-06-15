@@ -542,6 +542,23 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       check_persistence_read_drop_delta ~surface ~reason:invalid_reason
         ~before:before_invalid ~delta:2)
 
+(* RFC-0239 R4: the board-wakeup debounce keys on a content fingerprint, not
+   the post_id, so a keeper that re-posts the same conclusion (fresh post_id
+   each cycle) does not re-wake peers. *)
+let test_board_wakeup_dedup_key_collapses_reposts () =
+  let k ~post_id ~content =
+    KHS.board_wakeup_dedup_key ~post_id ~author:"garnet" ~title:"closure" ~content
+  in
+  check string "identical content, different post_id => same dedup key"
+    (k ~post_id:"p1" ~content:"operator's turn now")
+    (k ~post_id:"p2" ~content:"operator's   turn   NOW");
+  check bool "different content => different dedup key" false
+    (String.equal
+       (k ~post_id:"p1" ~content:"operator's turn")
+       (k ~post_id:"p1" ~content:"keeper layer complete"));
+  check string "empty title+content => post_id fallback" "p9"
+    (KHS.board_wakeup_dedup_key ~post_id:"p9" ~author:"garnet" ~title:"" ~content:"")
+
 let () =
   run "keeper_lifecycle_registry_dispatch"
     [
@@ -565,5 +582,7 @@ let () =
             test_keepalive_dispatch_event_rejection_increments_metric;
           test_case "heartbeat history fallback counts malformed rows" `Quick
             test_heartbeat_history_fallback_counts_malformed_rows;
+          test_case "board wakeup dedup key collapses reposts (RFC-0239 R4)" `Quick
+            test_board_wakeup_dedup_key_collapses_reposts;
         ] );
     ]

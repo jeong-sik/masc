@@ -5,7 +5,10 @@
 
    apply_decay updated per garnet's task-1289 root-cause analysis:
    replaces static 3-type decay triggers with 8-type Event Bus triggers
-   and Memory OS-aware stale factor deltas. *)
+   and Memory OS-aware stale factor deltas.
+
+   score_reduction added per garnet's follow-up: connects apply_decay delta
+   to per-fact base_score * turn_age formula for actual score decay. *)
 
 type decay_trigger =
   | TurnElapsed
@@ -99,13 +102,18 @@ let trigger_weight = function
   | KnowledgeImport  -> 0.20
   | DecayResistance  -> (-0.40)
 
+(* Default decay rate for per-fact score reduction.
+   Chosen so that a fact with base_score=1.0 at turn_age=50 reaches
+   the GC threshold (0.5) in about 25 turns with default decay_rate=0.02.
+   Phase 4 design value; env-configurable via the module root doc. *)
+let default_decay_rate = 0.02
+
 (* stale_factor_delta returns the per-trigger contribution to the stale
    factor computation, which is trigger_weight clamped to [-1.0, 1.0].
 
    This is the function garnet's task-1289 analysis identified as the
    missing dynamic link between Event Bus triggers and Memory OS fact
-   scores. Previously the decay was static (hardcoded constants);
-   now each trigger contributes its weight dynamically. *)
+   scores. *)
 let stale_factor_delta trigger =
   let w = trigger_weight trigger in
   clamp ~lo:(-1.0) ~hi:1.0 w
@@ -116,12 +124,26 @@ let stale_factor_delta trigger =
    Implementation per garnet's task-1289 root cause and rondo's task-1282
    Phase4 GC trigger design:
 
-   - Each trigger contributes trigger_weight (scaled by recency if available)
+   - Each trigger contributes trigger_weight
    - DecayResistance contributes negative weight (counters decay)
    - Result clamped to [-1.0, 1.0]
    - Positive delta = reduce fact scores = trigger decay
    - Negative delta = preserve fact scores = DecayResistance dominant *)
 let apply_decay ?keeper_id:_ triggers =
-  (* Compute accumulated stale-factor delta *)
   let sum = List.fold_left (fun acc t -> acc +. stale_factor_delta t) 0.0 triggers in
   clamp ~lo:(-1.0) ~hi:1.0 sum
+
+(* score_reduction computes the actual score decrease for a Memory OS fact
+   after applying decay triggers over [turn_age] turns.
+
+   Formula (garnet's task-1289 spec):
+     reduced_score = base_score - (decay_rate * base_score * turn_age)
+
+   [decay_rate] can be configured per-call; defaults to [default_decay_rate].
+   Result clamped to [0.0, base_score] so scores never go negative or increase.
+
+   This is the critical function garnet identified: the prior code had no
+   per-fact scoring formula at all, only static apply_decay constants. *)
+let score_reduction ?(decay_rate = default_decay_rate) ~base_score ~turn_age =
+  let reduction = decay_rate *. base_score *. float_of_int turn_age in
+  clamp ~lo:0.0 ~hi:base_score (base_score -. reduction)

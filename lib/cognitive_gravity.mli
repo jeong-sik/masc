@@ -89,13 +89,12 @@ type decay_trigger =
     a counter-force against unnecessary decay. *)
 val trigger_weight : decay_trigger -> float
 
-(** [apply_decay ?keeper_id triggers score_delta] applies each
-    [decay_trigger] to produce a composite stale-factor delta for
-    Memory OS fact scoring.
+(** [apply_decay ?keeper_id triggers] computes a composite stale-factor
+    delta from a list of fired decay triggers.
 
-    [score_delta] accumulates the weight of all concurrent triggers,
-    clamped to [-1.0, 1.0]. A positive delta reduces fact scores (decay);
-    a negative delta (from DecayResistance) preserves them.
+    Each trigger contributes [trigger_weight], clamped to [-1.0, 1.0].
+    A positive delta means decay should be applied; a negative delta
+    (from DecayResistance) preserves existing scores.
 
     Called by the Event Bus dispatch layer after poll_all. *)
 val apply_decay :
@@ -104,6 +103,27 @@ val apply_decay :
   float
 
 (** [stale_factor_delta trigger] returns the per-trigger contribution
-    to the stale factor computation. Each trigger contributes its
-    weight, scaled by recency of the triggering event. *)
+    to the stale factor computation, which is [trigger_weight] clamped to
+    [-1.0, 1.0]. Used internally by [apply_decay] and exposed for
+    callers that need fine-grained per-trigger inspection. *)
 val stale_factor_delta : decay_trigger -> float
+
+(** Default decay rate for per-fact score reduction. Value = 0.02.
+    Chosen so a fact with base_score=1.0 needs ~25 turns at default rate
+    to reach the GC eviction threshold (0.5). *)
+val default_decay_rate : float
+
+(** [score_reduction ?decay_rate ~base_score ~turn_age] computes the
+    reduced score for a Memory OS fact after [turn_age] turns of decay.
+
+    Formula (garnet's task-1289 spec):
+    { reduced_score = base_score - (decay_rate * base_score * turn_age) }
+
+    Result is clamped to [0.0, base_score] so scores never go negative
+    or increase. This is the core scoring function that replaces the
+    previous static stale-factor computation. *)
+val score_reduction :
+  ?decay_rate:float ->
+  base_score:float ->
+  turn_age:int ->
+  float

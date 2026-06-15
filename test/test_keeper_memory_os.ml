@@ -21,6 +21,20 @@ let contains substring s =
   if sub_len = 0 then true else aux 0
 ;;
 
+(* Count non-overlapping occurrences of [substring] in [s] (RFC-0239 R2 test). *)
+let occurrences substring s =
+  let sub_len = String.length substring in
+  let str_len = String.length s in
+  if sub_len = 0 then 0
+  else (
+    let rec aux i acc =
+      if i + sub_len > str_len then acc
+      else if String.sub s i sub_len = substring then aux (i + sub_len) (acc + 1)
+      else aux (i + 1) acc
+    in
+    aux 0 0)
+;;
+
 let index_of substring s =
   let sub_len = String.length substring in
   let str_len = String.length s in
@@ -853,6 +867,57 @@ let test_render_if_enabled_renders_persisted_memory () =
             (contains "Gated recall should surface saved facts" block))))
 ;;
 
+(* RFC-0239 R2: the append-only store keeps every re-confirmation of a claim as
+   a separate immortal row. Recall must collapse duplicate claims by normalized
+   fingerprint so one repeated conclusion does not crowd distinct facts out of
+   the injected top-N. *)
+let test_recall_dedups_repeated_claim () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "virtual-memory-keeper" in
+      let now = 1_000_000.0 in
+      let base = fact_fixture ~now () in
+      let dup ~claim turn =
+        (* Same claim across turns, varying only case — normalize_claim folds
+           these to one fingerprint. *)
+        { base with Types.claim; Types.source = { base.source with turn } }
+      in
+      let distinct =
+        { base with
+          Types.claim = "a genuinely distinct fact"
+        ; Types.source = { base.source with turn = 9 }
+        }
+      in
+      let episode =
+        { Types.trace_id = "trace-dedup"
+        ; Types.generation = 1
+        ; Types.episode_summary = "dedup episode"
+        ; Types.claims =
+            [ dup ~claim:"Operator's turn now" 1
+            ; dup ~claim:"OPERATOR'S TURN NOW" 2
+            ; dup ~claim:"operator's turn NOW" 3
+            ; distinct
+            ]
+        ; Types.open_items = []
+        ; Types.constraints = []
+        ; Types.preserved_tool_refs = []
+        ; Types.source_turn_range = Some (1, 9)
+        ; Types.created_at = now
+        ; Types.schema_version = Types.schema_version
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id episode;
+      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:8 ~max_episodes:0 () in
+      Alcotest.(check int)
+        "repeated claim collapses to a single fact line"
+        1
+        (occurrences "operator's turn now" (String.lowercase_ascii ctx));
+      Alcotest.(check bool)
+        "distinct fact is not crowded out"
+        true
+        (contains "a genuinely distinct fact" ctx)))
+;;
+
 let test_recall_context_renders_sanitized_memory () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -1066,6 +1131,10 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "dedups repeated claim (RFC-0239 R2)"
+            `Quick
+            test_recall_dedups_repeated_claim
         ] )
     ]
 ;;

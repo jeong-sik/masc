@@ -143,11 +143,50 @@ let render_recall_context ~fact_lines ~episode_lines =
          [ "facts_section", facts_section; "episodes_section", episodes_section ])
 ;;
 
+(* RFC-0239 R2: collapse a claim to a normalized fingerprint (lowercase +
+   whitespace-collapsed + trimmed) so trivially reworded re-confirmations of the
+   same conclusion ("...would end the session" vs "...will end the session")
+   share a key. *)
+let normalize_claim s =
+  let b = Buffer.create (String.length s) in
+  let prev_space = ref true in
+  String.iter
+    (fun c ->
+      match Char.lowercase_ascii c with
+      | ' ' | '\t' | '\r' | '\n' ->
+        if not !prev_space then Buffer.add_char b ' ';
+        prev_space := true
+      | c ->
+        Buffer.add_char b c;
+        prev_space := false)
+    s;
+  let r = Buffer.contents b in
+  let n = String.length r in
+  if n > 0 && r.[n - 1] = ' ' then String.sub r 0 (n - 1) else r
+;;
+
+(* RFC-0239 R2: the fact store is append-only with no write-time dedup, so a
+   claim re-confirmed across turns accumulates as many immortal rows (live
+   measurement: ~8% exact-duplicate claims, all stale loop conclusions).
+   Collapse duplicate claims at recall time by normalized fingerprint, keeping
+   the highest-scored occurrence (input is sorted by score descending), so one
+   repeated conclusion cannot crowd distinct facts out of the injected top-N.
+   The append-only file size is bounded separately by the retention sweep. *)
+let dedup_by_claim scored =
+  let seen = Hashtbl.create 32 in
+  List.filter
+    (fun (_score, fact) ->
+      let key = normalize_claim fact.claim in
+      if Hashtbl.mem seen key then false else (Hashtbl.add seen key (); true))
+    scored
+;;
+
 let scored_facts ~now facts =
   facts
   |> List.filter (fact_is_current ~now)
   |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~now fact, fact)
   |> List.sort (fun (a, _) (b, _) -> compare b a)
+  |> dedup_by_claim
   |> List.map snd
 ;;
 

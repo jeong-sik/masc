@@ -10,9 +10,13 @@ let remote_confirm_ttl_seconds = 900.0
 
 let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
   let runtime_status =
-    match Keeper_status_runtime.agent_status_text agent_status_json with
-    | ("active" | "busy" | "listening" | "idle") as status -> Some status
-    | _ -> None
+    (* Mirror the keeper_status_runtime typed parse: the agent-status blob's
+       "status" field only ever holds active|busy|listening|inactive, so match
+       the closed ADT and drop the dead "idle" arm the compiler can now reject. *)
+    match Keeper_status_runtime.agent_runtime_status_opt agent_status_json with
+    | Some ((Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening) as s) ->
+        Some (Masc_domain.string_of_agent_status s)
+    | Some Masc_domain.Inactive | None -> None
   in
   let has_live_signal =
     Keeper_status_runtime.agent_runtime_has_live_signal agent_status_json

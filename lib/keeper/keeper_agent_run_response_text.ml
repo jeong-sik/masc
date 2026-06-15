@@ -2,7 +2,7 @@
 
 type finalized = {
   state_snapshot : Keeper_memory_policy.keeper_state_snapshot;
-  state_snapshot_source : string;
+  state_snapshot_source : Keeper_memory_policy.state_snapshot_source;
   response_text : string;
 }
 
@@ -20,16 +20,16 @@ let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_to
       ()
   =
   match reported_state_snapshot with
-  | Some snapshot -> (snapshot, "model_structured_state_tool")
+  | Some snapshot -> (snapshot, Keeper_memory_policy.Structured_state_tool)
   | None ->
     (match
        Keeper_memory_policy.parse_structured_state_snapshot_from_reply
          raw_response_text
      with
-     | Some snapshot -> (snapshot, "model_structured_state")
+     | Some snapshot -> (snapshot, Keeper_memory_policy.Structured_state_reply)
      | None ->
        (match Keeper_memory_policy.parse_state_snapshot_from_reply raw_response_text with
-        | Some snapshot -> (snapshot, "model_state_block")
+        | Some snapshot -> (snapshot, Keeper_memory_policy.State_block)
         | None ->
           let stop_reason_str = stop_reason_label stop_reason in
           let synth =
@@ -43,20 +43,25 @@ let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_to
             "state metadata missing, synthesized from %d tools (stop=%s)"
             (List.length actual_keeper_tool_names)
             stop_reason_str;
-          (synth, "synthesized")))
+          (synth, Keeper_memory_policy.Synthesized)))
 ;;
 
 let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
+  let is_structured_reply =
+    match (state_snapshot_source : Keeper_memory_policy.state_snapshot_source) with
+    | Structured_state_reply -> true
+    | Structured_state_tool | State_block | Synthesized -> false
+  in
   let fallback =
     match
       Keeper_text_processing.state_snapshot_reply_fallback (Some state_snapshot)
     with
     | Some _ as fallback -> fallback
-    | None when String.equal state_snapshot_source "model_structured_state" ->
+    | None when is_structured_reply ->
       Some "State updated."
     | None -> None
   in
-  if String.equal state_snapshot_source "model_structured_state" then
+  if is_structured_reply then
     Keeper_text_processing.user_visible_reply_text ?fallback ""
   else
     match fallback with

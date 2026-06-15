@@ -193,9 +193,10 @@ val is_meaningful_memory_text : string -> bool
 val memory_candidates_from_snapshot :
   keeper_state_snapshot -> candidate_selection_result
 
-val memory_candidates_from_snapshot_source :
-  state_snapshot_source:string ->
+val memory_candidates_from_snapshot_gated :
+  is_synthetic:bool ->
   keeper_state_snapshot ->
   candidate_selection_result
-  (** Source-aware variant used by post-turn persistence. Runtime-synthesized
-      snapshots are resume aids, not model-authored durable memory. *)
+  (** Gated variant used by post-turn persistence. When [is_synthetic] (the
+      snapshot was fabricated from run metadata, not model-authored), no durable
+      memory candidates are produced — synthetic snapshots are resume aids only. *)

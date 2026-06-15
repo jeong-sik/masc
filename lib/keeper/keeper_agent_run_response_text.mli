@@ -2,7 +2,7 @@
 
 type finalized = {
   state_snapshot : Keeper_memory_policy.keeper_state_snapshot;
-  state_snapshot_source : string;
+  state_snapshot_source : Keeper_memory_policy.state_snapshot_source;
   response_text : string;
 }
 

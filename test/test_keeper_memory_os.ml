@@ -3,6 +3,7 @@
 module Types = Masc.Keeper_memory_os_types
 module Policy = Masc.Keeper_memory_os_policy
 module Memory_io = Masc.Keeper_memory_os_io
+module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
@@ -19,6 +20,20 @@ let contains substring s =
     else aux (i + 1)
   in
   if sub_len = 0 then true else aux 0
+;;
+
+(* Count non-overlapping occurrences of [substring] in [s] (RFC-0239 R2 test). *)
+let occurrences substring s =
+  let sub_len = String.length substring in
+  let str_len = String.length s in
+  if sub_len = 0 then 0
+  else (
+    let rec aux i acc =
+      if i + sub_len > str_len then acc
+      else if String.sub s i sub_len = substring then aux (i + sub_len) (acc + 1)
+      else aux (i + 1) acc
+    in
+    aux 0 0)
 ;;
 
 let index_of substring s =
@@ -43,8 +58,15 @@ let fact_fixture ~now () =
   ; Types.first_seen = now -. 86400.0
   ; Types.last_accessed = now -. 3600.0
   ; Types.valid_until = None
+  ; Types.stale_factor = 0.0
+  ; Types.last_verified_at = Some (now -. 3600.0)
+  ; Types.expected_lifetime_cycles = None
   ; Types.schema_version = Types.schema_version
   }
+;;
+
+let days n =
+  float n *. 86400.0
 ;;
 
 let with_temp_keepers_dir f =
@@ -174,6 +196,11 @@ let test_json_roundtrip () =
   Alcotest.(check (float 0.001)) "confidence round-trip" f.confidence f2.Types.confidence;
   Alcotest.(check int) "access_count round-trip" f.access_count f2.Types.access_count;
   Alcotest.(check (float 0.001)) "first_seen round-trip" f.first_seen f2.Types.first_seen;
+  Alcotest.(check (float 0.001)) "stale_factor round-trip" f.stale_factor f2.Types.stale_factor;
+  Alcotest.(check (option (float 0.001)))
+    "last_verified_at round-trip"
+    f.last_verified_at
+    f2.Types.last_verified_at;
   let e =
     { Types.trace_id = "trace-123"
     ; Types.generation = 1
@@ -194,6 +221,27 @@ let test_json_roundtrip () =
     e2.Types.episode_summary;
   Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims);
   Alcotest.(check int) "open_items length" 1 (List.length e2.Types.open_items)
+;;
+
+let test_fact_v1_json_defaults_to_safe_staleness_fields () =
+  let json =
+    `Assoc
+      [ "claim", `String "legacy fact"
+      ; "confidence", `Float 0.9
+      ; "category", `String "legacy"
+      ; "source", `Assoc [ "trace_id", `String "trace-v1"; "turn", `Int 1 ]
+      ; "access_count", `Int 0
+      ; "first_seen", `Float 10.0
+      ; "last_accessed", `Float 20.0
+      ; "schema_version", `String "rfc0231-v1"
+      ]
+  in
+  match Types.fact_of_json json with
+  | None -> Alcotest.fail "expected legacy fact to parse"
+  | Some fact ->
+    Alcotest.(check (float 0.001)) "default stale factor" 0.0 fact.Types.stale_factor;
+    Alcotest.(check (option (float 0.001))) "missing last_verified_at" None fact.last_verified_at;
+    Alcotest.(check (option int)) "missing lifetime cycles" None fact.expected_lifetime_cycles
 ;;
 
 let test_librarian_prompt_renders () =
@@ -657,6 +705,39 @@ let test_policy_score () =
     (Policy.score_fact ~now low < score)
 ;;
 
+let test_policy_truth_age_not_reset_by_access () =
+  let now = 1_000_000.0 in
+  let fresh =
+    { (fact_fixture ~now ()) with
+      Types.confidence = 0.99
+    ; Types.access_count = 0
+    ; Types.first_seen = now
+    ; Types.last_accessed = now
+    ; Types.last_verified_at = Some now
+    }
+  in
+  let stale_but_frequently_recalled =
+    { fresh with
+      Types.first_seen = now -. days 120
+    ; Types.last_verified_at = None
+    ; Types.last_accessed = now
+    ; Types.access_count = 10_000
+    }
+  in
+  Alcotest.(check bool)
+    "truth-stale fact cannot be revived by access count"
+    true
+    (Policy.score_fact ~now stale_but_frequently_recalled < Policy.score_fact ~now fresh);
+  let explicitly_stale = { fresh with Types.stale_factor = 1.0 } in
+  Alcotest.(check (float 0.001))
+    "stale_factor=1 zeroes score"
+    0.0
+    (Policy.score_fact ~now explicitly_stale);
+  match Policy.decide_retention (Policy.score_fact ~now explicitly_stale) with
+  | Policy.Discard -> ()
+  | Policy.KeepVerbatim -> Alcotest.fail "expected explicit stale fact to be discarded"
+;;
+
 let test_bump_access () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
@@ -772,6 +853,71 @@ let test_jsonl_tail_reads_last_entries () =
     | events -> Alcotest.failf "expected one event, got %d" (List.length events))
 ;;
 
+let test_gc_dry_run_and_rewrite () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "gc-keeper" in
+    let now = 1_000_000.0 in
+    let base = fact_fixture ~now () in
+    let keep =
+      { base with
+        Types.claim = "keep this fact"
+      ; Types.confidence = 0.95
+      ; Types.first_seen = now
+      ; Types.last_verified_at = Some now
+      ; Types.last_accessed = now
+      }
+    in
+    let expired =
+      { keep with
+        Types.claim = "expired fact"
+      ; Types.valid_until = Some (now -. 1.0)
+      }
+    in
+    let explicit_stale =
+      { keep with
+        Types.claim = "explicitly stale fact"
+      ; Types.stale_factor = 1.0
+      }
+    in
+    let duplicate_low =
+      { keep with
+        Types.claim = "Duplicate Claim"
+      ; Types.confidence = 0.80
+      ; Types.source = { keep.source with turn = 10 }
+      }
+    in
+    let duplicate_high =
+      { keep with
+        Types.claim = "duplicate claim"
+      ; Types.confidence = 0.90
+      ; Types.source = { keep.source with turn = 11 }
+      }
+    in
+    List.iter
+      (Memory_io.append_fact ~keeper_id)
+      [ keep; expired; explicit_stale; duplicate_low; duplicate_high ];
+    let dry = GC.run_gc ~dry_run:true ~keeper_id ~now () in
+    Alcotest.(check bool) "dry-run flag" true dry.GC.dry_run;
+    Alcotest.(check int) "dry-run leaves file untouched" 5
+      (List.length (Memory_io.read_facts_all ~keeper_id));
+    let report = GC.run_gc ~keeper_id ~now () in
+    Alcotest.(check int) "total input" 5 report.GC.total_input;
+    Alcotest.(check int) "ttl expired" 1 report.ttl_expired;
+    Alcotest.(check int) "verdict discarded" 1 report.verdict_discarded;
+    Alcotest.(check int) "dedup removed" 1 report.dedup_removed;
+    Alcotest.(check int) "written" 2 report.written;
+    let survivors = Memory_io.read_facts_all ~keeper_id in
+    Alcotest.(check int) "survivor count" 2 (List.length survivors);
+    Alcotest.(check bool)
+      "keeps high duplicate"
+      true
+      (List.exists (fun f -> String.equal f.Types.claim "duplicate claim") survivors);
+    Alcotest.(check bool)
+      "drops expired"
+      false
+      (List.exists (fun f -> String.equal f.Types.claim "expired fact") survivors))
+;;
+
 let test_recall_context_empty_without_memory () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let ctx =
@@ -851,6 +997,57 @@ let test_render_if_enabled_renders_persisted_memory () =
             "block carries the persisted claim"
             true
             (contains "Gated recall should surface saved facts" block))))
+;;
+
+(* RFC-0239 R2: the append-only store keeps every re-confirmation of a claim as
+   a separate immortal row. Recall must collapse duplicate claims by normalized
+   fingerprint so one repeated conclusion does not crowd distinct facts out of
+   the injected top-N. *)
+let test_recall_dedups_repeated_claim () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "virtual-memory-keeper" in
+      let now = 1_000_000.0 in
+      let base = fact_fixture ~now () in
+      let dup ~claim turn =
+        (* Same claim across turns, varying only case — normalize_claim folds
+           these to one fingerprint. *)
+        { base with Types.claim; Types.source = { base.source with turn } }
+      in
+      let distinct =
+        { base with
+          Types.claim = "a genuinely distinct fact"
+        ; Types.source = { base.source with turn = 9 }
+        }
+      in
+      let episode =
+        { Types.trace_id = "trace-dedup"
+        ; Types.generation = 1
+        ; Types.episode_summary = "dedup episode"
+        ; Types.claims =
+            [ dup ~claim:"Operator's turn now" 1
+            ; dup ~claim:"OPERATOR'S TURN NOW" 2
+            ; dup ~claim:"operator's turn NOW" 3
+            ; distinct
+            ]
+        ; Types.open_items = []
+        ; Types.constraints = []
+        ; Types.preserved_tool_refs = []
+        ; Types.source_turn_range = Some (1, 9)
+        ; Types.created_at = now
+        ; Types.schema_version = Types.schema_version
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id episode;
+      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:8 ~max_episodes:0 () in
+      Alcotest.(check int)
+        "repeated claim collapses to a single fact line"
+        1
+        (occurrences "operator's turn now" (String.lowercase_ascii ctx));
+      Alcotest.(check bool)
+        "distinct fact is not crowded out"
+        true
+        (contains "a genuinely distinct fact" ctx)))
 ;;
 
 let test_recall_context_renders_sanitized_memory () =
@@ -993,6 +1190,10 @@ let () =
     "keeper_memory_os"
     [ ( "json"
       , [ Alcotest.test_case "fact and episode round-trip" `Quick test_json_roundtrip
+        ; Alcotest.test_case
+            "v1 fact json defaults staleness fields"
+            `Quick
+            test_fact_v1_json_defaults_to_safe_staleness_fields
         ; Alcotest.test_case "librarian prompt renders" `Quick test_librarian_prompt_renders
         ; Alcotest.test_case
             "librarian prompt omits private blocks"
@@ -1021,6 +1222,10 @@ let () =
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score ordering" `Quick test_policy_score
+        ; Alcotest.test_case
+            "truth age is not reset by access"
+            `Quick
+            test_policy_truth_age_not_reset_by_access
         ; Alcotest.test_case "bump access" `Quick test_bump_access
         ] )
     ; ( "io"
@@ -1036,6 +1241,10 @@ let () =
             "jsonl tail reads last entries"
             `Quick
             test_jsonl_tail_reads_last_entries
+        ; Alcotest.test_case
+            "gc dry-run and rewrite"
+            `Quick
+            test_gc_dry_run_and_rewrite
         ] )
     ; ( "recall"
       , [ Alcotest.test_case
@@ -1066,6 +1275,10 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "dedups repeated claim (RFC-0239 R2)"
+            `Quick
+            test_recall_dedups_repeated_claim
         ] )
     ]
 ;;

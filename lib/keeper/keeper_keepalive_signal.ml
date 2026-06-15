@@ -233,11 +233,53 @@ let board_reactive_wakeup_max =
     "MASC_KEEPER_BOARD_WAKEUP_MAX" ~default:4 ~min_v:1 ~max_v:64
 ;;
 
-let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
+(* RFC-0239 R4: collapse runs of whitespace and lowercase so trivial spacing
+   or case differences do not split a re-post into a fresh dedup key. *)
+let normalize_for_fingerprint s =
+  let b = Buffer.create (String.length s) in
+  let prev_space = ref true in
+  String.iter
+    (fun c ->
+      match Char.lowercase_ascii c with
+      | ' ' | '\t' | '\n' | '\r' ->
+        if not !prev_space then Buffer.add_char b ' ';
+        prev_space := true
+      | c ->
+        Buffer.add_char b c;
+        prev_space := false)
+    s;
+  let r = Buffer.contents b in
+  let n = String.length r in
+  if n > 0 && r.[n - 1] = ' ' then String.sub r 0 (n - 1) else r
+;;
+
+(* RFC-0239 R4: a keeper that re-posts the same conclusion mints a fresh
+   post_id every cycle, so the prior post_id-keyed debounce never matched
+   across re-posts. Key the debounce on a fingerprint of normalized
+   (author,title,content) so identical re-posts collapse into one peer wake per
+   window. Empty title+content falls back to post_id so content-less signals
+   keep their original per-post behaviour. *)
+let board_wakeup_dedup_key ~post_id ~author ~title ~content =
+  if String.trim (title ^ content) = "" then post_id
+  else (
+    let normalized = normalize_for_fingerprint (title ^ "\n" ^ content) in
+    "cfp:" ^ Digest.to_hex (Digest.string (author ^ "\x00" ^ normalized)))
+;;
+
+let board_reactive_wakeup_allowed
+      ~base_path
+      ~keeper_name
+      ~(signal : Board_dispatch.board_signal)
+  =
   Keeper_registry.board_wakeup_allowed
     ~base_path
     keeper_name
-    ~post_id
+    ~dedup_key:
+      (board_wakeup_dedup_key
+         ~post_id:signal.post_id
+         ~author:signal.author
+         ~title:signal.title
+         ~content:signal.content)
     ~debounce_sec:board_reactive_debounce_sec
 ;;
 
@@ -421,7 +463,7 @@ let wakeup_relevant_keeper_for_board_signal
       board_reactive_wakeup_allowed
         ~base_path:config.base_path
         ~keeper_name:meta.name
-        ~post_id:signal.post_id
+        ~signal
     then (
       match board_signal_wake_keeper ~config ~reason ~signal meta with
       | Ok () ->

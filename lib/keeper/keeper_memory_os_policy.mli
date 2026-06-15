@@ -5,13 +5,25 @@ open Keeper_memory_os_types
 
 val default_lambda : float
 val default_alpha : float
+val default_truth_lambda : float
+val default_max_access_factor : float
+val default_discard_score_threshold : float
+
+type retention_verdict =
+  | KeepVerbatim
+  | Discard
 
 (** Composite importance score for a fact.
 
-    Score = confidence × recency × access_boost
-    where recency follows an exponential forgetting curve and
-    access_boost is [(1 + access_count) ** alpha]. *)
+    Score = confidence × access_recency × truth_recency ×
+    stale_penalty × access_boost.  [access_recency] uses
+    [last_accessed], while [truth_recency] uses [last_verified_at] or
+    [first_seen] so recall cannot make an unverified claim fresh again. *)
 val score_fact : ?lambda:float -> ?alpha:float -> now:float -> fact -> float
+
+val truth_recency_factor : ?lambda:float -> now:float -> fact -> float
+val stale_penalty : fact -> float
+val decide_retention : ?discard_threshold:float -> float -> retention_verdict
 
 (** Score an archived tool result. *)
 val score_tool_result

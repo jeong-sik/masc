@@ -42,10 +42,25 @@ let update_streak_gauge keeper_name value =
     ~labels:[ ("keeper", keeper_name) ]
     (Float.of_int value)
 
-let record_turn ~keeper_name ~speech_act =
+(* RFC-0239 §3 R3: a turn makes progress when it produced durable evidence
+   (substantive tool calls or validated output), or when it was delivered on a
+   surface where a no-evidence turn is legitimate (a user-facing reply or a
+   task claim). A turn that only broadcasts to peers (board post/comment/
+   broadcast) or stays silent *without* such evidence is no-progress and
+   accrues the loop streak.
+
+   This generalises the retired speech_act="stay_silent" predicate, which
+   reset the streak whenever a keeper *posted* its "nothing to do" conclusion
+   — so the detector never fired for a cluster that thrashed by re-posting
+   rather than by emitting the literal stay_silent act. Primitive bools keep
+   this module decoupled from the social-model type. *)
+let turn_made_progress ~strong_evidence ~surface_requires_evidence =
+  strong_evidence || not surface_requires_evidence
+
+let record_turn ~keeper_name ~made_progress =
   with_lock (fun () ->
     let s = get_or_create keeper_name in
-    if speech_act = "stay_silent" then begin
+    if not made_progress then begin
       s.streak <- s.streak + 1;
       update_streak_gauge keeper_name s.streak;
       let t = threshold () in
@@ -55,11 +70,11 @@ let record_turn ~keeper_name ~speech_act =
           Keeper_metrics.(to_string StaySilentLoopDetected)
           ~labels:[ ("keeper", keeper_name) ] ();
         Log.Keeper.error
-          "#9926 stay_silent loop detected keeper=%s streak=%d threshold=%d \
-           — keeper is returning stay_silent repeatedly. Check effective tool \
-           surface mismatch (#9926 proposal 1) or scheduler/backlog drift. \
-           Counter will not re-fire until the streak resets via any \
-          non-stay_silent speech act."
+          "#9926/RFC-0239 no-progress loop detected keeper=%s streak=%d \
+           threshold=%d — keeper repeated no-progress turns (stay_silent, or \
+           board posts with no tool evidence). Check effective tool surface \
+           mismatch or scheduler/backlog drift. Counter will not re-fire until \
+           the streak resets via a turn that makes progress."
           keeper_name s.streak t;
         Loop_detected { streak = s.streak; threshold = t }
       end else Normal

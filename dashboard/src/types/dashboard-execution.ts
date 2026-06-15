@@ -39,6 +39,21 @@ export interface DashboardShellMetaCognitionSummary {
   top_desire?: DashboardShellMetaCognitionDesire | null
 }
 
+/**
+ * Typed auth error code emitted server-side. SSOT mapping lives in
+ * `lib/types/masc_error.ml:dashboard_auth_error_code`; carried both in the
+ * dashboard shell summary and the HTTP 401/403 error body
+ * (`lib/server/server_auth.ml:auth_error_json`).
+ */
+export type DashboardAuthErrorCode =
+  | 'missing_token'
+  | 'invalid_token'
+  | 'token_expired'
+  | 'actor_mismatch'
+  | 'insufficient_role'
+  | 'same_origin_blocked'
+  | 'unknown'
+
 export interface DashboardShellAuthSummary {
   enabled: boolean
   require_token: boolean
@@ -49,7 +64,7 @@ export interface DashboardShellAuthSummary {
   requested_agent?: string | null
   effective_agent?: string | null
   effective_role?: string | null
-  auth_error_code?: 'missing_token' | 'invalid_token' | 'token_expired' | 'actor_mismatch' | 'insufficient_role' | 'same_origin_blocked' | 'unknown' | null
+  auth_error_code?: DashboardAuthErrorCode | null
   auth_error_detail?: string | null
   can_keeper_msg: boolean
   keeper_msg_error?: string | null

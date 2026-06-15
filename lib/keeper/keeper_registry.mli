@@ -305,10 +305,13 @@ val restore_supervisor_state :
   restart_count:int -> last_restart_ts:float ->
   crash_log:(float * string) list -> unit
 
-(** Check if a board-reactive wakeup is allowed (debounce).
-    Records timestamp if allowed. Returns true for unregistered keepers. *)
+(** Check if a board-reactive wakeup is allowed (debounce). [dedup_key] is the
+    key under which the wake is deduped — RFC-0239 R4 passes a content
+    fingerprint rather than the raw post_id, so identical re-posts with fresh
+    post_ids collapse. Records timestamp if allowed. Returns true for
+    unregistered keepers. *)
 val board_wakeup_allowed :
-  base_path:string -> string -> post_id:string -> debounce_sec:float -> bool
+  base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
 
 (** Clear all board wakeup timestamps for a keeper. No-op if not found. *)
 val clear_board_wakeups : base_path:string -> string -> unit

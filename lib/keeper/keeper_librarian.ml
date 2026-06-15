@@ -142,6 +142,9 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          ; first_seen = now
          ; last_accessed = now
          ; valid_until = None
+         ; stale_factor = 0.0
+         ; last_verified_at = Some now
+         ; expected_lifetime_cycles = None
          ; schema_version
          }
      | (Some _, Some _, Some _, Some _)

@@ -76,6 +76,26 @@ val show : t -> string
 val to_yojson : t -> Yojson.Safe.t
 val code : t -> int
 
+val dashboard_auth_error_code : t -> string option
+(** [dashboard_auth_error_code err] maps a typed error to the stable
+    dashboard auth-error-code string consumed by the Bonsai dashboard
+    ([DashboardShellAuthSummary.auth_error_code]) and the keeper stream
+    401 retry gate (TS enum in
+    [dashboard/src/types/dashboard-execution.ts]).
+
+    SSOT for both the dashboard shell summary JSON and the HTTP 401
+    error body so the two surfaces never drift. Returns:
+    {ul
+    {- ["invalid_token"] for [Auth (InvalidToken _)];}
+    {- ["token_expired"] for [Auth (TokenExpired _)];}
+    {- ["same_origin_blocked"] for the browser cross-origin
+       [Auth (Forbidden _)] case;}
+    {- ["insufficient_role"] for any other [Auth (Forbidden _)];}
+    {- the [unauthorized_reason] code
+       (["actor_mismatch"] / ["missing_token"] / ["unknown"]) for
+       [Auth (Unauthorized _)];}
+    {- ["unknown"] for all non-auth errors.} } *)
+
 val is_retryable : t -> bool
 (** [is_retryable err] — would replaying the same operation, without
     additional caller action, have a chance of succeeding?

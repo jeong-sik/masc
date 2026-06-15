@@ -10,11 +10,11 @@ open Keeper_memory_os_types
 let default_lambda = 1.0 /. (86400.0 *. 7.0) (* half-life ~7 days *)
 let default_alpha = 0.5
 
-(** Forgetting curve: recency decays exponentially with a half-life
+(** Inverse recency bonus: hyperbolic decay 1/(1+lambda*delta) gives
     controlled by [lambda]. *)
-let recency_factor ~lambda ~now last_accessed =
+let recency_bonus ~lambda ~now last_accessed =
   let delta = now -. last_accessed in
-  if delta <= 0.0 then 1.0 else exp (-.lambda *. delta)
+  if delta <= 0.0 then 1.0 else 1.0 /. (1.0 +. lambda *. delta)
 ;;
 
 (** Access boost: each recall incrementally increases the weight of a
@@ -24,7 +24,7 @@ let access_factor ~alpha access_count =
 ;;
 
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
-  fact.confidence *. recency_factor ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count
+  fact.confidence *. recency_bonus ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count
 ;;
 
 let score_tool_result
@@ -37,7 +37,7 @@ let score_tool_result
       ()
   =
   let base_confidence = if was_successful then 0.9 else 0.5 in
-  base_confidence *. recency_factor ~lambda ~now created_at *. access_factor ~alpha access_count
+  base_confidence *. recency_bonus ~lambda ~now created_at *. access_factor ~alpha access_count
 ;;
 
 let string_contains substring str =

@@ -67,3 +67,87 @@ let rank ?(weights = default_weights) ~query items =
   (* Stable sort: List.stable_sort preserves input order for equal scores. *)
   let scored = List.map (fun it -> (it, gravity_score weights ~query it)) items in
   List.stable_sort (fun (_, a) (_, b) -> Float.compare b a) scored
+
+(* ============================================================
+   Phase 3a/4: Memory OS scoring — score_fact with recency,
+   access, stale_penalty, recency_bonus, valid_until_gate,
+   and verification_factor.
+   ============================================================ *)
+
+type scored_fact = {
+  confidence : float;
+  last_accessed : float; (* unix timestamp *)
+  access_count : int;
+  stale_penalty : float;
+  expected_lifetime_cycles : int option;
+  valid_until : float option; (* optional TTL; None means no expiry *)
+  verification_factor : float; (* confidence in the fact's correctness, 0-1 *)
+}
+
+let recency_factor ~now ~last_accessed =
+  let age_seconds = now -. last_accessed in
+  if age_seconds < 0.0 then 1.0
+  else Float.exp (-. age_seconds /. (3600.0 *. 24.0))
+
+let access_factor ~count =
+  let rec log_factor c =
+    if c <= 0 then 0.0
+    else 1.0 +. (0.1 *. Float.log (float_of_int c))
+  in
+  clamp ~lo:0.0 ~hi:1.0 (log_factor count)
+
+let stale_penalty ~last_accessed ~expected_lifetime_cycles ~now =
+  match expected_lifetime_cycles with
+  | None -> 0.0
+  | Some cycles ->
+    let age_seconds = now -. last_accessed in
+    let cycle_duration = 3600.0 *. 24.0 *. 7.0 in (* one week per cycle *)
+    let age_cycles = age_seconds /. cycle_duration in
+    if age_cycles > float_of_int cycles then
+      0.5 *. (age_cycles -. float_of_int cycles)
+    else 0.0
+
+let recency_bonus ~now ~last_accessed =
+  let age_seconds = now -. last_accessed in
+  if age_seconds < 3600.0 then 0.1 (* accessed within last hour *)
+  else if age_seconds < 86400.0 then 0.05 (* accessed within last day *)
+  else 0.0
+
+let valid_until_gate ~valid_until ~now =
+  match valid_until with
+  | None -> true
+  | Some expiry -> now < expiry
+
+let verification_factor_of ~confidence ~access_count =
+  (* Higher access count increases confidence in the fact's correctness *)
+  let base = confidence in
+  let access_boost = 0.1 *. Float.log (1.0 +. float_of_int access_count) in
+  clamp ~lo:0.0 ~hi:1.0 (base +. access_boost)
+
+let score_fact ~now fact =
+  let recency = recency_factor ~now ~last_accessed:fact.last_accessed in
+  let access = access_factor ~count:fact.access_count in
+  let stale = stale_penalty ~last_accessed:fact.last_accessed
+    ~expected_lifetime_cycles:fact.expected_lifetime_cycles ~now in
+  let bonus = recency_bonus ~now ~last_accessed:fact.last_accessed in
+  let verification = verification_factor_of ~confidence:fact.confidence
+    ~access_count:fact.access_count in
+  let gate = valid_until_gate ~valid_until:fact.valid_until ~now in
+  let raw_score =
+    (0.3 *. fact.confidence)
+    +. (0.2 *. recency)
+    +. (0.15 *. access)
+    +. (0.1 *. bonus)
+    -. (0.25 *. stale)
+    +. (0.1 *. verification)
+  in
+  let final_score = if gate then raw_score else -.1.0 in
+  {
+    confidence = fact.confidence;
+    last_accessed = fact.last_accessed;
+    access_count = fact.access_count;
+    stale_penalty = stale;
+    expected_lifetime_cycles = fact.expected_lifetime_cycles;
+    valid_until = fact.valid_until;
+    verification_factor = verification;
+  }, final_score

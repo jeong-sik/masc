@@ -852,6 +852,56 @@ let test_bump_access () =
   | _ -> Alcotest.fail "expected one unchanged fact"
 ;;
 
+(* RFC-0244: turn-seeded lexical relevance. *)
+
+let test_lexical_relevance_identity_for_empty_seed () =
+  let now = 1_000_000.0 in
+  Alcotest.(check (float 1e-9))
+    "empty seed is the multiplicative identity"
+    1.0
+    (Policy.lexical_relevance ~seed_tokens:[] (fact_fixture ~now ()))
+;;
+
+let test_lexical_relevance_is_deterministic () =
+  let now = 1_000_000.0 in
+  let fact = { (fact_fixture ~now ()) with Types.claim = "alpha bravo charlie delta" } in
+  let seed = Policy.tokenize "alpha bravo" in
+  Alcotest.(check (float 1e-12))
+    "pure function: identical inputs yield identical output"
+    (Policy.lexical_relevance ~seed_tokens:seed fact)
+    (Policy.lexical_relevance ~seed_tokens:seed fact)
+;;
+
+let test_lexical_relevance_monotone_in_coverage () =
+  let now = 1_000_000.0 in
+  let seed = Policy.tokenize "alpha bravo charlie" in
+  let full = { (fact_fixture ~now ()) with Types.claim = "alpha bravo charlie" } in
+  let partial = { (fact_fixture ~now ()) with Types.claim = "alpha only here" } in
+  let none = { (fact_fixture ~now ()) with Types.claim = "delta echo foxtrot" } in
+  let rf = Policy.lexical_relevance ~seed_tokens:seed full in
+  let rp = Policy.lexical_relevance ~seed_tokens:seed partial in
+  let rn = Policy.lexical_relevance ~seed_tokens:seed none in
+  Alcotest.(check bool) "full coverage > partial" true (rf > rp);
+  Alcotest.(check bool) "partial coverage > none" true (rp > rn);
+  Alcotest.(check (float 1e-9)) "no coverage = identity" 1.0 rn
+;;
+
+let test_score_fact_seed_boosts_match () =
+  let now = 1_000_000.0 in
+  let fact = { (fact_fixture ~now ()) with Types.claim = "deploy pipeline rollback" } in
+  let base = Policy.score_fact ~now fact in
+  let seedless_explicit = Policy.score_fact ~seed_tokens:[] ~now fact in
+  let matched =
+    Policy.score_fact ~seed_tokens:(Policy.tokenize "rollback the deploy") ~now fact
+  in
+  let unrelated =
+    Policy.score_fact ~seed_tokens:(Policy.tokenize "weather forecast today") ~now fact
+  in
+  Alcotest.(check (float 1e-12)) "omitted seed == empty seed" base seedless_explicit;
+  Alcotest.(check bool) "matching turn boosts score" true (matched > base);
+  Alcotest.(check (float 1e-12)) "non-matching turn leaves score unchanged" base unrelated
+;;
+
 let test_episode_files_do_not_overwrite_generation () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "episode-unique-keeper" in
@@ -1096,6 +1146,90 @@ let test_render_if_enabled_renders_persisted_memory () =
             "block carries the persisted claim"
             true
             (contains "Gated recall should surface saved facts" block))))
+;;
+
+(* RFC-0244: a seed reranks recall — the lexically matching fact is lifted above a
+   higher-base-confidence fact it would otherwise lose to. *)
+let test_render_context_seed_reranks_selection () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "rfc0244-rerank-keeper" in
+        let now = 1_000_000.0 in
+        (* [fact_a] has the higher base confidence, so it wins the seedless
+           ranking; [fact_b] is lower base but fully covers the seed, so the
+           lexical boost must lift it above [fact_a]. *)
+        let fact_a =
+          { (fact_fixture ~now ()) with
+            Types.claim = "alpha bravo charlie unrelated"
+          ; Types.confidence = 0.90
+          }
+        in
+        let fact_b =
+          { (fact_fixture ~now ()) with
+            Types.claim = "delta echo foxtrot golf"
+          ; Types.confidence = 0.80
+          }
+        in
+        let episode =
+          { Types.trace_id = "trace-rerank"
+          ; Types.generation = 1
+          ; Types.episode_summary = "rerank fixture"
+          ; Types.claims = [ fact_a; fact_b ]
+          ; Types.open_items = []
+          ; Types.constraints = []
+          ; Types.preserved_tool_refs = []
+          ; Types.source_turn_range = Some (1, 2)
+          ; Types.created_at = now
+          ; Types.schema_version = Types.schema_version
+          }
+        in
+        Memory_io.append_episode_bundle ~keeper_id episode;
+        let seedless = Recall.render_context ~keeper_id ~now ~max_facts:1 () in
+        let seeded =
+          Recall.render_context ~keeper_id ~now ~max_facts:1 ~seed:"delta echo foxtrot" ()
+        in
+        Alcotest.(check bool)
+          "seedless keeps the higher-confidence fact"
+          true
+          (contains "alpha bravo charlie" seedless
+           && not (contains "delta echo foxtrot" seedless));
+        Alcotest.(check bool)
+          "seed lifts the lexically matching fact above it"
+          true
+          (contains "delta echo foxtrot" seeded
+           && not (contains "alpha bravo charlie" seeded)))))
+;;
+
+(* RFC-0244: an empty seed is byte-identical to the seedless path (no behavior
+   change when there is no turn text). *)
+let test_render_context_empty_seed_matches_seedless () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "rfc0244-empty-seed-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with Types.claim = "deploy pipeline rollback note" }
+        in
+        let episode =
+          { Types.trace_id = "trace-empty-seed"
+          ; Types.generation = 1
+          ; Types.episode_summary = "empty seed fixture"
+          ; Types.claims = [ fact ]
+          ; Types.open_items = []
+          ; Types.constraints = []
+          ; Types.preserved_tool_refs = []
+          ; Types.source_turn_range = Some (1, 2)
+          ; Types.created_at = now
+          ; Types.schema_version = Types.schema_version
+          }
+        in
+        Memory_io.append_episode_bundle ~keeper_id episode;
+        Alcotest.(check string)
+          "empty seed is byte-identical to seedless"
+          (Recall.render_context ~keeper_id ~now ())
+          (Recall.render_context ~keeper_id ~now ~seed:"" ()))))
 ;;
 
 (* RFC-0239 R2: the append-only store keeps every re-confirmation of a claim as
@@ -1547,6 +1681,22 @@ let () =
             "reobserve_fact updates signals (RFC-0243)"
             `Quick
             test_reobserve_fact_updates_signals
+        ; Alcotest.test_case
+            "lexical_relevance identity for empty seed (RFC-0244)"
+            `Quick
+            test_lexical_relevance_identity_for_empty_seed
+        ; Alcotest.test_case
+            "lexical_relevance is deterministic (RFC-0244)"
+            `Quick
+            test_lexical_relevance_is_deterministic
+        ; Alcotest.test_case
+            "lexical_relevance monotone in coverage (RFC-0244)"
+            `Quick
+            test_lexical_relevance_monotone_in_coverage
+        ; Alcotest.test_case
+            "score_fact seed boosts matching fact (RFC-0244)"
+            `Quick
+            test_score_fact_seed_boosts_match
         ] )
     ; ( "io"
       , [ Alcotest.test_case
@@ -1595,6 +1745,14 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "seed reranks recall selection (RFC-0244)"
+            `Quick
+            test_render_context_seed_reranks_selection
+        ; Alcotest.test_case
+            "empty seed matches seedless (RFC-0244)"
+            `Quick
+            test_render_context_empty_seed_matches_seedless
         ; Alcotest.test_case
             "dedups repeated claim (RFC-0239 R2)"
             `Quick

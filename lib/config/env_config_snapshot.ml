@@ -370,7 +370,7 @@ let keeper_sandbox_entries =
 
 let economy_entries =
   [
-    entry ~default:"false" "MASC_ECONOMY_ENABLED"
+    entry ~default:"true" "MASC_ECONOMY_ENABLED"
       "Agent economy feature flag";
     entry ~default:"5.0" "MASC_ECONOMY_FRUGAL_THRESHOLD"
       "Frugal behavior threshold";

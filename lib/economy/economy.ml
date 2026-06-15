@@ -54,7 +54,7 @@ type transaction = {
 (** {1 Configuration from Environment} *)
 
 let enabled () =
-  Env_config_core.get_bool ~default:false "MASC_ECONOMY_ENABLED"
+  Env_config_core.get_bool ~default:true "MASC_ECONOMY_ENABLED"
 
 let initial_balance () =
   Env_config_core.get_float ~default:5.0 "MASC_ECONOMY_INITIAL_BALANCE"

@@ -63,3 +63,21 @@ val rank :
   query:string list ->
   'a item list ->
   ('a item * float) list
+
+(** Decay triggers sourced from the Event Bus for Memory OS stale-fact
+    reconciliation. Each variant corresponds to a workspace channel that
+    can signal staleness. *)
+type decay_trigger =
+  | BoardPost of string   (** post_id *)
+  | TaskTransition of string * string  (** task_id, new_status *)
+  | GitEvent of string    (** event type e.g. \"push\", \"merge\" *)
+
+(** [apply_decay triggers ctx] applies each [decay_trigger] to the
+    Memory OS fact set, reducing scores of facts that are no longer
+    relevant. Returns a list of (fact_id, new_score) pairs.
+
+    Called by the Event Bus wiring after [poll_all]. *)
+val apply_decay :
+  decay_trigger list ->
+  query:string list ->
+  (string * float) list

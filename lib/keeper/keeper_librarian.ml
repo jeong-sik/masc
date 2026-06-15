@@ -112,10 +112,56 @@ let string_list_field key fields =
   | None -> None
 ;;
 
+let string_list_field_or_empty key fields =
+  match List.assoc_opt key fields with
+  | None -> Some []
+  | Some _ -> string_list_field key fields
+;;
+
 let confidence_field fields =
   match number_field "confidence" fields with
   | Some confidence when confidence >= 0.0 && confidence <= 1.0 -> Some confidence
   | Some _ | None -> None
+;;
+
+let json_of_output raw =
+  let raw = String.trim raw in
+  let raw =
+    if String.starts_with ~prefix:"```" raw then (
+      match String.split_on_char '\n' raw with
+      | first :: rest when String.starts_with ~prefix:"```" first ->
+        rest
+        |> List.rev
+        |> (function
+            | last :: rest when String.starts_with ~prefix:"```" (String.trim last) ->
+              List.rev rest
+            | lines -> List.rev lines)
+        |> String.concat "\n"
+        |> String.trim
+      | _ -> raw)
+    else raw
+  in
+  match Yojson.Safe.from_string raw with
+  | json -> Some json
+  | exception Yojson.Json_error _ ->
+    let len = String.length raw in
+    let rec find_from i ch =
+      if i >= len then None
+      else if Char.equal raw.[i] ch then Some i
+      else find_from (i + 1) ch
+    in
+    let rec find_from_right i ch =
+      if i < 0 then None
+      else if Char.equal raw.[i] ch then Some i
+      else find_from_right (i - 1) ch
+    in
+    (match find_from 0 '{', find_from_right (len - 1) '}' with
+     | Some start, Some stop when start < stop ->
+       let candidate = String.sub raw start (stop - start + 1) in
+       (match Yojson.Safe.from_string candidate with
+        | json -> Some json
+        | exception Yojson.Json_error _ -> None)
+     | _ -> None)
 ;;
 
 let claim_source ~trace_id turn tool_call_id =
@@ -173,15 +219,17 @@ let episode_of_output ?now (inp : input) (raw : string) : episode option =
       (* NDT-OK: extraction timestamps are provenance/retention metadata only. *)
       Unix.gettimeofday ()
   in
-  try
-    match Yojson.Safe.from_string raw with
+  match json_of_output raw with
+  | None -> None
+  | Some json ->
+    (match json with
     | `Assoc fields ->
       (match
          string_field "episode_summary" fields
          , List.assoc_opt "claims" fields
-         , string_list_field "open_items" fields
-         , string_list_field "constraints" fields
-         , string_list_field "preserved_tool_refs" fields
+         , string_list_field_or_empty "open_items" fields
+         , string_list_field_or_empty "constraints" fields
+         , string_list_field_or_empty "preserved_tool_refs" fields
        with
        | ( Some episode_summary
          , Some (`List claim_items)
@@ -204,7 +252,5 @@ let episode_of_output ?now (inp : input) (raw : string) : episode option =
               }
           | None -> None)
        | _ -> None)
-    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
-  with
-  | Yojson.Json_error _ -> None
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None)
 ;;

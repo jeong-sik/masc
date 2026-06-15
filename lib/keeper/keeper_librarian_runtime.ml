@@ -31,6 +31,14 @@ let max_messages () =
   |> max 1
 ;;
 
+let runtime_id_for_librarian ~runtime_id =
+  match Sys.getenv_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" with
+  | Some value ->
+    let value = String.trim value in
+    if String.equal value "" then runtime_id else value
+  | None -> runtime_id
+;;
+
 let select_recent_messages ~max_messages messages =
   let max_messages = max 0 max_messages in
   let len = List.length messages in
@@ -213,6 +221,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id inp =
     try
       match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
       | Some sw, Some net ->
+        let runtime_id = runtime_id_for_librarian ~runtime_id in
         (match provider_for_runtime ~runtime_id with
          | Error err ->
            Log.Keeper.warn ~keeper_name:keeper_id

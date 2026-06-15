@@ -385,6 +385,82 @@ let test_librarian_accepts_integer_confidence () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
+let test_librarian_accepts_wrapped_json_output () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-wrapped-json"
+    ; generation = 5
+    ; messages = [ text_message "wrapped JSON memory" ]
+    }
+  in
+  let json = valid_librarian_output () |> Yojson.Safe.to_string in
+  let cases =
+    [ "fenced", Printf.sprintf "```json\n%s\n```" json
+    ; "prefixed", Printf.sprintf "Here is the extracted JSON:\n%s" json
+    ]
+  in
+  List.iter
+    (fun (name, raw) ->
+       match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+       | Some episode ->
+         Alcotest.(check int)
+           (name ^ " claim count")
+           1
+           (List.length episode.Types.claims)
+       | None -> Alcotest.failf "expected %s librarian output to parse" name)
+    cases
+;;
+
+let test_librarian_defaults_missing_optional_lists () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-missing-lists"
+    ; generation = 6
+    ; messages = [ text_message "minimal JSON memory" ]
+    }
+  in
+  let raw =
+    `Assoc
+      [ "episode_summary", `String "Minimal valid librarian output"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "Minimal output still records a fact."
+                ; "confidence", `Float 0.9
+                ; "category", `String "fact"
+                ; "source_turn", `Int 0
+                ]
+            ] )
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  | Some episode ->
+    Alcotest.(check (list string)) "open_items defaults" [] episode.Types.open_items;
+    Alcotest.(check (list string)) "constraints defaults" [] episode.Types.constraints;
+    Alcotest.(check (list string))
+      "preserved_tool_refs defaults"
+      []
+      episode.Types.preserved_tool_refs
+  | None -> Alcotest.fail "expected missing optional list fields to parse"
+;;
+
+let test_librarian_runtime_override_env () =
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" "")
+    (fun () ->
+       Unix.putenv "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" "";
+       Alcotest.(check string)
+         "empty override falls back"
+         "keeper-runtime"
+         (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime");
+       Unix.putenv
+         "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+         " runpod_mtp.qwen36-35b-a3b-mtp ";
+       Alcotest.(check string)
+         "override trims"
+         "runpod_mtp.qwen36-35b-a3b-mtp"
+         (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
+;;
+
 let test_librarian_preserves_admission_memory_text () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-filter-transient-cap"
@@ -1244,6 +1320,18 @@ let () =
             "librarian accepts integer confidence"
             `Quick
             test_librarian_accepts_integer_confidence
+        ; Alcotest.test_case
+            "librarian accepts wrapped json output"
+            `Quick
+            test_librarian_accepts_wrapped_json_output
+        ; Alcotest.test_case
+            "librarian defaults missing optional lists"
+            `Quick
+            test_librarian_defaults_missing_optional_lists
+        ; Alcotest.test_case
+            "librarian runtime override env"
+            `Quick
+            test_librarian_runtime_override_env
         ; Alcotest.test_case
             "librarian preserves admission memory text"
             `Quick

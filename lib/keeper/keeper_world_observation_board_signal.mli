@@ -32,8 +32,21 @@ val check_self_comment_status
   -> post_id:string
   -> comment_status
 
+type wake_reason =
+  | Explicit_mention
+  | Stigmergy of { score : int }
+  | Thread_reply_after_self_comment
+(** Closed set of reasons a keeper wakes for a board signal (RFC-0020).
+    Replaces the prior [string option] contract; consumers match exhaustively
+    so the previously dead ["board_activity"] generic bucket is gone. *)
+
+val wake_reason_label : wake_reason -> string
+(** Stable string label for logs/metrics. *)
+
 val wake_reason
   :  continuity_summary:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
-  -> string option
+  -> wake_reason option
+(** [None] means the relevance pipeline found no reason for this keeper to
+    wake (counted as [BoardSignalNoWakeTotal] by the caller). *)

@@ -7,7 +7,7 @@
     a keeper entered decision_layer >= 2.
 
     Properties pinned:
-    1. Shard floor preserved (5 base read-only tools present).
+    1. Shard floor preserved (4 base read-only tools present).
     2. Essential MASC subset present (masc_status / WebSearch / WebFetch)
        — hardcoded in [Masc.Keeper_tool_policy.essential_masc_minimum_names].
     3. No duplicates (sort_uniq).
@@ -19,7 +19,6 @@ let test_includes_shard_floor () =
     Alcotest.(check bool)
       (Printf.sprintf "%s in shard floor" tool) true (List.mem tool names)
   in
-  assert_includes "keeper_stay_silent";
   assert_includes "keeper_time_now";
   assert_includes "keeper_context_status";
   assert_includes "keeper_memory_search";

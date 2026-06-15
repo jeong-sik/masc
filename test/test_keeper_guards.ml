@@ -206,7 +206,7 @@ let test_gate_rejection_planner_alternative () =
   check bool "includes structured field" true
     (contains_substring streak "planner_alternative=");
   check bool "names retry alternative" true
-    (contains_substring streak "keeper_stay_silent");
+    (contains_substring streak "report no-work/blocker directly");
   let destructive =
     KG.For_testing.planner_alternative_for_gate
       ~stage:"destructive_guard" ~tool_name:"shell_exec"
@@ -418,6 +418,7 @@ let test_custom_guard_passthrough () =
 
 let test_governance_approval_notifies_gate_observer () =
   with_env "MASC_GOVERNANCE_LEVEL" "production" (fun () ->
+  with_env "MASC_DISABLE_HITL" "false" (fun () ->
     let meta_ref = make_meta_ref "test_keeper" in
     let observed = ref [] in
     let on_gate_decision event = observed := event :: !observed in
@@ -445,7 +446,7 @@ let test_governance_approval_notifies_gate_observer () =
          | Some line -> line > 0
          | None -> false)
     | events ->
-      failf "expected one observer event, got %d" (List.length events))
+      failf "expected one observer event, got %d" (List.length events)))
 
 let test_timing_guard_sets_time_and_continues () =
   let tool_start_time = ref 0.0 in

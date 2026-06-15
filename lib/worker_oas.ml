@@ -65,7 +65,6 @@ let agent_config_of_worker_meta
        avoids ambiguous_partial_commit when the gate has not propagated. *)
     min_p = None
   ; enable_thinking = Some (Option.value ~default:false meta.thinking_enabled)
-  ; tool_choice = Some Agent_sdk.Types.Auto
   }
 ;;
 
@@ -180,7 +179,6 @@ let build_agent
        (Groq, GLM) reject the field itself. *)
     |> Agent_sdk.Builder.with_enable_thinking
          (Option.value ~default:false meta.thinking_enabled)
-    |> Agent_sdk.Builder.with_tool_choice Agent_sdk.Types.Auto
     |> Agent_sdk.Builder.with_provider provider
     |> Agent_sdk.Builder.with_tools tools
     |> Agent_sdk.Builder.with_hooks hooks

@@ -65,6 +65,24 @@ let run_result ?content ?stop_reason ?checkpoint () : Runtime_agent.run_result =
     stop_reason = Runtime_agent.Completed;
   }
 
+let test_keeper_hook_relaxes_strict_tool_choice () =
+  let open Agent_sdk.Types in
+  let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in
+  Alcotest.(check bool) "Any -> Auto" true (relax (Some Any) = Some Auto);
+  Alcotest.(check bool)
+    "Tool -> Auto"
+    true
+    (relax (Some (Tool "keeper_context_status")) = Some Auto);
+  Alcotest.(check bool)
+    "Auto unchanged"
+    true
+    (relax (Some Auto) = Some Auto);
+  Alcotest.(check bool)
+    "None_ unchanged"
+    true
+    (relax (Some None_) = Some None_);
+  Alcotest.(check bool) "unset unchanged" true (relax None = None)
+
 let test_accept_keeps_result () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -551,6 +569,10 @@ let () =
       , [
           Alcotest.test_case "accepted response passes through" `Quick
             test_accept_keeps_result;
+          Alcotest.test_case
+            "strict tool_choice is relaxed to auto"
+            `Quick
+            test_keeper_hook_relaxes_strict_tool_choice;
           Alcotest.test_case "rejected response is typed" `Quick
             test_rejects_as_typed_accept_error;
           Alcotest.test_case "thinking-only rejection is diagnosed" `Quick

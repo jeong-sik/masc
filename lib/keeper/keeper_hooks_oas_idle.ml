@@ -14,9 +14,7 @@ let suggest_alternatives ~(allowed_tools : string list)
     List.fold_left (fun acc t -> SS.add t acc) SS.empty repeated_tools
   in
   allowed_tools
-  |> List.filter (fun t ->
-       not (SS.mem t repeated_set)
-       && t <> "keeper_stay_silent")
+  |> List.filter (fun t -> not (SS.mem t repeated_set))
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates
@@ -99,7 +97,7 @@ let recovery_hint ~allowed_tools ~tool_names =
     [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:
     - For idle counts below [skip_at - 1]: gentle nudge suggesting alternatives
     - For idle counts at [skip_at - 1]: final warning (stronger nudge)
-      suggesting [stay_silent]
+      suggesting a different visible tool or a text/no-work completion
     - For idle counts at or above [skip_at]: Skip (end this turn, but the
       heartbeat loop will retry next cycle)
 
@@ -126,7 +124,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     let preferred =
       if includes_tool "keeper_tool_search" tool_names then
         allowed_visible_candidates
-          [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute"; "keeper_stay_silent" ]
+          [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute" ]
           ~allowed_tools
       else if includes_tool "keeper_tools_list" tool_names
               && includes_tool "keeper_surface_read" allowed_tools
@@ -141,7 +139,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     |> List.filteri (fun i _ -> i < 5)
   in
   let alt_str = match alternatives with
-    | [] -> "keeper_tool_search or keeper_stay_silent"
+    | [] -> "a different visible tool, or finish with a direct no-work/status response"
     | alts -> String.concat ", " alts
   in
   let hint = recovery_hint ~allowed_tools ~tool_names in
@@ -157,7 +155,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
       (append_hint
          (Printf.sprintf
             "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
-             Use one of these instead: %s — or call keeper_stay_silent to do nothing."
+             Use one of these instead: %s."
             tools_str consecutive_idle_turns alt_str))
   else
     Agent_sdk.Hooks.Nudge

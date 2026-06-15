@@ -50,7 +50,6 @@ let test_tools = [
   make_tool "keeper_task_done" "Mark a task as done";
   make_tool "keeper_context_status" "Check context window usage";
   make_tool "keeper_tools_list" "List available tools";
-  make_tool "keeper_stay_silent" "Do nothing (no-op tool)";
   make_tool "keeper_tool_search" "Search for tools by keyword";
   make_tool "tool_search_files" "Search code in the repository";
   make_tool "tool_read_file" "Read code from a source file";
@@ -144,7 +143,7 @@ let test_topk_llm_fallback_on_failure () =
   let strategy = Agent_sdk.Tool_selector.TopK_llm {
     k = 3;
     bm25_prefilter_n = 10;
-    always_include = ["keeper_stay_silent"];
+    always_include = ["keeper_tools_list"];
     confidence_threshold = 0.0;
     rerank_fn = mock_rerank_failing;
   } in
@@ -153,7 +152,7 @@ let test_topk_llm_fallback_on_failure () =
     ~strategy ~context:"search code" ~tools:test_tools in
   Alcotest.(check bool) "fallback returns results" true (selected <> []);
   Alcotest.(check bool) "always_include survives failure"
-    true (List.mem "keeper_stay_silent" selected)
+    true (List.mem "keeper_tools_list" selected)
 
 let test_topk_llm_confidence_gate () =
   let call_count = ref 0 in
@@ -210,7 +209,7 @@ let test_topk_llm_always_include_survives () =
   let strategy = Agent_sdk.Tool_selector.TopK_llm {
     k = 2;
     bm25_prefilter_n = 5;
-    always_include = ["keeper_stay_silent"; "keeper_context_status"];
+    always_include = ["keeper_tools_list"; "keeper_context_status"];
     confidence_threshold = 0.0;
     rerank_fn = (fun ~context:_ ~candidates ->
       (* Return one regular tool — always_include should still appear *)
@@ -223,7 +222,7 @@ let test_topk_llm_always_include_survives () =
   let selected = Agent_sdk.Tool_selector.select_names
     ~strategy ~context:"do something" ~tools:test_tools in
   Alcotest.(check bool) "always_include[0] present"
-    true (List.mem "keeper_stay_silent" selected);
+    true (List.mem "keeper_tools_list" selected);
   Alcotest.(check bool) "always_include[1] present"
     true (List.mem "keeper_context_status" selected)
 

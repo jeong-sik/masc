@@ -239,11 +239,6 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    if config.tools <> []
-    then Agent_sdk.Builder.with_tool_choice Agent_sdk.Types.Auto builder
-    else builder
-  in
-  let builder =
     match config.hooks with
     | Some h -> Agent_sdk.Builder.with_hooks h builder
     | None -> builder

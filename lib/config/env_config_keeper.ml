@@ -287,14 +287,14 @@ module KeeperKeepalive = struct
 
   (** {2 Idle Turn Constants}
 
-      With tool_choice=Any, keepers always call tools.  Idle detection
-      now only fires when the same tool+args pattern repeats.  Higher
-      thresholds allow legitimate multi-step exploration (e.g., calling
+      Keepers may call tools or finish with text. Idle detection only
+      fires when the same tool+args pattern repeats. Higher thresholds
+      allow legitimate multi-step exploration (e.g., calling
       keeper_tool_search with different queries). *)
 
   (** Max idle turns for scheduled autonomous keeper turns.
-      With tool_choice=Any and max_turns=50, keepers have workspace to
-      explore.  10 idle turns × ~5K tokens = ~50K budget.
+      Keepers have workspace to explore multi-step tool sequences.
+      10 idle turns × ~5K tokens = ~50K budget.
       Env: [MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS]. Default: 10. *)
   let max_idle_turns_autonomous =
     max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
@@ -466,9 +466,9 @@ module KeeperKeepalive = struct
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
-      With tool_choice=Any, the model always calls tools, so idle
-      detection triggers on repeated tool calls.  4 catches loops
-      quickly while still allowing legitimate exploration.
+      Optional tool use means this only applies after repeated tool
+      calls.  4 catches loops quickly while still allowing legitimate
+      exploration.
       Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 4. *)
   let idle_skip_threshold =
     max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))

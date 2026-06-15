@@ -48,6 +48,11 @@ type ctx =
   ; tools : Agent_sdk.Tool.t list
   }
 
+let relax_strict_tool_choice_for_keeper = function
+  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
+    Some Agent_sdk.Types.Auto
+  | other -> other
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -356,12 +361,12 @@ let assemble_hooks
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter
                 in
-                let clear_inherited_strict_tool_choice = function
-                  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> None
-                  | other -> other
-                in
+                (* OAS treats [None] in AdjustParams as "keep the base
+                   config", so strict choices must be explicitly relaxed.
+                   Tools remain available, but the model may finish without
+                   another forced tool call. *)
                 let tool_choice =
-                  clear_inherited_strict_tool_choice current_params.tool_choice
+                  relax_strict_tool_choice_for_keeper current_params.tool_choice
                 in
                 let lane = computed_turn_lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names

@@ -107,7 +107,7 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
       slot
         ~active:true
         ~source:"keeper_hooks_oas"
-        ~features:[ "repeated_tool_nudge"; "stay_silent_skip" ]
+        ~features:[ "repeated_tool_nudge"; "idle_skip" ]
         "on_idle";
       slot
         ~active:true

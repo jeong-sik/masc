@@ -245,7 +245,7 @@ and corrective_hint cls keeper_name =
        - Do NOT retry the exact same failing command."
     | Other ->
       "- You are repeating the same failing action. Try a completely different approach.\n\
-       - If stuck, use `keeper_stay_silent` and wait for new context."
+       - If stuck, stop tool calls and report the blocker or no-work state directly."
   in
   base ^ specific
 

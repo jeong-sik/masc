@@ -1021,7 +1021,7 @@ let masc_keeper_descriptor id name description ~readonly =
 ;;
 
 let internal_descriptors : t list =
-  [ (* ── time / silence / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
+  [ (* ── time / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
     in_process_descriptor
       ~id:"keeper.time.now"
       ~name:"keeper_time_now"
@@ -1031,15 +1031,6 @@ let internal_descriptors : t list =
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_time_now
-  ; in_process_descriptor
-      ~id:"keeper.stay_silent"
-      ~name:"keeper_stay_silent"
-      ~description:
-        "Signal that the keeper will not emit further output this turn. \
-         Returns {status:\"silent\"}."
-      ~input_schema:empty_object_schema
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_stay_silent
   ; (in_process_descriptor
        ~id:"keeper.tools_list"
        ~name:"keeper_tools_list"

@@ -56,7 +56,7 @@ val is_claim_tool_name : string -> bool
 val is_claim_context_tool_name : string -> bool
 val is_completion_tool_name : string -> bool
 
-(** [true] iff the canonicalized name is keeper_stay_silent. *)
+(** [true] iff the canonicalized name is the historical keeper_stay_silent tool. *)
 val is_stay_silent_tool_name : string -> bool
 
 (** Extract OAS completion-contract satisfying-tool hints from an error reason.

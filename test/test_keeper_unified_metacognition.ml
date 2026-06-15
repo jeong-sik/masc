@@ -52,7 +52,6 @@ let test_on_idle_board_get_nudge_names_post_id_discovery () =
         [ "keeper_board_get"
         ; "keeper_board_list"
         ; "keeper_board_search"
-        ; "keeper_stay_silent"
         ]
       ~tool_names:[ "keeper_board_get" ]
   in
@@ -93,7 +92,6 @@ let test_on_idle_tools_list_loop_suggests_surface_read () =
         ; "keeper_broadcast"
         ; "keeper_tasks_list"
         ; "keeper_surface_read"
-        ; "keeper_stay_silent"
         ]
       ~tool_names:[ "keeper_tools_list" ]
   in
@@ -138,7 +136,6 @@ let test_on_idle_tool_search_loop_suggests_code_search () =
         ; "Grep"
         ; "Read"
         ; "Execute"
-        ; "keeper_stay_silent"
         ]
       ~tool_names:[ "keeper_tool_search" ]
   in
@@ -183,7 +180,6 @@ let test_on_idle_tool_search_loop_maps_internal_file_tools () =
         ; "tool_search_files"
         ; "tool_read_file"
         ; "tool_execute"
-        ; "keeper_stay_silent"
         ]
       ~tool_names:[ "keeper_tool_search" ]
   in
@@ -229,9 +225,9 @@ let test_on_idle_final_warning_before_skip () =
   | Agent_sdk.Hooks.Nudge msg ->
     check
       bool
-      "final warning mentions stay_silent"
+      "final warning mentions direct no-work/status response"
       true
-      (contains_substring msg "stay_silent")
+      (contains_substring msg "direct no-work/status response")
   | other ->
     fail
       (Printf.sprintf

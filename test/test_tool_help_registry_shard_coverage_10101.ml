@@ -75,7 +75,7 @@ let test_keeper_task_claim_is_resolvable () =
 let test_representative_tools_across_categories () =
   let representatives =
     [
-      "keeper_stay_silent",   "base_tools";
+      "keeper_time_now",      "base_tools";
       "keeper_board_post",    "board_tools";
       "tool_read_file",       "filesystem_tools";
       "tool_search_files",         "search_files_tools";
@@ -94,12 +94,11 @@ let test_representative_tools_across_categories () =
 (* The #9912 fix bolted [Tool_shard.base_tools] onto
    [raw_all_tool_schemas] directly.  We replaced that with
    [all_keeper_tool_schemas] — this test makes sure the base
-   five tools are still in there (not regressed by the
+   four tools are still in there (not regressed by the
    replacement). *)
 let test_9912_base_tools_still_covered () =
-  let base_five =
-    [ "keeper_stay_silent"
-    ; "keeper_time_now"
+  let base_four =
+    [ "keeper_time_now"
     ; "keeper_context_status"
     ; "keeper_memory_search"
     ; "keeper_tools_list"
@@ -110,7 +109,7 @@ let test_9912_base_tools_still_covered () =
       Alcotest.(check bool)
         (Printf.sprintf "#9912 base tool %s stays resolvable" name)
         true (registry_has name))
-    base_five
+    base_four
 
 let () =
   Alcotest.run "tool_help_registry_shard_coverage_10101"

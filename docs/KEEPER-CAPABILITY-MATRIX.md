@@ -20,7 +20,7 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 
 | Shard | Tools | Count | Removable |
 |-------|-------|-------|-----------|
-| **base** | `keeper_stay_silent`, `keeper_time_now`, `keeper_context_status`, `keeper_memory_search`, `keeper_tools_list` | 5 | No |
+| **base** | `keeper_time_now`, `keeper_context_status`, `keeper_memory_search`, `keeper_tools_list` | 4 | No |
 | **board** | `keeper_board_{get,post,list,comment,vote,stats,search}` | 7 | Yes |
 | **filesystem** | `tool_read_file`, `tool_edit_file`, `tool_write_file` | 3 | Yes |
 | **search_files** | `tool_search_files` | 1 | Yes |

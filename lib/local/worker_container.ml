@@ -429,7 +429,6 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
          reject the field itself even when the value is a no-op. *)
       min_p = None;
       enable_thinking = Some thinking_enabled;
-      tool_choice = Some Agent_sdk.Types.Auto;
     }
   in
   let effective_guardrails =

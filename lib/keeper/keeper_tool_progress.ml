@@ -61,7 +61,7 @@ let completion_tool_names : string list =
      LLM evaluates the situation via passive reads, then signals stay_silent to
      terminate the turn intentionally. Classifying it as Completion lets the
      contract accept the turn as satisfied; abuse is bounded separately by
-     keeper_stay_silent_loop_detector (consecutive-stay metric + circuit
+     keeper_stay_silent_loop_detector (consecutive speech-act metric + circuit
      breaker). Without this, 4+ events/day were rejected as passive_only even
      though the LLM had decided no fit (sangsu/janitor/taskmaster on 2026-04-27
      00:17-00:58 UTC, idle_seconds 28-40h, claimable_count 44-46). *)

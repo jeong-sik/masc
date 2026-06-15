@@ -860,6 +860,41 @@ let test_runtime_agent_context_uses_configured_turn_budget () =
   check int "resume adds fresh per-call turn budget" 31
     prepared.agent_config.max_turns
 
+let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
+  let tool =
+    Agent_sdk.Tool.create
+      ~name:"probe_tool"
+      ~description:"probe tool"
+      ~parameters:[]
+      (fun _input -> Ok { content = "ok" })
+  in
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[ tool ]
+  in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder_without_approval
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_sdk.Builder.build_safe builder with
+      | Error err -> fail (Agent_sdk.Error.to_string err)
+      | Ok agent ->
+        let agent_config = (Agent_sdk.Agent.state agent).config in
+        check
+          (option string)
+          "tool_choice remains unset"
+          None
+          (Option.map Agent_sdk.Types.show_tool_choice agent_config.tool_choice);
+        Eio.Switch.on_release sw (fun () ->
+          Agent_sdk.Agent.close agent)))
+
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
    streaming timeout. *)
@@ -971,6 +1006,10 @@ let () =
             "runtime agent context uses configured turn budget"
             `Quick
             test_runtime_agent_context_uses_configured_turn_budget
+        ; test_case
+            "runtime agent context leaves tool_choice unset with tools"
+            `Quick
+            test_runtime_agent_context_leaves_tool_choice_unset_with_tools
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

@@ -16,7 +16,7 @@ import {
   WorkspaceSigil,
   StatusDot,
   keeperBucket,
-  bucketDotTone,
+  keeperStatusTone,
   keeperPhaseLabel,
   type KeeperBucket,
 } from './keeper-workspace-shared'
@@ -63,7 +63,7 @@ function matchesQuery(keeper: Keeper, q: string): boolean {
 
 function RosterRow({ keeper, active, onSelect }: { keeper: Keeper; active: boolean; onSelect: (name: string) => void }) {
   const bucket = keeperBucket(keeper)
-  const tone = bucketDotTone(bucket)
+  const tone = keeperStatusTone(keeper)
   const att = attentionCount(keeper)
   const scope = keeperScope(keeper)
   const activity = keeperActivityDisplay(keeper)

@@ -107,6 +107,9 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
 function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
   const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
+  // scope (skill_primary) used to live in the chat header sub-row; folded here
+  // so the slim single-row header loses no information.
+  const scope = keeper.skill_primary ?? null
   const series = tpsSeries(keeper)
   const peak = Math.max(1, ...series)
   const latest = series.length ? series[series.length - 1] : 0
@@ -116,6 +119,7 @@ function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
       <div class="kw-vitals">
         <div class="kw-vital"><div class="vk">모델</div><div class="vv" title=${model ?? ''}>${model ?? '—'}</div></div>
         <div class="kw-vital"><div class="vk">런타임</div><div class="vv" title=${runtime ?? ''}>${runtime ?? '—'}</div></div>
+        ${scope ? html`<div class="kw-vital" style=${{ gridColumn: '1 / -1' }}><div class="vk">scope</div><div class="vv" title=${scope}>${scope}</div></div>` : null}
       </div>
       ${series.length >= 2
         ? html`<div class="kw-card mt-2">

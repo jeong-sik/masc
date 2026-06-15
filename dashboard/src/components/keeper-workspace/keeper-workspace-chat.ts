@@ -13,26 +13,10 @@ import {
   WorkspaceSigil,
   StatusDot,
   keeperBucket,
-  bucketDotTone,
+  keeperStatusTone,
   keeperPhaseLabel,
   statePillTone,
-  keeperModelLabel,
-  keeperRuntimeLabel,
 } from './keeper-workspace-shared'
-
-/** Latest per-turn throughput from the metrics series (no scalar field). */
-function latestTps(keeper: Keeper): number | null {
-  const series = keeper.metrics_series ?? []
-  for (let i = series.length - 1; i >= 0; i -= 1) {
-    const v = series[i]?.wall_tokens_per_second
-    if (typeof v === 'number' && v > 0) return Math.round(v)
-  }
-  return null
-}
-
-function keeperScope(keeper: Keeper): string | null {
-  return keeper.skill_primary ?? null
-}
 
 function ChatHeader({
   keeper,
@@ -46,31 +30,23 @@ function ChatHeader({
   onClear: () => void
 }): VNode {
   const bucket = keeperBucket(keeper)
-  const tone = bucketDotTone(bucket)
-  const pill = statePillTone(bucket)
-  const model = keeperModelLabel(keeper)
-  const runtime = keeperRuntimeLabel(keeper)
-  const scope = keeperScope(keeper)
-  const tps = latestTps(keeper)
+  const tone = keeperStatusTone(keeper)
+  const pill = statePillTone(tone)
   const live = bucket === 'running'
 
+  // Single-row header: identity + status + actions only. Runtime / model /
+  // throughput / scope live in the context rail (ThroughputSection) — the
+  // canonical home — so the header stays slim and the conversation gets the
+  // vertical space instead of a redundant metadata sub-row.
   return html`
     <div class="kw-chat-head">
-      <${WorkspaceSigil} id=${keeper.name} size=${46} beat=${live} />
+      <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${live} />
       <div class="kw-chat-id">
         <div class="kw-chat-name-row">
           <h2 class="kw-chat-name">${keeper.koreanName ?? keeper.name}</h2>
           <span class=${`kw-state-pill ${pill}`} title=${keeperDisplayStatus(keeper)}>
             <${StatusDot} tone=${tone} pulse=${live} />${keeperPhaseLabel(keeper)}
           </span>
-        </div>
-        <div class="kw-chat-sub">
-          ${scope ? html`<span><span class="k">scope</span><span class="mono">${scope}</span></span>` : null}
-          ${model ? html`<span><span class="k">모델</span><span class="mono">${model}</span></span>` : null}
-          ${runtime ? html`<span><span class="k">런타임</span><span class="mono">${runtime}</span></span>` : null}
-          ${live && tps !== null
-            ? html`<span class="kw-tps-live"><span class="kw-tps-dot"></span><span class="k">tok/s</span><span class="mono">${tps}</span></span>`
-            : null}
         </div>
       </div>
       <div class="kw-chat-actions">

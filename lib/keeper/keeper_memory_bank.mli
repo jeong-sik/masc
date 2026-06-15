@@ -255,12 +255,13 @@ val memory_candidates_from_snapshot :
 (** Lift snapshot fields into candidate triples and run the cap +
     selection pipeline. *)
 
-val memory_candidates_from_snapshot_source :
-  state_snapshot_source:string ->
+val memory_candidates_from_snapshot_gated :
+  is_synthetic:bool ->
   keeper_state_snapshot ->
   candidate_selection_result
-(** Source-aware variant used by post-turn persistence. Runtime-synthesized
-    snapshots are resume aids, not model-authored durable memory. *)
+(** Gated variant used by post-turn persistence. When [is_synthetic] (the
+    snapshot was fabricated from run metadata, not model-authored), no durable
+    memory candidates are produced — synthetic snapshots are resume aids only. *)
 
 (** {1 Bank wire format} *)
 
@@ -339,7 +340,7 @@ val append_memory_notes_from_reply :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   ?snapshot:keeper_state_snapshot ->
-  ?state_snapshot_source:string ->
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
   turn:int -> reply:string -> unit -> int * string list
 (** Persist new memory rows derived from a turn's [reply] (and
     optional [snapshot]); returns [(rows_written, drop_reasons)]. *)

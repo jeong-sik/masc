@@ -183,8 +183,8 @@ let test_synthetic_snapshot_source_drops_memory_candidates () =
       ~response_text:"Continuation checkpoint saved; keeper remains scheduled"
   in
   let selection =
-    Keeper_memory_bank.memory_candidates_from_snapshot_source
-      ~state_snapshot_source:"synthesized"
+    Keeper_memory_bank.memory_candidates_from_snapshot_gated
+      ~is_synthetic:true
       snapshot
   in
   Alcotest.(check int)

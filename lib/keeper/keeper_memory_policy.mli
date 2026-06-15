@@ -70,10 +70,24 @@ val empty_keeper_state_snapshot : keeper_state_snapshot
 (** All-empty snapshot used as a default when no [STATE] block was
     emitted. *)
 
-val state_snapshot_source_is_synthetic : string -> bool
-(** True for runtime-synthesized continuity snapshots. Synthetic snapshots may
-    remain in checkpoints/sidecars for resume, but must not be promoted as
-    model-authored durable memory or active work. *)
+(** Provenance of a turn's continuity snapshot (RFC-0242 §3.2, replacing the prior
+    untyped string discriminant). [Structured_state_tool] is currently unreachable
+    (the reporting tool was removed) and is retired by RFC-0242 §3.1. *)
+type state_snapshot_source =
+  | Structured_state_tool
+  | Structured_state_reply
+  | State_block
+  | Synthesized
+
+val state_snapshot_source_to_string : state_snapshot_source -> string
+(** Wire rendering for the turn sidecar [source] field. Stable strings:
+    [model_structured_state_tool] / [model_structured_state] / [model_state_block]
+    / [synthesized]. *)
+
+val state_snapshot_source_is_synthetic : state_snapshot_source -> bool
+(** True only for [Synthesized]. Synthetic snapshots may remain in
+    checkpoints/sidecars for resume, but must not be promoted as model-authored
+    durable memory or active work. *)
 
 type compaction_source =
   | Pre_dispatch_hygiene

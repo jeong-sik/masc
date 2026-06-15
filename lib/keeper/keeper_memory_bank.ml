@@ -693,18 +693,24 @@ let append_memory_notes_from_reply
     ~(turn : int)
     ~(reply : string)
     () : (int * string list) =
-  let (snapshot, source) =
+  (* [source] is the per-note provenance written to the memory-bank JSONL — a
+     separate vocabulary from the turn-cascade [state_snapshot_source]. The
+     turn-cascade source (when present) is rendered to its wire string and carries
+     its typed synthetic-ness; the internal fallback labels are never synthetic.
+     RFC-0242 §3.2: the candidate gate now receives the [is_synthetic] bit, not a
+     string to re-classify. *)
+  let (snapshot, source, is_synthetic) =
     match snapshot with
     | Some s ->
-      let source =
-        match state_snapshot_source with
-        | Some source -> source
-        | None -> "message_metadata"
-      in
-      (s, source)
+      (match state_snapshot_source with
+       | Some src ->
+         ( s,
+           Keeper_memory_policy.state_snapshot_source_to_string src,
+           Keeper_memory_policy.state_snapshot_source_is_synthetic src )
+       | None -> (s, "message_metadata", false))
     | None ->
       (match parse_state_snapshot_from_reply reply with
-    | Some s -> (s, "reply_state_block")
+    | Some s -> (s, "reply_state_block", false)
     | None ->
         (* Deterministic fallback: use keeper meta fields as memory source.
            This guarantees memory write regardless of LLM output format.
@@ -720,10 +726,10 @@ let append_memory_notes_from_reply
             open_questions = [];
             constraints = [];
           },
-          "meta_goal_fallback" ))
+          "meta_goal_fallback", false ))
   in
   let selection =
-    memory_candidates_from_snapshot_source ~state_snapshot_source:source snapshot
+    memory_candidates_from_snapshot_gated ~is_synthetic snapshot
   in
   let notes = selection.selected in
   if selection.dropped_by_total_cap > 0 || selection.dropped_by_kind <> [] then

@@ -102,7 +102,7 @@ val append_from_reply :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   ?snapshot:state_snapshot ->
-  ?state_snapshot_source:string ->
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
   turn:int ->
   reply:string ->
   unit ->

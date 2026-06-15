@@ -72,7 +72,7 @@ let finalize
   in
   let resume_merge =
     pre_dispatch_compacted
-    || String.equal state_snapshot_source "synthesized"
+    || Keeper_memory_policy.state_snapshot_source_is_synthetic state_snapshot_source
     || is_budget_exhausted result.stop_reason
   in
   let { Keeper_agent_run_sidecar.working_state = _

@@ -166,7 +166,7 @@ let save_sidecars
         ("generation", `Int generation);
         ("keeper_turn_id", `Int keeper_turn_id);
         ("oas_turn_count", `Int oas_turn_count);
-        ("source", `String state_snapshot_source);
+        ("source", `String (Keeper_memory_policy.state_snapshot_source_to_string state_snapshot_source));
         ("active_open_loop_count", `Int active_open_loop_count);
         ("working_state", Keeper_working_state.to_json working_state);
       ]
@@ -251,7 +251,7 @@ let save_sidecars
             `List
               (List.map (fun id -> `String id) working_state.prompt_digest_ids)
           );
-          ("source", `String state_snapshot_source);
+          ("source", `String (Keeper_memory_policy.state_snapshot_source_to_string state_snapshot_source));
         ])
     Keeper_runtime_manifest.State_snapshot_sidecar_saved;
   append_manifest ~site:"working_state_sidecar"
@@ -272,7 +272,7 @@ let save_sidecars
             `List
               (List.map (fun id -> `String id) working_state.prompt_digest_ids)
           );
-          ("source", `String state_snapshot_source);
+          ("source", `String (Keeper_memory_policy.state_snapshot_source_to_string state_snapshot_source));
         ])
     Keeper_runtime_manifest.Working_state_sidecar_saved;
   { working_state; state_snapshot_saved = state_snapshot_saved

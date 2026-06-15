@@ -184,6 +184,9 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          ; confidence
          ; category
          ; source = claim_source ~trace_id turn tool_call_id
+         (* Tier-1 (per-keeper) facts carry no distinct-keeper corroboration set;
+            the consolidator populates observed_by only on promotion (RFC-0244). *)
+         ; observed_by = []
          ; access_count = 0
          ; first_seen = now
          ; last_accessed = now

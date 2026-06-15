@@ -4,6 +4,11 @@ open Keeper_memory_os_types
 
 let default_max_facts = 8
 let default_max_episodes = 2
+
+(* RFC-0244 Tier 2: how many shared-semantic facts to append after the keeper's
+   own (private-precedence) facts. Kept small so the communal tier informs
+   without crowding out keeper-local memory. *)
+let default_max_shared_facts = 4
 let fact_tail_scan = 64
 let max_fact_text_len = 260
 let max_episode_text_len = 360
@@ -102,6 +107,25 @@ let render_fact ~now ?(seed_tokens = []) fact =
     (sanitize_text ~max_len:max_fact_text_len fact.claim)
 ;;
 
+(* RFC-0244 Tier 2: a shared fact is rendered with its provenance (the distinct
+   keepers that corroborated it) so it is never silently merged into the keeper's
+   own knowledge — the reader can see it is cross-keeper consensus. *)
+let render_shared_fact ~now ?(seed_tokens = []) fact =
+  let score = Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact in
+  let provenance =
+    match fact.observed_by with
+    | [] -> "shared"
+    | keepers -> "shared via " ^ String.concat "," (List.map sanitize_atom keepers)
+  in
+  Printf.sprintf
+    "- [%s category=%s confidence=%.2f score=%.3f] %s"
+    provenance
+    (sanitize_atom fact.category)
+    fact.confidence
+    score
+    (sanitize_text ~max_len:max_fact_text_len fact.claim)
+;;
+
 let render_episode episode =
   Printf.sprintf
     "- [%s g%04d] %s"
@@ -183,11 +207,30 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
     |> scored_facts ~now ~seed_tokens
     |> take max_facts
   in
+  (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own, with
+     private precedence — a claim already surfaced from this keeper's store is not
+     repeated from the shared store. The shared store is read under the reserved
+     [shared_store_id]; reading it for the shared store itself is a no-op guard. *)
+  let private_keys = List.map (fun f -> normalize_claim f.claim) facts in
+  let shared_facts =
+    if String.equal keeper_id shared_store_id
+    then []
+    else
+      Keeper_memory_os_io.read_facts_tail
+        ~keeper_id:shared_store_id
+        ~n:Keeper_memory_os_io.fact_recall_window
+      |> scored_facts ~now ~seed_tokens
+      |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
+      |> take default_max_shared_facts
+  in
   let episodes = Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n:max_episodes in
-  match facts, episodes with
-  | [], [] -> ""
+  match facts, shared_facts, episodes with
+  | [], [], [] -> ""
   | _ ->
-    let fact_lines = List.map (render_fact ~now ~seed_tokens) facts in
+    let fact_lines =
+      List.map (render_fact ~now ~seed_tokens) facts
+      @ List.map (render_shared_fact ~now ~seed_tokens) shared_facts
+    in
     let episode_lines = List.map render_episode episodes in
     (match render_recall_context ~fact_lines ~episode_lines with
      | Ok context -> context

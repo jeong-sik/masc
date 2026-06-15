@@ -93,9 +93,10 @@ let render_fact ~now fact =
   let score = Keeper_memory_os_policy.score_fact ~now fact in
   let source = fact.source in
   Printf.sprintf
-    "- [category=%s confidence=%.2f score=%.3f turn=%d] %s"
+    "- [category=%s confidence=%.2f stale=%.2f score=%.3f turn=%d] %s"
     (sanitize_atom fact.category)
     fact.confidence
+    fact.stale_factor
     score
     source.turn
     (sanitize_text ~max_len:max_fact_text_len fact.claim)

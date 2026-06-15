@@ -4,7 +4,7 @@
     Episodes group related facts with a short summary and metadata for
     downstream retention scoring. *)
 
-let schema_version = "rfc0231-v1"
+let schema_version = "rfc0231-v2"
 
 type provenance_event =
   { trace_id : string
@@ -21,6 +21,9 @@ type fact =
   ; first_seen : float
   ; last_accessed : float
   ; valid_until : float option
+  ; stale_factor : float
+  ; last_verified_at : float option
+  ; expected_lifetime_cycles : int option
   ; schema_version : string
   }
 
@@ -107,21 +110,37 @@ let provenance_event_of_json (json : Yojson.Safe.t) =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
+let clamp01 value =
+  Float.max 0.0 (Float.min 1.0 value)
+;;
+
+let optional_float_field key = function
+  | Some value -> [ key, `Float value ]
+  | None -> []
+;;
+
+let optional_int_field key = function
+  | Some value -> [ key, `Int value ]
+  | None -> []
+;;
+
 let fact_to_json f =
-  `Assoc
-    ([ "claim", `String f.claim
-     ; "confidence", `Float f.confidence
-     ; "category", `String f.category
-     ; "source", provenance_event_to_json f.source
-     ; "access_count", `Int f.access_count
-     ; "first_seen", `Float f.first_seen
-     ; "last_accessed", `Float f.last_accessed
-     ; "schema_version", `String f.schema_version
-     ]
-     @
-     match f.valid_until with
-     | Some ts -> [ "valid_until", `Float ts ]
-     | None -> [])
+  let fields =
+    [ "claim", `String f.claim
+    ; "confidence", `Float f.confidence
+    ; "category", `String f.category
+    ; "source", provenance_event_to_json f.source
+    ; "access_count", `Int f.access_count
+    ; "first_seen", `Float f.first_seen
+    ; "last_accessed", `Float f.last_accessed
+    ; "stale_factor", `Float f.stale_factor
+    ; "schema_version", `String f.schema_version
+    ]
+    @ optional_float_field "valid_until" f.valid_until
+    @ optional_float_field "last_verified_at" f.last_verified_at
+    @ optional_int_field "expected_lifetime_cycles" f.expected_lifetime_cycles
+  in
+  `Assoc fields
 ;;
 
 let fact_of_json (json : Yojson.Safe.t) =
@@ -143,15 +162,32 @@ let fact_of_json (json : Yojson.Safe.t) =
           (* DET-OK: absent last_accessed inherits first_seen. *)
           let last_accessed = Option.value (json_float_field "last_accessed" fields) ~default:first_seen in
           let valid_until = json_float_field "valid_until" fields in
+          let stale_factor =
+            match json_float_field "stale_factor" fields with
+            | Some value -> clamp01 value
+            | None ->
+              (* DET-OK: legacy v1 facts had no stale marker, so they start
+                 as not-explicitly-stale and are still truth-aged by policy. *)
+              0.0
+          in
+          let last_verified_at = json_float_field "last_verified_at" fields in
+          let expected_lifetime_cycles =
+            match json_int_field "expected_lifetime_cycles" fields with
+            | Some cycles when cycles > 0 -> Some cycles
+            | Some _ | None -> None
+          in
           Some
             { claim
-            ; confidence = Float.max 0.0 (Float.min 1.0 confidence)
+            ; confidence = clamp01 confidence
             ; category
             ; source
             ; access_count
             ; first_seen
             ; last_accessed
             ; valid_until
+            ; stale_factor
+            ; last_verified_at
+            ; expected_lifetime_cycles
             ; schema_version =
                 (* DET-OK: default to current schema for forward compatibility. *)
                 Option.value (json_string_field "schema_version" fields) ~default:schema_version

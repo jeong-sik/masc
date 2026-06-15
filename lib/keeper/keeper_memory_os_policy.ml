@@ -9,6 +9,14 @@ open Keeper_memory_os_types
 
 let default_lambda = 1.0 /. (86400.0 *. 7.0) (* half-life ~7 days *)
 let default_alpha = 0.5
+let default_truth_lambda = 1.0 /. (86400.0 *. 30.0)
+let default_cycle_seconds = 3600.0
+let default_max_access_factor = 4.0
+let default_discard_score_threshold = 0.02
+
+type retention_verdict =
+  | KeepVerbatim
+  | Discard
 
 (** Forgetting curve: recency decays exponentially with a half-life
     controlled by [lambda]. *)
@@ -20,11 +28,45 @@ let recency_factor ~lambda ~now last_accessed =
 (** Access boost: each recall incrementally increases the weight of a
     fact, governed by [alpha] (sub-linear by default). *)
 let access_factor ~alpha access_count =
-  (1.0 +. float access_count) ** alpha
+  Float.min default_max_access_factor ((1.0 +. float access_count) ** alpha)
+;;
+
+let clamp01 value =
+  Float.max 0.0 (Float.min 1.0 value)
+;;
+
+let stale_penalty fact =
+  1.0 -. clamp01 fact.stale_factor
+;;
+
+let truth_anchor fact =
+  match fact.last_verified_at with
+  | Some ts -> ts
+  | None -> fact.first_seen
+;;
+
+let truth_lambda_for_fact ~lambda fact =
+  match fact.expected_lifetime_cycles with
+  | Some cycles when cycles > 0 ->
+    1.0 /. (default_cycle_seconds *. float cycles)
+  | Some _ | None -> lambda
+;;
+
+let truth_recency_factor ?(lambda = default_truth_lambda) ~now fact =
+  let lambda = truth_lambda_for_fact ~lambda fact in
+  recency_factor ~lambda ~now (truth_anchor fact)
 ;;
 
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
-  fact.confidence *. recency_factor ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count
+  fact.confidence
+  *. recency_factor ~lambda ~now fact.last_accessed
+  *. truth_recency_factor ~now fact
+  *. stale_penalty fact
+  *. access_factor ~alpha fact.access_count
+;;
+
+let decide_retention ?(discard_threshold = default_discard_score_threshold) score =
+  if score <= discard_threshold then Discard else KeepVerbatim
 ;;
 
 let score_tool_result

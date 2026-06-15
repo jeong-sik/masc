@@ -199,6 +199,100 @@ let test_recovers_from_last_good () =
   check int "recovered schedule" 1 (List.length recovered.schedules)
 ;;
 
+let recovery_path config = schedules_path config ^ ".last-good"
+
+(* Corrupt both the primary and the .last-good recovery file. After [insert_ok],
+   [write_state] has produced a parseable .last-good, so we overwrite both files
+   with non-JSON to simulate out-of-band corruption (e.g. partial write / schema
+   evolution). *)
+let corrupt_both config =
+  Workspace.write_text config (schedules_path config) "{not json";
+  Workspace.write_text config (recovery_path config) "}also not json"
+;;
+
+let test_load_fresh_when_file_absent () =
+  with_workspace
+  @@ fun config ->
+  (* A pristine workspace has no schedules.json yet. *)
+  (match Schedule_store.load config with
+   | Fresh -> ()
+   | Loaded _ -> fail "absent ledger reported as Loaded"
+   | Corrupt _ -> fail "absent ledger reported as Corrupt");
+  let state = read_state config in
+  check int "fresh store has no schedules" 0 (List.length state.schedules);
+  check int "fresh store has no grants" 0 (List.length state.grants)
+;;
+
+let test_load_corrupt_when_both_unparseable () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  corrupt_both config;
+  match Schedule_store.load config with
+  | Corrupt { primary_err; recovery_err } ->
+    check bool "primary error is non-empty" true (String.length primary_err > 0);
+    check bool "recovery error reported" true (Option.is_some recovery_err)
+  | Fresh -> fail "corrupt-but-present ledger reported as Fresh"
+  | Loaded _ -> fail "corrupt ledger reported as Loaded"
+;;
+
+let test_read_state_raises_on_corrupt () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  corrupt_both config;
+  match read_state config with
+  | _ -> fail "read_state silently returned a state for a corrupt ledger"
+  | exception Schedule_store.Corrupt_ledger_exn _ -> ()
+;;
+
+(* The core silent-failure-to-data-loss regression: a mutation on a corrupt
+   ledger must be refused (typed [Corrupt_ledger]) and must NOT overwrite the
+   present-but-corrupt files with an empty default. *)
+let test_mutation_refused_and_preserves_corrupt_ledger () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  corrupt_both config;
+  let primary_before = Workspace.read_text config (schedules_path config) in
+  let recovery_before = Workspace.read_text config (recovery_path config) in
+  (match insert_request config (make_request ~schedule_id:"sched-2" ~risk_class:Read_only ()) with
+   | Ok _ -> fail "insert on corrupt ledger unexpectedly succeeded"
+   | Error (Corrupt_ledger _) -> ()
+   | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err));
+  let primary_after = Workspace.read_text config (schedules_path config) in
+  let recovery_after = Workspace.read_text config (recovery_path config) in
+  check string "corrupt primary preserved" primary_before primary_after;
+  check string "corrupt recovery preserved" recovery_before recovery_after
+;;
+
+let test_cancel_refused_on_corrupt_ledger () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"cancel-corrupt" ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  corrupt_both config;
+  match cancel_request config ~schedule_id:"cancel-corrupt" with
+  | Ok _ -> fail "cancel on corrupt ledger unexpectedly succeeded"
+  | Error (Corrupt_ledger _) -> ()
+  | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err)
+;;
+
+(* [.last-good] must hold a parseable snapshot, never a mirror of corruption. *)
+let test_last_good_is_parseable_after_good_write () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  let recovery_json = Workspace.read_json config (recovery_path config) in
+  match Schedule_store.state_of_yojson recovery_json with
+  | Ok state -> check int "last-good holds the schedule" 1 (List.length state.schedules)
+  | Error msg -> fail (".last-good is not parseable: " ^ msg)
+;;
+
 let () =
   run "Schedule_store"
     [
@@ -210,6 +304,21 @@ let () =
             test_duplicate_insert_rejected_without_bump;
           test_case "corrupt primary recovers from last-good" `Quick
             test_recovers_from_last_good;
+        ] );
+      ( "corruption",
+        [
+          test_case "absent ledger loads Fresh" `Quick
+            test_load_fresh_when_file_absent;
+          test_case "both unparseable loads Corrupt" `Quick
+            test_load_corrupt_when_both_unparseable;
+          test_case "read_state raises on corrupt ledger" `Quick
+            test_read_state_raises_on_corrupt;
+          test_case "mutation refused and corrupt ledger preserved" `Quick
+            test_mutation_refused_and_preserves_corrupt_ledger;
+          test_case "cancel refused on corrupt ledger" `Quick
+            test_cancel_refused_on_corrupt_ledger;
+          test_case "last-good is parseable after good write" `Quick
+            test_last_good_is_parseable_after_good_write;
         ] );
       ( "approval",
         [

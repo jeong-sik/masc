@@ -19,10 +19,19 @@ type provenance_event =
   ; tool_call_id : string option
   }
 
-(** Librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241). The free-text
-    label the LLM emits is parsed once at the producer boundary via
+(** Librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241; RFC-0246 §2.5).
+    The free-text label the LLM emits is parsed once at the producer boundary via
     [category_of_string]; [Unknown] absorbs any label outside the taxonomy so a
-    drifted/typo'd label can never be silently promoted by the consolidator. *)
+    drifted/typo'd label can never be silently promoted by the consolidator.
+
+    [Ephemeral] is the load-bearing RFC-0246 arm: lifecycle/coordination
+    boilerplate that is true but not durable cross-keeper knowledge ("checkpoint
+    saved", "no tasks", "remains scheduled"). The #21244 live dry-run found these
+    are the only >=2-keeper-corroborated claims today; a structurally
+    non-promotable category is the type-level backstop that lets the consolidation
+    fiber be turned back on without injecting recall noise — robust even when the
+    prompt's durability gate is imperfect. [Unknown] is distinct: a rising
+    [Unknown] rate signals the librarian prompt needs a new arm. *)
 type category =
   | Code_change
   | Fact
@@ -30,6 +39,7 @@ type category =
   | Blocker
   | Goal
   | Constraint
+  | Ephemeral
   | Unknown of string
 
 (** Canonical lowercase token for a category (round-trips with
@@ -40,6 +50,12 @@ val category_to_string : category -> string
     anything outside the taxonomy becomes [Unknown] carrying the raw label. *)
 val category_of_string : string -> category
 
+(** Whether a category may be promoted into the shared semantic tier. Exhaustive
+    over {!category}; only [Fact] and [Constraint] promote (preserving the prior
+    ["fact";"constraint"] whitelist), so a new or typo'd category cannot silently
+    join the promotable set — a future durable kind must be classified here at
+    compile time. *)
+val is_promotable : category -> bool
 (** A single semantic claim extracted from conversation history. *)
 type fact =
   { claim : string

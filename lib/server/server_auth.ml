@@ -651,9 +651,20 @@ let respond_public_read_json_value ?(status = `OK) request reqd value =
   Http_server_eio.Response.json_value ~status
     ~request ~extra_headers:(public_read_cors_headers request) value reqd
 
+(* The 401/403 body carries the typed [auth_error_code] alongside the
+   human-readable [error] string. Clients (dashboard keeper stream retry
+   gate) dispatch on the typed code instead of substring-matching the
+   message. The code is the same SSOT mapping the dashboard shell
+   summary uses ([Masc_domain.dashboard_auth_error_code]). The legacy
+   [error] field is retained for human display and backward compat. *)
 let auth_error_json err =
-  Yojson.Safe.to_string
-    (`Assoc [ ("error", `String (Masc_domain.masc_error_to_string err)) ])
+  let base = [ ("error", `String (Masc_domain.masc_error_to_string err)) ] in
+  let fields =
+    match Masc_domain.dashboard_auth_error_code err with
+    | Some code -> base @ [ ("auth_error_code", `String code) ]
+    | None -> base
+  in
+  Yojson.Safe.to_string (`Assoc fields)
 
 let respond_auth_error request reqd err =
   let status = http_status_of_auth_error err in

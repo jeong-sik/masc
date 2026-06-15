@@ -35,6 +35,7 @@ import './styles/ops.css'
 import './styles/tools.css'
 import './styles/provider-matrix.css'
 import './styles/paper-theme.css'
+import './styles/keeper-workspace.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

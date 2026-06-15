@@ -34,14 +34,24 @@ type record_outcome =
   | Loop_detected of { streak : int; threshold : int }
   | Loop_reset of { previous_streak : int; was_latched : bool }
 
-(** Update streak for [keeper_name] based on [speech_act] from the
-    latest turn. [speech_act] is the string form already emitted by
-    {!Keeper_social_model_types.speech_act_to_string} —
-    we match on the literal ["stay_silent"] rather than the variant
-    so this module does not couple to the social-model type. *)
-val record_turn : keeper_name:string -> speech_act:string -> record_outcome
+(** [turn_made_progress ~strong_evidence ~surface_requires_evidence] is the
+    no-progress predicate (RFC-0239 §3 R3). A turn makes progress when it
+    produced durable evidence ([strong_evidence]), or when its delivery surface
+    does not require evidence ([surface_requires_evidence = false], e.g. a
+    user-facing reply or a task claim). Pure; primitive bools keep this module
+    decoupled from the social-model type. *)
+val turn_made_progress :
+  strong_evidence:bool -> surface_requires_evidence:bool -> bool
 
-(** Current consecutive stay_silent count for [keeper_name]. *)
+(** Update the per-keeper streak from the latest turn. [made_progress] is the
+    caller's verdict (see {!turn_made_progress}): the streak increments on a
+    no-progress turn and resets when a turn makes progress. Generalises the
+    earlier literal ["stay_silent"] match so a keeper that re-posts its
+    "nothing to do" conclusion (a no-progress board post) also accrues the
+    streak. *)
+val record_turn : keeper_name:string -> made_progress:bool -> record_outcome
+
+(** Current consecutive no-progress count for [keeper_name]. *)
 val current_streak : keeper_name:string -> int
 
 (** Reset streak for [keeper_name] — used on keeper restart or

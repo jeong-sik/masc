@@ -117,6 +117,7 @@ type fact =
   ; last_verified_at : float option
   ; expected_lifetime_cycles : int option
   ; schema_version : string
+  ; content_hash : string
   }
 
 type episode =
@@ -254,6 +255,7 @@ let fact_to_json f =
     ; "last_accessed", `Float f.last_accessed
     ; "stale_factor", `Float f.stale_factor
     ; "schema_version", `String f.schema_version
+    ; "content_hash", `String f.content_hash
     ]
     @ optional_float_field "valid_until" f.valid_until
     @ optional_float_field "last_verified_at" f.last_verified_at
@@ -322,6 +324,9 @@ let fact_of_json (json : Yojson.Safe.t) =
             ; schema_version =
                 (* DET-OK: default to current schema for forward compatibility. *)
                 Option.value (json_string_field "schema_version" fields) ~default:schema_version
+            ; content_hash =
+                (* DET-OK: default to empty for backward compat with pre-hash facts. *)
+                Option.value (json_string_field "content_hash" fields) ~default:""
             }
         | None -> None)
      | (Some _, Some _, Some _, None)

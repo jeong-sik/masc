@@ -143,7 +143,32 @@ let append_json path json =
 ;;
 
 let append_fact ~keeper_id fact =
-  append_json (facts_path ~keeper_id) (fact_to_json fact)
+  (* Compute content_hash from content fields if not already set. *)
+  let content_hash =
+    if fact.content_hash <> "" then fact.content_hash
+    else
+      let digest =
+        Digest.string
+          (String.concat "|"
+             [ fact.fact; fact.category; fact.episode_id; fact.trace_id
+             ; string_of_int fact.generation; fact.schema_version ])
+      in
+      Digest.to_hex digest
+  in
+  let fact = { fact with content_hash } in
+  (* Noise filter: skip facts with empty/whitespace-only fact text. *)
+  if String.trim fact.fact = "" then (
+    Log.warn (fun m -> m "append_fact: skipping empty fact for %s" keeper_id);
+    ()
+  )
+  else
+    (* Dedup: read existing facts and skip if content_hash already exists. *)
+    let existing = read_facts_all ~keeper_id in
+    if List.exists (fun f -> f.content_hash = content_hash) existing then
+      Log.info (fun m ->
+        m "append_fact: dedup skipped fact hash=%s for %s" content_hash keeper_id)
+    else
+      append_json (facts_path ~keeper_id) (fact_to_json fact)
 ;;
 
 (* RFC-0247 §2.7 associative layer: per-keeper append-only association events,
@@ -208,8 +233,21 @@ let append_episode_bundle ~keeper_id episode =
 
 let rewrite_facts_atomically ~keeper_id facts =
   let path = facts_path ~keeper_id in
+  (* Dedup by content_hash before writing. Keep last occurrence of each hash. *)
+  let seen = Hashtbl.create 128 in
+  let deduped =
+    List.filter_map
+      (fun f ->
+        let h = if f.content_hash <> "" then f.content_hash
+                else Digest.to_hex (Digest.string (String.concat "|"
+                  [ f.fact; f.category; f.episode_id; f.trace_id
+                  ; string_of_int f.generation; f.schema_version ])) in
+        if Hashtbl.mem seen h then None
+        else (Hashtbl.replace seen h true; Some { f with content_hash = h }))
+      facts
+  in
   let content =
-    facts
+    deduped
     |> List.map (fun fact -> fact_to_json fact |> Yojson.Safe.to_string)
     |> String.concat "\n"
   in

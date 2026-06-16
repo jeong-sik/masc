@@ -229,7 +229,7 @@ let test_compact_agent_json_uses_current_focus () =
     {
       id = None;
       name = "worker-1";
-      agent_type = "agent_code";
+      agent_type = "codex";
       capabilities = [ "ops"; "review"; "debug" ];
       current_task = None;
       status = Masc_domain.Active;
@@ -319,7 +319,7 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
     {
       id = None;
       name = "agent-gap";
-      agent_type = "agent_code";
+      agent_type = "codex";
       capabilities = [];
       current_task = None;
       status = Masc_domain.Active;
@@ -339,7 +339,7 @@ let test_collect_metadata_gaps_ignores_inactive_agents () =
     {
       id = None;
       name = "agent-idle";
-      agent_type = "agent_code";
+      agent_type = "codex";
       capabilities = [];
       current_task = None;
       status = Masc_domain.Inactive;

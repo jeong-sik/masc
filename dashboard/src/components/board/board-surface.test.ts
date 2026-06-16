@@ -190,6 +190,18 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText(/아직 게시글이 없습니다/)).toBeInTheDocument()
   })
 
+  it('wraps the board surface in the v2 workspace surface class', () => {
+    const { container } = render(h(BoardSurface, null))
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+  })
+
+  it('marks the sort bar and new-post form as v2 workspace panels', () => {
+    const { container } = render(h(BoardSurface, null))
+    const panels = container.querySelectorAll('.v2-workspace-panel')
+    expect(panels.length).toBeGreaterThanOrEqual(2)
+    expect(container.querySelector('.v2-workspace-action')).not.toBeNull()
+  })
+
   it('renders loading state when loading', () => {
     boardLoading.value = true
     render(h(BoardSurface, null))

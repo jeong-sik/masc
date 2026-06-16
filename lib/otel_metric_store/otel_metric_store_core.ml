@@ -28,10 +28,9 @@ let metrics_mutex = Stdlib.Mutex.create ()
 let last_deadlock_backtrace : string option Atomic.t = Atomic.make None
 
 let with_lock f =
-  let bt0 = Printexc.get_callstack 64 in
   (try Stdlib.Mutex.lock metrics_mutex with
    | Sys_error msg as exn ->
-     let trace = Printexc.raw_backtrace_to_string bt0 in
+     let trace = Printexc.raw_backtrace_to_string (Printexc.get_callstack 64) in
      let dump = Printf.sprintf "Otel_metric_store.with_lock: %s\nCaller stack:\n%s" msg trace in
      Atomic.set last_deadlock_backtrace (Some dump);
      Log.Metrics.error "Otel_metric_store mutex deadlock: %s" dump;

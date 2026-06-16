@@ -482,3 +482,11 @@
   --space-7: 48px;
   --space-8: 64px;
 }
+
+/* Readability lift for the v2 dark-fantasy muted tone: the mapped
+   generated value (#5a6a88 on navy surfaces) is below WCAG AA for small
+   labels. Raise it while keeping it clearly subordinate to
+   --color-fg-secondary. Paper theme is left untouched. */
+html:not([data-theme="paper"]) {
+  --color-fg-muted: #7a8aa8;
+}

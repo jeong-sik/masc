@@ -195,7 +195,7 @@ export function ComposerV2({ workspaceId }: { workspaceId?: string | null }) {
   }
 
   return html`
-    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3" aria-label="Composer v2">
+    <section class="v2-workspace-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3" aria-label="Composer v2">
       <div class="flex flex-wrap items-center gap-2">
         <div class="inline-flex rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-0.5" role="group" aria-label="Composer v2 mode">
           ${MODE_OPTIONS.map(option => {
@@ -242,7 +242,7 @@ export function ComposerV2({ workspaceId }: { workspaceId?: string | null }) {
                 ? html`
                     <div
                       id=${MENTION_LISTBOX_ID}
-                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+                      class="v2-workspace-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
                       role="listbox"
                       aria-label=${`Mention autocomplete (${mentionMatches.length} matches)`}
                     >
@@ -251,7 +251,7 @@ export function ComposerV2({ workspaceId }: { workspaceId?: string | null }) {
                             <button
                               id=${`${MENTION_LISTBOX_ID}-option-${index}`}
                               type="button"
-                              class="flex w-full items-center gap-2 border-0 border-l-2 border-solid ${candidate.selected || index === activeMentionIndex ? 'border-l-[var(--color-accent-fg)] bg-[var(--color-bg-elevated)]' : 'border-l-transparent bg-transparent'} px-2 py-1.5 text-left text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--button-ghost-bg-hover)]"
+                              class="v2-workspace-action flex w-full items-center gap-2 border-0 border-l-2 border-solid ${candidate.selected || index === activeMentionIndex ? 'border-l-[var(--color-accent-fg)] bg-[var(--color-bg-elevated)]' : 'border-l-transparent bg-transparent'} px-2 py-1.5 text-left text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--button-ghost-bg-hover)]"
                               role="option"
                               aria-selected=${candidate.selected || index === activeMentionIndex ? 'true' : 'false'}
                               onClick=${() => { chooseMentionTarget(candidate.name) }}

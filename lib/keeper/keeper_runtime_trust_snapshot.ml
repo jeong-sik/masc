@@ -3,6 +3,60 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_runtime_trust_timeline
 
+(** Short-lived cache for [snapshot_json]. The result is expensive to compute
+    (tail-reads decision log, tool-call log, receipts, approval audit, and
+    pending approvals) and is requested repeatedly by dashboard renders. The
+    cache key includes runtime generation and last-turn timestamp so normal
+    keeper progress invalidates it automatically. *)
+module Snapshot_cache = struct
+  type key =
+    { base_path : string
+    ; keeper_name : string
+    ; generation : int
+    ; last_turn_ts : float
+    }
+
+  type entry =
+    { value : Yojson.Safe.t
+    ; expires_at : float
+    }
+
+  let tbl : (key, entry) Hashtbl.t = Hashtbl.create 64
+  let mu = Stdlib.Mutex.create ()
+  let ttl_sec = 0.5
+  let max_size = 256
+
+  let clear_expired ~now =
+    let expired =
+      Hashtbl.fold (fun k e acc -> if e.expires_at <= now then k :: acc else acc) tbl []
+    in
+    List.iter (Hashtbl.remove tbl) expired
+
+  let clear () =
+    Stdlib.Mutex.protect mu (fun () -> Hashtbl.clear tbl)
+
+  let get ~now key =
+    Stdlib.Mutex.protect mu (fun () ->
+        match Hashtbl.find_opt tbl key with
+        | Some entry when entry.expires_at > now -> Some entry.value
+        | _ -> None)
+
+  let set ~now key value =
+    Stdlib.Mutex.protect mu (fun () ->
+        clear_expired ~now;
+        if Hashtbl.length tbl >= max_size
+        then (
+          (* Cap memory: drop expired entries, and if still full clear the
+             whole table rather than keeping stale entries. *)
+          clear_expired ~now;
+          if Hashtbl.length tbl >= max_size then Hashtbl.clear tbl);
+        Hashtbl.replace tbl key { value; expires_at = now +. ttl_sec })
+end
+
+module For_testing = struct
+  let clear_snapshot_cache = Snapshot_cache.clear
+end
+
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
@@ -427,11 +481,7 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
   let resolution_mode =
     Option.bind latest_tool_call (json_string_opt_member "approval_mode")
   in
-  let approval_profile =
-    Option.bind latest_receipt (fun receipt ->
-        receipt |> json_member "approval"
-        |> json_string_opt_member "profile")
-  in
+  ignore latest_receipt;
   let state =
     if pending_approval_count > 0 then "pending"
     else
@@ -448,7 +498,6 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
     [
       ("state", `String state);
       ("pending_count", `Int pending_approval_count);
-      ("profile", Json_util.string_opt_to_json approval_profile);
       ("resolution_mode", Json_util.string_opt_to_json resolution_mode);
       ("latest_event_kind", Json_util.string_opt_to_json latest_event_kind);
       ( "latest_event_at",
@@ -761,7 +810,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   |> take 12
   |> fun items -> `List items
 
-let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+let snapshot_json_inner ~(config : Workspace.config) ~(meta : keeper_meta) =
   let registry_entry =
     Keeper_registry.get ~base_path:config.base_path meta.name
   in
@@ -896,3 +945,19 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
             Json_util.string_opt_to_json entry.last_event_bus_correlation
         | None -> `Null );
     ]
+
+let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let cache_key =
+    { Snapshot_cache.base_path = config.base_path
+    ; keeper_name = meta.name
+    ; generation = meta.runtime.generation
+    ; last_turn_ts = meta.runtime.usage.last_turn_ts
+    }
+  in
+  let now = Time_compat.now () in
+  match Snapshot_cache.get ~now cache_key with
+  | Some value -> value
+  | None ->
+      let value = snapshot_json_inner ~config ~meta in
+      Snapshot_cache.set ~now cache_key value;
+      value

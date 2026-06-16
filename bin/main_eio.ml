@@ -983,10 +983,28 @@ let init_cmd =
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
 
+let setup_gc () =
+  (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
+     main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
+     parsing and metric encoding, with many domains parked waiting for STW.
+     Bumping the per-domain minor heap reduces the frequency of those
+     parallel pauses.  We only override when the operator has not set
+     OCAMLRUNPARAM so existing tuning instructions remain authoritative. *)
+  match Sys.getenv_opt "OCAMLRUNPARAM" with
+  | Some _ -> ()
+  | None ->
+      let gc = Gc.get () in
+      let desired_minor_words = 4 * 1024 * 1024 in
+      (* 4M words ~= 32 MiB on 64-bit *)
+      if gc.minor_heap_size < desired_minor_words then
+        Gc.set { gc with minor_heap_size = desired_minor_words }
+
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
     info [ init_cmd; login_cmd ]
 
-let () = exit (Cmd.eval' cmd)
+let () =
+  setup_gc ();
+  exit (Cmd.eval' cmd)

@@ -70,7 +70,7 @@ export interface RailPill {
 const TONE: Record<RailState, { bg: string; border: string; text: string; dot: string; icon: string; gradient: string }> = {
   ok: {
     bg: 'bg-[var(--ok-10)]',
-    border: 'border-[var(--ok-20)]',
+    border: 'border-[var(--ok-border)]',
     text: 'text-[var(--color-status-ok)]',
     dot: 'bg-[var(--ok-10)]',
     icon: '✓',
@@ -89,7 +89,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
   },
   bad: {
     bg: 'bg-[var(--bad-10)]',
-    border: 'border-[var(--bad-20)]',
+    border: 'border-[var(--err-border)]',
     text: 'text-[var(--bad-light)]',
     dot: 'bg-[var(--bad-10)]',
     icon: '⊘',
@@ -139,7 +139,7 @@ function Pill({ pill }: { pill: RailPill }) {
   return html`
     <button
       type="button"
-      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded-[var(--r-1)] border px-1.5 py-2 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-1)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
+      class=${`group flex min-w-0 flex-1 cursor-pointer flex-col items-center gap-1 overflow-hidden rounded-[var(--r-1)] border px-2 py-2.5 text-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent-fg)] ${tone.gradient} ${tone.border} hover:brightness-125 ${inflight ? 'animate-pulse' : ''}`}
       title=${pill.hint ?? pill.detail}
       aria-label=${railPillAriaLabel(pill)}
       aria-busy=${inflight ? 'true' : 'false'}
@@ -152,13 +152,13 @@ function Pill({ pill }: { pill: RailPill }) {
     >
       <span
         aria-hidden="true"
-        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-0)] text-xs font-bold ${inflight ? 'bg-[var(--color-bg-hover)]' : tone.dot} text-[var(--color-bg-page)]`}
+        class=${`flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--r-0)] text-sm font-bold ${inflight ? 'bg-[var(--color-bg-hover)]' : tone.dot} text-[var(--color-bg-page)]`}
       >
         ${inflight ? '…' : tone.icon}
       </span>
       <span
         aria-hidden="true"
-        class=${`block text-3xs uppercase tracking-4 ${tone.text}`}
+        class=${`block text-2xs font-semibold uppercase tracking-4 ${tone.text}`}
       >${pill.label}</span>
     </button>
   `
@@ -173,7 +173,7 @@ export function ConnectorReadinessRail({ pills }: { pills: RailPill[] }) {
   // strip, and labels truncate symmetrically when the tile is narrow instead
   // of each pill truncating at a different point.
   return html`
-    <div class="mt-2 grid grid-cols-4 items-stretch gap-2" data-rail-layout="grid-4">
+    <div class="mt-2 grid grid-cols-4 items-stretch gap-2 v2-connector-readiness-rail" data-rail-layout="grid-4">
       ${pills.map(pill => html`<${Pill} pill=${pill} />`)}
     </div>
   `

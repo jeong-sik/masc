@@ -2,7 +2,42 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { KeeperConversationEntry } from '../../types'
+import type { ToolCallEntry } from '../../api/dashboard'
 import { ChatComposer, ChatTranscript } from './primitives'
+import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
+
+const flushUi = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
+
+function toolEntry(
+  overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id'>,
+): KeeperConversationEntry {
+  return {
+    role: 'tool',
+    source: 'tool_result',
+    label: 'keeper_context_status',
+    text: '{}',
+    rawText: '{}',
+    timestamp: '2026-03-24T00:00:00.000Z',
+    delivery: 'history',
+    streamState: null,
+    details: null,
+    error: null,
+    ...overrides,
+  }
+}
+
+function toolCallOutput(overrides: Partial<ToolCallEntry> & Pick<ToolCallEntry, 'tool_use_id'>): ToolCallEntry {
+  return {
+    ts: 0,
+    keeper: 'sangsu',
+    tool: 'keeper_context_status',
+    input: {},
+    output: 'context window ok',
+    success: true,
+    duration_ms: 12,
+    ...overrides,
+  }
+}
 
 function entry(
   overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id' | 'text'>,
@@ -35,6 +70,115 @@ describe('ChatTranscript', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+    resetToolCallOutputs()
+  })
+
+  it('surfaces tool output joined by tool_use_id in the collapsed preview', () => {
+    recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_x', output: 'context window 42%' })])
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-toolu_x' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble).not.toBeNull()
+    // No-argument tool (`{}`): the collapsed glance shows the result, not args.
+    expect(bubble?.textContent).toContain('context window 42%')
+    // Success status marker is rendered in the header.
+    expect(bubble?.textContent).toContain('✓')
+  })
+
+  it('marks a failed tool call with the error status glyph', () => {
+    recordToolCallOutputs([
+      toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),
+    ])
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-toolu_y' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('✗')
+  })
+
+  it('falls back to arguments and shows no status until output arrives', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-toolu_pending', text: '{"path":"a.ml"}' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('a.ml')
+    expect(bubble?.textContent).not.toContain('✓')
+    expect(bubble?.textContent).not.toContain('✗')
+  })
+
+  it('renders args and output in labelled sections when expanded', async () => {
+    recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_z', output: 'EXPANDED OUTPUT' })])
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-toolu_z', text: '{"k":"v"}' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const toggle = container.querySelector('[data-chat-variant="tool-call"] button') as HTMLButtonElement
+    toggle.click()
+    await flushUi()
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('arguments')
+    expect(bubble?.textContent).toContain('output')
+    expect(bubble?.textContent).toContain('EXPANDED OUTPUT')
+  })
+
+  it('shows a waiting hint for a no-arg tool whose output has not landed, when expanded', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-toolu_wait' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const toggle = container.querySelector('[data-chat-variant="tool-call"] button') as HTMLButtonElement
+    toggle.click()
+    await flushUi()
+
+    const bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('출력 대기 중')
+  })
+
+  it('re-renders to show output when it arrives after the bubble mounted', async () => {
+    // Real-world path: the bubble renders before the tool-call hydration
+    // lands (output is always late). Reading the store signal during render
+    // subscribes the bubble, so a later record() must update it.
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-toolu_late' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    let bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).not.toContain('late output here')
+
+    recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_late', output: 'late output here' })])
+    await flushUi()
+
+    bubble = container.querySelector('[data-chat-variant="tool-call"]')
+    expect(bubble?.textContent).toContain('late output here')
+    expect(bubble?.textContent).toContain('✓')
   })
 
   it('keeps saved delivery badges in the default transcript', () => {
@@ -47,6 +191,48 @@ describe('ChatTranscript', () => {
     )
 
     expect(container.querySelector('[data-chat-delivery="saved"]')).not.toBeNull()
+  })
+
+  it('renders no-argument tool call (args "{}") as "입력 없음", not a bare {}', () => {
+    // Regression: keeper_tools_list streams args `{}` (no params). The old
+    // ToolCallBubble rendered `T keeper_tools_list ▸ {}`, which read as an
+    // empty RESULT. The fix labels args as "입력" and renders `{}` as
+    // "입력 없음" so operators do not mistake a no-arg call for a no-result call.
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'tool-1',
+          role: 'tool',
+          source: 'tool_result',
+          label: 'keeper_tools_list',
+          text: '{}',
+        })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    expect(container.textContent).toContain('keeper_tools_list')
+    expect(container.textContent).toContain('입력')
+    expect(container.textContent).toContain('입력 없음')
+  })
+
+  it('labels tool-call arguments as "입력" and shows the arg JSON', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'tool-2',
+          role: 'tool',
+          source: 'tool_result',
+          label: 'keeper_board_post',
+          text: '{"title":"hi"}',
+        })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    expect(container.textContent).toContain('입력')
+    expect(container.textContent).toContain('keeper_board_post')
+    expect(container.textContent).toContain('"title"')
   })
 
   it('hides saved badges in messenger mode but keeps live state badges', () => {

@@ -27,13 +27,13 @@ let test_run_record_basic () =
 let test_run_record_with_agent () =
   let r : Run_eio.run_record = {
     task_id = "task-002";
-    agent_name = Some "agent_llm_a";
+    agent_name = Some "claude";
     plan = "Do the thing";
     created_at = "2024-01-01T09:00:00Z";
     updated_at = "2024-01-01T11:00:00Z";
   } in
   match r.agent_name with
-  | Some a -> check string "agent_name" "agent_llm_a" a
+  | Some a -> check string "agent_name" "claude" a
   | None -> fail "expected Some"
 
 (* ============================================================
@@ -43,7 +43,7 @@ let test_run_record_with_agent () =
 let test_run_record_json_roundtrip () =
   let original : Run_eio.run_record = {
     task_id = "rt-001";
-    agent_name = Some "agent_llm_a";
+    agent_name = Some "claude";
     plan = "# Plan Content";
     created_at = "2024-01-01T10:00:00Z";
     updated_at = "2024-01-01T12:00:00Z";
@@ -111,11 +111,11 @@ let with_initialized_masc f =
 
 let test_init_run () =
   with_initialized_masc @@ fun config ->
-  match Run_eio.init config ~task_id:"task-init-001" ~agent_name:(Some "agent_llm_a") with
+  match Run_eio.init config ~task_id:"task-init-001" ~agent_name:(Some "claude") with
   | Ok run ->
       check string "task_id" "task-init-001" run.task_id;
       (match run.agent_name with
-       | Some a -> check string "agent_name" "agent_llm_a" a
+       | Some a -> check string "agent_name" "claude" a
        | None -> fail "expected agent_name")
   | Error e -> failf "init failed: %s" e
 
@@ -139,7 +139,7 @@ let test_read_nonexistent () =
 
 let test_update_plan () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-plan-001" ~agent_name:(Some "provider_f"));
+  ignore (Run_eio.init config ~task_id:"task-plan-001" ~agent_name:(Some "gemini"));
   match Run_eio.update_plan config ~task_id:"task-plan-001" ~content:"# New Plan\n- Step 1\n- Step 2" with
   | Ok run ->
       check bool "plan updated" true (String.length run.plan > 0)
@@ -151,7 +151,7 @@ let test_update_plan () =
 
 let test_get_run () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-get-001" ~agent_name:(Some "provider_f"));
+  ignore (Run_eio.init config ~task_id:"task-get-001" ~agent_name:(Some "gemini"));
   match Run_eio.get config ~task_id:"task-get-001" with
   | Ok json ->
       let open Yojson.Safe.Util in
@@ -255,7 +255,7 @@ let test_init_run_idempotent () =
 
 let test_get_run_with_updated_plan () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-plan-get" ~agent_name:(Some "agent_llm_a"));
+  ignore (Run_eio.init config ~task_id:"task-plan-get" ~agent_name:(Some "claude"));
   ignore (Run_eio.update_plan config ~task_id:"task-plan-get" ~content:"# Updated Plan\n- New step");
   match Run_eio.get config ~task_id:"task-plan-get" with
   | Ok json ->

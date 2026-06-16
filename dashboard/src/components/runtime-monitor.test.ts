@@ -42,7 +42,7 @@ describe('RuntimeMonitor', () => {
           provider_display_name: 'RunPod MTP',
           model_id: 'qwen',
           model_api_name: 'Qwen/Qwen3-32B',
-          protocol: 'provider_d-http',
+          protocol: 'openai-http',
           transport: 'http',
           kind: 'cloud',
           runtime_kind: 'http',
@@ -151,5 +151,6 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('latency · 42.5 ms')
     expect(container.textContent).toContain('models · 1')
     expect(container.textContent).toContain('auth · present')
+    expect(container.querySelector('article.v2-monitoring-card')).not.toBeNull()
   })
 })

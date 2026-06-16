@@ -11,7 +11,6 @@
 - `../design/contract-driven-agent-loop-rfc.md`
 - `../design/handoff-ssot-adr.md`
 - `../design/keeper-social-model-inventory.md`
-- `../KEEPER-SOCIAL-EXPERIMENT-DESIGN.md`
 - `../SUPERVISOR-MODE.md`
 - `../BENCHMARK-RUNBOOK.md`
 - `../COMMAND-PLANE-RUNBOOK.md`

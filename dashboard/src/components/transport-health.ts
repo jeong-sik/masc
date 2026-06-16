@@ -344,7 +344,7 @@ function TransportStatusBadge({ status, label }: { status: StatusTone; label: st
 
 function CaseCard({ item, data }: { item: PracticalCase; data: TransportHealthData }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-card-border/70 bg-card/40 p-4">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-card-border/70 bg-card/40 p-4">
       <div class="flex items-center justify-between gap-3 mb-2">
         <div class="text-sm font-semibold text-text-strong">${item.title}</div>
         <div class="text-3xs uppercase tracking-wider text-text-muted">${item.transport}</div>
@@ -415,7 +415,7 @@ export function TransportHealthPanel() {
   const truthLine = transportTruthLine(data)
 
   return html`
-    <div class="space-y-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-start justify-between gap-4">
         <div>
           <div class="flex items-center gap-2">
@@ -433,7 +433,7 @@ export function TransportHealthPanel() {
         <${ActionButton}
           variant="subtle"
           size="sm"
-          class="text-3xs"
+          class="v2-monitoring-action text-3xs"
           onClick=${() => void refreshTransportHealth()}
         >새로고침<//>
       </div>
@@ -463,7 +463,7 @@ export function TransportHealthPanel() {
         />
       </div>
 
-      <details class="group rounded-[var(--r-1)] border border-card-border/50 bg-card/18 overflow-hidden" open=${hasAnyBadTransport}>
+      <details class="v2-monitoring-detail group rounded-[var(--r-1)] border border-card-border/50 bg-card/18 overflow-hidden" open=${hasAnyBadTransport}>
         <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
           <span>트랜스포트 상세</span>
           <span class="ml-auto flex items-center gap-2 text-2xs font-normal text-text-muted">
@@ -573,7 +573,7 @@ export function TransportHealthPanel() {
             const filtered = filterHotSessions(data.sse.hot_sessions, query)
             const isFiltered = query.trim() !== ''
             return html`
-            <details class="group rounded-[var(--r-1)] border border-card-border/50 bg-card/18 overflow-hidden" open=${data.sse.hot_sessions.length >= 3}>
+            <details class="v2-monitoring-detail group rounded-[var(--r-1)] border border-card-border/50 bg-card/18 overflow-hidden" open=${data.sse.hot_sessions.length >= 3}>
               <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
                 <span>핫 큐</span>
                 <span class="ml-auto text-2xs font-normal text-text-muted">${data.sse.hot_sessions.length}개 세션 -- SSE 백프레셔 위험</span>
@@ -602,7 +602,7 @@ export function TransportHealthPanel() {
                 ` : html`
                   <div class="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
                     ${filtered.map((session) => html`
-                      <div key=${session.session_id} class="rounded-[var(--r-1)] border border-card-border/60 bg-bg-1/60 p-3">
+                      <div key=${session.session_id} class="v2-monitoring-card rounded-[var(--r-1)] border border-card-border/60 bg-bg-1/60 p-3">
                         <div class="flex items-center justify-between gap-2 mb-1">
                           <div class="flex min-w-0 items-center gap-1">
                             <span class="truncate text-2xs font-mono text-text-strong">${compactId(session.session_id)}</span>
@@ -622,7 +622,7 @@ export function TransportHealthPanel() {
           })()
         : null}
 
-      <details class="group rounded-[var(--r-1)] border border-card-border/50 bg-card/18 overflow-hidden">
+      <details class="v2-monitoring-detail group rounded-[var(--r-1)] border border-card-border/50 bg-card/18 overflow-hidden">
         <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
           <span>실용 경로</span>
           <span class="ml-auto text-2xs font-normal text-text-muted">각 트랜스포트의 실제 연결 방법 레퍼런스</span>

@@ -27,8 +27,12 @@ a, button, [role="tab"], [role="button"] {
 
 body {
   font-family: var(--font-sans);
-  color: var(--color-fg-secondary);
-  line-height: var(--lh-body);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-body);
+  line-height: 1.55;
+  color: var(--color-fg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background-color: var(--color-bg-page);
   background-image:
     radial-gradient(circle at 88% 14%, rgb(var(--brass-glow) / .05), transparent 20%);

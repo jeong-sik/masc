@@ -121,6 +121,8 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.textContent).toContain('provider details')
     expect(container.textContent).toContain('runtime.toml')
     expect(container.textContent).toContain('transport health')
+    const endpointCards = container.querySelectorAll('[data-testid="runtime-health-endpoints"] .v2-monitoring-card')
+    expect(endpointCards.length).toBeGreaterThan(0)
   })
 
   it('does not hide failed live probe details behind the full runtime monitor', async () => {

@@ -28,7 +28,7 @@ default = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-http"
 endpoint = "https://runpod.example/v1"
 
 [providers.runpod_mtp.credentials]
@@ -37,7 +37,7 @@ key = "RUNPOD_API_KEY"
 
 [providers.openai]
 display-name = "OpenAI"
-protocol = "provider_d-http"
+protocol = "openai-http"
 endpoint = "https://api.openai.example/v1"
 
 [models.qwen]
@@ -126,6 +126,8 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
     expect(container.querySelector('[data-testid="runtime-toml-line-numbers"]')?.textContent).toBe('1\n2\n3')
     expect(container.querySelector('[data-testid="runtime-toml-stats"]')?.textContent).toContain('3 lines')
+    expect(container.querySelector('[data-testid="runtime-toml-code-frame"]')?.classList.contains('v2-monitoring-code-frame')).toBe(true)
+    expect(container.querySelector('.v2-monitoring-toolbar')).not.toBeNull()
   })
 
   it('saves the edited TOML source and clears the dirty state', async () => {

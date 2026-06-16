@@ -124,7 +124,6 @@ let consolidate_into_shared ~now ~min_keepers contribs =
         ; last_accessed =
             List.fold_left (fun acc c -> Float.max acc c.fact.last_accessed) rep.fact.last_accessed contribs
         ; valid_until = None
-        ; stale_factor = 0.0
           (* The consolidation IS the verification of the shared fact. *)
         ; last_verified_at = Some now
         ; expected_lifetime_cycles = None

@@ -530,7 +530,7 @@ let make_worker
       ?(requested_model = None)
       ?(requested_policy = None)
       ?(resolved_provider = Some "llama")
-      ?(resolved_model = Some "provider_h")
+      ?(resolved_model = Some "qwen")
       ?(status = Sessions_types.Completed)
       ?(trace_capability = Sessions_types.Raw)
       ?(validated = true)

@@ -202,7 +202,7 @@ let test_worker_execution_spec_rejects_removed_fields () =
       {|{
   "base_path": "/tmp/base",
   "worker_name": "worker",
-  "model_label": "custom:provider_h@http://127.0.0.1:19001",
+  "model_label": "custom:qwen@http://127.0.0.1:19001",
   "runtime_backend": "docker",
   "prompt": "hello",
   "timeout_sec": 30,

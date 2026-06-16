@@ -68,9 +68,6 @@ let assemble_hooks
       ~(turn_affordances : string list)
       ~(config_root : string)
       ~(runtime_config_path : string option)
-      ~(gemini_mcp_disabled : bool)
-      ~(approval_mode_effective : string option)
-      ~(approval_mode_derived : bool)
       ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
@@ -105,9 +102,6 @@ let assemble_hooks
   <- { turn_lane = initial_turn_lane
      ; config_root
      ; runtime_config_path
-     ; gemini_mcp_disabled
-     ; approval_mode_effective
-     ; approval_mode_derived
      };
   Keeper_run_tools_hook_accumulator.record_requested_tool_names
       acc
@@ -390,9 +384,6 @@ let assemble_hooks
                 <- { turn_lane = lane
                    ; config_root
                    ; runtime_config_path
-                   ; gemini_mcp_disabled
-                   ; approval_mode_effective
-                   ; approval_mode_derived
                    };
                 let thinking_enabled_effective =
                   match current_params.enable_thinking with
@@ -427,7 +418,6 @@ let assemble_hooks
                     (Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
                   ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
                   ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
-                  ?approval_mode:approval_mode_effective
                   ~runtime_profile:runtime_id_string
                   ();
                 (ignore hook_t0;

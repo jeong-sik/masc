@@ -74,7 +74,7 @@ let test_provider_runtime_error_carrier_none () =
   let r =
     R.Provider_runtime_error
       { code = "provider_error"
-      ; detail = "provider_c unicode crash"
+      ; detail = "kimi unicode crash"
       ; provider_id = None
       ; http_status = None
       ; runtime_id = None
@@ -83,7 +83,7 @@ let test_provider_runtime_error_carrier_none () =
   in
   (check string)
     "failure_reason_to_string: None/None is byte-identical to pre-PR-1"
-    "provider_runtime_error(provider_error:provider_c unicode crash)"
+    "provider_runtime_error(provider_error:kimi unicode crash)"
     (R.failure_reason_to_string r)
 
 let test_provider_runtime_error_carrier_some () =

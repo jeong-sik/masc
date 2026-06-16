@@ -84,7 +84,7 @@ export function ConnectorOverviewSkeleton({
   const count = overviewSkeletonTileCount()
   const grid = overviewSkeletonGridClasses()
   return html`<div
-    class=${`${grid} ${cx ?? ''}`}
+    class=${`${grid} ${cx ?? ''} v2-connector-overview-skeleton`}
     role="status"
     aria-label="커넥터 상태 불러오는 중"
     aria-live="polite"

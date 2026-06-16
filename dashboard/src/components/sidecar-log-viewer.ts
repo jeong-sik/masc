@@ -124,7 +124,7 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
   return html`
     <button
       type="button"
-      class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+      class="v2-sidecar-log-toggle cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
       aria-expanded=${entry.open}
       aria-controls=${`sidecar-log-${connectorId}`}
       onClick=${onClick}
@@ -146,8 +146,8 @@ function LevelPills({ connectorId, active }: { connectorId: string; active: LogL
     <div class="flex items-center gap-1" role="radiogroup" aria-label="log level filter">
       ${LEVELS.map(level => {
         const isActive = level === active
-        const base = 'cursor-pointer rounded-[var(--r-1)] border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'
-        const activeCls = 'border-[var(--accent-1)] bg-[var(--accent-1)]/15 text-[var(--color-fg-primary)]'
+        const base = 'v2-sidecar-log-level-pill cursor-pointer rounded-[var(--r-1)] border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'
+        const activeCls = 'border-[var(--color-accent-fg)] bg-[var(--accent-10)] text-[var(--color-fg-primary)]'
         const idleCls = 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
         return html`
           <button
@@ -186,9 +186,9 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
   const hasFilter = entry.level !== 'all' || entry.keyword.trim() !== ''
 
   return html`
-    <${SurfaceCard} class="mt-3 !p-2" id=${`sidecar-log-${connectorId}`}>
+    <${SurfaceCard} class="v2-sidecar-log-surface mt-3 !p-2" id=${`sidecar-log-${connectorId}`}>
       <div class="mb-2 flex items-center justify-between gap-2">
-        <div class="min-w-0 truncate text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" title=${entry.logPath}>
+        <div class="v2-sidecar-log-path min-w-0 truncate text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" title=${entry.logPath}>
           ${entry.logPath || '(log path unknown)'}
         </div>
         <div class="flex items-center gap-2">
@@ -255,7 +255,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                   </${SurfaceCard}>
                 `
               : html`
-                  <pre class="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-2 font-mono text-3xs leading-[1.4] text-[var(--color-fg-primary)]">${filtered.join('\n')}</pre>
+                  <pre class="v2-sidecar-log-pre max-h-[40vh] overflow-auto whitespace-pre-wrap break-words rounded-[var(--r-1)] bg-[var(--color-bg-page)] p-2 font-mono text-3xs leading-[1.4] text-[var(--color-fg-primary)]">${filtered.join('\n')}</pre>
                 `
             : html`
                 <${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-3 text-center text-2xs text-[var(--color-fg-disabled)]">

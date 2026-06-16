@@ -22,7 +22,7 @@ type token_source =
   | Per_keeper_token_file
       (** [<base_path>/.masc/auth/<agent_name>.token] raw token; used as
           a fallback when [MASC_TOKEN] is unset (e.g. CLI subprocesses
-          like cli_tool_a/cli_tool_b/cli_tool_c that callback into masc
+          like codex_cli/gemini_cli/kimi_cli that callback into masc
           but do not inherit the parent process env). Phase A F1. *)
   | Provider_api_key_env of { var_name : string }
       (** Provider-specific HTTPS API key, e.g.

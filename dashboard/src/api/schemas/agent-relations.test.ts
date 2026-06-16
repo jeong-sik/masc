@@ -7,7 +7,7 @@ import {
 
 function validResponse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    agent_name: 'dreamer',
+    agent_name: 'alice',
     collaborators: [
       { name: 'planner', collaborations: 7, last_collab: '2026-04-17T00:00:00Z' },
       { name: 'critic', collaborations: 2, last_collab: null },
@@ -20,7 +20,7 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
         confidence: 0.87,
         note: null,
         participants: [
-          { kind: 'agent', display_name: 'dreamer', role: 'author' },
+          { kind: 'agent', display_name: 'alice', role: 'author' },
           { kind: 'agent', display_name: 'critic', role: 'reviewer' },
         ],
       },
@@ -32,7 +32,7 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
 describe('parseAgentRelationsResponse', () => {
   it('accepts a well-formed response', () => {
     const out = parseAgentRelationsResponse(validResponse())
-    expect(out.agent_name).toBe('dreamer')
+    expect(out.agent_name).toBe('alice')
     expect(out.collaborators).toHaveLength(2)
     expect(out.relations[0]!.participants).toHaveLength(2)
   })

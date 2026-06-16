@@ -1,0 +1,14 @@
+/* MASC Dashboard v2 — Monitoring leftover surfaces.
+ *
+ * Scoped to .v2-monitoring-leftover-* (and extends .v2-monitoring-*)
+ * for Observatory, Journey, Cognition, Transport Health, Feature Health,
+ * Cost Dashboard, and Telemetry Unified.
+ *
+ * Colors come from v2-theme.css and v2-monitoring.css.
+ */
+
+.v2-monitoring-leftover-surface,
+.v2-monitoring-leftover-panel,
+.v2-monitoring-leftover-detail {
+  --v2-monitoring-leftover-top-glow: rgb(var(--brass-glow) / 0.04);
+}

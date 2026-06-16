@@ -243,7 +243,7 @@ export function StatusPill({ status }: { status: RailStatus }) {
 
 export function EmptySignal({ text }: { text: string }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
+    <div class="v2-lab-card rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">
       ${text}
     </div>
   `
@@ -258,7 +258,7 @@ export function GateChart({ distribution }: { distribution: GateDistribution }) 
   return html`
     <div class="space-y-2">
       ${entries.map(([gate, count]) => html`
-        <div class="flex items-center gap-2">
+        <div class="v2-lab-row flex items-center gap-2">
           <span class="w-20 text-right font-mono text-xs text-[var(--color-fg-muted)]">${gate}</span>
           <div class="h-4 flex-1 overflow-hidden rounded-[var(--r-1)] bg-[var(--color-bg-hover)]">
             <div
@@ -285,7 +285,7 @@ export function HeroRailCard({
   freshness: string
 }) {
   return html`
-    <div class=${`rounded-[var(--r-1)] border p-3 ${statusCardClass(status)}`}>
+    <div class=${`v2-lab-card rounded-[var(--r-1)] border p-3 ${statusCardClass(status)}`}>
       <div class="flex items-start justify-between gap-3">
         <${ItemTitle}>${label}</${ItemTitle}>
         <${StatusPill} status=${status} />

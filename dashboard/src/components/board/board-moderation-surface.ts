@@ -75,12 +75,12 @@ function QueueRow({
       <div class="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-start">
         <div class="min-w-0 space-y-2">
           <div class="flex min-w-0 flex-wrap items-center gap-2">
-            <span class="inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]" aria-hidden="true">
+            <span class="inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)]" aria-hidden="true">
               <${ShieldAlert} size=${15} />
             </span>
             <div class="min-w-0">
-              <h3 class="truncate font-mono text-sm font-semibold text-[var(--color-fg-primary)]">${entry.target_id}</h3>
-              <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
+              <h3 class="truncate font-mono text-sm font-bold text-[var(--color-fg-primary)]">${entry.target_id}</h3>
+              <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
                 <span>${entry.target_kind}</span>
                 <span>${entry.reason}</span>
                 <span>${entry.reporter}</span>
@@ -88,7 +88,7 @@ function QueueRow({
               </div>
             </div>
           </div>
-          <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
+          <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-secondary)]">
             <span class=${`inline-flex rounded-[var(--r-1)] border px-1.5 py-0.5 ${
               entry.resolved
                 ? 'border-[var(--ok-30)] bg-[var(--ok-10)] text-[var(--ok-bright)]'
@@ -234,11 +234,11 @@ export function BoardModerationSurface() {
   }
 
   return html`
-    <section class="flex min-w-0 flex-col gap-4" aria-label="Board moderation">
+    <section class="v2-workspace-surface flex min-w-0 flex-col gap-4" aria-label="Board moderation">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
-          <h2 class="text-base font-semibold text-[var(--color-fg-primary)]">Board Moderation</h2>
-          <p class="mt-1 text-xs text-[var(--color-fg-muted)]">${openCount} open / ${serverCount} returned</p>
+          <h2 class="text-base font-bold text-[var(--color-fg-primary)]">Board Moderation</h2>
+          <p class="mt-1 text-xs text-[var(--color-fg-secondary)]">${openCount} open / ${serverCount} returned</p>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <${Select}
@@ -253,6 +253,7 @@ export function BoardModerationSurface() {
           <${ActionButton}
             variant="ghost"
             size="sm"
+            class="v2-workspace-action"
             onClick=${() => { void load() }}
             disabled=${queueControlsDisabled}
             ariaLabel="Refresh moderation queue"
@@ -265,9 +266,9 @@ export function BoardModerationSurface() {
         </div>
       </div>
 
-      <form class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submitFlag}>
+      <form class="v2-workspace-panel grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3" onSubmit=${submitFlag}>
         <div class="grid gap-3 lg:grid-cols-[0.7fr_1fr_0.8fr_0.8fr_auto] lg:items-end">
-          <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+          <label class="grid gap-1 text-2xs font-bold uppercase text-[var(--color-fg-secondary)]">
             Target
             <${Select}
               value=${targetKind}
@@ -278,7 +279,7 @@ export function BoardModerationSurface() {
               onInput=${(value: string) => setTargetKind(value as BoardModerationTargetKind)}
             />
           </label>
-          <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+          <label class="grid gap-1 text-2xs font-bold uppercase text-[var(--color-fg-secondary)]">
             Target ID
             <${TextInput}
               value=${targetId}
@@ -290,7 +291,7 @@ export function BoardModerationSurface() {
               onInput=${(event: Event) => setTargetId((event.target as HTMLInputElement).value)}
             />
           </label>
-          <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+          <label class="grid gap-1 text-2xs font-bold uppercase text-[var(--color-fg-secondary)]">
             Reason
             <${Select}
               value=${reason}
@@ -301,7 +302,7 @@ export function BoardModerationSurface() {
               onInput=${(value: string) => setReason(value as BoardModerationFlagReason)}
             />
           </label>
-          <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+          <label class="grid gap-1 text-2xs font-bold uppercase text-[var(--color-fg-secondary)]">
             Reporter
             <${TextInput}
               value=${reporter}
@@ -316,6 +317,7 @@ export function BoardModerationSurface() {
             type="submit"
             variant="primary"
             size="md"
+            class="v2-workspace-action"
             disabled=${!canSubmit}
             ariaBusy=${submitting}
             testId="moderation-flag-submit"

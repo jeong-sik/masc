@@ -103,7 +103,7 @@ let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
      uses [observe_silent] instead of [observe_or_default] because warning about
      a failed warning can re-enter the same failing log backend and break the
      caller contract. [Eio.Cancel.Cancelled] is still preserved. (#13096 review,
-     copilot P1; supersedes the single-try wrapping noted in agent_code P2.) *)
+     copilot P1; supersedes the single-try wrapping noted in codex P2.) *)
   Telemetry_observe.observe_silent ~kind:"workspace_telemetry_drop_log" (fun () ->
     Log.Workspace.emit
       Log.Warn

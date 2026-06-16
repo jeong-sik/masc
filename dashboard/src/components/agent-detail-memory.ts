@@ -120,7 +120,7 @@ export function AgentDetailMemory({ agentName }: Props) {
   const isFilteringEpisodes = episodeQuery.value.trim() !== ''
 
   return html`
-    <${CollapsibleSection} title="협업 & 기억" mountWhenOpen=${true}>
+    <${CollapsibleSection} class="v2-monitoring-detail" title="협업 & 기억" mountWhenOpen=${true}>
       <div class="space-y-4">
         <!-- Hebbian collaboration -->
         <div>
@@ -143,7 +143,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                             <div class="space-y-1">
                               ${outgoing.map(
                                 (s: MemorySubsystemsSynapse) => html`
-                                  <div class="flex items-center gap-2 text-xs">
+                                  <div class="v2-monitoring-row flex items-center gap-2 text-xs">
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.to_agent)}</span>
                                     <${SynapseWeightBar} weight=${s.weight} />
                                     <span class="text-[var(--color-fg-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
@@ -163,7 +163,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                             <div class="space-y-1">
                               ${incoming.map(
                                 (s: MemorySubsystemsSynapse) => html`
-                                  <div class="flex items-center gap-2 text-xs">
+                                  <div class="v2-monitoring-row flex items-center gap-2 text-xs">
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.from_agent)}</span>
                                     <${SynapseWeightBar} weight=${s.weight} />
                                     <span class="text-[var(--color-fg-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
@@ -230,16 +230,16 @@ export function AgentDetailMemory({ agentName }: Props) {
                               ? 'text-[var(--color-status-warn)]'
                               : 'text-[var(--bad-light)]'
                         return html`
-                          <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-xs">
+                          <div class="v2-monitoring-row border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2.5 py-2 text-xs bg-[var(--color-bg-elevated)] hover:bg-[var(--color-bg-hover)] transition-colors">
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
-                                <span class="truncate text-[var(--color-fg-muted)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
+                                <span class="truncate text-[var(--color-fg-primary)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
-                              <span class="text-3xs text-[var(--color-fg-muted)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+                              <span class="text-2xs text-[var(--color-fg-secondary)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
-                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--color-border-default)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
+                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-secondary)] pl-3 border-l border-[var(--color-border-default)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
                               : null}
                           </div>
                         `

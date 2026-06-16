@@ -152,6 +152,14 @@ describe('VerificationRequestsPanel', () => {
     expect(screen.getByTestId('filter-chip-timed_out')).toBeTruthy()
   })
 
+  it('marks the table and rows with v2 workspace classes', () => {
+    setData([makeRequest()])
+    const { container } = render(html`<${VerificationRequestsPanel} />`)
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-workspace-table')).not.toBeNull()
+    expect(container.querySelector('.v2-workspace-row')).not.toBeNull()
+  })
+
   it('shows total count in all filter mode', () => {
     setData([makeRequest(), makeRequest({ request_id: 'req-002', status: 'approved' })])
     render(html`<${VerificationRequestsPanel} />`)

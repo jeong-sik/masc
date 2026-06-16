@@ -321,7 +321,7 @@ let add_delete_action_routes router =
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
                  respond_error ~status:`Not_found ~request:req reqd
-                   (Board_types.show_board_error err)
+                   (Board_tool.board_error_to_string err)
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "post_id")
          )
@@ -345,7 +345,7 @@ let add_delete_action_routes router =
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
                  respond_error ~status:`Not_found ~request:req reqd
-                   (Board_types.show_board_error err)
+                   (Board_tool.board_error_to_string err)
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "post_id")
          )
@@ -584,7 +584,7 @@ let add_delete_action_routes router =
                                      (match Board_dispatch.delete_post ~post_id:target_id with
                                       | Ok () -> None
                                       | Error e ->
-                                          Some (Board_types.show_board_error e))
+                                          Some (Board_tool.board_error_to_string e))
                                  | Board_moderation.Target_comment ->
                                      (* Comment removal not yet backed by dispatch; note only *)
                                      None)

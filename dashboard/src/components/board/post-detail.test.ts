@@ -117,11 +117,12 @@ describe('CommentThread', () => {
       { id: 'c3', post_id: 'post-1', parent_id: 'c2', author: 'grandchild-agent', content: 'grandchild reply', created_at: '2026-04-02T00:02:00Z' },
     ] as any
 
-    render(h(CommentThread, { comments, postId: 'post-1' }))
+    const { container } = render(h(CommentThread, { comments, postId: 'post-1' }))
 
     expect(screen.getByText('root comment')).toBeInTheDocument()
     expect(screen.getByText('child reply')).toBeInTheDocument()
     expect(screen.getByText('grandchild reply')).toBeInTheDocument()
+    expect(container.querySelectorAll('.v2-workspace-row').length).toBeGreaterThanOrEqual(3)
   })
 
   it('shows orphaned replies as root comments when the parent is missing', () => {

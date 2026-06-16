@@ -104,30 +104,30 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
   const cat = toolCategory(toolName)
 
   return html`
-    <div class="flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s var(--ease-out)' }}>
+    <div class="v2-monitoring-row flex flex-col py-1.5 px-2 rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors" key=${idx} style=${{ animation: 'activityFadeIn 0.25s var(--ease-out)' }}>
       <div class="flex items-center gap-2 text-sm">
         <div class="flex-shrink-0 size-6 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
           ${cat.icon}
         </div>
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-50" title=${toolName}>${toolName}</span>
-        <span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]">${cat.label}</span>
+        <span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)]">${cat.label}</span>
         ${durationMs != null
           ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatMsCompact(durationMs)}</span>`
           : null}
         ${success
-          ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]">ok</span>`
-          : html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
+          ? html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]">ok</span>`
+          : html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
         <span class="flex-1"></span>
         ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
       </div>
       ${args ? html`
-        <div class="ml-8 mt-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono truncate">
-          ${typeof args === 'string' ? trimText(args, 60) : formatArgs(args)}
+        <div class="ml-8 mt-0.5 text-2xs text-[var(--color-fg-secondary)] font-mono truncate">
+          ${typeof args === 'string' ? trimText(args, 80) : formatArgs(args)}
         </div>
       ` : null}
       ${errorMsg ? html`
-        <div class="ml-8 mt-0.5 text-3xs text-[var(--color-status-err)] font-mono truncate" title=${errorMsg}>
-          ${trimText(errorMsg, 60)}
+        <div class="ml-8 mt-0.5 text-2xs text-[var(--color-status-err)] font-mono truncate" title=${errorMsg}>
+          ${trimText(errorMsg, 80)}
         </div>
       ` : null}
     </div>
@@ -147,7 +147,7 @@ export function AgentTimelineSection() {
   const filterActive = activeCategory !== 'all' || query.trim() !== ''
 
   return html`
-    <${CollapsibleSection} title=${`활동 타임라인 (${summary?.total_events ?? 0})`} mountWhenOpen=${true}>
+    <${CollapsibleSection} class="v2-monitoring-detail" title=${`활동 타임라인 (${summary?.total_events ?? 0})`} mountWhenOpen=${true}>
       ${summary ? html`
         <div class="flex gap-1.5 flex-wrap mb-2">
           ${summary.tasks_completed > 0 ? html`<${SummaryBadge}>완료 ${summary.tasks_completed}<//>` : null}
@@ -185,7 +185,7 @@ export function AgentTimelineSection() {
                 onInput=${(e: Event) => { timelineSearchQuery.value = (e.target as HTMLInputElement).value }}
               />
               ${filterActive
-                ? html`<span class="text-3xs text-[var(--color-fg-disabled)] tabular-nums">${filtered.length} / ${events.length}</span>`
+                ? html`<span class="text-2xs text-[var(--color-fg-secondary)] tabular-nums">${filtered.length} / ${events.length}</span>`
                 : null}
             </div>
             ${filtered.length === 0
@@ -199,7 +199,7 @@ export function AgentTimelineSection() {
                       const detail = evt.detail as Record<string, string | undefined>
                       const title = detail.title ?? detail.content ?? ''
                       return html`
-                        <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)]" key=${idx}>
+                        <div class="agent-timeline-event v2-monitoring-row flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)]" key=${idx}>
                           <span class="agent-journal-kind">${timelineEventIcon(evt.type)}</span>
                           <span class="agent-timeline-type">${timelineEventLabel(evt.type)}</span>
                           ${title ? html`<span class="agent-timeline-detail">${trimText(title, 80)}</span>` : null}

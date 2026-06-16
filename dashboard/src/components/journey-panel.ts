@@ -186,7 +186,7 @@ function MetricCell({
   tone?: string
 }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${label}</div>
       <div class="mt-1">
         <${StatusChip} tone=${tone} uppercase=${false}>${value}<//>
@@ -198,7 +198,7 @@ function MetricCell({
 function SourceWarning({ errors }: { errors: string[] }) {
   if (errors.length === 0) return null
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
+    <div class="v2-monitoring-warning rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-xs text-[var(--color-status-warn)]">
       ${errors.map(error => html`<div class="break-all font-mono">${error}</div>`)}
     </div>
   `
@@ -266,7 +266,7 @@ function WaterfallEntryRow({
   const resultPreview = entry.error ?? entry.toolResult ?? entry.thinkingContent ?? ''
 
   return html`
-    <div class="grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2" data-testid="journey-waterfall-entry">
+    <div class="v2-monitoring-card grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2" data-testid="journey-waterfall-entry">
       <div class="flex flex-wrap items-center gap-2">
         <span class="inline-flex h-5 min-w-5 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1 font-mono text-3xs ${isTool ? style.color : 'text-[var(--color-info-fg)]'}">
           ${isTool ? style.icon : 'TH'}
@@ -314,7 +314,7 @@ function WaterfallEntryRow({
 
       ${resultPreview && isTool
         ? html`
-            <details class="text-xs text-[var(--color-fg-muted)]">
+            <details class="v2-monitoring-detail text-xs text-[var(--color-fg-muted)]">
               <summary class="cursor-pointer text-2xs text-[var(--color-fg-disabled)]">details</summary>
               <pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 font-mono text-3xs">${resultPreview}</pre>
             </details>
@@ -334,7 +334,7 @@ function WaterfallTurnRow({
   const tone = turnTone(turn)
 
   return html`
-    <section class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3" data-testid="journey-waterfall-turn">
+    <section class="v2-monitoring-card grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3" data-testid="journey-waterfall-turn">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -422,7 +422,7 @@ function WaterfallBody({
         </div>
         <div class="flex items-center gap-2">
           <span>fetched <${TimeAgo} timestamp=${new Date(result.fetchedAtMs).toISOString()} /></span>
-          <${ActionButton} variant="ghost" size="sm" onClick=${onRefresh} disabled=${loading}>
+          <${ActionButton} variant="ghost" size="sm" class="v2-monitoring-action" onClick=${onRefresh} disabled=${loading}>
             ${loading ? 'Refreshing...' : 'Refresh'}
           <//>
         </div>
@@ -477,8 +477,8 @@ export function JourneyPanel() {
   const state = resource.state.value
 
   return html`
-    <div class="flex flex-col gap-4">
-      <${SurfaceCard} class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
+      <${SurfaceCard} class="v2-monitoring-panel flex flex-col gap-4">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
@@ -513,7 +513,7 @@ export function JourneyPanel() {
                   testId="journey-keeper-select"
                   onInput=${(value: string) => setSelectedKeeper(value)}
                 />
-                <${ActionButton} variant="ghost" size="md" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>
+                <${ActionButton} variant="ghost" size="md" class="v2-monitoring-action" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>
                   ${state.loading ? 'Refreshing...' : 'Refresh'}
                 <//>
               </div>
@@ -525,7 +525,7 @@ export function JourneyPanel() {
             <div class="flex flex-col gap-3">
               <${ErrorState} message=${state.error} />
               <div>
-                <${ActionButton} variant="ghost" size="sm" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>Retry<//>
+                <${ActionButton} variant="ghost" size="sm" class="v2-monitoring-action" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>Retry<//>
               </div>
             </div>
           `

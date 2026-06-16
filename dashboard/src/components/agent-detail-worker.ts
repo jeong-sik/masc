@@ -9,7 +9,7 @@ import { workerBriefForAgent } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
 
 function DetailLabel({ children }: { children: unknown }) {
-  return html`<span class="text-2xs text-[var(--color-fg-muted)] min-w-15 shrink-0">${children}</span>`
+  return html`<span class="text-2xs font-medium text-[var(--color-fg-secondary)] min-w-15 shrink-0">${children}</span>`
 }
 
 function WorkerInfoRow({ children }: { children: unknown }) {
@@ -21,7 +21,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
   if (!worker) return null
 
   return html`
-    <${CollapsibleSection} title="워커 상태" mountWhenOpen=${true}>
+    <${CollapsibleSection} class="v2-monitoring-detail" title="워커 상태" mountWhenOpen=${true}>
       <div class="flex flex-col gap-1.5">
         <${WorkerInfoRow}>
           <${DetailLabel}>상태</${DetailLabel}>
@@ -50,7 +50,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
           <${WorkerInfoRow}>
             <${DetailLabel}>시그널</${DetailLabel}>
             <${TimeAgo} timestamp=${worker.last_signal_at} />
-            ${worker.signal_truth ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-[var(--r-0)]">${worker.signal_truth}</span>` : null}
+            ${worker.signal_truth ? html`<span class="text-2xs font-medium py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-[var(--r-0)]">${worker.signal_truth}</span>` : null}
           </${WorkerInfoRow}>
         ` : null}
       </div>

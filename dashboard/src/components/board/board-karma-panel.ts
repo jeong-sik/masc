@@ -65,11 +65,11 @@ export function BoardKarmaPanel() {
     <section class="grid gap-4" aria-labelledby="board-karma-heading">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
-          <div class="flex items-center gap-2 text-2xs uppercase text-[var(--color-fg-muted)]">
+          <div class="flex items-center gap-2 text-2xs uppercase text-[var(--color-fg-secondary)]">
             <${Trophy} size=${13} aria-hidden="true" />
             Board karma
           </div>
-          <h2 id="board-karma-heading" class="mt-1 text-xl font-semibold text-[var(--color-fg-primary)]">Karma ledger</h2>
+          <h2 id="board-karma-heading" class="mt-1 text-xl font-bold text-[var(--color-fg-primary)]">Karma ledger</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <${ActionButton} variant="ghost" size="sm" onClick=${() => navigate('workspace', { section: 'board' })} ariaLabel="Back to board">
@@ -82,11 +82,11 @@ export function BoardKarmaPanel() {
       </div>
 
       <form
-        class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 sm:flex-row sm:items-end"
+        class="v2-workspace-panel flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 sm:flex-row sm:items-end"
         data-testid="karma-filter-form"
         onSubmit=${submitFilter}
       >
-        <label class="grid min-w-0 flex-1 gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+        <label class="grid min-w-0 flex-1 gap-1 text-2xs font-bold uppercase text-[var(--color-fg-secondary)]">
           Agent
           <${TextInput}
             value=${agentInput}
@@ -97,7 +97,7 @@ export function BoardKarmaPanel() {
             onInput=${(event: Event) => setAgentInput((event.target as HTMLInputElement).value)}
           />
         </label>
-        <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
+        <label class="grid gap-1 text-2xs font-bold uppercase text-[var(--color-fg-secondary)]">
           Limit
           <${Select}
             value=${String(limit)}
@@ -131,20 +131,20 @@ export function BoardKarmaPanel() {
             <div class="grid gap-3 lg:grid-cols-[0.8fr_1.2fr]">
               <${SurfaceCard} variant="compact">
                 <div class="mb-3 flex items-center justify-between gap-2">
-                  <h3 class="text-xs font-semibold uppercase text-[var(--color-fg-muted)]">Totals</h3>
-                  <span class="font-mono text-2xs text-[var(--color-fg-muted)]">${ledger.totals.length} agents</span>
+                  <h3 class="text-xs font-bold uppercase text-[var(--color-fg-secondary)]">Totals</h3>
+                  <span class="font-mono text-2xs text-[var(--color-fg-secondary)]">${ledger.totals.length} agents</span>
                 </div>
                 ${ledger.totals.length === 0
                   ? html`<${EmptyState} message="No karma totals." compact />`
                   : html`
                     <div class="grid gap-2">
                       ${ledger.totals.map((row, index) => html`
-                        <div key=${row.agent} class="flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-2">
+                        <div key=${row.agent} class="v2-workspace-row flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
                           <div class="min-w-0">
-                            <div class="truncate text-sm font-medium text-[var(--color-fg-primary)]">${row.agent}</div>
-                            <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${index + 1}</div>
+                            <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${row.agent}</div>
+                            <div class="font-mono text-2xs text-[var(--color-fg-secondary)]">#${index + 1}</div>
                           </div>
-                          <div class="font-mono text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${row.karma}</div>
+                          <div class="font-mono text-lg font-bold tabular-nums text-[var(--color-fg-primary)]">${row.karma}</div>
                         </div>
                       `)}
                     </div>
@@ -153,8 +153,8 @@ export function BoardKarmaPanel() {
 
               <${SurfaceCard} variant="compact">
                 <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-                  <h3 class="text-xs font-semibold uppercase text-[var(--color-fg-muted)]">Ledger events</h3>
-                  <div class="flex flex-wrap items-center gap-2 font-mono text-2xs text-[var(--color-fg-muted)]">
+                  <h3 class="text-xs font-bold uppercase text-[var(--color-fg-secondary)]">Ledger events</h3>
+                  <div class="flex flex-wrap items-center gap-2 font-mono text-2xs text-[var(--color-fg-secondary)]">
                     <span>${ledger.count} events</span>
                     ${ledger.scoring_rule ? html`<span>${ledger.scoring_rule}</span>` : null}
                   </div>
@@ -164,13 +164,13 @@ export function BoardKarmaPanel() {
                   : html`
                     <div class="grid gap-2">
                       ${ledger.events.map((event, index) => html`
-                        <div key=${`${event.ts}:${event.recipient}:${event.voter}:${event.target_id}:${index}`} class="grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
+                        <div key=${`${event.ts}:${event.recipient}:${event.voter}:${event.target_id}:${index}`} class="v2-workspace-row grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
                           <div class="flex flex-wrap items-center gap-2 text-xs">
-                            <span class="font-medium text-[var(--color-fg-primary)]">${event.recipient}</span>
+                            <span class="font-bold text-[var(--color-fg-primary)]">${event.recipient}</span>
                             <span class="font-mono tabular-nums text-[var(--ok-bright)]">${signedDelta(event.delta)}</span>
-                            <span class="text-[var(--color-fg-muted)]">from ${event.voter}</span>
+                            <span class="text-[var(--color-fg-secondary)]">from ${event.voter}</span>
                           </div>
-                          <div class="flex flex-wrap items-center gap-2 font-mono text-2xs text-[var(--color-fg-muted)]">
+                          <div class="flex flex-wrap items-center gap-2 font-mono text-2xs text-[var(--color-fg-secondary)]">
                             <span>${targetLabel(event)}</span>
                             <span><${TimeAgo} timestamp=${event.ts_iso} /></span>
                           </div>

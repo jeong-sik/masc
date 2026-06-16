@@ -7,6 +7,7 @@ import { AsyncContainer } from './common/async-container'
 import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
+import { terminalReasonCodeLabel } from './fsm-hub-types'
 
 interface DecisionStats {
   total: number
@@ -51,7 +52,7 @@ function summarizeDecisionEvents(events: readonly KeeperDecision[]): DecisionSta
 
 function MetricCell({ label, value }: { label: string; value: string | number }) {
   return html`
-    <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
+    <div class="v2-monitoring-card rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
       <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${label}</div>
       <div class="mt-1 font-mono text-lg font-semibold leading-none text-[var(--color-fg-primary)]">${value}</div>
     </div>
@@ -80,14 +81,14 @@ function KeeperDecisionsTable({
         <${MetricCell} label="tool-linked" value=${stats.tool} />
       </div>
 
-      <div class="flex items-center justify-between rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
+      <div class="v2-monitoring-toolbar flex items-center justify-between rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2">
         <span class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           keeper decisions · ${events.length} events · limit ${limit}
         </span>
       </div>
 
       <div class="overflow-x-auto rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
-        <table class="w-full min-w-[760px]" aria-label="Keeper decision events">
+        <table class="v2-monitoring-table w-full min-w-[760px]" aria-label="Keeper decision events">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
@@ -102,14 +103,14 @@ function KeeperDecisionsTable({
           </thead>
           <tbody>
             ${events.map((event, index) => html`
-              <tr key=${`${event.ts_unix ?? 'na'}:${event.keeper_name}:${index}`} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+              <tr key=${`${event.ts_unix ?? 'na'}:${event.keeper_name}:${index}`} class="v2-monitoring-row border-b border-[var(--color-border-default)]/50 text-2xs">
                 <td class="px-2 py-1.5 text-left font-mono text-[var(--color-fg-muted)]">${formatDecisionTime(event.ts_unix)}</td>
                 <td class="px-2 py-1.5 text-left">
                   <${KeeperBadge} id=${event.keeper_name} variant="full" size="sm" />
                 </td>
                 <td class="px-2 py-1.5 text-left font-mono text-[var(--color-fg-primary)]">${event.event_type}</td>
                 <td class="px-2 py-1.5 text-left font-mono ${decisionOutcomeTone(event.outcome)}">${event.outcome ?? '-'}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-[var(--color-fg-muted)]">-</td>
+                <td class="px-2 py-1.5 text-left font-mono text-[var(--color-fg-muted)]" title=${event.terminal_reason_code ?? ''}>${terminalReasonCodeLabel(event.terminal_reason_code) ?? '-'}</td>
                 <td class="px-2 py-1.5 text-right font-mono text-[var(--color-fg-muted)]">
                   ${event.latency_ms == null ? '-' : `${Math.round(event.latency_ms)}ms`}
                 </td>
@@ -140,7 +141,7 @@ export function KeeperDecisionsStream({ limit = 200 }: { limit?: number }) {
       <div class="mb-3 flex justify-end">
         <button
           type="button"
-          class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="v2-monitoring-action rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
           onClick=${() => { void loadDecisions(limit) }}
         >
           refresh

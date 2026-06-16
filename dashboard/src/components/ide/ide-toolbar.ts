@@ -31,7 +31,7 @@ const VIEW_TABS: ReadonlyArray<{ readonly id: ViewTab; readonly label: string }>
 ]
 
 const TOOLBAR_BUTTON_BASE =
-  'h-7 shrink-0 cursor-pointer rounded-[var(--r-1)] px-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] transition-colors'
+  'v2-ide-action h-7 shrink-0 cursor-pointer rounded-[var(--r-1)] px-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] transition-colors'
 
 export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },
@@ -168,7 +168,7 @@ export function IdeToolbar({
       role="toolbar"
       aria-label="IDE editor toolbar"
       data-testid="ide-toolbar"
-      class="ide-toolbar"
+      class="ide-toolbar v2-ide-toolbar"
       data-has-rails=${onRailsToggle ? 'true' : 'false'}
     >
       <div
@@ -207,6 +207,7 @@ export function IdeToolbar({
       ${onRailsToggle ? html`
         <button
           type="button"
+          class="v2-ide-action"
           aria-pressed=${railsCollapsed ? 'true' : 'false'}
           onClick=${onRailsToggle}
           title=${railsCollapsed ? 'Show IDE rails' : 'Hide IDE rails'}
@@ -317,7 +318,7 @@ function ToolbarContextFocus({
             >
               <button
                 type="button"
-                class="ide-toolbar-context-route-group-action"
+                class="ide-toolbar-context-route-group-action v2-ide-action"
                 title=${group.evidence}
                 aria-label=${`Open ${group.evidence}`}
                 onClick=${() => openToolbarContextRouteLink(group.routeLink)}
@@ -335,6 +336,7 @@ function ToolbarContextFocus({
             <button
               key=${link.id}
               type="button"
+              class="v2-ide-action"
               title=${link.evidence}
               aria-label=${`Open ${link.evidence}`}
               onClick=${() => openToolbarContextRouteLink(link)}

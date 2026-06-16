@@ -170,7 +170,7 @@ let test_voice_routes_present () =
 
 let test_frontend_canonical_loopback_location_localhost () =
   let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
-  let request = Httpun.Request.create ~headers `GET "/dashboard?agent=agent_code" in
+  let request = Httpun.Request.create ~headers `GET "/dashboard?agent=codex" in
   let location =
     Server_routes_http_routes_frontend.canonical_loopback_location
       ~default_port:8935
@@ -178,7 +178,7 @@ let test_frontend_canonical_loopback_location_localhost () =
   in
   Alcotest.(check (option string))
     "localhost redirects to canonical loopback"
-    (Some "http://127.0.0.1:8935/dashboard?agent=agent_code")
+    (Some "http://127.0.0.1:8935/dashboard?agent=codex")
     location
 ;;
 

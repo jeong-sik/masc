@@ -209,7 +209,7 @@ let test_keeper_tool_called_scope_promoted_for_filters () =
                     ("tool_name", `String "keeper_task_claim");
                     ("success", `Bool true);
                     ("duration_ms", `Int 42);
-                    ("agent_id", `String "agent_code-mcp-client");
+                    ("agent_id", `String "codex-mcp-client");
                     ("session_id", `String "mcp-session-1");
                     ("operation_id", `String "op-1");
                     ("worker_run_id", `String "worker-1");

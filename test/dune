@@ -201,6 +201,7 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
+  test_keeper_observation_provenance
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
@@ -490,6 +491,7 @@
   test_keeper_surface_read
   test_keeper_surface_presence_prompt
   test_keeper_unified_verification_surface
+  test_keeper_observation_provenance
   test_keeper_fsm_guard_actions
   test_keeper_callback_hardening
   test_keeper_behavioral_regime
@@ -596,7 +598,6 @@
   test_keeper_event_queue
   test_keeper_relevance_check
   test_actionable_path_action
-  test_effective_oas_env
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_cognitive_gravity
@@ -1054,6 +1055,16 @@
  (libraries masc_test_deps))
 
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
+
+; Memory-OS "brain" end-to-end organ-composition harness. Runs the real
+; production functions in composition with falsification/teeth checks (not unit
+; isolation). Runnable standalone for read-only dry-run against a live store:
+;   dune exec test/memory_os_brain_harness.exe -- --keepers-dir <path>
+
+(test
+ (name memory_os_brain_harness)
+ (modules memory_os_brain_harness)
+ (libraries masc_test_deps))
 
 (test
  (name test_json_field)

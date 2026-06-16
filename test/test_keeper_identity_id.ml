@@ -70,25 +70,25 @@ let new_is_self ~name ~agent_name author =
 (* ── Goldens ── *)
 
 let test_of_string_goldens () =
-  check (option string) "bare name" (Some "dreamer") (id_str "dreamer");
-  check (option string) "wrapper -/-" (Some "dreamer")
-    (id_str "keeper-dreamer-agent");
-  check (option string) "wrapper _/_" (Some "dreamer")
-    (id_str "keeper_dreamer_agent");
-  check (option string) "wrapper -/_" (Some "dreamer")
-    (id_str "keeper-dreamer_agent");
-  check (option string) "wrapper _/-" (Some "dreamer")
-    (id_str "keeper_dreamer-agent");
-  check (option string) "keeper- prefix form" (Some "dreamer")
-    (id_str "keeper-dreamer");
-  check (option string) "case folded before canonicalizing" (Some "dreamer")
+  check (option string) "bare name" (Some "alice") (id_str "alice");
+  check (option string) "wrapper -/-" (Some "alice")
+    (id_str "keeper-alice-agent");
+  check (option string) "wrapper _/_" (Some "alice")
+    (id_str "keeper_alice_agent");
+  check (option string) "wrapper -/_" (Some "alice")
+    (id_str "keeper-alice_agent");
+  check (option string) "wrapper _/-" (Some "alice")
+    (id_str "keeper_alice-agent");
+  check (option string) "keeper- prefix form" (Some "alice")
+    (id_str "keeper-alice");
+  check (option string) "case folded before canonicalizing" (Some "alice")
     (id_str "Keeper-Dreamer-Agent");
-  check (option string) "whitespace trimmed" (Some "dreamer")
-    (id_str "  dreamer  ");
+  check (option string) "whitespace trimmed" (Some "alice")
+    (id_str "  alice  ");
   check (option string) "human author keeps raw form" (Some "vincent")
     (id_str "Vincent");
   check (option string) "@-form is not a keeper shape, raw fallback"
-    (Some "@dreamer") (id_str "@dreamer");
+    (Some "@alice") (id_str "@alice");
   check (option string) "empty is None" None (id_str "");
   check (option string) "whitespace-only is None" None (id_str "   ")
 
@@ -102,18 +102,18 @@ let test_of_string_idempotent_on_goldens () =
           (Printf.sprintf "of_string idempotent for %S" input)
           (Some (Kid.to_string id))
           (id_str (Kid.to_string id)))
-    [ "dreamer"
-    ; "keeper-dreamer-agent"
-    ; "keeper_dreamer_agent"
-    ; "keeper-dreamer"
+    [ "alice"
+    ; "keeper-alice-agent"
+    ; "keeper_alice_agent"
+    ; "keeper-alice"
     ; "Vincent"
-    ; "@dreamer"
+    ; "@alice"
     ]
 
 (* ── Legacy equivalence matrix ── *)
 
 let keeper_identities =
-  [ ("dreamer", "keeper-dreamer-agent")
+  [ ("alice", "keeper-alice-agent")
   ; ("sangsu", "keeper_sangsu_agent")
   ; ("analyst", "keeper-analyst-agent")
   ]
@@ -132,9 +132,9 @@ let foreign_authors =
   ; "operator"
   ; "other"
   ; "keeper-other-agent"
-  ; "@dreamer"
-  ; "email@dreamer.com"
-  ; "dreamerx"
+  ; "@alice"
+  ; "email@alice.com"
+  ; "alicex"
   ; ""
   ; "   "
   ]
@@ -176,15 +176,15 @@ let test_self_form_always_matches () =
 let test_case_fold_widening () =
   check bool "mixed-case wrapper is self (legacy matched via raw token)"
     true
-    (new_is_self ~name:"dreamer" ~agent_name:"keeper-dreamer-agent"
+    (new_is_self ~name:"alice" ~agent_name:"keeper-alice-agent"
        "Keeper-Dreamer-Agent");
   check bool "uppercase bare name is self" true
-    (new_is_self ~name:"dreamer" ~agent_name:"keeper-dreamer-agent" "DREAMER")
+    (new_is_self ~name:"alice" ~agent_name:"keeper-alice-agent" "DREAMER")
 
 let test_message_scope_surface () =
-  let ids = List.filter_map Kid.of_string [ "dreamer" ] in
+  let ids = List.filter_map Kid.of_string [ "alice" ] in
   check bool "is_self_author over MS surface" true
-    (MS.is_self_author ~self_ids:ids "keeper-dreamer-agent");
+    (MS.is_self_author ~self_ids:ids "keeper-alice-agent");
   check bool "foreign author is not self" false
     (MS.is_self_author ~self_ids:ids "vincent")
 

@@ -16,9 +16,9 @@ module Types = Masc_domain
    ============================================================ *)
 
 let test_agent_id_of_string () =
-  let id = Masc_domain.Agent_id.of_string "agent_llm_a-1" in
+  let id = Masc_domain.Agent_id.of_string "claude-1" in
   let s = Masc_domain.Agent_id.to_string id in
-  check string "roundtrip" "agent_llm_a-1" s
+  check string "roundtrip" "claude-1" s
 
 let test_agent_id_equal_same () =
   let id1 = Masc_domain.Agent_id.of_string "agent-x" in
@@ -279,15 +279,15 @@ let test_task_status_to_string_todo () =
   check string "todo" "todo" (Masc_domain.task_status_to_string Masc_domain.Todo)
 
 let test_task_status_to_string_claimed () =
-  let status = Masc_domain.Claimed { assignee = "agent_llm_a"; claimed_at = "2024-01-01" } in
+  let status = Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01" } in
   check string "claimed" "claimed" (Masc_domain.task_status_to_string status)
 
 let test_task_status_to_string_in_progress () =
-  let status = Masc_domain.InProgress { assignee = "agent_llm_a"; started_at = "2024-01-01" } in
+  let status = Masc_domain.InProgress { assignee = "claude"; started_at = "2024-01-01" } in
   check string "in_progress" "in_progress" (Masc_domain.task_status_to_string status)
 
 let test_task_status_to_string_done () =
-  let status = Masc_domain.Done { assignee = "agent_llm_a"; completed_at = "2024-01-01"; notes = None } in
+  let status = Masc_domain.Done { assignee = "claude"; completed_at = "2024-01-01"; notes = None } in
   check string "done" "done" (Masc_domain.task_status_to_string status)
 
 let test_task_status_to_string_cancelled () =
@@ -308,7 +308,7 @@ let test_task_status_to_yojson_todo () =
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_claimed () =
-  let status = Masc_domain.Claimed { assignee = "agent_llm_a"; claimed_at = "2024-01-01T00:00:00Z" } in
+  let status = Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" } in
   let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
@@ -318,7 +318,7 @@ let test_task_status_to_yojson_claimed () =
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_in_progress () =
-  let status = Masc_domain.InProgress { assignee = "provider_f"; started_at = "2024-01-01T12:00:00Z" } in
+  let status = Masc_domain.InProgress { assignee = "gemini"; started_at = "2024-01-01T12:00:00Z" } in
   let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
@@ -326,7 +326,7 @@ let test_task_status_to_yojson_in_progress () =
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_done_with_notes () =
-  let status = Masc_domain.Done { assignee = "agent_code"; completed_at = "2024-01-01"; notes = Some "All tests pass" } in
+  let status = Masc_domain.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = Some "All tests pass" } in
   let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
@@ -335,7 +335,7 @@ let test_task_status_to_yojson_done_with_notes () =
   | _ -> fail "expected Assoc"
 
 let test_task_status_to_yojson_done_no_notes () =
-  let status = Masc_domain.Done { assignee = "agent_code"; completed_at = "2024-01-01"; notes = None } in
+  let status = Masc_domain.Done { assignee = "codex"; completed_at = "2024-01-01"; notes = None } in
   let json = Masc_domain.task_status_to_yojson status in
   match json with
   | `Assoc fields ->
@@ -367,29 +367,29 @@ let test_task_status_of_yojson_todo () =
 let test_task_status_of_yojson_claimed () =
   let json = `Assoc [
     ("status", `String "claimed");
-    ("assignee", `String "agent_llm_a");
+    ("assignee", `String "claude");
     ("claimed_at", `String "2024-01-01")
   ] in
   match Masc_domain.task_status_of_yojson json with
-  | Ok (Masc_domain.Claimed { assignee; _ }) -> check string "assignee" "agent_llm_a" assignee
+  | Ok (Masc_domain.Claimed { assignee; _ }) -> check string "assignee" "claude" assignee
   | Ok _ -> fail "expected Claimed"
   | Error e -> fail e
 
 let test_task_status_of_yojson_in_progress () =
   let json = `Assoc [
     ("status", `String "in_progress");
-    ("assignee", `String "provider_f");
+    ("assignee", `String "gemini");
     ("started_at", `String "2024-01-01")
   ] in
   match Masc_domain.task_status_of_yojson json with
-  | Ok (Masc_domain.InProgress { assignee; _ }) -> check string "assignee" "provider_f" assignee
+  | Ok (Masc_domain.InProgress { assignee; _ }) -> check string "assignee" "gemini" assignee
   | Ok _ -> fail "expected InProgress"
   | Error e -> fail e
 
 let test_task_status_of_yojson_done () =
   let json = `Assoc [
     ("status", `String "done");
-    ("assignee", `String "agent_code");
+    ("assignee", `String "codex");
     ("completed_at", `String "2024-01-01");
     ("notes", `String "Done!")
   ] in
@@ -426,10 +426,10 @@ let test_show_task_status_todo () =
   check bool "non-empty" true (String.length s > 0)
 
 let test_show_task_status_claimed () =
-  let status = Masc_domain.Claimed { assignee = "agent_llm_a"; claimed_at = "2024-01-01" } in
+  let status = Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01" } in
   let s = Masc_domain.show_task_status status in
   check bool "contains assignee" true
-    (try let _ = Str.search_forward (Str.regexp "agent_llm_a") s 0 in true
+    (try let _ = Str.search_forward (Str.regexp "claude") s 0 in true
      with Not_found -> false)
 
 (* ============================================================
@@ -731,9 +731,9 @@ let test_masc_error_already_initialized () =
   check bool "contains already" true (String.length s > 0)
 
 let test_masc_error_agent_not_found () =
-  let s = Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.NotFound "agent_llm_a")) in
-  check bool "contains agent_llm_a" true
-    (try let _ = Str.search_forward (Str.regexp "agent_llm_a") s 0 in true
+  let s = Masc_domain.masc_error_to_string (Masc_domain.Agent (Masc_domain.Agent_error.NotFound "claude")) in
+  check bool "contains claude" true
+    (try let _ = Str.search_forward (Str.regexp "claude") s 0 in true
      with Not_found -> false)
 
 let test_masc_error_task_not_found () =
@@ -801,7 +801,7 @@ let test_agent_credential_to_yojson () =
   let cred : Masc_domain.agent_credential = {
     id = None;
     agent_id = None;
-    agent_name = "agent_llm_a";
+    agent_name = "claude";
     token = "abc123";
     role = Masc_domain.Worker;
     created_at = "2024-01-15T12:00:00Z";
@@ -819,7 +819,7 @@ let test_agent_credential_to_yojson_with_expiry () =
   let cred : Masc_domain.agent_credential = {
     id = None;
     agent_id = None;
-    agent_name = "agent_llm_a";
+    agent_name = "claude";
     token = "abc123";
     role = Masc_domain.Admin;
     created_at = "2024-01-15T12:00:00Z";
@@ -832,14 +832,14 @@ let test_agent_credential_to_yojson_with_expiry () =
 
 let test_agent_credential_of_yojson_ok () =
   let json = `Assoc [
-    ("agent_name", `String "provider_f");
+    ("agent_name", `String "gemini");
     ("token", `String "xyz");
     ("admin", `Bool false);
     ("created_at", `String "2024-01-15T12:00:00Z");
   ] in
   match Masc_domain.agent_credential_of_yojson json with
   | Ok cred ->
-    check string "agent_name" "provider_f" cred.agent_name;
+    check string "agent_name" "gemini" cred.agent_name;
     check bool "admin=false maps to worker" true (cred.role = Masc_domain.Worker)
   | Error e -> fail ("expected Ok, got: " ^ e)
 
@@ -1181,7 +1181,7 @@ let test_tempo_config_to_yojson () =
     mode = Masc_domain.Slow;
     delay_ms = 100;
     reason = Some "testing";
-    set_by = Some "agent_llm_a";
+    set_by = Some "claude";
     set_at = Some "2024-01-15T12:00:00Z";
   } in
   let json = Masc_domain.tempo_config_to_yojson c in
@@ -1236,7 +1236,7 @@ let test_rate_limit_config_to_yojson () =
   let c : Masc_domain.rate_limit_config = {
     per_minute = 60;
     burst_allowed = 10;
-    priority_agents = ["agent_llm_a"; "provider_f"];
+    priority_agents = ["claude"; "gemini"];
     worker_multiplier = 1.0;
     admin_multiplier = 2.0;
     broadcast_per_minute = 30;

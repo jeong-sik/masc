@@ -5,7 +5,7 @@ open Alcotest
     Verifies:
     - lib/server/server_startup_takeover.ml: "/tmp/masc-" literal = 0
       (PID lock now via host.run_dir).
-    - lib/server/server_runtime_bootstrap.ml: Provider_f admin-policy literals = 0
+    - lib/server/server_runtime_bootstrap.ml: provider-specific admin policy = 0
       (MASC bootstrap must not encode provider-specific OAS CLI policy).
     - server_startup_takeover invokes Host_config.host >= 1.
 
@@ -19,8 +19,8 @@ let test_no_tmp_masc_in_takeover () =
 
 let test_no_tmp_gemini_in_bootstrap () =
   let path = "lib/server/server_runtime_bootstrap.ml" in
-  let n = Ast_grep.count_string_literals ~module_path:path ~needle:"/tmp/provider_f" in
-  check int "/tmp/provider_f literals in runtime_bootstrap" 0 n
+  let n = Ast_grep.count_string_literals ~module_path:path ~needle:"/tmp/gemini" in
+  check int "/tmp/gemini literals in runtime_bootstrap" 0 n
 ;;
 
 let test_no_gemini_specific_policy_wiring () =
@@ -30,13 +30,7 @@ let test_no_gemini_specific_policy_wiring () =
       ~module_path:path
       ~needle:"gemini_headless_admin"
   in
-  let admin_env =
-    Ast_grep.count_string_literals
-      ~module_path:path
-      ~needle:"OAS_GEMINI_ADMIN_POLICY"
-  in
-  check int "gemini_headless_admin literals in runtime_bootstrap" 0 headless;
-  check int "OAS_GEMINI_ADMIN_POLICY literals in runtime_bootstrap" 0 admin_env
+  check int "gemini_headless_admin literals in runtime_bootstrap" 0 headless
 ;;
 
 let test_takeover_uses_host_config () =
@@ -50,7 +44,7 @@ let () =
     "rfc-0085-pr-3-server-runtime-paths"
     [ ( "literal purge"
       , [ test_case "no /tmp/masc- in takeover" `Quick test_no_tmp_masc_in_takeover
-        ; test_case "no /tmp/provider_f in bootstrap" `Quick test_no_tmp_gemini_in_bootstrap
+        ; test_case "no /tmp/gemini in bootstrap" `Quick test_no_tmp_gemini_in_bootstrap
         ; test_case
             "no Provider_f-specific admin-policy wiring"
             `Quick

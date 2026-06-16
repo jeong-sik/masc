@@ -366,7 +366,6 @@ let to_json (receipt : t) =
       ~sandbox_profile:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
       ?sandbox_root:receipt.sandbox_root
       ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode)
-      ?approval_mode:receipt.approval_profile
       ~runtime_profile:(receipt.runtime_id)
       ()
   in
@@ -421,11 +420,6 @@ let to_json (receipt : t) =
           ; ( "sandbox_root", string_opt_json receipt.sandbox_root )
           ; ( "network_mode"
             , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
-          ] )
-    ; ( "approval"
-      , `Assoc
-          [ ( "profile", string_opt_json receipt.approval_profile )
-          ; "derived", `Bool receipt.approval_profile_derived
           ] )
     ; ( "runtime"
       , `Assoc

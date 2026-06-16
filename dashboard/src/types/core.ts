@@ -511,6 +511,8 @@ export interface KeeperTrustLatestEvent {
   summary: string
   severity: 'ok' | 'warn' | 'bad'
   next_human_action?: string | null
+  // Trace id for deep-linking the causal event to its distributed trace.
+  trace_id?: string | null
 }
 
 export interface KeeperTrustApprovalPendingFirst {
@@ -525,6 +527,8 @@ export interface KeeperTrustApprovalState {
   summary?: string | null
   pending_count?: number | null
   pending_first?: KeeperTrustApprovalPendingFirst | null
+  // ISO8601 timestamp of the last approval-audit event.
+  latest_event_at?: string | null
 }
 
 export interface KeeperTrustExecutionSummary {

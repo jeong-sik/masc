@@ -50,6 +50,7 @@ describe('ConnectorOverviewStrip', () => {
       html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
       container,
     )
+    expect(container.querySelector('.v2-connector-overview-strip')).not.toBeNull()
     const tiles = container.querySelectorAll('[data-overview-tile]')
     expect(tiles.length).toBe(4)
     const ids = Array.from(tiles).map(t => t.getAttribute('data-overview-tile'))
@@ -464,9 +465,9 @@ describe('formatTileIdentityLine (pure)', () => {
 
   it('bot only → \"as @bot\"', () => {
     expect(formatTileIdentityLine(mkConnector({
-      bot_user_name: 'agent-llm-a-bot',
+      bot_user_name: 'claude-bot',
       guild_count: 0,
-    }))).toBe('as @agent-llm-a-bot')
+    }))).toBe('as @claude-bot')
   })
 
   it('guilds only → \"N guilds\" (plural)', () => {
@@ -485,9 +486,9 @@ describe('formatTileIdentityLine (pure)', () => {
 
   it('bot + guilds → joined with bullet separator', () => {
     expect(formatTileIdentityLine(mkConnector({
-      bot_user_name: 'agent-llm-a-bot',
+      bot_user_name: 'claude-bot',
       guild_count: 4,
-    }))).toBe('as @agent-llm-a-bot · 4 guilds')
+    }))).toBe('as @claude-bot · 4 guilds')
   })
 
   it('whitespace-only bot is ignored (no \"as @\" ghost)', () => {
@@ -523,7 +524,7 @@ describe('Tile identity line (rendered inside ConnectorOverviewStrip)', () => {
       html`<${ConnectorOverviewStrip}
         connectors=${[mkConnector({
           connector_id: 'discord',
-          bot_user_name: 'agent-llm-a-bot',
+          bot_user_name: 'claude-bot',
           guild_count: 2,
         })]}
         keeperCount=${0}
@@ -531,8 +532,8 @@ describe('Tile identity line (rendered inside ConnectorOverviewStrip)', () => {
       container,
     )
     const line = container.querySelector('[data-tile-identity="discord"]')!
-    expect(line.textContent).toBe('as @agent-llm-a-bot · 2 guilds')
-    expect(line.getAttribute('title')).toBe('as @agent-llm-a-bot · 2 guilds')
+    expect(line.textContent).toBe('as @claude-bot · 2 guilds')
+    expect(line.getAttribute('title')).toBe('as @claude-bot · 2 guilds')
   })
 
   it('omits identity line when both fields are empty', () => {

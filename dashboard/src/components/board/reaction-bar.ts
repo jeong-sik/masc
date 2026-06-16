@@ -92,7 +92,7 @@ export function ReactionBar({
           <button
             key=${emoji}
             type="button"
-            class=${`${compact ? 'h-6 min-w-7 px-1.5 text-2xs' : 'h-7 min-w-8 px-2 text-xs'} rounded-[var(--r-1)] border transition-colors duration-[var(--t-med)] ${
+            class=${`v2-workspace-action ${compact ? 'h-6 min-w-7 px-1.5 text-2xs' : 'h-7 min-w-8 px-2 text-xs'} rounded-[var(--r-1)] border transition-colors duration-[var(--t-med)] ${
               reacted
                 ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-20)]'
                 : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-divider)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'

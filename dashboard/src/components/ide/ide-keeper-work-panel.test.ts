@@ -28,7 +28,7 @@ describe('IdeKeeperWorkPanel', () => {
 
     expect(container.textContent).toContain('KEEPER WORK')
     expect(container.textContent).toContain('task-151')
-    expect(container.textContent).toContain('Fix agent-code runtime config')
+    expect(container.textContent).toContain('Fix codex runtime config')
     expect(container.textContent).toContain('tool_route_recoverable_failure')
     expect(container.textContent).toContain('inspect_provider_tool_contract')
     expect(container.textContent).toContain('masc_claim_next')
@@ -42,7 +42,7 @@ describe('IdeKeeperWorkPanel', () => {
     )
 
     expect(summary.currentTaskId).toBe('task-151')
-    expect(summary.currentTask?.title).toBe('Fix agent-code runtime config')
+    expect(summary.currentTask?.title).toBe('Fix codex runtime config')
     expect(summary.activeTasks).toHaveLength(1)
     expect(summary.activeTaskCount).toBe(1)
   })
@@ -81,8 +81,15 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).toContain('50%')
     expect(container.textContent).toContain('Goal')
     expect(container.textContent).toContain('Task')
+    expect(container.querySelectorAll('.ide-keeper-work-card.v2-ide-card').length).toBeGreaterThanOrEqual(1)
+    expect(container.querySelector('.ide-keeper-work-goal.v2-ide-card')).not.toBeNull()
     expect(container.querySelector('.ide-keeper-work-goal .ide-keeper-work-route-count')?.textContent)
       .toBe('CTX 2')
+
+    const goalLinks = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.ide-keeper-work-goal .ide-keeper-work-links button'),
+    )
+    expect(goalLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
 
     fireEvent.click(buttonByText(container, 'Goal'))
     expect(window.location.hash).toBe('#workspace?section=planning&goal=goal-runtime')
@@ -105,6 +112,7 @@ describe('IdeKeeperWorkPanel', () => {
     const taskLinks = Array.from(
       container.querySelectorAll<HTMLButtonElement>('.ide-keeper-work-card .ide-keeper-work-links button'),
     )
+    expect(taskLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(container.querySelector('.ide-keeper-work-card .ide-keeper-work-route-count')?.textContent)
       .toBe('CTX 4')
     expect(taskLinks.map(link => link.textContent)).toEqual([
@@ -203,7 +211,7 @@ function keeperFixture(): Keeper {
 function taskFixture(partial: Partial<Task> = {}): Task {
   return {
     id: 'task-151',
-    title: 'Fix agent-code runtime config',
+    title: 'Fix codex runtime config',
     status: 'claimed',
     assignee: 'sangsu',
     ...partial,

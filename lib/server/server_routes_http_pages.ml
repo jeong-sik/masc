@@ -280,7 +280,7 @@ let serve_dashboard_static name request reqd =
 
 (** Dashboard Bonsai island (Jane Street Bonsai + js_of_ocaml).
     Coexists with the Preact SPA under [/dashboard/b/*] until the migration is
-    complete. See planning/agent_llm_a-plans/masc-eventual-parrot.md. *)
+    complete. See planning/claude-plans/masc-eventual-parrot.md. *)
 let bonsai_asset_root () =
   Filename.concat (assets_root ()) "dashboard_bonsai"
 

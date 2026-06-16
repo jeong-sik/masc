@@ -92,18 +92,18 @@ function StateRow({ row }: { row: StateBlockRow }) {
   return html`
     <article
       role="listitem"
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--warn-bright)] bg-[var(--color-bg-surface)] px-3.5 py-3"
+      class="v2-workspace-row rounded-[var(--r-1)] border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--warn-bright)] bg-[var(--color-bg-elevated)] px-3.5 py-3"
     >
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         ${row.message.seq !== undefined
-          ? html`<span class="text-3xs font-semibold tabular-nums uppercase tracking-[var(--track-caps)] text-[var(--warn-bright)]">#${row.message.seq}</span>`
+          ? html`<span class="text-2xs font-bold tabular-nums uppercase tracking-[var(--track-caps)] text-[var(--warn-bright)]">#${row.message.seq}</span>`
           : null}
-        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
+        <span class="text-xs font-bold text-[var(--color-fg-primary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
         ${row.message.timestamp
-          ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
+          ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-secondary)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
           : null}
         ${row.message.type
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.message.type}</span>`
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.type}</span>`
           : null}
       </div>
 
@@ -112,10 +112,10 @@ function StateRow({ row }: { row: StateBlockRow }) {
       </div>
 
       <div
-        class="mt-3 rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-3 py-3"
+        class="v2-workspace-detail mt-3 rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-3 py-3"
         aria-label="State block"
       >
-        <div class="mb-2 flex items-center gap-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
+        <div class="mb-2 flex items-center gap-2 text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
           <${Braces} size=${13} aria-hidden="true" />
           STATE
         </div>
@@ -124,13 +124,13 @@ function StateRow({ row }: { row: StateBlockRow }) {
               <dl class="grid gap-2 sm:grid-cols-2">
                 ${row.fields.map(field => html`
                   <div class="min-w-0 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2" key=${field.label}>
-                    <dt class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${field.label}</dt>
-                    <dd class="mt-1 text-xs leading-paragraph text-[var(--color-fg-secondary)]">${field.value}</dd>
+                    <dt class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${field.label}</dt>
+                    <dd class="mt-1 text-xs leading-paragraph text-[var(--color-fg-primary)]">${field.value}</dd>
                   </div>
                 `)}
               </dl>
             `
-          : html`<pre class="whitespace-pre-wrap break-words text-xs leading-paragraph text-[var(--color-fg-secondary)]">${row.stateBlock}</pre>`}
+          : html`<pre class="whitespace-pre-wrap break-words text-xs leading-paragraph text-[var(--color-fg-primary)]">${row.stateBlock}</pre>`}
       </div>
     </article>
   `
@@ -144,8 +144,8 @@ export function StateBlockMessages() {
     <section class="grid gap-4" aria-labelledby="state-block-messages-heading">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Messages</div>
-          <h2 id="state-block-messages-heading" class="mt-1 text-xl font-semibold text-[var(--color-fg-primary)]">State-block messages</h2>
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Messages</div>
+          <h2 id="state-block-messages-heading" class="mt-1 text-xl font-bold text-[var(--color-fg-primary)]">State-block messages</h2>
         </div>
         <${ActionButton}
           variant="ghost"
@@ -160,13 +160,13 @@ export function StateBlockMessages() {
       </div>
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">State blocks</div>
-          <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${rows.length}</div>
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">State blocks</div>
+          <div class="mt-1 text-lg font-bold tabular-nums text-[var(--color-fg-primary)]">${rows.length}</div>
         </div>
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Sources</div>
-          <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${sourceCount}</div>
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Sources</div>
+          <div class="mt-1 text-lg font-bold tabular-nums text-[var(--color-fg-primary)]">${sourceCount}</div>
         </div>
       </div>
 

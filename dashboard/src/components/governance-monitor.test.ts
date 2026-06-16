@@ -73,5 +73,31 @@ describe('GovernanceMonitor', () => {
 
     expect(get).toHaveBeenCalledTimes(2)
   })
+
+  it('marks the raw toolbar and rejection table with v2 monitoring classes', async () => {
+    const get = vi.fn().mockResolvedValue({
+      generated_at: '2026-04-21T00:00:00Z',
+      window_minutes: 60,
+      tool_rejections: [
+        { tool: 'tool_edit_file', reason: 'risk threshold', count: 3 },
+      ],
+      approval_queue: {
+        depth: 0,
+        p50_wait_sec: null,
+        p95_wait_sec: null,
+        oldest_pending_sec: null,
+      },
+    })
+    const { GovernanceMonitor } = await loadMonitor(get)
+
+    await act(async () => {
+      render(html`<${GovernanceMonitor} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.querySelector('.v2-monitoring-toolbar')).not.toBeNull()
+    expect(container.querySelector('.v2-monitoring-table')).not.toBeNull()
+  })
 })
 

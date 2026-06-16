@@ -158,11 +158,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
             latency_ms: 120,
             generation: 3,
             channel: 'turn',
-            model_used: 'provider-k-5',
+            model_used: 'glm-5',
             cost_usd: 0.12,
             compacted: false,
             handoff_performed: true,
-            handoff_to_model: 'provider-k-5',
+            handoff_to_model: 'glm-5',
             handoff_new_generation: 4,
           },
         ],
@@ -292,7 +292,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             latency_ms: 110,
             generation: 2,
             channel: 'turn',
-            model_used: 'provider-k-5',
+            model_used: 'glm-5',
             cost_usd: 0.03,
             compacted: false,
             prompt_fingerprint: 'prompt-fp-001',
@@ -385,6 +385,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             state: 'pending',
             summary: '1 approval request waiting',
             pending_count: 1,
+            latest_event_at: '2026-04-23T00:09:30Z',
           },
           execution_summary: {
             sandbox_summary: 'docker / none',
@@ -402,6 +403,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             summary: 'Waiting for operator approval before resuming.',
             severity: 'warn',
             next_human_action: 'resolve_approval',
+            trace_id: 'trace-approval-42',
           },
         },
       },
@@ -417,6 +419,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         state: 'pending',
         summary: '1 approval request waiting',
         pending_count: 1,
+        latest_event_at: '2026-04-23T00:09:30Z',
       },
       execution_summary: {
         sandbox_summary: 'docker / none',
@@ -427,6 +430,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         keeper_turn_id: 42,
         title: 'Approval pending',
         summary: 'Waiting for operator approval before resuming.',
+        trace_id: 'trace-approval-42',
       },
     })
   })
@@ -578,11 +582,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
         status: 'active',
         runtime_id: 'oas-keeper_unified',
         selected_runtime_canonical: 'primary',
-        primary_model: 'provider-d:gpt-5.4',
+        primary_model: 'openai:gpt-5.4',
         active_model: 'gpt-5.4',
-        active_model_label: 'provider-d:gpt-5.4',
+        active_model_label: 'openai:gpt-5.4',
         last_model_used: 'gpt-5.4',
-        last_model_used_label: 'provider-d:gpt-5.4',
+        last_model_used_label: 'openai:gpt-5.4',
         metrics_series: [
           {
             ts_unix: 10,
@@ -592,10 +596,10 @@ describe('normalizeKeepers lifecycle metrics', () => {
             latency_ms: 100,
             generation: 1,
             channel: 'turn',
-            model_used: 'provider-a:model-a-sonnet',
+            model_used: 'anthropic:claude-sonnet',
             runtime: {
               runtime_id: 'primary',
-              selected_model: 'provider-a:model-a-sonnet',
+              selected_model: 'anthropic:claude-sonnet',
               attempt_count: 2,
               outcome: 'passed_to_next_model',
               strategy: 'round_robin',
@@ -603,8 +607,8 @@ describe('normalizeKeepers lifecycle metrics', () => {
               fallback_hops: 1,
               fallback_events: [
                 {
-                  from_model_id: 'provider-d:gpt-5.4',
-                  to_model_id: 'provider-a:model-a-sonnet',
+                  from_model_id: 'openai:gpt-5.4',
+                  to_model_id: 'anthropic:claude-sonnet',
                   reason: 'turn_timeout',
                 },
               ],
@@ -653,7 +657,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             latency_ms: 95,
             generation: 2,
             channel: 'turn',
-            model_used: 'provider-k-5',
+            model_used: 'glm-5',
             cost_usd: 0.04,
             compacted: false,
             ctx_composition: {
@@ -703,7 +707,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             latency_ms: 2000,
             generation: 2,
             channel: 'turn',
-            model_used: 'provider-k-5',
+            model_used: 'glm-5',
             cost_usd: 0.05,
             compacted: false,
             usage: {
@@ -745,7 +749,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             context_max: 1000,
             generation: 2,
             channel: 'turn',
-            model_used: 'provider-k-5',
+            model_used: 'glm-5',
             cost_usd: 0.05,
             usage: {
               input_tokens: 120,

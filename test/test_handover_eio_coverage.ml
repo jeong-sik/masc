@@ -25,7 +25,7 @@ let persistence_counter reason =
 let test_handover_record_basic () =
   let h : Handover_eio.handover_record = {
     id = "handover-12345-00001";
-    from_agent = "agent_llm_a";
+    from_agent = "claude";
     to_agent = None;
     task_id = "task-001";
     session_id = "session-abc";
@@ -42,15 +42,15 @@ let test_handover_record_basic () =
     context_usage_percent = 75;
     handover_reason = "context_limit_75";
   } in
-  check string "from_agent" "agent_llm_a" h.from_agent;
+  check string "from_agent" "claude" h.from_agent;
   check int "context_usage_percent" 75 h.context_usage_percent;
   check int "completed_steps" 2 (List.length h.completed_steps)
 
 let test_handover_record_with_to_agent () =
   let h : Handover_eio.handover_record = {
     id = "handover-12345-00002";
-    from_agent = "agent_llm_a";
-    to_agent = Some "provider_f";
+    from_agent = "claude";
+    to_agent = Some "gemini";
     task_id = "task-002";
     session_id = "session-def";
     current_goal = "Goal";
@@ -67,13 +67,13 @@ let test_handover_record_with_to_agent () =
     handover_reason = "explicit";
   } in
   match h.to_agent with
-  | Some a -> check string "to_agent" "provider_f" a
+  | Some a -> check string "to_agent" "gemini" a
   | None -> fail "expected Some"
 
 let test_handover_record_errors () =
   let h : Handover_eio.handover_record = {
     id = "handover-12345-00003";
-    from_agent = "agent_code";
+    from_agent = "codex";
     to_agent = None;
     task_id = "task-003";
     session_id = "session-ghi";
@@ -237,18 +237,18 @@ let with_eio_env f =
 
 let test_create_handover_basic () =
   let h = Handover_eio.create_handover
-    ~from_agent:"agent_llm_a"
+    ~from_agent:"claude"
     ~task_id:"task-001"
     ~session_id:"sess-001"
     ~reason:(Handover_eio.ContextLimit 75)
   in
-  check string "from_agent" "agent_llm_a" h.from_agent;
+  check string "from_agent" "claude" h.from_agent;
   check string "task_id" "task-001" h.task_id;
   check bool "id not empty" true (String.length h.id > 0)
 
 let test_create_handover_timeout () =
   let h = Handover_eio.create_handover
-    ~from_agent:"provider_f"
+    ~from_agent:"gemini"
     ~task_id:"task-002"
     ~session_id:"sess-002"
     ~reason:(Handover_eio.Timeout 300)
@@ -286,7 +286,7 @@ let test_handover_of_json_invalid () =
 let test_save_and_load_handover () =
   with_eio_env @@ fun ~fs config ->
   let h = Handover_eio.create_handover
-    ~from_agent:"agent_llm_a"
+    ~from_agent:"claude"
     ~task_id:"task-io"
     ~session_id:"sess-io"
     ~reason:(Handover_eio.ContextLimit 75)
@@ -361,7 +361,7 @@ let test_list_handovers_skips_bad_entries_with_metric () =
 let test_get_pending_handovers () =
   with_eio_env @@ fun ~fs config ->
   let h = Handover_eio.create_handover
-    ~from_agent:"agent_llm_a" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
+    ~from_agent:"claude" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
   ignore (Handover_eio.save_handover ~fs config h);
   let pending = Handover_eio.get_pending_handovers ~fs config in
   check int "one pending" 1 (List.length pending)
@@ -373,13 +373,13 @@ let test_get_pending_handovers () =
 let test_claim_handover_success () =
   with_eio_env @@ fun ~fs config ->
   let h = Handover_eio.create_handover
-    ~from_agent:"agent_llm_a" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
+    ~from_agent:"claude" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
   ignore (Handover_eio.save_handover ~fs config h);
-  match Handover_eio.claim_handover ~fs config ~handover_id:h.id ~agent_name:"provider_f" with
+  match Handover_eio.claim_handover ~fs config ~handover_id:h.id ~agent_name:"gemini" with
   | Ok claimed ->
       check bool "has to_agent" true (claimed.to_agent <> None);
       (match claimed.to_agent with
-       | Some name -> check string "to_agent" "provider_f" name
+       | Some name -> check string "to_agent" "gemini" name
        | None -> fail "expected Some")
   | Error e -> failf "claim failed: %s" e
 
@@ -395,7 +395,7 @@ let test_claim_handover_nonexistent () =
 
 let test_format_as_markdown () =
   let h = Handover_eio.create_handover
-    ~from_agent:"agent_llm_a" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
+    ~from_agent:"claude" ~task_id:"t1" ~session_id:"s1" ~reason:Handover_eio.Explicit in
   let md = Handover_eio.format_as_markdown h in
   check bool "contains handover" true (String.length md > 0);
   check bool "is markdown" true (String.contains md '#')

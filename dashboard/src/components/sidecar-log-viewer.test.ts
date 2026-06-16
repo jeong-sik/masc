@@ -119,6 +119,13 @@ describe('SidecarLogViewer DOM', () => {
     await flushUi()
     await flushUi()
 
+    // v2 surface marker classes for CSS scoping
+    expect(container.querySelector('.v2-sidecar-log-toggle')).not.toBeNull()
+    expect(container.querySelector('.v2-sidecar-log-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-sidecar-log-path')).not.toBeNull()
+    expect(container.querySelector('.v2-sidecar-log-pre')).not.toBeNull()
+    expect(container.querySelector('.v2-sidecar-log-level-pill')).not.toBeNull()
+
     // Before filter: match-count shows total
     const pre = container.querySelector('pre') as HTMLPreElement
     expect(pre.textContent).toContain('hb')

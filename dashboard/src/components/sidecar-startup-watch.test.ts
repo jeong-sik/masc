@@ -87,6 +87,7 @@ describe('StartupCheckBanner rendering', () => {
       markStartAttempt('discord')
       vi.setSystemTime(t0 + 6_000) // 6s past grace (GRACE=5s)
       render(html`<${StartupCheckBanner} connectorId="discord" sidecarUp=${false} />`, container)
+      expect(container.querySelector('.v2-sidecar-startup-watch')).not.toBeNull()
       const elapsed = container.querySelector('[data-startup-warning-elapsed]')
       expect(elapsed).toBeTruthy()
       expect(elapsed!.getAttribute('data-startup-warning-elapsed')).toBe('6')

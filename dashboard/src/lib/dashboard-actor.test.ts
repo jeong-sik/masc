@@ -72,11 +72,11 @@ describe('resolveDashboardActorName', () => {
   })
 
   it('resolves from agent_name query param', () => {
-    expect(resolveDashboardActorName('?agent_name=dreamer', null)).toBe('dreamer')
+    expect(resolveDashboardActorName('?agent_name=alice', null)).toBe('alice')
   })
 
   it('prioritizes agent over agent_name', () => {
-    expect(resolveDashboardActorName('?agent=janitor&agent_name=dreamer', null)).toBe('janitor')
+    expect(resolveDashboardActorName('?agent=janitor&agent_name=alice', null)).toBe('janitor')
   })
 
   it('falls back to storage when no query param', () => {
@@ -130,16 +130,16 @@ describe('actor query helpers', () => {
       hash: '#pane',
     }
     const result = replaceDashboardActorQueryParam(
-      'agent-code',
+      'codex',
       location as unknown as Location,
       history as unknown as History,
     )
 
-    expect(result).toBe('agent-code')
+    expect(result).toBe('codex')
     expect(history.replaceState).toHaveBeenCalledTimes(1)
     const [, , nextUrl] = history.replaceState.mock.calls[0] as [null, string, string]
     expect(nextUrl).toContain('/dashboard?')
-    expect(nextUrl).toContain('agent=agent-code')
+    expect(nextUrl).toContain('agent=codex')
     expect(nextUrl).toContain('tab=tools')
     expect(nextUrl).toContain('#pane')
     expect(nextUrl).not.toContain('agent_name=')
@@ -153,15 +153,15 @@ describe('actor query helpers', () => {
       search: '?agent=dashboard',
       hash: '',
     }
-    const result = syncDashboardActorName('agent-code', {
+    const result = syncDashboardActorName('codex', {
       storage,
       rewriteQuery: true,
       location: location as unknown as Location,
       history: history as unknown as History,
     })
 
-    expect(result).toBe('agent-code')
-    expect(storage.getItem(DASHBOARD_AGENT_NAME_KEY)).toBe('agent-code')
-    expect(history.replaceState).toHaveBeenCalledWith(null, '', '/dashboard?agent=agent-code')
+    expect(result).toBe('codex')
+    expect(storage.getItem(DASHBOARD_AGENT_NAME_KEY)).toBe('codex')
+    expect(history.replaceState).toHaveBeenCalledWith(null, '', '/dashboard?agent=codex')
   })
 })

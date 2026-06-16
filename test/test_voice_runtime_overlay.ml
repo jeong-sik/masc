@@ -71,7 +71,7 @@ let test_resolve_voice_aliases () =
   let elevenlabs = Option.get (Voice.resolve_adapter "elevenlabs") in
   check string "elevenlabs alias" "elevenlabs-direct" elevenlabs.canonical_name;
   let openai_compat = Option.get (Voice.resolve_adapter "openai_compat") in
-  check string "provider_d compat alias" "voice-provider_d-compat" openai_compat.canonical_name
+  check string "openai compat alias" "voice-openai-compat" openai_compat.canonical_name
 ;;
 
 let test_voice_auth_env_resolution () =
@@ -81,7 +81,7 @@ let test_voice_auth_env_resolution () =
     "elevenlabs auth env"
     (Some "ELEVENLABS_API_KEY")
     (Voice.auth_env_name elevenlabs);
-  let openai_compat = Option.get (Voice.resolve_adapter "voice-provider_d-compat") in
+  let openai_compat = Option.get (Voice.resolve_adapter "voice-openai-compat") in
   check
     (option string)
     "endpoint override auth env"
@@ -228,9 +228,9 @@ let test_stt_request_elevenlabs_direct () =
 
 let test_stt_request_openai_compat () =
   let endpoint : Voice_config.endpoint =
-    { id = "test-provider_d-stt"
+    { id = "test-openai-stt"
     ; kind = Voice_config.Openai_compat
-    ; base_url = Some "https://api.provider_d.com/v1"
+    ; base_url = Some "https://api.openai.com/v1"
     ; mcp_url = None
     ; health_url = None
     ; api_key_env = Some "OPENAI_API_KEY"
@@ -247,7 +247,7 @@ let test_stt_request_openai_compat () =
       ~model:"whisper-1"
   with
   | Ok req ->
-    check string "url" "https://api.provider_d.com/v1/audio/transcriptions" req.url;
+    check string "url" "https://api.openai.com/v1/audio/transcriptions" req.url;
     check
       bool
       "has Authorization header"
@@ -621,7 +621,7 @@ let () =
             "stt request elevenlabs direct"
             `Quick
             test_stt_request_elevenlabs_direct
-        ; test_case "stt request provider_d compat" `Quick test_stt_request_openai_compat
+        ; test_case "stt request openai compat" `Quick test_stt_request_openai_compat
         ; test_case "stt request mcp rejected" `Quick test_stt_request_mcp_rejected
         ] )
     ; ( "tts"

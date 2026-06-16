@@ -1,7 +1,7 @@
 (** Head+tail truncating byte accumulator — Phase 3 of the Legendary
     Bash roadmap.
 
-    Mirrors agent_llm_a-code's [EndTruncatingAccumulator] but retains BOTH
+    Mirrors claude-code's [EndTruncatingAccumulator] but retains BOTH
     the head and tail of the stream, which keeps opening banners
     (usage strings, config echoes) and closing summaries (final exit
     status, error tails) readable when the middle is elided.

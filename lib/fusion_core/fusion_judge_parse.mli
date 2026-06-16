@@ -25,7 +25,7 @@
     - recommend:    [{ "kind": "recommend", "action": "...", "rationale": "..." }]
     - insufficient: [{ "kind": "insufficient", "missing": ["..."] }]
 
-    설계 SSOT: docs/rfc/RFC-0251-fusion-panel-judge-deliberation.md §7.2 *)
+    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
 
 (** 심판 프롬프트에 임베드할, 기대 JSON 형태 설명 (LLM 지시용). *)
 val expected_json_doc : string

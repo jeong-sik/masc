@@ -1,5 +1,5 @@
 (* Fusion — 패널+심판 심의 루프의 타입드 계약 (구현).
-   계약/문서: fusion_types.mli, docs/rfc/RFC-0251-fusion-panel-judge-deliberation.md *)
+   계약/문서: fusion_types.mli, docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md *)
 
 type usage =
   { input_tokens : int

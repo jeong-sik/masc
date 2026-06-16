@@ -1,4 +1,4 @@
-(* Standalone alcotest for the pure fusion core (RFC-0251 §6/§9/§10).
+(* Standalone alcotest for the pure fusion core (RFC-0252 §6/§9/§10).
    Proves: deterministic gate branches, TOML config validation, depth guard. *)
 
 open Fusion_types
@@ -33,7 +33,7 @@ let req ?(preset = "budget") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_to
 let decide ?(policy = base_policy) ?(hourly_count = 0) ?(estimated_cost_usd = 0.1) r =
   Fusion_policy.decide ~policy ~hourly_count ~estimated_cost_usd r
 
-(* --- gate branches (RFC-0251 §6) --- *)
+(* --- gate branches (RFC-0252 §6) --- *)
 
 let test_disabled () =
   let policy = { base_policy with Fusion_policy.enabled = false } in
@@ -87,7 +87,7 @@ let test_explicit_still_budget_bound () =
   Alcotest.check gate "operator request still budget-bound"
     (Deny Over_hourly_budget) (decide ~hourly_count:99 r)
 
-(* --- depth guard (RFC-0251 §10) --- *)
+(* --- depth guard (RFC-0252 §10) --- *)
 
 let test_depth_descend () =
   Alcotest.(check bool) "Top descends to Nested" true
@@ -95,7 +95,7 @@ let test_depth_descend () =
   Alcotest.(check bool) "Nested is the floor" true
     (Fusion_depth.descend Fusion_depth.Nested = None)
 
-(* --- config (RFC-0251 §9) --- *)
+(* --- config (RFC-0252 §9) --- *)
 
 let parse s = Otoml.Parser.from_string s
 
@@ -255,7 +255,7 @@ let test_config_disabled_with_preset () =
     Alcotest.failf "seed [fusion] must parse, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
 
-(* --- judge LLM-facing JSON parse (RFC-0251 §7.2) --- *)
+(* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
 
 let jdecision = Alcotest.testable pp_judge_decision equal_judge_decision
 
@@ -339,7 +339,7 @@ let test_judge_tolerant_skip () =
   | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
-(* --- budget counter (RFC-0251 §6/§10) --- *)
+(* --- budget counter (RFC-0252 §6/§10) --- *)
 
 let test_budget_basic () =
   let b = Fusion_budget.create () in

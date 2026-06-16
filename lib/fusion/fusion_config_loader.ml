@@ -1,5 +1,5 @@
 (* Fusion — runtime.toml [fusion] 로딩 (구현).
-   계약/문서: fusion_config_loader.mli, docs/rfc/RFC-0251 §9 *)
+   계약/문서: fusion_config_loader.mli, docs/rfc/RFC-0252 §9 *)
 
 (* base_path 기준 runtime.toml 절대경로. Config_dir_resolver SSOT 재사용
    (MASC_CONFIG_DIR override + <base_path>/.masc/config/ fallback 모두 honored). *)

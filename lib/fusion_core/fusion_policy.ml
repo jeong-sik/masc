@@ -1,5 +1,5 @@
 (* Fusion — 결정론적 발동 게이트 (구현).
-   계약/문서: fusion_policy.mli, docs/rfc/RFC-0251 §6 *)
+   계약/문서: fusion_policy.mli, docs/rfc/RFC-0252 §6 *)
 
 type preset =
   { name : string

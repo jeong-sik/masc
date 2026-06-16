@@ -231,7 +231,7 @@ describe('HarnessHealth', () => {
         timestamp: 1711440600,
         task_id: 'task-2',
         task_title: 'transition-done',
-        agent_name: 'agent-code',
+        agent_name: 'codex',
         gate: 'fallback',
         verdict: 'reject:vague notes',
         evaluator_runtime: 'cross_verifier',
@@ -291,7 +291,7 @@ describe('HarnessHealth', () => {
         trace_id: 'trace-b',
         generation: 8,
         next_generation: 9,
-        to_model: 'provider-k-5',
+        to_model: 'glm-5',
       },
     }
     await flushUi()

@@ -57,7 +57,7 @@ describe('log diagnostics', () => {
         entry({
           level: 'ERROR',
           message:
-            'all runtimes exhausted: Runtime attempt liveness guard killed runtime lane provider-k-coding-with-spark: inter_chunk_idle',
+            'all runtimes exhausted: Runtime attempt liveness guard killed runtime lane glm-coding-with-spark: inter_chunk_idle',
         }),
       ),
     ).toBeNull()

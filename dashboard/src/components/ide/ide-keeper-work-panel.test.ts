@@ -28,7 +28,7 @@ describe('IdeKeeperWorkPanel', () => {
 
     expect(container.textContent).toContain('KEEPER WORK')
     expect(container.textContent).toContain('task-151')
-    expect(container.textContent).toContain('Fix agent-code runtime config')
+    expect(container.textContent).toContain('Fix codex runtime config')
     expect(container.textContent).toContain('tool_route_recoverable_failure')
     expect(container.textContent).toContain('inspect_provider_tool_contract')
     expect(container.textContent).toContain('masc_claim_next')
@@ -42,7 +42,7 @@ describe('IdeKeeperWorkPanel', () => {
     )
 
     expect(summary.currentTaskId).toBe('task-151')
-    expect(summary.currentTask?.title).toBe('Fix agent-code runtime config')
+    expect(summary.currentTask?.title).toBe('Fix codex runtime config')
     expect(summary.activeTasks).toHaveLength(1)
     expect(summary.activeTaskCount).toBe(1)
   })
@@ -203,7 +203,7 @@ function keeperFixture(): Keeper {
 function taskFixture(partial: Partial<Task> = {}): Task {
   return {
     id: 'task-151',
-    title: 'Fix agent-code runtime config',
+    title: 'Fix codex runtime config',
     status: 'claimed',
     assignee: 'sangsu',
     ...partial,

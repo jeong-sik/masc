@@ -224,7 +224,7 @@ export function Planning() {
       : '아직 등록된 항목이 없습니다.'
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-workspace-surface flex flex-col gap-4">
       <section class="${DECK_PANEL}" aria-label="계획 상태 요약">
         <div class="${DECK_HEAD}">
           <div class="max-w-190">
@@ -235,6 +235,7 @@ export function Planning() {
           <${ActionButton}
             variant="ghost"
             size="md"
+            class="v2-workspace-action"
             disabled=${goalsLoading.value}
             onClick=${() => { refreshGoals() }}
           >

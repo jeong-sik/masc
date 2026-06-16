@@ -115,7 +115,7 @@ function PlanningRouteFocusPanel() {
 
   return html`
     <section
-      class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      class="v2-workspace-panel rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
       data-testid="planning-route-focus"
       data-route-focused-goal=${goalId ?? undefined}
       data-route-focused-task=${taskId ?? undefined}
@@ -149,7 +149,7 @@ function PlanningRouteFocusPanel() {
         </div>
         <button
           type="button"
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-text-muted transition-colors hover:border-[var(--color-border-strong)] hover:text-text-strong"
+          class="v2-workspace-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-text-muted transition-colors hover:border-[var(--color-border-strong)] hover:text-text-strong"
           onClick=${clearPlanningRouteFocus}
         >
           CLEAR
@@ -211,7 +211,7 @@ function WorkspaceHealthPanel() {
   const warnCount = workspaceCount(snapshot, 'warn')
   const evidenceCount = workspaceCount(snapshot, 'evidence')
   return html`
-    <section class="rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-3" aria-label="협력 상태">
+    <section class="v2-workspace-panel rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-3" aria-label="협력 상태">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">협력 상태</div>
@@ -266,7 +266,7 @@ export function PlanningPanel() {
   const view = activeView.value
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-workspace-surface flex flex-col gap-4">
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

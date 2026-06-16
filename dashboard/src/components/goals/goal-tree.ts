@@ -955,7 +955,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
     <div class="flex flex-col" style="margin-left:${indent}px">
       <button
         type="button"
-        class="${headerBase} ${hasContent ? 'cursor-pointer' : ''} ${ringFocusClasses()}"
+        class="v2-workspace-row ${headerBase} ${hasContent ? 'cursor-pointer' : ''} ${ringFocusClasses()}"
         onClick=${() => {
           selectGoal(node.id)
           if (hasContent) toggleNode(node.id)
@@ -1642,8 +1642,8 @@ export function GoalTree() {
   const isFiltering = query.trim() !== '' || activePhaseFilter !== 'all'
 
   return html`
-    <div class="flex flex-col gap-5">
-      <section class=${GOAL_PANEL} aria-label="목표 관리자">
+    <div class="v2-workspace-surface flex flex-col gap-5">
+      <section class="${GOAL_PANEL} v2-workspace-panel" aria-label="목표 관리자">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
             <h3 class="text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 관리자</h3>
@@ -1658,16 +1658,17 @@ export function GoalTree() {
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
                 class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent-fg"
               />
-              <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
+              <${ActionButton} variant="ghost" size="sm" class="v2-workspace-action" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기
               <//>
-              <${ActionButton} variant="ghost" size="sm" onClick=${collapseAll}>
+              <${ActionButton} variant="ghost" size="sm" class="v2-workspace-action" onClick=${collapseAll}>
                 모두 접기
               <//>
             ` : null}
             <${ActionButton}
               variant="ghost"
               size="md"
+              class="v2-workspace-action"
               disabled=${loading}
               onClick=${() => { void refreshTree() }}
             >

@@ -141,7 +141,7 @@ function PhaseBlock({
   const phaseStatus = status.phases[phase].status
   return html`
     <div
-      class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2"
+      class="v2-workspace-panel min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2"
       data-testid=${`goal-loop-phase-${phase}`}
     >
       <div class="mb-2 flex items-center justify-between gap-2">
@@ -545,20 +545,22 @@ export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
   }, [initialStatus, refresh])
 
   if (loading && status === null) {
-    return html`<${LoadingState}>Loading GOAL LOOP...<//>`
+    return html`<div class="v2-workspace-surface"><${LoadingState}>Loading GOAL LOOP...<//></div>`
   }
 
   if (status === null) {
     return html`
-      <${SectionCard} label="GOAL LOOP" data-testid="goal-loop-panel">
-        <div class="text-xs text-[var(--color-status-err)]">${error ?? 'status unavailable'}</div>
-      <//>
+      <div class="v2-workspace-surface">
+        <${SectionCard} label="GOAL LOOP" data-testid="goal-loop-panel">
+          <div class="text-xs text-[var(--color-status-err)]">${error ?? 'status unavailable'}</div>
+        <//>
+      </div>
     `
   }
 
   return html`
-    <div class="flex flex-col gap-4" data-testid="goal-loop-panel">
-      <div class="flex flex-wrap items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+    <div class="v2-workspace-surface flex flex-col gap-4" data-testid="goal-loop-panel">
+      <div class="v2-workspace-panel flex flex-wrap items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <span class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
@@ -574,6 +576,7 @@ export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
         <${ActionButton}
           variant="ghost"
           size="sm"
+          class="v2-workspace-action"
           ariaLabel="Refresh GOAL LOOP status"
           title="Refresh GOAL LOOP status"
           onClick=${refresh}

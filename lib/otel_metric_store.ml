@@ -53,8 +53,8 @@ let record_task_completed () =
   inc_counter metric_tasks ~labels:[ "status", "completed" ] ()
 ;;
 
-let record_task_failed () =
-  inc_counter metric_tasks ~labels:[ "status", "failed" ] ()
+let record_task_cancelled () =
+  inc_counter metric_tasks ~labels:[ "status", "cancelled" ] ()
 ;;
 
 let record_error ?(error_type = "unknown") () =

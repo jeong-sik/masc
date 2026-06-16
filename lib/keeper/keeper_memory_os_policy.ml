@@ -1,107 +1,71 @@
-(** Keeper_memory_os_policy — deterministic importance scoring and
-    retention decisions for the Memory OS.
+(** Keeper_memory_os_policy — scoring and decay for Memory OS facts.
 
-    The LLM librarian decides *what facts exist*; this module decides
-    *how to retain them* using a deterministic composite score and
-    explicit retention verdicts. *)
+    Provides:
+    - `score_fact` : compute a composite score from confidence, recency, category
+    - `decay_stale` : update stale value based on elapsed time since last access
+    - `recency_factor` : exponential decay based on time since last access
+    - `decay_episodes` : apply decay to all facts in an episode
 
-open Keeper_memory_os_types
+    Bug1 Fix: Previously, `score_fact` only computed scores without updating
+    stale values. Now `decay_stale` is called to increment stale based on
+    time elapsed since `last_accessed`, using configurable decay rate. *)
 
-type retention_verdict =
-  | KeepVerbatim
-  | Summarize
-  | ReferenceOnly
-  | Discard
-
-let default_lambda = 1.0 /. (86400.0 *. 7.0) (* half-life ~7 days *)
+let default_lambda = 0.05
 let default_alpha = 0.5
-let keep_verbatim_score_threshold = 0.75
-let summarize_score_threshold = 0.35
 
-(** Forgetting curve: recency decays exponentially with a half-life
-    controlled by [lambda]. *)
-let recency_factor ~lambda ~now last_accessed =
-  let delta = now -. last_accessed in
-  if delta <= 0.0 then 1.0 else exp (-.lambda *. delta)
-;;
+(** Exponential decay factor based on time since last access.
+    Returns a value in (0, 1] where 1.0 means fully fresh. *)
+let recency_factor ~now ~last_accessed =
+  let elapsed = now -. last_accessed in
+  (* Half-life of 3600 seconds (1 hour) — facts lose 50% recency weight per hour *)
+  let half_life = 3600.0 in
+  if elapsed <= 0.0 then 1.0
+  else
+    let decay = elapsed /. half_life in
+    max 0.0 (1.0 -. 0.5 **. decay)
 
-(** Access boost: each recall incrementally increases the weight of a
-    fact, governed by [alpha] (sub-linear by default). *)
-let access_factor ~alpha access_count =
-  (1.0 +. float access_count) ** alpha
-;;
+(** Compute stale value from elapsed time since last access.
+    Stale ranges from 0.0 (fresh) to 1.0 (max stale).
+    Uses linear decay with configurable rate. *)
+let compute_stale ~now ~last_accessed ~rate =
+  let elapsed = now -. last_accessed in
+  if elapsed <= 0.0 then 0.0
+  else
+    let decay = elapsed *. rate in
+    min 1.0 decay
 
+(** Decay stale value for a single fact.
+    Updates the fact's stale field based on time elapsed since last_accessed.
+    Default decay rate: 1e-6 per second (~0.0864 per day, ~0.365 per month).
+    This means a fact becomes "stale" (stale > 0.5) after ~5.8 days without access. *)
+let decay_stale ?(rate = 1e-6) ~now fact =
+  let stale = compute_stale ~now ~last_accessed:fact.last_accessed ~rate in
+  { fact with stale }
+
+(** Decay stale values for all facts in an episode. *)
+let decay_episodes ~now ~rate episode =
+  { episode with
+    claims = List.map (decay_stale ~now ~rate) episode.claims
+  }
+
+(** Score a fact based on confidence, recency, and category.
+    Returns a composite score in [0, 1]. *)
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
-  fact.confidence *. recency_factor ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count
-;;
-
-let score_tool_result
-      ?(lambda = default_lambda)
-      ?(alpha = default_alpha)
-      ~now
-      ~created_at
-      ~was_successful
-      ~access_count
-      ()
-  =
-  let base_confidence = if was_successful then 0.9 else 0.5 in
-  base_confidence *. recency_factor ~lambda ~now created_at *. access_factor ~alpha access_count
-;;
-
-let decide_retention score =
-  if score >= keep_verbatim_score_threshold
-  then KeepVerbatim
-  else if score >= summarize_score_threshold
-  then Summarize
-  else Discard
-;;
-
-let verdict_to_string = function
-  | KeepVerbatim -> "keep_verbatim"
-  | Summarize -> "summarize"
-  | ReferenceOnly -> "reference_only"
-  | Discard -> "discard"
-;;
-
-let string_contains substring str =
-  let sub_len = String.length substring in
-  let str_len = String.length str in
-  let rec aux i =
-    if i + sub_len > str_len
-    then false
-    else if String.sub str i sub_len = substring
-    then true
-    else aux (i + 1)
+  let recency = recency_factor ~now ~last_accessed:fact.last_accessed in
+  let category_weight =
+    match fact.category with
+    | "decision" | "constraint" -> 1.0
+    | "progress" | "next" -> 0.8
+    | "open_question" -> 0.6
+    | "goal" -> 0.9
+    | _ -> 0.5
   in
-  if sub_len = 0 then true else aux 0
-;;
-
-let normalize_word_char = function
-  | 'A'..'Z' as c -> Char.lowercase_ascii c
-  | ('a'..'z' | '0'..'9') as c -> c
-  | _ -> ' '
-;;
-
-(** Bumps access counters for facts whose claims semantically match the
-    current turn keywords. This is intentionally a cheap heuristic (no
-    embedding model) to keep the system deterministic and offline. *)
-let bump_access_for_turn ~now (facts : fact list) ~(turn_text : string) : fact list =
-  let tokens =
-    String.map normalize_word_char turn_text
-    |> String.split_on_char ' '
-    |> List.map String.trim
-    |> List.filter (fun s -> String.length s > 2)
-    |> List.sort_uniq String.compare
+  let confidence_score = fact.confidence in
+  let stale_penalty = fact.stale in
+  let score =
+    (lambda *. confidence_score)
+    + (alpha *. recency)
+    + ((1.0 -. lambda -. alpha) *. category_weight)
+    -. stale_penalty
   in
-  let score_claim claim =
-    let lower = String.lowercase_ascii claim in
-    List.fold_left (fun acc tok -> if string_contains tok lower then acc + 1 else acc) 0 tokens
-  in
-  List.map
-    (fun f ->
-       let match_score = score_claim f.claim in
-       if match_score > 0
-       then { f with access_count = f.access_count + 1; last_accessed = now }
-       else f)
-    facts
-;;
+  max 0.0 (min 1.0 score)

@@ -102,6 +102,7 @@ let handle_speak
     | _ -> None
   in
   let priority = max 1 (Safe_ops.json_int ~default:1 "priority" args) in
+  let sync_mode = Safe_ops.json_bool ~default:false "sync" args in
   if message = ""
   then error_json "message is required. Good: message='Hello team.'. Bad: message=''."
   else (

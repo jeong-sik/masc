@@ -6,7 +6,7 @@ import type { Goal } from '../../types'
 const sample: NormalizedTaskEvent[] = [
   {
     label: 'claim',
-    agent: 'dreamer',
+    agent: 'alice',
     actorKind: 'keeper',
     taskId: 't-1',
     ts: '2026-04-17T00:00:00Z',
@@ -59,7 +59,7 @@ describe('filterTaskEvents', () => {
   })
 
   it('matches on agent', () => {
-    const out = filterTaskEvents(sample, 'dreamer')
+    const out = filterTaskEvents(sample, 'alice')
     expect(out.map(e => e.label)).toEqual(['claim'])
   })
 
@@ -90,7 +90,7 @@ describe('filterTaskEvents', () => {
 
   it('does not mutate the input array', () => {
     const before = sample.slice()
-    filterTaskEvents(sample, 'dreamer')
+    filterTaskEvents(sample, 'alice')
     expect(sample).toEqual(before)
   })
 

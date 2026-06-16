@@ -23,10 +23,10 @@ let pstr : WO.observation_provenance -> string = function
   | Automation -> "automation"
   | Unknown -> "unknown"
 
-(* self_ids holds the "dreamer" keeper; [Option.get] is safe on the golden
-   inputs from test_keeper_identity_id ("dreamer"/"keeper-dreamer-agent"). *)
+(* self_ids holds the "alice" keeper; [Option.get] is safe on the golden
+   inputs from test_keeper_identity_id ("alice"/"keeper-alice-agent"). *)
 let self_ids =
-  [ Option.get (Kid.of_string "dreamer") ]
+  [ Option.get (Kid.of_string "alice") ]
 ;;
 
 let provenance_str ~post_kind ~author =
@@ -37,11 +37,11 @@ let test_self_narrative () =
   (* Own author is Self_narrative regardless of post_kind (a keeper's own prior
      post is the highest confabulation risk). *)
   check string "self author + automation post" "self"
-    (provenance_str ~post_kind:B.Automation_post ~author:"keeper-dreamer-agent");
+    (provenance_str ~post_kind:B.Automation_post ~author:"keeper-alice-agent");
   check string "self author + system post" "self"
-    (provenance_str ~post_kind:B.System_post ~author:"dreamer");
+    (provenance_str ~post_kind:B.System_post ~author:"alice");
   check string "self author + human post (drift, still self first)" "self"
-    (provenance_str ~post_kind:B.Human_post ~author:"keeper-dreamer-agent")
+    (provenance_str ~post_kind:B.Human_post ~author:"keeper-alice-agent")
 ;;
 
 let test_peer_keeper () =

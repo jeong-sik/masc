@@ -143,12 +143,12 @@ let test_is_agent () =
   cleanup ();
   (* is_agent uses agent_lookup_hook — returns false when no hook installed *)
   Alcotest.(check bool) "no hook = not agent" false
-    (Board_tool.is_agent "dreamer");
-  (* Install a mock hook that recognises "dreamer" *)
-  Board_tool.set_agent_lookup (fun name -> name = "dreamer");
+    (Board_tool.is_agent "alice");
+  (* Install a mock hook that recognises "alice" *)
+  Board_tool.set_agent_lookup (fun name -> name = "alice");
   Fun.protect ~finally:Board_tool.set_agent_lookup_none (fun () ->
     Alcotest.(check bool) "registered agent" true
-      (Board_tool.is_agent "dreamer");
+      (Board_tool.is_agent "alice");
     Alcotest.(check bool) "unregistered agent" false
       (Board_tool.is_agent "unknown");
     Alcotest.(check bool) "empty = not agent" false

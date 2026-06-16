@@ -5,9 +5,9 @@
 
 (* Trim non-word characters from both ends of a token, keeping internal
    ones.  Word chars are [a-z0-9@_-]; '.' is NOT a word char, so
-   "@dreamer." trims to "@dreamer" while the internal '.' in
-   "email@dreamer.com" is preserved (the whole token stays
-   "email@dreamer.com" and never equals "@dreamer"). *)
+   "@alice." trims to "@alice" while the internal '.' in
+   "email@alice.com" is preserved (the whole token stays
+   "email@alice.com" and never equals "@alice"). *)
 let trim_token_edges s =
   let is_word c =
     (c >= 'a' && c <= 'z')

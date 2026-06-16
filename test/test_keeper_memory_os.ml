@@ -978,51 +978,6 @@ let test_librarian_runtime_reports_fact_upsert_failure () =
             (contains "memory os fact upsert failed" msg))))
 ;;
 
-let test_policy_score () =
-  let now = 1_000_000.0 in
-  let f = fact_fixture ~now () in
-  let score = Policy.score_fact ~now f in
-  Alcotest.(check bool) "score positive" true (score > 0.0);
-  (* A stale, low-confidence, never-recalled fact scores strictly lower
-     than a fresh confident one — the ordering recall ranking relies on. *)
-  let low =
-    { f with
-      Types.confidence = 0.1
-    ; Types.observed_by = []
-    ; Types.access_count = 0
-    ; Types.last_accessed = now -. 864_000.0
-    }
-  in
-  Alcotest.(check bool) "stale low-confidence fact scores lower" true
-    (Policy.score_fact ~now low < score)
-;;
-
-let test_policy_truth_age_not_reset_by_access () =
-  let now = 1_000_000.0 in
-  let fresh =
-    { (fact_fixture ~now ()) with
-      Types.confidence = 0.99
-    ; Types.observed_by = []
-    ; Types.access_count = 0
-    ; Types.first_seen = now
-    ; Types.last_accessed = now
-    ; Types.last_verified_at = Some now
-    }
-  in
-  let stale_but_frequently_recalled =
-    { fresh with
-      Types.first_seen = now -. days 120
-    ; Types.last_verified_at = None
-    ; Types.last_accessed = now
-    ; Types.observed_by = []
-    ; Types.access_count = 10_000
-    }
-  in
-  Alcotest.(check bool)
-    "truth-stale fact cannot be revived by access count"
-    true
-    (Policy.score_fact ~now stale_but_frequently_recalled < Policy.score_fact ~now fresh)
-;;
 
 (* RFC-0247 §-1 Step 1: structural retention rank (replaces score_fact on the cap). *)
 let test_retention_rank_structural () =
@@ -1047,55 +1002,10 @@ let test_retention_rank_structural () =
     (Policy.retention_rank ~now durable > Policy.retention_rank ~now durable_old)
 ;;
 
-(* RFC-0244: turn-seeded lexical relevance. *)
-
-let test_lexical_relevance_identity_for_empty_seed () =
-  let now = 1_000_000.0 in
-  Alcotest.(check (float 1e-9))
-    "empty seed is the multiplicative identity"
-    1.0
-    (Policy.lexical_relevance ~seed_tokens:[] (fact_fixture ~now ()))
-;;
-
-let test_lexical_relevance_is_deterministic () =
-  let now = 1_000_000.0 in
-  let fact = { (fact_fixture ~now ()) with Types.claim = "alpha bravo charlie delta" } in
-  let seed = Policy.tokenize "alpha bravo" in
-  Alcotest.(check (float 1e-12))
-    "pure function: identical inputs yield identical output"
-    (Policy.lexical_relevance ~seed_tokens:seed fact)
-    (Policy.lexical_relevance ~seed_tokens:seed fact)
-;;
-
-let test_lexical_relevance_monotone_in_coverage () =
-  let now = 1_000_000.0 in
-  let seed = Policy.tokenize "alpha bravo charlie" in
-  let full = { (fact_fixture ~now ()) with Types.claim = "alpha bravo charlie" } in
-  let partial = { (fact_fixture ~now ()) with Types.claim = "alpha only here" } in
-  let none = { (fact_fixture ~now ()) with Types.claim = "delta echo foxtrot" } in
-  let rf = Policy.lexical_relevance ~seed_tokens:seed full in
-  let rp = Policy.lexical_relevance ~seed_tokens:seed partial in
-  let rn = Policy.lexical_relevance ~seed_tokens:seed none in
-  Alcotest.(check bool) "full coverage > partial" true (rf > rp);
-  Alcotest.(check bool) "partial coverage > none" true (rp > rn);
-  Alcotest.(check (float 1e-9)) "no coverage = identity" 1.0 rn
-;;
-
-let test_score_fact_seed_boosts_match () =
-  let now = 1_000_000.0 in
-  let fact = { (fact_fixture ~now ()) with Types.claim = "deploy pipeline rollback" } in
-  let base = Policy.score_fact ~now fact in
-  let seedless_explicit = Policy.score_fact ~seed_tokens:[] ~now fact in
-  let matched =
-    Policy.score_fact ~seed_tokens:(Policy.tokenize "rollback the deploy") ~now fact
-  in
-  let unrelated =
-    Policy.score_fact ~seed_tokens:(Policy.tokenize "weather forecast today") ~now fact
-  in
-  Alcotest.(check (float 1e-12)) "omitted seed == empty seed" base seedless_explicit;
-  Alcotest.(check bool) "matching turn boosts score" true (matched > base);
-  Alcotest.(check (float 1e-12)) "non-matching turn leaves score unchanged" base unrelated
-;;
+(* RFC-0247 (purge): the turn-seeded lexical-relevance tests
+   (test_lexical_relevance_*, test_score_fact_seed_boosts_match) were removed with
+   score_fact and lexical_relevance. Token-overlap no longer orders recall, so
+   there is no lexical multiplier to test. *)
 
 let test_episode_files_do_not_overwrite_generation () =
   with_temp_keepers_dir (fun _keepers_dir ->
@@ -1703,61 +1613,23 @@ let test_recall_context_preserves_admission_memory () =
         (contains "Memory OS stale goal_cap blocker was diagnosed" ctx)))
 ;;
 
-(* RFC-0243: blend_confidence is a bounded convex EMA — it stays within the
-   prior/observed band (so inside [0,1]), is stable when re-affirmed at the same
-   value, and is monotone in the observed value. *)
-let test_blend_confidence_is_bounded_convex () =
-  let w = Policy.reaffirm_weight in
-  let blended = Policy.blend_confidence ~prior:0.9 ~observed:0.4 in
-  Alcotest.(check (float 1e-9))
-    "EMA toward observed"
-    ((0.9 *. (1.0 -. w)) +. (0.4 *. w))
-    blended;
-  Alcotest.(check bool) "within prior/observed band" true (blended <= 0.9 && blended >= 0.4);
-  Alcotest.(check (float 1e-9))
-    "stable when re-affirmed at same confidence"
-    0.8
-    (Policy.blend_confidence ~prior:0.8 ~observed:0.8);
-  let lo = Policy.blend_confidence ~prior:0.5 ~observed:0.2 in
-  let hi = Policy.blend_confidence ~prior:0.5 ~observed:0.9 in
-  Alcotest.(check bool) "monotone in observed" true (hi > lo);
-  Alcotest.(check bool) "stays within [0,1]" true (Policy.blend_confidence ~prior:1.0 ~observed:1.0 <= 1.0)
-;;
-
-(* RFC-0243: reobserve_fact moves the re-observation signals (confidence blends,
-   access_count bumps, last_accessed/last_verified_at refresh) while preserving
-   the fact's identity and first-seen provenance. *)
-let test_reobserve_fact_updates_signals () =
+(* RFC-0247 (purge): reobserve_fact refreshes the truth anchor only.
+   Re-extracting the same claim is fresh evidence it still holds, so
+   [last_verified_at] advances to [now]; identity and first-seen provenance are
+   preserved. The prior confidence-blend and access-count bump (and their
+   blend_confidence test) were removed with the score. *)
+let test_reobserve_fact_refreshes_truth_anchor () =
   let now = 1_000_000.0 in
   let existing =
     { (fact_fixture ~now ()) with
-      Types.confidence = 0.9
-    ; Types.observed_by = []
-    ; Types.access_count = 2
-    ; Types.first_seen = now -. 86400.0
-    ; Types.last_accessed = now -. 3600.0
+      Types.first_seen = now -. 86400.0
     ; Types.last_verified_at = Some (now -. 7200.0)
     }
   in
-  let incoming =
-    { existing with
-      Types.confidence = 0.4
-    ; Types.observed_by = []
-    ; Types.access_count = 0
-    ; Types.first_seen = now
-    ; Types.last_accessed = now
-    ; Types.last_verified_at = Some now
-    }
-  in
+  let incoming = { existing with Types.last_verified_at = Some now } in
   let merged = Policy.reobserve_fact ~now ~existing ~incoming in
-  Alcotest.(check int) "access_count bumped" 3 merged.Types.access_count;
-  Alcotest.(check (float 1e-9))
-    "confidence blended toward incoming"
-    (Policy.blend_confidence ~prior:0.9 ~observed:0.4)
-    merged.Types.confidence;
-  Alcotest.(check (float 1e-9)) "last_accessed refreshed" now merged.Types.last_accessed;
   Alcotest.(check (option (float 1e-9)))
-    "last_verified_at refreshed"
+    "last_verified_at refreshed to now"
     (Some now)
     merged.Types.last_verified_at;
   Alcotest.(check (float 1e-9))
@@ -1767,11 +1639,10 @@ let test_reobserve_fact_updates_signals () =
   Alcotest.(check string) "claim identity preserved" existing.Types.claim merged.Types.claim
 ;;
 
-(* RFC-0243: a re-observed claim (even reworded by case/whitespace) is folded into
-   the single existing row instead of appending an immortal duplicate — the
-   accuracy-inversion root fix. The merged row keeps the first observation's
-   claim/provenance but its live signals (access_count, confidence,
-   last_verified_at) move. *)
+(* RFC-0243/0247: a re-observed claim (even reworded by case/whitespace) is folded
+   into the single existing row instead of appending a duplicate. The merged row
+   keeps the first observation's claim/provenance; its truth anchor
+   ([last_verified_at]) advances to now. *)
 let test_merge_and_cap_upserts_reobserved_claim () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "virtual-memory-keeper" in
@@ -1779,22 +1650,12 @@ let test_merge_and_cap_upserts_reobserved_claim () =
     let base = fact_fixture ~now () in
     let claim = "User deploys via blue-green" in
     let first =
-      { base with
-        Types.claim
-      ; Types.confidence = 0.6
-      ; Types.observed_by = []
-      ; Types.access_count = 0
-      ; Types.last_verified_at = Some (now -. 86400.0)
-      }
+      { base with Types.claim; Types.last_verified_at = Some (now -. 86400.0) }
     in
     Memory_io.append_fact ~keeper_id first;
     let reobserved =
       { base with
         Types.claim = "user  deploys via BLUE-GREEN"
-      ; Types.confidence = 0.9
-      ; Types.observed_by = []
-      ; Types.access_count = 0
-      ; Types.last_accessed = now
       ; Types.last_verified_at = Some now
       }
     in
@@ -1805,18 +1666,13 @@ let test_merge_and_cap_upserts_reobserved_claim () =
         ~incoming:[ reobserved ]
         ~keep:256
         ~trigger:384
-        ~rank:(Policy.score_fact ~now)
+        ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "one claim merged" 1 stats.Memory_io.merged;
     Alcotest.(check int) "none appended" 0 stats.Memory_io.appended;
     let rows = Memory_io.read_all_facts ~keeper_id in
     Alcotest.(check int) "single row after upsert" 1 (List.length rows);
     let row = List.hd rows in
-    Alcotest.(check int) "access_count bumped to 1" 1 row.Types.access_count;
-    Alcotest.(check bool)
-      "confidence moved up toward re-observed 0.9"
-      true
-      (row.Types.confidence > 0.6 && row.Types.confidence < 0.9);
     Alcotest.(check (option (float 1e-9)))
       "last_verified_at refreshed to now"
       (Some now)
@@ -2425,39 +2281,14 @@ let () =
             test_librarian_runtime_reports_fact_upsert_failure
         ] )
     ; ( "policy"
-      , [ Alcotest.test_case "score ordering" `Quick test_policy_score
-        ; Alcotest.test_case
+      , [ Alcotest.test_case
             "retention rank is structural (Ephemeral dropped first)"
             `Quick
             test_retention_rank_structural
         ; Alcotest.test_case
-            "truth age is not reset by access"
+            "reobserve_fact refreshes truth anchor (RFC-0247)"
             `Quick
-            test_policy_truth_age_not_reset_by_access
-        ; Alcotest.test_case
-            "blend_confidence bounded convex (RFC-0243)"
-            `Quick
-            test_blend_confidence_is_bounded_convex
-        ; Alcotest.test_case
-            "reobserve_fact updates signals (RFC-0243)"
-            `Quick
-            test_reobserve_fact_updates_signals
-        ; Alcotest.test_case
-            "lexical_relevance identity for empty seed (RFC-0244)"
-            `Quick
-            test_lexical_relevance_identity_for_empty_seed
-        ; Alcotest.test_case
-            "lexical_relevance is deterministic (RFC-0244)"
-            `Quick
-            test_lexical_relevance_is_deterministic
-        ; Alcotest.test_case
-            "lexical_relevance monotone in coverage (RFC-0244)"
-            `Quick
-            test_lexical_relevance_monotone_in_coverage
-        ; Alcotest.test_case
-            "score_fact seed boosts matching fact (RFC-0244)"
-            `Quick
-            test_score_fact_seed_boosts_match
+            test_reobserve_fact_refreshes_truth_anchor
         ] )
     ; ( "io"
       , [ Alcotest.test_case

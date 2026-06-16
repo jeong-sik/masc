@@ -484,13 +484,14 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   : Runtime_schema.binding
   =
   let is_default = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "is-default" ] in
-  (* RFC-0058 §3.4: max-concurrent is REQUIRED. The marker value 0
-     here makes the omission visible to the validator instead of
-     silently throttling every binding to 1. *)
+  (* RFC-0153 §4.2.4: max-concurrent is an OPTIONAL per-binding cap.
+     Missing or non-positive parses to [None] ("no per-binding cap"), a real
+     [int option] — replacing the RFC-0058 [0]-as-required-marker, which was an
+     Unknown->permissive-default (CLAUDE.md anti-pattern #2). *)
   let max_concurrent =
     match Otoml.find_opt tbl Otoml.get_integer [ "max-concurrent" ] with
-    | Some n -> n
-    | None -> 0
+    | Some n when n > 0 -> Some n
+    | Some _ | None -> None
   in
   let price_input = Otoml.find_opt tbl Otoml.get_float [ "price-input" ] in
   let price_output = Otoml.find_opt tbl Otoml.get_float [ "price-output" ] in

@@ -10,10 +10,12 @@ type attempt_timeout_resolution =
   ; source : string
   }
 
-val of_provider_config : max_concurrent:int -> Llm_provider.Provider_config.t -> t
-val of_provider_configs : (Llm_provider.Provider_config.t * int) list -> t list
+val of_provider_config : max_concurrent:int option -> Llm_provider.Provider_config.t -> t
+val of_provider_configs : (Llm_provider.Provider_config.t * int option) list -> t list
 
-val max_concurrent : t -> int
+(** RFC-0153 §4.2.4: per-binding HTTP concurrency cap. [None] = no per-binding
+    cap (coarse global Fd_accountant Provider_http pool only). *)
+val max_concurrent : t -> int option
 val provider_cfg : t -> Llm_provider.Provider_config.t
 
 val runtime_url_of_label : string -> string option
@@ -79,4 +81,4 @@ val local_runtime_urls : t list -> string list
 val filter_unhealthy_local_runtime_urls :
   endpoint_health:(string * bool) list -> t list -> t list * string list
 val http_probe_urls : t list -> string list
-val register_http_probe_capable : max_concurrent:int -> t -> unit
+val register_http_probe_capable : max_concurrent:int option -> t -> unit

@@ -116,7 +116,11 @@ type binding =
   { provider_id : string
   ; model_id : string
   ; is_default : bool
-  ; max_concurrent : int
+  ; max_concurrent : int option
+    (** RFC-0153 §4.2.4: optional per-binding HTTP-round-trip concurrency cap.
+        [None] = no per-binding cap (coarse global Fd_accountant Provider_http
+        pool only); [Some n] caps in-flight provider HTTP round-trips for this
+        binding. Replaces the RFC-0058 [0]-as-required-marker. *)
   ; price_input : float option
   ; price_output : float option
   ; keep_alive : string option

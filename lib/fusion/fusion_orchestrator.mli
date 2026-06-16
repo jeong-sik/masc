@@ -15,13 +15,11 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, string) result
       }
 
-(** 패널 모델에 주는 기본 system prompt (질문에 전문가로 답하라). *)
-val default_panel_prompt : string
-
 (** 요청을 심의한다.
 
     + [Fusion_policy.decide]로 게이트 → [Deny]면 [Denied] 반환(부작용 없음).
     + [Allow]면 preset의 패널 모델로 [Fusion_panel.run], judge 모델로 [Fusion_judge.run].
+      패널/심판 system prompt와 타임아웃은 preset(=config)에서 온다 — 코드 default 없음.
     + [Fusion_sink.emit]으로 트랜스크립트를 키퍼 chat lane에 기록.
     + [Completed]로 패널/심판 결과 반환.
 
@@ -35,7 +33,6 @@ val run
   -> policy:Fusion_policy.t
   -> hourly_count:int
   -> ?estimated_cost_usd:float
-  -> ?panel_system_prompt:string
   -> request:Fusion_types.fusion_request
   -> unit
   -> outcome

@@ -12,6 +12,12 @@ type preset =
   { name : string
   ; panel : string list  (** provider.model ids, {!min_panel}..{!max_panel} *)
   ; judge : string
+  ; panel_system_prompt : string
+      (** 패널 모델 system prompt — config에서 필수(코드 default 없음). *)
+  ; judge_system_prompt : string
+      (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
+  ; panel_timeout_s : float  (** 패널 fan-out 구조적 타임아웃 (초). *)
+  ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
   ; max_tool_calls_per_panel : int
   ; web_tools : bool
   }
@@ -22,8 +28,14 @@ val min_panel : int
 
 val max_panel : int
 
+(** 패널/심판 타임아웃 기본값 (config 미지정 시). 운영 노브 — named SSOT. *)
+val default_timeout_s : float
+
 (** 패널이 [min_panel]..[max_panel] 범위인가. config 로드 시 검증되지만 게이트도 방어. *)
 val preset_size_ok : preset -> bool
+
+(** 패널·심판 system prompt가 둘 다 비어있지 않은가 (config 로드 시 fail-fast 검증). *)
+val preset_prompts_present : preset -> bool
 
 (** 해석된 [fusion] config. {!Fusion_config}가 runtime.toml에서 생성한다. *)
 type t =

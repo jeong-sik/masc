@@ -5,6 +5,10 @@ type preset =
   { name : string
   ; panel : string list
   ; judge : string
+  ; panel_system_prompt : string
+  ; judge_system_prompt : string
+  ; panel_timeout_s : float
+  ; judge_timeout_s : float
   ; max_tool_calls_per_panel : int
   ; web_tools : bool
   }
@@ -13,9 +17,19 @@ type preset =
 let min_panel = 1
 let max_panel = 8
 
+(* 패널/심판 호출 구조적 타임아웃 기본값 (preset이 명시 안 할 때). 운영 노브 —
+   행동 휴리스틱이 아니므로 named SSOT 상수로 둔다 (Magic Number 회피). *)
+let default_timeout_s = 120.0
+
 let preset_size_ok (p : preset) =
   let n = List.length p.panel in
   n >= min_panel && n <= max_panel
+
+(* 패널·심판 system prompt가 둘 다 비어있지 않은가. 프롬프트는 행동을 정의하므로
+   코드 default로 채우지 않고 config에서 받는다 (없으면 fail-fast). *)
+let preset_prompts_present (p : preset) =
+  String.length (String.trim p.panel_system_prompt) > 0
+  && String.length (String.trim p.judge_system_prompt) > 0
 
 type t =
   { enabled : bool

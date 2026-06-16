@@ -203,6 +203,8 @@ per_hour_budget = 20
 max_cost_usd_per_call = 0.50
 
 # 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.
+# 프롬프트는 행동을 정의하므로 코드 default가 아니라 여기서 받는다 (누락 시 로드
+# 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
 [fusion.presets.trio]
 panel = [
   "deepseek.deepseek-v4-pro",
@@ -210,6 +212,20 @@ panel = [
   "ollama_cloud.deepseek-v4-flash",
 ]
 judge = "deepseek.deepseek-v4-pro"
+panel_system_prompt = """
+You are an expert panelist. Answer the user's question directly and concisely \
+with your best independent analysis. Do not defer to other models; give your \
+own view.
+"""
+judge_system_prompt = """
+You are an impartial judge. You are given a panel of model answers to the same \
+question. Synthesize them: identify points of consensus, contradictions, \
+partial coverage, unique insights, and blind spots, then give one resolved \
+answer. Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+# 구조적 타임아웃(초). 미지정 시 Fusion_policy.default_timeout_s.
+panel_timeout_s = 120.0
+judge_timeout_s = 120.0
 # 패널 모델당 허용 도구 호출 수 (v1은 tools=[]라 미사용, 향후 web_tools용).
 max_tool_calls_per_panel = 2
 web_tools = false

@@ -14,6 +14,10 @@ let base_policy : Fusion_policy.t =
       [ { Fusion_policy.name = "budget"
         ; panel = [ "a"; "b"; "c" ]
         ; judge = "a"
+        ; panel_system_prompt = "panel"
+        ; judge_system_prompt = "judge"
+        ; panel_timeout_s = 120.0
+        ; judge_timeout_s = 120.0
         ; max_tool_calls_per_panel = 2
         ; web_tools = true
         }
@@ -116,6 +120,8 @@ max_cost_usd_per_call = 0.5
 [fusion.presets.budget]
 panel = ["a", "b", "c"]
 judge = "a"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "synthesize the panel"
 max_tool_calls_per_panel = 2
 web_tools = true
 |}
@@ -165,6 +171,8 @@ default_preset = "ghost"
 [fusion.presets.budget]
 panel = ["a", "b"]
 judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
 |}
   in
   match Fusion_config.of_toml (parse s) with
@@ -172,6 +180,23 @@ judge = "a"
     Alcotest.(check bool) "Missing_default_preset present" true
       (List.mem (Fusion_config.Missing_default_preset "ghost") es)
   | Ok _ -> Alcotest.fail "expected Error Missing_default_preset"
+
+let test_config_missing_prompt () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Missing_prompt present" true
+      (List.mem (Fusion_config.Missing_prompt "p1") es)
+  | Ok _ -> Alcotest.fail "expected Error Missing_prompt"
 
 (* Mirrors the disabled [fusion] seed shipped in config/runtime.toml: a
    populated default_preset + trio panel while enabled=false must parse to
@@ -195,6 +220,10 @@ panel = [
   "ollama_cloud.deepseek-v4-flash",
 ]
 judge = "deepseek.deepseek-v4-pro"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "synthesize the panel"
+panel_timeout_s = 120.0
+judge_timeout_s = 120.0
 max_tool_calls_per_panel = 2
 web_tools = false
 |}
@@ -335,6 +364,7 @@ let () =
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
+        ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ] )
     ; ( "judge_parse"

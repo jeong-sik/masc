@@ -4,6 +4,7 @@
 type config_error =
   | Empty_presets
   | Invalid_panel_size of string * int
+  | Missing_prompt of string
   | Missing_default_preset of string
   | Toml_type_error of string
 [@@deriving show, eq]
@@ -25,15 +26,42 @@ let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
     Otoml.find_or ~default:[] tbl (Otoml.get_array Otoml.get_string) [ "panel" ]
   in
   let judge = Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge" ] in
+  (* 프롬프트는 행동을 정의하므로 코드 default로 채우지 않는다. 누락 시 ""로 읽혀
+     아래 preset_prompts_present 검증에서 Missing_prompt로 fail-fast된다. *)
+  let panel_system_prompt =
+    Otoml.find_or ~default:"" tbl Otoml.get_string [ "panel_system_prompt" ]
+  in
+  let judge_system_prompt =
+    Otoml.find_or ~default:"" tbl Otoml.get_string [ "judge_system_prompt" ]
+  in
+  let panel_timeout_s =
+    Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
+      [ "panel_timeout_s" ]
+  in
+  let judge_timeout_s =
+    Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
+      [ "judge_timeout_s" ]
+  in
   let max_tool_calls_per_panel =
     Otoml.find_or ~default:2 tbl Otoml.get_integer [ "max_tool_calls_per_panel" ]
   in
   let web_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ] in
   let p : Fusion_policy.preset =
-    { name; panel; judge; max_tool_calls_per_panel; web_tools }
+    { name
+    ; panel
+    ; judge
+    ; panel_system_prompt
+    ; judge_system_prompt
+    ; panel_timeout_s
+    ; judge_timeout_s
+    ; max_tool_calls_per_panel
+    ; web_tools
+    }
   in
-  if Fusion_policy.preset_size_ok p then Ok p
-  else Error (Invalid_panel_size (name, List.length panel))
+  if not (Fusion_policy.preset_size_ok p) then
+    Error (Invalid_panel_size (name, List.length panel))
+  else if not (Fusion_policy.preset_prompts_present p) then Error (Missing_prompt name)
+  else Ok p
 
 (* [fusion] 존재 확정 후의 본 파싱. Otoml.Type_error는 of_toml이 감싼다. *)
 let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =

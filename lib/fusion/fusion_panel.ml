@@ -22,7 +22,7 @@ let outcome_of_result (model : string)
       ; reason = Fusion_types.Provider_error (Agent_sdk.Error.to_string e)
       }
 
-let run ~sw ~net ?(max_fibers = 3) ?(timeout_s = 120.0) ~models ~system_prompt ~prompt ()
+let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt ()
   : Fusion_types.panel_outcome list
   =
   (* 1. 각 모델을 에이전트로 빌드. 빌드 실패는 격리. *)

@@ -20,7 +20,8 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?timeout_s:float
+  -> timeout_s:float
+  -> judge_system_prompt:string
   -> judge_model:string
   -> question:string
   -> panel:Fusion_types.panel_outcome list

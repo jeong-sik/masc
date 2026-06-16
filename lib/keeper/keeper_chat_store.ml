@@ -858,5 +858,6 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
                          ("data", `String att.data);
                        ]
                      ) atts in
-                     [("attachments", `List att_json)])))
+                     [("attachments", `List att_json)])
+              @ audio_fields m.audio))
        messages)

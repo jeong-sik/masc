@@ -254,6 +254,39 @@ describe('ChatTranscript', () => {
     expect(label).toContain('응답 중')
     expect(label).not.toContain('...')
   })
+
+  it('renders an audio player for assistant entries with an RFC-0235 clip', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'hello operator',
+            audio: {
+              token: 'clip-1',
+              audioUrl: '/api/v1/voice/audio/clip-1',
+              mime: 'audio/mpeg',
+              durationSec: 5,
+              messageText: 'hello operator',
+              deviceId: null,
+            },
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const player = container.querySelector('[data-chat-audio-clip]')
+    expect(player).not.toBeNull()
+    const audio = container.querySelector('audio')
+    expect(audio).not.toBeNull()
+    expect(audio?.getAttribute('src')).toBe('/api/v1/voice/audio/clip-1')
+    expect(container.textContent).toContain('0:05')
+  })
 })
 
 describe('ChatComposer queue & stall', () => {

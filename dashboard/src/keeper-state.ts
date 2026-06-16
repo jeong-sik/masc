@@ -2,6 +2,7 @@ import { signal } from '@preact/signals'
 import { formatKeeperVisibleReply } from './keeper-message'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
 import type {
+  KeeperConversationAudioClip,
   KeeperConversationEntry,
   KeeperConversationRole,
   KeeperConversationSource,
@@ -110,6 +111,65 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
     && entry.source !== 'internal_assistant'
     && entry.source !== 'tool_result'
     && entry.source !== 'system'
+}
+
+// --- Audio helpers (RFC-0235 P1/P3) ---
+
+/** Canonicalize an audio clip from the wire into the dashboard type.
+ *  Accepts both snake_case (history rows) and camelCase (SSE payloads).
+ *  Falls back to `/api/v1/voice/audio/<token>` when the backend did not
+ *  emit a full URL, so every persisted clip is playable. */
+export function normalizeAudioClip(raw: unknown): KeeperConversationAudioClip | null {
+  if (!isRecord(raw)) return null
+  const token = asString(raw.token)
+  const mime = asString(raw.mime)
+  if (!token || !mime) return null
+  const explicitUrl = asString(raw.audio_url) ?? asString(raw.audioUrl)
+  const audioUrl = explicitUrl && explicitUrl.trim() !== ''
+    ? explicitUrl
+    : `/api/v1/voice/audio/${encodeURIComponent(token)}`
+  const duration = asNumber(raw.duration_sec) ?? asNumber(raw.durationSec)
+  const messageText = asString(raw.message_text) ?? asString(raw.messageText) ?? ''
+  const deviceId = asString(raw.device_id) ?? asString(raw.deviceId)
+  return {
+    token,
+    audioUrl,
+    mime,
+    durationSec: duration ?? null,
+    messageText,
+    deviceId: deviceId ?? null,
+  }
+}
+
+/** Try to attach an audio clip to the most recent assistant entry whose
+ *  rendered text matches the clip's message text. Returns true if a match
+ *  was found and updated. This handles the live SSE path: the assistant
+ *  bubble is already streaming when the synthesized audio event arrives. */
+export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean {
+  const clip = normalizeAudioClip(rawAudio)
+  if (!clip) return false
+  const targetText = formatKeeperVisibleReply(clip.messageText).trim()
+  const rawTarget = clip.messageText.trim()
+  const existing = keeperThreads.value[name] ?? []
+  let updated = false
+  const next = existing.map((entry) => {
+    if (updated) return entry
+    if (entry.role !== 'assistant') return entry
+    const entryText = entry.text.trim()
+    const entryRawText = (entry.rawText ?? entry.text).trim()
+    if (
+      (targetText && entryText === targetText)
+      || (rawTarget && entryRawText === rawTarget)
+    ) {
+      updated = true
+      return { ...entry, audio: clip }
+    }
+    return entry
+  })
+  if (updated) {
+    keeperThreads.value = { ...keeperThreads.value, [name]: next }
+  }
+  return updated
 }
 
 // --- Normalizers ---
@@ -246,6 +306,7 @@ function normalizeHistoryEntry(
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
+  const audio = normalizeAudioClip(raw.audio) ?? null
   return {
     // R3: key off the producer-assigned server id when present so the
     // render key is stable across history-page merges (the former
@@ -262,6 +323,7 @@ function normalizeHistoryEntry(
     streamState: null,
     details: null,
     surface,
+    audio,
   }
 }
 
@@ -437,6 +499,7 @@ interface RestChatHistoryMessage {
   tool_call_name?: string
   source?: string
   surface?: SurfaceRef
+  audio?: unknown
 }
 
 /** Convert a persisted tool-call row into the same entry shape the live
@@ -480,7 +543,13 @@ export function chatHistoryEntriesFromRest(
       return
     }
     const normalized = normalizeHistoryEntry(
-      { id: message.id, role: message.role, content: message.content, ts_unix: message.ts },
+      {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        ts_unix: message.ts,
+        audio: message.audio,
+      },
       keeperName,
       previousSource,
     )

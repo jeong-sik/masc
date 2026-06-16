@@ -31,6 +31,7 @@ import {
   keeperStreamLastEventAt,
   keeperThreads,
   appendThreadEntry,
+  attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
   finalizeAssistantEntry,
@@ -390,11 +391,18 @@ export async function resumePendingKeeperChatRequests(name: string): Promise<voi
  *  persisted transcript so messages arriving through other connectors
  *  (Discord, Slack, agent MCP) appear without a page reload. Keepers
  *  whose transcript was never hydrated are skipped — the mount
- *  hydration fetches the full window when the panel first opens. */
-export function noteKeeperChatAppended(name: string): void {
+ *  hydration fetches the full window when the panel first opens.
+ *
+ *  If the event carries an RFC-0235 audio clip, we first try to attach
+ *  it to the matching assistant bubble that is already streaming. A
+ *  failed match still falls back to the history re-merge (the clip is
+ *  persisted server-side too). */
+export function noteKeeperChatAppended(name: string, audio?: unknown): void {
   const keeperName = name.trim()
   if (!keeperName) return
   if (!hydratedChatKeepers.has(keeperName)) return
+  const attached = audio != null && attachKeeperAudioClip(keeperName, audio)
+  if (attached) return
   const pending = chatRefreshTimers.get(keeperName)
   if (pending) clearTimeout(pending)
   chatRefreshTimers.set(keeperName, setTimeout(() => {

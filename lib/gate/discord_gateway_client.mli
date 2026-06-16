@@ -115,3 +115,8 @@ val set_presence : Discord_gateway_state.presence_status -> unit
     the request is logged and dropped.
 
     Thread-safe: may be called from any fiber. *)
+
+module For_testing : sig
+  val reader_should_continue_after_input :
+    Discord_gateway_state.input -> bool
+end

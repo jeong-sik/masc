@@ -8,9 +8,8 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, string) result
       }
 
-let run ~sw ~net ~base_dir ~policy ~hourly_count ?(estimated_cost_usd = 0.0)
-    ~request () : outcome =
-  match Fusion_policy.decide ~policy ~hourly_count ~estimated_cost_usd request with
+let run ~sw ~net ~base_dir ~policy ~hourly_count ~request () : outcome =
+  match Fusion_policy.decide ~policy ~hourly_count request with
   | Fusion_types.Deny reason -> Denied reason
   | Fusion_types.Allow req ->
     (match Fusion_policy.find_preset policy req.Fusion_types.preset with

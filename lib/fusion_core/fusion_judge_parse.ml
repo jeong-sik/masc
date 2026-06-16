@@ -131,16 +131,22 @@ let of_json (j : Yojson.Safe.t) : (Fusion_types.judge_synthesis, string) result 
     ; decision
     }
 
+(* 코드펜스 구분자 — 마커와 그 길이를 한 곳에 묶어 drift를 막는다. *)
+let fence = "```"
+let fence_len = String.length fence
+
 (* ```json ... ``` 또는 ``` ... ``` 코드펜스를 벗긴다. *)
 let strip_fences (s : string) : string =
   let s = String.trim s in
-  if String.length s >= 3 && String.equal (String.sub s 0 3) "```" then
+  if String.length s >= fence_len && String.equal (String.sub s 0 fence_len) fence then
     match String.index_opt s '\n' with
     | Some nl ->
       let body = String.trim (String.sub s (nl + 1) (String.length s - nl - 1)) in
-      if String.length body >= 3
-         && String.equal (String.sub body (String.length body - 3) 3) "```"
-      then String.trim (String.sub body 0 (String.length body - 3))
+      if String.length body >= fence_len
+         && String.equal
+              (String.sub body (String.length body - fence_len) fence_len)
+              fence
+      then String.trim (String.sub body 0 (String.length body - fence_len))
       else body
     | None -> s
   else s

@@ -199,8 +199,6 @@ low_confidence_threshold = 0.6
 high_stakes_task_kinds = []
 # 시간당 최대 발동 횟수 (UTC hour bucket 기준).
 per_hour_budget = 20
-# 1회 호출 추정 비용 상한 (USD).
-max_cost_usd_per_call = 0.50
 
 # 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.
 # 프롬프트는 행동을 정의하므로 코드 default가 아니라 여기서 받는다 (누락 시 로드

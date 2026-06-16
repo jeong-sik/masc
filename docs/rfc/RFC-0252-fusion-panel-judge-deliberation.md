@@ -134,16 +134,20 @@ type fusion_request =
   ; preset    : string                              (* runtime.toml [fusion.presets.*] 이름 *)
   ; depth     : Fusion_depth.t
   ; trigger   : fusion_trigger
-  ; web_tools : bool
   }
 
 (* 게이트 출력 *)
 type deny_reason =
   | Disabled | Preset_unknown of string | Depth_exceeded
-  | Over_hourly_budget | Over_cost_cap | Rate_limited
+  | Over_hourly_budget | Not_warranted
 
 type gate_decision = Allow of fusion_request | Deny of deny_reason
 ```
+
+> 비용 *제약*(cost cap / per-call USD 상한)은 v1에서 제외한다 — 모델별 가격
+> 추정기가 없으면 inert한 결정론 게이트가 되기 때문(괴상한 제약 제거 원칙).
+> 비용은 *관측*만 한다: panel 응답의 `usage`(실측 토큰)를 sink가 합산·표시한다.
+> 발동 통제는 `per_hour_budget`(실측 카운터)가 담당한다.
 
 > `Usage.t`는 기존 MASC usage 타입 재사용(없으면 `{ input_tokens:int; output_tokens:int }` 최소 정의).
 
@@ -151,12 +155,12 @@ type gate_decision = Allow of fusion_request | Deny of deny_reason
 
 ## 6. 트리거 / 게이트 (`fusion_policy`) — 결정론 우선
 
-사용자가 "#4를 제대로 만들라"고 명시. fusion 발동은 **config 상한으로 결정론적**이어야 비용 4×가 예측·테스트 가능하다.
+사용자가 "#4를 제대로 만들라"고 명시. fusion 발동은 **config 상한으로 결정론적**이어야 발동 횟수가 예측·테스트 가능하다.
 
 ```ocaml
 val decide
   :  policy:Fusion_policy.t          (* runtime.toml [fusion] + [fusion.gate]에서 로드 *)
-  -> budget:Fusion_budget_state.t    (* per-hour 카운터 + 진행중 cost *)
+  -> hourly_count:int                (* per-hour 발동 카운터 (호출자 집계) *)
   -> fusion_request
   -> gate_decision
 ```
@@ -172,10 +176,9 @@ val decide
    - `High_stakes {task_kind}` → `task_kind ∈ policy.high_stakes_task_kinds`.
    - `Contested_board` → 통과.
 5. `per_hour_budget` 초과 → `Deny Over_hourly_budget`.
-6. 예상 cost > `max_cost_usd_per_call` → `Deny Over_cost_cap`.
-7. 전부 통과 → `Allow request`.
+6. 전부 통과 → `Allow request`.
 
-모델이 "심의 필요"를 *요청*해도(키퍼가 `masc_fusion` 호출 = `Explicit_tool_call`) 4–6 예산 게이트에 종속된다. 즉 **모델 판단은 보조, 결정론 상한이 주**. (MEMORY: 키퍼 wake-cascade thrash 전례 회피.)
+모델이 "심의 필요"를 *요청*해도(키퍼가 `masc_fusion` 호출 = `Explicit_tool_call`) 4–5 게이트에 종속된다. 즉 **모델 판단은 보조, 결정론 상한이 주**. (MEMORY: 키퍼 wake-cascade thrash 전례 회피.)
 
 ---
 
@@ -250,20 +253,15 @@ max_concurrent_panels = 2             # provider max-concurrent 존중 (qwen36=2
 [fusion.gate]
 low_confidence_threshold = 0.55
 high_stakes_task_kinds = ["goal_decision", "architecture"]
-per_hour_budget = 20                  # 시간당 발동 상한
-max_cost_usd_per_call = 0.50
-
-[fusion.presets.quality]
-panel = ["anthropic.claude-opus", "openai.gpt", "google.gemini-pro"]
-judge = "anthropic.claude-opus"
-max_tool_calls_per_panel = 4
-web_tools = true
+per_hour_budget = 20                  # 시간당 발동 상한 (유일한 비-disabled deny 노브)
 
 [fusion.presets.budget]
 panel = ["deepseek.v4-flash", "glm.5-turbo", "ollama.gemma4-26b"]
 judge = "deepseek.v4-flash"
-max_tool_calls_per_panel = 2
-web_tools = true
+panel_system_prompt = "..."           # 행동 정의 — 코드 default 없음, 비면 Missing_prompt
+judge_system_prompt = "..."
+panel_timeout_s = 120.0               # 생략 시 default_timeout_s
+judge_timeout_s = 120.0
 ```
 
 - panel/judge 모델 식별자는 기존 `provider.model` opaque 문자열(runtime.toml bindings와 동일 컨벤션). 미존재 모델 → parse/resolve 에러(fail-fast).
@@ -272,11 +270,11 @@ web_tools = true
 
 ---
 
-## 10. 재귀 가드 · 예산 · 비용 회계
+## 10. 재귀 가드 · 발동 예산 · 비용 관측
 
 - **재귀**: 패널/심판 `Agent.t`는 fusion 도구를 주입받지 않는다(도구 목록에서 배제). 추가로 `request.depth = Nested`면 게이트가 `Deny Depth_exceeded`. 이중 차단.
-- **tool budget**: 패널 멤버별 `max_tool_calls_per_panel`(OAS `Agent_turn_budget`로 강제). 심판은 별도 예산.
-- **비용 회계**: 패널 N 완성 + 심판 1 완성의 토큰을 합산해 `.masc/costs.jsonl`에 `fusion_run_id`로 귀속. 게이트 §6.6 cost cap 검사는 preset의 모델 가격 × 예상 토큰으로 사전 추정.
+- **발동 예산**: `per_hour_budget`(UTC hour bucket 카운터, `Fusion_budget` CAS)가 시간당 발동 수를 제한. 유일한 비-disabled deny 노브.
+- **비용 관측(제약 아님)**: 패널 응답의 `usage`(실측 input/output 토큰)를 sink가 합산해 심의 메시지에 표시한다. v1은 비용을 *제약*하지 않는다 — 모델별 가격 추정기가 없으면 cost cap은 inert 게이트(괴상한 제약)가 되기 때문. 가격 추정기 도입 시 별도 RFC로 cost cap을 다시 추가한다.
 
 ---
 

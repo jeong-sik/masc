@@ -12,8 +12,16 @@ type config_error =
   | Invalid_panel_size of string * int  (** (preset 이름, 패널 수) — 1..8 위반 *)
   | Missing_prompt of string
       (** preset의 panel/judge system prompt가 비어있음 (코드 default 금지) *)
+  | Missing_judge_model of string
+      (** preset의 judge 모델 id가 비어있음 (필수, 빈 문자열 default 거부) *)
   | Invalid_max_concurrent_panels of int  (** max_concurrent_panels < 1 *)
-  | Missing_default_preset of string  (** default_preset가 presets에 없음 *)
+  | Invalid_per_hour_budget of int
+      (** enabled인데 per_hour_budget < 1 — gate가 `count >= budget`로 deny하므로
+          0/음수는 모든 호출을 silent deny-all로 만든다 (enabled-but-never-runs). *)
+  | Missing_default_preset of string
+      (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자열도 거부 —
+          preset 생략 호출이 default_preset로 폴백하는데 ""는 항상 Preset_unknown로
+          deny되기 때문. *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]
 

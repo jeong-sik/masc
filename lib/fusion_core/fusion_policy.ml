@@ -29,6 +29,11 @@ let preset_prompts_present (p : preset) =
   String.length (String.trim p.panel_system_prompt) > 0
   && String.length (String.trim p.judge_system_prompt) > 0
 
+(* 심판 모델 id가 비어있지 않은가. judge는 종합을 수행하는 필수 모델이므로 빈
+   문자열(config 누락 시 default)은 런타임에 빈 runtime_id로 agent 빌드를 깨뜨린다.
+   load 단계에서 fail-fast (Unknown→Permissive 회피). *)
+let preset_judge_present (p : preset) = String.length (String.trim p.judge) > 0
+
 type t =
   { enabled : bool
   ; default_preset : string
@@ -37,7 +42,6 @@ type t =
   ; low_confidence_threshold : float
   ; high_stakes_task_kinds : string list
   ; per_hour_budget : int
-  ; max_cost_usd_per_call : float
   }
 [@@deriving show, eq]
 
@@ -57,7 +61,7 @@ let trigger_eligible ~(policy : t) (trigger : Fusion_types.fusion_trigger) =
   | Fusion_types.High_stakes task_kind ->
     List.mem task_kind policy.high_stakes_task_kinds
 
-let decide ~(policy : t) ~hourly_count ~estimated_cost_usd
+let decide ~(policy : t) ~hourly_count
     (req : Fusion_types.fusion_request) : Fusion_types.gate_decision =
   if not policy.enabled then Fusion_types.Deny Fusion_types.Disabled
   else
@@ -75,7 +79,5 @@ let decide ~(policy : t) ~hourly_count ~estimated_cost_usd
             Fusion_types.Deny Fusion_types.Not_warranted
           else if hourly_count >= policy.per_hour_budget then
             Fusion_types.Deny Fusion_types.Over_hourly_budget
-          else if Float.compare estimated_cost_usd policy.max_cost_usd_per_call > 0
-          then Fusion_types.Deny Fusion_types.Over_cost_cap
           else Fusion_types.Allow req
       end

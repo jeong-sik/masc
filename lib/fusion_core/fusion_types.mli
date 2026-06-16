@@ -82,9 +82,6 @@ type panel_outcome =
 (** 성공한 답만 추출 (심판 입력 구성용). 입력 순서 보존. *)
 val answered_of : panel_outcome list -> panel_answer list
 
-(** 실패한 패널 수 (심의 유효성 판정용). *)
-val failure_count : panel_outcome list -> int
-
 (** {1 심판 구조화 출력}
 
     [Structured.extract]의 provider-native JSON schema로 강제 파싱되는 닫힌 타입.
@@ -188,14 +185,12 @@ type fusion_request =
 
 (** {1 게이트 결정} *)
 
-(** 게이트가 심의를 거부하는 사유 — 닫힌 합. 비용 통제가 명시적·테스트 가능. *)
+(** 게이트가 심의를 거부하는 사유 — 닫힌 합. 발동 통제가 명시적·테스트 가능. *)
 type deny_reason =
   | Disabled  (** [fusion].enabled = false *)
   | Preset_unknown of string  (** preset 이름이 config에 없음 (fail-fast) *)
   | Depth_exceeded  (** depth = Nested *)
   | Over_hourly_budget  (** per_hour_budget 초과 *)
-  | Over_cost_cap  (** 예상 cost > max_cost_usd_per_call *)
-  | Rate_limited  (** 동시 진행 심의 상한 *)
   | Not_warranted  (** 트리거가 게이트 조건 미충족 (예: low_confidence인데 score≥threshold) *)
 [@@deriving yojson, show, eq]
 

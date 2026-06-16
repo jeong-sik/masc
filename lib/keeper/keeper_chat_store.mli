@@ -88,15 +88,18 @@ val authority_of_label : string -> speaker_authority option
     authenticated operator and carries no per-user identity). *)
 type audio_clip = {
   token : string;
+  audio_url : string option;
   mime : string;
   duration_sec : float option;
   message_text : string;
+  device_id : string option;
 }
 (** Persistable audio clip (RFC-0235 P1). Written on an assistant line
     when the keeper synthesized a voice utterance; [token] is the
     [/api/v1/voice/audio/:token] capability, [message_text] doubles as
-    the caption. Same shape as {!Keeper_chat_broadcast}'s SSE payload so
-    the two never drift. *)
+    the caption. [audio_url] and [device_id] carry transport routing hints
+    so the dashboard can fetch and route the clip. Same shape as
+    {!Keeper_chat_broadcast}'s SSE payload so the two never drift. *)
 
 type speaker = {
   speaker_id : string option;

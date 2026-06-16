@@ -8,9 +8,11 @@
     .ml for the full contract. *)
 type audio_clip = {
   token : string;
+  audio_url : string option;
   mime : string;
   duration_sec : float option;
   message_text : string;
+  device_id : string option;
 }
 
 (** Broadcast a [keeper_chat_appended] SSE event after a completed turn

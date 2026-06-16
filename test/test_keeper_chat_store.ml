@@ -260,9 +260,11 @@ let test_recent_direct_context_omits_voice_audio_self_echo () =
         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~audio:
           { K.token = "voice-token-1"
+          ; audio_url = None
           ; mime = "audio/mpeg"
           ; duration_sec = None
           ; message_text = "I will say this out loud now."
+          ; device_id = None
           }
         ();
       let lines =

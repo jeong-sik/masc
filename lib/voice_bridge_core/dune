@@ -9,6 +9,7 @@
   eio
   fs_compat
   masc.config
+  masc.masc_process
   masc.host_config
   masc.masc_exec
   masc.masc_random_id

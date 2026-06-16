@@ -105,8 +105,8 @@ val audio_duration_seconds : audio_file:string -> float option
 
 val with_voice_output_turn : agent_id:string -> (unit -> 'a) -> 'a
 (** Serialize a speaking turn for transports whose call includes audible output.
-    Direct TTS generation should stay outside this helper; local playback is
-    already serialized by {!run_local_playback}. *)
+    Uses the same distributed playback lock as {!run_local_playback} so a voice
+    MCP session and direct TTS do not overlap across processes. *)
 
 val is_dedup_hit : agent_id:string -> message:string -> bool
 (** [true] iff [(agent_id, hash message)] matches the most recent
@@ -122,8 +122,10 @@ val run_local_playback :
   audio_file:string ->
   unit ->
   [ `Dedup_hit | `Opened of float | `Played of float | `Skipped of string | `Failed of string ]
-(** Mutex-protected local audio playback with a 30s dedup window
-    keyed on [(agent_id, hash message)]. Returns:
+(** Distributed-lock-protected local audio playback with a 30s dedup window
+    keyed on [(agent_id, hash message)]. The lock is backed by an OS-level
+    flock on the host runtime directory so multiple MASC processes on the same
+    host cannot talk over each other. Returns:
 
     - [`Dedup_hit] — another fiber already played this same message
       recently (check happens inside the playback mutex to close the

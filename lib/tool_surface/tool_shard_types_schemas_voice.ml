@@ -28,6 +28,13 @@ let voice_tools : Masc_domain.tool_schema list =
                       [ "type", `String "integer"
                       ; "description", `String "Optional priority hint for the TTS endpoint"
                       ] )
+                ; ( "audio_device"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description"
+                        , `String
+                            "Optional target output device id/name for the dashboard/client"
+                      ] )
                 ] )
           ; "required", `List [ `String "message" ]
           ]

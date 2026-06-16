@@ -27,8 +27,14 @@ let default_max_retries = 3
 let default_initial_backoff_seconds = 1.0
 let default_backoff_multiplier = 2.0
 
-let playback_mu = Eio.Mutex.create ()
 let playback_dedup_window_sec = 30.0
+
+(** Distributed playback lock. Uses an OS-level flock on a file in the host
+    runtime directory so multiple MASC processes on the same host serialize
+    audible output, not just fibers inside one process. *)
+let playback_lock_path () =
+  let host = Host_config.host () in
+  Filename.concat host.run_dir "masc_voice_playback.lock"
 
 type last_playback = { agent_id : string; message_hash : int; finished_at : float }
 let last_playback_ref : last_playback option Atomic.t = Atomic.make None
@@ -123,7 +129,7 @@ let log_debug msg =
   Log.Voice.debug "%s %s" log_prefix msg
 
 let with_voice_output_turn ~agent_id:_ f =
-  Eio.Mutex.use_rw ~protect:true playback_mu f
+  File_lock_eio.with_lock (playback_lock_path ()) f
 
 let split_path_env value =
   String.split_on_char ':' value
@@ -277,7 +283,7 @@ let run_local_playback ~sw:_ ~agent_id ?message ~audio_file () =
           playback_timeout_sec_for
             ~duration_sec:(audio_duration_seconds ~audio_file)
         in
-        Eio.Mutex.use_rw ~protect:true playback_mu (fun () ->
+        File_lock_eio.with_lock (playback_lock_path ()) (fun () ->
           let dedup_hit =
             match message with
             | Some m -> is_dedup_hit ~agent_id ~message:m

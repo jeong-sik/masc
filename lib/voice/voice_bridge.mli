@@ -50,6 +50,7 @@ val agent_speak :
   message:string ->
   ?provider:string ->
   ?priority:int ->
+  ?audio_device:string ->
   unit ->
   (Yojson.Safe.t, string) result
 (** Synthesize [message] via the configured TTS endpoint chain and play it

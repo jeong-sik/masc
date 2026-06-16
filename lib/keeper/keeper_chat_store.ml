@@ -131,9 +131,11 @@ let authority_of_label = function
 
 type audio_clip = {
   token : string;
+  audio_url : string option;
   mime : string;
   duration_sec : float option;
   message_text : string;
+  device_id : string option;
 }
 
 type speaker = {
@@ -497,7 +499,9 @@ let parse_line ~file_path (line : string) : chat_message option =
                  | _ -> None
                in
                let message_text = Option.value (get "message_text") ~default:"" in
-               Some { token; mime; duration_sec; message_text }
+               let audio_url = get "audio_url" in
+               let device_id = get "device_id" in
+               Some { token; audio_url; mime; duration_sec; message_text; device_id }
            | _ ->
                (* audio without token+mime is malformed; drop the field but
                   keep the row (text-only render). *)

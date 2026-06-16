@@ -95,6 +95,33 @@ describe('parseWorktreeSSE', () => {
     const label = workspaceLabelForAgent('nick0cave', entries)
     expect(label).toBe('wt-run-47')
   })
+
+  it('carries origin_url / web_url through when present', () => {
+    const entry = {
+      ...sampleWorktrees[0],
+      origin_url: 'git@github.com:jeong-sik/masc.git',
+      web_url: 'https://github.com/jeong-sik/masc',
+    }
+    const result = parseWorktreeSSE(`data: ${JSON.stringify(entry)}`)
+    expect(result).toHaveLength(1)
+    expect(result[0]?.origin_url).toBe('git@github.com:jeong-sik/masc.git')
+    expect(result[0]?.web_url).toBe('https://github.com/jeong-sik/masc')
+  })
+
+  it('accepts entries from an older server that omit origin_url / web_url', () => {
+    // Backward compat: the tolerant guard must not drop entries that predate
+    // the origin_url/web_url fields, else every worktree vanishes mid-rollout.
+    const result = parseWorktreeSSE(`data: ${JSON.stringify(sampleWorktrees[0])}`)
+    expect(result).toHaveLength(1)
+    expect(result[0]?.origin_url).toBeUndefined()
+  })
+
+  it('accepts null origin_url (worktree with no remote)', () => {
+    const entry = { ...sampleWorktrees[1], origin_url: null, web_url: null }
+    const result = parseWorktreeSSE(`data: ${JSON.stringify(entry)}`)
+    expect(result).toHaveLength(1)
+    expect(result[0]?.origin_url).toBeNull()
+  })
 })
 
 describe('agentsToPresence', () => {

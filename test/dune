@@ -1285,6 +1285,8 @@
 
 (include stanzas/test_anti_rationalization_empty_liveness.inc)
 
+(include stanzas/test_registry_visible_tag_coverage.inc)
+
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
 (include stanzas/test_anti_rationalization_gate2_advisory_10113.inc)

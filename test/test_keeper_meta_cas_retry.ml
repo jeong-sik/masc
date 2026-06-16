@@ -199,6 +199,62 @@ let test_monotonic_usage_counters_on_cas_retry () =
     check int "last_* observation stays with the caller" 777
       final.runtime.usage.last_latency_ms)
 
+let test_operator_pause_survives_stale_heartbeat_retry () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let m0 = make_meta ~name:"operator-pause-cas" in
+    (match Keeper_meta_store.write_meta config m0 with
+     | Ok () -> ()
+     | Error e -> fail ("seed write failed: " ^ e));
+    let stale_turn_view = match Keeper_meta_store.read_meta config "operator-pause-cas" with
+      | Ok (Some m) -> m
+      | _ -> fail "seed read failed"
+    in
+    let operator_pause =
+      { stale_turn_view with
+        paused = true;
+        auto_resume_after_sec = None;
+        runtime = { stale_turn_view.runtime with last_blocker = None };
+        updated_at = Keeper_meta_contract.now_iso ();
+      }
+    in
+    (match Keeper_meta_store.write_meta config operator_pause with
+     | Ok () -> ()
+     | Error e -> fail ("operator pause write failed: " ^ e));
+    let stale_completion =
+      { stale_turn_view with
+        paused = false;
+        runtime =
+          { stale_turn_view.runtime with
+            usage =
+              { stale_turn_view.runtime.usage with
+                total_turns = stale_turn_view.runtime.usage.total_turns + 1;
+              };
+          };
+        updated_at = Keeper_meta_contract.now_iso ();
+      }
+    in
+    (match
+       Keeper_meta_store.write_meta_with_merge
+         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk config stale_completion
+     with
+     | Ok () -> ()
+     | Error e -> fail ("stale retry write failed: " ^ e));
+    let final = match Keeper_meta_store.read_meta config "operator-pause-cas" with
+      | Ok (Some m) -> m
+      | _ -> fail "final read failed"
+    in
+    check bool "operator pause survives stale retry" true final.paused;
+    check bool "auto resume stays disabled" true
+      (Option.is_none final.auto_resume_after_sec);
+    check bool "stale blocker stays cleared" true
+      (Option.is_none final.runtime.last_blocker))
+
 (* RFC-0237: the [write_meta ~force:true] escape hatch is removed, so the
    counter-rewind path the four keeper-internal sites carried
    (keeper_tool_surface / keeper_tool_surface_ops / keeper_keepalive /
@@ -273,6 +329,8 @@ let () =
             test_retry_succeeds_after_concurrent_bump;
           test_case "usage counters stay monotonic on stale retry (RFC-0225 §3.2)"
             `Quick test_monotonic_usage_counters_on_cas_retry;
+          test_case "operator pause survives stale heartbeat retry"
+            `Quick test_operator_pause_survives_stale_heartbeat_retry;
           test_case "stale write conflicts without force (RFC-0237 escape hatch closed)"
             `Quick test_stale_write_conflicts_without_force;
         ] );

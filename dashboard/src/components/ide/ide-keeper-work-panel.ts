@@ -100,7 +100,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
         </div>
         ${currentTask
           ? html`
-            <div class="ide-keeper-work-card">
+            <div class="ide-keeper-work-card v2-ide-card">
               <div class="ide-keeper-work-card-top">
                 <span>${currentTask.id}</span>
                 <span>${currentTask.status ?? 'unknown'}</span>
@@ -111,7 +111,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
           `
           : summary.currentTaskId
             ? html`
-              <div class="ide-keeper-work-card">
+              <div class="ide-keeper-work-card v2-ide-card">
                 <div class="ide-keeper-work-card-top">
                   <span>${summary.currentTaskId}</span>
                   <span>runtime</span>
@@ -127,7 +127,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
           ? GoalProgressCard(currentGoal, currentGoalProgress, summary.currentTaskId)
           : summary.currentGoalId
             ? html`
-              <div class="ide-keeper-work-goal" role="status">
+              <div class="ide-keeper-work-goal v2-ide-card" role="status">
                 <div class="ide-keeper-work-card-top">
                   <span>GOAL PROGRESS</span>
                   <span>${summary.currentGoalId}</span>
@@ -163,7 +163,7 @@ function QueuedTaskCards(
   const shownTasks = tasks.slice(0, 3)
   const hiddenCount = Math.max(0, tasks.length - shownTasks.length)
   return html`
-    <div class="ide-keeper-work-card" aria-label="Keeper active task queue">
+    <div class="ide-keeper-work-card v2-ide-card" aria-label="Keeper active task queue">
       <div class="ide-keeper-work-card-top">
         <span>ACTIVE QUEUE</span>
         <span>${tasks.length} queued</span>
@@ -193,7 +193,7 @@ function GoalProgressCard(
   const pctLabel = progress ? formatProgressPct(progress) : '0%'
   const pctValue = progress ? Math.round(progress.ratio * 100) : 0
   return html`
-    <div class="ide-keeper-work-goal" role="status" aria-label=${`Goal ${goal.id} progress ${pctLabel}`}>
+    <div class="ide-keeper-work-goal v2-ide-card" role="status" aria-label=${`Goal ${goal.id} progress ${pctLabel}`}>
       <div class="ide-keeper-work-card-top">
         <span>GOAL PROGRESS</span>
         <span>${horizonLabel(goal.horizon)} · ${goalPhaseLabel(goal.phase)}</span>
@@ -259,6 +259,7 @@ function KeeperWorkRouteLinks(
         <button
           key=${link.id}
           type="button"
+          class="v2-ide-action"
           title=${link.evidence}
           onClick=${() => openIdeContextRouteLink(link)}
         >${link.label}</button>

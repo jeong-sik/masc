@@ -519,7 +519,7 @@ export function RuntimeMonitor() {
             ? providers?.providers.map(provider => {
                 const liveProbe = providerProbes.get(providerRuntimeKey(provider)) ?? null
                 return html`
-                <article class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
+                <article class="v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-sm text-[var(--color-fg-primary)]">${provider.runtime_id ?? provider.provider}</strong>
@@ -600,11 +600,11 @@ export function RuntimeMonitor() {
                   metric.coverage_status === 'none'
                   || metric.coverage_status === 'partial'
                   || metric.coverage_status === 'error_only'
-                let articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2'
+                let articleClass = 'v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2'
                 if (isFailing) {
-                  articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--status-bad)] bg-[var(--status-bad)]/5 backdrop-blur-sm flex flex-col gap-2'
+                  articleClass = 'v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--status-bad)] bg-[var(--status-bad)]/5 backdrop-blur-sm flex flex-col gap-2'
                 } else if (hasCoverageGap) {
-                  articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--status-warn)]/5 backdrop-blur-sm flex flex-col gap-2'
+                  articleClass = 'v2-monitoring-card p-4 rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--status-warn)]/5 backdrop-blur-sm flex flex-col gap-2'
                 }
                 const runtimeLabel = metric.model_id
                 const ariaLabel = isFailing
@@ -724,7 +724,7 @@ export function RuntimeMonitor() {
                   ${(metric.recent_entries ?? []).length > 0
                     ? html`
                       <button
-                        class="text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] mt-1 text-left"
+                        class="v2-monitoring-action text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] mt-1 text-left"
                         onClick=${() => { expandedModel.value = expandedModel.value === metric.model_id ? null : metric.model_id }}
                       >
                         ${expandedModel.value === metric.model_id ? '▾' : '▸'} recent ${metric.recent_entries?.length ?? 0} turns

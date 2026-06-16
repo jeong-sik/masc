@@ -258,7 +258,7 @@ export function RuntimeHealthSnapshot() {
       ${endpoints.length > 0 ? html`
         <div class="mt-3 grid gap-2 md:grid-cols-3" data-testid="runtime-health-endpoints">
           ${endpoints.map(row => html`
-            <div class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+            <div class="v2-monitoring-card min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
               <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.label}</div>
               <div class="mt-1 truncate font-mono text-2xs text-[var(--color-fg-secondary)]" title=${row.value ?? ''}>
                 ${shortUrl(row.value)}

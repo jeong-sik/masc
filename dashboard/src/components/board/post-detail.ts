@@ -257,14 +257,14 @@ function CommentItem({
   return html`
     <div style=${indentStyle}>
       <div
-        class=${`board-comment rounded-[var(--r-1)] border p-3 ${commentToneClass} ${depthBorderClass}`}
+        class=${`board-comment v2-workspace-row rounded-[var(--r-1)] border p-3 ${commentToneClass} ${depthBorderClass}`}
         data-route-focused-comment=${isRouteFocused ? comment.id : undefined}
       >
         <div class="flex items-center gap-2 mb-1.5">
           ${canToggleReplies ? html`
             <button
               type="button"
-              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+              class="v2-workspace-action flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
               aria-expanded=${repliesExpanded}
               aria-label=${repliesExpanded ? `답글 ${replyCount}개 접기` : `답글 ${replyCount}개 펼치기`}
               onClick=${() => setCollapsed(!collapsed)}
@@ -277,7 +277,7 @@ function CommentItem({
           <div class="ml-auto flex items-center gap-1">
             <button
               type="button"
-              class=${`h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--warn-10)] hover:text-[var(--warn-bright)]'}`}
+              class=${`v2-workspace-action h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--warn-10)] hover:text-[var(--warn-bright)]'}`}
               aria-label="댓글 추천"
               aria-pressed=${upvoteActive ? 'true' : 'false'}
               disabled=${upvoteActive}
@@ -292,7 +292,7 @@ function CommentItem({
             >${scoreLabel}</span>
             <button
               type="button"
-              class=${`h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]'}`}
+              class=${`v2-workspace-action h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]'}`}
               aria-label="댓글 비추천"
               aria-pressed=${downvoteActive ? 'true' : 'false'}
               disabled=${downvoteActive}
@@ -349,7 +349,7 @@ function CommentItem({
         ${cappedByDepth ? html`
           <button
             type="button"
-            class="mt-2 rounded-[var(--r-1)] border border-dashed border-[var(--accent-20)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
+            class="v2-workspace-action mt-2 rounded-[var(--r-1)] border border-dashed border-[var(--accent-20)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
             onClick=${() => setDeepExpanded(true)}
           >스레드 계속 펼치기 · 답글 ${replyCount}개</button>
         ` : null}
@@ -360,7 +360,7 @@ function CommentItem({
           ${canLoadMoreSiblingReplies ? html`
             <button
               type="button"
-              class="ml-4 mt-1 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-divider)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
+              class="v2-workspace-action ml-4 mt-1 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-divider)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
               onClick=${() => setVisibleReplyLimit(visibleReplyLimit + INITIAL_CHILD_REPLY_LIMIT)}
             >답글 ${hiddenSiblingReplyCount}개 더 보기</button>
           ` : null}
@@ -458,7 +458,7 @@ function CommentRouteFocusPanel({
 
   return html`
     <section
-      class="mb-3 rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      class="v2-workspace-panel mb-3 rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
       data-testid="board-comment-route-focus"
       aria-label="Board comment route focus"
     >
@@ -478,7 +478,7 @@ function CommentRouteFocusPanel({
         </div>
         <button
           type="button"
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="v2-workspace-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
           onClick=${() => clearCommentRouteFocus(postId)}
         >
           CLEAR

@@ -95,6 +95,7 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('Feature cleanup')
     expect(container.textContent).toContain('RuntimeMonitor')
     expect(container.textContent).toContain('VerificationSpecsPanel')
+    expect(container.querySelector('section[aria-label="Hidden diagnostics"].v2-monitoring-panel')).not.toBeNull()
   })
 
   it('default view uses progressive disclosure: Signal open, Diagnostic/Raw in collapsed <details>', async () => {

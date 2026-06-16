@@ -55,6 +55,7 @@ describe('AgentRuntimeStrip', () => {
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
     // STAGES short label for `compacting` is `compact`.
     expect(container.textContent).toContain('compact')
+    expect(container.querySelector('.v2-monitoring-detail')).not.toBeNull()
   })
 
   it('renders context ratio bar when present', () => {

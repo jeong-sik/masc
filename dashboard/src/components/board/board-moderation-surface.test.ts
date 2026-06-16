@@ -84,6 +84,7 @@ describe('BoardModerationSurface', () => {
     expect(screen.getByText('keeper-a')).toBeTruthy()
     expect(screen.getByText('open')).toBeTruthy()
     expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-workspace-panel')).not.toBeNull()
     expect(fetchQueueMock).toHaveBeenCalledWith(expect.objectContaining({
       resolved: false,
       signal: expect.any(AbortSignal),

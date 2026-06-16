@@ -213,6 +213,7 @@ export function IdeExplorer({
             ${onRepositoryScan ? html`
               <button
                 type="button"
+                class="v2-ide-action"
                 title="base path 아래 git 저장소 스캔"
                 aria-label="base path 아래 git 저장소 스캔"
                 disabled=${isScanningRepositories}
@@ -379,7 +380,7 @@ function TreeRow(
   }
   return html`
     <li
-      class="ide-explorer-row"
+      class="ide-explorer-row v2-ide-row"
       role="treeitem"
       aria-expanded=${node.hasChildren ? (expanded ? 'true' : 'false') : undefined}
       aria-selected=${selected ? 'true' : undefined}
@@ -488,6 +489,7 @@ function ExplorerContextChip(focus: IdeContextFocus) {
         <button
           key=${link.id}
           type="button"
+          class="v2-ide-action"
           title=${link.evidence}
           aria-label=${`Open ${link.evidence}`}
           onClick=${(event: MouseEvent) => {

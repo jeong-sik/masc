@@ -225,7 +225,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
   const height = topPad + n * cell + 30
 
   return html`
-    <div class="bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-3 overflow-x-auto">
+    <div class="v2-monitoring-card bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-3 overflow-x-auto">
       <svg viewBox="0 0 ${width} ${height}" class="w-full h-auto" role="img" aria-label="에이전트 간 메모리 서브시스템 연결 행렬" style="max-height:560px">
         ${agents.map(
           (name, i) => html`
@@ -370,7 +370,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
   if (synapses.length === 0) return null
   const top = [...synapses].sort((a, b) => b.weight - a.weight).slice(0, TOP_LINK_COUNT)
   return html`
-    <div class="bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-3 mt-3">
+    <div class="v2-monitoring-card bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] p-3 mt-3">
       <div class="text-xs text-[var(--color-fg-muted)] mb-2">강한 연결 Top ${TOP_LINK_COUNT} · sparkline = 학습 궤적</div>
       <div class="space-y-1.5">
         ${top.map(s => {
@@ -413,7 +413,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
 function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
   const pct = Math.round(s.weight * 100)
   return html`
-    <tr class="border-b border-[var(--color-border-default)]">
+    <tr class="v2-monitoring-row border-b border-[var(--color-border-default)]">
       <td class="py-1.5 px-2 text-sm font-mono">
         <button
           class="hover:text-[var(--color-accent-fg)] hover:underline focus:outline-none focus:text-[var(--color-accent-fg)]"
@@ -452,7 +452,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
   const outcomeIcon =
     ep.outcome === 'success' ? '●' : ep.outcome === 'partial' ? '◐' : '○'
   return html`
-    <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] p-3 mb-2 hover:border-[var(--color-border-default)] transition-colors">
+    <div class="v2-monitoring-card border border-[var(--color-border-default)] rounded-[var(--r-1)] p-3 mb-2 hover:border-[var(--color-border-default)] transition-colors">
       <div class="flex items-start justify-between gap-2 mb-1">
         <div class="flex items-center gap-2 min-w-0">
           <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
@@ -500,7 +500,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
 function MemoryEntryRow({ entry }: { readonly entry: MemorySubsystemsMemoryEntry }) {
   return html`
     <div
-      class="grid grid-cols-[5.5rem_8rem_6rem_minmax(0,1fr)_3rem] items-start gap-2 border-b border-[var(--color-border-default)] px-2 py-2 text-xs last:border-b-0 max-md:grid-cols-[4.5rem_minmax(0,1fr)]"
+      class="v2-monitoring-row grid grid-cols-[5.5rem_8rem_6rem_minmax(0,1fr)_3rem] items-start gap-2 border-b border-[var(--color-border-default)] px-2 py-2 text-xs last:border-b-0 max-md:grid-cols-[4.5rem_minmax(0,1fr)]"
       role="listitem"
       aria-label=${`${entry.keeper} · ${entry.kind} · priority ${entry.priority} · ${entry.text}`}
     >
@@ -601,12 +601,12 @@ export function MemoryEntriesPanel({
       }
       ${
         visibleEntries.length === 0
-          ? html`<div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 text-center text-sm text-[var(--color-fg-muted)]">
+          ? html`<div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 text-center text-sm text-[var(--color-fg-muted)]">
               memory entries 없음
             </div>`
           : html`
               <div
-                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]"
+                class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]"
                 role="list"
                 aria-label=${`${visibleEntries.length} memory entries`}
               >
@@ -735,7 +735,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
       <section aria-label="아키텍처 데이터 흐름도">
         <button
           onClick=${() => (showArch.value = !showArch.value)}
-          class="w-full flex items-center justify-between p-2 bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors"
+          class="v2-monitoring-action w-full flex items-center justify-between p-2 bg-[var(--color-bg-elevated)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)] transition-colors"
         >
           <span class="text-sm font-semibold text-[var(--color-fg-muted)] flex items-center gap-2">
             <span class="text-xs">${showArch.value ? '▼' : '▶'}</span>
@@ -835,7 +835,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
                         필터 결과 없음 (${synapses.length} items)
                       </div>`
                     : html`<div class="overflow-x-auto">
-                        <table class="w-full text-left" aria-label="Hebbian 시냅스 상세 테이블">
+                        <table class="v2-monitoring-table w-full text-left" aria-label="Hebbian 시냅스 상세 테이블">
                           <thead>
                             <tr class="border-b border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
                               <th scope="col" class="py-1.5 px-2">출처</th>
@@ -880,7 +880,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
                 <span class="text-[var(--color-fg-muted)]">시냅스 쌍 필터</span>
                 <span class="text-[var(--color-fg-muted)] font-mono">${shortAgentLabel(pairFilter.from)} → ${shortAgentLabel(pairFilter.to)}</span>
                 <button
-                  class="ml-auto text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)]"
+                  class="v2-monitoring-action ml-auto text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)]"
                   onClick=${() => setSynapsePairFilter(null)}
                   aria-label="시냅스 쌍 필터 해제"
                 >✕</button>
@@ -922,7 +922,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
             hasFilter
               ? html`<button
                   onClick=${clearFilters}
-                  class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)] px-2 py-1 border border-[var(--color-border-default)] rounded-[var(--r-1)] hover:border-[var(--color-border-default)]0"
+                  class="v2-monitoring-action text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)] px-2 py-1 border border-[var(--color-border-default)] rounded-[var(--r-1)] hover:border-[var(--color-border-default)]0"
                 >
                   필터 해제
                 </button>`

@@ -178,7 +178,7 @@ function RuntimeCatalogStrip({
         return html`
           <button
             type="button"
-            class="min-w-0 rounded-[var(--r-1)] border px-3 py-2 text-left transition-colors ${active ? 'border-[var(--color-accent-fg)] bg-[var(--accent-10)]' : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] hover:border-[var(--color-border-strong)]'}"
+            class="v2-monitoring-card min-w-0 rounded-[var(--r-1)] border px-3 py-2 text-left transition-colors ${active ? 'border-[var(--color-accent-fg)] bg-[var(--accent-10)]' : 'border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] hover:border-[var(--color-border-strong)]'}"
             disabled=${disabled}
             onClick=${() => onSelect(entry)}
             aria-pressed=${active}
@@ -319,7 +319,7 @@ export function RuntimeEnvironmentEditor({
       ` : null}
 
       ${bindings.length === 0 ? html`
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-muted)]">
+        <div class="v2-monitoring-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] px-3 py-4 text-xs text-[var(--color-fg-muted)]">
           구조화해서 편집할 provider.model binding이 없습니다. 아래 raw editor에서 runtime.toml을 먼저 추가하세요.
         </div>
       ` : html`

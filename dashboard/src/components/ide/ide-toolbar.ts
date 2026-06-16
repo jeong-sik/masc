@@ -31,7 +31,7 @@ const VIEW_TABS: ReadonlyArray<{ readonly id: ViewTab; readonly label: string }>
 ]
 
 const TOOLBAR_BUTTON_BASE =
-  'h-7 shrink-0 cursor-pointer rounded-[var(--r-1)] px-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] transition-colors'
+  'v2-ide-action h-7 shrink-0 cursor-pointer rounded-[var(--r-1)] px-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] transition-colors'
 
 export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },
@@ -168,7 +168,7 @@ export function IdeToolbar({
       role="toolbar"
       aria-label="IDE editor toolbar"
       data-testid="ide-toolbar"
-      class="ide-toolbar"
+      class="ide-toolbar v2-ide-toolbar"
       data-has-rails=${onRailsToggle ? 'true' : 'false'}
     >
       <div

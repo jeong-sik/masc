@@ -208,6 +208,7 @@ describe('IdeConversationRail', () => {
         tool: null,
         duration_ms: null,
         match_count: null,
+        terminal_reason_code: null,
       }],
     )
 

@@ -987,6 +987,11 @@ export interface KeeperDecision {
   tool: string | null
   duration_ms: number | null
   match_count: number | null
+  // Closed-sum terminal cause of the turn (completed / api_error /
+  // runtime_exhausted / tool_contract / required_tool_use_unsatisfied),
+  // computed by dashboard_http_keeper_feeds.ml; the table can only show the
+  // coarse `outcome` without it.
+  terminal_reason_code: string | null
 }
 
 export interface KeeperDecisionContext {
@@ -1056,6 +1061,7 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
     tool: asNullableString(raw.tool),
     duration_ms: asNumber(raw.duration_ms) ?? null,
     match_count: asNumber(raw.match_count) ?? null,
+    terminal_reason_code: asNullableString(raw.terminal_reason_code),
   }
 }
 

@@ -12,6 +12,7 @@ import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-runtime'
 import { keeperActivityDisplay, keeperWorkPreview } from '../../lib/keeper-runtime-display'
 import type { Keeper } from '../../types'
+import { VirtualList } from '../common/virtual-list'
 import {
   WorkspaceSigil,
   StatusDot,
@@ -28,6 +29,16 @@ const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
   { bucket: 'paused', label: '대기 · 일시정지' },
   { bucket: 'offline', label: '중지 · 종료됨' },
 ]
+
+/** Flattened roster item used by the virtualized render path. */
+type RosterItem =
+  | { type: 'header'; bucket: KeeperBucket; label: string }
+  | { type: 'row'; keeper: Keeper }
+
+/** Switch to the shared VirtualList once the roster is long enough that DOM
+ *  weight matters. Below this we keep the identical grouped DOM structure and
+ *  rely on content-visibility:auto for cheap off-screen skipping. */
+const WINDOW_AT = 60
 
 /** Blocked tasks + explicit attention flag → the roster attention badge. */
 function attentionCount(keeper: Keeper): number {
@@ -49,7 +60,17 @@ function matchesQuery(keeper: Keeper, q: string): boolean {
   return hay.includes(q.toLowerCase())
 }
 
-function RosterRow({ keeper, active, onSelect }: { keeper: Keeper; active: boolean; onSelect: (name: string) => void }) {
+function RosterRow({
+  keeper,
+  active,
+  onSelect,
+  style,
+}: {
+  keeper: Keeper
+  active: boolean
+  onSelect: (name: string) => void
+  style?: string
+}) {
   const bucket = keeperBucket(keeper)
   const tone = keeperStatusTone(keeper)
   const att = attentionCount(keeper)
@@ -60,6 +81,7 @@ function RosterRow({ keeper, active, onSelect }: { keeper: Keeper; active: boole
     <button
       type="button"
       class="kw-kp-row"
+      style=${style}
       aria-current=${active ? 'true' : 'false'}
       onClick=${() => onSelect(keeper.name)}
     >
@@ -115,6 +137,31 @@ export function KeeperWorkspaceRoster({
     { id: 'att', label: '주의' },
   ]
 
+  // Flatten groups → [{ type: 'header'|'row', ... }] for windowing.
+  const items: RosterItem[] = []
+  for (const group of GROUP_ORDER) {
+    const rows = visible.filter(k => keeperBucket(k) === group.bucket)
+    if (rows.length === 0) continue
+    items.push({ type: 'header', bucket: group.bucket, label: group.label })
+    for (const keeper of rows) {
+      items.push({ type: 'row', keeper })
+    }
+  }
+
+  const useVirtual = items.length > WINDOW_AT
+  const rowStyle = 'content-visibility:auto;contain-intrinsic-size:auto 58px'
+
+  function renderItem(item: RosterItem): VNode {
+    if (item.type === 'header') {
+      return html`<div class="kw-roster-group">${item.label}</div>`
+    }
+    return html`<${RosterRow} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} />`
+  }
+
+  function getKey(item: RosterItem): string {
+    return item.type === 'header' ? `h:${item.bucket}` : item.keeper.name
+  }
+
   return html`
     <aside class="kw-roster" aria-label="키퍼 로스터">
       <div class="kw-roster-head">
@@ -139,19 +186,28 @@ export function KeeperWorkspaceRoster({
           </button>
         `)}
       </div>
-      <div class="kw-roster-list">
-        ${GROUP_ORDER.map(group => {
-          const rows = visible.filter(k => keeperBucket(k) === group.bucket)
-          if (rows.length === 0) return null
-          return html`
-            <div>
-              <div class="kw-roster-group">${group.label}</div>
-              ${rows.map(k => html`<${RosterRow} key=${k.name} keeper=${k} active=${k.name === activeName} onSelect=${select} />`)}
-            </div>
-          `
-        })}
-        ${visible.length === 0 ? html`<div class="kw-roster-empty">일치하는 키퍼가 없습니다</div>` : null}
-      </div>
+      ${visible.length === 0
+        ? html`<div class="kw-roster-list"><div class="kw-roster-empty">일치하는 키퍼가 없습니다</div></div>`
+        : useVirtual
+          ? html`<${VirtualList}
+              items=${items}
+              estimatedItemHeight=${58}
+              className="kw-roster-list"
+              renderItem=${renderItem}
+              getKey=${getKey}
+            />`
+          : html`<div class="kw-roster-list">
+              ${GROUP_ORDER.map(group => {
+                const rows = visible.filter(k => keeperBucket(k) === group.bucket)
+                if (rows.length === 0) return null
+                return html`
+                  <div>
+                    <div class="kw-roster-group">${group.label}</div>
+                    ${rows.map(k => html`<${RosterRow} key=${k.name} keeper=${k} active=${k.name === activeName} onSelect=${select} style=${rowStyle} />`)}
+                  </div>
+                `
+              })}
+            </div>`}
     </aside>
   `
 }

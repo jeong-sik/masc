@@ -481,4 +481,35 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
+
+  /* Keeper v2 token bridge — aliases for importing v2 stylesheets.
+     Maps the v2 surface vocabulary to the existing dashboard semantic
+     token ladder. Tokens that already exist in tokens.generated.css /
+     tokens.css (e.g. --font-*, --shadow-card, --radius-pill) are
+     intentionally not duplicated. */
+  --bg-deep: var(--bg-root);
+  --bg-panel-alt: var(--color-bg-panel-alt);
+  --bg-card: var(--color-bg-elevated);
+  --bg-card-hover: var(--color-bg-hover);
+  --bg-sunken: var(--bg-deepest);
+  --border-main: var(--border-base);
+  --border-soft: var(--border-subtle);
+  --text-bright: var(--text-strong);
+  --text-primary: var(--text-body);
+  --text-mid: var(--text-muted);
+  --volt: var(--accent);
+  --volt-strong: var(--color-accent-fg);
+  --volt-dim: var(--color-accent-fg-dim);
+  --volt-wash: var(--accent-10);
+  --volt-glow: rgb(var(--brass-glow) / .22);
+  --volt-ink: var(--bg-root);
+  --status-ok: var(--ok);
+  --status-warn: var(--warn);
+  --status-bad: var(--bad);
+  --status-idle: var(--idle);
+  --status-busy: var(--info);
+  --sp-9: var(--space-5);
+  --sp-10: var(--space-6);
+  --radius-2xs: var(--radius-xs);
+  --shadow-pop: var(--shadow-cmd-palette);
 }

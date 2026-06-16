@@ -140,9 +140,9 @@ Source-of-truth cross-reference (after Step 4 caller adoption):
 | `Awaiting_provider → Streaming` | `keeper_unified_turn.ml:803` (pre-`run_turn`) | #11358 |
 | `Streaming → Streaming` (SupervisorRequestsStop in Eio.Cancel handler) | `keeper_unified_turn.ml:867` | fix |
 | `Streaming → Failed provider_error` (retry exhausted) | `keeper_unified_turn.ml:1446` | #11363 |
-| `Streaming → Completing` | `keeper_unified_turn.ml:2092` (stop_reason) | #11308 |
+| `Streaming → Completing` | `keeper_unified_turn_success.ml` | #11308 |
 | `Streaming → Cancelled supervisor_stop` (HonorStopSignal, Eio.Cancel) | `keeper_unified_turn.ml:884` | Cycle 1b-iv |
-| `Completing → Done` (success exit) | `keeper_unified_turn.ml:2119` | #11288 |
+| `Completing → Done` (success exit) | `keeper_unified_turn_success.ml` | #11288 |
 
 Pending edges (require `keeper_agent_run.ml run_turn` adoption — volume risk):
 - `Streaming ⇄ Awaiting_tool_result` per tool call

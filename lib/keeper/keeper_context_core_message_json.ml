@@ -48,7 +48,16 @@ let content_blocks_of_json
            | Some "thinking" ->
              (match Json_util.get_string j "thinking" with
               | Some content ->
-                Some (Agent_sdk.Types.Thinking { thinking_type = "thinking"; content })
+                let thinking_type =
+                  match Json_util.get_string j "thinking_type" with
+                  | Some thinking_type -> thinking_type
+                  | None ->
+                    (* DET-OK: older context/checkpoint JSON predates the
+                       explicit carrier tag; "thinking" is the historical
+                       wire value for those persisted rows. *)
+                    "thinking"
+                in
+                Some (Agent_sdk.Types.Thinking { thinking_type; content })
               | None -> None)
            | Some "redacted_thinking" ->
              (match Json_util.get_string j "data" with

@@ -8,7 +8,7 @@ import { useVoiceInput } from './voice-input'
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
-import type { KeeperConversationAttachment, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
+import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
 
 function surfaceLink(surface?: SurfaceRef | null): { url: string; label: string; icon: string } | null {
   if (!surface || !surface.kind) return null
@@ -269,6 +269,40 @@ function renderAttachmentCard(attachment: KeeperConversationAttachment) {
   `
 }
 
+function formatAudioDuration(seconds?: number | null): string {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return ''
+  const totalSec = Math.round(seconds)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return `${min}:${sec.toString().padStart(2, '0')}`
+}
+
+// RFC-0235 P1/P3: user-gesture play button for synthesized assistant
+// voice clips. Uses the native `<audio controls>` element (no autoplay).
+function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
+  const duration = formatAudioDuration(clip.durationSec)
+  return html`
+    <div
+      class="flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5"
+      data-chat-audio-clip
+    >
+      <audio
+        controls
+        preload="none"
+        src=${clip.audioUrl ?? `/api/v1/voice/audio/${encodeURIComponent(clip.token)}`}
+        class="h-8 max-w-[16rem]"
+        aria-label=${clip.messageText || '음성 메시지'}
+      />
+      ${duration
+        ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${duration}</span>`
+        : null}
+      ${clip.deviceId
+        ? html`<span class="text-2xs text-[var(--color-fg-muted)]" title=${`device: ${clip.deviceId}`}>🔊</span>`
+        : null}
+    </div>
+  `
+}
+
 function ChatMessageBubble({
   entry,
   showMetadata = true,
@@ -477,6 +511,9 @@ function ChatMessageBubble({
               ${attachments.map(attachment => renderAttachmentCard(attachment))}
             </div>
           `
+        : null}
+      ${entry.audio
+        ? html`<${AudioPlayer} clip=${entry.audio} />`
         : null}
       ${entry.error
         ? html`

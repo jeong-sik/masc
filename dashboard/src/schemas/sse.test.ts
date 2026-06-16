@@ -171,6 +171,43 @@ describe('SSEMessageSchema', () => {
     })
     expect(r.success).toBe(true)
   })
+
+  it('accepts keeper_chat_appended with RFC-0235 audio clip', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_appended',
+      name: 'keeper-1',
+      connector: 'agent',
+      ts_unix: 1_712_000_000,
+      audio: {
+        token: 'clip-123',
+        mime: 'audio/mpeg',
+        message_text: 'hello operator',
+        audio_url: 'https://cdn.example/voice/clip-123.mp3',
+        duration_sec: 5.2,
+        device_id: 'dashboard',
+      },
+    })
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.audio).toEqual({
+        token: 'clip-123',
+        mime: 'audio/mpeg',
+        message_text: 'hello operator',
+        audio_url: 'https://cdn.example/voice/clip-123.mp3',
+        duration_sec: 5.2,
+        device_id: 'dashboard',
+      })
+    }
+  })
+
+  it('rejects malformed audio clip on keeper_chat_appended', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_appended',
+      name: 'keeper-1',
+      audio: { token: 'clip-123' },
+    })
+    expect(r.success).toBe(false)
+  })
 })
 
 describe('parseSSEMessage', () => {

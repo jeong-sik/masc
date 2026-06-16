@@ -545,13 +545,13 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   }
 
   if (event.type === 'keeper_chat_appended') {
-    const payload = event as unknown as { name?: string }
+    const payload = event as unknown as { name?: string; audio?: unknown }
     const name = typeof payload.name === 'string' ? payload.name : ''
     if (name) {
       // Dynamic import keeps sse-store decoupled from the keeper action
       // layer (same pattern as the agent-failed notification above).
       void import('./keeper-runtime')
-        .then(mod => { mod.noteKeeperChatAppended(name) })
+        .then(mod => { mod.noteKeeperChatAppended(name, payload.audio) })
         .catch(err => {
           console.debug('[SSE] keeper chat refresh unavailable', err instanceof Error ? err.message : '')
         })

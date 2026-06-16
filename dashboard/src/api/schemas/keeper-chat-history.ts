@@ -23,6 +23,7 @@ import {
   record,
   safeParse,
   string,
+  unknown,
   type InferOutput,
 } from 'valibot'
 
@@ -42,6 +43,25 @@ export const SurfaceRefSchema = object({
   label: optional(string()),
   address: optional(record(string(), string())),
 })
+
+// RFC-0235 P1/P3: synthesized voice clip. Backend uses snake_case in
+// history rows (lib/keeper/keeper_chat_store.ml) and camelCase in SSE
+// payloads (lib/keeper/keeper_chat_broadcast.ml). We accept both at the
+// boundary and let normalizers canonicalize to camelCase.
+export const KeeperChatHistoryAudioClipSchema = object({
+  token: string(),
+  audio_url: optional(string()),
+  audioUrl: optional(string()),
+  mime: string(),
+  duration_sec: optional(number()),
+  durationSec: optional(number()),
+  message_text: optional(string()),
+  messageText: optional(string()),
+  device_id: optional(string()),
+  deviceId: optional(string()),
+})
+
+export type KeeperChatHistoryAudioClip = InferOutput<typeof KeeperChatHistoryAudioClipSchema>
 
 export const KeeperChatHistoryMessageSchema = object({
   // R3: producer-assigned stable message id (keeper_chat_store.ml mints it
@@ -76,6 +96,10 @@ export const KeeperChatHistoryMessageSchema = object({
   speaker_id: optional(string()),
   speaker_name: optional(string()),
   speaker_authority: optional(string()),
+  // RFC-0235 P1/P3: audio clip field. The wire object is accepted as
+  // `unknown` at the boundary so malformed clips do not cause the whole
+  // message to be dropped; `normalizeAudioClip` validates before use.
+  audio: optional(unknown()),
 })
 
 export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>

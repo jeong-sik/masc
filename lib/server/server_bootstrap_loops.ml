@@ -160,6 +160,10 @@ let trimmed_env_opt name =
 
 let discord_bot_token_opt () = trimmed_env_opt "DISCORD_BOT_TOKEN"
 
+let broadcast_mention_wakeup_action = function
+  | Some target when String.trim target <> "" -> `Wake_keeper target
+  | Some _ | None -> `Suppress_no_target
+
 module For_testing = struct
   type queued_chat_projection = {
     payload_channel : string;
@@ -171,6 +175,7 @@ module For_testing = struct
 
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
   let board_sse_event_params = board_sse_event_params
+  let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
 
   let queued_chat_projection queued_message : queued_chat_projection =
     let projection = queued_chat_projection queued_message in
@@ -542,18 +547,19 @@ let start_keeper_loops
         "board: Activity_graph.emit kind=%s failed: %s"
         activity_kind
         (Printexc.to_string exn));
-  (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
-     can react to new tasks, mentions, or workspace activity immediately.
-     SSOT: Workspace_broadcast.on_broadcast_mention is the single ref wired here. *)
+  (* Wire broadcast -> keeper wakeup. Explicit mentions wake the target
+     keeper immediately; unmentioned broadcasts remain passive SSE/message
+     fanout so one broad announcement cannot create a fleet-wide turn storm.
+     Board signals have their own capped keeper wake path above. *)
   let broadcast_mention_handler =
     fun mention ->
-    match mention with
-    | Some target ->
+    match broadcast_mention_wakeup_action mention with
+    | `Wake_keeper target ->
       Keeper_keepalive.wakeup_keeper ~base_path:(Mcp_server.workspace_config state).base_path target;
       Log.Keeper.info "broadcast mention → wakeup keeper %s" target
-    | None ->
-      Keeper_keepalive.wakeup_all_keepers ~base_path:(Mcp_server.workspace_config state).base_path ();
-      Log.Keeper.info "broadcast → wakeup all keepers (reactive push)"
+    | `Suppress_no_target ->
+      Log.Keeper.info
+        "broadcast without mention -> keeper wakeup suppressed (passive fanout)"
   in
   Workspace_broadcast.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)

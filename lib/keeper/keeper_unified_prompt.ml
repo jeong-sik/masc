@@ -121,7 +121,21 @@ let provenance_label (p : Keeper_world_observation.observation_provenance) : str
   | Unknown -> "unknown"
 ;;
 
-let format_board_event_line
+(* RFC-0248 PR-2: a trust-tagged board line. The decision "render this line as
+   operator-reachable instruction, or keep it inside the observational-data
+   envelope?" is made exactly once, in [board_line_of_event]. The variant then
+   carries the trust boundary to the point of rendering: there is no longer a
+   function that renders a list of board events as a bare string, so a future
+   edit cannot accidentally drop fleet narrative (self/peer/automation/unknown)
+   into the instruction stream — the confabulation path PR-1 fenced at render
+   time becomes a compile error. Trusted lines render via
+   [render_trusted_lines]; observation lines render ONLY via
+   [render_observation_lines], the sole site that applies the envelope. *)
+type board_line =
+  | Trusted_line of string
+  | Observation_line of string
+
+let format_board_event_text
     (event : Keeper_world_observation.pending_board_event) : string =
   let kind = provenance_label event.provenance in
   let mention_note =
@@ -159,9 +173,22 @@ let format_board_event_line
     event.preview
 ;;
 
-let format_board_events
-    (events : Keeper_world_observation.pending_board_event list) : string =
-  String.concat "\n" (List.map format_board_event_line events)
+let board_line_of_event
+    (event : Keeper_world_observation.pending_board_event) : board_line =
+  let line = format_board_event_text event in
+  (* Same predicate as the prior runtime [is_trusted]: trusted = NOT quarantined
+     (human direction) OR an explicit @mention (the actionable channel). The tag
+     is fixed here; neither renderer can override it. *)
+  if (not (Keeper_world_observation.should_quarantine event.provenance))
+     || event.explicit_mention
+  then Trusted_line line
+  else Observation_line line
+;;
+
+let render_trusted_lines (lines : board_line list) : string =
+  lines
+  |> List.filter_map (function Trusted_line s -> Some s | Observation_line _ -> None)
+  |> String.concat "\n"
 ;;
 
 (* RFC-0247: observational-data envelope. Fleet-authored board narrative is
@@ -181,6 +208,23 @@ let observation_data_envelope_header =
 ;;
 
 let observation_data_envelope_footer = "\n--- end observational-data ---\n"
+;;
+
+(* RFC-0248 PR-2: the SOLE renderer for observation lines. Applying the envelope
+   is structurally mandatory — there is no function that turns an
+   [Observation_line] into a bare string, so fleet narrative cannot reach the
+   instruction stream. Returns [None] when there are no observations so the
+   caller adds nothing. Output is byte-identical to the PR-1 render-time
+   partition that wrapped the quarantined list. *)
+let render_observation_lines (lines : board_line list) : string option =
+  match
+    lines |> List.filter_map (function Observation_line s -> Some s | Trusted_line _ -> None)
+  with
+  | [] -> None
+  | obs ->
+    Some
+      (observation_data_envelope_header ^ String.concat "\n" obs
+       ^ observation_data_envelope_footer)
 ;;
 
 let line_block label value =
@@ -849,26 +893,22 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
        keeper_board_post_get / keeper_board_post_comment to verify. *)
     | Keeper_context_layers.Board_activity ->
       if observation.pending_board_events <> [] then (
-        let is_trusted (event : Keeper_world_observation.pending_board_event) =
-          (not (Keeper_world_observation.should_quarantine event.provenance))
-          || event.explicit_mention
-        in
-        let trusted, quarantined =
-          List.partition is_trusted observation.pending_board_events
-        in
+        (* RFC-0248 PR-2: each event becomes a trust-tagged [board_line] once,
+           then the typed renderers place it. Trusted lines render as
+           instruction; observation lines render ONLY inside the envelope. The
+           type makes dropping fleet narrative into the instruction stream a
+           compile error. *)
+        let lines = List.map board_line_of_event observation.pending_board_events in
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf
           (Printf.sprintf "### Board Activity (%d new)\n"
              (List.length observation.pending_board_events));
-        (match trusted with
-         | [] -> ()
-         | _ -> Buffer.add_string ubuf (format_board_events trusted));
-        (match quarantined with
-         | [] -> ()
-         | _ ->
-           Buffer.add_string ubuf observation_data_envelope_header;
-           Buffer.add_string ubuf (format_board_events quarantined);
-           Buffer.add_string ubuf observation_data_envelope_footer);
+        (match render_trusted_lines lines with
+         | "" -> ()
+         | trusted -> Buffer.add_string ubuf trusted);
+        (match render_observation_lines lines with
+         | None -> ()
+         | Some envelope -> Buffer.add_string ubuf envelope);
         if
           tool_allowed "keeper_board_curation_submit"
           && List.length observation.pending_board_events >= 2

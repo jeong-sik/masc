@@ -43,7 +43,6 @@ val tokenize : string -> string list
 val lexical_relevance : ?gain:float -> seed_tokens:string list -> fact -> float
 
 val truth_recency_factor : ?lambda:float -> now:float -> fact -> float
-val stale_penalty : fact -> float
 val decide_retention : ?discard_threshold:float -> float -> retention_verdict
 
 (** Score an archived tool result. *)

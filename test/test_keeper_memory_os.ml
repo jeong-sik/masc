@@ -1197,6 +1197,10 @@ let test_jsonl_tail_reads_last_entries () =
     | events -> Alcotest.failf "expected one event, got %d" (List.length events))
 ;;
 
+(* RFC-0247 (purge): GC is two structural passes — hard-expire past-TTL facts and
+   dedup duplicate claims keeping the most-recently-verified. There is no
+   score-threshold discard, so this asserts only the structural outcomes. The
+   duplicate winner is chosen by [last_verified_at] recency, not by confidence. *)
 let test_gc_dry_run_and_rewrite () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "gc-keeper" in
@@ -1205,10 +1209,8 @@ let test_gc_dry_run_and_rewrite () =
     let keep =
       { base with
         Types.claim = "keep this fact"
-      ; Types.confidence = 0.95
       ; Types.first_seen = now
       ; Types.last_verified_at = Some now
-      ; Types.last_accessed = now
       }
     in
     let expired =
@@ -1217,43 +1219,36 @@ let test_gc_dry_run_and_rewrite () =
       ; Types.valid_until = Some (now -. 1.0)
       }
     in
-    let low_confidence =
-      { keep with
-        Types.claim = "low confidence fact"
-      ; Types.confidence = 0.0
-      }
-    in
-    let duplicate_low =
+    let duplicate_old =
       { keep with
         Types.claim = "Duplicate Claim"
-      ; Types.confidence = 0.80
+      ; Types.last_verified_at = Some (now -. 100.0)
       ; Types.source = { keep.source with turn = 10 }
       }
     in
-    let duplicate_high =
+    let duplicate_recent =
       { keep with
         Types.claim = "duplicate claim"
-      ; Types.confidence = 0.90
+      ; Types.last_verified_at = Some now
       ; Types.source = { keep.source with turn = 11 }
       }
     in
     List.iter
       (Memory_io.append_fact ~keeper_id)
-      [ keep; expired; low_confidence; duplicate_low; duplicate_high ];
+      [ keep; expired; duplicate_old; duplicate_recent ];
     let dry = GC.run_gc ~dry_run:true ~keeper_id ~now () in
     Alcotest.(check bool) "dry-run flag" true dry.GC.dry_run;
-    Alcotest.(check int) "dry-run leaves file untouched" 5
+    Alcotest.(check int) "dry-run leaves file untouched" 4
       (List.length (Memory_io.read_facts_all ~keeper_id));
     let report = GC.run_gc ~keeper_id ~now () in
-    Alcotest.(check int) "total input" 5 report.GC.total_input;
+    Alcotest.(check int) "total input" 4 report.GC.total_input;
     Alcotest.(check int) "ttl expired" 1 report.ttl_expired;
-    Alcotest.(check int) "verdict discarded" 1 report.verdict_discarded;
     Alcotest.(check int) "dedup removed" 1 report.dedup_removed;
     Alcotest.(check int) "written" 2 report.written;
     let survivors = Memory_io.read_facts_all ~keeper_id in
     Alcotest.(check int) "survivor count" 2 (List.length survivors);
     Alcotest.(check bool)
-      "keeps high duplicate"
+      "keeps most-recently-verified duplicate"
       true
       (List.exists (fun f -> String.equal f.Types.claim "duplicate claim") survivors);
     Alcotest.(check bool)

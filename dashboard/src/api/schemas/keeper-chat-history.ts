@@ -17,6 +17,7 @@
  */
 
 import {
+  array,
   number,
   object,
   optional,
@@ -26,6 +27,18 @@ import {
   unknown,
   type InferOutput,
 } from 'valibot'
+
+// Attachment row shape persisted by keeper_chat_store.ml (to_json_array
+// :848-861): snake_case mime_type and an open `type` string. Normalized to
+// the camelCase KeeperConversationAttachment at the consume boundary.
+export const KeeperChatHistoryAttachmentSchema = object({
+  id: string(),
+  type: string(),
+  name: string(),
+  size: number(),
+  mime_type: string(),
+  data: string(),
+})
 
 export const SurfaceRefSchema = object({
   kind: string(),
@@ -100,6 +113,14 @@ export const KeeperChatHistoryMessageSchema = object({
   // `unknown` at the boundary so malformed clips do not cause the whole
   // message to be dropped; `normalizeAudioClip` validates before use.
   audio: optional(unknown()),
+  // Persisted file/image uploads (keeper_chat_store.ml to_json_array
+  // :848-861). Without decoding these, a user's upload appears live but
+  // vanishes on reload even though it is on disk.
+  attachments: optional(array(KeeperChatHistoryAttachmentSchema)),
+  // Row kind (keeper_chat_store.ml :838-841). `transport_failure` is minted
+  // so a reload can tell a failed request apart from a real keeper reply;
+  // open string() per the same deploy-window rationale as `role`.
+  kind: optional(string()),
 })
 
 export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>

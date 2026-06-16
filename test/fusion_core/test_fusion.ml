@@ -257,6 +257,23 @@ let test_judge_tolerant_skip () =
   | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
+(* --- budget counter (RFC-0249 §6/§10) --- *)
+
+let test_budget_basic () =
+  let b = Fusion_budget.create () in
+  Alcotest.(check int) "first" 1 (Fusion_budget.incr_and_count b ~hour_bucket:"H1");
+  Alcotest.(check int) "second" 2 (Fusion_budget.incr_and_count b ~hour_bucket:"H1");
+  Alcotest.(check int) "current" 2 (Fusion_budget.current_count b ~hour_bucket:"H1")
+
+let test_budget_window_reset () =
+  let b = Fusion_budget.create () in
+  ignore (Fusion_budget.incr_and_count b ~hour_bucket:"H1" : int);
+  ignore (Fusion_budget.incr_and_count b ~hour_bucket:"H1" : int);
+  Alcotest.(check int) "new window resets to 1" 1
+    (Fusion_budget.incr_and_count b ~hour_bucket:"H2");
+  Alcotest.(check int) "old window now 0" 0
+    (Fusion_budget.current_count b ~hour_bucket:"H1")
+
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
@@ -289,5 +306,9 @@ let () =
         ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
         ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
         ; Alcotest.test_case "tolerant_skip" `Quick test_judge_tolerant_skip
+        ] )
+    ; ( "budget"
+      , [ Alcotest.test_case "basic" `Quick test_budget_basic
+        ; Alcotest.test_case "window_reset" `Quick test_budget_window_reset
         ] )
     ]

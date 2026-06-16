@@ -18,14 +18,15 @@ type provenance_event =
   ; tool_call_id : string option
   }
 
-(* The librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241). The LLM emits
-   a free-text category label; [category_of_string] parses it once at the
-   producer boundary into this type, with [Unknown] absorbing any label outside
-   the taxonomy (drift / typo / a future label) instead of letting a free-text
-   string flow downstream. Consumers (consolidator promotion whitelist, recall
-   rendering) then match typed variants — a new label can never be silently
-   promoted, and the surface-string list that the consolidator used to match on
-   is gone. *)
+(* The librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241; RFC-0247 §2.5).
+   The LLM emits a free-text category label; [category_of_string] parses it once
+   at the producer boundary into this type, with [Unknown] absorbing any label
+   outside the taxonomy (drift / typo / a future label) instead of letting a
+   free-text string flow downstream. [Ephemeral] (RFC-0247) is the non-promotable
+   arm for coordination/lifecycle boilerplate — the structural backstop for the
+   #21244 mislabel-and-promote failure: even if the prompt's durability gate is
+   imperfect, a claim the LLM recognizes as ephemeral is typed non-promotable and
+   forgotten, rather than silently entering the store as a durable fact. *)
 type category =
   | Code_change
   | Fact
@@ -33,6 +34,7 @@ type category =
   | Blocker
   | Goal
   | Constraint
+  | Ephemeral
   | Unknown of string
 
 let category_to_string = function
@@ -42,6 +44,7 @@ let category_to_string = function
   | Blocker -> "blocker"
   | Goal -> "goal"
   | Constraint -> "constraint"
+  | Ephemeral -> "ephemeral"
   | Unknown s -> s
 ;;
 
@@ -53,7 +56,45 @@ let category_of_string s =
   | "blocker" -> Blocker
   | "goal" -> Goal
   | "constraint" -> Constraint
+  | "ephemeral" -> Ephemeral
   | _ -> Unknown s
+;;
+
+(* Exhaustive promotability: only objective, durable claim kinds cross keepers.
+   Preserves the prior [Fact; Constraint] whitelist exactly; everything else —
+   including [Ephemeral] and any [Unknown] label — stays keeper-local. Exhaustive
+   match (not a runtime [category list]) so a future durable kind must be
+   classified here at compile time rather than silently defaulting to
+   non-promotable, the no-silent-omission property RFC-0247 §2.5 argues for over
+   the prompt-suppression approach. *)
+let is_promotable = function
+  | Fact | Constraint -> true
+  | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
+;;
+
+(* RFC-0247 §2.3 (forgetting): retention is a property of the category. A
+   coordination event ("checkpoint saved") is stale within a day and worthless in
+   a later session, so it gets a short hard TTL and a fast truth-decay; durable
+   knowledge never hard-expires and decays slowly. These two functions are the
+   write-side producers that make [valid_until] and [expected_lifetime_cycles]
+   (previously set-once-to-None dead fields) actually reachable. *)
+
+(* A coordination/lifecycle fact is stale within a day. Named, not magic. *)
+let ephemeral_ttl_seconds = 86_400.0
+
+(* Ephemeral facts decay over a few retention cycles; with the policy's
+   default_cycle_seconds (1h) this is a ~hours half-life vs the ~30-day default,
+   so an ephemeral fact loses recall score fast even before its hard TTL. *)
+let ephemeral_lifetime_cycles = 3
+
+let category_valid_until ~now = function
+  | Ephemeral -> Some (now +. ephemeral_ttl_seconds)
+  | Fact | Constraint | Preference | Blocker | Goal | Code_change | Unknown _ -> None
+;;
+
+let category_lifetime_cycles = function
+  | Ephemeral -> Some ephemeral_lifetime_cycles
+  | Fact | Constraint | Preference | Blocker | Goal | Code_change | Unknown _ -> None
 ;;
 
 type fact =
@@ -264,7 +305,9 @@ let fact_of_json (json : Yojson.Safe.t) =
           Some
             { claim
             ; confidence = clamp01 confidence
-            ; category = category_of_string category_str
+            ; (* Parse-once at the read boundary; legacy free-string categories
+                 on disk map to their arm or [Unknown] (graceful-degrade). *)
+              category = category_of_string category_str
             ; source
             ; observed_by
             ; access_count

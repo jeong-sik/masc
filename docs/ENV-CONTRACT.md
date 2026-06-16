@@ -139,12 +139,20 @@ Because every flag here is `request_dynamic` on the Execute path
 (read at tool-invocation time), operators can flip a flag without a
 restart and the next `Execute` call picks it up.
 
-### 5. WebSearch provider selection (`request_dynamic` inside the process)
+### 5. WebSearch provider selection (`boot_static` seed, request-time read)
 
 The WebSearch backend reads these values while handling each search request.
-Changing the parent shell after the server has already started still requires a
-process restart; changing the process env inside the running process is picked
-up on the next WebSearch call.
+Values can be authored either as process env vars or in
+`<resolved-config-root>/runtime.toml` under `[web_search]`. Runtime TOML values
+are loaded into the process-local boot override store at startup, so
+`runtime.toml` edits require a process restart. Changing the process env inside
+the running process is still picked up on the next WebSearch call.
+
+Precedence:
+
+1. Process env var
+2. `[web_search]` value from `runtime.toml`
+3. Built-in default
 
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -157,10 +165,25 @@ up on the next WebSearch call.
 | `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC` | `30.0` | In-process WebSearch rate-limit window. |
 | `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS` | `30` | In-process WebSearch rate-limit ceiling per window. |
 
+Equivalent `runtime.toml` keys:
+
+```toml
+[web_search]
+searxng_url = "http://localhost:8888"
+provider = "auto"
+provider_order = "searxng,brave,tavily,exa,bing_api"
+fallbacks = "duckduckgo,bing_rss"
+timeout_sec = 15
+cache_ttl_sec = 30.0
+rate_limit_window_sec = 30.0
+rate_limit_max_calls = 30
+```
+
 Representative code paths:
 
 - [`tool_misc_web_search.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/tool_misc_web_search.ml)
 - [`env_config_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/env_config_runtime.ml)
+- [`keeper_runtime_config.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/keeper_runtime/keeper_runtime_config.ml)
 - [`masc_network_defaults.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/masc_network_defaults.ml)
 
 ### 6. Test-only boot overrides

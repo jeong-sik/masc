@@ -37,6 +37,7 @@
   test_keeper_cycle_channel
   test_keeper_identity_id
   test_keeper_idle_threshold_contract
+  test_keeper_context_layers
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -238,6 +239,7 @@
   test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
   test_no_progress_loop_detector
+  test_keeper_wake_tombstone
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
@@ -322,6 +324,7 @@
   test_keeper_cycle_channel
   test_keeper_identity_id
   test_keeper_idle_threshold_contract
+  test_keeper_context_layers
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -523,6 +526,7 @@
   test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
   test_no_progress_loop_detector
+  test_keeper_wake_tombstone
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
@@ -1329,6 +1333,8 @@
 
 (include stanzas/test_discord_gateway_state.inc)
 
+(include stanzas/test_discord_gateway_client.inc)
+
 (include stanzas/test_discord_presence_bridge.inc)
 
 (include stanzas/test_discord_observability.inc)
@@ -1352,6 +1358,8 @@
 (include stanzas/test_otel_zero_fill.inc)
 
 (include stanzas/test_nickname_words_ssot.inc)
+
+(include stanzas/test_thinking_control_format_unknown_error.inc)
 
 (include stanzas/test_workspace_bootstrap.inc)
 
@@ -1426,6 +1434,8 @@
 (include stanzas/test_gate_protocol.inc)
 
 (include stanzas/test_git_fetch_retry_script.inc)
+
+(include stanzas/test_goal_phase_all.inc)
 
 (include stanzas/test_goal_phase_awaiting_verification_10411.inc)
 
@@ -1546,6 +1556,8 @@
 (include stanzas/test_keeper_supervisor_write_meta_source.inc)
 
 (include stanzas/test_keeper_supervisor_finally_cancel_swallow.inc)
+
+(include stanzas/test_keeper_surface_status.inc)
 
 (include stanzas/test_failing_minimum_essential.inc)
 

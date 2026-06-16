@@ -178,6 +178,8 @@ export async function hydrateKeeperChatHistory(
 const chatRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const CHAT_APPENDED_REFRESH_DELAY_MS = 400
 const PENDING_KEEPER_CHAT_POLL_MS = 2_000
+const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
+  '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -290,10 +292,19 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
   } catch (err) {
     if (isMissingQueuedKeeperRequestError(err)) {
       removePendingKeeperChatRequest(request.requestId)
-      removeThreadEntries(request.keeperName, [
-        pendingUserEntryId(request.requestId),
-        assistantId,
-      ])
+      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+        delivery: 'error',
+        error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+      })
+      finalizeAssistantEntry(request.keeperName, assistantId, {
+        text: '',
+        rawText: '',
+        delivery: 'error',
+        streamState: null,
+        timestamp: new Date().toISOString(),
+        error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+      })
+      setRecordValue(keeperActionErrors, request.keeperName, QUEUED_KEEPER_REQUEST_LOST_MESSAGE)
       await hydrateKeeperChatHistory(request.keeperName, { force: true })
       return
     }
@@ -453,6 +464,17 @@ export async function sendKeeperThreadMessage(
     const finalText = finalEntry?.text.trim() ?? ''
 
     if (!outcome.terminal) {
+      if (requestId) {
+        removeThreadEntries(keeperName, [localId, assistantId])
+        await resumePendingKeeperChatRequest({
+          requestId,
+          keeperName,
+          message,
+          submittedAt: Date.now(),
+          ...(attachments ? { attachments } : {}),
+        })
+        return
+      }
       // The SSE connection closed without RUN_FINISHED / RUN_ERROR —
       // keep the partial text but mark the entry so the operator can
       // tell a cut stream from a completed reply.

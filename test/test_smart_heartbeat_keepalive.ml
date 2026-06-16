@@ -209,6 +209,36 @@ module KWOBS = Masc.Keeper_world_observation_board_signal
 let reason_label = KWOBS.wake_reason_label
 let labeled selected = List.map (fun (item, r) -> item, reason_label r) selected
 
+let make_board_resume_meta ?(paused = false) ?auto_resume_after_sec name =
+  let json =
+    `Assoc
+      [
+        ("name", `String name);
+        ("agent_name", `String ("keeper-" ^ name));
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "test");
+        ("sandbox_profile", `String "local");
+        ("network_mode", `String "inherit");
+        ("tool_access", `List []);
+      ]
+  in
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error err -> fail ("meta_of_json failed: " ^ err)
+  | Ok meta -> { meta with paused; auto_resume_after_sec }
+
+let test_board_auto_resume_rejects_operator_pause () =
+  let meta = make_board_resume_meta ~paused:true "operator-paused" in
+  check bool "operator pause is not board-auto-resumable" false
+    (KKS.paused_meta_allows_board_auto_resume meta)
+
+let test_board_auto_resume_allows_auto_paused_keeper () =
+  let meta =
+    make_board_resume_meta ~paused:true ~auto_resume_after_sec:3600.0
+      "auto-paused"
+  in
+  check bool "auto-paused keeper is board-auto-resumable" true
+    (KKS.paused_meta_allows_board_auto_resume meta)
+
 let test_board_wakeup_selection_keeps_explicit_mentions () =
   let selected, dropped =
     KKS.select_board_wakeup_candidates
@@ -399,6 +429,10 @@ let () =
         `Quick test_board_wakeup_selection_drops_none_reasons;
       test_case "total non-explicit fanout is capped"
         `Quick test_board_wakeup_selection_caps_total_non_explicit;
+      test_case "operator pauses are not board-auto-resumed"
+        `Quick test_board_auto_resume_rejects_operator_pause;
+      test_case "auto-paused keepers can be board-auto-resumed"
+        `Quick test_board_auto_resume_allows_auto_paused_keeper;
     ];
     "missed_wakeup_gap", [
       test_case "Skip_idle + Woken -> resumes (MissedWakeup spec gap)"

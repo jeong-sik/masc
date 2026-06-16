@@ -794,6 +794,24 @@ let test_bundled_keeper_profiles_resolve_prompt_self_model () =
              require_nonempty_option path "needs" defaults.needs;
              require_nonempty_option path "desires" defaults.desires))
 
+let test_bundled_issue_king_uses_local_sandbox () =
+  let repo = repo_root () in
+  Fun.protect
+    ~finally:(fun () -> Config_dir_resolver.reset ())
+    (fun () ->
+      with_env_restore [ "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ] (fun () ->
+          Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
+          Unix.putenv "MASC_PERSONAS_DIR"
+            (Filename.concat (Filename.concat repo "config") "personas");
+          Config_dir_resolver.reset ();
+          match KTP.load_keeper_profile_defaults_result "issue_king" with
+          | Error e -> fail (Printf.sprintf "issue_king failed to resolve: %s" e)
+          | Ok defaults ->
+            check (option string) "issue_king sandbox" (Some "local")
+              (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
+            check (option string) "issue_king network" (Some "inherit")
+              (Option.map KTP.network_mode_to_string defaults.network_mode)))
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -1865,6 +1883,8 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "bundled keeper profiles resolve prompt self-model" `Quick
             test_bundled_keeper_profiles_resolve_prompt_self_model;
+          test_case "bundled issue_king uses local sandbox" `Quick
+            test_bundled_issue_king_uses_local_sandbox;
           test_case "persona resolver omits unspecified tool_access" `Quick
             test_persona_resolver_omits_unspecified_tool_access;
           test_case "persona defaults load self-model fields" `Quick

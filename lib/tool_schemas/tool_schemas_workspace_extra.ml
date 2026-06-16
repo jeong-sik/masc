@@ -4,29 +4,14 @@
 open Masc_domain
 
 let goal_horizon_enum = [ "short"; "mid"; "long" ]
-let goal_phase_enum =
-  [
-    "executing";
-    "awaiting_verification";
-    "awaiting_approval";
-    "blocked";
-    "paused";
-    "completed";
-    "dropped";
-  ]
+(* RFC-0089: the phase/action enums advertised to MCP clients are derived from
+   the Goal_phase ADT (the goal lifecycle SSOT), the same source the
+   workspace_goals validator uses, so the schema can never advertise a value the
+   validator rejects (or vice versa). *)
+let goal_phase_enum = List.map Goal_phase.to_string Goal_phase.all
 
 let goal_transition_action_enum =
-  [
-    "request_complete";
-    "approve_completion";
-    "reject_completion";
-    "pause";
-    "resume";
-    "operator_block";
-    "operator_unblock";
-    "drop";
-    "reopen";
-  ]
+  List.map Goal_phase.action_to_string Goal_phase.all_actions
 
 let goal_vote_decision_enum = [ "approve"; "reject" ]
 let goal_inherit_mode_enum = [ "extend"; "replace" ]

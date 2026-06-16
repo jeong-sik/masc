@@ -53,6 +53,12 @@ val record_turn : keeper_name:string -> made_progress:bool -> record_outcome
 (** Current consecutive no-progress count for [keeper_name]. *)
 val current_streak : keeper_name:string -> int
 
+(** RFC-0246: true iff this keeper is latched in a no-progress loop — the
+    streak crossed the threshold and has not been reset by a progress turn.
+    The wake-tombstone gate (see [Keeper_wake_tombstone]) reads this to decide
+    whether to suppress an automatic (board-reactive/heartbeat) wake. *)
+val is_latched : keeper_name:string -> bool
+
 (** Reset streak for [keeper_name] — used on keeper restart or
     operator-triggered unstick. *)
 val reset : keeper_name:string -> unit

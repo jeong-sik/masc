@@ -124,51 +124,58 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* RFC-0239 Q4: Memory OS Tier-1 fact GC. Removes TTL-expired facts,
-     verdict-discarded rows, and duplicate claims from each keeper's own
-     fact store. Per-keeper like writes, so it cannot race cross-keeper
-     consolidation; it is the production caller that makes [run_gc] live. *)
-  fork_logged_fiber
-    ~sw
-    ~on_error:(log_server_fiber_crash "memory_os_gc")
-    (fun () ->
-      let interval = 300.0 in
+  (* RFC-0247 §2.3: memory-os forgetting sweep. Off the keeper hot path — every
+     [interval]s it runs the deterministic per-keeper GC ([run_gc]: hard-expire
+     facts whose [valid_until] has passed, drop fully-decayed facts by retention
+     verdict, dedup by the [normalize_claim] SSOT) and rewrites each keeper's
+     Tier-1 store atomically. This is [run_gc]'s first production caller; without
+     it the TTL/lifetime machinery (now produced per-category at librarian write
+     time) is unreachable. The shared store is skipped — the consolidator
+     reconstructs it wholesale each sweep, so GC-ing it would just be undone.
+     Default OFF (mirrors the consolidation gate): enable via the env once a live
+     dry-run confirms what it would prune. Per-keeper failures are caught so one
+     corrupt store cannot cancel siblings. *)
+  if
+    Keeper_memory_bank_env.memory_env_bool_logged
+      "MASC_KEEPER_MEMORY_OS_GC"
+      ~default:false
+  then
+    fork_logged_fiber
+      ~sw
+      ~on_error:(log_server_fiber_crash "memory_os_gc")
+      (fun () ->
+      (* Coarser than consolidation (300s): GC rewrites stores, so a 10-minute
+         cadence is ample off the hot path. *)
+      let interval = 600.0 in
       let rec loop () =
-        (try
-           let keeper_ids = Keeper_memory_os_io.list_fact_store_keeper_ids () in
-           List.iter
-             (fun keeper_id ->
-                try
-                  let report =
-                    Keeper_memory_os_gc.run_gc
-                      ~keeper_id
-                      ~now:(Time_compat.now ())
-                      ()
-                  in
-                  if report.Keeper_memory_os_gc.total_input > 0
-                  then
-                    Log.Server.debug
-                      "memory_os_gc keeper=%s input=%d ttl=%d verdict=%d dedup=%d written=%d"
-                      keeper_id
-                      report.Keeper_memory_os_gc.total_input
-                      report.Keeper_memory_os_gc.ttl_expired
-                      report.Keeper_memory_os_gc.verdict_discarded
-                      report.Keeper_memory_os_gc.dedup_removed
-                      report.Keeper_memory_os_gc.written
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                  Log.Server.warn
-                    "memory_os_gc keeper=%s failed: %s"
-                    keeper_id
-                    (Printexc.to_string exn))
-             keeper_ids
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Server.warn
-             "memory_os_gc sweep failed: %s"
-             (Printexc.to_string exn));
+        List.iter
+          (fun keeper_id ->
+             try
+               let report =
+                 Keeper_memory_os_gc.run_gc ~keeper_id ~now:(Time_compat.now ()) ()
+               in
+               if
+                 report.Keeper_memory_os_gc.ttl_expired > 0
+                 || report.verdict_discarded > 0
+                 || report.dedup_removed > 0
+               then
+                 Log.Server.info
+                   "memory_os_gc: keeper=%s ttl_expired=%d discarded=%d dedup=%d written=%d"
+                   keeper_id
+                   report.ttl_expired
+                   report.verdict_discarded
+                   report.dedup_removed
+                   report.written
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Server.warn
+                 "memory_os_gc: keeper=%s tick crashed: %s"
+                 keeper_id
+                 (Printexc.to_string exn))
+          (List.filter
+             (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
+             (Keeper_memory_os_io.list_fact_store_keeper_ids ()));
         Eio.Time.sleep clock interval;
         loop ()
       in

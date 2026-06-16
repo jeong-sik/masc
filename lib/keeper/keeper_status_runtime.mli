@@ -54,6 +54,23 @@ val keeper_health_state :
   unit ->
   keeper_health
 
+(** Keeper display status derived from (keeper_health x agent_status). Closed so
+    consumers that classify it match exhaustively. "paused" is a control-plane
+    override applied above this layer, not a member of this domain. *)
+type surface_status =
+  | Surface_active
+  | Surface_busy
+  | Surface_listening
+  | Surface_inactive
+  | Surface_offline
+  | Surface_idle
+
+val surface_status_to_string : surface_status -> string
+
+(** Parse a wire/display status string into {!surface_status}; [None] when the
+    value is outside the six labels (e.g. "paused" or drift). *)
+val surface_status_of_string_opt : string -> surface_status option
+
 val keeper_surface_status :
   agent_status:Yojson.Safe.t ->
   diagnostic:Yojson.Safe.t ->

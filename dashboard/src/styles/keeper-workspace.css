@@ -255,8 +255,30 @@
 .kw-tasktag .tstate { font-size: 10px; flex: none; color: var(--color-fg-muted); }
 .kw-tasktag .tstate.review { color: var(--color-status-warn); }
 
-.kw-tool { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--color-fg-secondary); }
-.kw-tool .nm { font-family: var(--font-mono); font-size: 12px; color: var(--color-fg-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Recent tool calls: compact rows (status dot + name + duration + age) that
+ * expand on click to reveal input/output. Replaces the old names-only .kw-tool. */
+.kw-toolcall { border-radius: var(--r-1); }
+.kw-toolcall.open { background: var(--color-bg-page); border: 1px solid var(--color-border-divider); }
+.kw-toolcall-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 3px 6px; border-radius: var(--r-1); cursor: pointer;
+  background: none; border: none; text-align: left; color: var(--color-fg-secondary);
+  font-size: 12.5px;
+}
+.kw-toolcall-head:hover { background: var(--color-bg-hover); }
+.kw-toolcall-head .nm { font-family: var(--font-mono); font-size: 12px; color: var(--color-fg-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kw-toolcall-head .dur { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted); flex: none; }
+.kw-toolcall-head .age { font-size: 10.5px; color: var(--color-fg-muted); flex: none; white-space: nowrap; }
+.kw-toolcall-body { padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 6px; }
+.kw-tc-block { display: flex; flex-direction: column; gap: 2px; }
+.kw-tc-lbl { font-size: 10px; letter-spacing: 0.04em; color: var(--color-fg-muted); text-transform: uppercase; }
+.kw-tc-block pre {
+  margin: 0; max-height: 160px; overflow: auto;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
+  color: var(--color-fg-secondary); white-space: pre-wrap; word-break: break-word;
+  background: var(--color-bg-surface); border: 1px solid var(--color-border-divider);
+  border-radius: var(--r-0); padding: 6px 8px;
+}
 
 .kw-detail-btn {
   width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;

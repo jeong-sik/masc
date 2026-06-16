@@ -107,6 +107,85 @@ let test_toml_catalog_resolves_lifecycle_keys () =
   check (option string) "paused cleanup ttl" (Some "604800")
     (List.assoc_opt "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC" overrides)
 
+let test_toml_catalog_resolves_web_search_keys () =
+  let doc =
+    parse_or_fail
+      "[web_search]\n\
+       searxng_url = \"http://localhost:8888\"\n\
+       provider = \"auto\"\n\
+       provider_order = \"searxng,brave,duckduckgo\"\n\
+       fallbacks = \"duckduckgo,bing_rss\"\n\
+       timeout_sec = 12\n\
+       cache_ttl_sec = 45.5\n\
+       rate_limit_window_sec = 20.0\n\
+       rate_limit_max_calls = 9\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied web search overrides" 8 count;
+  check (option string) "searxng url" (Some "http://localhost:8888")
+    (List.assoc_opt "MASC_SEARXNG_URL" overrides);
+  check (option string) "provider" (Some "auto")
+    (List.assoc_opt "MASC_WEB_SEARCH_PROVIDER" overrides);
+  check (option string) "provider order" (Some "searxng,brave,duckduckgo")
+    (List.assoc_opt "MASC_WEB_SEARCH_PROVIDER_ORDER" overrides);
+  check (option string) "fallbacks" (Some "duckduckgo,bing_rss")
+    (List.assoc_opt "MASC_WEB_SEARCH_FALLBACKS" overrides);
+  check (option string) "timeout" (Some "12")
+    (List.assoc_opt "MASC_WEB_SEARCH_TIMEOUT_SEC" overrides);
+  check (option string) "cache ttl" (Some "45.5")
+    (List.assoc_opt "MASC_WEB_SEARCH_CACHE_TTL_SEC" overrides);
+  check (option string) "rate window" (Some "20")
+    (List.assoc_opt "MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC" overrides);
+  check (option string) "rate max" (Some "9")
+    (List.assoc_opt "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS" overrides);
+  let preempt_searxng name =
+    if String.equal name "MASC_SEARXNG_URL"
+    then Some "http://operator.example"
+    else None
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:preempt_searxng doc
+  in
+  check int "env preempts only searxng url" 7 count;
+  check (option string) "preempted searxng absent" None
+    (List.assoc_opt "MASC_SEARXNG_URL" overrides)
+
+let test_runtime_toml_reserves_web_search_namespace () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-concurrent = 1\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     [web_search]\n\
+     searxng_url = \"http://localhost:8888\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse with [web_search]:\n%s" rendered
+  | Ok cfg ->
+    check int "web_search is not a provider binding" 1
+      (List.length cfg.Runtime_schema.bindings);
+    check (option string) "default runtime" (Some "local.sample")
+      cfg.Runtime_schema.default_runtime_id
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -116,5 +195,10 @@ let () =
             test_repo_runtime_toml_loads;
           test_case
             "lifecycle TOML keys resolve through the declarative catalog"
-            `Quick test_toml_catalog_resolves_lifecycle_keys ] )
+            `Quick test_toml_catalog_resolves_lifecycle_keys;
+          test_case
+            "web_search TOML keys resolve through the declarative catalog"
+            `Quick test_toml_catalog_resolves_web_search_keys;
+          test_case "web_search is a reserved runtime TOML namespace" `Quick
+            test_runtime_toml_reserves_web_search_namespace ] )
     ]

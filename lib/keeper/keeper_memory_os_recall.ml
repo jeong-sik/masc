@@ -183,28 +183,65 @@ let dedup_by_claim scored =
     scored
 ;;
 
-let scored_facts ~now ?(seed_tokens = []) facts =
+(* Score, filter to current, rank, and dedup — retaining the score so the
+   spreading-activation step can boost from neighbour scores before the score is
+   dropped. *)
+let score_facts_ranked ~now ?(seed_tokens = []) facts =
   facts
   |> List.filter (fact_is_current ~now)
   |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact, fact)
   |> List.sort (fun (a, _) (b, _) -> compare b a)
   |> dedup_by_claim
-  |> List.map snd
+;;
+
+let scored_facts ~now ?(seed_tokens = []) facts =
+  score_facts_ranked ~now ~seed_tokens facts |> List.map snd
+;;
+
+(* Re-rank [scored] by adding each fact's spreading-activation boost. With
+   [alpha] <= 0 (or no associations) this is the identity, preserving the exact
+   RFC-0244 order and values. *)
+let activate ~alpha ~associations scored =
+  if alpha <= 0.0
+  then scored
+  else (
+    let base = List.map (fun (s, fact) -> normalize_claim fact.claim, s) scored in
+    let boosts = Keeper_memory_os_edges.activation_boosts ~alpha ~associations ~base in
+    let boost_tbl = Hashtbl.create (List.length boosts * 2 + 1) in
+    List.iter (fun (k, b) -> Hashtbl.replace boost_tbl k b) boosts;
+    scored
+    |> List.map (fun (s, fact) ->
+      let boost =
+        match Hashtbl.find_opt boost_tbl (normalize_claim fact.claim) with
+        | Some b -> b
+        | None -> 0.0
+      in
+      s +. boost, fact)
+    |> List.sort (fun (a, _) (b, _) -> compare b a))
 ;;
 
 let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = []) () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
+  (* RFC-0247 §2.7 (P2a-2): read associations only when activation is enabled, so
+     the default (alpha = 0) path does no extra IO and stays byte-identical. *)
+  let alpha = Keeper_memory_os_edges.activation_alpha () in
+  let associations =
+    if alpha <= 0.0 then [] else Keeper_memory_os_io.read_associations ~keeper_id
+  in
   let facts =
     (* RFC-0239 Q4: read up to the bounded recall window (the retention sweep
        caps the store to this many facts), so score ranking selects the
        globally best facts rather than only the most recent [fact_tail_scan].
        RFC-0244: [seed_tokens] (current turn) reranks via lexical relevance; an
-       empty seed leaves the ranking unchanged. *)
+       empty seed leaves the ranking unchanged. RFC-0247: spreading activation
+       then lifts facts linked to the recalled set (identity when alpha = 0). *)
     Keeper_memory_os_io.read_facts_tail
       ~keeper_id
       ~n:(max fact_tail_scan Keeper_memory_os_io.fact_recall_window)
-    |> scored_facts ~now ~seed_tokens
+    |> score_facts_ranked ~now ~seed_tokens
+    |> activate ~alpha ~associations
+    |> List.map snd
     |> take max_facts
   in
   (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own, with

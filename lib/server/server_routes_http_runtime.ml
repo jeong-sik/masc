@@ -1109,8 +1109,14 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
     ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with
   | Error err ->
+      (* Render a human-readable message (e.g. "Post not found: <id>") via the
+         shared Board_tool.board_error_to_string, matching the 404 contract in
+         the .mli and the convention already used for board errors in
+         server_routes_http_routes_activity.ml. The derived [show_board_error]
+         leaked the internal OCaml constructor name ("Post_not_found(...)") into
+         the public HTTP body. *)
       (`Not_found, Printf.sprintf {|{"error":"%s"}|}
-         (String.escaped (Board_types.show_board_error err)))
+         (String.escaped (Board_tool.board_error_to_string err)))
   | Ok post ->
       let author = Board.Agent_id.to_string post.author in
       let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in

@@ -106,6 +106,19 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.speaker_authority).toBeUndefined()
   })
 
+  it('passes the R3 producer-assigned id through when present', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({ id: 'msg-0001700000000000-0' }),
+    )
+    expect(out?.id).toBe('msg-0001700000000000-0')
+  })
+
+  it('accepts rows without an id (pre-R3 backend during the deploy window)', () => {
+    const out = safeParseKeeperChatHistoryMessage(validMessage())
+    expect(out).not.toBeNull()
+    expect(out?.id).toBeUndefined()
+  })
+
   it('composes in a filter chain — drops garbage entries silently', () => {
     const raw: unknown[] = [
       validMessage(),

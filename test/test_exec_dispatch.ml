@@ -933,5 +933,124 @@ let () =
   assert (result.stdout = "");
   assert (String.length result.stderr > 0)
 
+(* --- dispatch_async --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  Eio.Switch.run @@ fun sw ->
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("async", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  let promise = Masc_exec.Exec_dispatch.dispatch_async ~sw envelope in
+  let result = Eio.Promise.await promise in
+  assert (result.status = Unix.WEXITED 0);
+  assert (String.trim result.stdout = "async")
+
+(* --- dispatch_decided_outcome --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("outcome", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch_decided_outcome envelope in
+  assert (result.status = Unix.WEXITED 0);
+  assert (String.trim result.stdout = "outcome");
+  assert (result.semantic = `Ok)
+
+(* --- Keeper_tool_execute_shell_ir.dispatch_classified_with_approval --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("safe", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  let agent_id = Masc_exec.Agent_id.of_string "test-keeper" in
+  let approval_config =
+    { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.permissive_default
+    ; per_agent = []
+    }
+  in
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
+      ~agent_id
+      ~approval_config
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok result ->
+    assert (result.status = Unix.WEXITED 0);
+    assert (String.trim result.stdout = "safe")
+  | Error _ -> assert false
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "rm" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("-rf", default_meta); Lit ("/tmp/__nonexistent_rm_test", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  let agent_id = Masc_exec.Agent_id.of_string "test-keeper" in
+  let approval_config =
+    { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.permissive_default
+    ; per_agent = []
+    }
+  in
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
+      ~agent_id
+      ~approval_config
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok _ -> assert false
+  | Error (Keeper_tool_execute_shell_ir.Approval_required _) -> ()
+  | Error (Keeper_tool_execute_shell_ir.Policy_denied _) -> ()
+  | Error _ -> assert false
+
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

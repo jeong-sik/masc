@@ -403,14 +403,33 @@ let handle_tool_execute_typed
                   (Printexc.to_string exn))
           in
           let dispatch_result =
-            Keeper_tool_execute_shell_ir.dispatch_classified
-              ~keeper_id:meta.name
-              ~base_path:root
-              ~workdir:cwd
-              ~sandbox:dispatch_sandbox
-              ?base_host_env
-              ~on_output_chunk
-              envelope
+            if Env_config_runtime.Shell_ir_approval_gate.enabled ()
+            then (
+              let agent_id = Masc_exec.Agent_id.of_string meta.name in
+              let approval_config =
+                { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.permissive_default
+                ; per_agent = []
+                }
+              in
+              Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
+                ~agent_id
+                ~approval_config
+                ~keeper_id:meta.name
+                ~base_path:root
+                ~workdir:cwd
+                ~sandbox:dispatch_sandbox
+                ?base_host_env
+                ~on_output_chunk
+                envelope)
+            else
+              Keeper_tool_execute_shell_ir.dispatch_classified
+                ~keeper_id:meta.name
+                ~base_path:root
+                ~workdir:cwd
+                ~sandbox:dispatch_sandbox
+                ?base_host_env
+                ~on_output_chunk
+                envelope
           in
           match dispatch_result with
           | Error (Keeper_tool_execute_shell_ir.Gate_reject diagnostic) ->

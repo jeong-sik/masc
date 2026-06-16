@@ -288,4 +288,72 @@ let () =
                 (Option.is_some result);
               check int "cleared wrapper not invoked" 0 !calls);
         ] );
+      ( "dispatch_many",
+        [
+          test_case "runs multiple calls concurrently preserving order" `Quick
+            (fun () ->
+              Eio_main.run @@ fun _env ->
+              Eio.Switch.run @@ fun sw ->
+              let tool_a = "__test_dispatch_many_a" in
+              let tool_b = "__test_dispatch_many_b" in
+              register_full ~tool_name:tool_a ~handler:echo_handler ();
+              register_full ~tool_name:tool_b ~handler:echo_handler ();
+              let token_a =
+                match Tool_dispatch.mint_token ~name:tool_a with
+                | Ok t -> t
+                | Error e -> Alcotest.fail e
+              in
+              let token_b =
+                match Tool_dispatch.mint_token ~name:tool_b with
+                | Ok t -> t
+                | Error e -> Alcotest.fail e
+              in
+              let results =
+                Tool_dispatch.dispatch_many ~sw [ token_a, `Null; token_b, `Null ]
+              in
+              check int "two results" 2 (List.length results);
+              List.iteri
+                (fun i (token, opt) ->
+                   let expected = if i = 0 then tool_a else tool_b in
+                   check bool ("result " ^ string_of_int i ^ " present") true
+                     (Option.is_some opt);
+                   let tr = Option.get opt in
+                   check bool ("success " ^ string_of_int i) true
+                     (Tool_result.is_success tr);
+                   check string ("message " ^ string_of_int i)
+                     ("ok:" ^ expected) (Tool_result.message tr))
+                results);
+          test_case "max_concurrency caps parallelism" `Quick
+            (fun () ->
+              Eio_main.run @@ fun env ->
+              Eio.Switch.run @@ fun sw ->
+              let clock = Eio.Stdenv.clock env in
+              let running = ref 0 in
+              let max_seen = ref 0 in
+              let mu = Eio.Mutex.create () in
+              let slow_handler ~name ~args:_ =
+                Eio.Mutex.use_rw ~protect:true mu (fun () ->
+                  running := !running + 1;
+                  max_seen := max !max_seen !running);
+                Eio.Time.sleep clock 0.05;
+                Eio.Mutex.use_rw ~protect:true mu (fun () ->
+                  running := !running - 1);
+                Some (tool_ok ~tool_name:name ("ok:" ^ name))
+              in
+              let names = [ "__test_concur_1"; "__test_concur_2" ] in
+              List.iter
+                (fun n -> register_full ~tool_name:n ~handler:slow_handler ())
+                names;
+              let tokens =
+                List.map
+                  (fun n ->
+                     match Tool_dispatch.mint_token ~name:n with
+                     | Ok t -> t
+                     | Error e -> Alcotest.fail e)
+                  names
+              in
+              let calls = List.map (fun t -> t, `Null) tokens in
+              let _results = Tool_dispatch.dispatch_many ~max_concurrency:1 ~sw calls in
+              check int "max concurrent observed" 1 !max_seen);
+        ] );
     ]

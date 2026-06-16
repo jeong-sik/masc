@@ -173,6 +173,11 @@ let all_flags : flag list = [
     default = false; category = "runtime";
     lifecycle = Active; since = "2.200.0" };
 
+  { env_name = "MASC_SHELL_IR_APPROVAL_GATE_ENABLED";
+    description = "Route Execute tool calls through the capability-based Shell IR approval policy gate";
+    default = false; category = "runtime";
+    lifecycle = Experimental; since = "2.234.0" };
+
   { env_name = "MASC_SLOT_YIELD_ENABLED";
     description = "Release LLM slot during tool execution so other agents can use it";
     default = true; category = "runtime";

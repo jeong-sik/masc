@@ -637,23 +637,17 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   in
   (* User message: structured world observation — reactive triggers + resource state only.
      Metacognition sections (tool activity, cycle outcome, diversity, behavioral stats)
-     removed in #6814; telemetry preserved in decision_audit and independent paths. *)
-  let ubuf = Buffer.create 1024 in
-  Buffer.add_string ubuf "## Current World State\n\n";
-  (* Prefix-cache ordering: emit larger, more stable sections first so
-     providers can reuse a longer shared prefix across cycles. Highly
-     volatile reactive signals stay later in the same user message. *)
-  (* 1. Active goals — stable turn context *)
-  if observation.active_goals <> [] then (
-    Buffer.add_string ubuf
-      (Printf.sprintf "### Active Goals (%d)\n"
-         (List.length observation.active_goals));
-    Buffer.add_string ubuf (format_goals observation.active_goals);
-    Buffer.add_string ubuf "\n\n");
-  (* 2. Connected surfaces — connector presence, changes only on
-     bind/unbind or transport flaps (RFC-0223 P2). Omitted when only
-     the implicit dashboard is attached: every keeper has the
-     dashboard, so dashboard-only presence carries no signal. *)
+     removed in #6814; telemetry preserved in decision_audit and independent paths.
+
+     The body is an ordered fold of typed context layers (Keeper_context_layers).
+     [content_of] below is an exhaustive match on [layer_id], so adding a
+     world-state signal fails to compile until this match renders it, and the
+     section order is the module's declared [ordered] SSOT rather than the
+     implicit order of buffer writes. Byte-identical to the prior imperative
+     buffer: each arm carries its own header and trailing separators, and
+     [assemble] concatenates the present layers in [ordered] order. *)
+  (* Prefix-cache ordering rationale and per-layer notes live on the matching
+     arms of [content_of] and in Keeper_context_layers.ordered. *)
   let connector_presence =
     List.filter
       (fun (p : Gate_surface.surface_presence) ->
@@ -664,141 +658,180 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             true)
       observation.connected_surfaces
   in
-  if connector_presence <> [] then (
-    Buffer.add_string ubuf "### Connected Surfaces\n";
-    List.iter
-      (fun p ->
-        Buffer.add_string ubuf
-          (Printf.sprintf "- %s\n" (format_surface_presence p)))
-      observation.connected_surfaces;
-    Buffer.add_string ubuf (connected_surface_discretion_prompt ());
-    Buffer.add_char ubuf '\n';
-    Buffer.add_char ubuf '\n');
-  (* 3. Namespace state — usually lower churn than inbox/board detail *)
-  if
-    observation.unclaimed_task_count > 0
-    || observation.claimable_task_count > 0
-    || observation.provider_capacity_blocked_task_count > 0
-    || observation.failed_task_count > 0
-    || observation.running_keeper_fiber_count > 0
-  then (
-    Buffer.add_string ubuf "### Namespace State\n";
-    if observation.unclaimed_task_count > 0 then
-      Buffer.add_string ubuf
-        (Printf.sprintf "- Unclaimed tasks: %d\n"
-           observation.unclaimed_task_count);
-    if observation.claimable_task_count > 0 then
-      Buffer.add_string ubuf
-        (Printf.sprintf "- Claimable tasks for this keeper: %d\n"
-           observation.claimable_task_count);
-    if observation.unclaimed_task_count > 0
-       && observation.claimable_task_count = 0
-    then
-      Buffer.add_string ubuf
-        "- Claimable tasks for this keeper: 0\n";
-    let keeper_or_scope_blocked =
-      max 0
-        (observation.unclaimed_task_count
-         - observation.claimable_task_count)
-    in
-    if keeper_or_scope_blocked > 0 then
-      Buffer.add_string ubuf
-        (Printf.sprintf
-           "- Blocked by keeper/tool/goal scope: %d\n"
-           keeper_or_scope_blocked);
-    if observation.provider_capacity_blocked_task_count > 0 then
-      Buffer.add_string ubuf
-        (Printf.sprintf
-           "- Provider-capacity blocked claimable tasks: %d\n"
-           observation.provider_capacity_blocked_task_count);
-    if observation.failed_task_count > 0 then
-      Buffer.add_string ubuf
-        (Printf.sprintf "- Failed tasks: %d\n" observation.failed_task_count);
-    Buffer.add_string ubuf
-      (Printf.sprintf
-         "- Running keeper fibers: %d\n"
-         observation.running_keeper_fiber_count);
-    Buffer.add_char ubuf '\n');
-  (* 4. Context health — stable resource framing *)
-  Buffer.add_string ubuf
-    (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
-       (observation.context_ratio *. 100.0)
-       observation.idle_seconds);
-  (* 5. Autonomous trigger — lower churn than reactive inboxes *)
   let turn_decision =
     Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
   let autonomous_trigger =
     autonomous_trigger_lines ~decision:turn_decision ~observation
   in
-  if autonomous_trigger <> [] then (
-    Buffer.add_string ubuf "\n### Autonomous Trigger\n";
-    Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
-    Buffer.add_char ubuf '\n');
-  (* 6. Continuity — usually large and moderately stable, so keep it
-     before highly volatile reactive sections for better prefix reuse.
-     Inject only forward-looking fields (Goal, Next plan, Next, OpenQuestions,
-     Constraints). Backward-looking fields (Done, Progress, Decisions) are
-     stripped to avoid a prose-level echo loop where the LLM re-reads its own
-     prior narrative and reproduces a near-identical one. The full summary
-     remains persisted in meta.continuity_summary for audit. *)
   let continuity_for_prompt =
     Keeper_memory_policy.filter_forward_looking_summary
       observation.continuity_summary
   in
-  if
-    continuity_for_prompt <> ""
-    && observation.continuity_summary <> "No continuity snapshot available."
-  then (
-    Buffer.add_string ubuf "\n### Continuity\n";
-    Buffer.add_string ubuf
-      "- Advisory only: ignore prior silence/wait directives until you re-verify them against the live world state.\n";
-    Buffer.add_string ubuf
-      "- If this turn was still scheduled or backlog/repo signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
-    Buffer.add_string ubuf continuity_for_prompt;
-    Buffer.add_char ubuf '\n');
-  (* 7. Pending mentions — reactive trigger *)
-  if observation.pending_mentions <> [] then (
-    Buffer.add_string ubuf
-      (Printf.sprintf "### Pending Mentions (%d)\n"
-         (List.length observation.pending_mentions));
-    Buffer.add_string ubuf (format_mentions observation.pending_mentions);
-    Buffer.add_string ubuf "\n\n");
-  (* 8. Scope messages — reactive trigger *)
-  if observation.pending_scope_messages <> [] then (
-    Buffer.add_string ubuf
-      (Printf.sprintf "### Scope Messages (%d recent)\n"
-         (List.length observation.pending_scope_messages));
-    Buffer.add_string ubuf
-      (format_scope_messages observation.pending_scope_messages);
-    Buffer.add_string ubuf "\n\n");
-  (* 9. Claimable work — advisory operational guidance.
-     Body lives at config/prompts/keeper.immediate_task_move.md. The OCaml
-     side only owns the section header and the trailing blank line; the
-     bullet prose stays in the markdown file alongside the other keeper
-     prompts (see fallback_externalized_bullet for the in-binary mirror). *)
-  if show_claim_guidance then (
-    Buffer.add_string ubuf "### Claimable Work\n";
-    Buffer.add_string ubuf
-      (load_externalized_bullet
-         ~enabled:true
-         Keeper_prompt_names.immediate_task_move);
-    Buffer.add_char ubuf '\n');
-  (* 10. Board activity — reactive trigger *)
-  if observation.pending_board_events <> [] then (
-    Buffer.add_string ubuf
-      (Printf.sprintf "### Board Activity (%d new)\n"
-         (List.length observation.pending_board_events));
-    Buffer.add_string ubuf (format_board_events observation.pending_board_events);
-    if
-      tool_allowed "keeper_board_curation_submit"
-      && List.length observation.pending_board_events >= 2
-    then
-      Buffer.add_string ubuf
-        "\n- Curation due: after reading enough context, call keeper_board_curation_submit with a concise snapshot for this board window.";
-    Buffer.add_string ubuf "\n\n");
+  let content_of : Keeper_context_layers.layer_id -> string option = function
+    (* 1. Active goals — stable turn context. *)
+    | Keeper_context_layers.Active_goals ->
+      if observation.active_goals <> [] then
+        Some
+          (Printf.sprintf "### Active Goals (%d)\n"
+             (List.length observation.active_goals)
+          ^ format_goals observation.active_goals
+          ^ "\n\n")
+      else None
+    (* 2. Connected surfaces — connector presence, changes only on bind/unbind
+       or transport flaps (RFC-0223 P2). Omitted when only the implicit
+       dashboard is attached: every keeper has the dashboard, so dashboard-only
+       presence carries no signal. *)
+    | Keeper_context_layers.Connected_surfaces ->
+      if connector_presence <> [] then (
+        let ubuf = Buffer.create 256 in
+        Buffer.add_string ubuf "### Connected Surfaces\n";
+        List.iter
+          (fun p ->
+            Buffer.add_string ubuf
+              (Printf.sprintf "- %s\n" (format_surface_presence p)))
+          observation.connected_surfaces;
+        Buffer.add_string ubuf (connected_surface_discretion_prompt ());
+        Buffer.add_char ubuf '\n';
+        Buffer.add_char ubuf '\n';
+        Some (Buffer.contents ubuf))
+      else None
+    (* 3. Namespace state — usually lower churn than inbox/board detail. *)
+    | Keeper_context_layers.Namespace_state ->
+      if
+        observation.unclaimed_task_count > 0
+        || observation.claimable_task_count > 0
+        || observation.provider_capacity_blocked_task_count > 0
+        || observation.failed_task_count > 0
+        || observation.running_keeper_fiber_count > 0
+      then (
+        let ubuf = Buffer.create 256 in
+        Buffer.add_string ubuf "### Namespace State\n";
+        if observation.unclaimed_task_count > 0 then
+          Buffer.add_string ubuf
+            (Printf.sprintf "- Unclaimed tasks: %d\n"
+               observation.unclaimed_task_count);
+        if observation.claimable_task_count > 0 then
+          Buffer.add_string ubuf
+            (Printf.sprintf "- Claimable tasks for this keeper: %d\n"
+               observation.claimable_task_count);
+        if observation.unclaimed_task_count > 0
+           && observation.claimable_task_count = 0
+        then
+          Buffer.add_string ubuf
+            "- Claimable tasks for this keeper: 0\n";
+        let keeper_or_scope_blocked =
+          max 0
+            (observation.unclaimed_task_count
+             - observation.claimable_task_count)
+        in
+        if keeper_or_scope_blocked > 0 then
+          Buffer.add_string ubuf
+            (Printf.sprintf
+               "- Blocked by keeper/tool/goal scope: %d\n"
+               keeper_or_scope_blocked);
+        if observation.provider_capacity_blocked_task_count > 0 then
+          Buffer.add_string ubuf
+            (Printf.sprintf
+               "- Provider-capacity blocked claimable tasks: %d\n"
+               observation.provider_capacity_blocked_task_count);
+        if observation.failed_task_count > 0 then
+          Buffer.add_string ubuf
+            (Printf.sprintf "- Failed tasks: %d\n"
+               observation.failed_task_count);
+        Buffer.add_string ubuf
+          (Printf.sprintf
+             "- Running keeper fibers: %d\n"
+             observation.running_keeper_fiber_count);
+        Buffer.add_char ubuf '\n';
+        Some (Buffer.contents ubuf))
+      else None
+    (* 4. Context health — stable resource framing. *)
+    | Keeper_context_layers.Context_health ->
+      Some
+        (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
+           (observation.context_ratio *. 100.0)
+           observation.idle_seconds)
+    (* 5. Autonomous trigger — lower churn than reactive inboxes. *)
+    | Keeper_context_layers.Autonomous_trigger ->
+      if autonomous_trigger <> [] then
+        Some
+          ("\n### Autonomous Trigger\n"
+          ^ String.concat "\n" autonomous_trigger
+          ^ "\n")
+      else None
+    (* 6. Continuity — usually large and moderately stable, so keep it before
+       highly volatile reactive sections for better prefix reuse. Inject only
+       forward-looking fields (Goal, Next plan, Next, OpenQuestions,
+       Constraints). Backward-looking fields (Done, Progress, Decisions) are
+       stripped to avoid a prose-level echo loop where the LLM re-reads its own
+       prior narrative and reproduces a near-identical one. The full summary
+       remains persisted in meta.continuity_summary for audit. *)
+    | Keeper_context_layers.Continuity ->
+      if
+        continuity_for_prompt <> ""
+        && observation.continuity_summary <> "No continuity snapshot available."
+      then
+        Some
+          ("\n### Continuity\n"
+          ^ "- Advisory only: ignore prior silence/wait directives until you re-verify them against the live world state.\n"
+          ^ "- If this turn was still scheduled or backlog/repo signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n"
+          ^ continuity_for_prompt
+          ^ "\n")
+      else None
+    (* 7. Pending mentions — reactive trigger. *)
+    | Keeper_context_layers.Pending_mentions ->
+      if observation.pending_mentions <> [] then
+        Some
+          (Printf.sprintf "### Pending Mentions (%d)\n"
+             (List.length observation.pending_mentions)
+          ^ format_mentions observation.pending_mentions
+          ^ "\n\n")
+      else None
+    (* 8. Scope messages — reactive trigger. *)
+    | Keeper_context_layers.Scope_messages ->
+      if observation.pending_scope_messages <> [] then
+        Some
+          (Printf.sprintf "### Scope Messages (%d recent)\n"
+             (List.length observation.pending_scope_messages)
+          ^ format_scope_messages observation.pending_scope_messages
+          ^ "\n\n")
+      else None
+    (* 9. Claimable work — advisory operational guidance. Body lives at
+       config/prompts/keeper.immediate_task_move.md. The OCaml side only owns
+       the section header and the trailing blank line; the bullet prose stays in
+       the markdown file alongside the other keeper prompts (see
+       fallback_externalized_bullet for the in-binary mirror). *)
+    | Keeper_context_layers.Claimable_work ->
+      if show_claim_guidance then
+        Some
+          ("### Claimable Work\n"
+          ^ load_externalized_bullet
+              ~enabled:true
+              Keeper_prompt_names.immediate_task_move
+          ^ "\n")
+      else None
+    (* 10. Board activity — reactive trigger. *)
+    | Keeper_context_layers.Board_activity ->
+      if observation.pending_board_events <> [] then (
+        let ubuf = Buffer.create 256 in
+        Buffer.add_string ubuf
+          (Printf.sprintf "### Board Activity (%d new)\n"
+             (List.length observation.pending_board_events));
+        Buffer.add_string ubuf
+          (format_board_events observation.pending_board_events);
+        if
+          tool_allowed "keeper_board_curation_submit"
+          && List.length observation.pending_board_events >= 2
+        then
+          Buffer.add_string ubuf
+            "\n- Curation due: after reading enough context, call keeper_board_curation_submit with a concise snapshot for this board window.";
+        Buffer.add_string ubuf "\n\n";
+        Some (Buffer.contents ubuf))
+      else None
+  in
   let user_message =
-    Buffer.contents ubuf
+    "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
   let sanitized_system = sanitize_retired_tool_names system_prompt in
   let sanitized_user = sanitize_retired_tool_names user_message in

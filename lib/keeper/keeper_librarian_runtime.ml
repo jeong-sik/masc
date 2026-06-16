@@ -96,6 +96,46 @@ let message role text =
   Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
 ;;
 
+(* Bounded parse-retry for librarian extraction (typed-harness contract C6).
+
+   The librarian asks a provider for a JSON episode. When the provider returns a
+   non-empty response that does not parse into the typed episode
+   ([Keeper_librarian.episode_of_output] -> None), the prior behavior dropped the
+   episode and only incremented [EpisodeCreateFailures]: a counter makes the loss
+   visible but does not recover it (the telemetry-as-fix shape CLAUDE.md rejects).
+   Instead, re-ask the provider with a corrective nudge up to
+   [librarian_max_parse_retries] times before giving up. Transport failures
+   (timeout / HTTP error) are NOT retried here — they are a provider-availability
+   problem, not the model-output problem this bound addresses. *)
+let librarian_max_parse_retries = 2
+
+let parse_retry_nudge =
+  "Your previous response could not be parsed as the required JSON episode \
+   object. Respond with ONLY a single JSON object — no markdown fences, no \
+   prose — containing: episode_summary (string), claims (array of objects with \
+   claim, confidence, category, source_turn), open_items, constraints, \
+   preserved_tool_refs."
+
+type attempt_outcome =
+  | Parsed of Keeper_memory_os_types.episode
+  | Unparseable of string
+    (* provider returned output we could not parse into an episode — retryable *)
+  | Transport_failed of string (* timeout / HTTP error — not retried here *)
+
+let rec run_with_parse_retries ~max_retries ~attempt messages =
+  match attempt messages with
+  | Parsed episode -> Ok episode
+  | Transport_failed msg -> Error msg
+  | Unparseable msg ->
+    if max_retries <= 0
+    then Error msg
+    else
+      run_with_parse_retries
+        ~max_retries:(max_retries - 1)
+        ~attempt
+        (messages @ [ message Agent_sdk.Types.User parse_retry_nudge ])
+;;
+
 let render_prompt key variables =
   match Prompt_registry.render_prompt_template key variables with
   | Ok text ->
@@ -180,20 +220,26 @@ let extract_with_provider
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
     with_provider_slot ?clock (fun () ->
-      match
-        with_timeout ?clock ~timeout_sec (fun () ->
-          complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
-      with
-      | None -> Error "librarian provider timed out"
-      | Some (Error err) -> Error (http_error_message err)
-      | Some (Ok response) ->
-        let raw = Agent_sdk_response.text_of_response response |> String.trim in
-        if String.equal raw ""
-        then Error "librarian provider returned empty response"
-        else (
-          match Keeper_librarian.episode_of_output inp raw with
-          | Some episode -> Ok episode
-          | None -> Error "librarian provider returned invalid episode JSON"))
+      let attempt messages =
+        match
+          with_timeout ?clock ~timeout_sec (fun () ->
+            complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+        with
+        | None -> Transport_failed "librarian provider timed out"
+        | Some (Error err) -> Transport_failed (http_error_message err)
+        | Some (Ok response) ->
+          let raw = Agent_sdk_response.text_of_response response |> String.trim in
+          if String.equal raw ""
+          then Unparseable "librarian provider returned empty response"
+          else (
+            match Keeper_librarian.episode_of_output inp raw with
+            | Some episode -> Parsed episode
+            | None -> Unparseable "librarian provider returned invalid episode JSON")
+      in
+      run_with_parse_retries
+        ~max_retries:librarian_max_parse_retries
+        ~attempt
+        messages)
 ;;
 
 let extract_and_append_with_provider

@@ -143,7 +143,7 @@
  * two-row variant — the runtime/model/throughput sub-row moved to the rail —
  * so the conversation below gets the reclaimed vertical space. */
 .kw-chat-head {
-  flex: none; padding: 12px 28px;
+  flex: none; padding: 10px 28px;
   border-bottom: 1px solid var(--color-border-default);
   background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-page));
   display: flex; align-items: center; gap: 14px;
@@ -183,25 +183,33 @@
   width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto;
   flex: 1; min-height: 0; display: flex; flex-direction: column;
 }
-/* Spacious overrides for the reused ChatTranscript (chat/primitives.ts).
- * Two-class specificity beats its single-class Tailwind gap/padding. */
+/* Overrides for the reused ChatTranscript (chat/primitives.ts).
+ * Two-class specificity beats its single-class Tailwind gap/padding.
+ * Gap + top inset are tightened from the original 30px/34px so more of the
+ * conversation is visible at once — the prior values left the transcript
+ * feeling cramped (few messages on screen) despite filling the column. */
 .kw-thread-inner .chat-transcript {
-  gap: 30px;
+  gap: 22px;
   padding-left: 40px;
   padding-right: 40px;
-  padding-top: 34px;
+  padding-top: 20px;
 }
 .kw-composer-wrap {
   flex: none;
   border-top: 1px solid var(--color-border-default);
   background: linear-gradient(0deg, var(--color-bg-panel-alt), var(--color-bg-page));
-  padding: 14px 0 18px;
+  padding: 12px 0 14px;
 }
 .kw-composer-inner { width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto; padding: 0 40px; }
+/* Composer floor: the reused ChatComposer applies min-h-30 (120px) to an empty
+ * textarea, permanently reserving space the transcript (its flex:1 sibling)
+ * would otherwise take. Lower the floor to ~2 rows, scoped to the workspace;
+ * control-textarea keeps resize:vertical so a long draft can be dragged taller. */
+.kw-composer-inner .control-textarea { min-height: 80px; }
 
 .kw-chat-toolbar {
   flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 40px; border-bottom: 1px solid var(--color-border-divider);
+  padding: 6px 40px; border-bottom: 1px solid var(--color-border-divider);
   background: var(--color-bg-page);
 }
 .kw-chat-toolbar .spacer { flex: 1; }

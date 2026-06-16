@@ -10,7 +10,7 @@ import type { VNode } from 'preact'
 import { keepers } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-runtime'
-import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
+import { keeperActivityDisplay, keeperWorkPreview } from '../../lib/keeper-runtime-display'
 import type { Keeper } from '../../types'
 import {
   WorkspaceSigil,
@@ -41,18 +41,6 @@ function needsAttention(keeper: Keeper): boolean {
  *  real scope signal, with the model as fallback. */
 function keeperScope(keeper: Keeper): string | null {
   return keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? null
-}
-
-/** One-line "what is this keeper doing" preview so rows carry real content
- *  instead of reading bare. Same precedence as the detail page's work
- *  preview (recent output → input → goal → current task). */
-function keeperWorkPreview(keeper: Keeper): string | null {
-  return keeper.recent_output_preview
-    ?? keeper.recent_input_preview
-    ?? keeper.short_goal
-    ?? keeper.goal
-    ?? keeper.agent?.current_task
-    ?? null
 }
 
 function matchesQuery(keeper: Keeper, q: string): boolean {

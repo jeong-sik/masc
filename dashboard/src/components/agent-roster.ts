@@ -60,6 +60,7 @@ import {
   keeperActivityDisplay,
   keeperRuntimeBlockerHint,
   keeperRuntimeBlockerLabel,
+  keeperWorkPreview,
 } from '../lib/keeper-runtime-display'
 // RFC-0135 PR-4: roster card derives its blocker note through the typed
 // KeeperOperationalState SSOT so the headline (`현재 차단` vs `이전 차단`
@@ -891,12 +892,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
     const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime, compositeForMonitoring) : null
     const isKeeper = keeperRuntime != null
-    const goalSummary = keeperRuntime?.short_goal ?? keeperRuntime?.goal ?? agent.current_task ?? null
-    const currentWork =
-      keeperRuntime?.recent_output_preview
-      ?? keeperRuntime?.recent_input_preview
-      ?? goalSummary
-      ?? null
+    // Shared precedence (incl. last_proactive_preview); fall back to the agent
+    // context's current_task for agents without a keeper runtime.
+    const currentWork = keeperWorkPreview(keeperRuntime) ?? agent.current_task ?? null
     const activityDisplay = keeperRuntime
       ? keeperActivityDisplay(keeperRuntime, agent.last_seen)
       : null
@@ -904,11 +902,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const lastActivityAt = activityDisplay?.timestamp ?? agent.last_seen ?? null
     const lastActivityLabel = activityDisplay?.label ?? '최근 활동'
     const contextMeta = rosterContextMeta(keeperRuntime ?? null)
-    const workPreview =
-      trimText(keeperRuntime?.recent_output_preview, 140)
-      ?? trimText(keeperRuntime?.recent_input_preview, 140)
-      ?? trimText(goalSummary, 140)
-      ?? '최근 활동 요약 없음'
+    const workPreview = trimText(currentWork, 140) ?? '최근 활동 요약 없음'
     const summaryText = workPreview
     const compositeForKeeper: KeeperCompositeSnapshot | null = keeperRuntime
       ? compositeByKeeperKey.get(keeperRuntime.name)

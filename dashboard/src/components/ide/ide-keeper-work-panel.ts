@@ -362,7 +362,11 @@ export function keeperWorkSummary(
       trust?.next_human_action,
       keeper?.next_human_action,
     ),
-    recentOutput: firstNonEmptyString(keeper?.recent_output_preview, keeper?.recent_input_preview),
+    recentOutput: firstNonEmptyString(
+      keeper?.recent_output_preview,
+      keeper?.recent_input_preview,
+      keeper?.last_proactive_preview,
+    ),
     recentTools: keeper?.recent_tool_names ?? keeper?.latest_tool_names ?? EMPTY_TOOLS,
     runtimeBlocker: firstNonEmptyString(keeper?.runtime_blocker_summary, keeper?.last_blocker),
   }

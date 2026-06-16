@@ -72,16 +72,50 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* RFC-0244 Tier 2 cross-keeper consolidation is intentionally NOT wired here,
-     and there is no MASC_KEEPER_MEMORY_OS_CONSOLIDATION env toggle: an unproven
-     fiber should not run, and a proven one needs no switch. The live dry-run
-     #21244 (15 keepers / 6017 facts) showed the consolidator promotes ephemeral
-     boilerplate into shared recall — the producer still mis-labels ephemeral
-     events as [Fact] — so #21265's env-gated default-on is removed outright. The
-     tested consolidator ([Keeper_memory_os_consolidator], covered by
-     test_keeper_memory_os) is kept ready; wire it always-on (no flag) once a
-     fresh dry-run with the P0a typed-[Ephemeral] categorisation proves the
-     consolidated set is noise-free. *)
+  (* RFC-0244 Tier 2 cross-keeper consolidation: always-on, no
+     MASC_KEEPER_MEMORY_OS_CONSOLIDATION toggle. An env toggle on this fiber was
+     dead-code-with-a-switch -- an unproven fiber should not run, a proven one
+     needs no switch. The noise the #21244 dry-run found (ephemeral boilerplate
+     promoted into shared recall) predates the fixes built to stop it: the typed
+     [Ephemeral] category + [is_promotable] gate (#21241) -- the consolidator now
+     structurally skips non-promotable facts -- and the durability-gate
+     librarian prompt (#21257) that labels coordination boilerplate "ephemeral",
+     both merged after that dry-run. Off the keeper hot path: each [interval]s it
+     reads each keeper's Tier-1 store and rewrites the shared semantic store
+     (keepers/_shared.facts.jsonl) atomically, never touching a keeper's own
+     store, so it cannot race keeper writes. Per-tick failures are caught so a
+     corrupt store cannot cancel sibling fibers. Each sweep logs [promoted]: a
+     rising count is the regression signal to watch if producer labelling
+     drifts. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "memory_os_consolidation")
+    (fun () ->
+      (* Coarse cadence: consolidation is advisory and off the hot path, so a
+         full fleet rescan every 5 minutes is ample. *)
+      let interval = 300.0 in
+      let rec loop () =
+        (try
+           let report =
+             Keeper_memory_os_consolidator.run
+               ~keeper_ids:(Keeper_memory_os_io.list_fact_store_keeper_ids ())
+               ~now:(Time_compat.now ())
+               ()
+           in
+           if report.Keeper_memory_os_consolidator.promoted > 0
+           then
+             Log.Server.info "memory_os_consolidation: keepers=%d promoted=%d"
+               report.Keeper_memory_os_consolidator.keepers_scanned
+               report.Keeper_memory_os_consolidator.promoted
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.warn "memory_os_consolidation: tick crashed: %s"
+             (Printexc.to_string exn));
+        Eio.Time.sleep clock interval;
+        loop ()
+      in
+      loop ());
   (* RFC-0247 §2.3: memory-os forgetting sweep. Off the keeper hot path — every
      [interval]s it runs the deterministic per-keeper GC ([run_gc]: hard-expire
      facts whose [valid_until] has passed, drop fully-decayed facts by retention

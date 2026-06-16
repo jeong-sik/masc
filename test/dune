@@ -1343,6 +1343,8 @@
 
 (include stanzas/test_nickname_words_ssot.inc)
 
+(include stanzas/test_thinking_control_format_unknown_error.inc)
+
 (include stanzas/test_workspace_bootstrap.inc)
 
 (include stanzas/test_workspace_base_path_cache.inc)

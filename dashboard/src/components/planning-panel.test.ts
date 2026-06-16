@@ -64,9 +64,10 @@ describe('PlanningPanel', () => {
   afterEach(() => cleanup())
 
   it('renders GoalTree by default', () => {
-    render(html`<${PlanningPanel} />`)
+    const { container } = render(html`<${PlanningPanel} />`)
     expect(screen.getByTestId('goal-tree')).toBeTruthy()
     expect(screen.queryByTestId('planning')).toBeNull()
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
   })
 
   it('renders Planning when view=default', () => {

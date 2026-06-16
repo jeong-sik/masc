@@ -40,6 +40,20 @@ let of_yojson = function
   | json ->
       Error ("goal_phase_of_yojson: " ^ Yojson.Safe.to_string json)
 
+(* Every phase, declaration order. SSOT for the MCP schema enum and the
+   workspace_goals validator so neither hand-rolls the string set (RFC-0089;
+   the #8372 anti-pattern). [to_string] is the exhaustive compile-time witness:
+   a new constructor breaks it; the round-trip test guards this list. *)
+let all =
+  [ Executing
+  ; Awaiting_verification
+  ; Awaiting_approval
+  ; Blocked
+  ; Paused
+  ; Completed
+  ; Dropped
+  ]
+
 type action =
   | Request_complete
   | Approve_completion
@@ -61,6 +75,20 @@ let action_to_string = function
   | Operator_unblock -> "operator_unblock"
   | Drop -> "drop"
   | Reopen -> "reopen"
+
+(* Every action, declaration order. SSOT for the schema/validator action enum
+   (see [all]). [action_to_string] is the exhaustive witness. *)
+let all_actions =
+  [ Request_complete
+  ; Approve_completion
+  ; Reject_completion
+  ; Pause
+  ; Resume
+  ; Operator_block
+  ; Operator_unblock
+  ; Drop
+  ; Reopen
+  ]
 
 let action_of_string = function
   | "request_complete" -> Some Request_complete

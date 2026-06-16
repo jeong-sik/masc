@@ -57,28 +57,13 @@ let validation_error_result
 let goal_horizon_strings = [ "short"; "mid"; "long" ]
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
 
-let goal_phase_strings =
-  [ "executing"
-  ; "awaiting_verification"
-  ; "awaiting_approval"
-  ; "blocked"
-  ; "paused"
-  ; "completed"
-  ; "dropped"
-  ]
-;;
+(* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
+   lifecycle SSOT) instead of hand-rolling them here, so the validator, the MCP
+   schema enum, and the type can never drift apart. *)
+let goal_phase_strings = List.map Goal_phase.to_string Goal_phase.all
 
 let goal_transition_action_strings =
-  [ "request_complete"
-  ; "approve_completion"
-  ; "reject_completion"
-  ; "pause"
-  ; "resume"
-  ; "operator_block"
-  ; "operator_unblock"
-  ; "drop"
-  ; "reopen"
-  ]
+  List.map Goal_phase.action_to_string Goal_phase.all_actions
 ;;
 
 let goal_vote_decision_strings = [ "approve"; "reject" ]

@@ -415,7 +415,7 @@ export function TransportHealthPanel() {
   const truthLine = transportTruthLine(data)
 
   return html`
-    <div class="space-y-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-start justify-between gap-4">
         <div>
           <div class="flex items-center gap-2">
@@ -433,7 +433,7 @@ export function TransportHealthPanel() {
         <${ActionButton}
           variant="subtle"
           size="sm"
-          class="text-3xs"
+          class="v2-monitoring-action text-3xs"
           onClick=${() => void refreshTransportHealth()}
         >새로고침<//>
       </div>

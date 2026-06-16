@@ -205,8 +205,8 @@ export function FeatureHealth() {
   }, [])
 
   return html`
-    <div class="space-y-4">
-      <${SectionCard} label="기능 상태" class="section">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
+      <${SectionCard} label="기능 상태" class="section v2-monitoring-panel">
         <${AsyncContainer}
           state=${featureHealth.state}
           loadingMessage="기능 상태 데이터를 불러오는 중..."
@@ -230,7 +230,7 @@ export function FeatureHealth() {
                     </div>
                     <button
                       type="button"
-                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--color-fg-secondary)]"
+                      class="v2-monitoring-action rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--color-fg-secondary)]"
                       onClick=${() => { void loadFeatureHealth() }}
                     >새로고침</button>
                   </div>

@@ -477,8 +477,8 @@ export function JourneyPanel() {
   const state = resource.state.value
 
   return html`
-    <div class="flex flex-col gap-4">
-      <${SurfaceCard} class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
+      <${SurfaceCard} class="v2-monitoring-panel flex flex-col gap-4">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
@@ -513,7 +513,7 @@ export function JourneyPanel() {
                   testId="journey-keeper-select"
                   onInput=${(value: string) => setSelectedKeeper(value)}
                 />
-                <${ActionButton} variant="ghost" size="md" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>
+                <${ActionButton} variant="ghost" size="md" class="v2-monitoring-action" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>
                   ${state.loading ? 'Refreshing...' : 'Refresh'}
                 <//>
               </div>
@@ -525,7 +525,7 @@ export function JourneyPanel() {
             <div class="flex flex-col gap-3">
               <${ErrorState} message=${state.error} />
               <div>
-                <${ActionButton} variant="ghost" size="sm" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>Retry<//>
+                <${ActionButton} variant="ghost" size="sm" class="v2-monitoring-action" onClick=${refresh} disabled=${state.loading || !selectedKeeper}>Retry<//>
               </div>
             </div>
           `

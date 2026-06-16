@@ -114,7 +114,7 @@ export function CognitionPlane() {
   const view = currentView()
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="v2-monitoring-surface flex flex-col gap-5">
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

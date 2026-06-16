@@ -18,6 +18,7 @@ val recovery_block : string
 val turn_intent : string
 val librarian_system : string
 val librarian_episode_extraction : string
+val librarian_memory_consolidation : string
 val memory_os_recall_context : string
 val memory_os_recall_facts_section : string
 val memory_os_recall_episodes_section : string

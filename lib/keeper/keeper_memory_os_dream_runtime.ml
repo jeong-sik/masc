@@ -1,0 +1,143 @@
+(** Keeper_memory_os_dream_runtime — LLM wiring for the dream consolidation pass.
+
+    Mirrors [Keeper_librarian_runtime]: the LLM call is an injectable [complete_fn]
+    (default = the real provider) so the read -> prompt -> LLM -> parse -> apply ->
+    write-back loop is driveable with a fake completion in tests. Reuses
+    [Keeper_memory_llm_summary]'s provider/transport helpers. The structure is
+    deterministic; the only judgement is the model's consolidation plan.
+
+    This is the read/write loop only — the cadence (when to dream) is the caller's.
+    Like the GC fiber, it stays disabled until a live shadow run validates it. *)
+
+module Io = Keeper_memory_os_io
+module Dream = Keeper_memory_os_dream
+
+(* Same shape as [Keeper_memory_llm_summary.complete_fn]; the LLM call is
+   injectable so the loop is driveable with a fake completion in tests. *)
+type complete_fn = Keeper_memory_llm_summary.complete_fn
+
+let default_complete ~sw ~net ?clock ~config ~messages () =
+  Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
+;;
+
+let user_message text : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.User
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let with_timeout ?clock ~timeout_sec f =
+  match clock with
+  | None -> Some (f ())
+  | Some clock ->
+    (try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
+     | Eio.Time.Timeout -> None)
+;;
+
+let response_text (response : Agent_sdk.Types.api_response) : string option =
+  let text =
+    response.content
+    |> List.filter_map (function
+      | Agent_sdk.Types.Text s -> Some s
+      | _ -> None)
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+    |> String.concat "\n"
+    |> String.trim
+  in
+  if String.equal text "" then None else Some text
+;;
+
+(* Below this many facts there is nothing to consolidate; skip the LLM call. *)
+let min_facts_to_consolidate = 4
+
+(* The plan can list many groups over a large store, so allow more than the
+   512-token summary budget. *)
+let consolidation_max_tokens = 2048
+
+type outcome =
+  | Skipped_too_few of int
+  | Transport_failed of string
+  | Unparseable of string
+  | Consolidated of
+      { before : int
+      ; after : int
+      }
+
+let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
+  let max_tokens =
+    match provider_cfg.max_tokens with
+    | Some n when n > 0 -> Some (max n consolidation_max_tokens)
+    | _ -> Some consolidation_max_tokens
+  in
+  { provider_cfg with
+    Llm_provider.Provider_config.max_tokens
+  ; temperature = Some 0.0
+  ; tool_choice = None
+  ; disable_parallel_tool_use = true
+  ; response_format = Agent_sdk.Types.Off
+  ; output_schema = None
+  }
+;;
+
+let messages_for_consolidation facts =
+  let numbered = Dream.render_numbered_facts facts in
+  match
+    Prompt_registry.render_prompt_template
+      Keeper_prompt_names.librarian_memory_consolidation
+      [ "numbered_facts", numbered ]
+  with
+  | Error msg -> Error msg
+  | Ok user ->
+    let user = String.trim user in
+    if String.equal user ""
+    then Error "consolidation prompt rendered empty"
+    else Ok [ user_message user ]
+;;
+
+(* Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it, and
+   (unless [dry_run]) rewrite the store atomically. Returns what happened without
+   raising for the expected failure modes (too few facts, transport error,
+   unparseable plan) so a caller fiber stays alive. *)
+let consolidate_keeper
+      ?(complete = default_complete)
+      ?clock
+      ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
+      ?(dry_run = false)
+      ~sw
+      ~net
+      ~provider_cfg
+      ~now
+      ~keeper_id
+      ()
+  =
+  let facts = Io.read_facts_all ~keeper_id in
+  let before = List.length facts in
+  if before < min_facts_to_consolidate
+  then Skipped_too_few before
+  else (
+    match messages_for_consolidation facts with
+    | Error msg -> Unparseable msg
+    | Ok messages ->
+      let config = provider_for_consolidation provider_cfg in
+      (match
+         with_timeout ?clock ~timeout_sec (fun () ->
+           complete ~sw ~net ?clock ~config ~messages ())
+       with
+       | None -> Transport_failed "consolidation provider timed out"
+       | Some (Error _) -> Transport_failed "consolidation provider transport error"
+       | Some (Ok response) ->
+         (match response_text response with
+          | None -> Unparseable "consolidation provider returned empty response"
+          | Some raw ->
+            (match Dream.plan_of_string raw with
+             | None -> Unparseable "consolidation provider returned invalid plan JSON"
+             | Some plan ->
+               let survivors = Dream.apply_plan ~now ~facts plan in
+               let after = List.length survivors in
+               if not dry_run then Io.rewrite_facts_atomically ~keeper_id survivors;
+               Consolidated { before; after }))))
+;;

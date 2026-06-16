@@ -185,7 +185,7 @@ function TaskEventTimeline({ events }: { events: AgentTimelineEvent[] }) {
           const icon = taskEventIcon(evt.type)
           const color = taskEventColor(evt.type)
           return html`
-            <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
+            <div key=${idx} class="v2-monitoring-row flex items-center gap-2 py-1.5 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
               <span class="text-3xs font-bold uppercase tracking-wider ${color} bg-[var(--color-bg-elevated)] px-2 py-0.5 rounded-[var(--r-1)]">${icon}</span>
               <span class="text-xs text-[var(--color-fg-secondary)] flex-1 truncate">${title}</span>
               ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
@@ -207,10 +207,10 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
     : report.content
 
   return html`
-    <div class="border border-[var(--color-border-default)]/60 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]/30 overflow-hidden hover:border-[var(--accent-20)] transition-colors">
+    <div class="v2-monitoring-card border border-[var(--color-border-default)]/60 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]/30 overflow-hidden hover:border-[var(--accent-20)] transition-colors">
       <button
         type="button"
-        class=${`w-full flex items-center justify-between px-4 py-2.5 bg-[var(--color-bg-surface)] border-b border-[var(--color-border-default)]/40 cursor-pointer select-none text-left ${ringFocusClasses()}`}
+        class=${`v2-monitoring-action w-full flex items-center justify-between px-4 py-2.5 bg-[var(--color-bg-surface)] border-b border-[var(--color-border-default)]/40 cursor-pointer select-none text-left ${ringFocusClasses()}`}
         onClick=${() => setExpanded(!expanded)}
         aria-expanded=${expanded}
       >

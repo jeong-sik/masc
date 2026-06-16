@@ -151,5 +151,6 @@ describe('RuntimeMonitor', () => {
     expect(container.textContent).toContain('latency · 42.5 ms')
     expect(container.textContent).toContain('models · 1')
     expect(container.textContent).toContain('auth · present')
+    expect(container.querySelector('article.v2-monitoring-card')).not.toBeNull()
   })
 })

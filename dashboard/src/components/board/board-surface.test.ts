@@ -195,6 +195,13 @@ describe('BoardSurface Component', () => {
     expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
   })
 
+  it('marks the sort bar and new-post form as v2 workspace panels', () => {
+    const { container } = render(h(BoardSurface, null))
+    const panels = container.querySelectorAll('.v2-workspace-panel')
+    expect(panels.length).toBeGreaterThanOrEqual(2)
+    expect(container.querySelector('.v2-workspace-action')).not.toBeNull()
+  })
+
   it('renders loading state when loading', () => {
     boardLoading.value = true
     render(h(BoardSurface, null))

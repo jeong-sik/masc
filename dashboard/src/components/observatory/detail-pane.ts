@@ -66,7 +66,7 @@ export function DetailPane() {
   const source = typeof selection.entry.source === 'string' ? selection.entry.source : null
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-bg-0/60 shadow-[var(--shadow-1)]" role="region" aria-label="선택 항목 상세">
+    <div class="v2-monitoring-detail rounded-[var(--r-1)] border border-[var(--accent-30)] bg-bg-0/60 shadow-[var(--shadow-1)]" role="region" aria-label="선택 항목 상세">
       <div class="flex items-center justify-between border-b border-card-border px-3 py-2">
         <div class="flex items-center gap-2">
           <span class="text-3xs uppercase tracking-[var(--track-caps)] text-accent-fg font-semibold">상세</span>
@@ -79,7 +79,7 @@ export function DetailPane() {
         </div>
         <button
           type="button"
-          class="rounded-[var(--r-1)] px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--color-bg-elevated)]"
+          class="v2-monitoring-action rounded-[var(--r-1)] px-2 py-0.5 text-2xs text-text-dim hover:text-text-strong hover:bg-[var(--color-bg-elevated)]"
           onClick=${clearSelection}
           aria-label="상세 패널 닫기"
         >
@@ -100,7 +100,7 @@ export function DetailPane() {
           <${MetaRow} label="operation" value=${selection.entry.operation_id} />
         ` : null}
       </div>
-      <details class="border-t border-card-border">
+      <details class="v2-monitoring-detail border-t border-card-border">
         <summary class="cursor-pointer px-3 py-1.5 text-2xs text-text-dim hover:text-text-strong">
           raw entry (JSON)
         </summary>

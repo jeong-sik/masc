@@ -27,6 +27,7 @@ describe('InventoryRow', () => {
   it('renders name and description', () => {
     const container = document.createElement('div')
     render(h(InventoryRow, { item: makeItem() }), container)
+    expect(container.querySelector('.v2-lab-card')).not.toBeNull()
     expect(container.textContent).toContain('Test Tool')
     expect(container.textContent).toContain('A test tool')
   })

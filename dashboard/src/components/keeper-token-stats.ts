@@ -47,7 +47,7 @@ export function KeeperTokenStats() {
   if (data.length === 0) {
     return html`
       <section
-        class="monitor-muted-panel p-4 text-xs text-[var(--color-fg-muted)]"
+        class="v2-monitoring-panel monitor-muted-panel p-4 text-xs text-[var(--color-fg-muted)]"
         aria-label="키퍼 토큰 사용량 집계"
       >
         <header class="mb-1 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
@@ -64,7 +64,7 @@ export function KeeperTokenStats() {
 
   return html`
     <section
-      class="monitor-muted-panel flex flex-col gap-3 p-4"
+      class="v2-monitoring-panel monitor-muted-panel flex flex-col gap-3 p-4"
       aria-label="키퍼 토큰 사용량 집계"
     >
       <header class="flex flex-wrap items-baseline justify-between gap-2">
@@ -76,7 +76,7 @@ export function KeeperTokenStats() {
         </span>
       </header>
       <div class="overflow-x-auto">
-        <table class="w-full font-mono text-xs">
+        <table class="v2-monitoring-table w-full font-mono text-xs">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-left text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
               <th class="py-1 pr-2">keeper</th>
@@ -89,7 +89,7 @@ export function KeeperTokenStats() {
             ${data.map(r => html`
               <tr
                 key=${r.name}
-                class="border-b border-[var(--color-border-default)]/40"
+                class="v2-monitoring-row border-b border-[var(--color-border-default)]/40"
               >
                 <td class="py-1 pr-2">
                   <span aria-hidden="true">${r.emoji}</span>

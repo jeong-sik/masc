@@ -286,7 +286,8 @@ let cache_desync_cleared_fn
     do not block the claim — claim semantics stay independent of sandbox
     state.
 
-    Wired in [lib/keeper/keeper_runtime.ml] at startup; the default no-op
+    Wired in [lib/workspace_metric_hooks.ml] at startup via
+    [Playground_repo_readiness.provision_task_worktree]; the default no-op
     keeps [masc_workspace] free of a direct dependency on [masc]. *)
 let claim_post_provision_fn
   : (Workspace_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit) Atomic.t

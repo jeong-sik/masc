@@ -118,3 +118,18 @@ let get_recent_commits ~repository ~branch ~limit =
   with
   | Ok lines -> Ok lines
   | Error msg -> Error msg
+
+(** [add_worktree ~repository ~worktree_path ~ref_ ()] adds a git worktree at
+    [worktree_path] checked out to [ref_]. The parent directory is created if
+    needed. If the path already exists as a directory the call is idempotent.
+    Best-effort: failures are returned as [Error msg]. *)
+let add_worktree ~repository ~worktree_path ~ref_ () : (unit, string) result =
+  let env = non_interactive_git_env in
+  let parent = Filename.dirname worktree_path in
+  Fs_compat.mkdir_p parent;
+  if Sys.file_exists worktree_path && Sys.is_directory worktree_path
+  then Ok ()
+  else
+    run_git ~cwd:repository.local_path ~env
+      [ "worktree"; "add"; "--checkout"; worktree_path; ref_ ]
+    |> Result.map (fun _ -> ())

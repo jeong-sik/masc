@@ -646,8 +646,8 @@ let effective_scheduled_autonomous_cooldown
      cooldown by 2^min(n, 3), capping at 8x. This prevents token waste when
      the keeper repeatedly reads board_list without taking action. *)
   let noop_multiplier =
-    if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 3
-    (* 1, 2, 4, 8 *)
+    if consecutive_noop_count <= 0 then 1 else 1 lsl min consecutive_noop_count 2
+    (* 1, 2, 4 *)
   in
   let effective_base = base_cooldown * noop_multiplier in
   let min_cooldown = Keeper_config.keeper_proactive_min_cooldown_sec () in

@@ -95,6 +95,11 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active; since = "2.163.0" };
 
+  { env_name = "MASC_KEEPER_VISIBILITY_GATE";
+    description = "Delay proactive idle turns when no SSE consumer is observing and no pending signal exists";
+    default = true; category = "keeper";
+    lifecycle = Active; since = "2.250.0" };
+
   { env_name = "MASC_KEEPER_ALERT_ENABLED";
     description = "Master switch for keeper interesting alert detection";
     default = true; category = "keeper";

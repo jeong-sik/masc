@@ -243,6 +243,13 @@ module SmartHeartbeat = struct
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_SMART_HEARTBEAT"
 end
 
+module KeeperVisibilityGate = struct
+  (** Consumer-driven idle backoff: when true, keepers with no dashboard/SSE
+      observer and no pending signal delay proactive idle turns by
+      [unobserved_visibility_idle_window_s] to reduce token waste. *)
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_VISIBILITY_GATE"
+end
+
 (** {1 Keeper Keepalive Loop Constants} *)
 
 module KeeperKeepalive = struct

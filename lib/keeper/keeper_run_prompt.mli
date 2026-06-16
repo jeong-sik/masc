@@ -22,6 +22,11 @@ val sanitize_user_message : string -> string
 (** Remove role/jailbreak prefixes from a turn user message before it is
     appended to the OAS context. *)
 
+val strip_prompt_injection_prefixes : ?remaining:int -> string -> string
+(** Remove known prompt-injection prefixes from a single line/text
+    fragment. Used by memory recall paths that inject stored text into
+    the system prompt. [remaining] limits recursive stripping (default 8). *)
+
 val render_recent_failure_context :
   Keeper_failure_circuit_breaker.failure_signature list -> string
 (** Render a bounded, non-authoritative dynamic-context block from the

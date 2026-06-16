@@ -83,6 +83,14 @@ val ensure_ready :
   unit ->
   (unit, string) result
 
+(** [provision_task_worktree ~config ~agent_name ~task_id ()] creates a
+    per-task git worktree under the Docker sandbox of [agent_name] for every
+    repository assigned to that keeper. The call is best-effort and silently
+    ignored for Local-profile keepers or when the sandbox clone is not ready.
+    This is the implementation wired to [Workspace_hooks.claim_post_provision_fn]. *)
+val provision_task_worktree :
+  config:Workspace.config -> agent_name:string -> task_id:string -> unit -> unit
+
 
 (** Outcome of an [ensure_current] pass. Every non-[Advanced] case leaves the
     working tree byte-for-byte untouched. *)

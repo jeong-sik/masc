@@ -494,8 +494,14 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                   with
                   | Ok [] -> ""
                   | Ok items ->
-                      "Long-term memory:\n- "
-                      ^ String.concat "\n- " (List.map String.trim items)
+                      let safe_items =
+                        List.map
+                          (fun s ->
+                             Keeper_run_prompt.strip_prompt_injection_prefixes
+                               (String.trim s))
+                          items
+                      in
+                      "Long-term memory:\n- " ^ String.concat "\n- " safe_items
                   | Error exn_class ->
                       Printf.sprintf
                         "Long-term memory: [unavailable: %s]"

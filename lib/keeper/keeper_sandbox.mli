@@ -30,6 +30,9 @@ type t = {
 
 val backend_to_string : backend -> string
 
+val backend_of_profile :
+  Keeper_types_profile_sandbox.sandbox_profile -> backend
+
 (** {1 Path resolution} *)
 
 (** [backend_of_config_agent ~config ~agent_name] resolves the keeper's

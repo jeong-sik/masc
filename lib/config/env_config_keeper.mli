@@ -106,6 +106,12 @@ module SmartHeartbeat : sig
   val enabled : bool
 end
 
+(** {1 Visibility gate (consumer-driven idle backoff)} *)
+
+module KeeperVisibilityGate : sig
+  val enabled : bool
+end
+
 (** {1 Keeper keepalive loop} *)
 
 module KeeperKeepalive : sig

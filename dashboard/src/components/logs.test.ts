@@ -235,6 +235,47 @@ describe('LogViewer Code links', () => {
   // throws LogsSchemaDriftError instead of silently dropping bad rows,
   // so there is no "parser dropped N rows" state to render here.
 
+  it('renders v2 surface marker classes for CSS scoping', async () => {
+    const fetchLogs = vi.fn().mockResolvedValue({
+      total: 1,
+      entries: [{
+        seq: 1,
+        ts: '2026-05-14T00:00:00Z',
+        level: 'INFO',
+        source: 'structured',
+        module: 'keeper_tool',
+        message: 'read file',
+        details: { file_path: 'lib/runtime.ml', line: 12 },
+      }],
+    })
+    const fetchProviderLogsCatalog = vi.fn().mockResolvedValue({
+      providers: [{
+        id: 'ollama',
+        display_name: 'Ollama Local',
+        protocol: 'ollama-http',
+        enabled: true,
+        path: '~/.ollama/logs/server.log',
+        resolved_path: '/Users/dancer/.ollama/logs/server.log',
+        default_lines: 200,
+        max_bytes: 1048576,
+      }],
+    })
+    const fetchProviderLogTail = vi.fn().mockResolvedValue({
+      provider: { id: 'ollama', display_name: 'Ollama Local', protocol: 'ollama-http' },
+      entries: [{ line: 1, text: 'tail line' }],
+    })
+    const { LogViewer } = await loadLogs(fetchLogs, { fetchProviderLogsCatalog, fetchProviderLogTail })
+    const { container } = render(h(LogViewer, {}))
+
+    await waitFor(() => expect(container.querySelector('.v2-logs-surface')).not.toBeNull())
+    expect(container.querySelector('.v2-logs-panel')).not.toBeNull()
+    expect(container.querySelector('.v2-logs-toolbar')).not.toBeNull()
+    expect(container.querySelector('.v2-logs-table-header')).not.toBeNull()
+    expect(container.querySelector('.v2-logs-row')).not.toBeNull()
+    expect(container.querySelector('.v2-logs-summary')).not.toBeNull()
+    expect(container.querySelector('.v2-logs-provider-panel')).not.toBeNull()
+  })
+
   it('does not render Code links for unsafe absolute log file paths', async () => {
     const fetchLogs = vi.fn().mockResolvedValue({
       total: 1,

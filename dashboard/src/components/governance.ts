@@ -115,7 +115,7 @@ function GovernanceSummaryStrip() {
         <${ActionButton}
           variant="ghost"
           size="sm"
-          class="rounded-[var(--r-1)] border-transparent bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--color-bg-hover)] hover:text-text-strong"
+          class="v2-command-action rounded-[var(--r-1)] border-transparent bg-[var(--color-bg-surface)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--color-bg-hover)] hover:text-text-strong"
           onClick=${refreshGovernance}
           disabled=${governanceLoading.value}
         >
@@ -239,7 +239,7 @@ function JudgmentsSection() {
       : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
     return html`
       <div data-testid="live-judge-empty">
-        <${SectionCard} label=${title} class="section mb-5" variant="compact">
+        <${SectionCard} label=${title} class="section mb-5 v2-command-panel" variant="compact">
           <${EmptyState} message=${message} compact />
           ${lastSeen || meta ? html`
             <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-2xs ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
@@ -255,10 +255,10 @@ function JudgmentsSection() {
   }
 
   return html`
-    <${SectionCard} label=${title} class="section mb-5" variant="compact">
+    <${SectionCard} label=${title} class="section mb-5 v2-command-panel" variant="compact">
       <div class="flex flex-col gap-2.5">
         ${judgments.map(j => html`
-          <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
+          <div class="v2-command-row rounded-[var(--r-1)] border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
             <div class="flex items-center gap-2 mb-1.5">
               <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-1.5 py-0.5 text-3xs font-bold text-accent-fg">${j.target_kind ?? 'unknown'}</span>
               <span class="font-medium text-text-strong">${j.target_id ?? ''}</span>
@@ -387,7 +387,7 @@ function KeeperApprovalAlertBanner() {
       <${ActionButton}
         variant=${isCritical ? 'danger' : 'primary'}
         size="md"
-        class="shrink-0"
+        class="v2-command-action shrink-0"
         onClick=${scrollToKeeperApprovalSection}
       >
         Review now
@@ -500,7 +500,7 @@ function KeeperApprovalQueueSection() {
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
-    <${SectionCard} label="Keeper HITL Approval Queue" class="section mb-5" variant="compact">
+    <${SectionCard} label="Keeper HITL Approval Queue" class="section mb-5 v2-command-panel" variant="compact">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-xs text-text-muted">
           Keeper tool calls above the risk threshold wait here.
@@ -535,7 +535,7 @@ function KeeperApprovalQueueSection() {
               ${visibleItems.map(item => {
                 const disabled = actingId === item.id
                 return html`
-                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-item">
+                  <div class="v2-command-row rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
                       <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${item.keeper_name}
@@ -572,7 +572,7 @@ function KeeperApprovalQueueSection() {
                         <${ActionButton}
                           variant="primary"
                           size="md"
-                          class="min-w-[110px]"
+                          class="v2-command-action min-w-[110px]"
                           onClick=${() => void respondToKeeperApproval(item.id, 'approve')}
                           disabled=${Boolean(actingId)}
                         >
@@ -581,7 +581,7 @@ function KeeperApprovalQueueSection() {
                         <${ActionButton}
                           variant="ghost"
                           size="md"
-                          class="min-w-[110px]"
+                          class="v2-command-action min-w-[110px]"
                           onClick=${() => void respondToKeeperApproval(item.id, 'approve', true)}
                           disabled=${Boolean(actingId)}
                         >
@@ -590,7 +590,7 @@ function KeeperApprovalQueueSection() {
                         <${ActionButton}
                           variant="danger"
                           size="md"
-                          class="min-w-[110px]"
+                          class="v2-command-action min-w-[110px]"
                           onClick=${() => void respondToKeeperApproval(item.id, 'reject')}
                           disabled=${Boolean(actingId)}
                         >
@@ -612,7 +612,7 @@ function ApprovalRulesSection() {
   const rules = governanceData.value?.approval_rules ?? []
   const actingId = governanceApprovalActing.value
   return html`
-    <${SectionCard} label="Always Rules" class="section mb-5" variant="compact">
+    <${SectionCard} label="Always Rules" class="section mb-5 v2-command-panel" variant="compact">
       <div class="mb-3 text-xs text-text-muted">
         Auto-approval rules derived from approved requests. Critical, destructive shell/git, and manual-decision states are never auto-approved even when a rule exists.
       </div>
@@ -623,7 +623,7 @@ function ApprovalRulesSection() {
               ${rules.map((rule: KeeperApprovalRule) => {
                 const deleting = actingId === `rule:${rule.id}`
                 return html`
-                  <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-rule">
+                  <div class="v2-command-row rounded-[var(--r-1)] border border-card-border bg-card/34 p-4 shadow-[var(--shadow-1)]" data-testid="governance-approval-rule">
                     <div class="flex flex-wrap items-start gap-2.5">
                       <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${rule.keeper_name}
@@ -647,6 +647,7 @@ function ApprovalRulesSection() {
                       <${ActionButton}
                         variant="danger"
                         size="sm"
+                        class="v2-command-action"
                         onClick=${() => void deleteKeeperApprovalRule(rule.id)}
                         disabled=${Boolean(actingId)}
                       >
@@ -672,7 +673,7 @@ export function Governance() {
   }, [])
 
   return html`
-    <div class="flex flex-col gap-0.5">
+    <div class="v2-command-surface flex flex-col gap-0.5">
       <${KeeperApprovalAlertBanner} />
       <${GovernanceSummaryStrip} />
       <${KeeperApprovalQueueSection} />

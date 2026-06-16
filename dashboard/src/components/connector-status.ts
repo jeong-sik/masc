@@ -300,7 +300,7 @@ function healthTone(health: string): { dot: string; badge: string; label: string
     case 'healthy':
       return {
         dot: 'var(--green)',
-        badge: 'border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]',
+        badge: 'border border-[var(--ok-border)] bg-[var(--ok-10)] text-[var(--color-status-ok)]',
         label: 'healthy',
       }
     case 'degraded':
@@ -312,7 +312,7 @@ function healthTone(health: string): { dot: string; badge: string; label: string
     case 'failing':
       return {
         dot: 'var(--red)',
-        badge: 'border border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
+        badge: 'border border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)]',
         label: 'failing',
       }
     default:
@@ -439,10 +439,10 @@ export function connectorCardBorderClass(label: string): string {
 function connectorStateTone(connector: GateConnectorInfo | null): string {
   const label = connectorStateLabel(connector)
   if (label === 'connected') {
-    return 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+    return 'border-[var(--ok-border)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
   }
   if (label === 'disconnected') {
-    return 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
+    return 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)]'
   }
   return 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
 }
@@ -838,7 +838,7 @@ function ConnectorLivePanel({
             ? html`
                 <button
                   type="button"
-                  class="cursor-pointer rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
+                  class="cursor-pointer rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
                   disabled=${isActionLoading}
                   aria-label=${`stop ${connectorName} sidecar`}
                   onClick=${() => { void stopSidecar(connectorId) }}
@@ -1401,7 +1401,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
 
       ${lastError
         ? html`
-            <${SurfaceCard} class="mt-3 !border-[var(--bad-20)] !bg-[var(--bad-10)] !px-3 !py-2 text-2xs text-[var(--bad-light)]">
+            <${SurfaceCard} class="mt-3 !border-[var(--err-border)] !bg-[var(--bad-10)] !px-3 !py-2 text-2xs text-[var(--bad-light)]">
               <div class="mb-1 uppercase tracking-5 text-[var(--bad-light)]/80">
                 ${ch.last_error_kind || 'error'} · ${timeAgo(ch.last_error_at)}
               </div>
@@ -1448,7 +1448,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
       </div>
       ${lastError
         ? html`
-            <${SurfaceCard} class="mt-2 !border-[var(--bad-20)] !bg-[var(--bad-10)] !px-2 !py-1 text-3xs text-[var(--bad-light)]">
+            <${SurfaceCard} class="mt-2 !border-[var(--err-border)] !bg-[var(--bad-10)] !px-2 !py-1 text-3xs text-[var(--bad-light)]">
               ${binding.last_error_kind || 'error'} · ${lastError}
             </${SurfaceCard}>
           `
@@ -1460,7 +1460,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
 function EventRow({ event }: { event: GateEventInfo }) {
   const isError = Boolean(event.error)
   const badgeClass = isError
-    ? 'border border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]'
+    ? 'border border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)]'
     : 'border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
 
   return html`
@@ -1679,7 +1679,7 @@ export function ConnectorStatusPanel() {
     : findKnownConnector(allConnectors, focusedConnectorId) ?? placeholderConnector(focusedConnectorId)
 
   return html`
-    <div class="contain-content">
+    <div class="contain-content v2-connector-status">
       <div class="mb-3 flex items-center justify-between gap-3">
         <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>
         ${filterId

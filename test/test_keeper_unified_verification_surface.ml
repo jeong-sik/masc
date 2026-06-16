@@ -102,6 +102,52 @@ let test_single_board_event_skips_curation_gate () =
   check bool "board_curation absent" false
     (List.mem "board_curation" affordances)
 
+(* RFC-0248 PR-2 behavioral proof: the trust boundary reaches the assembled
+   prompt. A fleet-authored board event (peer/self/automation) renders ONLY
+   inside the observational-data envelope; a human-authored event renders as
+   trusted instruction without it. This closes the test gap left since PR-1,
+   whose provenance tests covered classification only, not prompt rendering. *)
+let contains_sub sub s =
+  let sub_len = String.length sub in
+  let s_len = String.length s in
+  let rec aux i =
+    if i + sub_len > s_len then false
+    else if String.sub s i sub_len = sub then true
+    else aux (i + 1)
+  in
+  if sub_len = 0 then true else aux 0
+;;
+
+let test_quarantined_board_event_wraps_in_envelope () =
+  Masc_test_deps.init_keeper_tool_registry ();
+  let peer_event =
+    {
+      sample_board_event with
+      post_id = "peer-post-1";
+      author = "keeper-ramarama-agent";
+      preview = "I assert the build is green.";
+      provenance = WO.Peer_keeper;
+    }
+  in
+  let human_event =
+    { sample_board_event with post_id = "human-1"; provenance = WO.Human_direct }
+  in
+  let obs_peer = { base_observation with pending_board_events = [ peer_event ] } in
+  let obs_human = { base_observation with pending_board_events = [ human_event ] } in
+  let _, peer_msg =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+      ~observation:obs_peer ()
+  in
+  let _, human_msg =
+    Masc.Keeper_unified_prompt.build_prompt ~meta:minimal_meta ~base_path:"/tmp"
+      ~observation:obs_human ()
+  in
+  check bool "peer (fleet) event wrapped in observational-data envelope" true
+    (contains_sub "observational-data" peer_msg);
+  check bool "human event NOT wrapped in envelope (trusted instruction)" false
+    (contains_sub "observational-data" human_msg)
+;;
+
 let test_task_claim_requires_matched_backlog () =
   let obs =
     { base_observation with unclaimed_task_count = 3; claimable_task_count = 0 }
@@ -185,6 +231,9 @@ let () =
             `Quick test_board_curation_affordance_requires_multi_event_window;
           test_case "affordance: single board event skips curation gate" `Quick
             test_single_board_event_skips_curation_gate;
+          test_case
+            "trust: quarantined board event wraps in envelope (RFC-0248 PR-2)"
+            `Quick test_quarantined_board_event_wraps_in_envelope;
           test_case "affordance: task claim requires matched backlog" `Quick
             test_task_claim_requires_matched_backlog;
           test_case "affordance: task claim present for claimable backlog" `Quick

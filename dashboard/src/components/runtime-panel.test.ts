@@ -209,4 +209,14 @@ describe('RuntimePanel', () => {
     const filterChips = container.querySelector('[data-testid="filter-chips"]')
     expect(filterChips?.getAttribute('data-value')).toBe('providers')
   })
+
+  it('wraps the panel in the v2 monitoring surface class', async () => {
+    route.value.params = {}
+    const { RuntimePanel } = await loadRuntimePanel()
+    render(html`<${RuntimePanel} />`, container)
+    await flushUi()
+
+    const surface = container.querySelector('.v2-monitoring-surface')
+    expect(surface).not.toBeNull()
+  })
 })

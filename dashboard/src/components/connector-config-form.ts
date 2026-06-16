@@ -413,7 +413,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
     const hint = getFieldHint(inProcess.envVar)
     return html`
       <${SurfaceCard}
-        class="mt-3 !border-[var(--accent-20)] !bg-[var(--accent-10)]/5 !p-3 text-2xs"
+        class="mt-3 !border-[var(--accent-22)] !bg-[var(--accent-12)]/5 !p-3 text-2xs v2-connector-config-form"
         id=${`connector-config-${connectorId}`}
         data-in-process-config-panel
       >
@@ -429,7 +429,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         ${hint === null
           ? null
           : html`
-              <${SurfaceCard} class="mt-2 !border-[var(--accent-20)] !bg-[var(--accent-10)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${inProcess.envVar}>
+              <${SurfaceCard} class="mt-2 !border-[var(--accent-22)] !bg-[var(--accent-12)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${inProcess.envVar}>
                 <span>${hint.where}</span>
                 ${hint.url
                   ? html`
@@ -467,7 +467,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.loading) {
     return html`
-      <${SurfaceCard} class="mt-3 !p-3" id=${`connector-config-${connectorId}`}>
+      <${SurfaceCard} class="mt-3 !p-3 v2-connector-config-form" id=${`connector-config-${connectorId}`}>
         <${LoadingState}>config schema 불러오는 중...<//>
       </${SurfaceCard}>
     `
@@ -475,12 +475,12 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.error !== null) {
     return html`
-      <${SurfaceCard} class="mt-3 !border-[var(--bad-20)] !bg-[var(--bad-10)] !p-3 text-2xs text-[var(--bad-light)]" id=${`connector-config-${connectorId}`} role="alert">
+      <${SurfaceCard} class="mt-3 !border-[var(--err-border)] !bg-[var(--bad-10)] !p-3 text-2xs text-[var(--bad-light)] v2-connector-config-form" id=${`connector-config-${connectorId}`} role="alert">
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button
           type="button"
-          class="mt-2 cursor-pointer rounded-[var(--r-1)] border border-[var(--bad-20)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
+          class="mt-2 cursor-pointer rounded-[var(--r-1)] border border-[var(--err-border)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
           aria-label="config schema 다시 가져오기"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
@@ -490,7 +490,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.fields.length === 0) {
     return html`
-      <${SurfaceCard} class="mt-3 !p-3 text-2xs text-[var(--color-fg-disabled)]" id=${`connector-config-${connectorId}`}>
+      <${SurfaceCard} class="mt-3 !p-3 text-2xs text-[var(--color-fg-disabled)] v2-connector-config-form" id=${`connector-config-${connectorId}`}>
         schema가 비어있습니다. backend가 sidecar venv를 못 찾았을 수 있어요.
       </${SurfaceCard}>
     `
@@ -499,7 +499,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   const envBlock = buildEnvBlock(entry)
 
   return html`
-    <${SurfaceCard} class="mt-3 !p-3" id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정">
+    <${SurfaceCard} class="mt-3 !p-3 v2-connector-config-form" id=${`connector-config-${connectorId}`} role="form" aria-label="${connectorId} 설정">
       <div class="mb-2 flex items-center justify-between">
         <div class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required
@@ -579,7 +579,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
               const hint = getFieldHint(field.name)
               if (hint === null) return null
               return html`
-                <${SurfaceCard} class="!border-[var(--accent-20)] !bg-[var(--accent-10)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
+                <${SurfaceCard} class="!border-[var(--accent-22)] !bg-[var(--accent-12)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${field.name}>
                   <span class="mr-1" aria-hidden="true">📍</span>
                   <span>${hint.where}</span>
                   ${hint.url

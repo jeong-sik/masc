@@ -118,9 +118,9 @@ function taskEventIcon(type: string): string {
 
 function taskEventColor(type: string): string {
   switch (type) {
-    case 'task_completed': return 'text-ok'
-    case 'task_cancelled': return 'text-bad'
-    default: return 'text-accent-fg'
+    case 'task_completed': return 'text-[var(--color-status-ok)]'
+    case 'task_cancelled': return 'text-[var(--bad-light)]'
+    default: return 'text-[var(--color-accent-fg)]'
   }
 }
 
@@ -164,9 +164,9 @@ function SessionMeta({ agentName }: { agentName: string }) {
   return html`
     <div class="flex flex-wrap gap-2 mb-4">
       ${meta.map(m => html`
-        <span key=${m.label} class="inline-flex items-center gap-1.5 text-2xs font-medium py-1 px-2.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] rounded-[var(--r-1)] text-text-muted">
-          <span class="text-text-dim">${m.label}</span>
-          <span class="text-text-strong font-mono text-3xs">${m.value}</span>
+        <span key=${m.label} class="inline-flex items-center gap-1.5 text-2xs font-medium py-1 px-2.5 bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] rounded-[var(--r-1)] text-[var(--color-fg-muted)]">
+          <span class="text-[var(--color-fg-muted)]">${m.label}</span>
+          <span class="text-[var(--color-fg-primary)] font-mono text-3xs">${m.value}</span>
         </span>
       `)}
     </div>
@@ -178,7 +178,7 @@ function TaskEventTimeline({ events }: { events: AgentTimelineEvent[] }) {
 
   return html`
     <div class="mt-4">
-      <div class="text-2xs font-semibold uppercase tracking-wider text-text-muted mb-2">태스크 이력</div>
+      <div class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-2">태스크 이력</div>
       <div class="flex flex-col gap-1">
         ${events.map((evt, idx) => {
           const title = detailStr(evt.detail, 'title') || detailStr(evt.detail, 'task_id')
@@ -187,7 +187,7 @@ function TaskEventTimeline({ events }: { events: AgentTimelineEvent[] }) {
           return html`
             <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
               <span class="text-3xs font-bold uppercase tracking-wider ${color} bg-[var(--color-bg-elevated)] px-2 py-0.5 rounded-[var(--r-1)]">${icon}</span>
-              <span class="text-xs text-text-body flex-1 truncate">${title}</span>
+              <span class="text-xs text-[var(--color-fg-secondary)] flex-1 truncate">${title}</span>
               ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
             </div>
           `
@@ -207,10 +207,10 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
     : report.content
 
   return html`
-    <div class="border border-card-border/60 rounded-[var(--r-1)] bg-card/30 overflow-hidden hover:border-[var(--accent-20)] transition-colors">
+    <div class="border border-[var(--color-border-default)]/60 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]/30 overflow-hidden hover:border-[var(--accent-20)] transition-colors">
       <button
         type="button"
-        class=${`w-full flex items-center justify-between px-4 py-2.5 bg-[var(--color-bg-surface)] border-b border-card-border/40 cursor-pointer select-none text-left ${ringFocusClasses()}`}
+        class=${`w-full flex items-center justify-between px-4 py-2.5 bg-[var(--color-bg-surface)] border-b border-[var(--color-border-default)]/40 cursor-pointer select-none text-left ${ringFocusClasses()}`}
         onClick=${() => setExpanded(!expanded)}
         aria-expanded=${expanded}
       >
@@ -219,7 +219,7 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
           <${TimeAgo} timestamp=${report.ts} />
         </div>
         ${isLong ? html`
-          <span class="text-3xs text-text-dim font-medium">
+          <span class="text-3xs text-[var(--color-fg-muted)] font-medium">
             ${expanded ? '접기' : '펼치기'}
           </span>
         ` : null}
@@ -256,23 +256,23 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
   const hasQuery = query.trim() !== ''
 
   return html`
-    <${SectionCard} label="세션 활동 리포트" class="mb-5">
+    <${SectionCard} label="세션 활동 리포트" class="v2-monitoring-panel mb-5">
       <${SessionMeta} agentName=${agentName} />
 
       ${summary ? html`
         <div class="flex gap-3 flex-wrap mb-4">
           ${summary.tasks_completed > 0 ? html`
-            <div class="flex items-center gap-1.5 text-xs font-medium text-ok bg-ok/10 border border-ok/20 px-3 py-1.5 rounded-[var(--r-1)]">
+            <div class="flex items-center gap-1.5 text-xs font-medium text-[var(--color-status-ok)] bg-[var(--ok-10)] border border-[var(--ok-20)] px-3 py-1.5 rounded-[var(--r-1)]">
               <span class="font-bold">${summary.tasks_completed}</span> 완료
             </div>
           ` : null}
           ${summary.tasks_claimed > 0 ? html`
-            <div class="flex items-center gap-1.5 text-xs font-medium text-accent-fg bg-[var(--accent-10)] border border-[var(--accent-20)] px-3 py-1.5 rounded-[var(--r-1)]">
+            <div class="flex items-center gap-1.5 text-xs font-medium text-[var(--color-accent-fg)] bg-[var(--accent-10)] border border-[var(--accent-20)] px-3 py-1.5 rounded-[var(--r-1)]">
               <span class="font-bold">${summary.tasks_claimed}</span> 수임
             </div>
           ` : null}
           ${summary.messages_sent > 0 ? html`
-            <div class="flex items-center gap-1.5 text-xs font-medium text-text-muted bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] px-3 py-1.5 rounded-[var(--r-1)]">
+            <div class="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] px-3 py-1.5 rounded-[var(--r-1)]">
               <span class="font-bold">${summary.messages_sent}</span> 메시지
             </div>
           ` : null}
@@ -289,7 +289,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
             onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
           />
           ${hasQuery ? html`
-            <span class="text-2xs text-text-muted whitespace-nowrap">
+            <span class="text-2xs text-[var(--color-fg-muted)] whitespace-nowrap">
               ${filteredItems} / ${totalItems}
             </span>
           ` : null}
@@ -303,13 +303,13 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
           `)}
         </div>
       ` : hasQuery && reports.length > 0 ? html`
-        <div class="text-xs text-text-muted py-3">검색 결과 없음 (리포트)</div>
+        <div class="text-xs text-[var(--color-fg-muted)] py-3">검색 결과 없음 (리포트)</div>
       ` : null}
 
       <${TaskEventTimeline} events=${filteredTaskEvents} />
 
       ${hasQuery && filteredTaskEvents.length === 0 && taskEvents.length > 0 ? html`
-        <div class="text-xs text-text-muted py-2">검색 결과 없음 (태스크)</div>
+        <div class="text-xs text-[var(--color-fg-muted)] py-2">검색 결과 없음 (태스크)</div>
       ` : null}
     <//>
   `

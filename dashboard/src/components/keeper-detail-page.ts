@@ -1,5 +1,7 @@
 import { html } from 'htm/preact'
+import { memo } from 'preact/compat'
 import { useState, useRef, useEffect } from 'preact/hooks'
+import type { Keeper } from '../types'
 import { route } from '../router'
 import { keepers } from '../store'
 import { selectKeeper } from '../keeper-runtime'
@@ -58,8 +60,17 @@ export function KeeperDetailPage() {
       ? route.value.params.keeper?.trim()
       : ''
   if (!keeperName) return null
+  return html`<${KeeperDetailResolver} keeperName=${keeperName} />`
+}
 
-  // Resolve the active keeper. See [resolveKeeperForDetail] for semantics.
+// P0 render-perf: isolate the `keepers` signal subscription here. A heartbeat,
+// turn, or phase update on *any* keeper mutates the global `keepers` array and
+// would otherwise re-render the whole detail subtree (chat + rail + body,
+// ~1,400 LOC). keeper identity is reference-stable via `reconcileKeepers`, so
+// memoizing KeeperDetailContent below skips the heavy subtree whenever the
+// resolved keeper object did not change — which is every heartbeat that is
+// not this keeper's phase transition.
+function KeeperDetailResolver({ keeperName }: { keeperName: string }) {
   const keeper = resolveKeeperForDetail(
     keeperName,
     findKeeper(keeperName),
@@ -82,7 +93,10 @@ export function KeeperDetailPage() {
       </div>
     `
   }
+  return html`<${KeeperDetailContent} keeper=${keeper} />`
+}
 
+const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keeper: Keeper }) {
   const titleId = `keeper-detail-title-${keeper.name}`
   const effectiveStatus = keeperDisplayStatus(keeper)
   const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
@@ -319,4 +333,4 @@ export function KeeperDetailPage() {
         />`
       : null}
   `
-}
+})

@@ -142,12 +142,12 @@ function RuntimeCatalogSummary({
       <div class="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div class="min-w-0">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">provider</div>
-          <div class="truncate text-sm font-semibold text-text-strong">${provider}</div>
+          <div class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${provider}</div>
           <div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]">${entry.protocol ?? MISSING_DATA_DASH} · ${entry.auth_kind ?? 'auth unknown'}</div>
         </div>
         <div class="min-w-0">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">model</div>
-          <div class="truncate text-sm font-semibold text-text-strong">${model}</div>
+          <div class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${model}</div>
           <div class="truncate font-mono text-3xs text-[var(--color-fg-muted)]">${formatContextTokens(entry.max_context)}</div>
         </div>
       </div>
@@ -164,7 +164,7 @@ function RuntimeCatalogSummary({
 function EditorHeader() {
   return html`
     <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-      <span class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg">런타임</span>
+      <span class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">런타임</span>
       <span class="text-3xs text-[var(--color-fg-muted)]">keeper가 다음 턴에 호출할 runtime lane</span>
     </div>
   `
@@ -206,9 +206,9 @@ export function KeeperRuntimeModelEditor({ keeperName }: { keeperName: string })
     // the operator is not left at the same dead-end the card exists to fix.
     const kind = config.sources.default_source_kind ?? 'unknown'
     return html`
-      <div class="flex flex-col gap-2 rounded-[var(--r-4)] border border-card-border/60 bg-card/35 px-4 py-3 shadow-[var(--shadow-1)]">
+      <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--color-border-default)]/60 bg-[var(--color-bg-surface)]/35 px-4 py-3">
         <${EditorHeader} />
-        <div class="text-sm font-semibold text-text-strong">${current || MISSING_DATA_DASH}</div>
+        <div class="text-sm font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</div>
         ${canonical && canonical !== current
           ? html`<div class="text-2xs text-[var(--color-fg-muted)]">정규화: ${canonical}</div>`
           : null}
@@ -254,9 +254,9 @@ export function KeeperRuntimeModelEditor({ keeperName }: { keeperName: string })
   }
 
   return html`
-    <div class="flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-4 py-3 shadow-[var(--shadow-1)]">
+    <div class="v2-monitoring-card flex flex-col gap-2 rounded-[var(--r-4)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-4 py-3">
       <${EditorHeader} />
-      <div class="text-2xs text-[var(--color-fg-muted)]">현재 <span class="font-semibold text-text-strong">${current || MISSING_DATA_DASH}</span></div>
+      <div class="text-2xs text-[var(--color-fg-muted)]">현재 <span class="font-semibold text-[var(--color-fg-primary)]">${current || MISSING_DATA_DASH}</span></div>
       <${InlineSelectRow}
         label="runtime"
         value=${effective}

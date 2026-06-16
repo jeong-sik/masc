@@ -1,0 +1,132 @@
+/* MASC Dashboard v2 — Monitoring surface.
+ *
+ * Scoped to .v2-monitoring-* so unmigrated surfaces keep their legacy
+ * styling. Covers Runtime, Fleet, Agent roster/profile/detail, Keeper
+ * runtime/reactivity, and Governance monitor lanes.
+ *
+ * Colors come from v2-theme.css; this file handles surface-specific
+ * layout, soft brass top glow, hairlines, hover states, and consistent
+ * borders for tables/cards/panels.
+ */
+
+.v2-monitoring-surface,
+.v2-monitoring-panel,
+.v2-monitoring-card,
+.v2-monitoring-row,
+.v2-monitoring-action,
+.v2-monitoring-table,
+.v2-monitoring-detail {
+  --v2-monitoring-top-glow: rgb(var(--brass-glow) / 0.04);
+}
+
+/* ── Panels / cards ───────────────────────────────────────────────────────── */
+
+.v2-monitoring-panel,
+.v2-monitoring-card {
+  box-shadow: inset 0 1px 0 var(--v2-monitoring-top-glow);
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-monitoring-card:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* ── Rows (roster, tables, lists) ─────────────────────────────────────────── */
+
+.v2-monitoring-row,
+.v2-monitoring-panel table tbody tr,
+.v2-monitoring-detail table tbody tr,
+.v2-monitoring-table tbody tr {
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-monitoring-row:hover,
+.v2-monitoring-panel table tbody tr:hover,
+.v2-monitoring-detail table tbody tr:hover,
+.v2-monitoring-table tbody tr:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+
+/* ── Action buttons ───────────────────────────────────────────────────────── */
+
+.v2-monitoring-action:not(:disabled),
+.v2-monitoring-panel .v2-monitoring-action:not(:disabled),
+.v2-monitoring-card .v2-monitoring-action:not(:disabled) {
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-monitoring-action:not(:disabled):hover {
+  border-color: var(--color-accent-fg);
+  background: var(--color-brass-soft);
+}
+
+/* ── Telemetry / health / FSM tables ──────────────────────────────────────── */
+
+.v2-monitoring-table,
+.v2-monitoring-panel table,
+.v2-monitoring-detail table {
+  border-color: var(--color-border-default);
+}
+
+.v2-monitoring-table thead,
+.v2-monitoring-panel table thead,
+.v2-monitoring-detail table thead {
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.v2-monitoring-table th,
+.v2-monitoring-panel table th,
+.v2-monitoring-detail table th {
+  color: var(--color-fg-muted);
+}
+
+.v2-monitoring-table td,
+.v2-monitoring-panel table td,
+.v2-monitoring-detail table td {
+  color: var(--color-fg-secondary);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+/* ── Detail sections ──────────────────────────────────────────────────────── */
+
+.v2-monitoring-detail {
+  box-shadow: inset 0 1px 0 var(--v2-monitoring-top-glow);
+}
+
+/* ── Runtime panel / TOML editor chrome ───────────────────────────────────── */
+
+.v2-monitoring-panel .v2-monitoring-toolbar {
+  background: linear-gradient(
+    180deg,
+    var(--color-bg-elevated) 0%,
+    var(--color-bg-surface) 100%
+  );
+  border-color: var(--color-border-divider);
+}
+
+.v2-monitoring-panel .v2-monitoring-code-frame {
+  background: var(--color-bg-page);
+  border-color: var(--color-border-default);
+}
+
+/* ── Agent roster rows ────────────────────────────────────────────────────── */
+
+.v2-monitoring-roster-row {
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-monitoring-roster-row:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+
+/* ── FSM matrix cells ─────────────────────────────────────────────────────── */
+
+.v2-monitoring-fsm-cell {
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-monitoring-fsm-cell:hover {
+  border-color: var(--color-border-strong);
+}

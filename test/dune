@@ -1054,6 +1054,16 @@
 
 ; Typed JSON field extraction helper (RFC-0142 Phase 1).
 
+; Memory-OS "brain" end-to-end organ-composition harness. Runs the real
+; production functions in composition with falsification/teeth checks (not unit
+; isolation). Runnable standalone for read-only dry-run against a live store:
+;   dune exec test/memory_os_brain_harness.exe -- --keepers-dir <path>
+
+(test
+ (name memory_os_brain_harness)
+ (modules memory_os_brain_harness)
+ (libraries masc_test_deps))
+
 (test
  (name test_json_field)
  (modules test_json_field)

@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail } from './dashboard-shell'
+import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
@@ -889,5 +889,32 @@ describe('SideRail v2 chrome', () => {
     const links = container.querySelectorAll('.nav-link-collapsed')
     expect(links.length).toBeGreaterThan(0)
     expect(container.querySelector('.nav-link-collapsed.active')).not.toBeNull()
+  })
+})
+
+describe('DashboardHealthStrip v2 chrome', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('{}'))),
+    )
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.unstubAllGlobals()
+  })
+
+  it('renders with the v2-health-strip marker class', () => {
+    render(h(DashboardHealthStrip, {}), container)
+
+    const strip = container.querySelector('[data-testid="dashboard-health-strip"]')
+    expect(strip).not.toBeNull()
+    expect(strip?.classList.contains('v2-health-strip')).toBe(true)
   })
 })

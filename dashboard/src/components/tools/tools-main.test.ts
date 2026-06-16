@@ -87,6 +87,7 @@ describe('Tools', () => {
     render(html`<${Tools} />`, container)
     await flush()
 
+    expect(container.querySelector('.v2-lab-surface')).not.toBeNull()
     expect(mocks.loadTools).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('ConfigResolutionPanel')
     expect(container.textContent).toContain('예약 자동화 FSM')

@@ -263,7 +263,7 @@ export function KeeperLiveTruthPanel({
 
   return html`
     <div
-      class="w-full max-w-[calc(100vw-3rem)] rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4 lg:max-w-none"
+      class="v2-monitoring-detail w-full max-w-[calc(100vw-3rem)] rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4 lg:max-w-none"
       data-testid="keeper-live-truth"
     >
       <div class="flex flex-wrap items-start justify-between gap-3">
@@ -354,7 +354,7 @@ export function KeeperSecretProjectionPanel({
   if (!projection) {
     return html`
       <div
-        class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
+        class="v2-monitoring-detail rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
         data-testid="keeper-secret-projection"
       >
         <div class="flex items-center justify-between gap-3">
@@ -381,7 +381,7 @@ export function KeeperSecretProjectionPanel({
 
   return html`
     <div
-      class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
+      class="v2-monitoring-detail rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
       data-testid="keeper-secret-projection"
     >
       <div class="flex flex-wrap items-start justify-between gap-3">

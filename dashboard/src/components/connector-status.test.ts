@@ -957,6 +957,25 @@ describe('ConnectorStatusPanel', () => {
     expect(novaText).not.toContain('model ')
     expect(novaText).toContain('runtime keeper-nova-agent')
   })
+
+  it('mounts under the v2 connector status surface class', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const root = container.querySelector('.v2-connector-status')
+    expect(root).not.toBeNull()
+  })
 })
 
 describe('filterKeeperGroups', () => {

@@ -70,6 +70,7 @@ describe('ConnectorPathsStrip', () => {
   it('mounts the paths strip panel', () => {
     render(html`<${ConnectorPathsStrip} connectors=${[]} />`, container)
     expect(container.querySelector('[data-panel="connector-paths-strip"]')).not.toBeNull()
+    expect(container.querySelector('.v2-connector-paths-strip')).not.toBeNull()
   })
 
   it('is collapsed by default — body rows are absent until expanded', () => {

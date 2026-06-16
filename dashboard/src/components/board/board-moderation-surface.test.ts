@@ -77,12 +77,13 @@ describe('BoardModerationSurface', () => {
   })
 
   it('renders queue entries with moderation state', async () => {
-    render(h(BoardModerationSurface, null))
+    const { container } = render(h(BoardModerationSurface, null))
 
     expect(await screen.findByText('post-1')).toBeTruthy()
     expect(screen.getByText('spam')).toBeTruthy()
     expect(screen.getByText('keeper-a')).toBeTruthy()
     expect(screen.getByText('open')).toBeTruthy()
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
     expect(fetchQueueMock).toHaveBeenCalledWith(expect.objectContaining({
       resolved: false,
       signal: expect.any(AbortSignal),

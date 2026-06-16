@@ -132,6 +132,7 @@ describe('ConnectorFlowSection render', () => {
       html`<${ConnectorFlowSection} connector=${mkConnector()} gate=${mkGate()} />`,
       container,
     )
+    expect(container.querySelector('.v2-connector-flow')).not.toBeNull()
     const section = container.querySelector('[data-connector-flow="discord"]')!
     expect(section).toBeTruthy()
     expect(section.querySelector('[data-flow-stats]')?.textContent).toContain('12')

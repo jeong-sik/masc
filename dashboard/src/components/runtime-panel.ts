@@ -110,8 +110,8 @@ function HiddenDiagnosticsLinks() {
     >
       <div class="flex flex-col gap-3">
         <div>
-          <div class="text-sm font-semibold text-text-strong">Diagnostics</div>
-          <div class="mt-1 max-w-2xl text-xs leading-relaxed text-text-muted">
+          <div class="text-sm font-semibold text-[var(--color-fg-primary)]">Diagnostics</div>
+          <div class="mt-1 max-w-2xl text-xs leading-relaxed text-[var(--color-fg-muted)]">
             These are routeable support surfaces, not primary Monitor lanes. Use them when a keeper-facing runtime incident points at infrastructure or stale rollout state.
           </div>
         </div>
@@ -123,8 +123,8 @@ function HiddenDiagnosticsLinks() {
               params=${{ section: link.section }}
               class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)]"
             >
-              <span class="block text-xs font-semibold text-text-strong">${link.label}</span>
-              <span class="mt-1 block text-2xs leading-relaxed text-text-muted">${link.detail}</span>
+              <span class="block text-xs font-semibold text-[var(--color-fg-primary)]">${link.label}</span>
+              <span class="mt-1 block text-2xs leading-relaxed text-[var(--color-fg-muted)]">${link.detail}</span>
             <//>
           `)}
         </div>
@@ -137,7 +137,7 @@ export function RuntimePanel() {
   const view = activeView.value
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex flex-col gap-2">
         <${FilterChips}
           chips=${PRIMARY_VIEW_CHIPS}

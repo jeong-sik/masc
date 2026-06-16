@@ -594,6 +594,9 @@ export interface DashboardRuntimeProvidersResponse {
     default_runtime_id?: string | null
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
+  // Resolved filesystem path of the runtime.toml the server actually loaded
+  // (Runtime.config_path); answers "which config is live" in the monitor.
+  config_path?: string | null
 }
 
 export interface BucketMetric {
@@ -764,6 +767,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
     providers: asRecordArray(raw.providers)
       .map(decodeRuntimeProviderSnapshot)
       .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
+    config_path: asNullableString(raw.config_path),
   }
 }
 
@@ -987,6 +991,11 @@ export interface KeeperDecision {
   tool: string | null
   duration_ms: number | null
   match_count: number | null
+  // Closed-sum terminal cause of the turn (completed / api_error /
+  // runtime_exhausted / tool_contract / required_tool_use_unsatisfied),
+  // computed by dashboard_http_keeper_feeds.ml; the table can only show the
+  // coarse `outcome` without it.
+  terminal_reason_code: string | null
 }
 
 export interface KeeperDecisionContext {
@@ -1056,6 +1065,7 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
     tool: asNullableString(raw.tool),
     duration_ms: asNumber(raw.duration_ms) ?? null,
     match_count: asNumber(raw.match_count) ?? null,
+    terminal_reason_code: asNullableString(raw.terminal_reason_code),
   }
 }
 
@@ -1255,6 +1265,7 @@ function decodeGoalKeeperTrustLatestEvent(raw: unknown): GoalKeeperTrustLatestEv
     summary,
     severity,
     next_human_action: asNullableString(raw.next_human_action),
+    trace_id: asNullableString(raw.trace_id),
   }
 }
 
@@ -1273,6 +1284,7 @@ function decodeGoalKeeperTrustApprovalState(raw: unknown): GoalKeeperTrustApprov
           blocker_class: asNullableString(pendingFirst.blocker_class),
         }
       : null,
+    latest_event_at: asNullableString(raw.latest_event_at),
   }
 }
 
@@ -2375,6 +2387,9 @@ export type TelemetryFreshnessMetadata = {
   exists?: boolean
   coverage_gaps?: TelemetryCoverageGap[]
   coverage_gap_count?: number
+  // Count of gaps not yet recovered (source latest_ts < gap ts), distinct from
+  // the total coverage_gap_count — the actionable "still failing" number.
+  active_coverage_gap_count?: number
 }
 
 export type DashboardSurfaceEnvelope = {
@@ -2486,6 +2501,7 @@ function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): Telemet
     exists: asBoolean(raw.exists),
     coverage_gaps: coverageGaps,
     coverage_gap_count: asNumber(raw.coverage_gap_count, coverageGaps.length),
+    active_coverage_gap_count: asNumber(raw.active_coverage_gap_count),
   }
 }
 

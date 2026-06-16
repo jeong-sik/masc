@@ -83,7 +83,7 @@ export function AgentsUnified() {
   }))
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <${FilterChips}
         chips=${viewChips}
         value=${currentView}

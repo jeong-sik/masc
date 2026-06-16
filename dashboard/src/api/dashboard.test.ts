@@ -152,6 +152,7 @@ describe('fetchDashboardExecutionTrust', () => {
       health: 'coverage_gap',
       stale_reason: 'execution_receipt_append_failed',
       coverage_gap_count: 1,
+      active_coverage_gap_count: 1,
       coverage_gaps: [
         {
           schema: 'masc.telemetry_coverage_gap.v1',
@@ -178,6 +179,7 @@ describe('fetchDashboardExecutionTrust', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution-trust')
     expect(result.coverage_gap_count).toBe(1)
+    expect(result.active_coverage_gap_count).toBe(1)
     expect(result.dashboard_surface_envelope).toMatchObject({
       schema: 'masc.dashboard_surface.v1',
       surface: '/api/v1/dashboard/execution-trust',
@@ -1228,6 +1230,7 @@ describe('dashboard goals decoding', () => {
                 task_id: 'task-1',
                 blocker_class: 'blocked_before_worktree',
               },
+              latest_event_at: '2026-04-23T00:09:30Z',
             },
             execution: {
               tools_used: ['keeper_task_claim'],
@@ -1251,6 +1254,7 @@ describe('dashboard goals decoding', () => {
               summary: 'Waiting for operator approval before resuming.',
               severity: 'warn',
               next_human_action: 'resolve_approval',
+              trace_id: 'trace-approval-42',
             },
           },
           latest_causal_event: {
@@ -1299,6 +1303,7 @@ describe('dashboard goals decoding', () => {
             task_id: 'task-1',
             blocker_class: 'blocked_before_worktree',
           },
+          latest_event_at: '2026-04-23T00:09:30Z',
         },
         execution_summary: {
           provider_attempt_count: 2,
@@ -1314,6 +1319,7 @@ describe('dashboard goals decoding', () => {
           kind: 'approval_pending',
           keeper_turn_id: 42,
           title: 'Approval pending',
+          trace_id: 'trace-approval-42',
         },
       },
       latest_causal_event: {
@@ -1819,6 +1825,7 @@ describe('fetchRuntimeProviders', () => {
             },
           },
         ],
+        config_path: '/Users/dancer/me/.masc/runtime.toml',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1829,6 +1836,7 @@ describe('fetchRuntimeProviders', () => {
     const result = await fetchRuntimeProviders()
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/providers')
+    expect(result.config_path).toBe('/Users/dancer/me/.masc/runtime.toml')
     expect(result.summary?.default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.providers[0]?.provider).toBe('runpod_mtp.qwen')
     expect(result.providers[0]?.provider_id).toBe('runpod_mtp')
@@ -2031,6 +2039,24 @@ describe('fetchKeeperDecisions', () => {
       operation_id: 'op-decision',
       worker_run_id: 'worker-decision',
     })
+  })
+
+  it('decodes terminal_reason_code (and defaults to null when absent)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        events: [
+          { ts_unix: 1, keeper_name: 'k', event_type: 'turn', outcome: 'error', terminal_reason_code: 'runtime_exhausted' },
+          { ts_unix: 2, keeper_name: 'k', event_type: 'turn', outcome: 'success' },
+        ],
+        limit: 2,
+        generated_at: 1,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperDecisions(2)
+    expect(result.events[0]?.terminal_reason_code).toBe('runtime_exhausted')
+    expect(result.events[1]?.terminal_reason_code).toBeNull()
   })
 })
 

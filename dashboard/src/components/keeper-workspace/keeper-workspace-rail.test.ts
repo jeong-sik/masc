@@ -5,6 +5,22 @@ import { tasks } from '../../store'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 
+// The recent-tool-calls section now lazy-loads via fetchKeeperToolCalls (rather
+// than rendering keeper.recent_tool_names). Stub it so these rail tests never hit
+// the network; its rendering is covered directly in keeper-workspace-tool-calls.test.ts.
+vi.mock('../../api/dashboard', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/dashboard')>()
+  return {
+    ...actual,
+    fetchKeeperToolCalls: vi.fn().mockResolvedValue({
+      keeper: 'masc-improver',
+      count: 0,
+      source: 'tool_call_io',
+      entries: [],
+    }),
+  }
+})
+
 function mkKeeper(partial: Partial<Keeper>): Keeper {
   return { name: 'masc-improver', status: 'running', ...partial } as Keeper
 }
@@ -57,12 +73,6 @@ describe('KeeperWorkspaceRail', () => {
     render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`, host)
     expect(host.textContent).toContain('T-4412')
     expect(host.textContent).not.toContain('T-9999')
-  })
-
-  it('renders recent tool calls', () => {
-    render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`, host)
-    expect(host.textContent).toContain('최근 도구 호출')
-    expect(host.textContent).toContain('masc_amplitude_query')
   })
 
   it('renders the attention section from live blocked-task signal', () => {

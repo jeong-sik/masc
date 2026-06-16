@@ -1,13 +1,15 @@
 // Keeper Workspace — context rail (right). Runtime/throughput, context-window
 // occupancy, owned tasks, recent tool calls, and the "상세 보기" toggle that
-// surfaces the full KeeperDetailBody. All data comes from the live Keeper
-// object + the tasks store — no new fetches.
+// surfaces the full KeeperDetailBody. Most data comes from the live Keeper
+// object + the tasks store; the recent-tool-calls section lazy-loads the rich
+// per-call store (see keeper-workspace-tool-calls.ts).
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
+import { KeeperWorkspaceRecentTools } from './keeper-workspace-tool-calls'
 
 const COMPACT_AT = 85 // auto-compaction threshold (%) — matches runtime default
 
@@ -156,24 +158,6 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
   `
 }
 
-function RecentToolsSection({ keeper }: { keeper: Keeper }): VNode | null {
-  const names = (keeper.recent_tool_names ?? keeper.latest_tool_names ?? []).slice(0, 8)
-  if (names.length === 0) return null
-  return html`
-    <div class="kw-sec">
-      <h4>최근 도구 호출</h4>
-      <div class="kw-list">
-        ${names.map((n, i) => html`
-          <div class="kw-tool" key=${`${n}-${i}`}>
-            <span class="kw-dot ok" aria-hidden="true"></span>
-            <span class="nm" title=${n}>${n}</span>
-          </div>
-        `)}
-      </div>
-    </div>
-  `
-}
-
 export function KeeperWorkspaceRail({
   keeper,
   onToggleDetail,
@@ -188,7 +172,7 @@ export function KeeperWorkspaceRail({
         <${ThroughputSection} keeper=${keeper} />
         <${ContextSection} keeper=${keeper} />
         <${OwnedTasksSection} keeper=${keeper} />
-        <${RecentToolsSection} keeper=${keeper} />
+        <${KeeperWorkspaceRecentTools} keeperName=${keeper.name} />
         <div class="kw-sec">
           <button type="button" class="kw-detail-btn" onClick=${onToggleDetail}>
             <span>상세 보기</span>

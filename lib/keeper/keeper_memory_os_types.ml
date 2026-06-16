@@ -18,11 +18,11 @@ type provenance_event =
   ; tool_call_id : string option
   }
 
-(* The librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241; RFC-0246 §2.5).
+(* The librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241; RFC-0247 §2.5).
    The LLM emits a free-text category label; [category_of_string] parses it once
    at the producer boundary into this type, with [Unknown] absorbing any label
    outside the taxonomy (drift / typo / a future label) instead of letting a
-   free-text string flow downstream. [Ephemeral] (RFC-0246) is the non-promotable
+   free-text string flow downstream. [Ephemeral] (RFC-0247) is the non-promotable
    arm for coordination/lifecycle boilerplate — the structural backstop for the
    #21244 mislabel-and-promote failure: even if the prompt's durability gate is
    imperfect, a claim the LLM recognizes as ephemeral is typed non-promotable and
@@ -65,14 +65,14 @@ let category_of_string s =
    including [Ephemeral] and any [Unknown] label — stays keeper-local. Exhaustive
    match (not a runtime [category list]) so a future durable kind must be
    classified here at compile time rather than silently defaulting to
-   non-promotable, the no-silent-omission property RFC-0246 §2.5 argues for over
+   non-promotable, the no-silent-omission property RFC-0247 §2.5 argues for over
    the prompt-suppression approach. *)
 let is_promotable = function
   | Fact | Constraint -> true
   | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
 ;;
 
-(* RFC-0246 §2.3 (forgetting): retention is a property of the category. A
+(* RFC-0247 §2.3 (forgetting): retention is a property of the category. A
    coordination event ("checkpoint saved") is stale within a day and worthless in
    a later session, so it gets a short hard TTL and a fast truth-decay; durable
    knowledge never hard-expires and decays slowly. These two functions are the

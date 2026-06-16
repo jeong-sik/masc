@@ -19,12 +19,12 @@ type provenance_event =
   ; tool_call_id : string option
   }
 
-(** Librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241; RFC-0246 §2.5).
+(** Librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241; RFC-0247 §2.5).
     The free-text label the LLM emits is parsed once at the producer boundary via
     [category_of_string]; [Unknown] absorbs any label outside the taxonomy so a
     drifted/typo'd label can never be silently promoted by the consolidator.
 
-    [Ephemeral] is the load-bearing RFC-0246 arm: lifecycle/coordination
+    [Ephemeral] is the load-bearing RFC-0247 arm: lifecycle/coordination
     boilerplate that is true but not durable cross-keeper knowledge ("checkpoint
     saved", "no tasks", "remains scheduled"). The #21244 live dry-run found these
     are the only >=2-keeper-corroborated claims today; a structurally
@@ -57,7 +57,7 @@ val category_of_string : string -> category
     compile time. *)
 val is_promotable : category -> bool
 
-(** RFC-0246 §2.3 (forgetting): the hard-expiry timestamp a newly written fact of
+(** RFC-0247 §2.3 (forgetting): the hard-expiry timestamp a newly written fact of
     this category should carry, given [now]. Exhaustive over {!category}. Only
     [Ephemeral] (coordination boilerplate) gets a finite TTL — the brain's
     episodic memory that fades; durable knowledge ([Fact]/[Constraint]/…) and
@@ -67,7 +67,7 @@ val is_promotable : category -> bool
     pass) reachable. *)
 val category_valid_until : now:float -> category -> float option
 
-(** RFC-0246 §2.3: the expected lifetime, in retention cycles, a newly written
+(** RFC-0247 §2.3: the expected lifetime, in retention cycles, a newly written
     fact of this category should carry — drives the per-fact truth-decay rate in
     the retention policy ([truth_lambda_for_fact]). Exhaustive over {!category}.
     [Ephemeral] decays fast (a few cycles); everything else returns [None] and

@@ -172,7 +172,7 @@ let aggregate (edges : edge list) : association list =
 
 (* ---------- Spreading activation ---------- *)
 
-(* RFC-0246 §2.7: the associative organ is one feature behind one knob. [alpha]
+(* RFC-0247 §2.7: the associative organ is one feature behind one knob. [alpha]
    drives BOTH whether edges are written ([writes_enabled] — no consumer means no
    accumulation, so the edge store never grows on a fleet that has activation off)
    and how strongly recalled neighbours boost a fact. Default 0.0 = the whole
@@ -191,7 +191,7 @@ let writes_enabled () = activation_alpha () > 0.0
 
 (* How much a relation discounts its pull in activation. [Relates] is the
    weakest/noisiest signal (mere co-occurrence), so it enters recall at a heavy
-   discount (RFC-0246 §2.7); an [Unknown] relation — a legacy/forward label with
+   discount (RFC-0247 §2.7); an [Unknown] relation — a legacy/forward label with
    no arm — carries no weight, so an unrecognized relation can never drive recall.
    Exhaustive: a new relation arm must choose its discount here at compile time. *)
 let relation_weight = function

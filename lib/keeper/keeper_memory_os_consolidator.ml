@@ -24,7 +24,7 @@ module Io = Keeper_memory_os_io
    compile-time property of the closed [category] taxonomy
    (Keeper_memory_os_types.is_promotable: only Fact/Constraint), not a runtime
    list. Default-deny is structural: a new arm (e.g. the [Ephemeral]
-   coordination-boilerplate kind, RFC-0246 §2.5 / #21244) cannot leak into the
+   coordination-boilerplate kind, RFC-0247 §2.5 / #21244) cannot leak into the
    shared tier unless it is classified promotable at the type level. This
    strengthens #21241's typed [category list] into an exhaustive predicate, so a
    future arm forces a compile-time promotability decision rather than silently

@@ -215,7 +215,7 @@ let extract_and_append_with_provider
          "memory os fact upsert failed keeper=%s: %s"
          keeper_id
          (Printexc.to_string exn));
-    (* RFC-0246 §2.7: record the episode's co-occurrence associations — but only
+    (* RFC-0247 §2.7: record the episode's co-occurrence associations — but only
        when activation is enabled ([writes_enabled]). With the default-off organ
        there is no consumer, so writing edges would accrue unbounded disk cost on
        the fleet for nothing; gating the write keeps the whole organ dark until an

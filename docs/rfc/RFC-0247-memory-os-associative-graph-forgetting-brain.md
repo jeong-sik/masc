@@ -1,5 +1,5 @@
 ---
-rfc: "0246"
+rfc: "0247"
 title: "Memory OS as a brain: typed associative graph, spreading-activation recall, sleep consolidation, and forgetting"
 status: Draft
 created: 2026-06-16
@@ -11,7 +11,7 @@ related: ["0239", "0241", "0243", "0244"]
 implementation_prs: []
 ---
 
-# RFC-0246 — Memory OS as a brain
+# RFC-0247 — Memory OS as a brain
 
 ## §0 Context — the organs already built, and the ones missing
 

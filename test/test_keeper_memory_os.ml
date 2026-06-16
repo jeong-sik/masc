@@ -388,7 +388,7 @@ let test_librarian_accepts_integer_confidence () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
-(* RFC-0246 §2.3 producer end-to-end: a claim the librarian labels "ephemeral" is
+(* RFC-0247 §2.3 producer end-to-end: a claim the librarian labels "ephemeral" is
    born with a finite TTL and a fast decay rate, while a durable "fact" carries
    neither — so the forgetting machinery (GC TTL pass, per-fact truth decay) is
    driven by the typed category at write time, not left inert. *)
@@ -1783,7 +1783,7 @@ let test_consolidator_unknown_category_default_deny () =
   Alcotest.(check int) "unknown category not promoted" 0 (List.length shared)
 ;;
 
-(* RFC-0246 §2.5: the category codec round-trips every known arm, and an
+(* RFC-0247 §2.5: the category codec round-trips every known arm, and an
    unrecognized label degrades to [Unknown raw] carrying the original string so a
    read/write cycle is lossless (legacy free-string facts on disk survive). *)
 let test_category_codec_roundtrip () =
@@ -1840,7 +1840,7 @@ let test_is_promotable_only_fact_constraint () =
     blocked
 ;;
 
-(* RFC-0246 §2.3: retention is category-driven. Only Ephemeral gets a finite TTL
+(* RFC-0247 §2.3: retention is category-driven. Only Ephemeral gets a finite TTL
    and a fast decay; every durable arm returns None (never hard-expires, decays at
    the slow default). Exhaustive so a new category must be classified here. *)
 let test_category_retention_by_category () =
@@ -1868,7 +1868,7 @@ let test_category_retention_by_category () =
     ]
 ;;
 
-(* RFC-0246 §2.5 / #21244 regression guard: an Ephemeral claim corroborated by
+(* RFC-0247 §2.5 / #21244 regression guard: an Ephemeral claim corroborated by
    >=2 distinct keepers above threshold is NOT promoted. This is the exact failure
    the #21244 dry-run found (coordination boilerplate mislabeled and promoted);
    the typed non-promotable category makes it structurally impossible. *)
@@ -1947,7 +1947,7 @@ let test_recall_surfaces_shared_after_consolidation () =
            && not (contains "shared via" alpha_block)))))
 ;;
 
-(* ---------- RFC-0246 §2.7 associative edges ---------- *)
+(* ---------- RFC-0247 §2.7 associative edges ---------- *)
 
 let mk_episode ?(trace_id = "trace-ep") ?(generation = 0) ~created_at claim_strings =
   { Types.trace_id
@@ -2088,7 +2088,7 @@ let test_edges_io_roundtrip () =
       Alcotest.failf "expected one association, got %d" (List.length other))
 ;;
 
-(* ---------- RFC-0246 §2.7 (P2a-2) spreading activation ---------- *)
+(* ---------- RFC-0247 §2.7 (P2a-2) spreading activation ---------- *)
 
 let with_env name value f =
   let old = Sys.getenv_opt name in
@@ -2232,7 +2232,7 @@ let () =
             `Quick
             test_librarian_accepts_integer_confidence
         ; Alcotest.test_case
-            "librarian-born ephemeral fact has TTL (RFC-0246 §2.3)"
+            "librarian-born ephemeral fact has TTL (RFC-0247 §2.3)"
             `Quick
             test_librarian_ephemeral_fact_has_ttl
         ; Alcotest.test_case
@@ -2396,15 +2396,15 @@ let () =
             `Quick
             test_consolidator_unknown_category_default_deny
         ; Alcotest.test_case
-            "category codec round-trips (RFC-0246 §2.5)"
+            "category codec round-trips (RFC-0247 §2.5)"
             `Quick
             test_category_codec_roundtrip
         ; Alcotest.test_case
-            "only fact/constraint promote (RFC-0246 §2.5)"
+            "only fact/constraint promote (RFC-0247 §2.5)"
             `Quick
             test_is_promotable_only_fact_constraint
         ; Alcotest.test_case
-            "retention TTL/lifetime is category-driven (RFC-0246 §2.3)"
+            "retention TTL/lifetime is category-driven (RFC-0247 §2.3)"
             `Quick
             test_category_retention_by_category
         ; Alcotest.test_case
@@ -2426,7 +2426,7 @@ let () =
         ] )
     ; ( "edges"
       , [ Alcotest.test_case
-            "co-occurrence pairs distinct claims (RFC-0246 §2.7)"
+            "co-occurrence pairs distinct claims (RFC-0247 §2.7)"
             `Quick
             test_edges_co_occurrence_pairs_distinct_claims
         ; Alcotest.test_case

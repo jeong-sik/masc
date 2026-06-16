@@ -181,8 +181,8 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
        let tool_call_id = optional_string_field "source_tool_call_id" fields in
       (* Parse-once at the producer boundary: the LLM's free-text category becomes
          a typed [category] here, so no surface string reaches the store or the
-         consolidator (RFC-0244 §2.3 / #21241; RFC-0246 §2.5). The category then
-         drives retention (RFC-0246 §2.3) — an [Ephemeral] coordination claim is
+         consolidator (RFC-0244 §2.3 / #21241; RFC-0247 §2.5). The category then
+         drives retention (RFC-0247 §2.3) — an [Ephemeral] coordination claim is
          born with a short TTL and fast decay, durable knowledge with none. *)
       let category = category_of_string category_str in
       Some

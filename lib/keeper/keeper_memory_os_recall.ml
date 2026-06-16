@@ -223,7 +223,7 @@ let activate ~alpha ~associations scored =
 let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = []) () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
-  (* RFC-0246 §2.7 (P2a-2): read associations only when activation is enabled, so
+  (* RFC-0247 §2.7 (P2a-2): read associations only when activation is enabled, so
      the default (alpha = 0) path does no extra IO and stays byte-identical. *)
   let alpha = Keeper_memory_os_edges.activation_alpha () in
   let associations =
@@ -234,7 +234,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
        caps the store to this many facts), so score ranking selects the
        globally best facts rather than only the most recent [fact_tail_scan].
        RFC-0244: [seed_tokens] (current turn) reranks via lexical relevance; an
-       empty seed leaves the ranking unchanged. RFC-0246: spreading activation
+       empty seed leaves the ranking unchanged. RFC-0247: spreading activation
        then lifts facts linked to the recalled set (identity when alpha = 0). *)
     Keeper_memory_os_io.read_facts_tail
       ~keeper_id

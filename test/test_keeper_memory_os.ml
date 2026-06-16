@@ -1348,6 +1348,62 @@ let test_render_if_enabled_renders_persisted_memory () =
             (contains "Gated recall should surface saved facts" block))))
 ;;
 
+(* An old, never-verified fact is rendered with a worded staleness marker that
+   names the age and asks for verification — the anti-confabulation cue. The
+   prior [stale=%.2f] annotation was always 0.00 (no producer writes it), so this
+   guards the truth-anchored age rendering that replaced it. *)
+let test_recall_marks_stale_fact () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "stale-fact-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "Function frobnicate lives in widget.ml"
+          ; Types.first_seen = now -. days 12
+          ; Types.last_verified_at = None
+          }
+        in
+        Memory_io.append_fact ~keeper_id fact;
+        match Recall.render_if_enabled ~keeper_id ~now () with
+        | None -> Alcotest.fail "expected Some block for a persisted stale fact"
+        | Some block ->
+          Alcotest.(check bool)
+            "stale fact carries a worded staleness marker"
+            true
+            (contains "[stale: unverified, seen 12d ago — verify]" block);
+          Alcotest.(check bool)
+            "dead stale=0.00 float annotation is gone"
+            false
+            (contains "stale=0.00" block))))
+;;
+
+(* A freshly-verified fact gets no staleness marker — the note fires only past
+   the threshold so recent facts stay noise-free. *)
+let test_recall_omits_marker_for_fresh_fact () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "fresh-fact-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "User prefers terse output"
+          ; Types.first_seen = now -. days 30
+          ; Types.last_verified_at = Some now
+          }
+        in
+        Memory_io.append_fact ~keeper_id fact;
+        match Recall.render_if_enabled ~keeper_id ~now () with
+        | None -> Alcotest.fail "expected Some block for a persisted fresh fact"
+        | Some block ->
+          Alcotest.(check bool)
+            "fresh fact carries no staleness marker"
+            false
+            (contains "[stale:" block))))
+;;
+
 (* RFC-0244: a seed reranks recall — the lexically matching fact is lifted above a
    higher-base-confidence fact it would otherwise lose to. *)
 let test_render_context_seed_reranks_selection () =
@@ -2590,6 +2646,14 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "stale fact gets a worded staleness marker"
+            `Quick
+            test_recall_marks_stale_fact
+        ; Alcotest.test_case
+            "fresh fact gets no staleness marker"
+            `Quick
+            test_recall_omits_marker_for_fresh_fact
         ; Alcotest.test_case
             "seed reranks recall selection (RFC-0244)"
             `Quick

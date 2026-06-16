@@ -435,7 +435,7 @@ module FileSystem = struct
             collect_keys_under ~requested_prefix:prefix ~logical_prefix
               scan_root []
           in
-          ki_replace_bulk t (List.map (fun key -> (key, ())) keys);
+          (* REMOVED: ki_replace_bulk corrupts global key_index with subset *)
           Ok (List.sort_uniq String.compare keys)
         with
         | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Ok []

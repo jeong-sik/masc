@@ -90,13 +90,6 @@ let int_field key fields =
   | None -> None
 ;;
 
-let number_field key fields =
-  match List.assoc_opt key fields with
-  | Some (`Float f) -> Some f
-  | Some (`Int i) -> Some (float_of_int i)
-  | Some (`Assoc _ | `Bool _ | `Intlit _ | `List _ | `Null | `String _) | None -> None
-;;
-
 let rec traverse f = function
   | [] -> Some []
   | x :: xs ->

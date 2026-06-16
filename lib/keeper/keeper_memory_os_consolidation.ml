@@ -1,11 +1,15 @@
-(** Keeper_memory_os_dream — per-keeper LLM consolidation ("dream") pass.
+(** Keeper_memory_os_consolidation — per-keeper LLM consolidation pass.
 
     The librarian writes facts as they are observed; over time a keeper's store
     accumulates redundant, superseded, and verbose claims. This pass is the
     "summarize" half of RFC-0247: periodically an LLM reads the keeper's whole
     fact set and JUDGES which claims say the same thing (merge them into one
-    consolidated claim) and which are now obsolete (forget them). It is the
-    brain's sleep-consolidation analogue.
+    consolidated claim) and which are now obsolete (forget them).
+
+    Not to be confused with {!Keeper_memory_os_consolidator}: that is the
+    cross-keeper Tier-2 pass (promote a claim several DISTINCT keepers hold into
+    the shared store); this is the intra-keeper pass (shrink ONE keeper's own
+    store via the LLM).
 
     Boundary (the design tenet): the DECISION — what to merge, what to forget, how
     to word a consolidated claim — is the LLM's. The STRUCTURE — numbering the

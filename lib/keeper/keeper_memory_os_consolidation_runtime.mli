@@ -1,9 +1,9 @@
-(** Keeper_memory_os_dream_runtime — LLM wiring for the dream consolidation pass.
+(** Keeper_memory_os_consolidation_runtime — LLM wiring for the consolidation pass.
 
     The read -> prompt -> LLM -> parse -> apply -> write-back loop. The LLM call is
     an injectable [complete_fn] so the loop is testable with a fake completion. The
     structure is deterministic; the only judgement is the model's consolidation
-    plan ({!Keeper_memory_os_dream}). *)
+    plan ({!Keeper_memory_os_consolidation}). *)
 
 type complete_fn = Keeper_memory_llm_summary.complete_fn
 

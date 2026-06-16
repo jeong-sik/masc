@@ -1,9 +1,9 @@
-(** Tests for Keeper_memory_os_dream_runtime — the read -> prompt -> LLM -> parse
+(** Tests for Keeper_memory_os_consolidation_runtime — the read -> prompt -> LLM -> parse
     -> apply -> write-back loop driven with a fake completion (no real provider). *)
 
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
-module Runtime = Masc.Keeper_memory_os_dream_runtime
+module Runtime = Masc.Keeper_memory_os_consolidation_runtime
 module Atypes = Agent_sdk.Types
 
 let now = 1_000_000.0
@@ -44,7 +44,7 @@ let provider_cfg () =
 ;;
 
 let with_temp_keepers f =
-  let marker = Filename.temp_file "dream-runtime-" ".tmp" in
+  let marker = Filename.temp_file "consolidation-runtime-" ".tmp" in
   Sys.remove marker;
   Io.For_testing.with_keepers_dir marker (fun () -> f ())
 ;;
@@ -71,7 +71,7 @@ let test_consolidate_applies_plan () =
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
       with_temp_keepers (fun () ->
-        let keeper_id = "dreamer" in
+        let keeper_id = "keeper-1" in
         List.iter
           (Io.append_fact ~keeper_id)
           [ fact "deploy uses blue-green"
@@ -114,7 +114,7 @@ let test_consolidate_skips_too_few () =
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
       with_temp_keepers (fun () ->
-        let keeper_id = "dreamer" in
+        let keeper_id = "keeper-1" in
         Io.append_fact ~keeper_id (fact "lonely fact");
         let outcome =
           Runtime.consolidate_keeper
@@ -137,7 +137,7 @@ let test_consolidate_dry_run_preserves_store () =
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
       with_temp_keepers (fun () ->
-        let keeper_id = "dreamer" in
+        let keeper_id = "keeper-1" in
         List.iter
           (Io.append_fact ~keeper_id)
           [ fact "a"; fact "b"; fact "c"; fact "d" ];
@@ -163,7 +163,7 @@ let test_consolidate_dry_run_preserves_store () =
 
 let () =
   Alcotest.run
-    "keeper_memory_os_dream_runtime"
+    "keeper_memory_os_consolidation_runtime"
     [ ( "loop"
       , [ Alcotest.test_case "applies the model's plan" `Quick test_consolidate_applies_plan
         ; Alcotest.test_case "skips when too few facts" `Quick test_consolidate_skips_too_few

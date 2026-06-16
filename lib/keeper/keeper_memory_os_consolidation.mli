@@ -1,4 +1,4 @@
-(** Keeper_memory_os_dream — per-keeper LLM consolidation ("dream") pass.
+(** Keeper_memory_os_consolidation — per-keeper LLM consolidation pass.
 
     The "summarize" half of RFC-0247. An LLM reads a keeper's whole fact set and
     judges which claims to merge into one consolidated claim and which to forget.

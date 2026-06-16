@@ -1,4 +1,4 @@
-(** Keeper_memory_os_dream_runtime — LLM wiring for the dream consolidation pass.
+(** Keeper_memory_os_consolidation_runtime — LLM wiring for the consolidation pass.
 
     Mirrors [Keeper_librarian_runtime]: the LLM call is an injectable [complete_fn]
     (default = the real provider) so the read -> prompt -> LLM -> parse -> apply ->
@@ -6,11 +6,11 @@
     [Keeper_memory_llm_summary]'s provider/transport helpers. The structure is
     deterministic; the only judgement is the model's consolidation plan.
 
-    This is the read/write loop only — the cadence (when to dream) is the caller's.
+    This is the read/write loop only — the cadence (when to consolidate) is the caller's.
     Like the GC fiber, it stays disabled until a live shadow run validates it. *)
 
 module Io = Keeper_memory_os_io
-module Dream = Keeper_memory_os_dream
+module Consolidation = Keeper_memory_os_consolidation
 
 (* Same shape as [Keeper_memory_llm_summary.complete_fn]; the LLM call is
    injectable so the loop is driveable with a fake completion in tests. *)
@@ -84,7 +84,7 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
 ;;
 
 let messages_for_consolidation facts =
-  let numbered = Dream.render_numbered_facts facts in
+  let numbered = Consolidation.render_numbered_facts facts in
   match
     Prompt_registry.render_prompt_template
       Keeper_prompt_names.librarian_memory_consolidation
@@ -133,10 +133,10 @@ let consolidate_keeper
          (match response_text response with
           | None -> Unparseable "consolidation provider returned empty response"
           | Some raw ->
-            (match Dream.plan_of_string raw with
+            (match Consolidation.plan_of_string raw with
              | None -> Unparseable "consolidation provider returned invalid plan JSON"
              | Some plan ->
-               let survivors = Dream.apply_plan ~now ~facts plan in
+               let survivors = Consolidation.apply_plan ~now ~facts plan in
                let after = List.length survivors in
                if not dry_run then Io.rewrite_facts_atomically ~keeper_id survivors;
                Consolidated { before; after }))))

@@ -45,6 +45,7 @@ const TARGET_FILES = [
   'src/sse.ts',
   'src/sse-store.ts',
   'src/tab-refresh.ts',
+  'src/tool-call-output-store.ts',
   'src/types/sse.ts',
 ]
 

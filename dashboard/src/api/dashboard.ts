@@ -2591,6 +2591,11 @@ export type ToolCallEntry = {
   lane?: string
   // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
   execution_id?: string
+  // RFC-0233 PR-2: provider call id (oas-event join key). Equals the chat tool
+  // row's tool_call_id for the same execution, so the chat ToolCallBubble can
+  // join this entry's output onto the transcript. Absent when the call carried
+  // no provider id (synthesised tc-<position> rows) or on pre-PR-2 logs.
+  tool_use_id?: string
 }
 
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
@@ -2642,6 +2647,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
     execution_id: asString(raw.execution_id),
+    tool_use_id: asString(raw.tool_use_id),
   }
 }
 

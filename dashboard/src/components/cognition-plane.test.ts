@@ -68,6 +68,7 @@ describe('CognitionPlane', () => {
     render(html`<${CognitionPlane} />`, container)
     await flushUi()
 
+    expect(container.querySelector('.v2-monitoring-surface')).not.toBeNull()
     expect(container.textContent).toContain('Keeper')
     expect(container.textContent).toContain('Keeper Fleet')
     expect(container.querySelector('[data-testid="agents-unified"]')).toBeNull()

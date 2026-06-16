@@ -209,6 +209,7 @@ describe('TransportHealthPanel', () => {
     render(html`<${TransportHealthPanel} />`, container)
     await flushUi()
 
+    expect(container.querySelector('.v2-monitoring-surface')).not.toBeNull()
     expect(fetchTransportHealth).toHaveBeenCalled()
     expect(container.textContent).toContain('WebRTC')
     expect(container.textContent).toContain('시그널링')

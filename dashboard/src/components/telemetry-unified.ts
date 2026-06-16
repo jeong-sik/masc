@@ -1312,8 +1312,8 @@ export function TelemetryUnified() {
   const condensed = useMemo(() => condensedStats(displayItems), [displayItems])
 
   return html`
-    <div class="flex flex-col gap-4">
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
+      <div class="v2-monitoring-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
         <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">런타임 진단</div>
         <div class="mt-2 flex flex-wrap gap-2">
           <span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-disabled)]">MASC: keeper/tool/agent store</span>

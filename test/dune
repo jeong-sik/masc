@@ -312,7 +312,6 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_reasoning_dialect
   test_keeper_behavior_trace)
  (modules
   test_env_keeper_scrub
@@ -606,7 +605,6 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_reasoning_dialect
   test_keeper_behavior_trace)
  (libraries masc_test_deps multimodal))
 

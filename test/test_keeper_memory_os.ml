@@ -397,6 +397,70 @@ let test_librarian_accepts_integer_confidence () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
+(* RFC-0246 §2.3 producer end-to-end: a claim the librarian labels "ephemeral" is
+   born with a finite TTL and a fast decay rate, while a durable "fact" carries
+   neither — so the forgetting machinery (GC TTL pass, per-fact truth decay) is
+   driven by the typed category at write time, not left inert. *)
+let test_librarian_ephemeral_fact_has_ttl () =
+  let now = 1_000_000.0 in
+  let output =
+    `Assoc
+      [ "episode_summary", `String "mixed durability claims"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "checkpoint saved for task T-1"
+                ; "confidence", `Float 0.9
+                ; "category", `String "ephemeral"
+                ; "source_turn", `Int 0
+                ]
+            ; `Assoc
+                [ "claim", `String "the build uses dune 3.x"
+                ; "confidence", `Float 0.9
+                ; "category", `String "fact"
+                ; "source_turn", `Int 1
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-ttl"; generation = 0; messages = [ text_message "x" ] }
+  in
+  match Librarian.episode_of_output ~now inp output with
+  | Some episode ->
+    let find cat =
+      List.find (fun f -> f.Types.category = cat) episode.Types.claims
+    in
+    let eph = find Types.Ephemeral in
+    let durable = find Types.Fact in
+    Alcotest.(check (option (float 0.001)))
+      "ephemeral fact TTL matches the category producer"
+      (Types.category_valid_until ~now Types.Ephemeral)
+      eph.Types.valid_until;
+    Alcotest.(check bool) "ephemeral TTL is finite" true (Option.is_some eph.Types.valid_until);
+    Alcotest.(check (option int))
+      "ephemeral fact lifetime matches the category producer"
+      (Types.category_lifetime_cycles Types.Ephemeral)
+      eph.Types.expected_lifetime_cycles;
+    Alcotest.(check bool)
+      "ephemeral lifetime is finite"
+      true
+      (Option.is_some eph.Types.expected_lifetime_cycles);
+    Alcotest.(check (option (float 0.001)))
+      "durable fact never hard-expires"
+      None
+      durable.Types.valid_until;
+    Alcotest.(check (option int))
+      "durable fact decays at default rate"
+      None
+      durable.Types.expected_lifetime_cycles
+  | None -> Alcotest.fail "expected librarian output to parse"
+;;
+
 let test_librarian_accepts_wrapped_json_output () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-wrapped-json"
@@ -1891,6 +1955,34 @@ let test_is_promotable_only_fact_constraint () =
     blocked
 ;;
 
+(* RFC-0246 §2.3: retention is category-driven. Only Ephemeral gets a finite TTL
+   and a fast decay; every durable arm returns None (never hard-expires, decays at
+   the slow default). Exhaustive so a new category must be classified here. *)
+let test_category_retention_by_category () =
+  let now = 1_000_000.0 in
+  Alcotest.(check bool)
+    "ephemeral gets a finite TTL"
+    true
+    (Option.is_some (Types.category_valid_until ~now Types.Ephemeral));
+  Alcotest.(check bool)
+    "ephemeral gets a finite lifetime"
+    true
+    (Option.is_some (Types.category_lifetime_cycles Types.Ephemeral));
+  List.iter
+    (fun c ->
+       Alcotest.(check (option (float 0.001)))
+         (Types.category_to_string c ^ " never hard-expires")
+         None
+         (Types.category_valid_until ~now c);
+       Alcotest.(check (option int))
+         (Types.category_to_string c ^ " decays at default rate")
+         None
+         (Types.category_lifetime_cycles c))
+    [ Types.Fact; Types.Constraint; Types.Preference; Types.Blocker
+    ; Types.Goal; Types.Code_change; Types.Unknown "novel"
+    ]
+;;
+
 (* RFC-0246 §2.5 / #21244 regression guard: an Ephemeral claim corroborated by
    >=2 distinct keepers above threshold is NOT promoted. This is the exact failure
    the #21244 dry-run found (coordination boilerplate mislabeled and promoted);
@@ -2015,6 +2107,10 @@ let () =
             "librarian accepts integer confidence"
             `Quick
             test_librarian_accepts_integer_confidence
+        ; Alcotest.test_case
+            "librarian-born ephemeral fact has TTL (RFC-0246 §2.3)"
+            `Quick
+            test_librarian_ephemeral_fact_has_ttl
         ; Alcotest.test_case
             "librarian accepts wrapped json output"
             `Quick
@@ -2191,6 +2287,10 @@ let () =
             "only fact/constraint promote (RFC-0246 §2.5)"
             `Quick
             test_is_promotable_only_fact_constraint
+        ; Alcotest.test_case
+            "retention TTL/lifetime is category-driven (RFC-0246 §2.3)"
+            `Quick
+            test_category_retention_by_category
         ; Alcotest.test_case
             "ephemeral corroborated claim not promoted (#21244)"
             `Quick

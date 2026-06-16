@@ -72,6 +72,31 @@ let is_promotable = function
   | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
 ;;
 
+(* RFC-0246 §2.3 (forgetting): retention is a property of the category. A
+   coordination event ("checkpoint saved") is stale within a day and worthless in
+   a later session, so it gets a short hard TTL and a fast truth-decay; durable
+   knowledge never hard-expires and decays slowly. These two functions are the
+   write-side producers that make [valid_until] and [expected_lifetime_cycles]
+   (previously set-once-to-None dead fields) actually reachable. *)
+
+(* A coordination/lifecycle fact is stale within a day. Named, not magic. *)
+let ephemeral_ttl_seconds = 86_400.0
+
+(* Ephemeral facts decay over a few retention cycles; with the policy's
+   default_cycle_seconds (1h) this is a ~hours half-life vs the ~30-day default,
+   so an ephemeral fact loses recall score fast even before its hard TTL. *)
+let ephemeral_lifetime_cycles = 3
+
+let category_valid_until ~now = function
+  | Ephemeral -> Some (now +. ephemeral_ttl_seconds)
+  | Fact | Constraint | Preference | Blocker | Goal | Code_change | Unknown _ -> None
+;;
+
+let category_lifetime_cycles = function
+  | Ephemeral -> Some ephemeral_lifetime_cycles
+  | Fact | Constraint | Preference | Blocker | Goal | Code_change | Unknown _ -> None
+;;
+
 type fact =
   { claim : string
   ; confidence : float

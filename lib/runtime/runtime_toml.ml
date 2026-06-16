@@ -3,8 +3,8 @@
     Re-homed from the deleted [Runtime_declarative_parser]. Parses RFC-0058
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
-    models, runtime (plus the dropped routing namespaces system, routes,
-    profiles, which are still reserved so they are never mistaken for a
+    models, runtime, web_search (plus the dropped routing namespaces system,
+    routes, profiles, which are still reserved so they are never mistaken for a
     provider table). Any other top-level table is a provider table, with
     sub-tables as model bindings.
 
@@ -460,7 +460,7 @@ let parse_models (toml : Otoml.t)
    [[routes]]/[[profiles]] table in an existing runtime.toml is silently
    ignored rather than misread as a provider with bogus model bindings. *)
 let reserved_namespaces =
-  [ "providers"; "models"; "system"; "routes"; "profiles"; "runtime" ]
+  [ "providers"; "models"; "system"; "routes"; "profiles"; "runtime"; "web_search" ]
 ;;
 
 let is_reserved (name : string) : bool = List.mem name reserved_namespaces

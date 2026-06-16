@@ -2,6 +2,8 @@
 
 open Masc
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
@@ -36,6 +38,28 @@ let with_env name value_opt f =
       | Some value -> Unix.putenv name value
       | None -> Unix.putenv name "");
       f ())
+
+let with_unset_env name f =
+  let original = Sys.getenv_opt name in
+  unsetenv name;
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some value -> Unix.putenv name value
+      | None -> unsetenv name)
+    f
+
+let with_boot_override name value_opt f =
+  let original = Config_boot_overrides.get_opt name in
+  (match value_opt with
+   | Some value -> Config_boot_overrides.set name value
+   | None -> Config_boot_overrides.clear name);
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some value -> Config_boot_overrides.set name value
+      | None -> Config_boot_overrides.clear name)
+    f
 
 let with_isolated_runtime_env f =
   with_env "MASC_BASE_PATH" None (fun () ->
@@ -333,6 +357,22 @@ let () = test "web_search_provider_plan_includes_searxng_when_configured" (fun (
                     assert
                       (Tool_misc.web_search_provider_plan ()
                        = [ "searxng"; "duckduckgo"; "bing_rss" ]))))))))))
+)
+
+let () = test "web_search_provider_plan_reads_toml_boot_override" (fun () ->
+  with_unset_env "MASC_SEARXNG_URL" (fun () ->
+    with_boot_override "MASC_SEARXNG_URL" (Some "http://localhost:8888") (fun () ->
+      with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+        with_env "TAVILY_API_KEY" None (fun () ->
+          with_env "EXA_API_KEY" None (fun () ->
+            with_env "BING_SEARCH_API_KEY" None (fun () ->
+              with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                    with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                      assert
+                        (Tool_misc.web_search_provider_plan ()
+                         = [ "searxng"; "duckduckgo"; "bing_rss" ])))))))))))
 )
 
 let () = test "web_search_provider_plan_defaults_to_scraping_fallbacks" (fun () ->

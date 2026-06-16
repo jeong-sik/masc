@@ -301,25 +301,31 @@ let parse_providers (toml : Otoml.t)
 (* --- Layer 2: Models --- *)
 
 let parse_thinking_control_format ~(path : string) (raw : string)
-  : Runtime_schema.thinking_control_format
+  : (Runtime_schema.thinking_control_format, parse_error list) result
   =
   match String.lowercase_ascii (String.trim raw) with
   | "" | "none" | "no-thinking-control" | "no_thinking_control" ->
-    Runtime_schema.No_thinking_control
-  | "thinking-object" | "thinking_object" -> Runtime_schema.Thinking_object
-  | "chat-template-kwargs" | "chat_template_kwargs" -> Runtime_schema.Chat_template_kwargs
-  | "chat-template-token" | "chat_template_token" -> Runtime_schema.Chat_template_token
-  | "reasoning-effort" | "reasoning_effort" -> Runtime_schema.Reasoning_effort
+    Ok Runtime_schema.No_thinking_control
+  | "thinking-object" | "thinking_object" -> Ok Runtime_schema.Thinking_object
+  | "chat-template-kwargs" | "chat_template_kwargs" -> Ok Runtime_schema.Chat_template_kwargs
+  | "chat-template-token" | "chat_template_token" -> Ok Runtime_schema.Chat_template_token
+  | "reasoning-effort" | "reasoning_effort" -> Ok Runtime_schema.Reasoning_effort
   | other ->
-    Log.Runtime.warn "runtime_toml: %s.capabilities.thinking-control-format = %S — expected one of \
-         none|thinking-object|chat-template-kwargs|chat-template-token|reasoning-effort, defaulting to none"
-        path
-        other;
-    Runtime_schema.No_thinking_control
+    (* Unknown enum members fail the load, mirroring how this parser already
+       rejects unknown protocols / credential types. A silent downgrade to
+       No_thinking_control hid config typos that disable thinking control for a
+       model that needs it. *)
+    Error
+      (error
+         (path ^ ".thinking-control-format")
+         (Printf.sprintf
+            "unknown thinking-control-format %S — expected one of \
+             none|thinking-object|chat-template-kwargs|chat-template-token|reasoning-effort"
+            other))
 ;;
 
 let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
-  : Runtime_schema.model_capabilities
+  : (Runtime_schema.model_capabilities, parse_error list) result
   =
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
   let b_default_true key = Otoml.find_or ~default:true tbl Otoml.get_boolean [ key ] in
@@ -334,32 +340,35 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
           n;
       None
   in
-  let thinking_control_format =
+  let thinking_control_format_result =
     match Otoml.find_opt tbl Otoml.get_string [ "thinking-control-format" ] with
-    | None -> Runtime_schema.No_thinking_control
+    | None -> Ok Runtime_schema.No_thinking_control
     | Some raw -> parse_thinking_control_format ~path raw
   in
-  { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
-  ; supports_tool_choice = b "supports-tool-choice"
-  ; supports_extended_thinking = b "supports-extended-thinking"
-  ; supports_reasoning_budget = b "supports-reasoning-budget"
-  ; thinking_control_format
-  ; supports_image_input = b "supports-image-input"
-  ; supports_audio_input = b "supports-audio-input"
-  ; supports_video_input = b "supports-video-input"
-  ; supports_multimodal_inputs = b "supports-multimodal-inputs"
-  ; supports_response_format_json = b "supports-response-format-json"
-  ; supports_structured_output = b "supports-structured-output"
-  ; supports_native_streaming = b "supports-native-streaming"
-  ; supports_caching = b "supports-caching"
-  ; supports_prompt_caching = b "supports-prompt-caching"
-  ; prompt_cache_alignment = positive_int_opt_field "prompt-cache-alignment"
-  ; supports_top_k = b "supports-top-k"
-  ; supports_min_p = b "supports-min-p"
-  ; supports_seed = b "supports-seed"
-  ; emits_usage_tokens = b_default_true "emits-usage-tokens"
-  ; supports_computer_use = b "supports-computer-use"
-  }
+  Result.map
+    (fun thinking_control_format ->
+      { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
+      ; supports_tool_choice = b "supports-tool-choice"
+      ; supports_extended_thinking = b "supports-extended-thinking"
+      ; supports_reasoning_budget = b "supports-reasoning-budget"
+      ; thinking_control_format
+      ; supports_image_input = b "supports-image-input"
+      ; supports_audio_input = b "supports-audio-input"
+      ; supports_video_input = b "supports-video-input"
+      ; supports_multimodal_inputs = b "supports-multimodal-inputs"
+      ; supports_response_format_json = b "supports-response-format-json"
+      ; supports_structured_output = b "supports-structured-output"
+      ; supports_native_streaming = b "supports-native-streaming"
+      ; supports_caching = b "supports-caching"
+      ; supports_prompt_caching = b "supports-prompt-caching"
+      ; prompt_cache_alignment = positive_int_opt_field "prompt-cache-alignment"
+      ; supports_top_k = b "supports-top-k"
+      ; supports_min_p = b "supports-min-p"
+      ; supports_seed = b "supports-seed"
+      ; emits_usage_tokens = b_default_true "emits-usage-tokens"
+      ; supports_computer_use = b "supports-computer-use"
+      })
+    thinking_control_format_result
 ;;
 
 let parse_model (id : string) (tbl : Otoml.t)
@@ -391,9 +400,11 @@ let parse_model (id : string) (tbl : Otoml.t)
       Otoml.find_opt tbl Otoml.get_integer [ "max-thinking-budget" ]
     in
     let streaming = Otoml.find_or ~default:true tbl Otoml.get_boolean [ "streaming" ] in
-    let capabilities =
-      Otoml.find_opt tbl Fun.id [ "capabilities" ]
-      |> Option.map (parse_model_capabilities ~path:(path ^ ".capabilities"))
+    let capabilities_result =
+      match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
+      | None -> Ok None
+      | Some t ->
+        Result.map Option.some (parse_model_capabilities ~path:(path ^ ".capabilities") t)
     in
     let match_prefixes =
       match Otoml.find_opt tbl Fun.id [ "match-prefixes" ] with
@@ -416,18 +427,20 @@ let parse_model (id : string) (tbl : Otoml.t)
            Log.Runtime.warn "runtime_toml: %s.match-prefixes — expected string array, ignoring" path;
            [])
     in
-    Ok
-      { Runtime_schema.id
-      ; api_name
-      ; tools_support
-      ; max_context
-      ; thinking_support
-      ; preserve_thinking
-      ; max_thinking_budget
-      ; streaming
-      ; capabilities
-      ; match_prefixes
-      })
+    Result.map
+      (fun capabilities ->
+        { Runtime_schema.id
+        ; api_name
+        ; tools_support
+        ; max_context
+        ; thinking_support
+        ; preserve_thinking
+        ; max_thinking_budget
+        ; streaming
+        ; capabilities
+        ; match_prefixes
+        })
+      capabilities_result)
 ;;
 
 let parse_models (toml : Otoml.t)

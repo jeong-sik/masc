@@ -42,6 +42,21 @@ let test_unknown_token_reported () =
   Alcotest.(check (float 0.0001))
     "metric +1" (before +. 1.0) (total_unknown ())
 
+let test_unknown_capitalized_token_reported () =
+  (* Prefix matching must be case-insensitive so capitalized stale tokens are
+     caught, not silently missed. *)
+  let prompt = "Call KEEPER_P0_3_FICTIONAL_TOOL to proceed." in
+  let before = total_unknown () in
+  let unknowns =
+    Scanner.scan_text ~keeper_name:keeper ~source:System_prompt prompt
+  in
+  Alcotest.(check (list string))
+    "capitalized unknown keeper token is reported"
+    [ "keeper_p0_3_fictional_tool" ]
+    unknowns;
+  Alcotest.(check (float 0.0001))
+    "metric +1" (before +. 1.0) (total_unknown ())
+
 let test_unknown_masc_token_reported () =
   let prompt = "Use masc_p0_3_unknown_gadget for diagnostics." in
   let before = total_unknown () in
@@ -122,6 +137,8 @@ let () =
             test_known_tokens_are_not_reported;
           Alcotest.test_case "unknown keeper token reported" `Quick
             test_unknown_token_reported;
+          Alcotest.test_case "unknown capitalized keeper token reported" `Quick
+            test_unknown_capitalized_token_reported;
           Alcotest.test_case "unknown masc token reported" `Quick
             test_unknown_masc_token_reported;
           Alcotest.test_case "deduplicates within surface" `Quick

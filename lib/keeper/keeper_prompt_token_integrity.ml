@@ -39,22 +39,23 @@ let is_tool_token_char = function
 
 let token_kind_at pos text len :
     token_kind option =
+  let lc offset = Char.lowercase_ascii text.[pos + offset] in
   if pos + 7 <= len
-     && text.[pos] = 'k'
-     && text.[pos + 1] = 'e'
-     && text.[pos + 2] = 'e'
-     && text.[pos + 3] = 'p'
-     && text.[pos + 4] = 'e'
-     && text.[pos + 5] = 'r'
-     && text.[pos + 6] = '_'
+     && lc 0 = 'k'
+     && lc 1 = 'e'
+     && lc 2 = 'e'
+     && lc 3 = 'p'
+     && lc 4 = 'e'
+     && lc 5 = 'r'
+     && lc 6 = '_'
   then Some Keeper
   else if
     pos + 5 <= len
-    && text.[pos] = 'm'
-    && text.[pos + 1] = 'a'
-    && text.[pos + 2] = 's'
-    && text.[pos + 3] = 'c'
-    && text.[pos + 4] = '_'
+    && lc 0 = 'm'
+    && lc 1 = 'a'
+    && lc 2 = 's'
+    && lc 3 = 'c'
+    && lc 4 = '_'
   then Some Masc
   else None
 

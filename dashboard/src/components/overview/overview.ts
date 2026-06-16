@@ -265,6 +265,7 @@ function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
   return html`
     <${SectionCard}
       title="Fleet Ticker"
+      class="v2-overview-ticker"
       right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">latest ${events.length}</span>`}
       data-testid="overview-fleet-ticker"
     >
@@ -277,7 +278,7 @@ function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
           <div
             key=${event.id}
             role="listitem"
-            class="grid min-w-[15rem] max-w-[22rem] max-[768px]:min-w-[12rem] flex-[0_0_auto] gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2"
+            class="v2-overview-ticker-card grid min-w-[15rem] max-w-[22rem] max-[768px]:min-w-[12rem] flex-[0_0_auto] gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2"
           >
             <div class="flex min-w-0 items-center gap-2 font-mono text-3xs uppercase tracking-wider">
               <span class=${tickerToneClass(event.tone)}>${event.kind}</span>
@@ -303,6 +304,7 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
   return html`
     <${SectionCard}
       title="Alerts"
+      class="v2-overview-alerts"
       tone=${hasCritical ? 'border-[var(--color-status-err)]/45' : 'border-[var(--color-status-warn)]/45'}
       right=${html`<${StatusDot} class=${hasCritical ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-status-warn)]'} />`}
       data-testid="overview-alerts"
@@ -320,7 +322,7 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
         ${allAlerts.map(
           a => html`
             <li
-              class="flex items-start justify-between gap-4 cursor-pointer hover:bg-[var(--color-bg-secondary)]/50 p-1 -m-1 rounded-[var(--r-1)] transition-colors"
+              class="flex items-start justify-between gap-4 cursor-pointer p-1 -m-1 rounded-[var(--r-1)]"
               onClick=${() => {
                 if ('name' in a) openAgentDetail(a.name)
                 else openTaskDetail(a.task)
@@ -409,7 +411,7 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
   const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
   const segPct = (n: number) => total > 0 ? (n / total) * 100 : 0
   return html`
-    <${SectionCard} label="Today" right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">task basis</span>`} data-testid="overview-funnel">
+    <${SectionCard} label="Today" class="v2-overview-funnel" right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">task basis</span>`} data-testid="overview-funnel">
       <${KpiStripIsland}
         ariaLabel="Today funnel"
         cols=${5}
@@ -457,14 +459,14 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
   const members = active.member_names
 
   return html`
-    <${SectionCard} label="Active Mission" data-testid="overview-party">
+    <${SectionCard} label="Active Mission" class="v2-overview-party" data-testid="overview-party">
       <div class="space-y-4">
         <div class="flex items-center justify-between">
-           <p class="text-xs font-semibold text-[var(--color-fg-default)] truncate flex-1 mr-4">
+           <p class="text-xs font-semibold text-[var(--color-fg-primary)] truncate flex-1 mr-4">
              ${active.goal}
            </p>
            <div class="flex -space-x-1.5">
-             ${members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--color-bg-default)]" />`)}
+             ${members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--color-bg-page)]" />`)}
            </div>
         </div>
 
@@ -541,14 +543,14 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
 
   if (activeKeepers.length === 0) {
     return html`
-      <${SectionCard} label="Active Keepers" data-testid="overview-keepers-empty">
+      <${SectionCard} label="Active Keepers" class="v2-overview-keepers" data-testid="overview-keepers-empty">
         <p class="text-2xs text-[var(--color-fg-muted)] italic">No active keepers</p>
       <//>
     `
   }
 
   return html`
-    <${SectionCard} label="Active Keepers" data-testid="overview-keepers">
+    <${SectionCard} label="Active Keepers" class="v2-overview-keepers" data-testid="overview-keepers">
       <ul class="flex flex-wrap gap-x-6 gap-y-2">
         ${activeKeepers.map(
           k => {
@@ -597,7 +599,7 @@ function SurfaceReadinessSummary() {
 
   const summary = summarizeSurfaceReadiness(state.data)
   return html`
-    <${SectionCard} label="Surface Readiness" data-testid="overview-surface-readiness">
+    <${SectionCard} label="Surface Readiness" class="v2-overview-readiness" data-testid="overview-surface-readiness">
       <${KpiStripIsland}
         ariaLabel="Surface readiness summary"
         cols=${3}
@@ -631,7 +633,7 @@ export function Overview() {
     [taskList, messageList, boardPostList, keeperList],
   )
   return html`
-    <div class="flex flex-col gap-8">
+    <div class="v2-overview-surface flex flex-col gap-8">
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
       <${SurfaceReadinessSummary} />
       <${FleetTicker} events=${tickerEvents} />

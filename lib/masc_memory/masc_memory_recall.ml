@@ -14,7 +14,12 @@ let create ~worker ~env_clock ~supabase_client ~neo4j_client =
   { worker; env_clock; supabase_client; neo4j_client; speculative_cache = None; pre_embed_id = Atomic.make 0 }
 
 let canonicalize_query s =
-  s
+  let cleaned = String.map (fun c ->
+    match c with
+    | ' ' | '\t' | '\n' | '\r' -> ' '
+    | _ -> c
+  ) s in
+  cleaned
   |> String.trim
   |> String.split_on_char ' '
   |> List.filter (fun w -> w <> "")

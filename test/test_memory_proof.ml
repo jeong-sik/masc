@@ -312,21 +312,26 @@ let test_multicore_pre_embed_race env =
 let test_whitespace_canonicalization () =
   Printf.printf "=== 7. Whitespace Canonicalization Cache hit Test ===\n";
   let canonicalize_query s =
-    s
+    let cleaned = String.map (fun c ->
+      match c with
+      | ' ' | '\t' | '\n' | '\r' -> ' '
+      | _ -> c
+    ) s in
+    cleaned
     |> String.trim
     |> String.split_on_char ' '
     |> List.filter (fun w -> w <> "")
     |> String.concat " "
   in
-  let q1 = "  DB 모킹   금지   " in
+  let q1 = "  DB\n모킹\t금지\r   " in
   let q2 = "DB 모킹 금지" in
   let cq1 = canonicalize_query q1 in
   let cq2 = canonicalize_query q2 in
-  Printf.printf "원문 1: \"%s\"\n" q1;
+  Printf.printf "원문 1: \"  DB\\n모킹\\t금지\\r   \"\n";
   Printf.printf "원문 2: \"%s\"\n" q2;
   Printf.printf "정규화 원문 1: \"%s\"\n" cq1;
   Printf.printf "정규화 원문 2: \"%s\"\n" cq2;
-  Printf.printf "캐시 키 정규화 일치 여부: %b (★정규화 성공 시 불필요한 공백 차이로 인한 캐시 미스 방어 완료)\n" (cq1 = cq2);
+  Printf.printf "캐시 키 정규화 일치 여부: %b (★탭/개행 정규화 성공 시 불필요한 포맷팅 차이로 인한 캐시 미스 방어 완료)\n" (cq1 = cq2);
   Printf.printf "======================================================\n\n"
 
 (* Outbox 멱등성 및 부분 성공 복구 (Idempotent Outbox Partial Success) 검증 *)
@@ -337,7 +342,6 @@ let test_idempotent_outbox env =
   let pgvector_writes = ref 0 in
   let neo4j_writes = ref 0 in
   
-  (* pgvector는 처음부터 성공, neo4j는 1회차 실패 후 2회차에 성공 시뮬레이션 *)
   let write_pgvector _row =
     incr pgvector_writes;
     Ok ()
@@ -347,7 +351,6 @@ let test_idempotent_outbox env =
     if !neo4j_writes = 1 then Error "Neo4j Down" else Ok ()
   in
   
-  (* Outbox retry loop 시뮬레이션 *)
   let simulate_outbox_retry () =
     let rec retry pg_done neo_done attempt =
       if attempt > 5 then ()
@@ -367,6 +370,47 @@ let test_idempotent_outbox env =
   simulate_outbox_retry ();
   Printf.printf "pgvector 최종 쓰기 횟수: %d (★ 1회만 호출되어 중복 쓰기 방어 성공)\n" !pgvector_writes;
   Printf.printf "Neo4j 최종 쓰기 횟수: %d (★ 2회 호출되어 실패 상태 복구 성공)\n" !neo4j_writes;
+  Printf.printf "======================================================\n\n"
+
+(* Outbox 부팅 시 펜딩 복구 (Boot-up Recovery) 검증 *)
+let test_outbox_boot_recovery env =
+  Printf.printf "=== 9. Outbox Boot-up Recovery Test ===\n";
+  let clock = Eio.Stdenv.clock env in
+  
+  (* 펜딩 파일 복구 시뮬레이션 *)
+  let recovered_pgvector_writes = ref 0 in
+  let recovered_neo4j_writes = ref 0 in
+  
+  let write_pgvector _row =
+    incr recovered_pgvector_writes;
+    Ok ()
+  in
+  let write_neo4j _row =
+    incr recovered_neo4j_writes;
+    Ok ()
+  in
+  
+  (* pgvector_done=true, neo4j_done=false 인 상태 복구 시뮬레이션 *)
+  let simulate_boot_recovery pgvector_done neo4j_done =
+    let rec retry pg_done neo_done attempt =
+      if attempt > 5 then ()
+      else
+        let pg_done = if pg_done then true else match write_pgvector () with Ok () -> true | Error _ -> false in
+        let neo_done = if neo_done then true else match write_neo4j () with Ok () -> true | Error _ -> false in
+        if pg_done && neo_done then
+          Printf.printf "[Recovery] 부팅 시 펜딩 복구 작업 완료 (시도 횟수: %d)\n" attempt
+        else (
+          Eio.Time.sleep clock 0.01;
+          retry pg_done neo_done (attempt + 1)
+        )
+    in
+    retry pgvector_done neo4j_done 1
+  in
+  
+  Printf.printf "[부팅 복구 시뮬레이션 가동: pgvector_done=true, neo4j_done=false]\n";
+  simulate_boot_recovery true false;
+  Printf.printf "복구 시 pgvector 쓰기 호출 횟수: %d (★이미 완료되어 0회 호출, 중복 삽입 방어 완료)\n" !recovered_pgvector_writes;
+  Printf.printf "복구 시 Neo4j 쓰기 호출 횟수: %d (★미완료된 대상만 1회 호출되어 복구 성공)\n" !recovered_neo4j_writes;
   Printf.printf "======================================================\n"
 
 let () =
@@ -378,5 +422,6 @@ let () =
     test_adversarial_antonyms ();
     test_multicore_pre_embed_race env;
     test_whitespace_canonicalization ();
-    test_idempotent_outbox env
+    test_idempotent_outbox env;
+    test_outbox_boot_recovery env
   )

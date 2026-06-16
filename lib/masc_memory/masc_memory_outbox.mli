@@ -9,3 +9,9 @@ val process_queue :
   write_pgvector:(memory_row -> (unit, string) result) -> 
   write_neo4j:(memory_row -> (unit, string) result) -> 
   unit
+
+val recover_on_boot : 
+  t -> 
+  write_pgvector:(memory_row -> (unit, string) result) -> 
+  write_neo4j:(memory_row -> (unit, string) result) -> 
+  unit

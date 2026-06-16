@@ -314,4 +314,28 @@ describe('DashboardStatusTray', () => {
 
     expect(screen.queryByTestId('dashboard-status-tray-popover')).not.toBeInTheDocument()
   })
+
+  it('renders v2 chrome classes and tone badges on tray buttons', () => {
+    render(h(DashboardStatusTray, { sideRailCollapsed: false }))
+
+    const tray = screen.getByTestId('dashboard-status-tray')
+    expect(tray.classList.contains('v2-status-tray')).toBe(true)
+
+    const bar = tray.querySelector('.v2-tray-bar')
+    expect(bar).not.toBeNull()
+
+    const buttons = tray.querySelectorAll('.tray-button')
+    expect(buttons.length).toBe(4)
+
+    for (const key of ['transport', 'fleet', 'activity', 'attention'] as const) {
+      const btn = screen.getByTestId(`dashboard-status-tray-${key}`)
+      expect(btn.classList.contains('tray-button')).toBe(true)
+      expect(btn.querySelector('.tray-button-icon')).not.toBeNull()
+      expect(btn.querySelector('.tray-button-label')).not.toBeNull()
+      expect(btn.querySelector('.tray-button-value')).not.toBeNull()
+    }
+
+    const transportBtn = screen.getByTestId('dashboard-status-tray-transport')
+    expect(transportBtn.className).toMatch(/tone-(ok|warn|err|muted)/)
+  })
 })

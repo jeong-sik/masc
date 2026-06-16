@@ -8,6 +8,7 @@ import {
   keeperPauseDisplay,
   keeperRuntimeBlockerHint,
   keeperRuntimeBlockerLabel,
+  keeperWorkPreview,
 } from './keeper-runtime-display'
 
 /** Minimal Keeper stub with only the fields relevant to status classification. */
@@ -434,5 +435,45 @@ describe('keeperActivityDisplay', () => {
     })
     expect(result.source).toBe('created')
     expect(result.label).toBe('생성')
+  })
+})
+
+describe('keeperWorkPreview', () => {
+  it('prefers a message output over the proactive preview and goals', () => {
+    expect(
+      keeperWorkPreview(
+        makeKeeper({
+          recent_output_preview: '메시지 출력',
+          last_proactive_preview: 'proactive',
+          short_goal: '목표',
+        }),
+      ),
+    ).toBe('메시지 출력')
+  })
+
+  it('surfaces last_proactive_preview when message previews are empty', () => {
+    // The proactive-only keeper: no broadcast (recent_output/input empty), no
+    // goal/current_task — work lives solely in last_proactive_preview.
+    expect(
+      keeperWorkPreview(
+        makeKeeper({
+          recent_output_preview: '',
+          recent_input_preview: null,
+          last_proactive_preview: 'Continuation checkpoint saved.',
+        }),
+      ),
+    ).toBe('Continuation checkpoint saved.')
+  })
+
+  it('falls through to short_goal then goal then current_task', () => {
+    expect(keeperWorkPreview(makeKeeper({ short_goal: 'short', goal: 'long' }))).toBe('short')
+    expect(keeperWorkPreview(makeKeeper({ goal: 'long' }))).toBe('long')
+    expect(keeperWorkPreview(makeKeeper({ agent: { current_task: 'task-7' } }))).toBe('task-7')
+  })
+
+  it('returns null when no signal exists', () => {
+    expect(keeperWorkPreview(makeKeeper({}))).toBeNull()
+    expect(keeperWorkPreview(null)).toBeNull()
+    expect(keeperWorkPreview(undefined)).toBeNull()
   })
 })

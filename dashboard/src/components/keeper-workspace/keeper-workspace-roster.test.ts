@@ -103,6 +103,23 @@ describe('KeeperWorkspaceRoster', () => {
     expect(work?.textContent).toBe('WIP 게이트 수정')
   })
 
+  it('surfaces last_proactive_preview for a proactive-only keeper', () => {
+    // A proactive keeper never broadcasts, so the message-bus previews
+    // (recent_output/input) and goal/current_task stay empty; its work lives
+    // only in last_proactive_preview. The roster must read it rather than
+    // rendering the bare placeholder.
+    keepers.value = [
+      mk({
+        name: 'executor',
+        status: 'running',
+        last_proactive_preview: 'Continuation checkpoint saved; scheduled next cycle.',
+      }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="executor" />`, host)
+    const work = host.querySelector('.kw-kp-work') as HTMLElement
+    expect(work?.textContent).toBe('Continuation checkpoint saved; scheduled next cycle.')
+  })
+
   it('renders the empty-work fallback when no preview source exists', () => {
     keepers.value = [mk({ name: 'bare', status: 'stopped' })]
     render(html`<${KeeperWorkspaceRoster} activeName="bare" />`, host)

@@ -57,6 +57,7 @@ type runtime_handler =
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
+  | Tool_masc_fusion_dispatch
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -146,6 +147,7 @@ let runtime_handler_to_string = function
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
+  | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
@@ -750,6 +752,29 @@ let person_note_set_schema =
     ]
 ;;
 
+let masc_fusion_schema =
+  object_schema
+    ~required:[ "prompt" ]
+    [ property
+        "prompt"
+        "string"
+        "Question or task to deliberate. A panel of models answers \
+         independently, then a judge synthesises consensus, contradictions, \
+         partial coverage, unique insights, and blind spots. Out-of-band: the \
+         synthesis arrives asynchronously on this keeper's chat lane, not \
+         inline in this turn."
+    ; property
+        "preset"
+        "string"
+        "Panel preset name from runtime.toml [fusion.presets]. Omitted uses \
+         the configured default_preset."
+    ; property
+        "web_tools"
+        "boolean"
+        "Allow panel models web search/fetch tools (default false)."
+    ]
+;;
+
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
       ()
   =
@@ -1136,6 +1161,21 @@ let internal_descriptors : t list =
       ~input_schema:passthrough_object_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_ide_annotate
+    (* ── fusion deliberation (RFC-0249) ───────────────────────── *)
+  ; in_process_descriptor
+      ~id:"masc.fusion.deliberate"
+      ~name:"masc_fusion"
+      ~description:
+        "Run an out-of-band panel+judge deliberation. A panel of models from \
+         the configured preset answers the prompt independently; a judge model \
+         synthesises consensus, contradictions, partial coverage, unique \
+         insights, and blind spots. Advisory only: this keeper turn continues \
+         immediately and the synthesis arrives asynchronously on this keeper's \
+         chat lane (also visible in the dashboard). Returns a status with a \
+         run_id. Gated by runtime.toml [fusion] (disabled by default)."
+      ~input_schema:masc_fusion_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_masc_fusion_dispatch
     (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
   ; voice_descriptor
       "keeper_voice_speak"

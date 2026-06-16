@@ -439,7 +439,8 @@ let tool_tutor_for_validation ~tool_name ~input =
      | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
      | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
      | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
-     | Keeper_tool_descriptor.Tool_masc_surface_audit -> None)
+     | Keeper_tool_descriptor.Tool_masc_surface_audit
+     | Keeper_tool_descriptor.Tool_masc_fusion_dispatch -> None)
 ;;
 
 let append_assoc_fields json extra_fields =

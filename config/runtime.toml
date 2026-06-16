@@ -178,3 +178,38 @@ nick0cave = "ollama.gemma4-26b-a4b-qat"
 # Env var MASC_DISCORD_TRIGGER_POLICY overrides this value.
 [discord]
 trigger_policy = "mention_or_thread"
+
+# ── Fusion 패널+심판 심의 (RFC-0249) ─────────────────────────────────
+# masc_fusion 도구의 out-of-band 심의 루프 설정. 기본 OFF (opt-in).
+# [fusion] 섹션이 없거나 enabled=false면 masc_fusion 호출은 게이트에서
+# Deny로 즉시 반환되고 모델을 호출하지 않는다.
+#
+# 패널/심판 모델 문자열은 위의 <provider>.<model> 런타임 id를 그대로 쓴다.
+# 패널은 1..8개. 심판은 패널 답변을 종합한다.
+[fusion]
+enabled = false
+default_preset = "trio"
+# 동시에 띄울 수 있는 패널 수 (Async_agent.all max_fibers 상한).
+max_concurrent_panels = 2
+
+[fusion.gate]
+# 결정론적 게이트 상한. low_confidence 트리거가 이 임계값을 SSOT로 쓴다.
+low_confidence_threshold = 0.6
+# high_stakes 트리거로 인정할 task kind 목록 (빈 목록 = 비활성).
+high_stakes_task_kinds = []
+# 시간당 최대 발동 횟수 (UTC hour bucket 기준).
+per_hour_budget = 20
+# 1회 호출 추정 비용 상한 (USD).
+max_cost_usd_per_call = 0.50
+
+# 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.
+[fusion.presets.trio]
+panel = [
+  "deepseek.deepseek-v4-pro",
+  "glm-coding.glm-5-turbo",
+  "ollama_cloud.deepseek-v4-flash",
+]
+judge = "deepseek.deepseek-v4-pro"
+# 패널 모델당 허용 도구 호출 수 (v1은 tools=[]라 미사용, 향후 web_tools용).
+max_tool_calls_per_panel = 2
+web_tools = false

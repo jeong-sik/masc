@@ -173,6 +173,45 @@ judge = "a"
       (List.mem (Fusion_config.Missing_default_preset "ghost") es)
   | Ok _ -> Alcotest.fail "expected Error Missing_default_preset"
 
+(* Mirrors the disabled [fusion] seed shipped in config/runtime.toml: a
+   populated default_preset + trio panel while enabled=false must parse to
+   [Ok] (Empty_presets / Missing_default_preset are enabled-gated). Pins the
+   seed-template structure against parser drift. *)
+let seed_disabled_toml =
+  {|
+[fusion]
+enabled = false
+default_preset = "trio"
+max_concurrent_panels = 2
+[fusion.gate]
+low_confidence_threshold = 0.6
+high_stakes_task_kinds = []
+per_hour_budget = 20
+max_cost_usd_per_call = 0.50
+[fusion.presets.trio]
+panel = [
+  "deepseek.deepseek-v4-pro",
+  "glm-coding.glm-5-turbo",
+  "ollama_cloud.deepseek-v4-flash",
+]
+judge = "deepseek.deepseek-v4-pro"
+max_tool_calls_per_panel = 2
+web_tools = false
+|}
+
+let test_config_disabled_with_preset () =
+  match Fusion_config.of_toml (parse seed_disabled_toml) with
+  | Ok p ->
+    Alcotest.(check bool) "seed disabled" false p.Fusion_policy.enabled;
+    Alcotest.(check int) "trio preset present" 1 (List.length p.Fusion_policy.presets);
+    (match p.Fusion_policy.presets with
+     | [ preset ] ->
+       Alcotest.(check int) "trio panel size" 3 (List.length preset.Fusion_policy.panel)
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "seed [fusion] must parse, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
 (* --- judge LLM-facing JSON parse (RFC-0249 §7.2) --- *)
 
 let jdecision = Alcotest.testable pp_judge_decision equal_judge_decision
@@ -296,6 +335,7 @@ let () =
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
+        ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ] )
     ; ( "judge_parse"
       , [ Alcotest.test_case "valid" `Quick test_judge_valid

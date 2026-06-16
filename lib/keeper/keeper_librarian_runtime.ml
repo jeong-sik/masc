@@ -290,7 +290,7 @@ let extract_and_append_with_provider
      with
      | Error message -> Error ("memory os fact upsert failed: " ^ message)
      | Ok () ->
-       (* RFC-0246 §2.7: record the episode's co-occurrence associations — but
+       (* RFC-0247 §2.7: record the episode's co-occurrence associations — but
           only when activation is enabled ([writes_enabled]). With the
           default-off organ there is no consumer, so writing edges would accrue
           unbounded disk cost on the fleet for nothing. This is enrichment for

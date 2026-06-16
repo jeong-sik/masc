@@ -1,5 +1,5 @@
 (** Keeper_memory_os_edges — the associative layer of the Memory OS
-    (RFC-0246 §2.7). An [edge] is one observed association event between two
+    (RFC-0247 §2.7). An [edge] is one observed association event between two
     facts, identified by their normalized claim keys
     ([Keeper_memory_os_types.normalize_claim]). Edges are append-only; the
     Hebbian strength of an association is the count of observed events, derived
@@ -10,7 +10,7 @@
     construction of the librarian's single-episode extraction, about the same
     stretch of work, so they are associated. Causal relations (a fact that
     diagnoses / derives / verifies another) have no deterministic producer in
-    this system — labelling them would need an LLM classifier, which RFC-0246
+    this system — labelling them would need an LLM classifier, which RFC-0247
     rejects — so they are deliberately absent until a producer for them exists. *)
 
 (* Closed relation taxonomy. Grows one arm at a time, each arm landing WITH its
@@ -62,7 +62,7 @@ val co_occurrence_edges : Keeper_memory_os_types.episode -> edge list
    (src, dst, relation). *)
 val aggregate : edge list -> association list
 
-(* RFC-0246 §2.7: the associative organ's single knob. [alpha] (env
+(* RFC-0247 §2.7: the associative organ's single knob. [alpha] (env
    MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA, default 0.0) drives both edge writes
    ([writes_enabled]) and the recall boost; only a positive value enables it. *)
 val activation_alpha : unit -> float
@@ -75,7 +75,7 @@ val writes_enabled : unit -> bool
    signal and enters recall heavily discounted; [Unknown] carries no weight. *)
 val relation_weight : relation -> float
 
-(* One-step spreading activation (RFC-0246 §2.7, P2a-2). Given each recalled
+(* One-step spreading activation (RFC-0247 §2.7, P2a-2). Given each recalled
    fact's [base] score keyed by claim key, and the [associations] among facts,
    return an additive boost per key: [alpha] times the co-occurrence-normalized,
    relation-discounted pull of the base scores of that key's neighbours that are

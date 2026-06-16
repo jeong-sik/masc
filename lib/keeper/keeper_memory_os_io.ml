@@ -146,7 +146,7 @@ let append_fact ~keeper_id fact =
   append_json (facts_path ~keeper_id) (fact_to_json fact)
 ;;
 
-(* RFC-0246 §2.7 associative layer: per-keeper append-only association events,
+(* RFC-0247 §2.7 associative layer: per-keeper append-only association events,
    one file alongside the fact store. KNOWN LIMITATION (slice 1): unlike facts
    (RFC-0239 Q4 capped), edges are not yet bounded — an episode with [n] distinct
    claims appends [n*(n-1)/2] edges. Aggregation-on-write + a cap is deferred to

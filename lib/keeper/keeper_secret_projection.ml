@@ -409,7 +409,10 @@ let private_tmp_dir ~base_path =
   let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "tmp" in
   ensure_dir dir;
   if not (Sys.is_directory dir)
-  then failwith (Printf.sprintf "keeper private tmp path is not a directory: %s" dir);
+  then
+    raise
+      (Failure
+         (Printf.sprintf "keeper private tmp path is not a directory: %s" dir));
   dir
 ;;
 

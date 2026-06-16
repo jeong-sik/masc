@@ -230,7 +230,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
   const gridCols = `grid-template-columns: minmax(160px, 1fr) repeat(${matrix.columns.length}, minmax(80px, 1fr)) minmax(90px, auto);`
 
   return html`
-    <${SurfaceCard} class="mb-4 !border-[var(--color-border-default)] !bg-[var(--color-bg-surface)] !p-3" data-panel="connector-keeper-matrix" aria-label="Keeper × Connector 매트릭스">
+    <${SurfaceCard} class="mb-4 !border-[var(--color-border-default)] !bg-[var(--color-bg-surface)] !p-3 v2-connector-keeper-matrix" data-panel="connector-keeper-matrix" aria-label="Keeper × Connector 매트릭스">
       <header class="mb-2 flex items-baseline justify-between gap-3">
         <div>
           <h4 class="text-xs font-semibold uppercase tracking-4 text-[var(--color-fg-primary)]">

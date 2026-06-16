@@ -70,7 +70,7 @@ export interface RailPill {
 const TONE: Record<RailState, { bg: string; border: string; text: string; dot: string; icon: string; gradient: string }> = {
   ok: {
     bg: 'bg-[var(--ok-10)]',
-    border: 'border-[var(--ok-20)]',
+    border: 'border-[var(--ok-border)]',
     text: 'text-[var(--color-status-ok)]',
     dot: 'bg-[var(--ok-10)]',
     icon: '✓',
@@ -89,7 +89,7 @@ const TONE: Record<RailState, { bg: string; border: string; text: string; dot: s
   },
   bad: {
     bg: 'bg-[var(--bad-10)]',
-    border: 'border-[var(--bad-20)]',
+    border: 'border-[var(--err-border)]',
     text: 'text-[var(--bad-light)]',
     dot: 'bg-[var(--bad-10)]',
     icon: '⊘',
@@ -173,7 +173,7 @@ export function ConnectorReadinessRail({ pills }: { pills: RailPill[] }) {
   // strip, and labels truncate symmetrically when the tile is narrow instead
   // of each pill truncating at a different point.
   return html`
-    <div class="mt-2 grid grid-cols-4 items-stretch gap-2" data-rail-layout="grid-4">
+    <div class="mt-2 grid grid-cols-4 items-stretch gap-2 v2-connector-readiness-rail" data-rail-layout="grid-4">
       ${pills.map(pill => html`<${Pill} pill=${pill} />`)}
     </div>
   `

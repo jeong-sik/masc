@@ -62,6 +62,7 @@ type runtime_handler =
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
+  | Tool_masc_fusion_dispatch
 
 type policy =
   { visibility : Tool_catalog.visibility

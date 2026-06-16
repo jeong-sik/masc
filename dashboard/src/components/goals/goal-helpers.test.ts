@@ -233,10 +233,10 @@ describe('sortByTimeDesc', () => {
 describe('filterTasksByQuery', () => {
   type Searchable = { id: string; title: string; description?: string | null; assignee?: string | null }
   const tasks: Searchable[] = [
-    { id: 't1', title: '[masc] Fix keeper heartbeat', description: 'Eio timeout regression', assignee: 'agent-llm-a' },
-    { id: 't2', title: '[oas] Add Groq provider', description: null, assignee: 'agent-code' },
+    { id: 't1', title: '[masc] Fix keeper heartbeat', description: 'Eio timeout regression', assignee: 'claude' },
+    { id: 't2', title: '[oas] Add Groq provider', description: null, assignee: 'codex' },
     { id: 't3', title: 'Dashboard polish', description: 'Tailwind migration cleanup', assignee: null },
-    { id: 't4', title: 'Write evidence record', description: 'BFCL 67 verification', assignee: 'provider-f' },
+    { id: 't4', title: 'Write evidence record', description: 'BFCL 67 verification', assignee: 'gemini' },
   ]
 
   it('returns a copy of all tasks for an empty query', () => {
@@ -260,7 +260,7 @@ describe('filterTasksByQuery', () => {
   })
 
   it('matches on assignee', () => {
-    const result = filterTasksByQuery(tasks, 'agent-code')
+    const result = filterTasksByQuery(tasks, 'codex')
     expect(result.map(t => t.id)).toEqual(['t2'])
   })
 

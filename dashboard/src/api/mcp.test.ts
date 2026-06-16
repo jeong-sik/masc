@@ -272,11 +272,11 @@ describe('callMcpTool', () => {
   }, 60_000)
 
   it('omits implicit dashboard actor for token-bound sessions without actor metadata', async () => {
-    getStoredToken.mockReturnValue('agent-code-token')
+    getStoredToken.mockReturnValue('codex-token')
     getStoredTokenMeta.mockReturnValue(null)
     isRemoteAccess.mockReturnValue(true)
     authHeaders.mockImplementation((opts?: { actorName?: string | null }) => ({
-      Authorization: 'Bearer agent-code-token',
+      Authorization: 'Bearer codex-token',
       ...(opts?.actorName ? { 'X-MASC-Agent': opts.actorName } : {}),
     }))
     setupMcpSessionMocks('sess-token-owner')
@@ -289,7 +289,7 @@ describe('callMcpTool', () => {
     const body = JSON.parse(toolCall![1].body as string)
     expect(body.params.arguments).toEqual({})
     const headers = toolCall![1].headers as Record<string, string>
-    expect(headers.Authorization).toBe('Bearer agent-code-token')
+    expect(headers.Authorization).toBe('Bearer codex-token')
     expect(headers['X-MASC-Agent']).toBeUndefined()
   }, 60_000)
 
@@ -300,13 +300,13 @@ describe('callMcpTool', () => {
     setupMcpSessionMocks('sess-explicit')
 
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_agent_fitness', { agent_name: 'agent-code-tool-matrix', days: 7 })
+    await callMcpTool('masc_agent_fitness', { agent_name: 'codex-tool-matrix', days: 7 })
 
     const toolCall = findCallByMethod('tools/call')
     expect(toolCall).toBeDefined()
     const body = JSON.parse(toolCall![1].body as string)
     expect(body.params.arguments).toEqual({
-      agent_name: 'agent-code-tool-matrix',
+      agent_name: 'codex-tool-matrix',
       days: 7,
       _agent_name: 'dashboard',
     })
@@ -321,16 +321,16 @@ describe('callMcpTool', () => {
     setupMcpSessionMocks('sess-explicit-internal')
 
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_bind', { _agent_name: 'agent-code-tool-matrix' })
+    await callMcpTool('masc_bind', { _agent_name: 'codex-tool-matrix' })
 
     const toolCall = findCallByMethod('tools/call')
     expect(toolCall).toBeDefined()
     const body = JSON.parse(toolCall![1].body as string)
     expect(body.params.arguments).toEqual({
-      _agent_name: 'agent-code-tool-matrix',
+      _agent_name: 'codex-tool-matrix',
     })
     const headers = toolCall![1].headers as Record<string, string>
-    expect(headers['X-MASC-Agent']).toBe('agent-code-tool-matrix')
+    expect(headers['X-MASC-Agent']).toBe('codex-tool-matrix')
   }, 60_000)
 
   it('reports tool-host failures after the MCP session is established', async () => {
@@ -373,7 +373,7 @@ describe('callMcpTool', () => {
       )
       .mockResolvedValueOnce(new Response('', { status: 202 }))
       .mockResolvedValueOnce(
-        new Response('data: {"result":{"isError":true,"content":[{"type":"text","text":"🔐 Unauthorized: No credential found for dashboard (bearer token belongs to agent-code)"}]}}\n', { status: 200 }),
+        new Response('data: {"result":{"isError":true,"content":[{"type":"text","text":"🔐 Unauthorized: No credential found for dashboard (bearer token belongs to codex)"}]}}\n', { status: 200 }),
       )
 
     const { callMcpTool } = await import('./mcp')
@@ -399,7 +399,7 @@ describe('callMcpTool', () => {
       )
       .mockResolvedValueOnce(new Response('', { status: 202 }))
       .mockResolvedValueOnce(
-        new Response('data: {"result":{"isError":true,"content":[{"type":"text","text":"🔐 Unauthorized: No credential found for dashboard (bearer token belongs to agent-code)"}]}}\n', { status: 200 }),
+        new Response('data: {"result":{"isError":true,"content":[{"type":"text","text":"🔐 Unauthorized: No credential found for dashboard (bearer token belongs to codex)"}]}}\n', { status: 200 }),
       )
 
     const { callMcpTool } = await import('./mcp')

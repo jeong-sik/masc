@@ -156,14 +156,14 @@ function sampleKeepersResponse(overrides?: Partial<Record<string, unknown>>) {
         name: 'luna',
         agent_name: 'keeper-luna-agent',
         status: 'idle',
-        model: 'provider-k-5',
+        model: 'glm-5',
         keepalive_running: true,
       },
       {
         name: 'nova',
         agent_name: 'keeper-nova-agent',
         status: 'busy',
-        model: 'provider-f-3-flash-preview',
+        model: 'gemini-3-flash-preview',
         keepalive_running: true,
       },
     ],
@@ -953,7 +953,7 @@ describe('ConnectorStatusPanel', () => {
     expect(novaGroup).not.toBeNull()
     const novaText = novaGroup!.textContent ?? ''
     expect(novaText).toContain('status busy')
-    expect(novaText).not.toContain('provider-f-3-flash-preview')
+    expect(novaText).not.toContain('gemini-3-flash-preview')
     expect(novaText).not.toContain('model ')
     expect(novaText).toContain('runtime keeper-nova-agent')
   })
@@ -1017,19 +1017,19 @@ describe('filterKeeperGroups', () => {
   it('does not match on active_model via substring', async () => {
     const filterKeeperGroups = await loadFilter()
     const rows = [
-      group('nova', { name: 'nova', active_model: 'provider-f-3-flash-preview' }),
-      group('luna', { name: 'luna', active_model: 'model-a-opus' }),
+      group('nova', { name: 'nova', active_model: 'gemini-3-flash-preview' }),
+      group('luna', { name: 'luna', active_model: 'claude-opus' }),
     ]
-    const filtered = filterKeeperGroups(rows, 'provider-f')
+    const filtered = filterKeeperGroups(rows, 'gemini')
     expect(filtered).toHaveLength(0)
   })
 
   it('does not fall back from active_model to model', async () => {
     const filterKeeperGroups = await loadFilter()
     const rows = [
-      group('nova', { name: 'nova', active_model: '   ', model: 'provider-f-flash' }),
+      group('nova', { name: 'nova', active_model: '   ', model: 'gemini-flash' }),
     ]
-    const filtered = filterKeeperGroups(rows, 'provider-f')
+    const filtered = filterKeeperGroups(rows, 'gemini')
     expect(filtered).toHaveLength(0)
   })
 
@@ -1069,7 +1069,7 @@ describe('filterKeeperGroups', () => {
     ]
     expect(filterKeeperGroups(rows, 'ghost')).toHaveLength(1)
     // Model and runtime are empty for null keeper — only name matches.
-    expect(filterKeeperGroups(rows, 'provider-f')).toEqual([])
+    expect(filterKeeperGroups(rows, 'gemini')).toEqual([])
   })
 
   it('does not mutate the input array', async () => {

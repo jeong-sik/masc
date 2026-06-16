@@ -108,7 +108,7 @@ describe("TurnFsmDetailPanel", () => {
         terminal_reason_code: "tool_contract",
         operator_disposition: null,
         operator_disposition_reason: null,
-        model_used: "provider-k-4.5",
+        model_used: "glm-4.5",
         stop_reason: null,
         duration_ms: null,
         error: null,

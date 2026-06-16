@@ -1922,7 +1922,7 @@ describe('fetchKeeperCostMetrics', () => {
             p95_latency_ms: 100,
             sample_count: 2,
             model_breakdown: [
-              { model: 'private-provider:model-a', cost_usd: 0.2 },
+              { model: 'private-provider:claude', cost_usd: 0.2 },
               { model: 'private-provider:model-b', cost_usd: 0.3 },
             ],
           },
@@ -1969,7 +1969,7 @@ describe('fetchKeeperDecisions', () => {
               operation_id: 'op-decision',
               worker_run_id: 'worker-decision',
             },
-            model_used: 'private-provider:model-a',
+            model_used: 'private-provider:claude',
           },
         ],
         limit: 1,

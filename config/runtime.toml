@@ -179,7 +179,7 @@ nick0cave = "ollama.gemma4-26b-a4b-qat"
 [discord]
 trigger_policy = "mention_or_thread"
 
-# ── Fusion 패널+심판 심의 (RFC-0249) ─────────────────────────────────
+# ── Fusion 패널+심판 심의 (RFC-0251) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 기본 OFF (opt-in).
 # [fusion] 섹션이 없거나 enabled=false면 masc_fusion 호출은 게이트에서
 # Deny로 즉시 반환되고 모델을 호출하지 않는다.
@@ -226,6 +226,3 @@ answer. Respond with ONLY the requested JSON object, no prose and no code fences
 # 구조적 타임아웃(초). 미지정 시 Fusion_policy.default_timeout_s.
 panel_timeout_s = 120.0
 judge_timeout_s = 120.0
-# 패널 모델당 허용 도구 호출 수 (v1은 tools=[]라 미사용, 향후 web_tools용).
-max_tool_calls_per_panel = 2
-web_tools = false

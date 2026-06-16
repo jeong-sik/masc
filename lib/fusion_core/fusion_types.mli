@@ -7,14 +7,14 @@
     이 모듈은 순수 데이터 타입만 담는다: OAS·키퍼·보드 의존 0, 독립 컴파일 가능.
     fan-out(패널), 구조화 출력(심판), 게이트, 가시성은 별도 모듈이 이 타입을 소비한다.
 
-    설계 SSOT: docs/rfc/RFC-0249-fusion-panel-judge-deliberation.md
+    설계 SSOT: docs/rfc/RFC-0251-fusion-panel-judge-deliberation.md
 
     @stability Evolving *)
 
 (** {1 토큰 사용량} *)
 
 (** 단일 완성의 토큰 사용량. fusion은 패널 N + 심판 1 완성을 합산해 비용을
-    회계한다 (RFC-0249 §10). 외부 usage 타입에 결합하지 않도록 자체 정의한다. *)
+    회계한다 (RFC-0251 §10). 외부 usage 타입에 결합하지 않도록 자체 정의한다. *)
 type usage =
   { input_tokens : int
   ; output_tokens : int
@@ -30,7 +30,7 @@ val add_usage : usage -> usage -> usage
 (** {1 재귀 가드} *)
 
 (** 심의 깊이. OpenRouter의 [x-openrouter-fusion-depth] 헤더에 대응하는 타입드
-    가드. 패널/심판은 fusion을 다시 못 부른다 — 1단계로 제한 (RFC-0249 §10). *)
+    가드. 패널/심판은 fusion을 다시 못 부른다 — 1단계로 제한 (RFC-0251 §10). *)
 module Fusion_depth : sig
   type t =
     | Top  (** 키퍼/오퍼레이터가 시작한 최상위 심의 *)
@@ -109,7 +109,7 @@ type contradiction =
 type coverage_gap =
   { gap_topic : string
   ; addressed_by : string list
-  ; missing : string
+  ; missing : string option  (** 무엇이 빠졌는지. 미상이면 None. *)
   }
 [@@deriving yojson, show, eq]
 
@@ -160,7 +160,7 @@ type low_confidence =
 [@@deriving yojson, show, eq]
 
 (** fusion 발동 사유 — 게이트 입력. catch-all 없음.
-    결정론적 게이트가 각 변형을 config 상한과 대조한다 (RFC-0249 §6). *)
+    결정론적 게이트가 각 변형을 config 상한과 대조한다 (RFC-0251 §6). *)
 type fusion_trigger =
   | Explicit_tool_call  (** 키퍼가 masc_fusion을 직접 호출 *)
   | Low_confidence of low_confidence  (** 단일 모델 확신도가 임계 미만 *)
@@ -183,7 +183,6 @@ type fusion_request =
   ; preset : string  (** runtime.toml [fusion.presets.*] 이름 *)
   ; depth : Fusion_depth.t
   ; trigger : fusion_trigger
-  ; web_tools : bool  (** 패널·심판에 web_search/web_fetch 주입 여부 *)
   }
 [@@deriving yojson, show, eq]
 

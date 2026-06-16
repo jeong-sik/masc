@@ -1,5 +1,5 @@
 (* Fusion — 심판 (구현).
-   계약/문서: fusion_judge.mli, docs/rfc/RFC-0249 §7.2
+   계약/문서: fusion_judge.mli, docs/rfc/RFC-0251 §7.2
 
    일반 에이전트 실행(Fusion_oas) + Fusion_judge_parse(LLM-facing JSON). *)
 

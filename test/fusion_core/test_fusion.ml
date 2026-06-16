@@ -1,4 +1,4 @@
-(* Standalone alcotest for the pure fusion core (RFC-0249 §6/§9/§10).
+(* Standalone alcotest for the pure fusion core (RFC-0251 §6/§9/§10).
    Proves: deterministic gate branches, TOML config validation, depth guard. *)
 
 open Fusion_types
@@ -18,8 +18,6 @@ let base_policy : Fusion_policy.t =
         ; judge_system_prompt = "judge"
         ; panel_timeout_s = 120.0
         ; judge_timeout_s = 120.0
-        ; max_tool_calls_per_panel = 2
-        ; web_tools = true
         }
       ]
   ; low_confidence_threshold = 0.55
@@ -30,12 +28,12 @@ let base_policy : Fusion_policy.t =
 
 let req ?(preset = "budget") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool_call) ()
   : fusion_request =
-  { run_id = "r1"; keeper = "k"; prompt = "p"; preset; depth; trigger; web_tools = true }
+  { run_id = "r1"; keeper = "k"; prompt = "p"; preset; depth; trigger }
 
 let decide ?(policy = base_policy) ?(hourly_count = 0) ?(estimated_cost_usd = 0.1) r =
   Fusion_policy.decide ~policy ~hourly_count ~estimated_cost_usd r
 
-(* --- gate branches (RFC-0249 §6) --- *)
+(* --- gate branches (RFC-0251 §6) --- *)
 
 let test_disabled () =
   let policy = { base_policy with Fusion_policy.enabled = false } in
@@ -89,7 +87,7 @@ let test_explicit_still_budget_bound () =
   Alcotest.check gate "operator request still budget-bound"
     (Deny Over_hourly_budget) (decide ~hourly_count:99 r)
 
-(* --- depth guard (RFC-0249 §10) --- *)
+(* --- depth guard (RFC-0251 §10) --- *)
 
 let test_depth_descend () =
   Alcotest.(check bool) "Top descends to Nested" true
@@ -97,7 +95,7 @@ let test_depth_descend () =
   Alcotest.(check bool) "Nested is the floor" true
     (Fusion_depth.descend Fusion_depth.Nested = None)
 
-(* --- config (RFC-0249 §9) --- *)
+(* --- config (RFC-0251 §9) --- *)
 
 let parse s = Otoml.Parser.from_string s
 
@@ -122,8 +120,6 @@ panel = ["a", "b", "c"]
 judge = "a"
 panel_system_prompt = "answer independently"
 judge_system_prompt = "synthesize the panel"
-max_tool_calls_per_panel = 2
-web_tools = true
 |}
 
 let test_config_valid () =
@@ -198,6 +194,26 @@ judge = "a"
       (List.mem (Fusion_config.Missing_prompt "p1") es)
   | Ok _ -> Alcotest.fail "expected Error Missing_prompt"
 
+let test_config_bad_concurrency () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+max_concurrent_panels = 0
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_max_concurrent_panels present" true
+      (List.mem (Fusion_config.Invalid_max_concurrent_panels 0) es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_max_concurrent_panels"
+
 (* Mirrors the disabled [fusion] seed shipped in config/runtime.toml: a
    populated default_preset + trio panel while enabled=false must parse to
    [Ok] (Empty_presets / Missing_default_preset are enabled-gated). Pins the
@@ -224,8 +240,6 @@ panel_system_prompt = "answer independently"
 judge_system_prompt = "synthesize the panel"
 panel_timeout_s = 120.0
 judge_timeout_s = 120.0
-max_tool_calls_per_panel = 2
-web_tools = false
 |}
 
 let test_config_disabled_with_preset () =
@@ -241,7 +255,7 @@ let test_config_disabled_with_preset () =
     Alcotest.failf "seed [fusion] must parse, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
 
-(* --- judge LLM-facing JSON parse (RFC-0249 §7.2) --- *)
+(* --- judge LLM-facing JSON parse (RFC-0251 §7.2) --- *)
 
 let jdecision = Alcotest.testable pp_judge_decision equal_judge_decision
 
@@ -325,7 +339,7 @@ let test_judge_tolerant_skip () =
   | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
-(* --- budget counter (RFC-0249 §6/§10) --- *)
+(* --- budget counter (RFC-0251 §6/§10) --- *)
 
 let test_budget_basic () =
   let b = Fusion_budget.create () in
@@ -365,6 +379,7 @@ let () =
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
+        ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ] )
     ; ( "judge_parse"

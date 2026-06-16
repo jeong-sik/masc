@@ -1,5 +1,5 @@
 (* Fusion — 심판 LLM-facing JSON → judge_synthesis (구현).
-   계약/문서: fusion_judge_parse.mli, docs/rfc/RFC-0249 §7.2 *)
+   계약/문서: fusion_judge_parse.mli, docs/rfc/RFC-0251 §7.2 *)
 
 let ( let* ) = Result.bind
 
@@ -82,7 +82,7 @@ let parse_coverage : Yojson.Safe.t -> Fusion_types.coverage_gap option = functio
        Some
          { Fusion_types.gap_topic
          ; addressed_by = opt_string_list kvs "addressed_by"
-         ; missing = (match opt_string kvs "missing" with Some s -> s | None -> "")
+         ; missing = opt_string kvs "missing"
          }
      | None -> None)
   | _ -> None

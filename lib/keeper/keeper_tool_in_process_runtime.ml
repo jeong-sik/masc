@@ -318,17 +318,21 @@ let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~nam
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-(* RFC-0249 — masc_fusion out-of-band panel+judge deliberation.  The
+(* RFC-0251 — masc_fusion out-of-band panel+judge deliberation.  The
    gate -> fiber fork -> orchestrator logic lives in [Fusion_tool.handle];
-   this handler only gathers the keeper turn context (base_path, name, a
-   fresh run_id, wall-clock) and loads the [fusion] policy from runtime.toml.
+   this handler only gathers the keeper context (base_path, name, a fresh
+   run_id, wall-clock) and loads the [fusion] policy from runtime.toml.
 
-   Fusion needs the Eio [sw] (to fork the background panel) and [net] (model
-   HTTP) that the keeper turn carries.  When the turn runs without them, we
-   return an explicit error JSON rather than silently dropping the request
-   (CLAUDE.md Silent-Failure / Unknown->Permissive avoidance). *)
-let handle_masc_fusion ?sw ?net ~(config : Workspace.config) ~(meta : keeper_meta) ~args () =
-  match sw, net with
+   Switch: fusion forks a background fiber that MUST outlive this keeper turn
+   (out-of-band, ~7x latency).  So it forks on the server ROOT switch
+   ([Eio_context.get_root_switch_opt], documented for exactly this case —
+   "work that must survive a single keeper turn"), NOT the turn-scoped
+   [ctx.sw], which would cancel the deliberation when the turn ends.  Net is
+   the server net capability (not turn-scoped) from the same context.  When
+   either is unavailable we return an explicit error JSON rather than
+   silently dropping the request (CLAUDE.md Silent-Failure avoidance). *)
+let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args () =
+  match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     (match Fusion_config_loader.load ~base_path:config.Workspace.base_path with
      | Error msg ->
@@ -350,7 +354,7 @@ let handle_masc_fusion ?sw ?net ~(config : Workspace.config) ~(meta : keeper_met
       (`Assoc
          [ "ok", `Bool false
          ; ( "error"
-           , `String "fusion requires Eio sw+net context (unavailable this turn)" )
+           , `String "fusion requires the server root switch + net (unavailable)" )
          ])
 ;;
 

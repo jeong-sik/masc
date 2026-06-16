@@ -1,10 +1,11 @@
 (* Fusion — runtime.toml [fusion] 파싱 (구현).
-   계약/문서: fusion_config.mli, docs/rfc/RFC-0249 §9 *)
+   계약/문서: fusion_config.mli, docs/rfc/RFC-0251 §9 *)
 
 type config_error =
   | Empty_presets
   | Invalid_panel_size of string * int
   | Missing_prompt of string
+  | Invalid_max_concurrent_panels of int
   | Missing_default_preset of string
   | Toml_type_error of string
 [@@deriving show, eq]
@@ -42,21 +43,8 @@ let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
     Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
       [ "judge_timeout_s" ]
   in
-  let max_tool_calls_per_panel =
-    Otoml.find_or ~default:2 tbl Otoml.get_integer [ "max_tool_calls_per_panel" ]
-  in
-  let web_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ] in
   let p : Fusion_policy.preset =
-    { name
-    ; panel
-    ; judge
-    ; panel_system_prompt
-    ; judge_system_prompt
-    ; panel_timeout_s
-    ; judge_timeout_s
-    ; max_tool_calls_per_panel
-    ; web_tools
-    }
+    { name; panel; judge; panel_system_prompt; judge_system_prompt; panel_timeout_s; judge_timeout_s }
   in
   if not (Fusion_policy.preset_size_ok p) then
     Error (Invalid_panel_size (name, List.length panel))
@@ -98,6 +86,13 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   (* 추가 검증 — enabled일 때만 강제 (disabled면 빈 config 허용). *)
   let errors =
     if enabled && presets = [] then Empty_presets :: errors else errors
+  in
+  (* max_concurrent_panels는 Async_agent.all ~max_fibers로 직결된다. <1이면 Eio가
+     예외를 던지고 패널이 전부 Timeout으로 오분류되므로 로드 단계에서 fail-fast. *)
+  let errors =
+    if enabled && max_concurrent_panels < 1 then
+      Invalid_max_concurrent_panels max_concurrent_panels :: errors
+    else errors
   in
   let errors =
     if

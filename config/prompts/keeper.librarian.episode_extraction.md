@@ -18,6 +18,8 @@ Category criteria — choose the FIRST that fits:
 - blocker: a specific external obstacle that prevents progress and persists beyond this turn (a dependency is missing, an API is down, a credential is absent). Not the keeper merely having no task to do.
 - goal: a durable objective or target the agent is working toward, beyond the current turn.
 - preference: a stable, stated preference about how work should be done (style, tooling, process) that holds across turns.
+- validated_approach: an approach, technique, or decision that was TRIED and CONFIRMED to work by its outcome this episode — a fix that resolved the problem, a method that passed verification, a path that succeeded. Record what was done AND why it worked, in one sentence, so a later keeper can reuse it. This is how a success is remembered; do not downgrade a confirmed win to a generic "fact".
+- lesson: a failure, mistake, or dead-end AND the correction drawn from it — recorded as how to do it better next time, never as a bare "X failed". State the trigger (what went wrong, under what condition) and the improvement (what to do instead). A failure earns a place in long-term memory only when stored as a reusable lesson; if you cannot name the corrective, it is probably "ephemeral", not a lesson.
 - fact: an externally verifiable statement about the world, the codebase, or the system that stays true across cycles and is NOT about this keeper's own run. Use fact only when none of the above fit and the durability gate passes. fact is the last resort, never the default — if you are unsure whether something is durable, label it "ephemeral", not "fact".
 - ephemeral: lifecycle/coordination boilerplate that is true right now but is NOT durable knowledge — "checkpoint saved", "no tasks pending", "remains scheduled", "turn completed", heartbeat/status ticks, or claims about transient run state. This is the category for anything that fails the durability gate: label it "ephemeral" rather than dropping it or forcing it into "fact"/"constraint". The store keeps ephemeral claims only briefly and never promotes them cross-keeper.
 
@@ -25,7 +27,7 @@ Additional rules:
 1. Do not preserve emotional fillers, repeated catchphrases, or stylistic noise unless they encode a durable fact.
 2. Never copy hidden reasoning, private runtime state, or tool payload content into claims.
 3. Each claim must include an approximate source_turn from the conversation slice. Use source_tool_call_id only when a tool call id is explicitly visible.
-4. confidence must be a JSON number between 0.0 and 1.0. Use 0.1-0.4 when uncertain and state the uncertainty in the claim text.
+4. If you are unsure a claim is durable, prefer "ephemeral" over a durable category and state the uncertainty in the claim text. Do not emit a confidence number — the store no longer reads one; spend the words on a precise claim instead.
 5. open_items and constraints are episode-level summary arrays, separate from a claim's category. A claim already categorized as constraint does not need to be repeated in the constraints array.
 
 Output schema:
@@ -34,8 +36,7 @@ Output schema:
   "claims": [
     {
       "claim": "A single factual sentence.",
-      "confidence": 0.95,
-      "category": "code_change|fact|preference|blocker|goal|constraint|ephemeral",
+      "category": "code_change|fact|preference|blocker|goal|constraint|validated_approach|lesson|ephemeral",
       "source_turn": 12,
       "source_tool_call_id": "call_abc"
     }

@@ -1773,6 +1773,34 @@ let test_consolidator_category_default_deny () =
   Alcotest.(check int) "non-whitelisted category not shared" 0 (List.length shared)
 ;;
 
+(* RFC-0247 §6: outcome-derived knowledge crosses keepers. A validated_approach
+   and a lesson each corroborated by two distinct keepers promote into the shared
+   tier — the "remember successes, record failures as lessons" payoff is shared
+   fleet-wide, not stranded per keeper. *)
+let test_consolidator_promotes_validated_approach_and_lesson () =
+  let now = 1_000_000.0 in
+  let keeper_facts =
+    [ ( "alpha"
+      , [ mk_shared_fixture ~now ~category:"validated_approach" "dune cache disabled fixes stale cmx"
+        ; mk_shared_fixture ~now ~category:"lesson" "rg -rn mangles output; use -n only"
+        ] )
+    ; ( "beta"
+      , [ mk_shared_fixture ~now ~category:"validated_approach" "dune cache disabled fixes stale cmx"
+        ; mk_shared_fixture ~now ~category:"lesson" "rg -rn mangles output; use -n only"
+        ] )
+    ]
+  in
+  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
+  let categories =
+    List.map (fun f -> Types.category_to_string f.Types.category) shared |> List.sort_uniq String.compare
+  in
+  Alcotest.(check int) "both outcome-derived claims promoted" 2 (List.length shared);
+  Alcotest.(check (list string))
+    "validated_approach and lesson both crossed keepers"
+    [ "lesson"; "validated_approach" ]
+    categories
+;;
+
 (* #21241: a label outside the closed taxonomy parses to [Unknown] and is
    default-denied even when two keepers corroborate it above threshold — so a
    future/drifted/ephemeral label can never be silently promoted. *)
@@ -1799,6 +1827,8 @@ let test_category_codec_roundtrip () =
     ; "goal", Types.Goal
     ; "code_change", Types.Code_change
     ; "ephemeral", Types.Ephemeral
+    ; "validated_approach", Types.Validated_approach
+    ; "lesson", Types.Lesson
     ]
   in
   List.iter
@@ -1827,10 +1857,13 @@ let test_category_codec_roundtrip () =
     (Types.category_to_string (Types.category_of_string "checkpoint_saved"))
 ;;
 
-(* Only [Fact] and [Constraint] promote — exhaustively, so a new arm cannot
-   silently join the shared tier (the prior ["fact";"constraint"] whitelist). *)
-let test_is_promotable_only_fact_constraint () =
-  let promotable = [ Types.Fact; Types.Constraint ] in
+(* The durable, objective kinds promote — exhaustively, so a new arm cannot
+   silently join the shared tier. RFC-0247 §6 adds Validated_approach and Lesson
+   (outcome-derived durable knowledge) to the prior Fact/Constraint whitelist. *)
+let test_is_promotable_durable_kinds () =
+  let promotable =
+    [ Types.Fact; Types.Constraint; Types.Validated_approach; Types.Lesson ]
+  in
   let blocked =
     [ Types.Preference; Types.Blocker; Types.Goal; Types.Code_change
     ; Types.Ephemeral; Types.Unknown "novel"
@@ -1861,7 +1894,8 @@ let test_category_retention_by_category () =
          None
          (Types.category_valid_until ~now c))
     [ Types.Fact; Types.Constraint; Types.Preference; Types.Blocker
-    ; Types.Goal; Types.Code_change; Types.Unknown "novel"
+    ; Types.Goal; Types.Code_change; Types.Validated_approach; Types.Lesson
+    ; Types.Unknown "novel"
     ]
 ;;
 
@@ -2356,13 +2390,17 @@ let () =
             `Quick
             test_consolidator_unknown_category_default_deny
         ; Alcotest.test_case
+            "validated_approach and lesson promote (RFC-0247 §6)"
+            `Quick
+            test_consolidator_promotes_validated_approach_and_lesson
+        ; Alcotest.test_case
             "category codec round-trips (RFC-0247 §2.5)"
             `Quick
             test_category_codec_roundtrip
         ; Alcotest.test_case
-            "only fact/constraint promote (RFC-0247 §2.5)"
+            "durable kinds promote incl. validated_approach/lesson (RFC-0247 §6)"
             `Quick
-            test_is_promotable_only_fact_constraint
+            test_is_promotable_durable_kinds
         ; Alcotest.test_case
             "retention TTL/lifetime is category-driven (RFC-0247 §2.3)"
             `Quick

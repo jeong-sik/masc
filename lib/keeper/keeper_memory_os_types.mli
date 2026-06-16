@@ -31,7 +31,12 @@ type provenance_event =
     non-promotable category is the type-level backstop that lets the consolidation
     fiber be turned back on without injecting recall noise — robust even when the
     prompt's durability gate is imperfect. [Unknown] is distinct: a rising
-    [Unknown] rate signals the librarian prompt needs a new arm. *)
+    [Unknown] rate signals the librarian prompt needs a new arm.
+
+    [Validated_approach] and [Lesson] (RFC-0247 §6) are the outcome-derived kinds
+    the redesign exists to capture: an approach confirmed by its result, and a
+    failure distilled into how to improve next time. Both are durable and
+    promotable. *)
 type category =
   | Code_change
   | Fact
@@ -40,6 +45,8 @@ type category =
   | Goal
   | Constraint
   | Ephemeral
+  | Validated_approach
+  | Lesson
   | Unknown of string
 
 (** Canonical lowercase token for a category (round-trips with

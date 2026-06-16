@@ -26,7 +26,14 @@ type provenance_event =
    arm for coordination/lifecycle boilerplate — the structural backstop for the
    #21244 mislabel-and-promote failure: even if the prompt's durability gate is
    imperfect, a claim the LLM recognizes as ephemeral is typed non-promotable and
-   forgotten, rather than silently entering the store as a durable fact. *)
+   forgotten, rather than silently entering the store as a durable fact.
+
+   [Validated_approach] and [Lesson] (RFC-0247 §6) are the two outcome-derived
+   kinds the redesign exists to capture: a [Validated_approach] is something that
+   worked, confirmed by its result ("remember successes well"); a [Lesson] is a
+   failure distilled into how to do it better next time ("record failures as the
+   way to improve them" — mirrors the Why/How-to-apply shape of a Claude-Code
+   feedback note). Both are durable, cross-keeper knowledge, so both promote. *)
 type category =
   | Code_change
   | Fact
@@ -35,6 +42,8 @@ type category =
   | Goal
   | Constraint
   | Ephemeral
+  | Validated_approach
+  | Lesson
   | Unknown of string
 
 let category_to_string = function
@@ -45,6 +54,8 @@ let category_to_string = function
   | Goal -> "goal"
   | Constraint -> "constraint"
   | Ephemeral -> "ephemeral"
+  | Validated_approach -> "validated_approach"
+  | Lesson -> "lesson"
   | Unknown s -> s
 ;;
 
@@ -57,18 +68,22 @@ let category_of_string s =
   | "goal" -> Goal
   | "constraint" -> Constraint
   | "ephemeral" -> Ephemeral
+  | "validated_approach" -> Validated_approach
+  | "lesson" -> Lesson
   | _ -> Unknown s
 ;;
 
 (* Exhaustive promotability: only objective, durable claim kinds cross keepers.
-   Preserves the prior [Fact; Constraint] whitelist exactly; everything else —
+   Extends the prior [Fact; Constraint] whitelist with the two outcome-derived
+   kinds [Validated_approach] and [Lesson] — a validated approach and a hard-won
+   lesson are exactly the knowledge worth sharing fleet-wide. Everything else —
    including [Ephemeral] and any [Unknown] label — stays keeper-local. Exhaustive
    match (not a runtime [category list]) so a future durable kind must be
    classified here at compile time rather than silently defaulting to
    non-promotable, the no-silent-omission property RFC-0247 §2.5 argues for over
    the prompt-suppression approach. *)
 let is_promotable = function
-  | Fact | Constraint -> true
+  | Fact | Constraint | Validated_approach | Lesson -> true
   | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
 ;;
 
@@ -84,7 +99,8 @@ let ephemeral_ttl_seconds = 86_400.0
 
 let category_valid_until ~now = function
   | Ephemeral -> Some (now +. ephemeral_ttl_seconds)
-  | Fact | Constraint | Preference | Blocker | Goal | Code_change | Unknown _ -> None
+  | Fact | Constraint | Preference | Blocker | Goal | Code_change
+  | Validated_approach | Lesson | Unknown _ -> None
 ;;
 
 (* RFC-0247 (purge): the fact carries only structure — the claim, its typed

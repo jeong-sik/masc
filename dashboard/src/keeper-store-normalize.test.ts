@@ -385,6 +385,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             state: 'pending',
             summary: '1 approval request waiting',
             pending_count: 1,
+            latest_event_at: '2026-04-23T00:09:30Z',
           },
           execution_summary: {
             sandbox_summary: 'docker / none',
@@ -402,6 +403,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
             summary: 'Waiting for operator approval before resuming.',
             severity: 'warn',
             next_human_action: 'resolve_approval',
+            trace_id: 'trace-approval-42',
           },
         },
       },
@@ -417,6 +419,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         state: 'pending',
         summary: '1 approval request waiting',
         pending_count: 1,
+        latest_event_at: '2026-04-23T00:09:30Z',
       },
       execution_summary: {
         sandbox_summary: 'docker / none',
@@ -427,6 +430,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         keeper_turn_id: 42,
         title: 'Approval pending',
         summary: 'Waiting for operator approval before resuming.',
+        trace_id: 'trace-approval-42',
       },
     })
   })

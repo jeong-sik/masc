@@ -1265,6 +1265,7 @@ function decodeGoalKeeperTrustLatestEvent(raw: unknown): GoalKeeperTrustLatestEv
     summary,
     severity,
     next_human_action: asNullableString(raw.next_human_action),
+    trace_id: asNullableString(raw.trace_id),
   }
 }
 
@@ -1283,6 +1284,7 @@ function decodeGoalKeeperTrustApprovalState(raw: unknown): GoalKeeperTrustApprov
           blocker_class: asNullableString(pendingFirst.blocker_class),
         }
       : null,
+    latest_event_at: asNullableString(raw.latest_event_at),
   }
 }
 

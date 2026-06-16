@@ -98,6 +98,14 @@ describe('OperationsPanel', () => {
     expect(labels).toContain('Inspector')
   })
 
+  it('wraps the panel in the v2 command surface class', async () => {
+    const { OperationsPanel } = await loadPanel()
+    render(html`<${OperationsPanel} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('.v2-command-surface')).not.toBeNull()
+  })
+
   it('falls back to default for unknown view param', async () => {
     route.value.params = { section: 'operations', view: 'unknown' }
     const { OperationsPanel } = await loadPanel()

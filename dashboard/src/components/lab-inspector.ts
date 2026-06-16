@@ -110,8 +110,8 @@ export function LabInspector() {
   const current = inspectorSection.value
 
   return html`
-    <div class="flex flex-col gap-4">
-      <${SectionCard} label="운영 인스펙터" class="section">
+    <div class="v2-command-surface flex flex-col gap-4">
+      <${SectionCard} label="운영 인스펙터" class="section v2-command-panel">
         <div class="flex flex-col gap-3">
           <div class="flex flex-wrap gap-2">
             <${InspectorTabButton} id="overview" label="개요" />

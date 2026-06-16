@@ -93,6 +93,17 @@ let current_streak ~keeper_name =
     | Some s -> s.streak
     | None -> 0)
 
+(* RFC-0246: expose latched state so the wake-tombstone gate can suppress
+   automatic wake for a keeper stuck in a no-progress loop. The detector owns
+   the single source of truth (streak + detected_latched); the tombstone gate
+   reads it rather than duplicating state, so exactly one place decides "this
+   keeper is looping". *)
+let is_latched ~keeper_name =
+  with_lock (fun () ->
+    match Hashtbl.find_opt state keeper_name with
+    | Some s -> s.detected_latched
+    | None -> false)
+
 let reset ~keeper_name =
   with_lock (fun () ->
     Hashtbl.remove state keeper_name;

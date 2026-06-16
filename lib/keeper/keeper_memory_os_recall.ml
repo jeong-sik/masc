@@ -214,8 +214,8 @@ let truth_anchor (fact : fact) =
    timestamp: recall ordering is structural, never a learned number. The prior
    pipeline also ran spreading-activation reranking ([activate]) and lexical
    seed-rerank ([seed_tokens]); both added a numeric boost to decide order and
-   were removed in the purge. The association edge store survives as a brain
-   structure ([Keeper_memory_os_edges]) but no longer reranks recall. *)
+   were removed in the purge. The association edge store was removed with that
+   dark reranking path. *)
 let facts_recency_ranked ~now facts =
   facts
   |> List.filter (fact_is_current ~now)

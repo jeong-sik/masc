@@ -172,21 +172,8 @@ let append_fact ~keeper_id fact =
   append_json (facts_path ~keeper_id) (fact_to_json fact)
 ;;
 
-(* RFC-0247 §2.7 associative layer: per-keeper append-only association events,
-   one file alongside the fact store. KNOWN LIMITATION (slice 1): unlike facts
-   (RFC-0239 Q4 capped), edges are not yet bounded — an episode with [n] distinct
-   claims appends [n*(n-1)/2] edges. Aggregation-on-write + a cap is deferred to
-   the capping slice, triggered when a keeper's edges file growth warrants it;
-   until then growth is disclosed here rather than silently capped. *)
-let edges_path ~keeper_id =
-  Filename.concat (keepers_dir ()) (keeper_id ^ ".edges.jsonl")
-;;
-
-let append_edge ~keeper_id edge =
-  append_json (edges_path ~keeper_id) (Keeper_memory_os_edges.edge_to_json edge)
-;;
-
-let append_edges ~keeper_id edges = List.iter (append_edge ~keeper_id) edges
+(* RFC-0251: the RFC-0247 association/edges layer (edges_path, append_edge[s])
+   was removed with spreading-activation recall — dark machinery. *)
 
 let append_event ~keeper_id episode =
   append_json (events_path ~keeper_id) (episode_to_json episode)
@@ -360,16 +347,6 @@ let read_facts_all ~keeper_id =
   |> List.filter_map (parse_json_line fact_of_json)
 ;;
 
-let read_edges_all ~keeper_id =
-  read_lines_all (edges_path ~keeper_id)
-  |> List.filter_map (parse_json_line Keeper_memory_os_edges.edge_of_json)
-;;
-
-(* The aggregated read view: associations with Hebbian weight, the surface a
-   future spreading-activation recall consumes. *)
-let read_associations ~keeper_id =
-  read_edges_all ~keeper_id |> Keeper_memory_os_edges.aggregate
-;;
 
 let read_facts_all_strict ~keeper_id =
   let path = facts_path ~keeper_id in

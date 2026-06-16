@@ -180,6 +180,50 @@ describe('thread history merge & persistence', () => {
     expect(tool?.delivery).toBe('history')
   })
 
+  it('decodes persisted attachments so uploads survive a reload', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'see this',
+        ts: 1_780_000_000,
+        attachments: [
+          { id: 'att1', type: 'image', name: 'shot.png', size: 1234, mime_type: 'image/png', data: 'BASE64' },
+          { id: 'att2', type: 'doc', name: 'notes.txt', size: 9, mime_type: 'text/plain', data: 'ZZ' },
+        ],
+      },
+    ])
+    const atts = entries[0]?.attachments ?? []
+    expect(atts).toHaveLength(2)
+    // snake_case mime_type -> camelCase mimeType, type narrowed to image/file.
+    expect(atts[0]).toMatchObject({ id: 'att1', type: 'image', mimeType: 'image/png', data: 'BASE64' })
+    expect(atts[1]?.type).toBe('file')
+  })
+
+  it('drops attachment rows missing id or data (unrenderable)', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'x',
+        ts: 1_780_000_000,
+        attachments: [{ id: '', type: 'file', name: 'n', size: 0, mime_type: '', data: 'D' }],
+      },
+    ])
+    expect(entries[0]?.attachments).toBeUndefined()
+  })
+
+  it('marks a transport_failure row as error delivery, not a saved reply', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'do it', ts: 1_780_000_000 },
+      { role: 'assistant', content: 'Keeper request failed: timeout', ts: 1_780_000_000, kind: 'transport_failure' },
+    ])
+    expect(entries[1]?.delivery).toBe('error')
+    // A normal reply on the same role stays 'history'.
+    const ok = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'done', ts: 1_780_000_000 },
+    ])
+    expect(ok[0]?.delivery).toBe('history')
+  })
+
   it('drops tool rows that lack id or name and keeps the rest of the turn', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'hi', ts: 1_780_000_000 },

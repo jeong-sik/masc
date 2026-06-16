@@ -30,6 +30,7 @@
 (tests
  (names
   test_keeper_reactive_wake_backlog_gate
+  test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_surface_ref
@@ -313,6 +314,7 @@
  (modules
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
+  test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_surface_ref

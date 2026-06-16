@@ -663,6 +663,7 @@
 
 (tests
  (names
+  test_runtime_binding_capacity
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
@@ -847,6 +848,7 @@
   test_board_attachment_meta
   test_board_moderation)
  (modules
+  test_runtime_binding_capacity
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage

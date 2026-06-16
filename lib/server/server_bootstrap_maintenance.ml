@@ -83,17 +83,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      disabled the shared store simply stops being refreshed (recall still reads
      whatever is there).
 
-     Default OFF until #21241: a read-only dry-run over the live fleet found the
-     only >=2-keeper-corroborated [fact]/[constraint] claims are ephemeral
-     lifecycle/coordination boilerplate ("checkpoint saved", "no tasks") that the
-     librarian mislabels as [category=fact]. Promoting them would inject prompt
-     noise via recall's [shared via] line, with no durable knowledge. Re-enable
-     (flip the default, or set the env true) once the librarian taxonomy emits
-     ephemeral events as a non-promotable category (#21241, RFC-0244 §2.3). *)
+     P2-1: enabled by default.  The #21241 librarian taxonomy fix already
+     typed [default_promote_categories] so [Unknown] and other non-objective
+     labels are default-denied; remaining ephemeral [Fact] mis-labels are a
+     librarian prompt issue and are gated below by requiring >=2 distinct
+     keepers.  Operators can still disable via MASC_KEEPER_MEMORY_OS_CONSOLIDATION=0. *)
   if
     Keeper_memory_bank_env.memory_env_bool_logged
       "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-      ~default:false
+      ~default:true
   then
     fork_logged_fiber
       ~sw
@@ -122,6 +120,62 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            Log.Server.warn
              "memory_os_consolidation: tick crashed: %s"
              (Printexc.to_string exn));
+        Eio.Time.sleep clock interval;
+        loop ()
+      in
+      loop ());
+  (* RFC-0247 §2.3: memory-os forgetting sweep. Off the keeper hot path — every
+     [interval]s it runs the deterministic per-keeper GC ([run_gc]: hard-expire
+     facts whose [valid_until] has passed, drop fully-decayed facts by retention
+     verdict, dedup by the [normalize_claim] SSOT) and rewrites each keeper's
+     Tier-1 store atomically. This is [run_gc]'s first production caller; without
+     it the TTL/lifetime machinery (now produced per-category at librarian write
+     time) is unreachable. The shared store is skipped — the consolidator
+     reconstructs it wholesale each sweep, so GC-ing it would just be undone.
+     Default OFF (mirrors the consolidation gate): enable via the env once a live
+     dry-run confirms what it would prune. Per-keeper failures are caught so one
+     corrupt store cannot cancel siblings. *)
+  if
+    Keeper_memory_bank_env.memory_env_bool_logged
+      "MASC_KEEPER_MEMORY_OS_GC"
+      ~default:false
+  then
+    fork_logged_fiber
+      ~sw
+      ~on_error:(log_server_fiber_crash "memory_os_gc")
+      (fun () ->
+      (* Coarser than consolidation (300s): GC rewrites stores, so a 10-minute
+         cadence is ample off the hot path. *)
+      let interval = 600.0 in
+      let rec loop () =
+        List.iter
+          (fun keeper_id ->
+             try
+               let report =
+                 Keeper_memory_os_gc.run_gc ~keeper_id ~now:(Time_compat.now ()) ()
+               in
+               if
+                 report.Keeper_memory_os_gc.ttl_expired > 0
+                 || report.verdict_discarded > 0
+                 || report.dedup_removed > 0
+               then
+                 Log.Server.info
+                   "memory_os_gc: keeper=%s ttl_expired=%d discarded=%d dedup=%d written=%d"
+                   keeper_id
+                   report.ttl_expired
+                   report.verdict_discarded
+                   report.dedup_removed
+                   report.written
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Server.warn
+                 "memory_os_gc: keeper=%s tick crashed: %s"
+                 keeper_id
+                 (Printexc.to_string exn))
+          (List.filter
+             (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
+             (Keeper_memory_os_io.list_fact_store_keeper_ids ()));
         Eio.Time.sleep clock interval;
         loop ()
       in

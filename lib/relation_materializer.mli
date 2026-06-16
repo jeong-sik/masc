@@ -14,6 +14,11 @@
 
     @since 2.112.0 *)
 
+val build_batch_mutation :
+  agent:string -> peers:string list -> context:string -> string
+(** Build a single batched GraphQL mutation with aliased fields.
+    Exposed primarily for unit testing the batching/escape logic. *)
+
 val on_agent_session_ended :
   leaving_agent:string ->
   active_agents:string list ->

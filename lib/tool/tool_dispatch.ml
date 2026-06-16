@@ -273,6 +273,7 @@ type module_tag = Tool_tag_types.module_tag =
   | Mod_library | Mod_external
   | Mod_inline
   | Mod_shard
+  | Mod_keeper_task
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = Atomic.make false
@@ -317,6 +318,9 @@ let mint_token ~name =
     errors (#9784). Handler-only registrations are intentionally invisible. *)
 let all_registered_names () =
   with_dispatch_ro (fun () -> Hashtbl.fold (fun n _ a -> n :: a) tag_registry [])
+
+let all_schema_names () =
+  with_dispatch_ro (fun () -> Hashtbl.fold (fun n _ a -> n :: a) schema_registry [])
 
 (* #9784: Unknown tool errors must include closest-name suggestions so the
    LLM can self-correct on the next turn. Jaccard works well for snake_case

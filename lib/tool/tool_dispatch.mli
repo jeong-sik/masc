@@ -170,6 +170,7 @@ type module_tag =
   | Mod_external
   | Mod_inline
   | Mod_shard
+  | Mod_keeper_task
 
 val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag -> unit
 (** Register tool names from a schema list with a module tag. *)
@@ -195,6 +196,10 @@ val is_tag_registry_initialized : unit -> bool
 val all_registered_names : unit -> string list
 (** Every tool name registered in the tag registry. Handler-only
     registrations are intentionally invisible. Iteration order is
+    unspecified. *)
+
+val all_schema_names : unit -> string list
+(** Every tool name registered in the schema registry. Iteration order is
     unspecified. *)
 
 val find_similar_names :

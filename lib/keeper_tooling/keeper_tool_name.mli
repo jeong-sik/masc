@@ -54,6 +54,9 @@ type t =
   | Voice_sessions
   | Voice_speak
 
+val all : t list
+(** All keeper tool-name variants. *)
+
 val to_string : t -> string
 val of_string : string -> t option
 val pp : Format.formatter -> t -> unit

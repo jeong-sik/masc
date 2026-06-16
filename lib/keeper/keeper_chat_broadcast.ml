@@ -10,9 +10,11 @@
     accessible caption/fallback. *)
 type audio_clip = {
   token : string;
+  audio_url : string option;
   mime : string;
   duration_sec : float option;
   message_text : string;
+  device_id : string option;
 }
 
 let audio_clip_to_json (clip : audio_clip) =
@@ -22,9 +24,22 @@ let audio_clip_to_json (clip : audio_clip) =
     ; ("message_text", `String clip.message_text)
     ]
   in
-  match clip.duration_sec with
-  | None -> base
-  | Some d -> base @ [ ("duration_sec", `Float d) ]
+  let with_optional fields =
+    fields
+    |> fun fs ->
+    (match clip.audio_url with
+     | None -> fs
+     | Some url -> fs @ [ ("audio_url", `String url) ])
+    |> fun fs ->
+    (match clip.duration_sec with
+     | None -> fs
+     | Some d -> fs @ [ ("duration_sec", `Float d) ])
+    |> fun fs ->
+    match clip.device_id with
+    | None -> fs
+    | Some id -> fs @ [ ("device_id", `String id) ]
+  in
+  with_optional base
 
 let do_broadcast ~keeper_name ~source ~audio =
   try

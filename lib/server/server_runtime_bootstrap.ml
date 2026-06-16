@@ -465,8 +465,18 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     ~requested:requested_backend_mode_before_enforcement
     ~effective:initial_backend_mode;
 
-  (* 2. All init in background fiber — protected so failures don't kill HTTP *)
+  (* 2. All init in background fiber — isolated on its own switch so a
+     failure in any init-time subsystem (keepers, maintenance, dashboard
+     refresh, etc.) cancels only that subtree and leaves the HTTP accept
+     loop running on the parent switch.  This is P1-5 Hierarchical
+     Supervision Phase 1.
+
+     [create_server_state] still attaches to the parent switch because
+     the resulting [server_state] (and its switch reference) is used by
+     the HTTP request path; we only want background init/maintenance
+     fibers to live on the child switch. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run @@ fun init_sw ->
     let governance_level = Env_config_core.governance_level () in
     let init_state_blocking () =
       let t0 = Eio.Time.now clock in

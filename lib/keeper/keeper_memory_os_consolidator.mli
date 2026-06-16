@@ -1,16 +1,13 @@
 (** Keeper_memory_os_consolidator — RFC-0244 Tier 2 cross-keeper consolidation.
 
     Reads per-keeper Tier-1 stores read-only and promotes claims corroborated by
-    [>= min_keepers] distinct keepers (above [threshold], on [categories]) into
-    the shared Tier-2 store ([Keeper_memory_os_types.shared_store_id]). Additive:
-    it never mutates a keeper's own store. Pure and deterministic — [promote_facts]
-    is a function of its inputs, emitted in normalized-claim order. *)
+    [>= min_keepers] distinct keepers (above [threshold], and
+    [Keeper_memory_os_types.is_promotable]) into the shared Tier-2 store
+    ([Keeper_memory_os_types.shared_store_id]). Additive: it never mutates a
+    keeper's own store. Pure and deterministic — [promote_facts] is a function of
+    its inputs, emitted in normalized-claim order. *)
 
 open Keeper_memory_os_types
-
-(** Categories shared across keepers by default ([Fact]; [Constraint]). Anything
-    else — including [Unknown] — is default-denied as keeper- or task-local. *)
-val default_promote_categories : category list
 
 (** Minimum confidence for an observation to count as corroboration. *)
 val default_confidence_threshold : float
@@ -31,8 +28,7 @@ type report =
     noisy-OR confidence over the per-keeper best confidences. No IO; [now] sets
     the shared facts' [last_verified_at]. *)
 val promote_facts
-  :  ?categories:category list
-  -> ?threshold:float
+  :  ?threshold:float
   -> ?min_keepers:int
   -> now:float
   -> keeper_facts:(string * fact list) list
@@ -44,7 +40,6 @@ val promote_facts
     shared store atomically. *)
 val run
   :  ?dry_run:bool
-  -> ?categories:category list
   -> ?threshold:float
   -> ?min_keepers:int
   -> keeper_ids:string list

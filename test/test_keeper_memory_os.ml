@@ -9,6 +9,7 @@ module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
+module Edges = Masc.Keeper_memory_os_edges
 
 let contains substring s =
   let sub_len = String.length substring in
@@ -394,6 +395,70 @@ let test_librarian_accepts_integer_confidence () =
          (Some (0, 0))
          episode.Types.source_turn_range
      | claims -> Alcotest.failf "expected one claim, got %d" (List.length claims))
+  | None -> Alcotest.fail "expected librarian output to parse"
+;;
+
+(* RFC-0247 §2.3 producer end-to-end: a claim the librarian labels "ephemeral" is
+   born with a finite TTL and a fast decay rate, while a durable "fact" carries
+   neither — so the forgetting machinery (GC TTL pass, per-fact truth decay) is
+   driven by the typed category at write time, not left inert. *)
+let test_librarian_ephemeral_fact_has_ttl () =
+  let now = 1_000_000.0 in
+  let output =
+    `Assoc
+      [ "episode_summary", `String "mixed durability claims"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "checkpoint saved for task T-1"
+                ; "confidence", `Float 0.9
+                ; "category", `String "ephemeral"
+                ; "source_turn", `Int 0
+                ]
+            ; `Assoc
+                [ "claim", `String "the build uses dune 3.x"
+                ; "confidence", `Float 0.9
+                ; "category", `String "fact"
+                ; "source_turn", `Int 1
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-ttl"; generation = 0; messages = [ text_message "x" ] }
+  in
+  match Librarian.episode_of_output ~now inp output with
+  | Some episode ->
+    let find cat =
+      List.find (fun f -> f.Types.category = cat) episode.Types.claims
+    in
+    let eph = find Types.Ephemeral in
+    let durable = find Types.Fact in
+    Alcotest.(check (option (float 0.001)))
+      "ephemeral fact TTL matches the category producer"
+      (Types.category_valid_until ~now Types.Ephemeral)
+      eph.Types.valid_until;
+    Alcotest.(check bool) "ephemeral TTL is finite" true (Option.is_some eph.Types.valid_until);
+    Alcotest.(check (option int))
+      "ephemeral fact lifetime matches the category producer"
+      (Types.category_lifetime_cycles Types.Ephemeral)
+      eph.Types.expected_lifetime_cycles;
+    Alcotest.(check bool)
+      "ephemeral lifetime is finite"
+      true
+      (Option.is_some eph.Types.expected_lifetime_cycles);
+    Alcotest.(check (option (float 0.001)))
+      "durable fact never hard-expires"
+      None
+      durable.Types.valid_until;
+    Alcotest.(check (option int))
+      "durable fact decays at default rate"
+      None
+      durable.Types.expected_lifetime_cycles
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
@@ -1834,33 +1899,105 @@ let test_consolidator_unknown_category_default_deny () =
   Alcotest.(check int) "unknown category not promoted" 0 (List.length shared)
 ;;
 
-(* The category codec round-trips known tokens, lowercases on parse, and carries
-   any out-of-taxonomy label verbatim in [Unknown]. *)
-let test_category_roundtrip () =
-  let known = [ "code_change"; "fact"; "preference"; "blocker"; "goal"; "constraint" ] in
+(* RFC-0247 §2.5: the category codec round-trips every known arm, and an
+   unrecognized label degrades to [Unknown raw] carrying the original string so a
+   read/write cycle is lossless (legacy free-string facts on disk survive). *)
+let test_category_codec_roundtrip () =
+  let known =
+    [ "fact", Types.Fact
+    ; "constraint", Types.Constraint
+    ; "preference", Types.Preference
+    ; "blocker", Types.Blocker
+    ; "goal", Types.Goal
+    ; "code_change", Types.Code_change
+    ; "ephemeral", Types.Ephemeral
+    ]
+  in
   List.iter
-    (fun s ->
-      Alcotest.(check string)
-        (Printf.sprintf "round-trip %s" s)
-        s
-        (Types.category_to_string (Types.category_of_string s)))
+    (fun (s, expected) ->
+       Alcotest.(check bool)
+         (Printf.sprintf "of_string %s" s)
+         true
+         (Types.category_of_string s = expected);
+       Alcotest.(check string)
+         (Printf.sprintf "to_string round-trip %s" s)
+         s
+         (Types.category_to_string (Types.category_of_string s)))
     known;
   Alcotest.(check string)
     "case-insensitive parse"
     "fact"
     (Types.category_to_string (Types.category_of_string "FACT"));
+  (* Unknown preserves the raw string both ways. *)
   Alcotest.(check bool)
-    "out-of-taxonomy becomes Unknown"
+    "unknown label parses to Unknown"
     true
-    (match Types.category_of_string "observation" with
-     | Types.Unknown "observation" -> true
-     | _ -> false);
+    (Types.category_of_string "checkpoint_saved" = Types.Unknown "checkpoint_saved");
   Alcotest.(check string)
-    "Unknown carries the raw label"
-    "observation"
-    (Types.category_to_string (Types.Unknown "observation"))
+    "unknown round-trips losslessly"
+    "checkpoint_saved"
+    (Types.category_to_string (Types.category_of_string "checkpoint_saved"))
 ;;
 
+(* Only [Fact] and [Constraint] promote — exhaustively, so a new arm cannot
+   silently join the shared tier (the prior ["fact";"constraint"] whitelist). *)
+let test_is_promotable_only_fact_constraint () =
+  let promotable = [ Types.Fact; Types.Constraint ] in
+  let blocked =
+    [ Types.Preference; Types.Blocker; Types.Goal; Types.Code_change
+    ; Types.Ephemeral; Types.Unknown "novel"
+    ]
+  in
+  List.iter
+    (fun c -> Alcotest.(check bool) (Types.category_to_string c ^ " promotes") true (Types.is_promotable c))
+    promotable;
+  List.iter
+    (fun c -> Alcotest.(check bool) (Types.category_to_string c ^ " blocked") false (Types.is_promotable c))
+    blocked
+;;
+
+(* RFC-0247 §2.3: retention is category-driven. Only Ephemeral gets a finite TTL
+   and a fast decay; every durable arm returns None (never hard-expires, decays at
+   the slow default). Exhaustive so a new category must be classified here. *)
+let test_category_retention_by_category () =
+  let now = 1_000_000.0 in
+  Alcotest.(check bool)
+    "ephemeral gets a finite TTL"
+    true
+    (Option.is_some (Types.category_valid_until ~now Types.Ephemeral));
+  Alcotest.(check bool)
+    "ephemeral gets a finite lifetime"
+    true
+    (Option.is_some (Types.category_lifetime_cycles Types.Ephemeral));
+  List.iter
+    (fun c ->
+       Alcotest.(check (option (float 0.001)))
+         (Types.category_to_string c ^ " never hard-expires")
+         None
+         (Types.category_valid_until ~now c);
+       Alcotest.(check (option int))
+         (Types.category_to_string c ^ " decays at default rate")
+         None
+         (Types.category_lifetime_cycles c))
+    [ Types.Fact; Types.Constraint; Types.Preference; Types.Blocker
+    ; Types.Goal; Types.Code_change; Types.Unknown "novel"
+    ]
+;;
+
+(* RFC-0247 §2.5 / #21244 regression guard: an Ephemeral claim corroborated by
+   >=2 distinct keepers above threshold is NOT promoted. This is the exact failure
+   the #21244 dry-run found (coordination boilerplate mislabeled and promoted);
+   the typed non-promotable category makes it structurally impossible. *)
+let test_consolidator_ephemeral_not_promoted () =
+  let now = 1_000_000.0 in
+  let keeper_facts =
+    [ "alpha", [ mk_shared_fixture ~now ~category:"ephemeral" ~confidence:0.9 "checkpoint saved" ]
+    ; "beta", [ mk_shared_fixture ~now ~category:"ephemeral" ~confidence:0.9 "checkpoint saved" ]
+    ]
+  in
+  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
+  Alcotest.(check int) "ephemeral corroborated claim not promoted" 0 (List.length shared)
+;;
 (* A contributor below the confidence floor does not count toward corroboration,
    so a 2-keeper claim with only one eligible contributor is not promoted. *)
 let test_consolidator_below_threshold_excluded () =
@@ -1926,6 +2063,272 @@ let test_recall_surfaces_shared_after_consolidation () =
            && not (contains "shared via" alpha_block)))))
 ;;
 
+(* ---------- RFC-0247 §2.7 associative edges ---------- *)
+
+let mk_episode ?(trace_id = "trace-ep") ?(generation = 0) ~created_at claim_strings =
+  { Types.trace_id
+  ; Types.generation
+  ; Types.episode_summary = "episode summary"
+  ; Types.claims =
+      List.map (fun claim -> { (fact_fixture ~now:created_at ()) with Types.claim }) claim_strings
+  ; Types.open_items = []
+  ; Types.constraints = []
+  ; Types.preserved_tool_refs = []
+  ; Types.source_turn_range = None
+  ; Types.created_at
+  ; Types.schema_version = Types.schema_version
+  }
+;;
+
+(* n distinct claims in one episode produce exactly n*(n-1)/2 undirected
+   [Relates] edges, each in canonical endpoint order and carrying the episode's
+   own provenance. *)
+let test_edges_co_occurrence_pairs_distinct_claims () =
+  let created_at = 1_000.0 in
+  let episode = mk_episode ~trace_id:"trace-xyz" ~created_at [ "gamma"; "alpha"; "beta" ] in
+  let edges = Edges.co_occurrence_edges episode in
+  Alcotest.(check int) "3 claims -> 3 pairs" 3 (List.length edges);
+  List.iter
+    (fun (e : Edges.edge) ->
+       Alcotest.(check string) "relation is relates" "relates" (Edges.relation_to_string e.relation);
+       Alcotest.(check bool) "canonical src < dst" true (String.compare e.src e.dst < 0);
+       Alcotest.(check string) "provenance trace_id" "trace-xyz" e.trace_id;
+       Alcotest.(check (float 1e-9)) "provenance created_at" created_at e.created_at)
+    edges;
+  let pairs =
+    List.map (fun (e : Edges.edge) -> e.src ^ "|" ^ e.dst) edges |> List.sort String.compare
+  in
+  Alcotest.(check (list string))
+    "exactly the i<j pairs of the sorted distinct keys"
+    [ "alpha|beta"; "alpha|gamma"; "beta|gamma" ]
+    pairs
+;;
+
+(* A single claim (and an empty episode) cannot form a pair, so produce no edges
+   — no self-loops. *)
+let test_edges_single_and_empty_produce_none () =
+  let created_at = 1_000.0 in
+  Alcotest.(check int)
+    "single claim -> no edge"
+    0
+    (List.length (Edges.co_occurrence_edges (mk_episode ~created_at [ "only one" ])));
+  Alcotest.(check int)
+    "empty episode -> no edge"
+    0
+    (List.length (Edges.co_occurrence_edges (mk_episode ~created_at [])))
+;;
+
+(* Two claims that share a normalized key (case/whitespace variants) collapse to
+   one endpoint, so they do not co-occur with themselves and the pair count is
+   over DISTINCT keys, not raw claims. *)
+let test_edges_co_occurrence_dedups_within_episode () =
+  let created_at = 1_000.0 in
+  let episode = mk_episode ~created_at [ "Foo Bar"; "foo  bar"; "Baz" ] in
+  let edges = Edges.co_occurrence_edges episode in
+  Alcotest.(check int) "2 distinct keys -> 1 pair" 1 (List.length edges);
+  match edges with
+  | [ e ] ->
+    Alcotest.(check string) "canonical src" "baz" e.Edges.src;
+    Alcotest.(check string) "canonical dst" "foo bar" e.Edges.dst
+  | _ -> Alcotest.fail "expected exactly one edge"
+;;
+
+(* The edge codec round-trips, and a relation string with no arm degrades to
+   [Unknown] (graceful, no line dropped) rather than failing. *)
+let test_edge_codec_roundtrip () =
+  let roundtrip (e : Edges.edge) =
+    match Edges.edge_of_json (Edges.edge_to_json e) with
+    | Some e' -> e'
+    | None -> Alcotest.fail "edge_of_json returned None on own output"
+  in
+  let base : Edges.edge =
+    { Edges.src = "a"
+    ; dst = "b"
+    ; relation = Edges.Relates
+    ; trace_id = "t1"
+    ; created_at = 42.0
+    ; schema_version = Types.schema_version
+    }
+  in
+  let r = roundtrip base in
+  Alcotest.(check string) "src preserved" "a" r.Edges.src;
+  Alcotest.(check string) "dst preserved" "b" r.Edges.dst;
+  Alcotest.(check string) "relation preserved" "relates" (Edges.relation_to_string r.Edges.relation);
+  Alcotest.(check string) "trace_id preserved" "t1" r.Edges.trace_id;
+  let unknown = roundtrip { base with Edges.relation = Edges.Unknown "supersedes" } in
+  Alcotest.(check string)
+    "unknown relation degrades to its label"
+    "supersedes"
+    (Edges.relation_to_string unknown.Edges.relation)
+;;
+
+(* Aggregation counts repeated observations of the same (src,dst,relation) as
+   Hebbian weight, bracketing first/last seen across events. *)
+let test_edges_aggregate_weights () =
+  let mk created_at : Edges.edge =
+    { Edges.src = "alpha"
+    ; dst = "beta"
+    ; relation = Edges.Relates
+    ; trace_id = "t"
+    ; created_at
+    ; schema_version = Types.schema_version
+    }
+  in
+  let assocs = Edges.aggregate [ mk 5.0; mk 1.0; mk 3.0 ] in
+  match assocs with
+  | [ a ] ->
+    Alcotest.(check int) "weight counts observations" 3 a.Edges.weight;
+    Alcotest.(check (float 1e-9)) "first_seen is min" 1.0 a.Edges.first_seen;
+    Alcotest.(check (float 1e-9)) "last_seen is max" 5.0 a.Edges.last_seen
+  | _ -> Alcotest.fail "expected one aggregated association"
+;;
+
+(* End-to-end: the producer's edges persist via append-only IO and read back as
+   aggregated associations from disk. *)
+let test_edges_io_roundtrip () =
+  with_temp_keepers_dir (fun _ ->
+    let episode = mk_episode ~created_at:100.0 [ "alpha"; "beta" ] in
+    Memory_io.append_edges ~keeper_id:"k" (Edges.co_occurrence_edges episode);
+    (* a second episode re-observes the same pair, strengthening it *)
+    Memory_io.append_edges
+      ~keeper_id:"k"
+      (Edges.co_occurrence_edges (mk_episode ~created_at:200.0 [ "beta"; "alpha" ]));
+    match Memory_io.read_associations ~keeper_id:"k" with
+    | [ a ] ->
+      Alcotest.(check string) "src" "alpha" a.Edges.a_src;
+      Alcotest.(check string) "dst" "beta" a.Edges.a_dst;
+      Alcotest.(check int) "weight accumulates across episodes" 2 a.Edges.weight;
+      Alcotest.(check (float 1e-9)) "first_seen" 100.0 a.Edges.first_seen;
+      Alcotest.(check (float 1e-9)) "last_seen" 200.0 a.Edges.last_seen
+    | other ->
+      Alcotest.failf "expected one association, got %d" (List.length other))
+;;
+
+(* ---------- RFC-0247 §2.7 (P2a-2) spreading activation ---------- *)
+
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  (* Codebase convention: [Unix.putenv name ""] clears a var (no portable
+     [Unix.unsetenv]); the float env reader treats that as unset -> default. *)
+  Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value old ~default:"")) f
+;;
+
+(* A fact linked to a strongly-scored neighbour gains alpha times the
+   relation-discounted, co-occurrence-normalized pull of its recalled
+   neighbours' base scores; an unlinked fact gains nothing; alpha <= 0 yields no
+   boost at all. *)
+let test_activation_boosts_lifts_linked () =
+  let base = [ "hi", 1.0; "lo", 0.1; "solo", 0.2 ] in
+  let assoc : Edges.association =
+    { Edges.a_src = "hi"
+    ; a_dst = "lo"
+    ; a_relation = Edges.Relates
+    ; weight = 1
+    ; first_seen = 0.0
+    ; last_seen = 0.0
+    }
+  in
+  let lookup k boosts = List.assoc_opt k boosts in
+  let boosts = Edges.activation_boosts ~alpha:0.5 ~associations:[ assoc ] ~base in
+  (* boost = alpha * relation_weight(Relates) * base(neighbour) = 0.5 * 0.3 * b *)
+  (match lookup "lo" boosts with
+   | Some b -> Alcotest.(check (float 1e-9)) "lo lifted by 0.5*0.3*base(hi)" 0.15 b
+   | None -> Alcotest.fail "expected a boost for the linked low fact");
+  (match lookup "hi" boosts with
+   | Some b -> Alcotest.(check (float 1e-9)) "hi lifted by 0.5*0.3*base(lo)" 0.015 b
+   | None -> Alcotest.fail "expected a boost for hi (linked to lo)");
+  Alcotest.(check (option (float 1e-9)))
+    "unlinked solo gets no boost"
+    None
+    (lookup "solo" boosts);
+  Alcotest.(check int)
+    "alpha <= 0 yields no boosts"
+    0
+    (List.length (Edges.activation_boosts ~alpha:0.0 ~associations:[ assoc ] ~base));
+  (* An Unknown-relation association carries no weight, so it lifts nothing. *)
+  let unknown_assoc = { assoc with Edges.a_relation = Edges.Unknown "diagnoses" } in
+  Alcotest.(check int)
+    "unknown-relation association yields no boost"
+    0
+    (List.length (Edges.activation_boosts ~alpha:0.5 ~associations:[ unknown_assoc ] ~base))
+;;
+
+let activation_alpha_env = "MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA"
+
+(* The writer is gated by the same alpha as the reader: no consumer, no edge
+   accumulation. *)
+let test_edges_writes_enabled_tracks_alpha () =
+  with_env activation_alpha_env "" (fun () ->
+    Alcotest.(check bool) "default alpha=0: writes disabled" false (Edges.writes_enabled ()));
+  with_env activation_alpha_env "1.5" (fun () ->
+    Alcotest.(check bool) "alpha>0: writes enabled" true (Edges.writes_enabled ()));
+  with_env activation_alpha_env "-1.0" (fun () ->
+    Alcotest.(check bool) "negative alpha: writes stay disabled" false (Edges.writes_enabled ()))
+;;
+
+(* With activation disabled (alpha = 0, the default), recall is byte-identical
+   whether or not an edge store exists alongside the facts. *)
+let test_recall_activation_disabled_byte_identical () =
+  with_env activation_alpha_env "" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _ ->
+        let now = 1_000_000.0 in
+        let facts =
+          [ { (fact_fixture ~now ()) with Types.claim = "alpha one"; Types.confidence = 0.9 }
+          ; { (fact_fixture ~now ()) with Types.claim = "beta two"; Types.confidence = 0.8 }
+          ]
+        in
+        List.iter (Memory_io.append_fact ~keeper_id:"k") facts;
+        let before = Recall.render_context ~keeper_id:"k" ~now ~max_episodes:0 () in
+        Alcotest.(check bool) "precondition: recall is non-empty" true (String.length before > 0);
+        (* Add an edge store; with alpha = 0 it must not change the rendering. *)
+        Memory_io.append_edges
+          ~keeper_id:"k"
+          (Edges.co_occurrence_edges (mk_episode ~created_at:now [ "alpha one"; "beta two" ]));
+        let after = Recall.render_context ~keeper_id:"k" ~now ~max_episodes:0 () in
+        Alcotest.(check string) "alpha=0 ignores the edge store" before after)))
+;;
+
+(* With activation enabled, a low-base fact linked to a strongly-recalled fact is
+   lifted above an unlinked fact that outranks it on base score alone. *)
+let test_recall_activation_lifts_linked_fact () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _ ->
+      let now = 1_000_000.0 in
+      (* [a] scores highest (seed match + high confidence); [c] outranks [b] on
+         confidence alone, so without activation the top two are [a] and [c]. *)
+      let a = { (fact_fixture ~now ()) with Types.claim = "distinctive topic"; Types.confidence = 0.95 } in
+      let b = { (fact_fixture ~now ()) with Types.claim = "beta"; Types.confidence = 0.50 } in
+      let c = { (fact_fixture ~now ()) with Types.claim = "gamma"; Types.confidence = 0.60 } in
+      List.iter (Memory_io.append_fact ~keeper_id:"k") [ a; b; c ];
+      (* Link [a] and [b] so activation can carry [a]'s score to [b]. *)
+      Memory_io.append_edges
+        ~keeper_id:"k"
+        (Edges.co_occurrence_edges (mk_episode ~created_at:now [ "distinctive topic"; "beta" ]));
+      let render alpha =
+        with_env activation_alpha_env alpha (fun () ->
+          Recall.render_context ~keeper_id:"k" ~now ~max_facts:2 ~max_episodes:0 ~seed:"distinctive" ())
+      in
+      let disabled = render "" in
+      Alcotest.(check bool)
+        "disabled: unlinked higher-base gamma is in top-2"
+        true
+        (contains "gamma" disabled);
+      Alcotest.(check bool)
+        "disabled: linked lower-base beta is crowded out"
+        false
+        (contains "beta" disabled);
+      (* A realistic alpha (same order of magnitude as the RFC default 0.5, not a
+         contrived 50x), discounted by relation_weight(Relates)=0.3, still lifts
+         the linked fact because its neighbour [a] is strongly recalled. *)
+      let enabled = render "3.0" in
+      Alcotest.(check bool)
+        "enabled: linked beta is lifted into top-2"
+        true
+        (contains "beta" enabled)))
+;;
+
 let test_consolidator_rejects_corrupt_source_store () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let now = 1_000_000.0 in
@@ -1952,7 +2355,6 @@ let test_consolidator_rejects_corrupt_source_store () =
         (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
       Alcotest.(check bool) "error includes line number" true (contains ":2:" msg))
 ;;
-
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -1971,6 +2373,10 @@ let () =
             "librarian accepts integer confidence"
             `Quick
             test_librarian_accepts_integer_confidence
+        ; Alcotest.test_case
+            "librarian-born ephemeral fact has TTL (RFC-0247 §2.3)"
+            `Quick
+            test_librarian_ephemeral_fact_has_ttl
         ; Alcotest.test_case
             "librarian accepts wrapped json output"
             `Quick
@@ -2140,9 +2546,21 @@ let () =
             `Quick
             test_consolidator_unknown_category_default_deny
         ; Alcotest.test_case
-            "category codec round-trips (#21241)"
+            "category codec round-trips (RFC-0247 §2.5)"
             `Quick
-            test_category_roundtrip
+            test_category_codec_roundtrip
+        ; Alcotest.test_case
+            "only fact/constraint promote (RFC-0247 §2.5)"
+            `Quick
+            test_is_promotable_only_fact_constraint
+        ; Alcotest.test_case
+            "retention TTL/lifetime is category-driven (RFC-0247 §2.3)"
+            `Quick
+            test_category_retention_by_category
+        ; Alcotest.test_case
+            "ephemeral corroborated claim not promoted (#21244)"
+            `Quick
+            test_consolidator_ephemeral_not_promoted
         ; Alcotest.test_case
             "below-threshold contributor excluded"
             `Quick
@@ -2159,6 +2577,39 @@ let () =
             "corrupt source store fails loud"
             `Quick
             test_consolidator_rejects_corrupt_source_store
+        ] )
+    ; ( "edges"
+      , [ Alcotest.test_case
+            "co-occurrence pairs distinct claims (RFC-0247 §2.7)"
+            `Quick
+            test_edges_co_occurrence_pairs_distinct_claims
+        ; Alcotest.test_case
+            "single and empty produce no edges"
+            `Quick
+            test_edges_single_and_empty_produce_none
+        ; Alcotest.test_case
+            "co-occurrence dedups within episode"
+            `Quick
+            test_edges_co_occurrence_dedups_within_episode
+        ; Alcotest.test_case "edge codec round-trips" `Quick test_edge_codec_roundtrip
+        ; Alcotest.test_case "aggregate counts Hebbian weight" `Quick test_edges_aggregate_weights
+        ; Alcotest.test_case "edges IO round-trip" `Quick test_edges_io_roundtrip
+        ; Alcotest.test_case
+            "activation boosts lift linked facts (P2a-2)"
+            `Quick
+            test_activation_boosts_lifts_linked
+        ; Alcotest.test_case
+            "edge writes gated by alpha (P2a-3)"
+            `Quick
+            test_edges_writes_enabled_tracks_alpha
+        ; Alcotest.test_case
+            "recall byte-identical when activation disabled (P2a-2)"
+            `Quick
+            test_recall_activation_disabled_byte_identical
+        ; Alcotest.test_case
+            "recall activation lifts linked fact (P2a-2)"
+            `Quick
+            test_recall_activation_lifts_linked_fact
         ] )
     ]
 ;;

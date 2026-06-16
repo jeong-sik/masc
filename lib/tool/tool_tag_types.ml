@@ -28,6 +28,7 @@ type module_tag =
   | Mod_external
   | Mod_inline
   | Mod_shard
+  | Mod_keeper_task
 
 type effect_domain =
   | Read_only

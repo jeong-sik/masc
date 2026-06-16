@@ -26,6 +26,7 @@ type module_tag =
   | Mod_external
   | Mod_inline
   | Mod_shard
+  | Mod_keeper_task
 
 (** Inferred effect classification for a tool. *)
 type effect_domain =

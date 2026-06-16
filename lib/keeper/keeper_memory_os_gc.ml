@@ -28,9 +28,11 @@ let ttl_expired ~now fact =
   | Some ts -> now > ts
 ;;
 
-let normalized_claim_key fact =
-  fact.claim |> String.trim |> String.lowercase_ascii
-;;
+(* Claim identity uses the shared SSOT [normalize_claim] (lowercase +
+   internal-whitespace-collapse + trailing-trim), the same key the write-time
+   upsert ([merge_and_cap_facts]) and recall dedup use, so GC's dedup cannot
+   diverge from them (RFC-0247 §2.3 fold). *)
+let normalized_claim_key fact = normalize_claim fact.claim
 
 let verified_at fact =
   match fact.last_verified_at with

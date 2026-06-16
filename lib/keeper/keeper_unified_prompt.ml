@@ -864,4 +864,16 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (Keeper_metrics.to_string KeeperTurnInstructionHash)
     ~labels:[("keeper", meta.name)]
     prompt_hash;
+  (* P0-3: rendered prompt token integrity ratchet. Every prompt that reaches
+     an LLM is scanned for keeper_*/masc_* tokens; any token that does not
+     resolve through [Keeper_tool_resolution] is counted by
+     [PromptUnknownToolTokens] and logged. This catches stale tool names that
+     survive the [sanitize_retired_tool_names] pass or leak into continuity. *)
+  let (_ : string list) =
+    Keeper_prompt_token_integrity.scan_rendered_prompt
+      ~keeper_name:meta.name
+      ~system_prompt:sanitized_system
+      ~user_message:sanitized_user
+      ~continuity_summary:meta.continuity_summary
+  in
   ( sanitized_system, sanitized_user )

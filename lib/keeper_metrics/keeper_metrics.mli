@@ -113,6 +113,7 @@ type t =
   | CycleExceptions
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
+  | PromptUnknownToolTokens
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures

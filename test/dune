@@ -311,7 +311,10 @@
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
-  test_env_keeper_scrub)
+  test_env_keeper_scrub
+  test_event_log
+  test_relation_materializer
+  test_keeper_behavior_trace)
  (modules
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
@@ -603,7 +606,10 @@
   test_blocker_class_exhaustiveness
   test_workspace_goal_index
   test_log_severity_outcome_level
-  test_env_keeper_scrub)
+  test_env_keeper_scrub
+  test_event_log
+  test_relation_materializer
+  test_keeper_behavior_trace)
  (libraries masc_test_deps multimodal))
 
 ; Focused CI gate for runtime TOML validity.
@@ -791,6 +797,7 @@
   ; test_proof_criteria removed (team session cleanup)
   ; test_tree_index removed (CP purge)
   test_tool_registry
+  test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
   test_tool_catalog_system_internal_hidden
@@ -800,6 +807,7 @@
   test_tool_hooks
   test_governance_pipeline
   test_keeper_agent_isolation
+  test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
   test_webrtc_signaling
@@ -972,6 +980,7 @@
   test_yojson_type_error_board
   ; test_tree_index removed (CP purge)
   test_tool_registry
+  test_tool_registry_consistency
   test_tool_dispatch
   test_tool_spec
   test_tool_catalog_system_internal_hidden
@@ -981,6 +990,7 @@
   test_tool_hooks
   test_governance_pipeline
   test_keeper_agent_isolation
+  test_keeper_prompt_token_integrity
   test_sse_external_sub
   test_ws_transport
   test_webrtc_signaling

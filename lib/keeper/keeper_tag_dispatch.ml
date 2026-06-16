@@ -45,6 +45,7 @@ let get_net_opt () = Eio_context.get_net_opt ()
 let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   match tag with
   | Mod_external -> "external"
+  | Mod_keeper_task -> "keeper_task"
   | Mod_library -> "library"
   | Mod_task -> "task"
   | Mod_shard -> "shard"
@@ -152,6 +153,12 @@ let dispatch
       Some
         (workflow_err
            (Printf.sprintf "tool '%s' is a keeper management tool (use MCP client)" name))
+    | Mod_keeper_task ->
+      Some
+        (workflow_err
+           (Printf.sprintf
+              "tool '%s' is a keeper task tool; use the keeper in-process task handler"
+              name))
     | Mod_operator ->
       Some
         (workflow_err

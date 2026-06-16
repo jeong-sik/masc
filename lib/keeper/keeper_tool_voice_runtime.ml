@@ -102,6 +102,13 @@ let handle_speak
     | _ -> None
   in
   let priority = max 1 (Safe_ops.json_int ~default:1 "priority" args) in
+  let audio_device =
+    Safe_ops.json_string_opt "audio_device" args
+    |> Option.map String.trim
+    |> function
+    | Some d when d <> "" -> Some d
+    | _ -> None
+  in
   if message = ""
   then error_json "message is required. Good: message='Hello team.'. Bad: message=''."
   else (
@@ -125,6 +132,7 @@ let handle_speak
            ~message
            ?provider
            ~priority
+           ?audio_device
            ()
        with
        | Ok json ->
@@ -149,11 +157,16 @@ let handle_speak
                let token =
                  path |> Filename.basename |> Filename.chop_extension
                in
+               let audio_url =
+                 Printf.sprintf "/api/v1/voice/audio/%s" token
+               in
                Some
                  { Keeper_chat_broadcast.token
+                 ; audio_url = Some audio_url
                  ; mime = "audio/mpeg"
                  ; duration_sec = None
                  ; message_text = message
+                 ; device_id = audio_device
                  }
              | None -> None
            in

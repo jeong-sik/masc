@@ -20,14 +20,15 @@ open Keeper_memory_os_types
 
 module Io = Keeper_memory_os_io
 
-(* Categories objective enough to share across keepers. Default-deny: anything
-   not listed (Preference / Goal / Blocker / Code_change / Unknown) stays
-   keeper-local, because promoting keeper- or task-local state cross-keeper is
-   the 456 leak. Typed since #21241 — an [Unknown] label (LLM drift, or an
-   ephemeral event the librarian no longer extracts) is never promoted, and the
-   surface-string match this list used to be is gone. See RFC-0244 §2.3 and the
-   librarian taxonomy (config/prompts/keeper.librarian.episode_extraction.md). *)
-let default_promote_categories : category list = [ Fact; Constraint ]
+(* Which categories are objective enough to share across keepers is a
+   compile-time property of the closed [category] taxonomy
+   (Keeper_memory_os_types.is_promotable: only Fact/Constraint), not a runtime
+   list. Default-deny is structural: a new arm (e.g. the [Ephemeral]
+   coordination-boilerplate kind, RFC-0247 §2.5 / #21244) cannot leak into the
+   shared tier unless it is classified promotable at the type level. This
+   strengthens #21241's typed [category list] into an exhaustive predicate, so a
+   future arm forces a compile-time promotability decision rather than silently
+   defaulting out of a list. *)
 
 (* A contributing observation must clear this confidence floor; below it a claim
    is too weak to count as corroboration. *)
@@ -58,8 +59,8 @@ type contribution =
   ; fact : fact
   }
 
-let eligible ~categories ~threshold fact =
-  fact.confidence >= threshold && List.mem fact.category categories
+let eligible ~threshold fact =
+  fact.confidence >= threshold && is_promotable fact.category
 ;;
 
 (* Pick the representative fact for a claim group: highest confidence, then
@@ -134,7 +135,6 @@ let consolidate_into_shared ~now ~min_keepers contribs =
 (* Pure core: given each keeper's Tier-1 facts, return the Tier-2 shared facts in
    normalized-claim order. No IO, no clock read — [now] is injected. *)
 let promote_facts
-      ?(categories = default_promote_categories)
       ?(threshold = default_confidence_threshold)
       ?(min_keepers = default_min_keepers)
       ~now
@@ -146,7 +146,7 @@ let promote_facts
     (fun (keeper_id, facts) ->
        List.iter
          (fun fact ->
-            if eligible ~categories ~threshold fact
+            if eligible ~threshold fact
             then (
               let key = normalize_claim fact.claim in
               let prev = Option.value (Hashtbl.find_opt groups key) ~default:[] in
@@ -167,7 +167,7 @@ let promote_facts
    (unless [dry_run]) rewrite the shared store atomically. The shared id itself
    is filtered out of the source list so a prior sweep's output is never folded
    back in as a "keeper". *)
-let run ?(dry_run = false) ?categories ?threshold ?min_keepers ~keeper_ids ~now () =
+let run ?(dry_run = false) ?threshold ?min_keepers ~keeper_ids ~now () =
   let source_ids =
     List.filter (fun id -> not (String.equal id shared_store_id)) keeper_ids
   in
@@ -182,7 +182,7 @@ let run ?(dry_run = false) ?categories ?threshold ?min_keepers ~keeper_ids ~now 
   | Error message -> invalid_arg ("memory os consolidation input invalid: " ^ message)
   | Ok keeper_facts ->
     let considered, promoted =
-      promote_facts ?categories ?threshold ?min_keepers ~now ~keeper_facts ()
+      promote_facts ?threshold ?min_keepers ~now ~keeper_facts ()
     in
     if not dry_run then Io.rewrite_facts_atomically ~keeper_id:shared_store_id promoted;
     { keepers_scanned = List.length source_ids

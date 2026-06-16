@@ -1230,6 +1230,7 @@ describe('dashboard goals decoding', () => {
                 task_id: 'task-1',
                 blocker_class: 'blocked_before_worktree',
               },
+              latest_event_at: '2026-04-23T00:09:30Z',
             },
             execution: {
               tools_used: ['keeper_task_claim'],
@@ -1253,6 +1254,7 @@ describe('dashboard goals decoding', () => {
               summary: 'Waiting for operator approval before resuming.',
               severity: 'warn',
               next_human_action: 'resolve_approval',
+              trace_id: 'trace-approval-42',
             },
           },
           latest_causal_event: {
@@ -1301,6 +1303,7 @@ describe('dashboard goals decoding', () => {
             task_id: 'task-1',
             blocker_class: 'blocked_before_worktree',
           },
+          latest_event_at: '2026-04-23T00:09:30Z',
         },
         execution_summary: {
           provider_attempt_count: 2,
@@ -1316,6 +1319,7 @@ describe('dashboard goals decoding', () => {
           kind: 'approval_pending',
           keeper_turn_id: 42,
           title: 'Approval pending',
+          trace_id: 'trace-approval-42',
         },
       },
       latest_causal_event: {

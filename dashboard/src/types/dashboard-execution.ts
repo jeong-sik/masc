@@ -854,6 +854,9 @@ export interface GoalKeeperTrustLatestEvent {
   summary: string
   severity: 'ok' | 'warn' | 'bad' | string
   next_human_action?: string | null
+  // OTel/Jaeger trace id of the causal event (keeper_runtime_trust_timeline.ml),
+  // for deep-linking the latest event to its distributed trace.
+  trace_id?: string | null
 }
 
 export interface GoalKeeperTrustApprovalState {
@@ -866,6 +869,10 @@ export interface GoalKeeperTrustApprovalState {
     task_id?: string | null
     blocker_class?: string | null
   } | null
+  // ISO8601 timestamp of the last approval-audit event
+  // (keeper_runtime_trust_snapshot.ml) — when the approval state last changed,
+  // not derivable from `state` alone.
+  latest_event_at?: string | null
 }
 
 export interface GoalKeeperTrustExecutionSummary {

@@ -331,6 +331,7 @@ function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent |
     summary,
     severity,
     next_human_action: asString(raw.next_human_action) ?? null,
+    trace_id: asString(raw.trace_id) ?? null,
   }
 }
 
@@ -375,6 +376,7 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
                 blocker_class: asString(approvalRaw.pending_first.blocker_class) ?? null,
               }
             : null,
+          latest_event_at: asString(approvalRaw.latest_event_at) ?? null,
         }
       : null,
     execution_summary: isRecord(executionRaw)

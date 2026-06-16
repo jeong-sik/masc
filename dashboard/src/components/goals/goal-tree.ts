@@ -1222,7 +1222,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
           ` : null}
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
             ${trust?.approval_state?.state ? html`
-              <span>승인 상태 ${trust.approval_state.state}</span>
+              <span>승인 상태 ${trust.approval_state.state}${trust.approval_state.latest_event_at ? html` · <${TimeAgo} timestamp=${trust.approval_state.latest_event_at} />` : null}</span>
             ` : null}
             ${pendingApprovalId ? html`
               <span>승인 ID ${pendingApprovalId}</span>
@@ -1280,6 +1280,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ` : null}
             ${latestEvent.next_human_action ? html`
               <span>next ${latestEvent.next_human_action}</span>
+            ` : null}
+            ${latestEvent.trace_id ? html`
+              <span class="font-mono" title=${latestEvent.trace_id}>trace ${latestEvent.trace_id.slice(0, 8)}</span>
             ` : null}
           </div>
         </div>

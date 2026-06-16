@@ -360,7 +360,7 @@ let extract_and_append_with_provider
              ~incoming:episode.Keeper_memory_os_types.claims
              ~keep:window
              ~trigger:(window + (window / 2))
-             ~rank:(Keeper_memory_os_policy.score_fact ~now)
+             ~rank:(Keeper_memory_os_policy.retention_rank ~now)
          in
          Ok ()
        with

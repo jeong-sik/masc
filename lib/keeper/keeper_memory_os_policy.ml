@@ -7,6 +7,28 @@
 
 open Keeper_memory_os_types
 
+(* Durable facts always outrank Ephemeral in the retention cap, regardless of
+   timestamp. The offset exceeds any unix timestamp so the two tiers never
+   interleave. *)
+let durable_retention_tier = 1.0e15
+
+(* RFC-0247 §-1 (Step 1): structural retention rank for the bounded store cap.
+   This is NOT a relevance score — it is a deterministic two-tier lexicographic
+   order used ONLY to decide which rows the size cap drops when the store grows past
+   its trigger: durable categories outrank Ephemeral (a typed decision via
+   [category_valid_until], which returns [Some] only for Ephemeral), and within a
+   tier the most-recently-verified (else first-seen) fact is kept. It never ranks
+   recall — recall ordering is structural + judgment, not a number. *)
+let retention_rank ~now (f : fact) =
+  let tier =
+    match category_valid_until ~now f.category with
+    | None -> durable_retention_tier
+    | Some _ -> 0.0
+  in
+  let recency = match f.last_verified_at with Some t -> t | None -> f.first_seen in
+  tier +. recency
+;;
+
 let default_lambda = 1.0 /. (86400.0 *. 7.0) (* half-life ~7 days *)
 let default_alpha = 0.5
 let default_truth_lambda = 1.0 /. (86400.0 *. 30.0)

@@ -3,6 +3,12 @@
 
 open Keeper_memory_os_types
 
+(** Structural retention rank for the bounded store cap (RFC-0247 §-1). NOT a
+    relevance score: a deterministic two-tier order — durable categories outrank
+    Ephemeral, then most-recently-verified (else first-seen) wins. Used only to
+    decide which rows the size cap drops, never to rank recall. *)
+val retention_rank : now:float -> fact -> float
+
 val default_lambda : float
 val default_alpha : float
 val default_truth_lambda : float

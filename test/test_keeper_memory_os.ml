@@ -1024,6 +1024,29 @@ let test_policy_truth_age_not_reset_by_access () =
     (Policy.score_fact ~now stale_but_frequently_recalled < Policy.score_fact ~now fresh)
 ;;
 
+(* RFC-0247 §-1 Step 1: structural retention rank (replaces score_fact on the cap). *)
+let test_retention_rank_structural () =
+  let now = 1_000_000.0 in
+  let base = fact_fixture ~now () in
+  let durable =
+    { base with Types.category = Types.Fact; Types.last_verified_at = Some (now -. 100.0) }
+  in
+  let ephemeral_fresh =
+    { base with Types.category = Types.Ephemeral; Types.last_verified_at = Some now }
+  in
+  (* Ephemeral is dropped first: durable outranks even a strictly-fresher ephemeral. *)
+  Alcotest.(check bool)
+    "durable outranks a fresher ephemeral" true
+    (Policy.retention_rank ~now durable > Policy.retention_rank ~now ephemeral_fresh);
+  (* Within a tier, the more-recently-verified fact is kept. *)
+  let durable_old =
+    { base with Types.category = Types.Fact; Types.last_verified_at = Some (now -. 1000.0) }
+  in
+  Alcotest.(check bool)
+    "newer durable outranks older durable" true
+    (Policy.retention_rank ~now durable > Policy.retention_rank ~now durable_old)
+;;
+
 (* RFC-0244: turn-seeded lexical relevance. *)
 
 let test_lexical_relevance_identity_for_empty_seed () =
@@ -2547,6 +2570,10 @@ let () =
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score ordering" `Quick test_policy_score
+        ; Alcotest.test_case
+            "retention rank is structural (Ephemeral dropped first)"
+            `Quick
+            test_retention_rank_structural
         ; Alcotest.test_case
             "truth age is not reset by access"
             `Quick

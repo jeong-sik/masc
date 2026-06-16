@@ -1,5 +1,5 @@
 (* Fusion — masc_fusion 키퍼 도구 핸들러 로직 (구현).
-   계약/문서: fusion_tool.mli, docs/rfc/RFC-0251 §4/§6 *)
+   계약/문서: fusion_tool.mli, docs/rfc/RFC-0252 §4/§6 *)
 
 let budget = Fusion_budget.create ()
 

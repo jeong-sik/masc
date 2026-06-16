@@ -1,5 +1,5 @@
 (* Fusion — 패널 fan-out (구현).
-   계약/문서: fusion_panel.mli, docs/rfc/RFC-0251 §7.1
+   계약/문서: fusion_panel.mli, docs/rfc/RFC-0252 §7.1
 
    OAS 범용 함수만 소비: Fusion_oas.build_agent → Async_agent.all(병렬).
    fusion 개념은 OAS에 노출하지 않는다. *)

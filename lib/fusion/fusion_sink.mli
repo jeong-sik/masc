@@ -7,7 +7,7 @@
 
     v1: keeper chat lane만. board post(meta_json 전역 증거)는 Phase 3b.
 
-    설계 SSOT: docs/rfc/RFC-0251-fusion-panel-judge-deliberation.md §8 *)
+    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §8 *)
 
 (** 심의 트랜스크립트를 키퍼 chat lane에 기록한다.
 

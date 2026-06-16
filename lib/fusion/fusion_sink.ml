@@ -1,5 +1,5 @@
 (* Fusion — 심의 결과 가시화 (구현).
-   계약/문서: fusion_sink.mli, docs/rfc/RFC-0251 §8 *)
+   계약/문서: fusion_sink.mli, docs/rfc/RFC-0252 §8 *)
 
 let render_decision (d : Fusion_types.judge_decision) : string =
   match d with

@@ -318,7 +318,7 @@ let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~nam
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-(* RFC-0251 — masc_fusion out-of-band panel+judge deliberation.  The
+(* RFC-0252 — masc_fusion out-of-band panel+judge deliberation.  The
    gate -> fiber fork -> orchestrator logic lives in [Fusion_tool.handle];
    this handler only gathers the keeper context (base_path, name, a fresh
    run_id, wall-clock) and loads the [fusion] policy from runtime.toml.

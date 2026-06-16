@@ -1157,7 +1157,7 @@ let internal_descriptors : t list =
       ~input_schema:passthrough_object_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_ide_annotate
-    (* ── fusion deliberation (RFC-0251) ───────────────────────── *)
+    (* ── fusion deliberation (RFC-0252) ───────────────────────── *)
   ; in_process_descriptor
       ~id:"masc.fusion.deliberate"
       ~name:"masc_fusion"

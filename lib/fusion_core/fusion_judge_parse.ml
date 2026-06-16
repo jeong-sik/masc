@@ -1,5 +1,5 @@
 (* Fusion — 심판 LLM-facing JSON → judge_synthesis (구현).
-   계약/문서: fusion_judge_parse.mli, docs/rfc/RFC-0251 §7.2 *)
+   계약/문서: fusion_judge_parse.mli, docs/rfc/RFC-0252 §7.2 *)
 
 let ( let* ) = Result.bind
 

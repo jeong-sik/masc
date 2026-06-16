@@ -2027,7 +2027,7 @@ let make_review_request () : Task.Anti_rationalization.review_request =
   { task_title = "Fix login bug";
     task_description = "desc";
     completion_notes = "notes";
-    agent_name = "dreamer";
+    agent_name = "alice";
     task_id = "test-task-1" }
 
 let make_review_result

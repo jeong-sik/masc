@@ -123,7 +123,7 @@ Inspect the paired audit JSONL (v0.9.5+):
 sb compaction list
 
 # Filter by keeper, show orphan rows (Start without Complete)
-sb compaction list --keeper dreamer --orphans-only
+sb compaction list --keeper alice --orphans-only
 
 # Manually trigger retention sweep
 sb compaction list --prune
@@ -131,7 +131,7 @@ sb compaction list --prune
 
 Output format (one line per paired row):
 ```
-[2026-04-16T15:45:02Z] dreamer             proactive  c1234567-dreamer-0 → 54000 → 27000 (Δ27000) phase=proactive(85%)
+[2026-04-16T15:45:02Z] alice             proactive  c1234567-alice-0 → 54000 → 27000 (Δ27000) phase=proactive(85%)
 ```
 
 Orphans are labelled explicitly (`ORPHAN_START` / `ORPHAN_COMPLETE`)

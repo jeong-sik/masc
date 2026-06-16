@@ -67,7 +67,7 @@ The prior audit `docs/tla-audit/state-fsm-gap-2026-04-13.md` covers **KeeperStat
 
 `specs/keeper-state-machine/KeeperContextLifecycle.cfg`:
 ```
-CONSTANTS: Keepers={dreamer,coder}, MaxTurns=3, MaxTokens=4, CompactTarget=2, MaxMessages=3, MaxFailures=3
+CONSTANTS: Keepers={alice,bob}, MaxTurns=3, MaxTokens=4, CompactTarget=2, MaxMessages=3, MaxFailures=3
 INVARIANTS: TypeOK ContextIsolation ResumeIdentity TurnMonotonicity CompactionPairIntegrity CheckpointConsistency BudgetAfterCompaction
 PROPERTIES: CompactionProgress EventualTurnCompletion AllKeepersTerminate
 ```

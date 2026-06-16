@@ -7,7 +7,7 @@ import {
 
 function validResponse(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    agent: 'dreamer',
+    agent: 'alice',
     period: { from: '2026-04-17T00:00:00Z', to: '2026-04-17T04:00:00Z' },
     events: [
       {
@@ -36,7 +36,7 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
 describe('parseAgentTimelineResponse', () => {
   it('accepts a well-formed response', () => {
     const out = parseAgentTimelineResponse(validResponse())
-    expect(out.agent).toBe('dreamer')
+    expect(out.agent).toBe('alice')
     expect(out.events).toHaveLength(2)
     expect(out.summary.tool_calls).toBe(7)
   })

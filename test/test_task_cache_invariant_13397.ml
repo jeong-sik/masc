@@ -150,7 +150,7 @@ let test_with_fresh_active_calls_continuation () =
     let called = ref false in
     let result =
       TCI.with_fresh_task_status config
-        ~agent_name:"keeper-coder-agent"
+        ~agent_name:"keeper-bob-agent"
         ~task_id:"task-050"
         ~module_name:"test.broadcast"
         (fun _status -> called := true; `proceed)

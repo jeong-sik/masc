@@ -172,37 +172,76 @@ let aggregate (edges : edge list) : association list =
 
 (* ---------- Spreading activation ---------- *)
 
+(* RFC-0246 §2.7: the associative organ is one feature behind one knob. [alpha]
+   drives BOTH whether edges are written ([writes_enabled] — no consumer means no
+   accumulation, so the edge store never grows on a fleet that has activation off)
+   and how strongly recalled neighbours boost a fact. Default 0.0 = the whole
+   organ is dark: no edge IO on either side, recall byte-identical to RFC-0244.
+   The env reader accepts only positive floats, so a non-positive value can never
+   enable it. *)
+let default_activation_alpha = 0.0
+
+let activation_alpha () =
+  Keeper_memory_bank_env.memory_env_float_logged
+    "MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA"
+    ~default:default_activation_alpha
+;;
+
+let writes_enabled () = activation_alpha () > 0.0
+
+(* How much a relation discounts its pull in activation. [Relates] is the
+   weakest/noisiest signal (mere co-occurrence), so it enters recall at a heavy
+   discount (RFC-0246 §2.7); an [Unknown] relation — a legacy/forward label with
+   no arm — carries no weight, so an unrecognized relation can never drive recall.
+   Exhaustive: a new relation arm must choose its discount here at compile time. *)
+let relation_weight = function
+  | Relates -> 0.3
+  | Unknown _ -> 0.0
+;;
+
 let activation_boosts ~alpha ~associations ~(base : (string * float) list) =
   if alpha <= 0.0
   then []
   else (
     let base_tbl = Hashtbl.create (List.length base * 2 + 1) in
     List.iter (fun (k, s) -> Hashtbl.replace base_tbl k s) base;
-    (* Undirected neighbour index: each association lends both directions. *)
-    let nbr : (string, (string * float) list) Hashtbl.t = Hashtbl.create 256 in
-    let add a b w =
+    (* Undirected neighbour index: each association lends both directions, with
+       its co-occurrence count [w] and its relation discount [rw] carried so the
+       boost weights neighbours by relation strength. A zero-weight relation
+       ([Unknown]) is dropped entirely, so it neither pulls nor dilutes. *)
+    let nbr : (string, (string * float * float) list) Hashtbl.t = Hashtbl.create 256 in
+    let add a b w rw =
       let cur = match Hashtbl.find_opt nbr a with Some l -> l | None -> [] in
-      Hashtbl.replace nbr a ((b, w) :: cur)
+      Hashtbl.replace nbr a ((b, w, rw) :: cur)
     in
     List.iter
       (fun a ->
-         let w = float_of_int a.weight in
-         add a.a_src a.a_dst w;
-         add a.a_dst a.a_src w)
+         let rw = relation_weight a.a_relation in
+         if rw > 0.0
+         then (
+           let w = float_of_int a.weight in
+           (* Both directions: canonical edges are stored once ([src] < [dst]) and
+              [Relates] is undirected, so this makes the neighbour index symmetric
+              without double-counting. A future DIRECTED relation must not add both
+              directions here — it would land WITH its own producer and handling. *)
+           add a.a_src a.a_dst w rw;
+           add a.a_dst a.a_src w rw))
       associations;
     List.filter_map
       (fun (k, _base_score) ->
          match Hashtbl.find_opt nbr k with
          | None -> None
          | Some neighbours ->
-           (* Weighted average over neighbours that are themselves recalled, so a
-              fact linked to strongly-scored facts is lifted in proportion to the
-              association strength; absent neighbours contribute nothing. *)
+           (* boost = alpha * Σ(rw·w·base_n) / Σ(w) over recalled neighbours: the
+              co-occurrence-normalized pull, scaled per neighbour by the relation
+              discount. With one Relates neighbour this is alpha·0.3·base_n, so
+              co-occurrence enters recall at the RFC's intended discount rather
+              than undiscounted. Absent neighbours contribute nothing. *)
            let num, den =
              List.fold_left
-               (fun (num, den) (n, w) ->
+               (fun (num, den) (n, w, rw) ->
                   match Hashtbl.find_opt base_tbl n with
-                  | Some base_n -> num +. (w *. base_n), den +. w
+                  | Some base_n -> num +. (rw *. w *. base_n), den +. w
                   | None -> num, den)
                (0.0, 0.0)
                neighbours

@@ -79,7 +79,13 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
       threshold;
     paused_meta
   | Error pause_err ->
-    Keeper_registry.wakeup ~base_path:config.base_path meta.name;
+    (* RFC-0246 P2: this is the no-progress pause-fallback wake. If pause sync
+       failed we used to wake the keeper as a recovery stimulus — but at this
+       point the keeper is already latched in a no-progress loop, so re-waking
+       just reruns the same empty turn (pause-fail -> wake -> no-progress ->
+       pause-fail). Pass [~bypass_tombstone:false] so a latched keeper stays
+       blocked instead of self-waking forever; an operator can force-resume. *)
+    Keeper_registry.wakeup ~bypass_tombstone:false ~base_path:config.base_path meta.name;
     Log.Keeper.error
       "%s: no_progress loop pause sync failed: %s; recovery stimulus queued \
        instead (streak=%d threshold=%d)"

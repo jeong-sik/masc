@@ -343,10 +343,30 @@ let record_spawn_slot_denied ~keeper_name ~surface reason =
   Spawn_slots.record_denied ~keeper_name ~surface reason
 ;;
 
-let wakeup ~base_path name =
+let wakeup ?(bypass_tombstone = true) ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   (* tla-lint: allow-mutation: fiber signal — public wakeup API for a single keeper *)
-  | Some entry -> Atomic.set entry.fiber_wakeup true
+  | Some entry ->
+    if bypass_tombstone then
+      Atomic.set entry.fiber_wakeup true
+    else begin
+      (* RFC-0246 P2: suppress an automatic (non-operator) wake of a keeper
+         latched in a no-progress loop, so a no-progress self-wake cannot run
+         the same empty turn forever. Operator-direct callers pass
+         [~bypass_tombstone:true] (the default) to override. The detector is
+         the single source of truth for latching. *)
+      (match Keeper_wake_tombstone.decide ~origin:Keeper_wake_tombstone.Heartbeat ~keeper_name:name with
+       | Wake_allowed -> Atomic.set entry.fiber_wakeup true
+       | Suppressed reason ->
+         let label = Keeper_wake_tombstone.suppression_label reason in
+         Otel_metric_store.inc_counter
+           "masc_keeper_wake_suppressed_total"
+           ~labels:[ ("keeper", name); ("reason", label) ]
+           ();
+         Log.Keeper.info
+           "RFC-0246 non-operator wake suppressed keeper=%s reason=%s (no-progress loop latched)"
+           name label)
+    end
   | None -> ()
 ;;
 

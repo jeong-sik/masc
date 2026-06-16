@@ -340,25 +340,13 @@ let assemble_hooks
                   (* Memory OS recall — bounded advisory block rendered from
                      persisted facts/episodes (read side; the write side is
                      the librarian wired in #20897). Opt-in via
-                     MASC_KEEPER_MEMORY_OS_RECALL. *)
-                  let recall_seed =
-                    (* RFC-0244: the current turn's user text seeds lexical
-                       reranking. Mirrors the [last_user_text] fold in
-                       [compute_tool_surface]; "" (no user turn) tokenizes to the
-                       empty set, so recall falls back to the seedless ranking. *)
-                    List.fold_left
-                      (fun acc (m : Agent_sdk.Types.message) ->
-                         match m.role with
-                         | Agent_sdk.Types.User -> Agent_sdk.Types.text_of_content m.content
-                         | _ -> acc)
-                      ""
-                      messages
-                  in
+                     MASC_KEEPER_MEMORY_OS_RECALL. RFC-0247 removed the lexical
+                     seed: recall now orders by structural recency, so the
+                     current-turn text no longer reranks the recalled facts. *)
                   match
                     Keeper_memory_os_recall.render_if_enabled
                       ~keeper_id:meta.name
                       ~now:(Time_compat.now ())
-                      ~seed:recall_seed
                       ()
                   with
                   | None -> ctx

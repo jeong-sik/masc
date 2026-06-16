@@ -1405,94 +1405,6 @@ let test_recall_omits_marker_for_fresh_fact () =
             (contains "ago — verify]" block))))
 ;;
 
-(* RFC-0244: a seed reranks recall — the lexically matching fact is lifted above a
-   higher-base-confidence fact it would otherwise lose to. *)
-let test_render_context_seed_reranks_selection () =
-  with_recall_env "true" (fun () ->
-    with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
-        let keeper_id = "rfc0244-rerank-keeper" in
-        let now = 1_000_000.0 in
-        (* [fact_a] has the higher base confidence, so it wins the seedless
-           ranking; [fact_b] is lower base but fully covers the seed, so the
-           lexical boost must lift it above [fact_a]. *)
-        let fact_a =
-          { (fact_fixture ~now ()) with
-            Types.claim = "alpha bravo charlie unrelated"
-          ; Types.confidence = 0.90
-          }
-        in
-        let fact_b =
-          { (fact_fixture ~now ()) with
-            Types.claim = "delta echo foxtrot golf"
-          ; Types.confidence = 0.80
-          }
-        in
-        let episode =
-          { Types.trace_id = "trace-rerank"
-          ; Types.generation = 1
-          ; Types.episode_summary = "rerank fixture"
-          ; Types.claims = [ fact_a; fact_b ]
-          ; Types.open_items = []
-          ; Types.constraints = []
-          ; Types.preserved_tool_refs = []
-          ; Types.source_turn_range = Some (1, 2)
-          ; Types.created_at = now
-          ; Types.valid_until = None
-          ; Types.terminal_marker = None
-          ; Types.schema_version = Types.schema_version
-          }
-        in
-        Memory_io.append_episode_bundle ~keeper_id episode;
-        let seedless = Recall.render_context ~keeper_id ~now ~max_facts:1 () in
-        let seeded =
-          Recall.render_context ~keeper_id ~now ~max_facts:1 ~seed:"delta echo foxtrot" ()
-        in
-        Alcotest.(check bool)
-          "seedless keeps the higher-confidence fact"
-          true
-          (contains "alpha bravo charlie" seedless
-           && not (contains "delta echo foxtrot" seedless));
-        Alcotest.(check bool)
-          "seed lifts the lexically matching fact above it"
-          true
-          (contains "delta echo foxtrot" seeded
-           && not (contains "alpha bravo charlie" seeded)))))
-;;
-
-(* RFC-0244: an empty seed is byte-identical to the seedless path (no behavior
-   change when there is no turn text). *)
-let test_render_context_empty_seed_matches_seedless () =
-  with_recall_env "true" (fun () ->
-    with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
-        let keeper_id = "rfc0244-empty-seed-keeper" in
-        let now = 1_000_000.0 in
-        let fact =
-          { (fact_fixture ~now ()) with Types.claim = "deploy pipeline rollback note" }
-        in
-        let episode =
-          { Types.trace_id = "trace-empty-seed"
-          ; Types.generation = 1
-          ; Types.episode_summary = "empty seed fixture"
-          ; Types.claims = [ fact ]
-          ; Types.open_items = []
-          ; Types.constraints = []
-          ; Types.preserved_tool_refs = []
-          ; Types.source_turn_range = Some (1, 2)
-          ; Types.created_at = now
-          ; Types.valid_until = None
-          ; Types.terminal_marker = None
-          ; Types.schema_version = Types.schema_version
-          }
-        in
-        Memory_io.append_episode_bundle ~keeper_id episode;
-        Alcotest.(check string)
-          "empty seed is byte-identical to seedless"
-          (Recall.render_context ~keeper_id ~now ())
-          (Recall.render_context ~keeper_id ~now ~seed:"" ()))))
-;;
-
 let test_recall_filters_expired_episodes () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -2417,67 +2329,16 @@ let test_edges_writes_enabled_tracks_alpha () =
     Alcotest.(check bool) "negative alpha: writes stay disabled" false (Edges.writes_enabled ()))
 ;;
 
-(* With activation disabled (alpha = 0, the default), recall is byte-identical
-   whether or not an edge store exists alongside the facts. *)
-let test_recall_activation_disabled_byte_identical () =
-  with_env activation_alpha_env "" (fun () ->
-    with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _ ->
-        let now = 1_000_000.0 in
-        let facts =
-          [ { (fact_fixture ~now ()) with Types.claim = "alpha one"; Types.confidence = 0.9 }
-          ; { (fact_fixture ~now ()) with Types.claim = "beta two"; Types.confidence = 0.8 }
-          ]
-        in
-        List.iter (Memory_io.append_fact ~keeper_id:"k") facts;
-        let before = Recall.render_context ~keeper_id:"k" ~now ~max_episodes:0 () in
-        Alcotest.(check bool) "precondition: recall is non-empty" true (String.length before > 0);
-        (* Add an edge store; with alpha = 0 it must not change the rendering. *)
-        Memory_io.append_edges
-          ~keeper_id:"k"
-          (Edges.co_occurrence_edges (mk_episode ~created_at:now [ "alpha one"; "beta two" ]));
-        let after = Recall.render_context ~keeper_id:"k" ~now ~max_episodes:0 () in
-        Alcotest.(check string) "alpha=0 ignores the edge store" before after)))
-;;
-
-(* With activation enabled, a low-base fact linked to a strongly-recalled fact is
-   lifted above an unlinked fact that outranks it on base score alone. *)
-let test_recall_activation_lifts_linked_fact () =
-  with_prompt_registry (fun () ->
-    with_temp_keepers_dir (fun _ ->
-      let now = 1_000_000.0 in
-      (* [a] scores highest (seed match + high confidence); [c] outranks [b] on
-         confidence alone, so without activation the top two are [a] and [c]. *)
-      let a = { (fact_fixture ~now ()) with Types.claim = "distinctive topic"; Types.confidence = 0.95 } in
-      let b = { (fact_fixture ~now ()) with Types.claim = "beta"; Types.confidence = 0.50 } in
-      let c = { (fact_fixture ~now ()) with Types.claim = "gamma"; Types.confidence = 0.60 } in
-      List.iter (Memory_io.append_fact ~keeper_id:"k") [ a; b; c ];
-      (* Link [a] and [b] so activation can carry [a]'s score to [b]. *)
-      Memory_io.append_edges
-        ~keeper_id:"k"
-        (Edges.co_occurrence_edges (mk_episode ~created_at:now [ "distinctive topic"; "beta" ]));
-      let render alpha =
-        with_env activation_alpha_env alpha (fun () ->
-          Recall.render_context ~keeper_id:"k" ~now ~max_facts:2 ~max_episodes:0 ~seed:"distinctive" ())
-      in
-      let disabled = render "" in
-      Alcotest.(check bool)
-        "disabled: unlinked higher-base gamma is in top-2"
-        true
-        (contains "gamma" disabled);
-      Alcotest.(check bool)
-        "disabled: linked lower-base beta is crowded out"
-        false
-        (contains "beta" disabled);
-      (* A realistic alpha (same order of magnitude as the RFC default 0.5, not a
-         contrived 50x), discounted by relation_weight(Relates)=0.3, still lifts
-         the linked fact because its neighbour [a] is strongly recalled. *)
-      let enabled = render "3.0" in
-      Alcotest.(check bool)
-        "enabled: linked beta is lifted into top-2"
-        true
-        (contains "beta" enabled)))
-;;
+(* RFC-0247 (purge): the recall-integration activation tests
+   [test_recall_activation_disabled_byte_identical] and
+   [test_recall_activation_lifts_linked_fact] were removed. They asserted that the
+   spreading-activation boost reranked recall (alpha lifting a linked low-base fact
+   above a higher-base unlinked one). Recall no longer reranks by any number — it
+   orders by the structural truth anchor — so there is no activation order to test
+   at the recall boundary. The edge-module math itself is still covered by
+   [test_activation_boosts_lifts_linked] and [test_edges_writes_enabled_tracks_alpha]
+   above; the [Keeper_memory_os_edges] association graph survives as a brain
+   structure, just not as a recall reranker. *)
 
 let test_consolidator_rejects_corrupt_source_store () =
   with_temp_keepers_dir (fun _keepers_dir ->
@@ -2659,14 +2520,6 @@ let () =
             `Quick
             test_recall_omits_marker_for_fresh_fact
         ; Alcotest.test_case
-            "seed reranks recall selection (RFC-0244)"
-            `Quick
-            test_render_context_seed_reranks_selection
-        ; Alcotest.test_case
-            "empty seed matches seedless (RFC-0244)"
-            `Quick
-            test_render_context_empty_seed_matches_seedless
-        ; Alcotest.test_case
             "expired episodes are omitted"
             `Quick
             test_recall_filters_expired_episodes
@@ -2771,14 +2624,6 @@ let () =
             "edge writes gated by alpha (P2a-3)"
             `Quick
             test_edges_writes_enabled_tracks_alpha
-        ; Alcotest.test_case
-            "recall byte-identical when activation disabled (P2a-2)"
-            `Quick
-            test_recall_activation_disabled_byte_identical
-        ; Alcotest.test_case
-            "recall activation lifts linked fact (P2a-2)"
-            `Quick
-            test_recall_activation_lifts_linked_fact
         ] )
     ]
 ;;

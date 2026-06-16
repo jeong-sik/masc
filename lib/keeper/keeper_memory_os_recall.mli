@@ -9,12 +9,12 @@ val render_context
   -> now:float
   -> ?max_facts:int
   -> ?max_episodes:int
-  -> ?seed:string
   -> unit
   -> string
-(** [?seed] (RFC-0244) is the current-turn text. When present, facts are reranked
-    by deterministic lexical relevance to it; when absent, the output is identical
-    to the pre-RFC-0244 recency/score ranking. *)
+(** Facts are ordered by the structural truth anchor ([last_verified_at] else
+    [first_seen]), most-recently-verified first. RFC-0247 removed the composite
+    score, the lexical seed-rerank, and spreading-activation reranking: recall
+    ordering is structural, never a learned number. *)
 
 val enabled : unit -> bool
 (** Kill-switch flag [MASC_KEEPER_MEMORY_OS_RECALL] (default [true]).
@@ -24,10 +24,8 @@ val enabled : unit -> bool
 val render_if_enabled
   :  keeper_id:string
   -> now:float
-  -> ?seed:string
   -> unit
   -> string option
-(** [render_if_enabled ~keeper_id ~now ?seed ()] is [Some block] when the
+(** [render_if_enabled ~keeper_id ~now ()] is [Some block] when the
     flag is on and the store yields advisory content, [None] otherwise.
-    [?seed] (RFC-0244) is the current-turn text used for lexical reranking.
     Intended for the [extra_system_context] assembly site. *)

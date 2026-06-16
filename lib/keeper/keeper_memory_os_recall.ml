@@ -104,9 +104,11 @@ let staleness_marker ~now (fact : fact) =
     | None -> Printf.sprintf " [stale: unverified, seen %s ago — verify]" age_text)
 ;;
 
-(* RFC-0251: the keeper is shown structure (category, turn, staleness), not a
-   fabricated worth. The confidence/score annotation is removed — recall neither
-   assigns nor displays value. *)
+(* RFC-0247 (purge): the recall line carries the fact's *structure* — category
+   (a typed decision), provenance turn, and the worded staleness marker — but no
+   number. The prior line printed [confidence=%.2f score=%.3f]; both were score
+   machinery. The reader (an LLM) judges relevance and freshness from the claim
+   text and the staleness marker, not from a rank the producer can't justify. *)
 let render_fact ~now fact =
   let source = fact.source in
   Printf.sprintf
@@ -188,79 +190,53 @@ let render_recall_context ~fact_lines ~episode_lines =
    librarian write path upsert-by-claim, the store no longer accumulates fresh
    duplicates; this read-time dedup remains as defense-in-depth for legacy rows
    written before the upsert landed. *)
-let dedup_by_claim scored =
+let dedup_by_claim facts =
   let seen = Hashtbl.create 32 in
   List.filter
-    (fun (_score, fact) ->
+    (fun fact ->
       let key = normalize_claim fact.claim in
       if Hashtbl.mem seen key then false else (Hashtbl.add seen key (); true))
-    scored
+    facts
 ;;
 
-(* RFC-0251: filter to current, then order candidates by deterministic seed
-   overlap (lexical relevance) — not by a worth score. The [(relevance, fact)]
-   pair is retained so the spreading-activation step can add neighbour
-   association weight before the value is dropped. With an empty seed every fact
-   has relevance 1.0, so [stable_sort] leaves them in store (recency) order. *)
-let rank_by_relevance ~now ?(seed_tokens = []) facts =
+(* RFC-0247 (purge): the truth anchor — [last_verified_at] when present, else
+   [first_seen]. Used as the structural recall order (most-recently-verified
+   first) and matches the anchor [retention_rank] and [staleness_marker] use, so
+   "kept", "ranked", and "marked stale" all read the same timestamp. *)
+let truth_anchor (fact : fact) =
+  match fact.last_verified_at with
+  | Some ts -> ts
+  | None -> fact.first_seen
+;;
+
+(* Filter to current, order by structural recency (the truth anchor), and dedup.
+   RFC-0247 replaced the composite [score_fact] order with this single typed
+   timestamp: recall ordering is structural, never a learned number. The prior
+   pipeline also ran spreading-activation reranking ([activate]) and lexical
+   seed-rerank ([seed_tokens]); both added a numeric boost to decide order and
+   were removed in the purge. The association edge store survives as a brain
+   structure ([Keeper_memory_os_edges]) but no longer reranks recall. *)
+let facts_recency_ranked ~now facts =
   facts
   |> List.filter (fact_is_current ~now)
-  |> List.map (fun fact ->
-    Keeper_memory_os_policy.lexical_relevance ~seed_tokens fact, fact)
-  |> List.stable_sort (fun (a, _) (b, _) -> compare b a)
+  |> List.sort (fun a b -> compare (truth_anchor b) (truth_anchor a))
   |> dedup_by_claim
 ;;
 
-let relevant_facts ~now ?(seed_tokens = []) facts =
-  rank_by_relevance ~now ~seed_tokens facts |> List.map snd
-;;
-
-(* Re-order the [(relevance, fact)] list by adding each fact's
-   spreading-activation boost (RFC-0247) to its relevance. With [alpha] <= 0 (or
-   no associations) this is the identity, preserving the relevance order. The
-   boost is an association weight (structure), not a worth score. *)
-let activate ~alpha ~associations scored =
-  if alpha <= 0.0
-  then scored
-  else (
-    let base = List.map (fun (s, fact) -> normalize_claim fact.claim, s) scored in
-    let boosts = Keeper_memory_os_edges.activation_boosts ~alpha ~associations ~base in
-    let boost_tbl = Hashtbl.create (List.length boosts * 2 + 1) in
-    List.iter (fun (k, b) -> Hashtbl.replace boost_tbl k b) boosts;
-    scored
-    |> List.map (fun (s, fact) ->
-      let boost =
-        match Hashtbl.find_opt boost_tbl (normalize_claim fact.claim) with
-        | Some b -> b
-        | None -> 0.0
-      in
-      s +. boost, fact)
-    |> List.sort (fun (a, _) (b, _) -> compare b a))
-;;
-
-let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = []) () =
+let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
-  (* RFC-0247 §2.7 (P2a-2): read associations only when activation is enabled, so
-     the default (alpha = 0) path does no extra IO and stays byte-identical. *)
-  let alpha = Keeper_memory_os_edges.activation_alpha () in
-  let associations =
-    if alpha <= 0.0 then [] else Keeper_memory_os_io.read_associations ~keeper_id
-  in
   let facts =
     (* RFC-0239 Q4: read up to the bounded recall window (the retention sweep
-       caps the store to this many facts), so ordering selects from the whole
-       window rather than only the most recent [fact_tail_scan].
-       RFC-0244 / RFC-0251: [seed_tokens] (current turn) orders by lexical
-       relevance; an empty seed leaves facts in store (recency) order. No worth
-       score participates. RFC-0247: spreading activation then lifts facts linked
-       to the recalled set (identity when alpha = 0). *)
+       caps the store to this many facts), so recency ranking selects from the
+       whole store rather than only the most recent [fact_tail_scan].
+       RFC-0247: order by the structural truth anchor (most-recently-verified
+       first); the composite score, lexical seed-rerank, and spreading-activation
+       reranking were all removed in the purge. *)
     Keeper_memory_os_io.read_facts_tail
       ~keeper_id
       ~n:(max fact_tail_scan Keeper_memory_os_io.fact_recall_window)
-    |> rank_by_relevance ~now ~seed_tokens
-    |> activate ~alpha ~associations
-    |> List.map snd
+    |> facts_recency_ranked ~now
     |> take max_facts
   in
   (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own, with
@@ -275,7 +251,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
       Keeper_memory_os_io.read_facts_tail
         ~keeper_id:shared_store_id
         ~n:Keeper_memory_os_io.fact_recall_window
-      |> relevant_facts ~now ~seed_tokens
+      |> facts_recency_ranked ~now
       |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
       |> take default_max_shared_facts
   in
@@ -306,15 +282,9 @@ let render_context
       ~now
       ?(max_facts = default_max_facts)
       ?(max_episodes = default_max_episodes)
-      ?seed
       ()
   =
-  let seed_tokens =
-    match seed with
-    | None -> []
-    | Some s -> Keeper_memory_os_policy.tokenize s
-  in
-  try render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ~seed_tokens () with
+  try render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
@@ -332,11 +302,11 @@ let enabled () =
     ~default:true
 ;;
 
-let render_if_enabled ~keeper_id ~now ?seed () =
+let render_if_enabled ~keeper_id ~now () =
   if not (enabled ())
   then None
   else (
-    match String.trim (render_context ~keeper_id ~now ?seed ()) with
+    match String.trim (render_context ~keeper_id ~now ()) with
     | "" -> None
     | block -> Some block)
 ;;

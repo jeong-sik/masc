@@ -198,22 +198,6 @@ let scored_facts ~now ?(seed_tokens = []) facts =
   score_facts_ranked ~now ~seed_tokens facts |> List.map snd
 ;;
 
-(* RFC-0246 §2.7 (P2a-2): spreading-activation strength. 0.0 = disabled — recall
-   is byte-identical to RFC-0244 (no association IO, no re-rank). A positive
-   [alpha] lets a recalled fact gain [alpha] times the association-weighted
-   average of its recalled neighbours' base scores, so a low-lexical fact linked
-   to strongly-recalled facts can surface. Env override for experimentation;
-   default off like the consolidator/GC organs until tuned on real edges. The
-   env reader accepts only positive floats, so a non-positive value can never
-   silently enable it. *)
-let default_activation_alpha = 0.0
-
-let activation_alpha () =
-  Keeper_memory_bank_env.memory_env_float_logged
-    "MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA"
-    ~default:default_activation_alpha
-;;
-
 (* Re-rank [scored] by adding each fact's spreading-activation boost. With
    [alpha] <= 0 (or no associations) this is the identity, preserving the exact
    RFC-0244 order and values. *)
@@ -241,7 +225,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
   let max_episodes = max 0 max_episodes in
   (* RFC-0246 §2.7 (P2a-2): read associations only when activation is enabled, so
      the default (alpha = 0) path does no extra IO and stays byte-identical. *)
-  let alpha = activation_alpha () in
+  let alpha = Keeper_memory_os_edges.activation_alpha () in
   let associations =
     if alpha <= 0.0 then [] else Keeper_memory_os_io.read_associations ~keeper_id
   in

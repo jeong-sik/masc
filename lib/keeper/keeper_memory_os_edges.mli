@@ -62,14 +62,29 @@ val co_occurrence_edges : Keeper_memory_os_types.episode -> edge list
    (src, dst, relation). *)
 val aggregate : edge list -> association list
 
+(* RFC-0246 §2.7: the associative organ's single knob. [alpha] (env
+   MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA, default 0.0) drives both edge writes
+   ([writes_enabled]) and the recall boost; only a positive value enables it. *)
+val activation_alpha : unit -> float
+
+(* Whether the co-occurrence producer should write edges this turn. False at the
+   default [alpha] = 0, so a fleet with activation off accumulates no edges. *)
+val writes_enabled : unit -> bool
+
+(* Per-relation activation discount. [Relates] (co-occurrence) is the weakest
+   signal and enters recall heavily discounted; [Unknown] carries no weight. *)
+val relation_weight : relation -> float
+
 (* One-step spreading activation (RFC-0246 §2.7, P2a-2). Given each recalled
    fact's [base] score keyed by claim key, and the [associations] among facts,
-   return an additive boost per key: [alpha] times the association-weighted
-   average of the base scores of that key's neighbours that are themselves in
-   [base]. A key with no in-[base] neighbour receives no entry. With [alpha] <= 0
-   the result is empty (recall stays byte-identical). The boost is bounded by
-   [alpha] * (max neighbour base score), so the relative order of strongly-scored
-   facts is preserved while a low-lexical fact linked to recalled facts is lifted. *)
+   return an additive boost per key: [alpha] times the co-occurrence-normalized,
+   relation-discounted pull of the base scores of that key's neighbours that are
+   themselves in [base] — Σ(relation_weight·count·base_n)/Σ(count). A key with no
+   in-[base] neighbour (or only [Unknown]-relation neighbours) receives no entry.
+   With [alpha] <= 0 the result is empty (recall stays byte-identical). The boost
+   is bounded by [alpha] * (max relation_weight) * (max neighbour base score); it
+   is INTENDED to let a low-base fact linked to strongly-recalled facts overtake
+   an unlinked higher-base fact, so it does not preserve the base order. *)
 val activation_boosts
   :  alpha:float
   -> associations:association list

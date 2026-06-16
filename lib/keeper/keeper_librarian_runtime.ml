@@ -290,14 +290,19 @@ let extract_and_append_with_provider
      with
      | Error message -> Error ("memory os fact upsert failed: " ^ message)
      | Ok () ->
-       (* RFC-0246 §2.7: record the episode's co-occurrence associations. This
-          is enrichment for associative recall, not part of the fact contract,
-          so a failure here is logged and swallowed (Cancelled re-raised) after
-          the fact write has succeeded. *)
+       (* RFC-0246 §2.7: record the episode's co-occurrence associations — but
+          only when activation is enabled ([writes_enabled]). With the
+          default-off organ there is no consumer, so writing edges would accrue
+          unbounded disk cost on the fleet for nothing. This is enrichment for
+          associative recall, not part of the fact contract, so a failure here
+          is logged and swallowed (Cancelled re-raised) after the fact write has
+          succeeded. *)
        (try
-          Keeper_memory_os_io.append_edges
-            ~keeper_id
-            (Keeper_memory_os_edges.co_occurrence_edges episode)
+          if Keeper_memory_os_edges.writes_enabled ()
+          then
+            Keeper_memory_os_io.append_edges
+              ~keeper_id
+              (Keeper_memory_os_edges.co_occurrence_edges episode)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

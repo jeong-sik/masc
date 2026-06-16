@@ -325,7 +325,8 @@ same way as the core phases.
 | **P1a** | `lifecycle` closed sum + write-side `valid_until` producer (per-category default lifetime, now exhaustive) + wire `run_gc` into sweep | unit: TTL pass now reachable; GC demotes by lifecycle, never dedups-on-read; `normalize_claim` SSOT folded |
 | **P1b** | truth-recency verifier (entity-ref → Stale Entity_gone) | unit: entity-present ⇒ Live; entity-gone ⇒ Stale+capped; no entity-ref ⇒ never staled |
 | **P2a-1** | `relation` closed sum + `edge`/`association` types + `*.edges.jsonl` IO + the **co-occurrence `Relates` producer** wired at the librarian write path (§2.7) — write substrate only, no recall change | unit: codec round-trip incl. `Unknown` degrade; `n` distinct claims ⇒ `n*(n-1)/2` canonical edges; within-episode dedup; aggregate Hebbian weight; append→read IO round-trip — **DONE** |
-| **P2a-2** | spreading-activation recall (`α` flag `MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA`, default 0 = byte-identical to RFC-0244) consuming `read_associations`; one-step neighbour boost = `α` × association-weighted average of recalled neighbours' base scores, applied to the Tier-1 path only | unit: pure boost math (linked lifted, unlinked none, `α≤0` empty); `α=0` ⇒ rendered output byte-identical even with an edge store present (non-empty precondition); `α>0` lifts a linked low-base fact into top-2 above an unlinked higher-base fact — **DONE** |
+| **P2a-2** | spreading-activation recall (`α` flag `MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA`, default 0 = byte-identical to RFC-0244) consuming `read_associations`; one-step neighbour boost applied to the Tier-1 path only | unit: pure boost math (linked lifted, unlinked none, `α≤0` empty); `α=0` ⇒ rendered output byte-identical even with an edge store present (non-empty precondition); `α>0` lifts a linked low-base fact into top-2 above an unlinked higher-base fact — **DONE** |
+| **P2a-3** | adversarial-review hardening: (1) gate the WRITER behind the same `α` (`Edges.writes_enabled`), so a fleet with activation off accumulates **no** edges — the organ is one feature behind one knob, not an always-on writer with a dark reader; (2) restore the RFC relation discount — boost = `α` × Σ(`relation_weight`·count·base)/Σ(count), `relation_weight Relates=0.3`, `Unknown=0.0` (exhaustive), so co-occurrence enters discounted and an unrecognized relation never drives recall; (3) realistic-`α` gate test (3.0, not 50.0); (4) `.mli` order-preservation claim corrected | unit: `writes_enabled` tracks `α` sign; `Unknown` relation yields no boost; lift holds at `α=3.0` — **DONE** |
 | **P2b** | contradiction→Board surfacing; earned-promotion gate (§2.6); optional MMR-Jaccard re-rank (default-off) | unit: contradiction emits a Board post, not a store overwrite; promotion requires ≥N recalls by ≥M queries |
 
 **Producer-first taxonomy (P2a invariant).** The `relation` sum grows one arm at a
@@ -336,9 +337,11 @@ from the v2 design (diagnoses / derives / verifies) are **deliberately absent**:
 they would require an LLM classifier, which this RFC rejects. `Supersedes`
 (same-claim upsert in `merge_and_cap_facts`) and `Corroborates` (cross-keeper
 promotion in the consolidator) have real producers and are the next arms — added
-when wired, not speculatively. KNOWN LIMITATION: P2a-1 edges are append-only and
-unbounded (the §6 edge-explosion cap is deferred to a later slice with a measured
-trigger, disclosed in `keeper_memory_os_io.edges_path`, not silently capped).
+when wired, not speculatively. GROWTH BOUND (after P2a-3): edges are written only
+when `α>0` (`Edges.writes_enabled`), so a fleet with activation off accumulates
+nothing; within an opted-in fleet the per-keeper edge store is still append-only
+and the §6 out-degree cap / weight-floor / GC is deferred to a measured-trigger
+slice (disclosed in `keeper_memory_os_io.edges_path`, not silently capped).
 
 P0a is the binding constraint (it unblocks the production sleep cycle, #21244);
 P2a is the user's headline "brain" organ (the v2 memory-graph). Each phase is

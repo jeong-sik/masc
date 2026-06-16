@@ -2233,9 +2233,18 @@ let test_edges_io_roundtrip () =
 
 (* ---------- RFC-0246 §2.7 (P2a-2) spreading activation ---------- *)
 
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  (* Codebase convention: [Unix.putenv name ""] clears a var (no portable
+     [Unix.unsetenv]); the float env reader treats that as unset -> default. *)
+  Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value old ~default:"")) f
+;;
+
 (* A fact linked to a strongly-scored neighbour gains alpha times the
-   association-weighted average of its recalled neighbours' base scores; an
-   unlinked fact gains nothing; alpha <= 0 yields no boost at all. *)
+   relation-discounted, co-occurrence-normalized pull of its recalled
+   neighbours' base scores; an unlinked fact gains nothing; alpha <= 0 yields no
+   boost at all. *)
 let test_activation_boosts_lifts_linked () =
   let base = [ "hi", 1.0; "lo", 0.1; "solo", 0.2 ] in
   let assoc : Edges.association =
@@ -2249,11 +2258,12 @@ let test_activation_boosts_lifts_linked () =
   in
   let lookup k boosts = List.assoc_opt k boosts in
   let boosts = Edges.activation_boosts ~alpha:0.5 ~associations:[ assoc ] ~base in
+  (* boost = alpha * relation_weight(Relates) * base(neighbour) = 0.5 * 0.3 * b *)
   (match lookup "lo" boosts with
-   | Some b -> Alcotest.(check (float 1e-9)) "lo lifted by 0.5*base(hi)" 0.5 b
+   | Some b -> Alcotest.(check (float 1e-9)) "lo lifted by 0.5*0.3*base(hi)" 0.15 b
    | None -> Alcotest.fail "expected a boost for the linked low fact");
   (match lookup "hi" boosts with
-   | Some b -> Alcotest.(check (float 1e-9)) "hi lifted by 0.5*base(lo)" 0.05 b
+   | Some b -> Alcotest.(check (float 1e-9)) "hi lifted by 0.5*0.3*base(lo)" 0.015 b
    | None -> Alcotest.fail "expected a boost for hi (linked to lo)");
   Alcotest.(check (option (float 1e-9)))
     "unlinked solo gets no boost"
@@ -2262,18 +2272,27 @@ let test_activation_boosts_lifts_linked () =
   Alcotest.(check int)
     "alpha <= 0 yields no boosts"
     0
-    (List.length (Edges.activation_boosts ~alpha:0.0 ~associations:[ assoc ] ~base))
-;;
-
-let with_env name value f =
-  let old = Sys.getenv_opt name in
-  Unix.putenv name value;
-  (* Codebase convention: [Unix.putenv name ""] clears a var (no portable
-     [Unix.unsetenv]); the float env reader treats that as unset -> default. *)
-  Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value old ~default:"")) f
+    (List.length (Edges.activation_boosts ~alpha:0.0 ~associations:[ assoc ] ~base));
+  (* An Unknown-relation association carries no weight, so it lifts nothing. *)
+  let unknown_assoc = { assoc with Edges.a_relation = Edges.Unknown "diagnoses" } in
+  Alcotest.(check int)
+    "unknown-relation association yields no boost"
+    0
+    (List.length (Edges.activation_boosts ~alpha:0.5 ~associations:[ unknown_assoc ] ~base))
 ;;
 
 let activation_alpha_env = "MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA"
+
+(* The writer is gated by the same alpha as the reader: no consumer, no edge
+   accumulation. *)
+let test_edges_writes_enabled_tracks_alpha () =
+  with_env activation_alpha_env "" (fun () ->
+    Alcotest.(check bool) "default alpha=0: writes disabled" false (Edges.writes_enabled ()));
+  with_env activation_alpha_env "1.5" (fun () ->
+    Alcotest.(check bool) "alpha>0: writes enabled" true (Edges.writes_enabled ()));
+  with_env activation_alpha_env "-1.0" (fun () ->
+    Alcotest.(check bool) "negative alpha: writes stay disabled" false (Edges.writes_enabled ()))
+;;
 
 (* With activation disabled (alpha = 0, the default), recall is byte-identical
    whether or not an edge store exists alongside the facts. *)
@@ -2327,7 +2346,10 @@ let test_recall_activation_lifts_linked_fact () =
         "disabled: linked lower-base beta is crowded out"
         false
         (contains "beta" disabled);
-      let enabled = render "50.0" in
+      (* A realistic alpha (same order of magnitude as the RFC default 0.5, not a
+         contrived 50x), discounted by relation_weight(Relates)=0.3, still lifts
+         the linked fact because its neighbour [a] is strongly recalled. *)
+      let enabled = render "3.0" in
       Alcotest.(check bool)
         "enabled: linked beta is lifted into top-2"
         true
@@ -2577,6 +2599,10 @@ let () =
             "activation boosts lift linked facts (P2a-2)"
             `Quick
             test_activation_boosts_lifts_linked
+        ; Alcotest.test_case
+            "edge writes gated by alpha (P2a-3)"
+            `Quick
+            test_edges_writes_enabled_tracks_alpha
         ; Alcotest.test_case
             "recall byte-identical when activation disabled (P2a-2)"
             `Quick

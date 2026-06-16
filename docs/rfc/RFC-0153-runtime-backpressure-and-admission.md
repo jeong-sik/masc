@@ -1,9 +1,9 @@
 ---
 rfc: "0153"
 title: "Runtime Backpressure & Tier Admission"
-status: Implemented
+status: Active
 created: 2026-05-20
-updated: 2026-05-22
+updated: 2026-06-16
 author: vincent
 supersedes: []
 superseded_by: null
@@ -344,6 +344,30 @@ admission_wait_ms = 2000          # NEW (optional, default 2000)
 ```
 
 호출 site: `try_runtime` 의 candidate 진입 직전에 `with_admission` wrap. semaphore 못 얻으면 *다음 tier로 즉시 진행*.
+
+#### 4.2.4 Per-binding HTTP-round-trip gate — root design (supersedes §4.2.3 turn-level wrap)
+
+**Status note**: §4.2.1 의 tier-admission machinery (`Runtime_throttle` / `Runtime_client_capacity` / `Runtime_tier_admission`) 는 RFC-0206 (#19536) runtime rebirth 에서 `lib/runtime*` 전면 삭제와 함께 purge 됨. 본 sub-section 은 binding granularity 로 backpressure 를 재정초한다. frontmatter status 를 `Implemented` → `Active` 로 강등 (기술한 모듈 일부가 더 이상 존재하지 않음).
+
+**문제**: provider endpoint (예: 로컬 ollama, 동시 연결 수 제한 있음) 에 여러 keeper 가 동시에 라우팅될 때, in-flight HTTP 요청 수를 *사전* 제한하는 게이트가 없다. `keeper_binding_health` 는 실패 *후* cooldown (반응형 circuit-breaker) 일 뿐이고, `fd_accountant.ml` 의 `Provider_http` slot 은 단일 process-global FD-class 풀 (provider/model 키 없음) 이다. per-binding 사전 제한이 부재.
+
+**기각된 접근 (turn-level wrap)**: per-binding semaphore 를 `Runtime_agent.run` attempt 전체에 거는 방식. attempt 는 LLM 호출 + 로컬 tool/subprocess 실행을 포함하므로, provider HTTP 와 무관한 로컬 작업 동안에도 provider slot 을 점유 → provider HTTP capacity 와 keeper attempt lifetime 을 혼동.
+
+**채택 (root, R-a')**: slot 을 **provider HTTP round-trip 경계**에서 획득한다. OAS `Llm_provider.Llm_transport.t` (record of `complete_sync` / `complete_stream`) 를 masc 가 decorate 하여, 각 completion 호출 안에서 per-binding `Eio.Semaphore` slot 을 잡고 푼다.
+
+- **OAS 변경 없음**: `Llm_provider.Complete.make_http_transport` (complete.mli, @since 0.78.0) 가 이미 public. masc 는 이미 이 transport 를 만들어 `provider_resource_slot_transport` (Fd_accountant `Provider_http`) 로 decorate 중 (`runtime_agent.ml`). 새 per-binding decorator 를 같은 자리에 layering.
+- **경계법 준수**: OAS `provider_throttle.ml` 가 *"concurrency control is the responsibility of the downstream consumer; OAS-level slot queueing would create invisible backpressure the consumer cannot observe"* 로 명시. semaphore registry 는 masc 소유. key = `provider:model@base_url` (`Runtime_provider_binding.provider_health_key_of_config`, OAS-owned `Provider_config.t` identity field 로부터 masc-side 도출).
+- **타입**: `max_concurrent` 은 `int option`. `None` = per-binding cap 없음 (coarse global `Fd_accountant.Provider_http` 풀만 적용; "보호 없음" 이 아니라 "per-binding cap 없음"). `0`-as-marker permissive default (CLAUDE.md anti-pattern #2) 제거.
+- **backpressure**: slot-wait 가 `wait_timeout_sec` (default·clamp 는 env) 초과 시 typed `Keeper_internal_error.Capacity_backpressure { source = Runtime_slot }` 로 표면화 → `keeper_binding_health` backoff 발화.
+
+**slot lifetime 의미론**:
+- **per-HTTP-attempt** — `Complete.complete_with_retry` 의 retry 루프가 transport 호출 *바깥*에 있으므로, decorator 가 transport record 안에 있으면 매 attempt 가 slot 을 재획득한다. backoff 중인 retry 는 slot 을 점유하지 않아 다른 keeper 를 굶기지 않음 (turn-level wrap 대비 개선).
+- **streaming** — `complete_stream` 은 SSE 전 구간을 읽고 반환하므로 slot 도 stream 전체 동안 유지. 열린 streaming connection 은 실제로 endpoint capacity 를 점유하므로 물리적으로 옳다. 단 `wait_timeout_sec` 은 worst-case stream 길이를 고려해 sizing.
+- **취소-안전** — `Eio.Switch.on_release` 로 release. 단, acquire 가 `with_timeout` race 로 permit 을 받은 채 timeout 으로 표면화되는 edge (Eio semaphore 의 cancel-loses-race) 에서 permit 누수를 막기 위해, permit 획득 직후 동기 플래그를 set 하고 release 를 플래그+Switch 에 결박한다 (match arm 결과값에 의존하지 않음).
+
+**multi-domain 주의**: masc 는 `Eio.Executor_pool` (`domain_count = max 2 (recommended-1)`) 로 multi-domain. `Eio.Semaphore` 의 cross-domain 거동은 **기존에 같은 경계에서 수용된 `Fd_accountant.Provider_http` semaphore 와 동일** (동일 transport record 의 layered decorator 라 항상 같은 domain 에서 실행). 따라서 본 변경은 새 cross-domain 리스크를 도입하지 않으며, cross-domain 강제 enforcement 가 측정상 필요해지면 두 게이트를 함께 마이그레이션한다 (별도 작업).
+
+**direct-caller 통합**: keeper turn 트래픽 (`Runtime_agent.run` → pipeline) 외에, `Complete.complete` 를 `?transport` 없이 직접 호출하는 masc 사이트 — Memory OS librarian (`keeper_librarian_runtime.ml`, 매 post-turn 발화), memory LLM summary (`keeper_memory_llm_summary.ml`), runtime probe/bench (`tool_local_runtime_verify.ml` / `tool_local_runtime_bench.ml`) — 도 같은 endpoint 를 친다. librarian 은 자체 unkeyed `Eio.Semaphore.make 1` (전역 1-slot) 을 들고 있어 산포된 동시성 게이트가 됨. 이들 direct caller 를 per-binding 게이트된 경로로 라우팅하고 librarian 의 make-1 을 registry 로 흡수한다 (산포 제거; librarian 은 본 RFC 가 겨냥한 provider-concurrency 과부하의 문서화된 원인).
 
 ### 4.3 Phase C — Adaptive Client-Side Throttling (Google SRE §21)
 

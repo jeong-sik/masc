@@ -283,7 +283,7 @@ let test_librarian_prompt_renders () =
       (contains "[turn=0 role=user] Please remember the project constraint." prompt);
     match
       ( index_of "[turn=0 role=user] Please remember the project constraint." prompt
-      , index_of "Respond with ONLY the JSON object." prompt )
+      , index_of "Respond with ONLY the JSON object" prompt )
     with
     | Some conversation_at, Some respond_at ->
       Alcotest.(check bool)

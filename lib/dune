@@ -192,7 +192,12 @@
   meta_cognition_digest
   keeper_memory_os_gc
   keeper_memory_os_io
-  keeper_memory_os_recall)
+  keeper_memory_os_recall
+  masc_memory_types
+  masc_memory_outbox
+  masc_domain_worker
+  masc_memory_recall
+  masc_memory_consolidator)
  (libraries
   mcp_protocol
   mcp_protocol.eio

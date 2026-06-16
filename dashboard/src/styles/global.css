@@ -33,6 +33,7 @@
 @import "./tools.css";
 @import "./ui.css";
 @import "./responsive.css";
+@import "./settings-surface.css";
 @import "./v2-shell.css";
 @import "./v2-theme.css";
 @import "./v2-logs.css";

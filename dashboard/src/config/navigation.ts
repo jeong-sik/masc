@@ -10,6 +10,7 @@ export type DashboardSurfaceIcon =
   | 'lab'
   | 'code'
   | 'logs'
+  | 'settings'
 
 type SurfaceSectionId =
   // monitoring
@@ -143,6 +144,14 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     defaultTab: 'code',
     defaultParams: { section: 'ide-shell' },
     tabs: ['code'],
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    icon: 'settings',
+    description: 'Operator console for keeper-v2 configuration',
+    defaultTab: 'settings',
+    tabs: ['settings'],
   },
   {
     id: 'logs',
@@ -307,6 +316,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'ide-shell' },
     },
   ],
+  settings: [],
 }
 
 function validSectionIds(tab: NonHomeTabId): SurfaceSectionId[] {
@@ -318,7 +328,7 @@ export function defaultParamsForTab(tabId: TabId): Record<string, string> {
 }
 
 export function sectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
-  if (tabId === 'overview' || tabId === 'logs') return []
+  if (tabId === 'overview' || tabId === 'logs' || tabId === 'settings') return []
   return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId]
 }
 
@@ -384,7 +394,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   const next = { ...params }
   const legacyObservatoryRanges = new Set(['1h', '6h', '24h', '7d'])
 
-  if (tabId === 'overview' || tabId === 'logs') {
+  if (tabId === 'overview' || tabId === 'logs' || tabId === 'settings') {
     delete next.section
     delete next.surface
     return next

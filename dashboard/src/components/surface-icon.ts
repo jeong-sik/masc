@@ -8,6 +8,7 @@ import {
   Home,
   Plug,
   ScrollText,
+  Settings,
 } from 'lucide-preact'
 import type { DashboardSurfaceIcon } from '../config/navigation'
 
@@ -35,5 +36,7 @@ export function SurfaceIcon({ icon, size = 16 }: SurfaceIconProps) {
       return html`<${Code2} ...${props} />`
     case 'logs':
       return html`<${ScrollText} ...${props} />`
+    case 'settings':
+      return html`<${Settings} ...${props} />`
   }
 }

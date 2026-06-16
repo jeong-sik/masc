@@ -104,6 +104,7 @@ type post = {
   votes_up : int;
   votes_down : int;
   reply_count : int;
+  pinned : bool;
   hearth : string option;
   thread_id : string option;
 }

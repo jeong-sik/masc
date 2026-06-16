@@ -169,6 +169,7 @@ export interface BoardPost {
   author: string
   author_identity?: BoardActorIdentity | null
   post_kind?: 'direct' | 'automation' | 'system'
+  pinned?: boolean
   classification_reason?: string | null
   title: string
   body: string

@@ -610,6 +610,10 @@ let set_thread_id ~post_id ~thread_id =
   match backend () with
   | Jsonl store -> Board.set_thread_id store ~post_id ~thread_id
 
+let set_pinned ~post_id ~pinned =
+  match backend () with
+  | Jsonl store -> Board.set_pinned store ~post_id ~pinned
+
 let delete_post ~post_id =
   match backend () with
   | Jsonl store -> Board.delete_post store ~post_id

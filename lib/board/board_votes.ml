@@ -575,6 +575,32 @@ let set_thread_id store ~post_id ~thread_id : (unit, board_error) Result.t =
             Ok ()
       )
 
+(** Set a post's [pinned] flag (operator-curated pin, owner-gated at the HTTP
+    boundary). Persists immediately via [append_post] (like [create_post])
+    rather than only marking dirty for the flusher: pinning is a low-frequency
+    operator action that must survive a restart in the flush window, unlike
+    [vote] (high-frequency, flusher-batched) or [set_thread_id] (in-memory). *)
+let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+      let result =
+        with_lock store (fun () ->
+          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          | None -> Error (Post_not_found post_id)
+          | Some post ->
+              let now = Time_compat.now () in
+              let updated = { post with pinned; updated_at = now } in
+              Hashtbl.replace store.posts (Post_id.to_string pid) updated;
+              invalidate_post_caches store;
+              Ok updated)
+      in
+      match result with
+      | Error e -> Error e
+      | Ok updated ->
+          with_persist_lock store (fun () -> append_post updated);
+          Ok ()
+
 let posts_jsonl_snapshot store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter (fun _ (pst : post) ->
@@ -978,6 +1004,7 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("votes_down", `Int p.votes_down);
     ("score", `Int (p.votes_up - p.votes_down));
     ("reply_count", `Int p.reply_count);
+    ("pinned", `Bool p.pinned);
   ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
     @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> [])
     @ (match p.meta_json with Some meta -> [("meta", meta)] | None -> []))

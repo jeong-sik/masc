@@ -156,6 +156,15 @@ val set_thread_id :
     Conversation linker to bridge a Board post to a
     persisted Conversation thread. *)
 
+val set_pinned :
+  store ->
+  post_id:string ->
+  pinned:bool ->
+  (unit, board_error) Result.t
+(** Sets the post's [pinned] flag (operator-curated pin).
+    Marks the post dirty so the change persists to
+    posts.jsonl and survives restart. *)
+
 val delete_post :
   store -> post_id:string -> (unit, board_error) Result.t
 (** Removes the post and every comment under it from the

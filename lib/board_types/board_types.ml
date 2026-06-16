@@ -158,6 +158,7 @@ type post = {
   votes_up: int;
   votes_down: int;
   reply_count: int;
+  pinned: bool;              (* Operator-curated pin (owner-gated): floats the post to the top of its category *)
   hearth: string option;     (* Topic category within the Board *)
   thread_id: string option;  (* Linked Conversation thread *)
 }

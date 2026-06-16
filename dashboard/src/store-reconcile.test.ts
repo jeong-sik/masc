@@ -82,6 +82,14 @@ describe('reconcileBoardPosts', () => {
     expect(result[0]).toBe(updated)
   })
 
+  it('detects change when pinned differs without updated_at changing', () => {
+    const post = makePost({ pinned: false })
+    const prev = [post]
+    const updated = { ...post, pinned: true }
+    const result = reconcileBoardPosts(prev, [updated])
+    expect(result[0]).toBe(updated)
+  })
+
   it('detects change when array length differs (new post added)', () => {
     const existing = makePost({ id: 'p-1' })
     const prev = [existing]

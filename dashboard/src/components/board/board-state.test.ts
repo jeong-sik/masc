@@ -240,6 +240,19 @@ describe('splitVisiblePosts', () => {
     expect(result.groups).toEqual([])
     expect(result.totalDirect).toBe(0)
   })
+
+  it('floats pinned posts to the top of their category, preserving order otherwise', () => {
+    boardHiddenCategories.value = new Set()
+    const posts = [
+      makePost({ id: 'a' }),
+      makePost({ id: 'b', pinned: true }),
+      makePost({ id: 'c' }),
+    ]
+    const result = splitVisiblePosts(posts)
+    const group = result.groups.find(g => g.posts.length === 3)
+    expect(group).toBeDefined()
+    expect(group!.posts.map(p => p.id)).toEqual(['b', 'a', 'c'])
+  })
 })
 
 describe('filterHint', () => {

@@ -18,7 +18,7 @@ import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
 import { votePost } from '../../api/board'
-import { deleteBoardPost } from '../../api/actions'
+import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
 import { MessageWorkspaceTimeline } from './message-workspace-timeline'
@@ -695,6 +695,19 @@ function PostCard({ post }: { post: BoardPost }) {
     }
   }
 
+  const handlePin = async (event: Event) => {
+    event.stopPropagation()
+    const next = !post.pinned
+    try {
+      await setBoardPostPinned(post.id, next)
+      showToast(next ? '게시글을 고정했습니다' : '고정을 해제했습니다', 'success')
+      refreshBoard()
+    } catch (err) {
+      console.warn(`[board] pin toggle failed (post=${post.id})`, err instanceof Error ? err.message : err)
+      showToast('고정 변경에 실패했습니다', 'error')
+    }
+  }
+
   const openPost = () => navigateToPost(post.id)
   const handlePostKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
@@ -780,6 +793,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-2xs text-[var(--color-fg-muted)]">댓글 ${post.comment_count}</span>
 
           <!-- Category badges -->
+          ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
           ${post.flair ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
           ${qualityPercent !== null ? html`
@@ -793,11 +807,21 @@ function PostCard({ post }: { post: BoardPost }) {
           ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
           <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
 
-          <!-- Delete button — reveal on row hover via opacity utilities -->
+          <!-- Pin toggle (owner-gated server-side) + delete — reveal on row hover -->
+          <${ActionButton}
+            variant="ghost"
+            size="sm"
+            class="ml-auto !py-0.5 opacity-0 group-hover:opacity-100"
+            onClick=${handlePin}
+            pressed=${post.pinned ?? false}
+            ariaLabel=${post.pinned ? `고정 해제: ${post.id}` : `고정: ${post.id}`}
+          >
+            ${post.pinned ? '고정 해제' : '고정'}
+          <//>
           <${ActionButton}
             variant="danger"
             size="sm"
-            class="ml-auto !py-0.5 opacity-0 group-hover:opacity-100"
+            class="!py-0.5 opacity-0 group-hover:opacity-100"
             onClick=${handleDelete}
             disabled=${isDeleting}
             ariaBusy=${isDeleting}

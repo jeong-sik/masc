@@ -288,7 +288,7 @@ let test_extract_reply_raw_on_non_json () =
   check string "raw body returned" "not json at all" result
 
 let test_extract_turn_stats_present () =
-  let body = {|{"model_used":"agent_llm_a-opus","duration_ms":1500,"total_tokens":500}|} in
+  let body = {|{"model_used":"claude-opus","duration_ms":1500,"total_tokens":500}|} in
   match Gate_keeper_backend.extract_turn_stats body with
   | Some { Gate_protocol.model_used; duration_ms; tokens_used } ->
       check string "model redacted to runtime lane" "runtime" model_used;
@@ -297,7 +297,7 @@ let test_extract_turn_stats_present () =
   | None -> fail "expected Some stats"
 
 let test_extract_turn_stats_ignores_model_only_payload () =
-  let body = {|{"model_used":"agent_llm_a-opus"}|} in
+  let body = {|{"model_used":"claude-opus"}|} in
   let result = Gate_keeper_backend.extract_turn_stats body in
   check bool "model-only fields are not stats" true (result = None)
 

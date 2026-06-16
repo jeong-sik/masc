@@ -75,11 +75,11 @@ val runtime_mcp_policy_for_provider :
 (** Normalise a runtime MCP policy for a specific provider, injecting the
     keeper's agent name when applicable. *)
 
-val cli_tool_a_cannot_carry_keeper_bound_runtime_mcp :
+val codex_cli_cannot_carry_keeper_bound_runtime_mcp :
   keeper_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   bool
-(** [true] when the provider is cli_tool_a and the policy includes tools that
-    require a bound-actor (keeper-scoped) runtime MCP — cli_tool_a cannot
+(** [true] when the provider is codex_cli and the policy includes tools that
+    require a bound-actor (keeper-scoped) runtime MCP — codex_cli cannot
     carry these across its CLI subprocess boundary. *)

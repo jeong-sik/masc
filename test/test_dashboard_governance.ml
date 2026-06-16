@@ -969,7 +969,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
             ~tool_name:"tool_edit_file"
             ~input:(`Assoc [ ("path", `String "/tmp/danger") ])
             ~risk_level:Lib.Keeper_approval_queue.Critical
-            ~selected_model:"provider_d:gpt-5.4"
+            ~selected_model:"openai:gpt-5.4"
             ()
         in
         decision_result := Some decision);

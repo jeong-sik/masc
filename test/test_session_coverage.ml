@@ -21,13 +21,13 @@ module Types = Masc_domain
 
 let test_session_type () =
   let s : Session.session = {
-    agent_name = "agent_llm_a-test";
+    agent_name = "claude-test";
     connected_at = 1704067200.0;
     last_activity = 1704067200.0;
     is_listening = false;
     message_queue = Eio.Stream.create 1000;
   } in
-  check string "agent_name" "agent_llm_a-test" s.agent_name;
+  check string "agent_name" "claude-test" s.agent_name;
   check (float 0.1) "connected_at" 1704067200.0 s.connected_at;
   check bool "is_listening" false s.is_listening
 
@@ -36,7 +36,7 @@ let test_session_with_messages () =
   let sq = Eio.Stream.create 1000 in
   Eio.Stream.add sq msg;
   let s : Session.session = {
-    agent_name = "provider_f";
+    agent_name = "gemini";
     connected_at = 1704067200.0;
     last_activity = 1704067250.0;
     is_listening = true;

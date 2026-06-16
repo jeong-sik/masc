@@ -180,7 +180,7 @@ let execution_smoke_fixture_json () =
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
                 ("koreanName", `String "local-beta");
-                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-a"));
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-claude"));
                 ("recent_output_preview", `String "secondary runtime is quiet; watching queue depth before escalation");
                 ("recent_event", `String "secondary runtime probe");
               ];
@@ -261,7 +261,7 @@ let execution_smoke_fixture_json () =
                 ("continuity", `String "Gen 2 · Turns 84 · Goals 2");
                 ("lifecycle", `String "handoff-imminent");
                 ("related_session_id", `Null);
-                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-a"));
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-claude"));
                 ("emoji", `String "🤖");
                 ("koreanName", `String "dm-keeper");
                 ("recent_input_preview", `String "Player asked to continue the next scene without breaking continuity");

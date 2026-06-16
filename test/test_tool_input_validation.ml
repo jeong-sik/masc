@@ -1147,7 +1147,7 @@ let test_validation_telemetry_rejects_retired_transition_aliases () =
            ~args:
              (`Assoc
                 [
-                  "agent_name", `String "agent_code-local-admin";
+                  "agent_name", `String "codex-local-admin";
                   "task_id", `String "task-239";
                   "action", `String "claim";
                   "to", `String "claimed";
@@ -1206,7 +1206,7 @@ let test_registered_hook_transition_rejects_to_and_note () =
   let args =
     `Assoc
       [
-        ("agent_name", `String "agent_code-local-admin");
+        ("agent_name", `String "codex-local-admin");
         ("task_id", `String "task-239");
         ("action", `String "claim");
         ("to", `String "claimed");
@@ -1254,8 +1254,8 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
   let args =
     `Assoc
       [
-        ("_agent_name", `String "agent_code-local-admin");
-        ("agent_name", `String "agent_code-local-admin");
+        ("_agent_name", `String "codex-local-admin");
+        ("agent_name", `String "codex-local-admin");
         ("task_id", `String "task-216");
         ("action", `String "done");
       ]
@@ -1270,7 +1270,7 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
   Alcotest.(check bool) "_agent_name removed before schema validation" true
     (Yojson.Safe.Util.member "_agent_name" forwarded = `Null);
-  Alcotest.(check string) "agent_name preserved" "agent_code-local-admin"
+  Alcotest.(check string) "agent_name preserved" "codex-local-admin"
     (assoc_string "agent_name" forwarded)
 
 let test_registered_hook_goal_list_strips_blank_optional_enums () =
@@ -1407,7 +1407,7 @@ let test_high_risk_tool_contract_rejection_corpus () =
       , "masc_transition"
       , masc_transition_schema
       , `Assoc
-          [ "agent_name", `String "agent_code-local-admin"
+          [ "agent_name", `String "codex-local-admin"
           ; "task_id", `String "task-239"
           ; "action", `String "claim"
           ; "to", `String "claimed"

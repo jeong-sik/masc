@@ -158,8 +158,8 @@ let test_keeper_name_with_spaces () =
     (Workspace_resilience.Zombie.is_keeper_name "  keeper-test-agent  ")
 
 let test_keeper_name_regular_agent () =
-  check bool "agent_llm_a is not keeper" false
-    (Workspace_resilience.Zombie.is_keeper_name "agent_llm_a")
+  check bool "claude is not keeper" false
+    (Workspace_resilience.Zombie.is_keeper_name "claude")
 
 let test_keeper_name_partial_match () =
   check bool "keeper-only prefix not keeper" false
@@ -184,7 +184,7 @@ let test_zombie_for_agent_regular_600s () =
   (* 600s old regular agent: should be zombie (default threshold 300s) *)
   let ts = make_iso_seconds_ago 600.0 in
   check bool "600s old regular agent is zombie" true
-    (Workspace_resilience.Zombie.is_zombie_for_agent ~agent_name:"agent_llm_a" ts)
+    (Workspace_resilience.Zombie.is_zombie_for_agent ~agent_name:"claude" ts)
 
 let test_zombie_for_agent_keeper_600s () =
   (* 600s old keeper agent: should NOT be zombie (keeper threshold 3600s) *)

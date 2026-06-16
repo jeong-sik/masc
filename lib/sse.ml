@@ -856,7 +856,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
             the HTTP socket open until keep-alive timeout — operators
             saw "WS events stop arriving" with no error indication and
             had to manually refresh.  See plan
-            [planning/agent_llm_a-plans/me-workspace-yousleepwhen-masc-radiant-piglet.md]. *)
+            [planning/claude-plans/me-workspace-yousleepwhen-masc-radiant-piglet.md]. *)
          Transport_metrics.inc_broadcast_failure ~target:target_label ();
          Log.Server.warn
            "Broadcast skip: session %s stream full (%d/%d) — disconnecting"

@@ -2,8 +2,8 @@
     Extracted from [runtime_transport.ml] (godfile decomp). Two
     helpers:
 
-    - [cli_tool_a_can_auth_keeper_bound_runtime_mcp] — predicate that
-      decides whether the cli_tool_a transport can mint a per-keeper
+    - [codex_cli_can_auth_keeper_bound_runtime_mcp] — predicate that
+      decides whether the codex_cli transport can mint a per-keeper
       Authorization header for a bound-actor MCP policy.
 
     - [bridged_runtime_mcp_policy_for_agent] — the RFC-0058 §2.4
@@ -14,7 +14,7 @@
 module Authorization = Runtime_transport_authorization
 module Mcp_policy_helpers = Runtime_transport_mcp_policy_helpers
 
-let cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
+let codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
   Authorization.runtime_mcp_policy_uses_bound_actor_tools policy
   && Option.is_some (Authorization.per_keeper_authorization_header ~agent_name)
 ;;

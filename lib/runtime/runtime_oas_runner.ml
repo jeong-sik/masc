@@ -128,7 +128,7 @@ let runtime_mcp_policy_for_provider
   let agent_name = keeper_agent_name_opt keeper_name |> Option.value ~default:"" in
   Runtime_agent.runtime_mcp_policy_for_provider ~provider_cfg ~agent_name policy_opt
 
-let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
+let codex_cli_cannot_carry_keeper_bound_runtime_mcp
       ~(keeper_name : string)
       ~(provider_cfg : Llm_provider.Provider_config.t)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
@@ -146,7 +146,7 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
       when Option.is_some
              ((require_keeper_name_xlat ()).keeper_name_from_agent_name agent_name) ->
       (not
-         (Runtime_agent.cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
+         (Runtime_agent.codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
       && List.exists
            Runtime_agent.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names

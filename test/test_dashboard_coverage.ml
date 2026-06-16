@@ -57,7 +57,7 @@ let test_section_empty () =
 let test_format_section_with_content () =
   let s : Dashboard.section = {
     title = "Agents";
-    content = ["[active] agent_llm_a"; "[busy] provider_f"];
+    content = ["[active] claude"; "[busy] gemini"];
     empty_msg = "(no agents)";
   } in
   let result = Dashboard.format_section s in
@@ -65,7 +65,7 @@ let test_format_section_with_content () =
     (try let _ = Str.search_forward (Str.regexp_string "Agents") result 0 in true
      with Not_found -> false);
   check bool "contains content" true
-    (try let _ = Str.search_forward (Str.regexp_string "agent_llm_a") result 0 in true
+    (try let _ = Str.search_forward (Str.regexp_string "claude") result 0 in true
      with Not_found -> false)
 
 let test_format_section_empty_shows_msg () =

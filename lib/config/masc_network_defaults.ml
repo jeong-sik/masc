@@ -29,7 +29,7 @@ let openai_chat_completions_path = "/v1/chat/completions"
     When [base_url] already carries a version segment (e.g. [/v1], [/v4]),
     the request path should not repeat it — the concatenation [base_url ^
     request_path] must produce exactly one version prefix.  This constant
-    matches what the OAS SDK's own [api_provider_d.ml] uses internally. *)
+    matches what the OAS SDK's own [api_openai.ml] uses internally. *)
 let chat_completions_path = "/chat/completions"
 
 (** OpenAI-compatible model listing path.  See
@@ -73,7 +73,7 @@ let is_ollama_url url =
     in
     loop 0
 
-(** Transport prefix marking a CLI-backed endpoint (e.g. [cli:agent_code]).
+(** Transport prefix marking a CLI-backed endpoint (e.g. [cli:codex]).
     Used by capacity classifiers to distinguish CLI endpoints from HTTP
     ones. *)
 let cli_transport_prefix = "cli:"

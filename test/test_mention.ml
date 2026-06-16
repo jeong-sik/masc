@@ -14,9 +14,9 @@ let mention_mode_equal a b =
 let test_stateless_basic () =
   let cases = [
     ("@ollama", Mention.Stateless "ollama");
-    ("@provider_f", Mention.Stateless "provider_f");
-    ("@agent_llm_a", Mention.Stateless "agent_llm_a");
-    ("@agent_code", Mention.Stateless "agent_code");
+    ("@gemini", Mention.Stateless "gemini");
+    ("@claude", Mention.Stateless "claude");
+    ("@codex", Mention.Stateless "codex");
     ("Hello @ollama what is 2+2?", Mention.Stateless "ollama");
     ("@glm 안녕하세요", Mention.Stateless "glm");
   ] in
@@ -46,9 +46,9 @@ let test_stateless_with_underscore () =
 let test_stateful_nickname () =
   let cases = [
     ("@ollama-gentle-gecko", Mention.Stateful "ollama-gentle-gecko");
-    ("@provider_f-swift-tiger", Mention.Stateful "provider_f-swift-tiger");
-    ("@agent_llm_a-bold-shark", Mention.Stateful "agent_llm_a-bold-shark");
-    ("Hey @agent_code-keen-otter can you help?", Mention.Stateful "agent_code-keen-otter");
+    ("@gemini-swift-tiger", Mention.Stateful "gemini-swift-tiger");
+    ("@claude-bold-shark", Mention.Stateful "claude-bold-shark");
+    ("Hey @codex-keen-otter can you help?", Mention.Stateful "codex-keen-otter");
   ] in
   List.iter (fun (content, expected) ->
     let result = Mention.parse content in
@@ -63,8 +63,8 @@ let test_stateful_nickname () =
 let test_broadcast_basic () =
   let cases = [
     ("@@ollama", Mention.Broadcast "ollama");
-    ("@@provider_f", Mention.Broadcast "provider_f");
-    ("Hey @@agent_llm_a everyone respond!", Mention.Broadcast "agent_llm_a");
+    ("@@gemini", Mention.Broadcast "gemini");
+    ("Hey @@claude everyone respond!", Mention.Broadcast "claude");
     ("@@all 전체 공지입니다", Mention.Broadcast "all");
   ] in
   List.iter (fun (content, expected) ->
@@ -95,7 +95,7 @@ let test_no_mention () =
 
 let test_broadcast_priority () =
   (* @@agent should take priority over @agent *)
-  let content = "@@ollama @provider_f" in
+  let content = "@@ollama @gemini" in
   let result = Mention.parse content in
   if not (mention_mode_equal result (Mention.Broadcast "ollama")) then
     Alcotest.fail (Printf.sprintf
@@ -116,7 +116,7 @@ let test_stateful_priority () =
 let test_korean_message () =
   let cases = [
     ("@ollama 안녕하세요 질문있어요", Mention.Stateless "ollama");
-    ("@@provider_f 모두에게 공지", Mention.Broadcast "provider_f");
+    ("@@gemini 모두에게 공지", Mention.Broadcast "gemini");
   ] in
   List.iter (fun (content, expected) ->
     let result = Mention.parse content in
@@ -128,7 +128,7 @@ let test_korean_message () =
 
 let test_multiple_mentions () =
   (* First mention should be extracted *)
-  let content = "@ollama @provider_f @agent_llm_a" in
+  let content = "@ollama @gemini @claude" in
   let result = Mention.parse content in
   if not (mention_mode_equal result (Mention.Stateless "ollama")) then
     Alcotest.fail (Printf.sprintf
@@ -138,21 +138,21 @@ let test_multiple_mentions () =
 (* ===== Target Resolution Tests ===== *)
 
 let test_resolve_stateless () =
-  let available = ["ollama-gentle-gecko"; "ollama-bold-shark"; "provider_f-swift-tiger"] in
+  let available = ["ollama-gentle-gecko"; "ollama-bold-shark"; "gemini-swift-tiger"] in
   let targets = Mention.resolve_targets (Mention.Stateless "ollama") ~available_agents:available in
   match targets with
   | [first] when String.sub first 0 6 = "ollama" -> ()
   | _ -> Alcotest.fail "Should resolve to one ollama agent"
 
 let test_resolve_stateful () =
-  let available = ["ollama-gentle-gecko"; "ollama-bold-shark"; "provider_f-swift-tiger"] in
+  let available = ["ollama-gentle-gecko"; "ollama-bold-shark"; "gemini-swift-tiger"] in
   let targets = Mention.resolve_targets (Mention.Stateful "ollama-gentle-gecko") ~available_agents:available in
   match targets with
   | ["ollama-gentle-gecko"] -> ()
   | _ -> Alcotest.fail "Should resolve to exact match only"
 
 let test_resolve_broadcast () =
-  let available = ["ollama-gentle-gecko"; "ollama-bold-shark"; "provider_f-swift-tiger"] in
+  let available = ["ollama-gentle-gecko"; "ollama-bold-shark"; "gemini-swift-tiger"] in
   let targets = Mention.resolve_targets (Mention.Broadcast "ollama") ~available_agents:available in
   if List.length targets = 2 && List.for_all (fun n -> String.sub n 0 6 = "ollama") targets then
     ()
@@ -165,7 +165,7 @@ let test_agent_type_extraction () =
   let cases = [
     ("ollama", "ollama");
     ("ollama-gentle-gecko", "ollama");
-    ("provider_f-swift-tiger", "provider_f");
+    ("gemini-swift-tiger", "gemini");
     ("claude_v2", "claude_v2");  (* underscore stays *)
   ] in
   List.iter (fun (input, expected) ->
@@ -182,7 +182,7 @@ let test_extract_backward_compat () =
   let cases = [
     ("@ollama", Some "ollama");
     ("@ollama-gentle-gecko", Some "ollama-gentle-gecko");
-    ("@@provider_f", Some "provider_f");
+    ("@@gemini", Some "gemini");
     ("Hello world", None);
   ] in
   List.iter (fun (content, expected) ->

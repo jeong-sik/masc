@@ -8,7 +8,7 @@ include module type of Otel_metric_names
     carry structural facts and Otel_metric_store carries frequency.
 
     RFC-0058 §2.4 / Phase 5.4: renamed from
-    `masc_cli_tool_a_mcp_tool_omission_total` to keep provider identity
+    `masc_codex_cli_mcp_tool_omission_total` to keep provider identity
     out of the metric name; `provider` is now a label. *)
 
 (** #9520: total telemetry coverage gaps recorded. Labels:

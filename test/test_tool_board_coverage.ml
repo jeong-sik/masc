@@ -217,10 +217,10 @@ let test_board_actor_identity_keeps_non_keeper_agent () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let json = Server_utils.board_actor_identity_json "agent_code" in
+  let json = Server_utils.board_actor_identity_json "codex" in
   Alcotest.(check string) "kind" "agent" (json_member_string json "kind");
-  Alcotest.(check string) "id" "agent_code" (json_member_string json "id");
-  Alcotest.(check string) "key" "agent:agent_code" (json_member_string json "key");
+  Alcotest.(check string) "id" "codex" (json_member_string json "id");
+  Alcotest.(check string) "key" "agent:codex" (json_member_string json "key");
   Alcotest.(check string) "source" "raw_agent"
     (json_member_string json "source")
 
@@ -1981,7 +1981,7 @@ let () =
             Board_tool.set_agent_lookup_none ();
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
-              ("author", `String "agent_llm_a-agent")
+              ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
             Alcotest.(check string) "classified as direct" "direct"
@@ -1991,10 +1991,10 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Board_tool.set_agent_lookup (fun name -> name = "agent_llm_a-agent");
+            Board_tool.set_agent_lookup (fun name -> name = "claude-agent");
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
-              ("author", `String "agent_llm_a-agent")
+              ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
             Alcotest.(check string) "classified as automation" "automation"
@@ -2020,7 +2020,7 @@ let () =
             Board_tool.set_agent_lookup (fun _name -> true);
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
-              ("author", `String "agent_llm_a-agent");
+              ("author", `String "claude-agent");
               ("post_kind", `String "human")
             ]) in
             Alcotest.(check bool) "post rejected" false ok;

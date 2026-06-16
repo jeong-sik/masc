@@ -155,9 +155,9 @@ let create_process_env prog argv env stdin_fd stdout_fd stderr_fd =
   (** [Unix.create_process_env] does not accept a child working directory, and
       we no longer mutate the parent process CWD with [Sys.chdir].  The public
       [run_argv*] [?cwd] parameter is documented as ignored on the Unix
-      fallback path; on the Eio path [Eio.Process.spawn ~cwd] handles CWD
-      correctly in the child.  This removes the process-wide [Sys.chdir] race
-      documented in the adversarial audit (P0). *)
+      fallback path; on the Eio path the spawn helper handles CWD correctly in
+      the child via its [~cwd] argument.  This removes the process-wide
+      [Sys.chdir] race documented in the adversarial audit (P0). *)
   Unix.create_process_env prog (Array.of_list argv) env stdin_fd stdout_fd stderr_fd
 
 let output_for_status = Process_eio_stderr.output_for_status
@@ -445,7 +445,7 @@ let unix_status_of_eio_status = function
 
 (** Reap a child process deterministically.
 
-    [Eio.Process.spawn] registers the handle with a switch, but relying solely
+    The Eio spawn helper registers the handle with a switch, but relying solely
     on switch finalizers leaves a window where the child keeps running after a
     timeout/cancel.  This helper sends [SIGTERM], waits a short grace period,
     then escalates to [SIGKILL] and awaits the final status.  It is safe to call
@@ -491,6 +491,9 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
   Option.iter (fun r -> r := Timeout_origin.Command) phase_ref;
   Eio.Flow.close stdout_w;
   let status = ref None in
+  (* fun-protect-finally-ok: finalizer only closes pipe FDs and reaps an
+     already-spawned Eio.Process handle bound to [sw]; it does not acquire new
+     Eio resources or yield to the scheduler. *)
   Fun.protect
     ~finally:(fun () ->
       if Option.is_none !status then (
@@ -525,6 +528,9 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv s
   Eio.Flow.close stdout_w;
   Eio.Flow.close stderr_w;
   let status = ref None in
+  (* fun-protect-finally-ok: finalizer only closes pipe FDs and reaps an
+     already-spawned Eio.Process handle bound to [sw]; it does not acquire new
+     Eio resources or yield to the scheduler. *)
   Fun.protect
     ~finally:(fun () ->
       if Option.is_none !status then (
@@ -584,6 +590,9 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
       drain r buf ~on_chunk chunk
   in
   let status = ref None in
+  (* fun-protect-finally-ok: finalizer only closes pipe FDs and reaps an
+     already-spawned Eio.Process handle bound to [sw]; it does not acquire new
+     Eio resources or yield to the scheduler. *)
   Fun.protect
     ~finally:(fun () ->
       if Option.is_none !status then (

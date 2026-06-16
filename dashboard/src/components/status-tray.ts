@@ -95,20 +95,6 @@ interface DashboardStatusTrayProps {
 
 const TRAY_ORDER: StatusTrayKey[] = ['transport', 'fleet', 'activity', 'attention']
 
-const TONE_CLASS: Record<StatusTrayTone, string> = {
-  ok: 'border-[var(--color-status-ok)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]',
-  warn: 'border-[var(--color-status-warn)] bg-[var(--warn-soft)] text-[var(--color-status-warn)]',
-  err: 'border-[var(--color-status-err)] bg-[var(--bad-soft)] text-[var(--color-status-err)]',
-  muted: 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]',
-}
-
-const PANEL_TONE_CLASS: Record<StatusTrayTone, string> = {
-  ok: 'border-[var(--ok-30)]',
-  warn: 'border-[var(--warn-30)]',
-  err: 'border-[var(--bad-30)]',
-  muted: 'border-[var(--color-border-default)]',
-}
-
 const ITEM_META = {
   transport: { icon: Radio, title: 'Transport' },
   fleet: { icon: Users, title: 'Fleet' },
@@ -150,17 +136,6 @@ function countKeeperAttention(keeperInput: readonly Keeper[]): number {
   return keeperInput.filter(keeper => {
     if (keeper.needs_attention) return true
     if (hasExecutionAttentionEvidence(keeper)) return true
-    // Terminal/crashed lifecycle states. The previous version inspected
-    // `keeper.status` for `'crash' | 'dead' | 'zombie'`, but the
-    // backend `Keeper.status` emit (`patched_keeper_status` in
-    // `lib/server/server_dashboard_http_execution_surfaces.ml:424-432`)
-    // only ever produces `'offline' | 'busy' | 'active' | 'listening' | 'idle'`.
-    // None of those crashed-state tokens are emitted into the status
-    // slot — they belong to `Keeper.phase` (typed `KeeperPhase` union
-    // in `core.ts:879-892`), normalised by `toKeeperPhase` at the wire
-    // boundary. Comparing typed phase tokens here means crashed keepers
-    // actually get counted as attention rather than silently slipping
-    // past an axis-confused string match.
     return isKeeperCrashed(keeper)
   }).length
 }
@@ -324,7 +299,7 @@ function TrayButton({
   return html`
     <button
       type="button"
-      class=${`inline-flex h-9 shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-solid px-2.5 text-left shadow-[var(--shadow-1)] transition-colors hover:bg-[var(--color-bg-hover)] max-[520px]:gap-1.5 max-[520px]:px-2 ${TONE_CLASS[item.tone]} ${active ? 'ring-2 ring-[var(--select-20)]' : ''} ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
+      class=${`tray-button tone-${item.tone} ${active ? 'active' : ''} inline-flex h-9 shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-solid px-2.5 text-left shadow-[var(--shadow-1)] transition-colors hover:bg-[var(--color-bg-hover)] max-[520px]:gap-1.5 max-[520px]:px-2 ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
       title=${`${meta.title}: ${item.detail}`}
       aria-label=${`${meta.title}: ${item.value}. ${item.detail}`}
       aria-haspopup="dialog"
@@ -333,12 +308,12 @@ function TrayButton({
       data-testid=${`dashboard-status-tray-${item.key}`}
       onClick=${onClick}
     >
-      <span class="inline-flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
+      <span class="tray-button-icon inline-flex size-4 shrink-0 items-center justify-center" aria-hidden="true">
         <${Icon} size=${14} strokeWidth=${2} />
       </span>
       <span class="grid min-w-0 grid-cols-1">
-        <span class="font-mono text-3xs uppercase leading-none tracking-[var(--track-caps)] opacity-75 max-[520px]:sr-only">${item.label}</span>
-        <span class="max-w-24 truncate text-xs font-semibold leading-tight tracking-normal">${item.value}</span>
+        <span class="tray-button-label font-mono text-3xs uppercase leading-none tracking-[var(--track-caps)] opacity-75 max-[520px]:sr-only">${item.label}</span>
+        <span class="tray-button-value max-w-24 truncate text-xs font-semibold leading-tight tracking-normal">${item.value}</span>
       </span>
     </button>
   `
@@ -351,13 +326,13 @@ function JournalPreviewList({ entries }: { entries: readonly JournalEntry[] }) {
   return html`
     <ul class="m-0 grid list-none gap-1 p-0">
       ${entries.map(entry => html`
-        <li class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-          <div class="flex min-w-0 items-center gap-2">
-            <span class="min-w-0 truncate text-xs font-medium text-[var(--color-fg-secondary)]">${entry.agent || entry.author || 'system'}</span>
+        <li class="tray-journal-item min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+          <div class="tray-journal-meta flex min-w-0 items-center gap-2">
+            <span class="tray-journal-agent min-w-0 truncate text-xs font-medium text-[var(--color-fg-secondary)]">${entry.agent || entry.author || 'system'}</span>
             <span class="shrink-0 font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${entry.kind ?? 'system'}</span>
             <span class="ml-auto shrink-0 text-3xs text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${entry.timestamp} /></span>
           </div>
-          <div class="mt-1 truncate text-xs text-[var(--color-fg-muted)]">${clip(entry.preview ?? entry.narrativeText ?? entry.text, 120)}</div>
+          <div class="tray-journal-preview mt-1 truncate text-xs text-[var(--color-fg-muted)]">${clip(entry.preview ?? entry.narrativeText ?? entry.text, 120)}</div>
         </li>
       `)}
     </ul>
@@ -376,17 +351,17 @@ function PopoverContent({
     return html`
       <div class="grid gap-3">
         <div>
-          <div class="text-sm font-semibold text-[var(--color-fg-secondary)]">${item.value}</div>
-          <div class="mt-1 text-xs text-[var(--color-fg-muted)]">${item.detail}</div>
+          <div class="tray-popover-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${item.label}</div>
+          <div class="tray-popover-detail mt-0.5 text-sm font-semibold text-[var(--color-fg-secondary)]">${item.detail}</div>
         </div>
         <div class="grid grid-cols-2 gap-2">
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Reconnects</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.reconnectCount}</div>
+          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Reconnects</div>
+            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.reconnectCount}</div>
           </div>
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">WS deltas</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.wsEventCount60s}/60s</div>
+          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">WS deltas</div>
+            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.wsEventCount60s}/60s</div>
           </div>
         </div>
       </div>
@@ -396,20 +371,20 @@ function PopoverContent({
     return html`
       <div class="grid gap-3">
         <div class="grid grid-cols-3 gap-2">
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Fresh</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.freshKeepers}/${summary.counts.totalKeepers}</div>
+          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Fresh</div>
+            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.freshKeepers}/${summary.counts.totalKeepers}</div>
           </div>
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Stale</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.staleKeepers}</div>
+          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Stale</div>
+            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.staleKeepers}</div>
           </div>
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Attention</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.keeperAttention}</div>
+          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+            <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Attention</div>
+            <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.keeperAttention}</div>
           </div>
         </div>
-        <${RouteLink} tab="monitoring" class="inline-flex w-fit items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]">
+        <${RouteLink} tab="monitoring" class="tray-action-link inline-flex w-fit items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]">
           Open monitoring
         <//>
       </div>
@@ -419,7 +394,7 @@ function PopoverContent({
     return html`
       <div class="grid gap-3">
         <${JournalPreviewList} entries=${summary.latestJournalEntries} />
-        <${RouteLink} tab="logs" class="inline-flex w-fit items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]">
+        <${RouteLink} tab="logs" class="tray-action-link inline-flex w-fit items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]">
           Open logs
         <//>
       </div>
@@ -428,17 +403,17 @@ function PopoverContent({
   return html`
     <div class="grid gap-3">
       <div class="grid grid-cols-3 gap-2">
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-          <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Errors</div>
-          <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.unacknowledgedErrors}</div>
+        <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+          <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Errors</div>
+          <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.unacknowledgedErrors}</div>
         </div>
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-          <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keepers</div>
-          <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.keeperAttention}</div>
+        <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+          <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keepers</div>
+          <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.keeperAttention}</div>
         </div>
-        <div class="rounded-[var(--r-1)] border ${summary.counts.pendingVerificationTasks >= 3 ? 'border-[var(--warn-20)] bg-[var(--warn-10)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'} px-2 py-1.5">
-          <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : 'text-[var(--color-fg-muted)]'}">Verify</div>
-          <div class="mt-0.5 text-sm font-semibold tabular-nums ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : ''}">${summary.counts.pendingVerificationTasks}</div>
+        <div class="tray-stat ${summary.counts.pendingVerificationTasks >= 3 ? 'tone-warn' : ''} rounded-[var(--r-1)] border ${summary.counts.pendingVerificationTasks >= 3 ? 'border-[var(--warn-20)] bg-[var(--warn-10)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'} px-2 py-1.5">
+          <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : 'text-[var(--color-fg-muted)]'}">Verify</div>
+          <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : ''}">${summary.counts.pendingVerificationTasks}</div>
         </div>
       </div>
       ${summary.counts.unacknowledgedErrors > 0 ? html`
@@ -506,7 +481,7 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
   return html`
     <aside
       ref=${trayRef}
-      class=${`dashboard-status-tray fixed z-40 max-w-[calc(100vw-1.5rem)] ${sideRailOffset} max-[1100px]:left-2 max-[1100px]:right-2 max-[1100px]:max-w-none ${codeOffset}`}
+      class=${`v2-status-tray dashboard-status-tray fixed z-40 max-w-[calc(100vw-1.5rem)] ${sideRailOffset} max-[1100px]:left-2 max-[1100px]:right-2 max-[1100px]:max-w-none ${codeOffset}`}
       aria-label="Dashboard status tray"
       data-testid="dashboard-status-tray"
     >
@@ -516,16 +491,16 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
           data-testid="dashboard-status-tray-popover"
           role="dialog"
           aria-label=${`${activeItem.label} details`}
-          class=${`absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl ${PANEL_TONE_CLASS[activeItem.tone]} max-[520px]:w-full`}
+          class=${`tray-popover tone-${activeItem.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl max-[520px]:w-full`}
         >
-          <div class="mb-3 flex min-w-0 items-start justify-between gap-3">
+          <div class="tray-popover-head mb-3 flex min-w-0 items-start justify-between gap-3">
             <div class="min-w-0">
-              <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${activeItem.label}</div>
-              <div class="mt-0.5 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${activeItem.detail}</div>
+              <div class="tray-popover-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${activeItem.label}</div>
+              <div class="tray-popover-detail mt-0.5 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${activeItem.detail}</div>
             </div>
             <button
               type="button"
-              class=${`inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
+              class=${`tray-popover-close inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
               aria-label="Close status tray details"
               onClick=${() => { setActiveKey(null) }}
             >
@@ -536,7 +511,7 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
         </div>
       ` : null}
 
-      <div class="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-header-bg)] p-1 shadow-[var(--shadow-panel)] backdrop-blur-xl [scrollbar-width:none]">
+      <div class="v2-tray-bar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-header-bg)] p-1 shadow-[var(--shadow-panel)] backdrop-blur-xl [scrollbar-width:none]">
         ${TRAY_ORDER.map(key => html`
           <${TrayButton}
             item=${summary.items[key]}

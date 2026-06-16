@@ -287,7 +287,12 @@ module For_testing : sig
 end
 
 (** Set fiber_wakeup for a specific keeper. *)
-val wakeup : base_path:string -> string -> unit
+val wakeup : ?bypass_tombstone:bool -> base_path:string -> string -> unit
+(** [wakeup ~bypass_tombstone ~base_path name] signals the keeper's fiber. RFC-0246
+    P2: when [bypass_tombstone] is [false] (the default is [true], preserving
+    historical behaviour for operator/restart/resume callers), a keeper latched
+    in a no-progress loop is NOT woken — the no-progress self-wake loop cannot
+    restart. The no-progress pause-fallback path passes [~bypass_tombstone:false]. *)
 
 (** Set fiber_wakeup for all running keepers. *)
 val wakeup_all : ?base_path:string -> unit -> unit

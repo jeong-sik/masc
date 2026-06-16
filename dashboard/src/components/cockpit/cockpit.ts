@@ -81,7 +81,7 @@ const COCKPIT_DISCLOSURE_ITEMS: CognitiveDisclosureItem[] = [
     metric: `${COCKPIT_ENTRYPOINTS.length} routes`,
     defaultOpen: true,
     detail: html`
-      <span class="font-mono text-3xs text-ok">${COCKPIT_COVERED_ROUTES} covered</span>
+      <span class="font-mono text-3xs text-[var(--color-status-ok)]">${COCKPIT_COVERED_ROUTES} covered</span>
       <span class="mx-2 text-[var(--color-fg-disabled)]">/</span>
       <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${COCKPIT_BLOCKED_ROUTES} backend-blocked</span>
     `,
@@ -139,7 +139,7 @@ function routeCaption(entrypoint: CockpitEntrypoint): string {
 function coverageClass(coverage: CockpitEntrypoint['coverage']): string {
   switch (coverage) {
     case 'covered':
-      return 'border-ok/30 bg-ok/10 text-ok'
+      return 'border-[var(--ok-30)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
     case 'backend-blocked':
       return 'border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
   }
@@ -152,7 +152,7 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
 
   return html`
     <section
-      class="min-w-0 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      class="v2-cockpit-plane min-w-0 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-cockpit-plane=${plane}
       aria-label=${`${meta.label} cockpit routes`}
     >
@@ -167,7 +167,7 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
           </div>
         </div>
         <div class="flex shrink-0 flex-wrap justify-end gap-1.5 font-mono text-3xs">
-          <span class="rounded-[var(--r-0)] border border-ok/30 bg-ok/10 px-1.5 py-0.5 text-ok">${covered} covered</span>
+          <span class="rounded-[var(--r-0)] border border-[var(--ok-30)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${covered} covered</span>
           ${blocked > 0
             ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5 text-[var(--color-fg-muted)]">${blocked} blocked</span>`
             : null}
@@ -180,7 +180,7 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
             key=${`${entrypoint.mode}:${entrypoint.aliases[0]}`}
             tab=${entrypoint.target.tab}
             params=${entrypoint.target.params}
-            class="group flex min-h-24 min-w-0 flex-col justify-between gap-3 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-left no-underline transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)]"
+            class="v2-cockpit-route group flex min-h-24 min-w-0 flex-col justify-between gap-3 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-left no-underline transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)]"
             title=${routeCaption(entrypoint)}
             aria-label=${`Open ${displayLabel(entrypoint)} in ${routeCaption(entrypoint)}`}
           >
@@ -207,7 +207,7 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
 
 export function Cockpit() {
   return html`
-    <div class="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg-page)]">
+    <div class="v2-cockpit-surface flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg-page)]">
       <div class="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(18rem,26rem)_minmax(0,1fr)]">
         <aside class="min-h-70 border-b border-[var(--color-border-default)] bg-black xl:border-r xl:border-b-0">
           <${WorldVisualizer} />
@@ -215,7 +215,7 @@ export function Cockpit() {
 
         <main class="min-h-0 overflow-y-auto" data-testid="cockpit-command-map">
           <div class="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-5">
-            <section class="border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3">
+            <section class="v2-cockpit-header border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3">
               <div class="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <p class="font-mono text-3xs text-[var(--color-fg-muted)]">MASC Cockpit</p>
@@ -229,6 +229,7 @@ export function Cockpit() {
 
             <${CognitiveDisclosure}
               title="Progressive Disclosure"
+              class="v2-cockpit-disclosure"
               items=${COCKPIT_DISCLOSURE_ITEMS}
               testId="cockpit-disclosure"
             />

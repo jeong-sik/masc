@@ -36,6 +36,7 @@
 @import "./v2-shell.css";
 @import "./v2-theme.css";
 @import "./v2-logs.css";
+@import "./v2-overview.css";
 @import "./a11y.css"; /* after feature styles so reduced-motion overrides win */
 
 /* Strangler Fig migration bridge — bridges legacy CSS hooks to

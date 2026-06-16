@@ -112,60 +112,62 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
       ]
   | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
 
-let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : unit =
+let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) result =
   let conversation_id = "fusion/" ^ run_id in
-  let append content =
-    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content
-      ~conversation_id ()
-  in
-  append
-    (Printf.sprintf "**Fusion deliberation** (run `%s`)\n\n**Question**\n%s" run_id
-       question);
-  List.iter (fun o -> append (render_panel o)) panel;
-  (* 비용 관측(제약 아님) — 패널이 실제 사용한 토큰을 합산해 표시한다. cost cap은
-     v1에서 제외(추정기 부재)하고, 측정값만 남긴다 (괴상한 제약 제거 원칙). *)
-  let total_usage =
-    List.fold_left
-      (fun acc (o : Fusion_types.panel_outcome) ->
-        match o with
-        | Fusion_types.Answered a -> Fusion_types.add_usage acc a.usage
-        | Fusion_types.Failed _ -> acc)
-      Fusion_types.zero_usage panel
-  in
-  append
-    (Printf.sprintf "**Observed usage** — input=%d output=%d tokens (panel)"
-       total_usage.Fusion_types.input_tokens total_usage.Fusion_types.output_tokens);
-  (match judge with
-   | Ok j -> append (render_judge j)
-   | Error e -> append (Printf.sprintf "**[judge]** _(failed: %s)_" e));
-  (* 모든 append 후 한 번 브로드캐스트 — 대시보드가 키퍼 chat을 재조회해 전체 표시. *)
-  Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion";
-  (* board post — 구조화 증거(meta_json). chat lane은 사람이 읽는 *서사*,
-     board는 run_id로 묶인 쿼리 가능한 *증거*다. 사용자 가시성 요구는 두 surface
-     모두(RFC-0252 §3/§8.2). 실패는 심의를 죽이지 않되 기록한다. *)
-  let board_headline =
-    match judge with
-    | Ok j ->
-      Printf.sprintf "Fusion deliberation (run %s): %s" run_id
-        (render_decision j.Fusion_types.decision)
-    | Error _ -> Printf.sprintf "Fusion deliberation (run %s): judge failed" run_id
-  in
-  let meta_json =
-    Some
-      (`Assoc
-         [ ("source", `String "fusion")
-         ; ("run_id", `String run_id)
-         ; ("question", `String question)
-         ; ("panel", `List (List.map panel_meta panel))
-         ; ("judge", judge_meta judge)
-         ])
-  in
-  match
-    Board_dispatch.create_post ~author:keeper ~content:board_headline
-      ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
-      ~ttl_hours:board_post_ttl_hours ()
+  try
+    let append content =
+      Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content
+        ~conversation_id ()
+    in
+    append
+      (Printf.sprintf "**Fusion deliberation** (run `%s`)\n\n**Question**\n%s" run_id
+         question);
+    List.iter (fun o -> append (render_panel o)) panel;
+    (* 비용 관측(제약 아님) — 패널이 실제 사용한 토큰을 합산해 표시한다. cost cap은
+       v1에서 제외(추정기 부재)하고, 측정값만 남긴다 (괴상한 제약 제거 원칙). *)
+    let total_usage =
+      List.fold_left
+        (fun acc (o : Fusion_types.panel_outcome) ->
+          match o with
+          | Fusion_types.Answered a -> Fusion_types.add_usage acc a.usage
+          | Fusion_types.Failed _ -> acc)
+        Fusion_types.zero_usage panel
+    in
+    append
+      (Printf.sprintf "**Observed usage** — input=%d output=%d tokens (panel)"
+         total_usage.Fusion_types.input_tokens total_usage.Fusion_types.output_tokens);
+    (match judge with
+     | Ok j -> append (render_judge j)
+     | Error e -> append (Printf.sprintf "**[judge]** _(failed: %s)_" e));
+    (* 모든 append 후 한 번 브로드캐스트 — 대시보드가 키퍼 chat을 재조회해 전체 표시. *)
+    Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion";
+    (* board post — 구조화 증거(meta_json). chat lane은 사람이 읽는 *서사*,
+       board는 run_id로 묶인 쿼리 가능한 *증거*다. 사용자 가시성 요구는 두 surface
+       모두(RFC-0252 §3/§8.2). 실패는 [Error]로 상위(orchestrator)에 전달한다. *)
+    let board_headline =
+      match judge with
+      | Ok j ->
+        Printf.sprintf "Fusion deliberation (run %s): %s" run_id
+          (render_decision j.Fusion_types.decision)
+      | Error _ -> Printf.sprintf "Fusion deliberation (run %s): judge failed" run_id
+    in
+    let meta_json =
+      Some
+        (`Assoc
+           [ ("source", `String "fusion")
+           ; ("run_id", `String run_id)
+           ; ("question", `String question)
+           ; ("panel", `List (List.map panel_meta panel))
+           ; ("judge", judge_meta judge)
+           ])
+    in
+    (match
+       Board_dispatch.create_post ~author:keeper ~content:board_headline
+         ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
+         ~ttl_hours:board_post_ttl_hours ()
+     with
+     | Ok () -> Ok ()
+     | Error e -> Error (Board.show_board_error e))
   with
-  | Ok _ -> ()
-  | Error e ->
-    Log.Keeper.warn ~keeper_name:keeper "fusion run %s board post failed: %s" run_id
-      (Board.show_board_error e)
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printexc.to_string exn)

@@ -6,14 +6,24 @@
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7 *)
 
-(** runtime_id("provider.model")로 OAS 에이전트를 빌드한다. v1: 도구 없음([tools=[]]),
-    read-only 분석/심판용. 미존재 runtime·빌드 실패는 [panel_failure]로. *)
+(** runtime_id("provider.model")로 OAS 에이전트를 빌드한다.
+
+    [tools]를 주면 패널/심판이 tool call을 할 수 있다.
+    [max_tool_calls] > 0이면 에이전트의 [max_turns]를 해당 횟수+1로 제한해
+    OpenRouter Fusion의 per-panel tool budget을 근사한다.
+    미존재 runtime·빌드 실패는 [panel_failure]로. *)
 val build_agent
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> system_prompt:string
+  -> ?tools:Agent_sdk.Tool.t list
+  -> ?max_tool_calls:int
   -> string
   -> (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
+
+(** [masc_web_search] / [masc_web_fetch]를 [Agent_sdk.Tool.t]로 변환한 목록.
+    [Keeper_tool_descriptor]에서 descriptor를 찾지 못하면 빈 목록을 반환한다. *)
+val web_tool_bundle : unit -> Agent_sdk.Tool.t list
 
 (** api_response의 [Text] 블록만 모아 답 텍스트로 (Thinking/ToolUse 제외). *)
 val answer_text : Agent_sdk.Types.api_response -> string

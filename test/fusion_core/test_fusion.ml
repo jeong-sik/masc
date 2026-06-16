@@ -1,5 +1,6 @@
 (* Standalone alcotest for the pure fusion core (RFC-0252 §6/§9/§10).
-   Proves: deterministic gate branches, TOML config validation, depth guard. *)
+   Proves: deterministic gate branches, TOML config validation, depth guard,
+   atomic budget check-and-increment. *)
 
 open Fusion_types
 
@@ -18,6 +19,8 @@ let base_policy : Fusion_policy.t =
         ; judge_system_prompt = "judge"
         ; panel_timeout_s = 120.0
         ; judge_timeout_s = 120.0
+        ; web_tools = false
+        ; max_tool_calls_per_panel = 0
         }
       ]
   ; low_confidence_threshold = 0.55
@@ -25,12 +28,13 @@ let base_policy : Fusion_policy.t =
   ; per_hour_budget = 20
   }
 
-let req ?(preset = "budget") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool_call) ()
-  : fusion_request =
-  { run_id = "r1"; keeper = "k"; prompt = "p"; preset; depth; trigger }
+let req ?(preset = "budget") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool_call)
+    ?(web_tools = false) () : fusion_request =
+  { run_id = "r1"; keeper = "k"; prompt = "p"; preset; web_tools; depth; trigger }
 
-let decide ?(policy = base_policy) r =
-  Fusion_policy.decide ~policy r
+let decide ?(policy = base_policy) r = Fusion_policy.decide ~policy r
+
+let ok_int = Alcotest.result Alcotest.int Alcotest.unit
 
 (* --- gate branches (RFC-0252 §6) --- *)
 
@@ -70,6 +74,14 @@ let test_allow () =
   let r = req () in
   Alcotest.check gate "all pass -> allow" (Allow r) (decide r)
 
+(* budget gate applies even to explicit/operator triggers — 예산은 이제
+   orchestrator에서 [Fusion_budget.try_incr_if_under]로 원자적으로 소비한다. *)
+let test_explicit_still_budget_bound () =
+  let b = Fusion_budget.create () in
+  Alcotest.(check ok_int) "operator request still budget-bound after limit hit"
+    (Error ())
+    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:0)
+
 (* --- config (RFC-0252 §9) --- *)
 
 let parse s = Otoml.Parser.from_string s
@@ -90,6 +102,8 @@ low_confidence_threshold = 0.55
 high_stakes_task_kinds = ["goal_decision"]
 per_hour_budget = 20
 [fusion.presets.budget]
+web_tools = false
+max_tool_calls_per_panel = 0
 panel = ["a", "b", "c"]
 judge = "a"
 panel_system_prompt = "answer independently"
@@ -102,7 +116,12 @@ let test_config_valid () =
     Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
     Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
     Alcotest.(check (float 0.0001)) "low_conf" 0.55 p.Fusion_policy.low_confidence_threshold;
-    Alcotest.(check int) "per_hour" 20 p.Fusion_policy.per_hour_budget
+    Alcotest.(check int) "per_hour" 20 p.Fusion_policy.per_hour_budget;
+    (match p.Fusion_policy.presets with
+     | [ preset ] ->
+       Alcotest.(check bool) "web_tools" false preset.Fusion_policy.web_tools;
+       Alcotest.(check int) "max_tool_calls" 0 preset.Fusion_policy.max_tool_calls_per_panel
+     | _ -> Alcotest.fail "expected exactly one preset")
   | Error es ->
     Alcotest.failf "expected Ok, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
@@ -232,7 +251,30 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Invalid_per_hour_budget 0) es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_per_hour_budget"
 
-(* enabled인데 default_preset 생략(="") → preset 생략 호출이 폴백할 default가 없어
+let test_config_invalid_max_tool_calls () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+web_tools = true
+max_tool_calls_per_panel = 17
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_max_tool_calls present" true
+      (List.exists
+         (function Fusion_config.Invalid_max_tool_calls _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_max_tool_calls"
+
+(* enabled인데 default_preset 생략(="") → preset 생략 호출이 폭빽할 default가 없어
    항상 Preset_unknown ""로 deny. 빈 default_preset도 로드 거부. *)
 let test_config_empty_default_preset () =
   let s =
@@ -269,6 +311,8 @@ low_confidence_threshold = 0.6
 high_stakes_task_kinds = []
 per_hour_budget = 20
 [fusion.presets.trio]
+web_tools = false
+max_tool_calls_per_panel = 0
 panel = [
   "deepseek.deepseek-v4-pro",
   "glm-coding.glm-5-turbo",
@@ -404,6 +448,17 @@ let test_budget_window_reset () =
   Alcotest.(check int) "new window resets to 1" 1
     (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H2" ~limit:10))
 
+let test_budget_try_incr_if_under () =
+  let b = Fusion_budget.create () in
+  Alcotest.(check ok_int) "first under limit" (Ok 1)
+    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2);
+  Alcotest.(check ok_int) "second under limit" (Ok 2)
+    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2);
+  Alcotest.(check ok_int) "at limit -> error" (Error ())
+    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2);
+  Alcotest.(check ok_int) "new bucket resets" (Ok 1)
+    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H2" ~limit:2)
+
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
@@ -415,6 +470,7 @@ let () =
         ; Alcotest.test_case "high_stakes_listed" `Quick test_high_stakes_listed
         ; Alcotest.test_case "high_stakes_unlisted" `Quick test_high_stakes_unlisted
         ; Alcotest.test_case "allow" `Quick test_allow
+        ; Alcotest.test_case "explicit_still_budget_bound" `Quick test_explicit_still_budget_bound
         ] )
     ; ( "config"
       , [ Alcotest.test_case "absent" `Quick test_config_absent
@@ -426,6 +482,7 @@ let () =
         ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model
         ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
         ; Alcotest.test_case "bad_per_hour" `Quick test_config_bad_per_hour
+        ; Alcotest.test_case "invalid_max_tool_calls" `Quick test_config_invalid_max_tool_calls
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ] )
@@ -443,5 +500,6 @@ let () =
       , [ Alcotest.test_case "basic" `Quick test_budget_basic
         ; Alcotest.test_case "limit" `Quick test_budget_limit
         ; Alcotest.test_case "window_reset" `Quick test_budget_window_reset
+        ; Alcotest.test_case "try_incr_if_under" `Quick test_budget_try_incr_if_under
         ] )
     ]

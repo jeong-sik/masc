@@ -8,6 +8,7 @@ type config_error =
   | Missing_judge_model of string
   | Invalid_max_concurrent_panels of int
   | Invalid_per_hour_budget of int
+  | Invalid_max_tool_calls of string * int
   | Missing_default_preset of string
   | Toml_type_error of string
 [@@deriving show, eq]
@@ -44,13 +45,30 @@ let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
     Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
       [ "judge_timeout_s" ]
   in
+  let web_tools =
+    Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
+  in
+  let max_tool_calls_per_panel =
+    Otoml.find_or ~default:0 tbl Otoml.get_integer [ "max_tool_calls_per_panel" ]
+  in
   let p : Fusion_policy.preset =
-    { name; panel; judge; panel_system_prompt; judge_system_prompt; panel_timeout_s; judge_timeout_s }
+    { name
+    ; panel
+    ; judge
+    ; panel_system_prompt
+    ; judge_system_prompt
+    ; panel_timeout_s
+    ; judge_timeout_s
+    ; web_tools
+    ; max_tool_calls_per_panel
+    }
   in
   if not (Fusion_policy.preset_size_ok p) then
     Error (Invalid_panel_size (name, List.length panel))
   else if not (Fusion_policy.preset_prompts_present p) then Error (Missing_prompt name)
   else if not (Fusion_policy.preset_judge_present p) then Error (Missing_judge_model name)
+  else if max_tool_calls_per_panel < 0 || max_tool_calls_per_panel > 16 then
+    Error (Invalid_max_tool_calls (name, max_tool_calls_per_panel))
   else Ok p
 
 (* [fusion] 존재 확정 후의 본 파싱. Otoml.Type_error는 of_toml이 감싼다. *)
@@ -100,8 +118,8 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
     else errors
   in
   (* enabled면 default_preset가 비어있지 않고 presets에 존재해야 한다. preset 생략
-     호출이 default_preset로 폴백하는데, ""는 find_preset에서 항상 None→Preset_unknown
-     ""로 deny되므로 빈 문자열도 거부한다(silent per-call deny 방지). *)
+     호출이 default_preset로 폭빽하는데, ""는 find_preset에서 항상 None→Preset_unknown
+     ""로 deny되므로 빈 문자엏도 거부한다(silent per-call deny 방지). *)
   let errors =
     if
       enabled

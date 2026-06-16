@@ -15,8 +15,10 @@
 
     순서: 헤더(질문) → 패널 답/실패(모델 순) → usage 관측 → 심판 종합. 모두 [base_dir]의
     keeper_chat에 append되고, [chat_appended]로 대시보드에 알린 뒤 [Board_dispatch.create_post]로
-    meta_json(source/run_id/panel/judge) 증거를 남긴다. board post 실패는 심의를 죽이지
-    않고 [Log.Keeper.warn]으로 기록한다. [base_dir]는 호출자(orchestrator)가 주입한다. *)
+    meta_json(source/run_id/panel/judge) 증거를 남긴다. [base_dir]는 호출자(orchestrator)가 주입한다.
+
+    chat store append, broadcast, board post 중 예외가 발생하면 [Error msg]를 반환한다.
+    [Eio.Cancel.Cancelled]는 재전파한다. *)
 val emit
   :  base_dir:string
   -> keeper:string
@@ -24,4 +26,4 @@ val emit
   -> question:string
   -> panel:Fusion_types.panel_outcome list
   -> judge:(Fusion_types.judge_synthesis, string) result
-  -> unit
+  -> (unit, string) result

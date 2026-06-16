@@ -9,4 +9,4 @@
  (name masc_exec_command_gate)
  (public_name masc.masc_exec_command_gate)
  (wrapped true)
- (libraries masc_exec masc_exec_bash_parser))
+ (libraries masc_exec masc_exec_bash_parser logs))

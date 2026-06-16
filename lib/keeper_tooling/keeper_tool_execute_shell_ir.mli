@@ -37,6 +37,8 @@ type dispatch_error =
   | Cannot_parse
   | Too_complex
   | Path_reject of string
+  | Approval_required of { summary : string; bin : string }
+  | Policy_denied of { reason : string }
 
 val validate_paths :
   ?keeper_id:string ->
@@ -71,6 +73,24 @@ val dispatch_classified :
     defaults to [true] for the historical tool execute path; legacy code-shell
     callers pass [false].  [?on_output_chunk] is forwarded to the host
     dispatch path for live output streaming. *)
+
+val dispatch_classified_with_approval :
+  ?allow_pipes:bool ->
+  ?redirect_allowed:bool ->
+  ?keeper_id:string ->
+  ?base_path:string ->
+  workdir:string ->
+  sandbox:Masc_exec.Sandbox_target.t ->
+  ?base_host_env:string array ->
+  ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
+  agent_id:Masc_exec.Agent_id.t ->
+  approval_config:Masc_exec.Approval_config.t ->
+  Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir ->
+  (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
+(** Same pipeline as {!dispatch_classified}, but inserts the capability-based
+    approval policy gate between the typed gate and path validation.
+    [Ask] produces [Approval_required]; [Deny] produces [Policy_denied].
+    [Allow] and [Suggest_confirm] proceed to dispatch with telemetry. *)
 
 val dispatch :
   ?allow_pipes:bool ->

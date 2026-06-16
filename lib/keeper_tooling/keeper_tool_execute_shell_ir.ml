@@ -70,6 +70,8 @@ type dispatch_error =
   | Cannot_parse
   | Too_complex
   | Path_reject of string
+  | Approval_required of { summary : string; bin : string }
+  | Policy_denied of { reason : string }
 
 let validate_paths ?keeper_id ?base_path ~workdir ir =
   Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ~workdir ir
@@ -143,4 +145,65 @@ let dispatch
     ?base_host_env
     ?on_output_chunk
     (classify ir)
+;;
+
+(** Extract the last simple stage from an IR for per-command approval policy.
+    For a [Simple] IR it is the command itself; for a pipeline it is the
+    final stage, whose risk class and binary usually drive the approval
+    decision. *)
+let last_simple_of_ir ir =
+  match ir with
+  | Masc_exec.Shell_ir.Simple s -> Some s
+  | Masc_exec.Shell_ir.Pipeline stages ->
+    (match List.rev stages with
+     | Masc_exec.Shell_ir.Simple s :: _ -> Some s
+     | _ -> None)
+;;
+
+(** Same pipeline as [dispatch_classified], but inserts the capability-based
+    approval policy gate between the typed gate and path validation.
+    [Ask] and [Deny] are surfaced as typed errors so the keeper runtime
+    can log them and return a structured failure to the model. *)
+let dispatch_classified_with_approval
+      ?allow_pipes
+      ?redirect_allowed
+      ?keeper_id
+      ?base_path
+      ~workdir
+      ~sandbox
+      ?base_host_env
+      ?on_output_chunk
+      ~agent_id
+      ~approval_config
+      envelope
+  =
+  let ir = envelope.Masc_exec.Shell_ir_risk.ir in
+  match last_simple_of_ir ir with
+  | None -> Error Cannot_parse
+  | Some simple ->
+    let caps = Masc_exec.Capability_check.of_ir ir in
+    let overlay = Masc_exec.Approval_config.lookup approval_config ~actor:agent_id in
+    let raw_source = Format.asprintf "%a" Masc_exec.Shell_ir.pp ir in
+    let summary = "Shell IR command approval check" in
+    let policy_input = { Masc_exec.Approval_policy.raw_source; summary } in
+    (match Masc_exec.Approval_policy.decide policy_input ~overlay ~caps ~simple with
+     | Allow _trusted | Suggest_confirm (_trusted, _) ->
+       dispatch_classified
+         ?allow_pipes
+         ?redirect_allowed
+         ?keeper_id
+         ?base_path
+         ~workdir
+         ~sandbox
+         ?base_host_env
+         ?on_output_chunk
+         envelope
+     | Ask _request ->
+       Error
+         (Approval_required
+            { summary
+            ; bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+            })
+     | Deny { reason = _; caps = _ } ->
+       Error (Policy_denied { reason = "approval policy denied" }))
 ;;

@@ -546,3 +546,66 @@ let dispatch_decided ?base_host_env ?on_output_chunk (envelope : Shell_ir_risk.d
    | Shell_ir_risk.R2_Irreversible ->
        ());
   dispatch ?base_host_env ?on_output_chunk envelope.Shell_ir_risk.ir
+
+(** Start a classified dispatch in a new fiber and return a promise for the
+    result. Cancellation propagates through the switch; other exceptions are
+    converted to a structured error result rather than leaving the promise
+    unresolved. *)
+let dispatch_async ?base_host_env ?on_output_chunk ~sw envelope =
+  let promise, resolver = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      try dispatch_decided ?base_host_env ?on_output_chunk envelope
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        { status = Unix.WEXITED 1
+        ; stdout = ""
+        ; stderr = Printexc.to_string exn
+        }
+    in
+    Eio.Promise.resolve resolver result);
+  promise
+;;
+
+(** Extract a representative argv from an IR for semantic classification.
+    For pipelines we use the last stage, which is the command whose exit
+    status and output the caller usually cares about. *)
+let argv_of_ir (ir : Shell_ir.t) =
+  let simple_argv (s : Shell_ir.simple) =
+    Exec_program.to_string s.bin :: List.map resolve_arg s.args
+  in
+  match ir with
+  | Shell_ir.Simple s -> simple_argv s
+  | Pipeline stages ->
+    (match List.rev stages with
+     | [] -> []
+     | Shell_ir.Simple s :: _ -> simple_argv s
+     | Pipeline _ :: _ -> [])
+;;
+
+type dispatch_outcome = {
+  status : Unix.process_status;
+  stdout : string;
+  stderr : string;
+  semantic : Exec_semantic.t;
+}
+
+(** Like [dispatch_decided], but returns a structured outcome that includes
+    the post-execution semantic classification. *)
+let dispatch_decided_outcome ?base_host_env ?on_output_chunk envelope =
+  let result = dispatch_decided ?base_host_env ?on_output_chunk envelope in
+  let argv = argv_of_ir envelope.Shell_ir_risk.ir in
+  let semantic =
+    Exec_semantic.interpret
+      ~argv
+      ~status:result.status
+      ~stdout:result.stdout
+      ~stderr:result.stderr
+  in
+  { status = result.status
+  ; stdout = result.stdout
+  ; stderr = result.stderr
+  ; semantic
+  }
+;;

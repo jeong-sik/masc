@@ -249,6 +249,35 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
   result
 ;;
 
+(** Run multiple independent tool calls concurrently.
+
+    Each element of [calls] goes through {!guarded_dispatch}, preserving the
+    same telemetry/hook/observer lifecycle. Results are returned in input
+    order. A positive [max_concurrency] bounds parallel fan-out with an
+    [Eio.Semaphore]; otherwise concurrency is limited only by the parent
+    switch. *)
+let dispatch_many ?max_concurrency ~sw calls =
+  let _ = sw in
+  let sem =
+    match max_concurrency with
+    | Some n when n > 0 -> Some (Eio.Semaphore.make n)
+    | _ -> None
+  in
+  let run_one (token, args) =
+    let result =
+      match sem with
+      | None -> guarded_dispatch ~token ~args ()
+      | Some sem ->
+        Eio.Semaphore.acquire sem;
+        Eio_guard.protect
+          ~finally:(fun () -> Eio.Semaphore.release sem)
+          (fun () -> guarded_dispatch ~token ~args ())
+    in
+    (token, result)
+  in
+  Eio.Fiber.List.map run_one calls
+;;
+
 (** Number of registered tool names. *)
 let registered_count () = Hashtbl.length registry
 

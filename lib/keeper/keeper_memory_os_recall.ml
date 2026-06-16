@@ -142,14 +142,14 @@ let staleness_marker ~now (fact : fact) =
     | None -> Printf.sprintf " [stale: unverified, seen %s ago — verify]" age_text)
 ;;
 
-let render_fact ~now ?(seed_tokens = []) fact =
-  let score = Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact in
+(* RFC-0251: the keeper is shown structure (category, turn, staleness), not a
+   fabricated worth. The confidence/score annotation is removed — recall neither
+   assigns nor displays value. *)
+let render_fact ~now fact =
   let source = fact.source in
   Printf.sprintf
-    "- [category=%s confidence=%.2f score=%.3f turn=%d]%s %s"
+    "- [category=%s turn=%d]%s %s"
     (sanitize_atom (category_to_string fact.category))
-    fact.confidence
-    score
     source.turn
     (staleness_marker ~now fact)
     (sanitize_text ~max_len:max_fact_text_len fact.claim)
@@ -158,19 +158,16 @@ let render_fact ~now ?(seed_tokens = []) fact =
 (* RFC-0244 Tier 2: a shared fact is rendered with its provenance (the distinct
    keepers that corroborated it) so it is never silently merged into the keeper's
    own knowledge — the reader can see it is cross-keeper consensus. *)
-let render_shared_fact ~now ?(seed_tokens = []) fact =
-  let score = Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact in
+let render_shared_fact ~now fact =
   let provenance =
     match fact.observed_by with
     | [] -> "shared"
     | keepers -> "shared via " ^ String.concat "," (List.map sanitize_atom keepers)
   in
   Printf.sprintf
-    "- [%s category=%s confidence=%.2f score=%.3f]%s %s"
+    "- [%s category=%s]%s %s"
     provenance
     (sanitize_atom (category_to_string fact.category))
-    fact.confidence
-    score
     (staleness_marker ~now fact)
     (sanitize_text ~max_len:max_fact_text_len fact.claim)
 ;;
@@ -238,24 +235,28 @@ let dedup_by_claim scored =
     scored
 ;;
 
-(* Score, filter to current, rank, and dedup — retaining the score so the
-   spreading-activation step can boost from neighbour scores before the score is
-   dropped. *)
-let score_facts_ranked ~now ?(seed_tokens = []) facts =
+(* RFC-0251: filter to current, then order candidates by deterministic seed
+   overlap (lexical relevance) — not by a worth score. The [(relevance, fact)]
+   pair is retained so the spreading-activation step can add neighbour
+   association weight before the value is dropped. With an empty seed every fact
+   has relevance 1.0, so [stable_sort] leaves them in store (recency) order. *)
+let rank_by_relevance ~now ?(seed_tokens = []) facts =
   facts
   |> List.filter (fact_is_current ~now)
-  |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact, fact)
-  |> List.sort (fun (a, _) (b, _) -> compare b a)
+  |> List.map (fun fact ->
+    Keeper_memory_os_policy.lexical_relevance ~seed_tokens fact, fact)
+  |> List.stable_sort (fun (a, _) (b, _) -> compare b a)
   |> dedup_by_claim
 ;;
 
-let scored_facts ~now ?(seed_tokens = []) facts =
-  score_facts_ranked ~now ~seed_tokens facts |> List.map snd
+let relevant_facts ~now ?(seed_tokens = []) facts =
+  rank_by_relevance ~now ~seed_tokens facts |> List.map snd
 ;;
 
-(* Re-rank [scored] by adding each fact's spreading-activation boost. With
-   [alpha] <= 0 (or no associations) this is the identity, preserving the exact
-   RFC-0244 order and values. *)
+(* Re-order the [(relevance, fact)] list by adding each fact's
+   spreading-activation boost (RFC-0247) to its relevance. With [alpha] <= 0 (or
+   no associations) this is the identity, preserving the relevance order. The
+   boost is an association weight (structure), not a worth score. *)
 let activate ~alpha ~associations scored =
   if alpha <= 0.0
   then scored
@@ -286,15 +287,16 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
   in
   let facts =
     (* RFC-0239 Q4: read up to the bounded recall window (the retention sweep
-       caps the store to this many facts), so score ranking selects the
-       globally best facts rather than only the most recent [fact_tail_scan].
-       RFC-0244: [seed_tokens] (current turn) reranks via lexical relevance; an
-       empty seed leaves the ranking unchanged. RFC-0247: spreading activation
-       then lifts facts linked to the recalled set (identity when alpha = 0). *)
+       caps the store to this many facts), so ordering selects from the whole
+       window rather than only the most recent [fact_tail_scan].
+       RFC-0244 / RFC-0251: [seed_tokens] (current turn) orders by lexical
+       relevance; an empty seed leaves facts in store (recency) order. No worth
+       score participates. RFC-0247: spreading activation then lifts facts linked
+       to the recalled set (identity when alpha = 0). *)
     Keeper_memory_os_io.read_facts_tail
       ~keeper_id
       ~n:(max fact_tail_scan Keeper_memory_os_io.fact_recall_window)
-    |> score_facts_ranked ~now ~seed_tokens
+    |> rank_by_relevance ~now ~seed_tokens
     |> activate ~alpha ~associations
     |> List.map snd
     |> take max_facts
@@ -311,7 +313,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
       Keeper_memory_os_io.read_facts_tail
         ~keeper_id:shared_store_id
         ~n:Keeper_memory_os_io.fact_recall_window
-      |> scored_facts ~now ~seed_tokens
+      |> relevant_facts ~now ~seed_tokens
       |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
       |> take default_max_shared_facts
   in
@@ -326,8 +328,8 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
   | [], [], [] -> ""
   | _ ->
     let fact_lines =
-      List.map (render_fact ~now ~seed_tokens) facts
-      @ List.map (render_shared_fact ~now ~seed_tokens) shared_facts
+      List.map (render_fact ~now) facts
+      @ List.map (render_shared_fact ~now) shared_facts
     in
     let episode_lines = List.map render_episode episodes in
     (match render_recall_context ~fact_lines ~episode_lines with

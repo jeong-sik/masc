@@ -6,6 +6,39 @@
 
     @since Unified Keeper Loop *)
 
+(** RFC-0247: typed provenance of a board observation, classified once at the
+    world-observation boundary by {!provenance_of}. Drives the trusted-vs-
+    observational split in the unified prompt: fleet-authored narrative
+    ({Self_narrative}/{Peer_keeper}/{Automation}/{Unknown}) is rendered inside
+    the observational-data envelope so a keeper cannot treat its own or a
+    peer's board narrative as trusted instruction. *)
+type observation_provenance =
+  | Self_narrative
+  | Peer_keeper
+  | Human_direct
+  | Automation
+  | Unknown
+
+(** RFC-0247: classify a board event's provenance from primitives already
+    present at the boundary ([post_kind] + [author] + the keeper's own identity
+    set [self_ids]). Pure, no new data plumbing.
+
+    - own author ([is_self_author]) -> [Self_narrative]
+    - [Human_post] + non-keeper author -> [Human_direct]
+    - [Human_post] + keeper author -> [Unknown] (classification drift)
+    - [Automation_post]/[System_post] + typed keeper author -> [Peer_keeper]
+    - [Automation_post]/[System_post] + non-keeper author -> [Automation] *)
+val provenance_of :
+  self_ids:Keeper_identity.Keeper_id.t list ->
+  Board_types.post_kind ->
+  author:string ->
+  observation_provenance
+
+(** RFC-0247: trust tier for rendering. [Unknown] defaults to [true]
+    (defense-in-depth: unclassifiable events are untrusted fleet output, never
+    trusted operator direction). *)
+val should_quarantine : observation_provenance -> bool
+
 (** Structured board activity delivered to keepers without routing heuristics. *)
 type pending_board_event = {
   post_id : string;
@@ -25,6 +58,9 @@ type pending_board_event = {
   (** Author of the most recent external comment (for prompt context). *)
   latest_external_preview : string option;
   (** Preview of the most recent external comment content. *)
+  provenance : observation_provenance;
+  (** RFC-0247: provenance classified at construction; drives the
+      trusted-vs-observational rendering split. *)
 }
 
 (** Snapshot of the world as seen by a keeper at heartbeat time. *)

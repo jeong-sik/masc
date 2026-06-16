@@ -50,6 +50,7 @@ describe('ConnectorOverviewStrip', () => {
       html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
       container,
     )
+    expect(container.querySelector('.v2-connector-overview-strip')).not.toBeNull()
     const tiles = container.querySelectorAll('[data-overview-tile]')
     expect(tiles.length).toBe(4)
     const ids = Array.from(tiles).map(t => t.getAttribute('data-overview-tile'))

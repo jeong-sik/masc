@@ -93,6 +93,7 @@ describe('ConnectorReadinessRail rendering', () => {
       noop,
     )
     render(html`<${ConnectorReadinessRail} pills=${pills} />`, container)
+    expect(container.querySelector('.v2-connector-readiness-rail')).not.toBeNull()
     const rendered = container.querySelectorAll('[data-rail-pill]')
     expect(rendered.length).toBe(4)
 

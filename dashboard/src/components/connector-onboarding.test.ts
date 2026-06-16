@@ -26,6 +26,7 @@ describe('ConnectorOnboardingGrid', () => {
   it('renders one card per external sidecar in stable order (in-process omitted)', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
 
+    expect(container.querySelector('.v2-connector-onboarding')).not.toBeNull()
     const text = container.textContent ?? ''
     // Discord is in-process (RFC-0203 §Phase 3) — no onboarding card.
     expect(text).not.toContain('Discord')

@@ -448,7 +448,7 @@ export function progressPct(session: DashboardMissionSessionCard | null): number
 function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | null }) {
   if (!active) {
     return html`
-      <${SectionCard} label="Active mission" data-testid="overview-party-empty">
+      <${SectionCard} label="Active mission" class="v2-overview-party" data-testid="overview-party-empty">
         <p class="text-2xs text-[var(--color-fg-muted)] italic">No active mission</p>
       <//>
     `

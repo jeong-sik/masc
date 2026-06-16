@@ -255,7 +255,10 @@ let test_voice_audio_self_output_is_not_recent_context () =
   let lines = MS.recent_direct_conversation_of_messages messages in
   check (list string) "voice audio assistant row omitted from prompt context"
     [ "user"; "assistant" ]
-    (List.map (fun (line : MS.recent_direct_line) -> line.role_label) lines);
+    (List.map
+       (fun (line : MS.recent_direct_line) ->
+         MS.direct_line_role_to_label line.role)
+       lines);
   check (list string) "spoken text is not quoted back"
     [ "please say it out loud"; "text follow-up" ]
     (List.map (fun (line : MS.recent_direct_line) -> line.content) lines)

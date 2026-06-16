@@ -65,7 +65,7 @@ describe('KeeperWorkspaceRoster', () => {
 })
 
 describe('KeeperWorkspaceRail', () => {
-  it('renders current keeper runtime, context, task, and tool summary', () => {
+  it('renders current keeper runtime, context, and owned task', () => {
     tasks.value = [makeTask()]
     const container = renderInto(html`<${KeeperWorkspaceRail} keeper=${makeKeeper()} onToggleDetail=${() => {}} />`)
 
@@ -74,6 +74,12 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('oas-seoul-1')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('T-1')
-    expect(container.textContent).toContain('masc_trace_window')
+    // The rail no longer renders keeper.recent_tool_names; #21266 migrated the
+    // recent-tool section to KeeperWorkspaceRecentTools, which lazy-loads per-call
+    // data via fetchKeeperToolCalls and returns null when nothing is fetched. That
+    // behavior is covered (with the fetch stubbed) in keeper-workspace-tool-calls.test.ts
+    // and keeper-workspace-rail.test.ts; asserting recent_tool_names here tested
+    // removed behavior. Do not re-add a fetch mock + tool assertion (would duplicate
+    // canonical coverage).
   })
 })

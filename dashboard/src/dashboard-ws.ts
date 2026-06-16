@@ -663,11 +663,19 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     if (socket !== ws) return
     const wasReady = dashboardWsReady.value
     const closeError = new Error(formatCloseEventError(event))
+    // Clean close (wasClean=true) is server-initiated (shutdown/redeploy/idle),
+    // not a degraded-WS error. Leaving lastError set on a clean close would trip
+    // the SSE fallback (dashboard-transport-fallback.ts) for every clean close ->
+    // reconnect window, producing the "dashboard keeps falling back to SSE"
+    // symptom. Abnormal closes (wasClean=false: network drop, code 1006/1011)
+    // keep lastError set so the fallback still engages. reconnect runs either
+    // way; pending RPCs are rejected either way (socket is gone).
+    const clean = event.wasClean === true
     clearHeartbeatTimer()
     batch(() => {
       dashboardWsConnected.value = false
       dashboardWsReady.value = false
-      dashboardWsLastError.value = closeError.message
+      dashboardWsLastError.value = clean ? null : closeError.message
     })
     if (!wasReady) clearCachedWsUrl()
     lastSubscribeKey = ''

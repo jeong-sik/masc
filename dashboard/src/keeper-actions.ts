@@ -15,6 +15,7 @@ import { isAbortError } from './lib/async-state'
 import type {
   KeeperConversationAttachment,
   KeeperConversationDelivery,
+  KeeperConversationEntry,
   KeeperDiagnostic,
   KeeperStatusDetail,
 } from './types'
@@ -180,9 +181,68 @@ const CHAT_APPENDED_REFRESH_DELAY_MS = 400
 const PENDING_KEEPER_CHAT_POLL_MS = 2_000
 const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
   '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
+const STREAM_FAILURE_HISTORY_SKEW_MS = 30_000
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function entryTimeMs(entry: KeeperConversationEntry): number | null {
+  if (!entry.timestamp) return null
+  const ms = Date.parse(entry.timestamp)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function hasServerAssistantAfterLocalMessage(
+  entries: readonly KeeperConversationEntry[],
+  message: string,
+  sentAtMs: number | null,
+): boolean {
+  const expectedText = message.trim()
+  if (!expectedText) return false
+  let matchedUser = false
+
+  for (const entry of entries) {
+    const tsMs = entryTimeMs(entry)
+    if (
+      sentAtMs !== null
+      && tsMs !== null
+      && tsMs < sentAtMs - STREAM_FAILURE_HISTORY_SKEW_MS
+    ) {
+      continue
+    }
+
+    if (entry.role === 'user' && entry.text.trim() === expectedText) {
+      matchedUser = true
+      continue
+    }
+
+    if (matchedUser && entry.role === 'assistant' && entry.text.trim() !== '') {
+      return true
+    }
+  }
+
+  return false
+}
+
+async function reconcileStreamFailureFromServerHistory(
+  keeperName: string,
+  message: string,
+  localUserId: string,
+  localAssistantId: string,
+): Promise<boolean> {
+  const localUser = (keeperThreads.value[keeperName] ?? [])
+    .find(entry => entry.id === localUserId) ?? null
+  const sentAtMs = localUser ? entryTimeMs(localUser) : null
+  const history = await fetchKeeperChatHistory(keeperName)
+  const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
+  if (!hasServerAssistantAfterLocalMessage(historyEntries, message, sentAtMs)) {
+    return false
+  }
+
+  mergeServerHistoryEntries(keeperName, historyEntries)
+  removeThreadEntries(keeperName, [localUserId, localAssistantId])
+  return true
 }
 
 function pendingUserEntryId(requestId: string): string {
@@ -536,6 +596,23 @@ export async function sendKeeperThreadMessage(
       error: errorMessage,
     })
     if (requestTerminalSeen && requestId) removePendingKeeperChatRequest(requestId)
+    try {
+      const reconciled = await reconcileStreamFailureFromServerHistory(
+        keeperName,
+        message,
+        localId,
+        assistantId,
+      )
+      if (reconciled) {
+        setRecordValue(keeperActionErrors, keeperName, null)
+        return
+      }
+    } catch (reconcileErr) {
+      console.warn(
+        `[keeper] stream failure history reconciliation failed for ${keeperName}`,
+        reconcileErr instanceof Error ? reconcileErr.message : reconcileErr,
+      )
+    }
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {

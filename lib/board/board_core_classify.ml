@@ -177,7 +177,7 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
   in
   let meta_is_agent_board_post =
     match meta_source meta_json with
-    | Some "agent_board_post" -> true
+    | Some "agent_board_post" | Some "keeper_board_post" -> true
     | Some _ | None -> false
   in
   let hearth_promotes_to_automation =
@@ -229,7 +229,7 @@ let post_classification_reason (p : post) =
             "Direct board post without automation override (source=%s)." source
       | Human_post, None ->
           "Direct board post without automation provenance."
-      | Automation_post, Some "agent_board_post" ->
+      | Automation_post, Some "agent_board_post" | Automation_post, Some "keeper_board_post" ->
           Printf.sprintf
             "Automation classification based on board automation provenance, author=%s, and the automation post_kind contract."
             author

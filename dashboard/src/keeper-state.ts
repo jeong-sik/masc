@@ -216,9 +216,23 @@ export function normalizeKeeperRecoverResult(raw: unknown): KeeperRecoverResult 
 
 // --- Thread state management ---
 
+// Stable fallback id for a message whose backend predates R3 and so
+// carries no producer-assigned id. Derived from the content (not the merge
+// index) so it does not shift when history pages are merged.
+function fallbackHistoryEntryId(
+  role: string,
+  timestamp: string | null | undefined,
+  text: string,
+): string {
+  let hash = 5381
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  }
+  return `${role}-${timestamp ?? 'entry'}-${(hash >>> 0).toString(36)}`
+}
+
 function normalizeHistoryEntry(
   raw: unknown,
-  index: number,
   keeperName?: string,
   previousSource: KeeperConversationSource | null = null,
 ): KeeperConversationEntry | null {
@@ -233,7 +247,11 @@ function normalizeHistoryEntry(
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
   return {
-    id: `${role}-${timestamp ?? 'entry'}-${index}`,
+    // R3: key off the producer-assigned server id when present so the
+    // render key is stable across history-page merges (the former
+    // `${role}-${ts}-${index}` shifted with the merge index and remounted
+    // bubbles). Pre-R3 rows fall back to a stable content-derived id.
+    id: asString(raw.id) ?? fallbackHistoryEntryId(role, timestamp, rawText),
     role,
     source,
     label,
@@ -253,8 +271,8 @@ export function normalizeStatusDetail(name: string, text: string, rawStatus: unk
     ? (() => {
         let previousSource: KeeperConversationSource | null = null
         return parsed.history_tail
-          .map((entry, index) => {
-            const normalized = normalizeHistoryEntry(entry, index, name, previousSource)
+          .map((entry) => {
+            const normalized = normalizeHistoryEntry(entry, name, previousSource)
             previousSource = normalized?.source ?? previousSource
             return normalized
           })
@@ -365,6 +383,14 @@ export function finalizeAssistantEntry(
 // produced duplicate bubbles on every history merge. Source is also
 // excluded — REST history has no source field, so the derived source
 // can differ from the local one for the same message.
+//
+// R3 made every history entry carry the producer-assigned server id, so
+// render keys are now stable; this optimistic-vs-server dedup still keys
+// on role+text because a locally-appended entry is created before the
+// server mints its id and so cannot match by id yet. Replacing it with id
+// equality needs a send-response id handshake (the POST returning the
+// minted id for the optimistic entry to adopt) — tracked as the R3
+// follow-up, deliberately out of this change's scope.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
@@ -403,6 +429,7 @@ export function mergeServerHistoryEntries(
 }
 
 interface RestChatHistoryMessage {
+  id?: string
   role: string
   content: string
   ts: number
@@ -445,7 +472,7 @@ export function chatHistoryEntriesFromRest(
 ): KeeperConversationEntry[] {
   let previousSource: KeeperConversationSource | null = null
   const entries: KeeperConversationEntry[] = []
-  messages.forEach((message, index) => {
+  messages.forEach((message) => {
     if (message.role === 'tool') {
       // Tool rows do not participate in user/assistant source chaining.
       const toolEntry = toolHistoryEntry(message)
@@ -453,8 +480,7 @@ export function chatHistoryEntriesFromRest(
       return
     }
     const normalized = normalizeHistoryEntry(
-      { role: message.role, content: message.content, ts_unix: message.ts },
-      index,
+      { id: message.id, role: message.role, content: message.content, ts_unix: message.ts },
       keeperName,
       previousSource,
     )

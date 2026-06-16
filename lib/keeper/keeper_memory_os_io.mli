@@ -40,6 +40,10 @@ val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t 
 (** {1 Bounded tail reads} *)
 
 val read_facts_all : keeper_id:string -> fact list
+(** Read every fact in the store, failing if any JSONL row is malformed or does
+    not match the fact schema. Use this before destructive rewrites so corrupt
+    input cannot be partially dropped and overwritten. *)
+val read_facts_all_strict : keeper_id:string -> (fact list, string) result
 val read_facts_tail : keeper_id:string -> n:int -> fact list
 
 (** Read every association event in the keeper's edge store (RFC-0247 §2.7). *)

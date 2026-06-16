@@ -145,6 +145,13 @@ type speaker = {
 }
 
 type chat_message = {
+  id : string;
+      (* R3: producer-assigned stable message id.  Minted once at append
+         by [encode_line] (the sole writer) and read back verbatim, so the
+         dashboard keys off a server identity instead of synthesising an
+         index-derived id at render.  Rows written before R3 carry no
+         persisted id and are given a deterministic one at the read
+         boundary ([legacy_message_id]); the field is therefore total. *)
   role : Role.t;
   content : string;
   ts : float option;
@@ -222,6 +229,33 @@ let audio_fields = function
   | None -> []
   | Some a -> [ ("audio", `Assoc (audio_to_json a)) ]
 
+(* R3: producer-assigned message id.  [encode_line] is the sole writer, so
+   minting here makes it impossible to persist a row without an id.  The
+   process-monotonic counter disambiguates the user/tool/assistant rows of
+   one turn (they share a timestamp); the microsecond timestamp orders ids
+   across processes.  Minted ids are persisted, so reads are deterministic
+   even though the mint itself is not. *)
+let message_id_counter = Atomic.make 0
+
+let mint_message_id ~ts =
+  let n = Atomic.fetch_and_add message_id_counter 1 in
+  Printf.sprintf "msg-%016.0f-%d" (ts *. 1_000_000.) n
+
+(* Rows written before R3 carry no persisted id.  Derive a stable one at
+   the read boundary from the row's timestamp and content so the dashboard
+   keys off a single deterministic id and never synthesises an
+   index-derived one that shifts when history pages are merged.  Two
+   byte-identical legacy rows collapse to the same id, which is acceptable:
+   they are indistinguishable and predate the per-row identity. *)
+let legacy_message_id ~ts ~content =
+  let ts_part =
+    match ts with
+    | Some t -> Printf.sprintf "%016.0f" (t *. 1_000_000.)
+    | None -> "nots"
+  in
+  Printf.sprintf "legacy-%s-%s" ts_part
+    (String.sub (Digest.to_hex (Digest.string content)) 0 12)
+
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
     ?audio ?(mentions = []) ?(kind = Row_kind.Utterance) ()
@@ -236,6 +270,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     | Some s -> [ ("surface", Surface_ref.to_json s) ]
   in
   let base_fields = [
+    ("id", `String (mint_message_id ~ts));
     ("role", `String (Role.to_label role));
     ("content", `String content);
     ("ts", `Float ts);
@@ -256,7 +291,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     match attachments with
     | None | Some [] -> []
     | Some atts ->
-        let att_json = List.map (fun att ->
+        let att_json = List.map (fun (att : attachment) ->
           `Assoc [
             ("id", `String att.id);
             ("type", `String att.att_type);
@@ -613,8 +648,13 @@ let parse_line ~file_path (line : string) : chat_message option =
             ~detail:"tool chat row missing non-empty tool_call_name";
           None
       | Some role ->
+          let id =
+            match opt_string "id" with
+            | Some persisted -> persisted
+            | None -> legacy_message_id ~ts ~content
+          in
           Some
-            { role; content; ts; attachments; tool_call_id; tool_call_name;
+            { id; role; content; ts; attachments; tool_call_id; tool_call_name;
               source; surface; conversation_id; external_message_id; speaker;
               audio; mentions; kind }
   with Yojson.Json_error detail ->
@@ -786,7 +826,8 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
     (List.map
        (fun m ->
          `Assoc
-           ([ ("role", `String (Role.to_label m.role));
+           ([ ("id", `String m.id);
+              ("role", `String (Role.to_label m.role));
               ("content", `String m.content);
             ] @ (match m.ts with
                  | Some t -> [("ts", `Float t)]
@@ -807,7 +848,7 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
               @ (match m.attachments with
                  | None | Some [] -> []
                  | Some atts ->
-                     let att_json = List.map (fun att ->
+                     let att_json = List.map (fun (att : attachment) ->
                        `Assoc [
                          ("id", `String att.id);
                          ("type", `String att.att_type);

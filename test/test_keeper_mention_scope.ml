@@ -48,7 +48,8 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
     ?(kind = Store.Row_kind.Utterance) content
   : Store.chat_message
   =
-  { role
+  { id = "test-msg"
+  ; role
   ; content
   ; ts
   ; attachments = None
@@ -185,7 +186,8 @@ let test_none_ts_assistant_still_clears () =
 ;;
 
 let tool_line : Store.chat_message =
-  { role = Store.Role.Tool
+  { id = "test-tool"
+  ; role = Store.Role.Tool
   ; content = "{}"
   ; ts = Some 10.5
   ; attachments = None
@@ -255,7 +257,7 @@ let test_voice_audio_self_output_is_not_recent_context () =
   let lines = MS.recent_direct_conversation_of_messages messages in
   check (list string) "voice audio assistant row omitted from prompt context"
     [ "user"; "assistant" ]
-    (List.map (fun (line : MS.recent_direct_line) -> line.role_label) lines);
+    (List.map (fun (line : MS.recent_direct_line) -> MS.direct_line_role_to_label line.role) lines);
   check (list string) "spoken text is not quoted back"
     [ "please say it out loud"; "text follow-up" ]
     (List.map (fun (line : MS.recent_direct_line) -> line.content) lines)

@@ -319,6 +319,16 @@ let parse_json_line parse line =
   | Yojson.Json_error _ -> None
 ;;
 
+let parse_fact_json_line_strict ~path ~line_number line =
+  try
+    match fact_of_json (Yojson.Safe.from_string line) with
+    | Some fact -> Ok fact
+    | None -> Error (Printf.sprintf "%s:%d: invalid fact JSON shape" path line_number)
+  with
+  | Yojson.Json_error message ->
+    Error (Printf.sprintf "%s:%d: invalid fact JSON: %s" path line_number message)
+;;
+
 let read_facts_all ~keeper_id =
   read_lines_all (facts_path ~keeper_id)
   |> List.filter_map (parse_json_line fact_of_json)
@@ -335,6 +345,17 @@ let read_associations ~keeper_id =
   read_edges_all ~keeper_id |> Keeper_memory_os_edges.aggregate
 ;;
 
+let read_facts_all_strict ~keeper_id =
+  let path = facts_path ~keeper_id in
+  let rec loop line_number acc = function
+    | [] -> Ok (List.rev acc)
+    | line :: rest ->
+      (match parse_fact_json_line_strict ~path ~line_number line with
+       | Ok fact -> loop (line_number + 1) (fact :: acc) rest
+       | Error _ as e -> e)
+  in
+  loop 1 [] (read_lines_all path)
+;;
 let read_facts_tail ~keeper_id ~n =
   read_lines_tail (facts_path ~keeper_id) ~n
   |> List.filter_map (parse_json_line fact_of_json)
@@ -357,17 +378,13 @@ let take_first n xs =
 ;;
 
 let read_all_facts ~keeper_id =
-  let path = facts_path ~keeper_id in
-  if not (Sys.file_exists path)
-  then []
-  else (
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         really_input_string ic (in_channel_length ic)
-         |> split_lines
-         |> List.filter_map (parse_json_line fact_of_json)))
+  read_facts_all ~keeper_id
+;;
+
+let read_facts_for_rewrite ~keeper_id =
+  match read_facts_all_strict ~keeper_id with
+  | Ok facts -> facts
+  | Error message -> invalid_arg message
 ;;
 
 (* RFC-0239 Q4 (supersedes RFC-0238 Capped_by_score): bound the append-only
@@ -378,7 +395,7 @@ let read_all_facts ~keeper_id =
    the number of facts dropped. *)
 let cap_facts ~keeper_id ~keep ~trigger ~rank =
   let path = facts_path ~keeper_id in
-  let all = read_all_facts ~keeper_id in
+  let all = read_facts_for_rewrite ~keeper_id in
   let total = List.length all in
   if total <= trigger
   then 0
@@ -451,7 +468,7 @@ let merge_episode_facts ~merge ~existing ~incoming =
    call, so a full rewrite of at most [trigger] facts is off the hot path. An
    empty [incoming] with the store already under [trigger] is a no-op. *)
 let merge_and_cap_facts ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
-  let existing = read_all_facts ~keeper_id in
+  let existing = read_facts_for_rewrite ~keeper_id in
   let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
   let total = List.length merged_list in
   let no_incoming = match incoming with [] -> true | _ :: _ -> false in

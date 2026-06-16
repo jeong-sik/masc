@@ -164,6 +164,13 @@ val set_thread_id :
   thread_id:string ->
   (unit, Board.board_error) Result.t
 
+val set_pinned :
+  post_id:string ->
+  pinned:bool ->
+  (unit, Board.board_error) Result.t
+(** Sets the [pinned] flag on a post (operator pin). Owner-gated at the
+    HTTP boundary; persists across restart. *)
+
 val search :
   query:string ->
   limit:int ->

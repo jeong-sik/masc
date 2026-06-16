@@ -171,16 +171,23 @@ let run ?(dry_run = false) ?threshold ?min_keepers ~keeper_ids ~now () =
   let source_ids =
     List.filter (fun id -> not (String.equal id shared_store_id)) keeper_ids
   in
-  let keeper_facts =
-    List.map (fun id -> id, Io.read_facts_all ~keeper_id:id) source_ids
+  let rec read_sources acc = function
+    | [] -> Ok (List.rev acc)
+    | id :: rest ->
+      (match Io.read_facts_all_strict ~keeper_id:id with
+       | Ok facts -> read_sources ((id, facts) :: acc) rest
+       | Error message -> Error message)
   in
-  let considered, promoted =
-    promote_facts ?threshold ?min_keepers ~now ~keeper_facts ()
-  in
-  if not dry_run then Io.rewrite_facts_atomically ~keeper_id:shared_store_id promoted;
-  { keepers_scanned = List.length source_ids
-  ; claims_considered = considered
-  ; promoted = List.length promoted
-  ; dry_run
-  }
+  match read_sources [] source_ids with
+  | Error message -> invalid_arg ("memory os consolidation input invalid: " ^ message)
+  | Ok keeper_facts ->
+    let considered, promoted =
+      promote_facts ?threshold ?min_keepers ~now ~keeper_facts ()
+    in
+    if not dry_run then Io.rewrite_facts_atomically ~keeper_id:shared_store_id promoted;
+    { keepers_scanned = List.length source_ids
+    ; claims_considered = considered
+    ; promoted = List.length promoted
+    ; dry_run
+    }
 ;;

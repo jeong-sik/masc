@@ -30,8 +30,10 @@
 (tests
  (names
   test_keeper_reactive_wake_backlog_gate
+  test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_librarian_retry
   test_surface_ref
   test_keeper_turn_outcome
   test_keeper_cycle_channel
@@ -316,8 +318,10 @@
  (modules
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
+  test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_librarian_retry
   test_surface_ref
   test_keeper_turn_outcome
   test_keeper_cycle_channel

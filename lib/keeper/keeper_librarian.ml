@@ -257,6 +257,8 @@ let episode_of_output ?now (inp : input) (raw : string) : episode option =
               ; preserved_tool_refs
               ; source_turn_range = source_turn_range claims
               ; created_at = now
+              ; valid_until = None
+              ; terminal_marker = None
               ; schema_version
               }
           | None -> None)

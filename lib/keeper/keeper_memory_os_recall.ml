@@ -10,6 +10,7 @@ let default_max_episodes = 2
    without crowding out keeper-local memory. *)
 let default_max_shared_facts = 4
 let fact_tail_scan = 64
+let episode_tail_scan = 32
 let max_fact_text_len = 260
 let max_episode_text_len = 360
 let max_atom_len = 48
@@ -88,8 +89,14 @@ let sanitize_atom text =
     | c -> c)
 ;;
 
-let fact_is_current ~now fact =
+let fact_is_current ~now (fact : fact) =
   match fact.valid_until with
+  | None -> true
+  | Some ts -> ts >= now
+;;
+
+let episode_is_current ~now (episode : episode) =
+  match episode.valid_until with
   | None -> true
   | Some ts -> ts >= now
 ;;
@@ -127,10 +134,16 @@ let render_shared_fact ~now ?(seed_tokens = []) fact =
 ;;
 
 let render_episode episode =
+  let terminal =
+    match episode.terminal_marker with
+    | None -> ""
+    | Some marker -> Printf.sprintf " terminal=%s" (sanitize_atom marker)
+  in
   Printf.sprintf
-    "- [%s g%04d] %s"
+    "- [%s g%04d%s] %s"
     (sanitize_atom episode.trace_id)
     episode.generation
+    terminal
     (sanitize_text ~max_len:max_episode_text_len episode.episode_summary)
 ;;
 
@@ -260,7 +273,13 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
       |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
       |> take default_max_shared_facts
   in
-  let episodes = Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n:max_episodes in
+  let episodes =
+    Keeper_memory_os_io.read_episodes_tail
+      ~keeper_id
+      ~n:(max max_episodes episode_tail_scan)
+    |> List.filter (episode_is_current ~now)
+    |> take max_episodes
+  in
   match facts, shared_facts, episodes with
   | [], [], [] -> ""
   | _ ->

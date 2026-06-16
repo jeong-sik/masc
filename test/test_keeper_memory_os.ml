@@ -197,6 +197,8 @@ let episode_fixture ~now ~trace_id ~generation ~summary =
   ; Types.preserved_tool_refs = []
   ; Types.source_turn_range = Some (0, 0)
   ; Types.created_at = now
+  ; Types.valid_until = None
+  ; Types.terminal_marker = None
   ; Types.schema_version = Types.schema_version
   }
 ;;
@@ -224,6 +226,8 @@ let test_json_roundtrip () =
     ; Types.preserved_tool_refs = [ "call_a" ]
     ; Types.source_turn_range = Some (5, 5)
     ; Types.created_at = now
+    ; Types.valid_until = Some (now +. days 1)
+    ; Types.terminal_marker = Some "handoff_complete"
     ; Types.schema_version = Types.schema_version
     }
   in
@@ -233,7 +237,15 @@ let test_json_roundtrip () =
     e.episode_summary
     e2.Types.episode_summary;
   Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims);
-  Alcotest.(check int) "open_items length" 1 (List.length e2.Types.open_items)
+  Alcotest.(check int) "open_items length" 1 (List.length e2.Types.open_items);
+  Alcotest.(check (option (float 0.001)))
+    "episode valid_until round-trip"
+    e.valid_until
+    e2.Types.valid_until;
+  Alcotest.(check (option string))
+    "episode terminal_marker round-trip"
+    e.terminal_marker
+    e2.Types.terminal_marker
 ;;
 
 let test_fact_v1_json_defaults_to_safe_staleness_fields () =
@@ -1321,6 +1333,8 @@ let test_render_if_enabled_renders_persisted_memory () =
           ; Types.preserved_tool_refs = []
           ; Types.source_turn_range = Some (1, 2)
           ; Types.created_at = now
+          ; Types.valid_until = None
+          ; Types.terminal_marker = None
           ; Types.schema_version = Types.schema_version
           }
         in
@@ -1367,6 +1381,8 @@ let test_render_context_seed_reranks_selection () =
           ; Types.preserved_tool_refs = []
           ; Types.source_turn_range = Some (1, 2)
           ; Types.created_at = now
+          ; Types.valid_until = None
+          ; Types.terminal_marker = None
           ; Types.schema_version = Types.schema_version
           }
         in
@@ -1408,6 +1424,8 @@ let test_render_context_empty_seed_matches_seedless () =
           ; Types.preserved_tool_refs = []
           ; Types.source_turn_range = Some (1, 2)
           ; Types.created_at = now
+          ; Types.valid_until = None
+          ; Types.terminal_marker = None
           ; Types.schema_version = Types.schema_version
           }
         in
@@ -1416,6 +1434,71 @@ let test_render_context_empty_seed_matches_seedless () =
           "empty seed is byte-identical to seedless"
           (Recall.render_context ~keeper_id ~now ())
           (Recall.render_context ~keeper_id ~now ~seed:"" ()))))
+;;
+
+let test_recall_filters_expired_episodes () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "episode-ttl-keeper" in
+      let now = 1_000_000.0 in
+      let expired =
+        { (episode_fixture
+             ~now
+             ~trace_id:"trace-expired"
+             ~generation:1
+             ~summary:"expired episode should not render")
+          with
+          Types.valid_until = Some (now -. 1.0)
+        }
+      in
+      let active =
+        { (episode_fixture
+             ~now
+             ~trace_id:"trace-active"
+             ~generation:2
+             ~summary:"active episode should render")
+          with
+          Types.valid_until = Some (now +. 1.0)
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id expired;
+      Memory_io.append_episode_bundle ~keeper_id active;
+      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:0 ~max_episodes:4 () in
+      Alcotest.(check bool)
+        "expired episode summary is omitted"
+        false
+        (contains "expired episode should not render" ctx);
+      Alcotest.(check bool)
+        "active episode summary remains"
+        true
+        (contains "active episode should render" ctx)))
+;;
+
+let test_recall_renders_terminal_episode_marker () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "episode-terminal-keeper" in
+      let now = 1_000_000.0 in
+      let episode =
+        { (episode_fixture
+             ~now
+             ~trace_id:"trace-terminal"
+             ~generation:3
+             ~summary:"terminal handoff summary")
+          with
+          Types.terminal_marker = Some "handoff_complete"
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id episode;
+      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:0 ~max_episodes:1 () in
+      Alcotest.(check bool)
+        "terminal marker is visible in episode line"
+        true
+        (contains "terminal=handoff_complete" ctx);
+      Alcotest.(check bool)
+        "terminal summary still renders"
+        true
+        (contains "terminal handoff summary" ctx)))
 ;;
 
 (* RFC-0239 R2: the append-only store keeps every re-confirmation of a claim as
@@ -1454,6 +1537,8 @@ let test_recall_dedups_repeated_claim () =
         ; Types.preserved_tool_refs = []
         ; Types.source_turn_range = Some (1, 9)
         ; Types.created_at = now
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
         ; Types.schema_version = Types.schema_version
         }
       in
@@ -1545,6 +1630,8 @@ let test_recall_context_renders_sanitized_memory () =
         ; Types.preserved_tool_refs = []
         ; Types.source_turn_range = Some (4, 6)
         ; Types.created_at = now
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
         ; Types.schema_version = Types.schema_version
         }
       in
@@ -1611,6 +1698,8 @@ let test_recall_context_preserves_admission_memory () =
         ; Types.preserved_tool_refs = []
         ; Types.source_turn_range = Some (7, 7)
         ; Types.created_at = now
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
         ; Types.schema_version = Types.schema_version
         }
       in
@@ -1624,6 +1713,8 @@ let test_recall_context_preserves_admission_memory () =
         ; Types.preserved_tool_refs = []
         ; Types.source_turn_range = Some (8, 8)
         ; Types.created_at = now +. 1.0
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
         ; Types.schema_version = Types.schema_version
         }
       in
@@ -2076,6 +2167,8 @@ let mk_episode ?(trace_id = "trace-ep") ?(generation = 0) ~created_at claim_stri
   ; Types.preserved_tool_refs = []
   ; Types.source_turn_range = None
   ; Types.created_at
+  ; Types.valid_until = None
+  ; Types.terminal_marker = None
   ; Types.schema_version = Types.schema_version
   }
 ;;
@@ -2505,6 +2598,14 @@ let () =
             "empty seed matches seedless (RFC-0244)"
             `Quick
             test_render_context_empty_seed_matches_seedless
+        ; Alcotest.test_case
+            "expired episodes are omitted"
+            `Quick
+            test_recall_filters_expired_episodes
+        ; Alcotest.test_case
+            "terminal episode marker is rendered"
+            `Quick
+            test_recall_renders_terminal_episode_marker
         ; Alcotest.test_case
             "dedups repeated claim (RFC-0239 R2)"
             `Quick

@@ -22,7 +22,7 @@ type scored_fact =
   ; score : float
   }
 
-let ttl_expired ~now fact =
+let ttl_expired ~now (fact : fact) =
   match fact.valid_until with
   | None -> false
   | Some ts -> now > ts

@@ -217,29 +217,33 @@ let extract_and_append_with_provider
        and last_verified_at refresh) rather than accumulating as an immortal
        frozen-confidence duplicate — the accuracy-inversion root fix. The same
        call applies the RFC-0239 Q4 retention cap in one atomic rewrite. The
-       episode log already retains the raw claims, so a fact-merge failure
-       (logged and swallowed) does not lose them. *)
+       episode log already retains the raw claims, but a fact-merge failure is
+       still reported to the caller so the turn is not counted as a clean
+       librarian write. *)
     Keeper_memory_os_io.append_episode ~keeper_id episode;
     Keeper_memory_os_io.append_event ~keeper_id episode;
-    (try
-       let window = Keeper_memory_os_io.fact_recall_window in
-       ignore
-         (Keeper_memory_os_io.merge_and_cap_facts
-            ~keeper_id
-            ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
-            ~incoming:episode.Keeper_memory_os_types.claims
-            ~keep:window
-            ~trigger:(window + (window / 2))
-            ~rank:(Keeper_memory_os_policy.score_fact ~now)
-          : Keeper_memory_os_io.fact_merge_stats)
+    (match
+       try
+         let window = Keeper_memory_os_io.fact_recall_window in
+         let (_ : Keeper_memory_os_io.fact_merge_stats) =
+           Keeper_memory_os_io.merge_and_cap_facts
+             ~keeper_id
+             ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
+             ~incoming:episode.Keeper_memory_os_types.claims
+             ~keep:window
+             ~trigger:(window + (window / 2))
+             ~rank:(Keeper_memory_os_policy.score_fact ~now)
+         in
+         Ok ()
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         let message = Printexc.to_string exn in
+         Log.Keeper.warn "memory os fact upsert failed keeper=%s: %s" keeper_id message;
+         Error message
      with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.warn
-         "memory os fact upsert failed keeper=%s: %s"
-         keeper_id
-         (Printexc.to_string exn));
-    Ok episode
+     | Ok () -> Ok episode
+     | Error message -> Error ("memory os fact upsert failed: " ^ message))
 ;;
 
 let provider_for_runtime ~runtime_id =

@@ -705,7 +705,7 @@ export function DashboardHealthStrip() {
 
   return html`
     <div
-      class="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-1.5 text-2xs"
+      class="v2-health-strip flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-1.5 text-2xs"
       role="status"
       aria-label="Dashboard runtime health"
       data-testid="dashboard-health-strip"
@@ -716,14 +716,14 @@ export function DashboardHealthStrip() {
           key=${chip.key}
           tab=${chip.route.tab}
           params=${chip.route.params}
-          class=${`inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium transition-opacity hover:opacity-80 ${healthChipClass(chip.tone)}`}
+          class=${`dashboard-health-chip inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium transition-opacity hover:opacity-80 ${healthChipClass(chip.tone)}`}
           title=${chip.detail}
           data-testid=${`dashboard-health-chip-${chip.key}`}
         >${chip.label}<//>
       ` : html`
         <span
           key=${chip.key}
-          class=${`inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}
+          class=${`dashboard-health-chip inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}
           title=${chip.detail}
           data-testid=${`dashboard-health-chip-${chip.key}`}
         >

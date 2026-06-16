@@ -140,6 +140,32 @@ describe('Governance surface', () => {
     expect(container.textContent).not.toContain('심의 의견 제출')
   }, 20000)
 
+  it('wraps the governance view in the v2 command surface class', async () => {
+    const response: DashboardGovernanceResponse = {
+      generated_at: '2026-03-26T00:00:00Z',
+      summary: { judge_online: false },
+      items: [],
+      activity: [],
+      judgments: [],
+      pending_actions: [],
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(response),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('.v2-command-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-command-panel')).not.toBeNull()
+  }, 20000)
+
   it('auto-refreshes the live judge surface while visible', async () => {
     const response: DashboardGovernanceResponse = {
       generated_at: '2026-04-21T00:00:00Z',

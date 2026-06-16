@@ -8,6 +8,100 @@
 
 .v2-command-surface,
 .v2-command-panel,
-.v2-command-action {
+.v2-command-card,
+.v2-command-row,
+.v2-command-action,
+.v2-command-table,
+.v2-command-detail {
   --v2-command-top-glow: rgb(var(--brass-glow) / 0.04);
+}
+
+/* ── Panels / cards ───────────────────────────────────────────────────────── */
+
+.v2-command-panel,
+.v2-command-card,
+.v2-command-surface [data-surface-card] {
+  box-shadow: inset 0 1px 0 var(--v2-command-top-glow);
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-command-panel:hover,
+.v2-command-card:hover,
+.v2-command-surface [data-surface-card]:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* ── Rows (lists, tables) ─────────────────────────────────────────────────── */
+
+.v2-command-row,
+.v2-command-table tbody tr,
+.v2-command-panel table tbody tr,
+.v2-command-detail table tbody tr {
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-command-row:hover,
+.v2-command-table tbody tr:hover,
+.v2-command-panel table tbody tr:hover,
+.v2-command-detail table tbody tr:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+
+/* ── Action buttons ───────────────────────────────────────────────────────── */
+
+.v2-command-action:not(:disabled),
+.v2-command-panel .v2-command-action:not(:disabled),
+.v2-command-surface [data-action-button]:not(:disabled) {
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-command-action:not(:disabled):hover,
+.v2-command-surface [data-action-button]:not(:disabled):hover {
+  border-color: var(--color-accent-fg);
+  background: var(--color-brass-soft);
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+
+.v2-command-table,
+.v2-command-panel table,
+.v2-command-detail table {
+  border-color: var(--color-border-default);
+}
+
+.v2-command-table thead,
+.v2-command-panel table thead,
+.v2-command-detail table thead {
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.v2-command-table th,
+.v2-command-panel table th,
+.v2-command-detail table th {
+  color: var(--color-fg-muted);
+}
+
+.v2-command-table td,
+.v2-command-panel table td,
+.v2-command-detail table td {
+  color: var(--color-fg-secondary);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+/* ── Detail sections ──────────────────────────────────────────────────────── */
+
+.v2-command-detail {
+  box-shadow: inset 0 1px 0 var(--v2-command-top-glow);
+}
+
+/* ── Composer / raw panel chrome inside the command surface ───────────────── */
+
+.v2-command-surface .v2-command-composer {
+  box-shadow: inset 0 1px 0 var(--v2-command-top-glow);
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-command-surface .v2-command-composer:hover {
+  border-color: var(--color-border-strong);
 }

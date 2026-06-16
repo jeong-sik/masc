@@ -317,7 +317,7 @@ function sourceTone(source: string): string {
     case 'client_tool_host':
       return 'text-[var(--color-accent-fg)] bg-[var(--accent-10)] border-[var(--accent-22)]'
     case 'legacy_stderr':
-      return 'text-[var(--bad-light)] bg-[var(--brick-soft)] border-[var(--err-border)]'
+      return 'text-[var(--bad-light)] bg-[var(--err-soft)] border-[var(--err-border)]'
     case 'legacy_traceln':
       return 'text-[var(--warn-fg)] bg-[var(--warn-soft)] border-[var(--warn-border)]'
     default:
@@ -445,7 +445,7 @@ function renderLogRow(entry: LogEntry) {
   return html`
     <div
       key=${entry.seq}
-      class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-card border border-[var(--color-border-divider)] px-3 py-3 ${backgroundClass}"
+      class="logs-row v2-logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] px-3 py-3 ${backgroundClass}"
     >
       <div class="font-mono text-2xs whitespace-nowrap text-[color:var(--color-fg-muted)]">
         ${entry.ts.replace('T', ' ').replace('Z', '')}
@@ -536,7 +536,7 @@ function renderSummaryChip(label: string, value: string | number, tone = 'neutra
 
 function renderLogSummary(summary: LogWindowSummary) {
   return html`
-    <div class="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
+    <div class="v2-logs-summary mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
       ${renderSummaryChip('ERROR', summary.errors, summary.errors > 0 ? 'bad' : 'neutral')}
       ${renderSummaryChip('WARN', summary.warnings, summary.warnings > 0 ? 'warn' : 'neutral')}
       ${renderSummaryChip('failure envelope', summary.failureEnvelopes, summary.failureEnvelopes > 0 ? 'info' : 'neutral')}
@@ -597,7 +597,7 @@ function renderProviderLogPanel() {
   }
 
   return html`
-    <div class="mx-3 mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+    <div class="v2-logs-provider-panel mx-3 mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-divider)] px-3 py-2">
         <div class="flex flex-wrap items-center gap-2 text-2xs">
           <${StatusChip} tone="info" uppercase=${false}>provider logs</${StatusChip}>
@@ -765,9 +765,9 @@ export function LogViewer() {
   const summary = summarizeLogWindow(logEntries)
 
   return html`
-    <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
-      <section class="contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
-        <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--color-border-divider)] px-4 py-4">
+    <div class="logs-viewer v2-logs-surface flex h-full min-h-0 flex-col gap-4">
+      <section class="v2-logs-panel contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
+        <div class="logs-toolbar v2-logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--color-border-divider)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
             <${Select}
               class="logs-select px-3 py-2 text-xs"
@@ -879,7 +879,7 @@ export function LogViewer() {
         ${renderProviderLogPanel()}
 
         <div class="px-3 pt-3">
-          <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">
+          <div class="v2-logs-table-header grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">
             <div>timestamp</div>
             <div>level</div>
             <div>module</div>

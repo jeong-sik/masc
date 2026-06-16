@@ -93,7 +93,7 @@ let poll_all () =
 
 (** [extract_keeper_id fact_id] extracts the keeper prefix from a
     fact_id string. Fact ids are expected to follow the convention
-    \"keeper_name:fact_id\". Returns None when the format is invalid. *)
+    "keeper_name:fact_id". Returns None when the format is invalid. *)
 let extract_keeper_id fact_id =
   match String.index_opt fact_id ':' with
   | Some colon_idx when colon_idx > 0 ->
@@ -108,7 +108,7 @@ let gc_threshold = 0.7
     triggers Keeper_memory_os_gc.run_gc for any keeper whose facts
     have decayed below the threshold.
 
-    Uses the fact_id prefix convention \"keeper:rest\" to map decay
+    Uses the fact_id prefix convention "keeper:rest" to map decay
     results to their owning keeper. On GC completion, writes a
     gc_event entry to the event log.
 

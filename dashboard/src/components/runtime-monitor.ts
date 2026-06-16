@@ -511,6 +511,9 @@ export function RuntimeMonitor() {
             delta=${{ direction: probe?.probe?.summary?.failed ? 'down' : 'flat', text: runtimeProbeSummaryText(probe) }}
           />
         </div>
+        ${providers?.config_path
+          ? html`<div class="mb-3 break-all font-mono text-2xs text-[var(--color-fg-muted)]">config · ${providers.config_path}</div>`
+          : null}
         <div class="flex flex-col gap-3">
           ${(providers?.providers ?? []).length > 0
             ? providers?.providers.map(provider => {

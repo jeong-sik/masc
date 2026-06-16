@@ -67,6 +67,33 @@ describe('coverageGapDisplay', () => {
     })
   })
 
+  it('appends the active (unrecovered) count when it is a strict subset of the total', () => {
+    const display = coverageGapDisplay({
+      source: 'tool_call_io',
+      stale_reason: 'tool_call_io_append_failed',
+      coverage_gap_count: 3,
+      active_coverage_gap_count: 1,
+    })
+    expect(display?.summary).toBe('Tool-call log write failed · 3 recorded gaps · 1 active')
+  })
+
+  it('omits the active suffix when all gaps are active or none are', () => {
+    const allActive = coverageGapDisplay({
+      source: 'tool_call_io',
+      stale_reason: 'tool_call_io_append_failed',
+      coverage_gap_count: 2,
+      active_coverage_gap_count: 2,
+    })
+    expect(allActive?.summary).toBe('Tool-call log write failed · 2 recorded gaps')
+    const noneActive = coverageGapDisplay({
+      source: 'tool_call_io',
+      stale_reason: 'tool_call_io_append_failed',
+      coverage_gap_count: 2,
+      active_coverage_gap_count: 0,
+    })
+    expect(noneActive?.summary).toBe('Tool-call log write failed · 2 recorded gaps')
+  })
+
   it('selects the newest gap (last element) when multiple gaps are present', () => {
     // Backends emit coverage_gaps in oldest→newest order; the UI must show the
     // most recent incident, not the first one in the list.

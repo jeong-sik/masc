@@ -594,6 +594,9 @@ export interface DashboardRuntimeProvidersResponse {
     default_runtime_id?: string | null
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
+  // Resolved filesystem path of the runtime.toml the server actually loaded
+  // (Runtime.config_path); answers "which config is live" in the monitor.
+  config_path?: string | null
 }
 
 export interface BucketMetric {
@@ -764,6 +767,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
     providers: asRecordArray(raw.providers)
       .map(decodeRuntimeProviderSnapshot)
       .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
+    config_path: asNullableString(raw.config_path),
   }
 }
 
@@ -2375,6 +2379,9 @@ export type TelemetryFreshnessMetadata = {
   exists?: boolean
   coverage_gaps?: TelemetryCoverageGap[]
   coverage_gap_count?: number
+  // Count of gaps not yet recovered (source latest_ts < gap ts), distinct from
+  // the total coverage_gap_count — the actionable "still failing" number.
+  active_coverage_gap_count?: number
 }
 
 export type DashboardSurfaceEnvelope = {
@@ -2486,6 +2493,7 @@ function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): Telemet
     exists: asBoolean(raw.exists),
     coverage_gaps: coverageGaps,
     coverage_gap_count: asNumber(raw.coverage_gap_count, coverageGaps.length),
+    active_coverage_gap_count: asNumber(raw.active_coverage_gap_count),
   }
 }
 

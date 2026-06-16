@@ -198,9 +198,16 @@ export function coverageGapDisplay(d: TelemetryFreshnessMetadata): CoverageGapDi
     .filter((entry): entry is [string, string] => entry[1] != null)
     .map(([label, value]) => `${label} ${value}`)
 
+  // Surface the still-unrecovered count when it is a strict subset of the
+  // total (source latest_ts has caught up on the rest); skip when all gaps are
+  // active or none are, to avoid a redundant "N active" on the total.
+  const active = d.active_coverage_gap_count
+  const activeSuffix =
+    typeof active === 'number' && active > 0 && active < count ? ` · ${active} active` : ''
+
   return {
     count,
-    summary: `${title} · ${recordedGapCount(count)}`,
+    summary: `${title} · ${recordedGapCount(count)}${activeSuffix}`,
     details,
     structured: {
       reason,

@@ -132,7 +132,7 @@ function AutoPausePanel({ allKeepers }: { allKeepers: Keeper[] }) {
   }
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       ${pausedKeepers.length > 0 ? html`
         <div>
           <div class="mb-2 text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">

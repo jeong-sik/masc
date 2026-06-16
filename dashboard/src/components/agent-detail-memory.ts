@@ -120,7 +120,7 @@ export function AgentDetailMemory({ agentName }: Props) {
   const isFilteringEpisodes = episodeQuery.value.trim() !== ''
 
   return html`
-    <${CollapsibleSection} title="협업 & 기억" mountWhenOpen=${true}>
+    <${CollapsibleSection} class="v2-monitoring-detail" title="협업 & 기억" mountWhenOpen=${true}>
       <div class="space-y-4">
         <!-- Hebbian collaboration -->
         <div>

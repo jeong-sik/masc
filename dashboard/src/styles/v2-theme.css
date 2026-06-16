@@ -94,8 +94,22 @@
   --color-accent-fg: var(--accent-brass);
   --color-accent-fg-dim: var(--accent-brass-dim);
   --color-accent-glow: var(--brass-glow);
+  --accent-6: rgb(var(--brass-glow) / .06);
+  --accent-8: rgb(var(--brass-glow) / .08);
+  --accent-10: rgb(var(--brass-glow) / .10);
   --accent-12: rgb(var(--brass-glow) / .12);
+  --accent-15: rgb(var(--brass-glow) / .15);
+  --accent-18: rgb(var(--brass-glow) / .18);
+  --accent-20: rgb(var(--brass-glow) / .20);
   --accent-22: rgb(var(--brass-glow) / .22);
+  --accent-25: rgb(var(--brass-glow) / .25);
+  --accent-30: rgb(var(--brass-glow) / .30);
+  --accent-35: rgb(var(--brass-glow) / .35);
+  --accent-36: rgb(var(--brass-glow) / .36);
+  --accent-40: rgb(var(--brass-glow) / .40);
+  --accent-50: rgb(var(--brass-glow) / .50);
+  --color-accent: var(--accent-brass);
+  --color-accent-soft: var(--brass-soft);
 
   /* Legacy status → v2 */
   --ok: var(--status-ok);
@@ -117,7 +131,14 @@
 
   /* Status soft/alpha slots */
   --ok-soft: rgb(90 122 58 / .10);
+  --ok-6: rgb(90 122 58 / .06);
+  --ok-8: rgb(90 122 58 / .08);
   --ok-10: rgb(90 122 58 / .10);
+  --ok-12: rgb(90 122 58 / .12);
+  --ok-20: rgb(90 122 58 / .20);
+  --ok-22: rgb(90 122 58 / .22);
+  --ok-25: rgb(90 122 58 / .25);
+  --ok-28: rgb(90 122 58 / .28);
   --ok-30: rgb(90 122 58 / .30);
   --ok-fg: #9abc7a;
   --ok-border: rgb(90 122 58 / .35);
@@ -126,6 +147,9 @@
   --warn-10: rgb(160 106 26 / .10);
   --warn-12: rgb(160 106 26 / .12);
   --warn-20: rgb(160 106 26 / .20);
+  --warn-22: rgb(160 106 26 / .22);
+  --warn-25: rgb(160 106 26 / .25);
+  --warn-30: rgb(160 106 26 / .30);
   --warn-fg: #d49a3a;
   --warn-bright: #e0a040;
   --warn-border: rgb(160 106 26 / .35);
@@ -133,7 +157,13 @@
   --err-soft: rgb(160 24 24 / .12);
   --bad-soft: rgb(160 24 24 / .15);
   --bad-6: rgb(160 24 24 / .06);
+  --bad-8: rgb(160 24 24 / .08);
   --bad-10: rgb(160 24 24 / .10);
+  --bad-12: rgb(160 24 24 / .12);
+  --bad-20: rgb(160 24 24 / .20);
+  --bad-22: rgb(160 24 24 / .22);
+  --bad-25: rgb(160 24 24 / .25);
+  --bad-28: rgb(160 24 24 / .28);
   --bad-30: rgb(160 24 24 / .30);
   --err-fg: #d06060;
   --bad-light: #e07070;
@@ -149,4 +179,30 @@
   --color-info: #6a8eb0;
   --color-scrollbar-thumb: #2a1f1a;
   --color-scrollbar-thumb-hover: #3d2e22;
+
+  /* Legacy component tokens → v2 */
+  --text: var(--color-fg-primary);
+  --bg-subtle: var(--color-bg-elevated);
+  --border-subtle: var(--border-soft);
+  --color-border-subtle: var(--border-soft);
+  --surface-inset: var(--color-bg-page);
+  --input-border: var(--color-border-strong);
+  --input-bg: var(--color-bg-page);
+  --shadow-1: 0 1px 2px 0 rgb(0 0 0 / .18);
+  --shadow-panel: 0 1px 3px 0 rgb(0 0 0 / .18);
+  --elev-6-shadow: 0 18px 45px -6px rgb(0 0 0 / .35);
+
+  /* Legacy purple / stalled / paused → v2 warn/idle */
+  --purple: #9a7ab0;
+  --purple-12: rgb(154 122 176 / .12);
+  --purple-24: rgb(154 122 176 / .24);
+  --stalled-fg: #b090c8;
+  --paused: var(--status-warn);
+  --paused-10: var(--warn-10);
+  --paused-20: var(--warn-20);
+
+  /* Legacy gold → v2 brass */
+  --gold-8: rgb(196 162 101 / .08);
+  --gold-10: rgb(196 162 101 / .10);
+  --gold-15: rgb(196 162 101 / .15);
 }

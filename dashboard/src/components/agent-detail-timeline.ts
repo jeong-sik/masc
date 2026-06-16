@@ -147,7 +147,7 @@ export function AgentTimelineSection() {
   const filterActive = activeCategory !== 'all' || query.trim() !== ''
 
   return html`
-    <${CollapsibleSection} title=${`활동 타임라인 (${summary?.total_events ?? 0})`} mountWhenOpen=${true}>
+    <${CollapsibleSection} class="v2-monitoring-detail" title=${`활동 타임라인 (${summary?.total_events ?? 0})`} mountWhenOpen=${true}>
       ${summary ? html`
         <div class="flex gap-1.5 flex-wrap mb-2">
           ${summary.tasks_completed > 0 ? html`<${SummaryBadge}>완료 ${summary.tasks_completed}<//>` : null}

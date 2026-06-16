@@ -628,7 +628,7 @@ export function FleetHealthPanel() {
   const view = activeView.value
 
   return html`
-    <div class="contain-content flex flex-col gap-4">
+    <div class="v2-monitoring-surface contain-content flex flex-col gap-4">
       <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keeper tool operations</div>
       <${FilterChips}
         chips=${VIEW_CHIPS}

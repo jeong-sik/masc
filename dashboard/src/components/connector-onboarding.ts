@@ -77,7 +77,7 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
 
 export function ConnectorOnboardingGrid() {
   return html`
-    <div>
+    <div class="v2-connector-onboarding">
       <div class="mb-3">
         <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">아직 연결된 사이드카가 없습니다</h3>
         <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">

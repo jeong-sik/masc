@@ -349,7 +349,7 @@ export function AgentProfile({ name }: { name: string }) {
   const isKeeper = keeper != null
 
   return html`
-    <div class="px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
+    <div class="v2-monitoring-surface px-1 ${isKeeper ? 'ff-profile--keeper' : ''}">
       <div class="flex gap-2 mb-3">
         <${ActionButton} variant="ghost" onClick=${() => navigate('monitoring', { section: 'agents' })}>← 목록<//>
         <${ActionButton} variant="ghost" onClick=${() => { void loadProfile(name) }} disabled=${profileLoading}>

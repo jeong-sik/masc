@@ -977,12 +977,12 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   return html`
     <section
       data-testid="fleet-fsm-matrix"
-      class="contain-content rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]"
+      class="v2-monitoring-panel contain-content rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]"
       aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--color-border-default)] p-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet 통합 (KSM × KTC × KDP × KCL × KMC × KCB)</h2>
-        <span class="text-xs text-[var(--color-fg-muted)]0">
+        <span class="text-xs text-[var(--color-fg-muted)]">
           키퍼 ${data.count}명 · ${unixSecondsToDate(data.generated_at).toLocaleTimeString()} 업데이트
         </span>
         <${TextInput}
@@ -1147,7 +1147,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                                     key=${key}
                                     data-runtime-action
                                     data-runtime-action-type=${action.action_type}
-                                    class="self-start rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--color-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                                    class="v2-monitoring-action self-start rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--color-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                                     title=${action.reason}
                                     aria-label=${action.reason}
                                     disabled=${busy}
@@ -1168,7 +1168,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                             <button
                               type="button"
                               data-runtime-assist
-                              class="self-start rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--color-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                              class="v2-monitoring-action self-start rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--color-bg-hover)] disabled:cursor-not-allowed disabled:opacity-50"
                               title="현재 원인/증거를 keeper LLM에 보내 감독형 진단을 요청합니다"
                               aria-label="감독형 진단 요청"
                               disabled=${assisting}
@@ -1194,7 +1194,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                             data-cell
                             data-axis=${a.key}
                             data-runtime-phase-conflict=${cell.runtimePhaseConflict ? 'true' : 'false'}
-                            class="inline-block self-start rounded-[var(--r-1)] border px-2 py-0.5 ${cell.className}"
+                            class="v2-monitoring-fsm-cell inline-block self-start rounded-[var(--r-1)] border px-2 py-0.5 ${cell.className}"
                             title=${cell.title}
                           >${cell.label}</span>
                           <div

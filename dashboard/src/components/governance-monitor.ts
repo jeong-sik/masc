@@ -131,7 +131,7 @@ export function GovernanceMonitor() {
   const isFiltering = query.value.trim() !== ''
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <${Select}
           class="px-2 py-1 text-xs"

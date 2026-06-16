@@ -15,7 +15,7 @@ export function AgentJournalStream({ agentName }: { agentName: string }) {
     : '실시간 활동 스트림'
 
   return html`
-    <${CollapsibleSection} title=${title} mountWhenOpen=${true}>
+    <${CollapsibleSection} class="v2-monitoring-detail" title=${title} mountWhenOpen=${true}>
       ${entries.length === 0
         ? html`<${EmptyState} message="아직 활동 기록이 없습니다" compact />`
         : html`

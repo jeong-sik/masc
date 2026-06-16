@@ -126,16 +126,12 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.deepseek-v4-flash]
-max-concurrent = 4
 
 [deepseek.deepseek-v4-pro]
-max-concurrent = 2
 
 [deepseek.deepseek-v4-flash]
-max-concurrent = 4
 
 [glm-coding.glm-4-7-coding]
-max-concurrent = 3
 
 [models.glm-5-turbo]
 api-name = "GLM-5-Turbo"
@@ -154,10 +150,8 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
-max-concurrent = 3
 
 [ollama.gemma4-26b-a4b-qat]
-max-concurrent = 1
 
 # ── Keeper assignments ──────────────────────────────────────────────
 # Keepers are assigned to a model by provider.model key. Unassigned

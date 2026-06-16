@@ -166,7 +166,7 @@ type binding =
   { provider_id : string
   ; model_id : string
   ; is_default : bool
-  ; max_concurrent : int
+  ; max_concurrent : int option
   ; price_input : float option
   ; price_output : float option
   ; keep_alive : string option

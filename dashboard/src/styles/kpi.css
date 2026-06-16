@@ -33,7 +33,7 @@
 
 /* Hover uses the shared interaction overlay token */
 .kpi-cell:hover {
-  background: linear-gradient(0deg, var(--hover-overlay), var(--hover-overlay));
+  background: var(--state-hover-bg);
 }
 
 /* Focused KPI — brass ring, keyboard-navigable */
@@ -60,7 +60,7 @@
 
 .kpi-value {
   font: var(--type-kpi-l);
-  font-weight: var(--fw-med);
+  font-weight: var(--fw-semi);
   font-variant-numeric: tabular-nums;
   color: var(--color-fg-primary);
   letter-spacing: var(--track-tight);
@@ -70,15 +70,15 @@
 
 .kpi-unit {
   font: var(--type-caption);
-  color: var(--color-fg-muted);
+  color: var(--color-fg-secondary);
   text-transform: uppercase;
   letter-spacing: var(--track-wide);
 }
 
 .kpi-delta {
-  font: var(--type-caption);
+  font: var(--type-label);
   font-variant-numeric: tabular-nums;
-  color: var(--color-fg-disabled);
+  color: var(--color-fg-muted);
 }
 .kpi-delta.up   { color: var(--ok-fg); }
 .kpi-delta.down { color: var(--err-fg); }
@@ -113,7 +113,7 @@
   box-shadow: inset 2px 0 0 var(--err);
 }
 .kpi-cell.is-crit:hover {
-  background: linear-gradient(0deg, var(--err-soft), var(--hover-overlay));
+  background: linear-gradient(0deg, var(--err-soft), var(--white-5));
 }
 
 .kpi-cell.is-warn .kpi-value { color: var(--warn-fg); }
@@ -121,16 +121,25 @@
   background: linear-gradient(0deg, var(--warn-soft), transparent 70%);
   box-shadow: inset 2px 0 0 var(--warn);
 }
+.kpi-cell.is-warn:hover {
+  background: linear-gradient(0deg, var(--warn-soft), var(--white-5));
+}
 
 .kpi-cell.is-ok .kpi-value { color: var(--ok-fg); }
 .kpi-cell.is-ok {
   box-shadow: inset 2px 0 0 var(--ok);
+}
+.kpi-cell.is-ok:hover {
+  background: linear-gradient(0deg, var(--ok-soft), var(--white-5));
 }
 
 .kpi-cell.is-brass .kpi-value { color: var(--brass-fg); }
 .kpi-cell.is-brass {
   background: linear-gradient(0deg, var(--brass-soft), transparent 70%);
   box-shadow: inset 2px 0 0 var(--brass-1);
+}
+.kpi-cell.is-brass:hover {
+  background: linear-gradient(0deg, var(--brass-soft), var(--white-5));
 }
 
 /* ── "Now" pulse — active / live-updating cell ── */

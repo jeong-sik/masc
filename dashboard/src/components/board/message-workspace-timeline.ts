@@ -95,22 +95,22 @@ export function buildMessageWorkspaceModel(messageList: readonly Message[]): Mes
 function TimelineMessage({ row }: { row: TimelineRow }) {
   const preview = previewBoardMessage(row.message)
   return html`
-    <article class="v2-workspace-row grid grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3.5 py-3">
-      <div class="pt-0.5 text-right text-3xs font-semibold tabular-nums uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+    <article class="v2-workspace-row grid grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-3 hover:border-[var(--color-border-strong)] transition-colors">
+      <div class="pt-0.5 text-right text-2xs font-bold tabular-nums uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">
         ${row.message.seq !== undefined ? `#${row.message.seq}` : row.index + 1}
       </div>
       <div class="min-w-0">
         <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
+          <span class="text-xs font-bold text-[var(--color-fg-primary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
           ${row.message.timestamp
-            ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
+            ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-secondary)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
             : null}
           ${row.message.type
-            ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.message.type}</span>`
+            ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.type}</span>`
             : null}
           ${row.stateBlockCount > 0
             ? html`
-                <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-[var(--color-accent-fg)]">
+                <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-accent-fg)]">
                   <${Braces} size=${11} aria-hidden="true" />
                   STATE ${row.stateBlockCount}
                 </span>
@@ -124,7 +124,7 @@ function TimelineMessage({ row }: { row: TimelineRow }) {
           ? html`
               <div class="mt-2 flex flex-wrap gap-1.5">
                 ${row.mentionTargets.map(target => html`
-                  <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]" key=${target}>
+                  <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]" key=${target}>
                     <${AtSign} size=${11} aria-hidden="true" />
                     @${target}
                   </span>
@@ -150,8 +150,8 @@ export function MessageWorkspaceTimeline() {
     <section class="grid gap-4" aria-labelledby="message-workspace-timeline-heading">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Messages</div>
-          <h2 id="message-workspace-timeline-heading" class="mt-1 text-xl font-semibold text-[var(--color-fg-primary)]">Workspace timeline</h2>
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Messages</div>
+          <h2 id="message-workspace-timeline-heading" class="mt-1 text-xl font-bold text-[var(--color-fg-primary)]">Workspace timeline</h2>
         </div>
         <${ActionButton}
           variant="ghost"
@@ -166,17 +166,17 @@ export function MessageWorkspaceTimeline() {
       </div>
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
-        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Workspaces</div>
-          <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.workspaces.length}</div>
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Workspaces</div>
+          <div class="mt-1 text-lg font-bold tabular-nums text-[var(--color-fg-primary)]">${model.workspaces.length}</div>
         </div>
-        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Messages</div>
-          <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.totalMessages}</div>
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Messages</div>
+          <div class="mt-1 text-lg font-bold tabular-nums text-[var(--color-fg-primary)]">${model.totalMessages}</div>
         </div>
-        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Signals</div>
-          <div class="mt-1 text-sm font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.totalMentions} mentions · ${model.totalStateBlocks} state</div>
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Signals</div>
+          <div class="mt-1 text-sm font-bold tabular-nums text-[var(--color-fg-primary)]">${model.totalMentions} mentions · ${model.totalStateBlocks} state</div>
         </div>
       </div>
 
@@ -195,12 +195,12 @@ export function MessageWorkspaceTimeline() {
                   class=${`v2-workspace-action rounded-[var(--r-1)] border px-3 py-1.5 text-xs font-medium transition-colors ${
                     workspace.workspace === activeWorkspace
                       ? 'border-[var(--color-accent)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
-                      : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
+                      : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
                   }`}
                   onClick=${() => setSelectedWorkspace(workspace.workspace)}
                 >
                   #${workspace.workspace}
-                  <span class="ml-2 text-3xs tabular-nums opacity-70">${workspace.rows.length}</span>
+                  <span class="ml-2 text-2xs tabular-nums text-[var(--color-fg-muted)]">${workspace.rows.length}</span>
                 </button>
               `)}
             </div>

@@ -83,6 +83,7 @@ const VARIANT_STYLE: Record<ResolvedVariant, VariantStyle> = {
     color: 'var(--color-fg-secondary)',
     borderColor: 'var(--color-border-default)',
     background: 'transparent',
+    fontWeight: 500,
     hover: {
       color: 'var(--color-fg-primary)',
       background: 'var(--color-bg-elevated)',
@@ -103,6 +104,7 @@ const VARIANT_STYLE: Record<ResolvedVariant, VariantStyle> = {
     color: 'var(--color-status-err)',
     borderColor: 'rgb(var(--color-status-err-glow) / 0.4)',
     background: 'transparent',
+    fontWeight: 500,
     hover: {
       color: 'var(--color-status-err)',
       background: 'rgb(var(--color-status-err-glow) / 0.1)',
@@ -112,6 +114,7 @@ const VARIANT_STYLE: Record<ResolvedVariant, VariantStyle> = {
     color: 'var(--color-fg-muted)',
     borderColor: 'transparent',
     background: 'transparent',
+    fontWeight: 500,
     hover: {
       color: 'var(--color-fg-primary)',
       background: 'var(--color-bg-panel-alt)',
@@ -132,10 +135,10 @@ interface SizeStyle {
 // with the 28px geometry inferred from the xs(18)→sm(20)→default(24)→
 // lg(28) +2px progression that primitives.html demos).
 const SIZE_STYLE: Record<BtnSize, SizeStyle> = {
-  xs: { height: '18px', padding: '0 6px', fontSize: '9px', letterSpacing: '0.06em' },
-  sm: { height: '20px', padding: '0 8px', fontSize: '10px' },
-  default: { height: '24px', padding: '0 10px', fontSize: '11px' },
-  lg: { height: '28px', padding: '0 14px', fontSize: '12px' },
+  xs: { height: '18px', padding: '0 6px', fontSize: '10px', letterSpacing: '0.04em' },
+  sm: { height: '20px', padding: '0 8px', fontSize: '11px', letterSpacing: '0.02em' },
+  default: { height: '24px', padding: '0 10px', fontSize: '12px', letterSpacing: '0.01em' },
+  lg: { height: '28px', padding: '0 14px', fontSize: '14px' },
 }
 
 const TRANSITION =

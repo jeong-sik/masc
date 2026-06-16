@@ -58,7 +58,7 @@ function toneClass(tone: ModerationTone): string {
     case 'ok':
       return 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)]'
     default:
-      return 'bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
+      return 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] border-[var(--color-border-divider)]'
   }
 }
 
@@ -78,7 +78,7 @@ export function ModerationBadge({
   const countLabel = normalizedCount > 0 ? ` ${normalizedCount}` : ''
   return html`
     <span
-      class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${toneClass(statusTone(normalizedStatus))}`}
+      class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${toneClass(statusTone(normalizedStatus))}`}
       aria-label=${`${targetLabel} moderation ${label}${normalizedCount > 0 ? ` ${normalizedCount}건` : ''}`}
       title=${
         normalizedCount > 0

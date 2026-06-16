@@ -1,0 +1,13 @@
+/* MASC Dashboard v2 — Lab surface (Tools + Safety Harness).
+ *
+ * Scoped to .v2-lab-* so unmigrated surfaces keep their legacy styling.
+ *
+ * Colors come from v2-theme.css; this file handles surface-specific
+ * layout, hairlines, hover states, and brass accent touches.
+ */
+
+.v2-lab-surface,
+.v2-lab-panel,
+.v2-lab-card {
+  --v2-lab-top-glow: rgb(var(--brass-glow) / 0.04);
+}

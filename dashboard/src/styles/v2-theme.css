@@ -205,4 +205,26 @@
   --gold-8: rgb(196 162 101 / .08);
   --gold-10: rgb(196 162 101 / .10);
   --gold-15: rgb(196 162 101 / .15);
+
+  /* Card tokens used by unmigrated surfaces */
+  --color-card: var(--bg-card);
+  --color-card-border: var(--border);
+
+  /* Bad/error semantic aliases */
+  --color-bad: var(--bad);
+  --color-bad-fg: var(--bad-light);
+  --color-bad-soft: var(--bad-soft);
+  --bad-muted: rgb(var(--err-glow) / .25);
+
+  /* Warning / danger fg aliases */
+  --color-warning-fg: var(--warn-fg);
+  --color-danger-fg: var(--err-fg);
+
+  /* Text / accent aliases */
+  --color-text-disabled: var(--color-fg-disabled);
+  --color-accent-muted: var(--color-brass-2);
+  --track-section: var(--track-caps);
+
+  /* Form-fitting gold bright alias */
+  --ff-gold-bright: var(--color-accent-fg);
 }

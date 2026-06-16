@@ -1,0 +1,13 @@
+/* MASC Dashboard v2 — Command / Operations surface.
+ *
+ * Scoped to .v2-command-* so unmigrated surfaces keep their legacy styling.
+ *
+ * Colors come from v2-theme.css; this file handles surface-specific
+ * layout, hairlines, hover states, and brass accent touches.
+ */
+
+.v2-command-surface,
+.v2-command-panel,
+.v2-command-action {
+  --v2-command-top-glow: rgb(var(--brass-glow) / 0.04);
+}

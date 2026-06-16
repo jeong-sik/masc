@@ -9,6 +9,7 @@ module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
+module Edges = Masc.Keeper_memory_os_edges
 
 let contains substring s =
   let sub_len = String.length substring in
@@ -2089,6 +2090,147 @@ let test_consolidator_rejects_corrupt_source_store () =
       Alcotest.(check bool) "error includes line number" true (contains ":2:" msg))
 ;;
 
+(* ---------- RFC-0246 §2.7 associative edges ---------- *)
+
+let mk_episode ?(trace_id = "trace-ep") ?(generation = 0) ~created_at claim_strings =
+  { Types.trace_id
+  ; Types.generation
+  ; Types.episode_summary = "episode summary"
+  ; Types.claims =
+      List.map (fun claim -> { (fact_fixture ~now:created_at ()) with Types.claim }) claim_strings
+  ; Types.open_items = []
+  ; Types.constraints = []
+  ; Types.preserved_tool_refs = []
+  ; Types.source_turn_range = None
+  ; Types.created_at
+  ; Types.schema_version = Types.schema_version
+  }
+;;
+
+(* n distinct claims in one episode produce exactly n*(n-1)/2 undirected
+   [Relates] edges, each in canonical endpoint order and carrying the episode's
+   own provenance. *)
+let test_edges_co_occurrence_pairs_distinct_claims () =
+  let created_at = 1_000.0 in
+  let episode = mk_episode ~trace_id:"trace-xyz" ~created_at [ "gamma"; "alpha"; "beta" ] in
+  let edges = Edges.co_occurrence_edges episode in
+  Alcotest.(check int) "3 claims -> 3 pairs" 3 (List.length edges);
+  List.iter
+    (fun (e : Edges.edge) ->
+       Alcotest.(check string) "relation is relates" "relates" (Edges.relation_to_string e.relation);
+       Alcotest.(check bool) "canonical src < dst" true (String.compare e.src e.dst < 0);
+       Alcotest.(check string) "provenance trace_id" "trace-xyz" e.trace_id;
+       Alcotest.(check (float 1e-9)) "provenance created_at" created_at e.created_at)
+    edges;
+  let pairs =
+    List.map (fun (e : Edges.edge) -> e.src ^ "|" ^ e.dst) edges |> List.sort String.compare
+  in
+  Alcotest.(check (list string))
+    "exactly the i<j pairs of the sorted distinct keys"
+    [ "alpha|beta"; "alpha|gamma"; "beta|gamma" ]
+    pairs
+;;
+
+(* A single claim (and an empty episode) cannot form a pair, so produce no edges
+   — no self-loops. *)
+let test_edges_single_and_empty_produce_none () =
+  let created_at = 1_000.0 in
+  Alcotest.(check int)
+    "single claim -> no edge"
+    0
+    (List.length (Edges.co_occurrence_edges (mk_episode ~created_at [ "only one" ])));
+  Alcotest.(check int)
+    "empty episode -> no edge"
+    0
+    (List.length (Edges.co_occurrence_edges (mk_episode ~created_at [])))
+;;
+
+(* Two claims that share a normalized key (case/whitespace variants) collapse to
+   one endpoint, so they do not co-occur with themselves and the pair count is
+   over DISTINCT keys, not raw claims. *)
+let test_edges_co_occurrence_dedups_within_episode () =
+  let created_at = 1_000.0 in
+  let episode = mk_episode ~created_at [ "Foo Bar"; "foo  bar"; "Baz" ] in
+  let edges = Edges.co_occurrence_edges episode in
+  Alcotest.(check int) "2 distinct keys -> 1 pair" 1 (List.length edges);
+  match edges with
+  | [ e ] ->
+    Alcotest.(check string) "canonical src" "baz" e.Edges.src;
+    Alcotest.(check string) "canonical dst" "foo bar" e.Edges.dst
+  | _ -> Alcotest.fail "expected exactly one edge"
+;;
+
+(* The edge codec round-trips, and a relation string with no arm degrades to
+   [Unknown] (graceful, no line dropped) rather than failing. *)
+let test_edge_codec_roundtrip () =
+  let roundtrip (e : Edges.edge) =
+    match Edges.edge_of_json (Edges.edge_to_json e) with
+    | Some e' -> e'
+    | None -> Alcotest.fail "edge_of_json returned None on own output"
+  in
+  let base : Edges.edge =
+    { Edges.src = "a"
+    ; dst = "b"
+    ; relation = Edges.Relates
+    ; trace_id = "t1"
+    ; created_at = 42.0
+    ; schema_version = Types.schema_version
+    }
+  in
+  let r = roundtrip base in
+  Alcotest.(check string) "src preserved" "a" r.Edges.src;
+  Alcotest.(check string) "dst preserved" "b" r.Edges.dst;
+  Alcotest.(check string) "relation preserved" "relates" (Edges.relation_to_string r.Edges.relation);
+  Alcotest.(check string) "trace_id preserved" "t1" r.Edges.trace_id;
+  let unknown = roundtrip { base with Edges.relation = Edges.Unknown "supersedes" } in
+  Alcotest.(check string)
+    "unknown relation degrades to its label"
+    "supersedes"
+    (Edges.relation_to_string unknown.Edges.relation)
+;;
+
+(* Aggregation counts repeated observations of the same (src,dst,relation) as
+   Hebbian weight, bracketing first/last seen across events. *)
+let test_edges_aggregate_weights () =
+  let mk created_at : Edges.edge =
+    { Edges.src = "alpha"
+    ; dst = "beta"
+    ; relation = Edges.Relates
+    ; trace_id = "t"
+    ; created_at
+    ; schema_version = Types.schema_version
+    }
+  in
+  let assocs = Edges.aggregate [ mk 5.0; mk 1.0; mk 3.0 ] in
+  match assocs with
+  | [ a ] ->
+    Alcotest.(check int) "weight counts observations" 3 a.Edges.weight;
+    Alcotest.(check (float 1e-9)) "first_seen is min" 1.0 a.Edges.first_seen;
+    Alcotest.(check (float 1e-9)) "last_seen is max" 5.0 a.Edges.last_seen
+  | _ -> Alcotest.fail "expected one aggregated association"
+;;
+
+(* End-to-end: the producer's edges persist via append-only IO and read back as
+   aggregated associations from disk. *)
+let test_edges_io_roundtrip () =
+  with_temp_keepers_dir (fun _ ->
+    let episode = mk_episode ~created_at:100.0 [ "alpha"; "beta" ] in
+    Memory_io.append_edges ~keeper_id:"k" (Edges.co_occurrence_edges episode);
+    (* a second episode re-observes the same pair, strengthening it *)
+    Memory_io.append_edges
+      ~keeper_id:"k"
+      (Edges.co_occurrence_edges (mk_episode ~created_at:200.0 [ "beta"; "alpha" ]));
+    match Memory_io.read_associations ~keeper_id:"k" with
+    | [ a ] ->
+      Alcotest.(check string) "src" "alpha" a.Edges.a_src;
+      Alcotest.(check string) "dst" "beta" a.Edges.a_dst;
+      Alcotest.(check int) "weight accumulates across episodes" 2 a.Edges.weight;
+      Alcotest.(check (float 1e-9)) "first_seen" 100.0 a.Edges.first_seen;
+      Alcotest.(check (float 1e-9)) "last_seen" 200.0 a.Edges.last_seen
+    | other ->
+      Alcotest.failf "expected one association, got %d" (List.length other))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -2311,6 +2453,23 @@ let () =
             "corrupt source store fails loud"
             `Quick
             test_consolidator_rejects_corrupt_source_store
+        ] )
+    ; ( "edges"
+      , [ Alcotest.test_case
+            "co-occurrence pairs distinct claims (RFC-0246 §2.7)"
+            `Quick
+            test_edges_co_occurrence_pairs_distinct_claims
+        ; Alcotest.test_case
+            "single and empty produce no edges"
+            `Quick
+            test_edges_single_and_empty_produce_none
+        ; Alcotest.test_case
+            "co-occurrence dedups within episode"
+            `Quick
+            test_edges_co_occurrence_dedups_within_episode
+        ; Alcotest.test_case "edge codec round-trips" `Quick test_edge_codec_roundtrip
+        ; Alcotest.test_case "aggregate counts Hebbian weight" `Quick test_edges_aggregate_weights
+        ; Alcotest.test_case "edges IO round-trip" `Quick test_edges_io_roundtrip
         ] )
     ]
 ;;

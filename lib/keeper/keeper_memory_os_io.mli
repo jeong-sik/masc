@@ -19,9 +19,17 @@ val tool_results_dir : keeper_id:string -> string
 val tool_result_path : keeper_id:string -> tool_call_id:string -> string
 val episode_path : keeper_id:string -> trace_id:string -> generation:int -> string
 
+(** RFC-0246 §2.7: per-keeper association events, alongside the fact store. *)
+val edges_path : keeper_id:string -> string
+
 (** {1 Atomic writes} *)
 
 val append_fact : keeper_id:string -> fact -> unit
+val append_edge : keeper_id:string -> Keeper_memory_os_edges.edge -> unit
+
+(** Append every co-occurrence edge of an episode (RFC-0246 §2.7). Append-only
+    and unbounded in slice 1 — see [edges_path]'s growth note in the .ml. *)
+val append_edges : keeper_id:string -> Keeper_memory_os_edges.edge list -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
 val append_episode_bundle : keeper_id:string -> episode -> unit
@@ -37,6 +45,13 @@ val read_facts_all : keeper_id:string -> fact list
     input cannot be partially dropped and overwritten. *)
 val read_facts_all_strict : keeper_id:string -> (fact list, string) result
 val read_facts_tail : keeper_id:string -> n:int -> fact list
+
+(** Read every association event in the keeper's edge store (RFC-0246 §2.7). *)
+val read_edges_all : keeper_id:string -> Keeper_memory_os_edges.edge list
+
+(** The aggregated read view: per-(src,dst,relation) associations with Hebbian
+    weight, the surface a spreading-activation recall consumes. *)
+val read_associations : keeper_id:string -> Keeper_memory_os_edges.association list
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
 

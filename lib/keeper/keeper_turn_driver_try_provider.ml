@@ -398,8 +398,9 @@ let run_try_provider
   | Ok config ->
     (* Stream stall detection is handled by OAS's stream_idle_timeout_s.
        No separate liveness FSM — provider stall is an OAS-level concern.
-       No per-lane capacity gate — provider load is managed by operator
-       adjusting keeper count. *)
+       Provider load is gated per binding by [Runtime_binding_capacity]
+       (RFC-0153 §4.2.3) using the candidate's [max_concurrent], in addition to
+       the operator tuning keeper count. *)
     let run_started_at =
       Unix.gettimeofday ()
       (* NDT-OK: provider-attempt latency telemetry only; dispatch/control
@@ -432,7 +433,16 @@ let run_try_provider
         (match per_provider_timeout_s with
          | Some (_ : float) -> ()
          | None -> ());
-        run_fn ())
+        (* RFC-0153 §4.2.3: hold one of the binding's [max_concurrent] slots
+           for the whole attempt so every keeper assigned to one endpoint
+           (e.g. ollama_cloud.deepseek-v4-flash, 8 keepers in live runtime.toml)
+           cannot collectively exceed its provider concurrency limit. An
+           unconfigured binding ([max_concurrent <= 0]) runs ungated, falling
+           back to the global [Fd_accountant.Provider_http] gate. *)
+        Runtime_binding_capacity.with_slot
+          ~key:(Runtime_candidate.capacity_key candidate)
+          ~max_concurrent:(Runtime_candidate.max_concurrent candidate)
+          run_fn)
     in
     let result =
       (* Restore typed provider-context enrichment (auth-env / not-found hints).

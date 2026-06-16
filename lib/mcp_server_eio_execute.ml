@@ -341,6 +341,15 @@ let execute_tool_eio
                      (make_keeper_tool_ctx ())
                      ~name
                      ~args:coerced_args
+                 | Mod_keeper_task ->
+                   Some
+                     (Tool_result.error
+                        ~failure_class:(Some Tool_result.Workflow_rejection)
+                        ~tool_name:name
+                        ~start_time
+                        (Printf.sprintf
+                           "tool '%s' is a keeper task tool; use the keeper in-process task handler"
+                           name))
                  (* Removed tool families are intentionally not dispatchable. *)
                  | Mod_shard ->
                    let ok, json = Tool_shard.execute name coerced_args in

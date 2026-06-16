@@ -177,6 +177,22 @@ let privileged_keeper_tool_names : string list =
 
 let keeper_backend_tool_name name = name
 
+let keeper_wrapped_server_tool_alias name =
+  match name with
+  | "masc_board_post" -> "keeper_board_post"
+  | "masc_board_comment" -> "keeper_board_comment"
+  | "masc_board_list" -> "keeper_board_list"
+  | "masc_tasks" -> "keeper_tasks_list"
+  | "masc_broadcast" -> "keeper_broadcast"
+  | _ -> name
+;;
+
+let keeper_wrapped_server_tools : string list =
+  [ "masc_board_post"; "masc_board_comment"; "masc_board_list";
+    "masc_tasks"; "masc_broadcast";
+  ]
+;;
+
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
   let public_schemas =
@@ -230,7 +246,30 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
       else
         with_spawned
     in
-    with_local_worker
+    let with_keeper_wrapper =
+      if List.mem name keeper_wrapped_server_tools then
+        let alias_name = keeper_wrapped_server_tool_alias name in
+        let alias_schema =
+          match
+            List.find_opt
+              (fun (s : Masc_domain.tool_schema) -> String.equal s.name alias_name)
+              Tool_shard.all_keeper_tool_schemas
+          with
+          | Some s -> s
+          | None -> schema
+        in
+        with_local_worker
+        @ [
+            make_seed ~capability_id:name ~risk_class:Audited
+              ~audiences:[ Keeper_agent ]
+              ~supports_audit_evidence:true
+              ~supports_direct_user_discovery:false
+              ~surface:Keeper_standard ~backend_tool_name:alias_name alias_schema;
+          ]
+      else
+        with_local_worker
+    in
+    with_keeper_wrapper
   in
   public_schemas |> List.concat_map make_public_seed
 
@@ -393,11 +432,6 @@ let keeper_safe_tool_names : string list =
 
 let keeper_privileged_tool_names : string list =
   privileged_keeper_tool_names
-
-let keeper_wrapped_server_tools : string list =
-  [ "masc_board_post"; "masc_board_comment"; "masc_board_list";
-    "masc_tasks"; "masc_broadcast";
-  ]
 
 let keeper_wrapped_internal_tools : string list =
   keeper_all_tool_names

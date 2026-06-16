@@ -83,17 +83,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      disabled the shared store simply stops being refreshed (recall still reads
      whatever is there).
 
-     Default OFF until #21241: a read-only dry-run over the live fleet found the
-     only >=2-keeper-corroborated [fact]/[constraint] claims are ephemeral
-     lifecycle/coordination boilerplate ("checkpoint saved", "no tasks") that the
-     librarian mislabels as [category=fact]. Promoting them would inject prompt
-     noise via recall's [shared via] line, with no durable knowledge. Re-enable
-     (flip the default, or set the env true) once the librarian taxonomy emits
-     ephemeral events as a non-promotable category (#21241, RFC-0244 §2.3). *)
+     P2-1: enabled by default.  The #21241 librarian taxonomy fix already
+     typed [default_promote_categories] so [Unknown] and other non-objective
+     labels are default-denied; remaining ephemeral [Fact] mis-labels are a
+     librarian prompt issue and are gated below by requiring >=2 distinct
+     keepers.  Operators can still disable via MASC_KEEPER_MEMORY_OS_CONSOLIDATION=0. *)
   if
     Keeper_memory_bank_env.memory_env_bool_logged
       "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-      ~default:false
+      ~default:true
   then
     fork_logged_fiber
       ~sw
@@ -121,6 +119,55 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          | exn ->
            Log.Server.warn
              "memory_os_consolidation: tick crashed: %s"
+             (Printexc.to_string exn));
+        Eio.Time.sleep clock interval;
+        loop ()
+      in
+      loop ());
+  (* RFC-0239 Q4: Memory OS Tier-1 fact GC. Removes TTL-expired facts,
+     verdict-discarded rows, and duplicate claims from each keeper's own
+     fact store. Per-keeper like writes, so it cannot race cross-keeper
+     consolidation; it is the production caller that makes [run_gc] live. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "memory_os_gc")
+    (fun () ->
+      let interval = 300.0 in
+      let rec loop () =
+        (try
+           let keeper_ids = Keeper_memory_os_io.list_fact_store_keeper_ids () in
+           List.iter
+             (fun keeper_id ->
+                try
+                  let report =
+                    Keeper_memory_os_gc.run_gc
+                      ~keeper_id
+                      ~now:(Time_compat.now ())
+                      ()
+                  in
+                  if report.Keeper_memory_os_gc.total_input > 0
+                  then
+                    Log.Server.debug
+                      "memory_os_gc keeper=%s input=%d ttl=%d verdict=%d dedup=%d written=%d"
+                      keeper_id
+                      report.Keeper_memory_os_gc.total_input
+                      report.Keeper_memory_os_gc.ttl_expired
+                      report.Keeper_memory_os_gc.verdict_discarded
+                      report.Keeper_memory_os_gc.dedup_removed
+                      report.Keeper_memory_os_gc.written
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Server.warn
+                    "memory_os_gc keeper=%s failed: %s"
+                    keeper_id
+                    (Printexc.to_string exn))
+             keeper_ids
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.warn
+             "memory_os_gc sweep failed: %s"
              (Printexc.to_string exn));
         Eio.Time.sleep clock interval;
         loop ()

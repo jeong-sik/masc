@@ -122,6 +122,7 @@ type t =
   | CycleExceptions
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
+  | PromptUnknownToolTokens
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
@@ -348,6 +349,8 @@ let to_string = function
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
   | StateSnapshotSkippedNoState ->
     "masc_keeper_state_snapshot_skipped_no_state_total"
+  | PromptUnknownToolTokens ->
+    "masc_keeper_prompt_unknown_tool_tokens_total"
   | ProgressUpdatedLineFailures -> "masc_keeper_progress_updated_line_failures_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
@@ -491,7 +494,8 @@ let all : t list =
     ToolPolicyFailures; ReconcileFailures; DecisionAuditFlushFailures; OasCancel;
     ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
     PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
-    CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; ProgressUpdatedLineFailures;
+    CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; PromptUnknownToolTokens;
+    ProgressUpdatedLineFailures;
     SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;
     EpisodeCreateFailures; MemoryActivityEmitFailures; SupervisorSweepFailures; TomlReconcileSweepFailures;
     TomlReconcileDedup; ReconcileDisabled; ToolUsageFlushFailures; TurnTimeoutCommitted;

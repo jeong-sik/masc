@@ -171,6 +171,8 @@ type fusion_request =
   ; keeper : string  (** 결과를 받을 키퍼 chat lane *)
   ; prompt : string
   ; preset : string  (** runtime.toml [fusion.presets.*] 이름 *)
+  ; web_tools : bool
+      (** web search/fetch 도구를 패널/심판에 주입할지 여부. preset을 오버라이드. *)
   ; depth : Fusion_depth.t
   ; trigger : fusion_trigger
   }

@@ -7,17 +7,26 @@ type t = (string * int) Atomic.t
 
 let create () : t = Atomic.make ("", 0)
 
-(* check(c < limit) → incr을 단일 CAS로 묶어 peek→incr TOCTOU를 닫는다 (멀티
-   도메인에서도 limit 초과 발행 없음). bucket이 바뀌면 새 윈도우로 리셋하며 첫
-   발동을 허용(limit>=1 가정). c >= limit이면 증가 없이 Error. *)
+let rec incr_and_count (t : t) ~hour_bucket =
+  let ((b, c) as cur) = Atomic.get t in
+  let next = if String.equal b hour_bucket then (b, c + 1) else (hour_bucket, 1) in
+  if Atomic.compare_and_set t cur next then snd next
+  else incr_and_count t ~hour_bucket
+
 let rec try_incr_if_under (t : t) ~hour_bucket ~limit =
   let ((b, c) as cur) = Atomic.get t in
   if not (String.equal b hour_bucket) then
-    let next = (hour_bucket, 1) in
-    if Atomic.compare_and_set t cur next then Ok 1
-    else try_incr_if_under t ~hour_bucket ~limit
+    (* 새 bucket에서도 limit=0이면 첫 호출부터 거부해야 한다. *)
+    if limit <= 0 then Error ()
+    else
+      let next = (hour_bucket, 1) in
+      if Atomic.compare_and_set t cur next then Ok 1
+      else try_incr_if_under t ~hour_bucket ~limit
   else if c >= limit then Error ()
   else
     let next = (b, c + 1) in
-    if Atomic.compare_and_set t cur next then Ok (c + 1)
-    else try_incr_if_under t ~hour_bucket ~limit
+    if Atomic.compare_and_set t cur next then Ok (c + 1) else try_incr_if_under t ~hour_bucket ~limit
+
+let current_count (t : t) ~hour_bucket =
+  let b, c = Atomic.get t in
+  if String.equal b hour_bucket then c else 0

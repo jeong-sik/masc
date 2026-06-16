@@ -34,10 +34,14 @@ let compose_prompt ~question ~panel =
 %s|}
     (escape_xml question) answers Fusion_judge_parse.expected_json_doc
 
-let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel ()
-  : (Fusion_types.judge_synthesis, string) result
+let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
+    ~web_tools ~max_tool_calls () : (Fusion_types.judge_synthesis, string) result
   =
-  match Fusion_oas.build_agent ~sw ~net ~system_prompt:judge_system_prompt judge_model with
+  let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
+  match
+    Fusion_oas.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
+      ~max_tool_calls judge_model
+  with
   | Error reason ->
     Error
       (Printf.sprintf "judge build failed: %s"

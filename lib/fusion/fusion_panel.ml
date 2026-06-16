@@ -22,14 +22,18 @@ let outcome_of_result (model : string)
       ; reason = Fusion_types.Provider_error (Agent_sdk.Error.to_string e)
       }
 
-let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt ()
-  : Fusion_types.panel_outcome list
+let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt
+    ~web_tools ~max_tool_calls_per_panel () : Fusion_types.panel_outcome list
   =
+  let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
   (* 1. 각 모델을 에이전트로 빌드. 빌드 실패는 격리. *)
   let built, build_failures =
     List.fold_left
       (fun (oks, fails) model ->
-        match Fusion_oas.build_agent ~sw ~net ~system_prompt model with
+        match
+          Fusion_oas.build_agent ~sw ~net ~system_prompt ~tools
+            ~max_tool_calls:max_tool_calls_per_panel model
+        with
         | Ok agent -> ((agent, model) :: oks, fails)
         | Error reason ->
           (oks, Fusion_types.Failed { failed_model = model; reason } :: fails))

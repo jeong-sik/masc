@@ -9,6 +9,8 @@ type preset =
   ; judge_system_prompt : string
   ; panel_timeout_s : float
   ; judge_timeout_s : float
+  ; web_tools : bool
+  ; max_tool_calls_per_panel : int
   }
 [@@deriving show, eq]
 

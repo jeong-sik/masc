@@ -18,6 +18,8 @@ type preset =
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; panel_timeout_s : float  (** 패널 fan-out 구조적 타임아웃 (초). *)
   ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
+  ; web_tools : bool  (** 패널/심판에 web_search/web_fetch 주입 여부. *)
+  ; max_tool_calls_per_panel : int  (** 패널 모델당 최대 tool 호출 수 (0=무제한). *)
   }
 [@@deriving show, eq]
 

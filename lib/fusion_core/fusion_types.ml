@@ -131,6 +131,7 @@ type fusion_request =
   ; keeper : string
   ; prompt : string
   ; preset : string
+  ; web_tools : bool
   ; depth : Fusion_depth.t
   ; trigger : fusion_trigger
   }

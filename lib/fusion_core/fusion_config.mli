@@ -18,9 +18,11 @@ type config_error =
   | Invalid_per_hour_budget of int
       (** enabled인데 per_hour_budget < 1 — gate가 `count >= budget`로 deny하므로
           0/음수는 모든 호출을 silent deny-all로 만든다 (enabled-but-never-runs). *)
+  | Invalid_max_tool_calls of string * int
+      (** (preset 이름, 값) — 0..16 범위 위반 *)
   | Missing_default_preset of string
-      (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자열도 거부 —
-          preset 생략 호출이 default_preset로 폴백하는데 ""는 항상 Preset_unknown로
+      (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자엏도 거부 —
+          preset 생략 호출이 default_preset로 폭빽하는데 ""는 항상 Preset_unknown로
           deny되기 때문. *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]
@@ -33,6 +35,11 @@ val disabled : Fusion_policy.t
     - [fusion] 부재 → [Ok disabled].
     - enabled=true인데 preset 부재 → [Error [Empty_presets]].
     - 패널 크기 1..8 위반 → [Error [Invalid_panel_size _]].
+    - panel/judge system prompt 누락 → [Error [Missing_prompt _]].
+    - judge 모델 id 누락 → [Error [Missing_judge_model _]].
+    - max_concurrent_panels < 1 → [Error [Invalid_max_concurrent_panels _]].
+    - enabled + per_hour_budget < 1 → [Error [Invalid_per_hour_budget _]].
+    - max_tool_calls_per_panel이 0..16 범위 밖 → [Error [Invalid_max_tool_calls _]].
     - default_preset가 presets에 없음 → [Error [Missing_default_preset _]].
     - 필드 타입 불일치 → [Error [Toml_type_error _]].
     여러 에러는 누적되어 한 번에 반환된다. *)

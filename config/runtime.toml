@@ -224,3 +224,7 @@ answer. Respond with ONLY the requested JSON object, no prose and no code fences
 # 구조적 타임아웃(초). 미지정 시 Fusion_policy.default_timeout_s.
 panel_timeout_s = 120.0
 judge_timeout_s = 120.0
+# 패널/심판에 MASC web_search/web_fetch 도구를 주입할지 여부.
+web_tools = false
+# 패널 모델당 최대 tool 호출 수 (0 = 무제한, OpenRouter Fusion 허용 범위 0..16).
+max_tool_calls_per_panel = 0

@@ -161,6 +161,7 @@ type deny_reason =
   | Over_hourly_budget
   | Over_cost_cap
   | Rate_limited
+  | Not_warranted
 [@@deriving yojson, show, eq]
 
 let deny_reason_label = function
@@ -170,6 +171,7 @@ let deny_reason_label = function
   | Over_hourly_budget -> "over_hourly_budget"
   | Over_cost_cap -> "over_cost_cap"
   | Rate_limited -> "rate_limited"
+  | Not_warranted -> "not_warranted"
 
 type gate_decision =
   | Allow of fusion_request

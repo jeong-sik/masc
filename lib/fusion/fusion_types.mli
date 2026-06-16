@@ -197,6 +197,7 @@ type deny_reason =
   | Over_hourly_budget  (** per_hour_budget 초과 *)
   | Over_cost_cap  (** 예상 cost > max_cost_usd_per_call *)
   | Rate_limited  (** 동시 진행 심의 상한 *)
+  | Not_warranted  (** 트리거가 게이트 조건 미충족 (예: low_confidence인데 score≥threshold) *)
 [@@deriving yojson, show, eq]
 
 (** 안정적 짧은 라벨 (로깅·메트릭용). *)

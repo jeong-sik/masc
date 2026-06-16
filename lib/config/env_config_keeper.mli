@@ -117,6 +117,16 @@ module KeeperKeepalive : sig
   val max_idle_turns_autonomous : int
   val max_idle_turns_reactive : int
   val turn_timeout_sec : float
+  val admission_wait_timeout_sec : float
+  (** Legacy retry/admission wait budget. This is not the provider binding
+      semaphore wait. Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Clamp
+      range: [5, 1200] s. *)
+
+  val binding_slot_wait_timeout_sec : float
+  (** Max wait for a saturated provider-model binding semaphore before the
+      keeper attempt returns runtime-slot backpressure. Env:
+      [MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC]. Clamp range: [1, 300] s. *)
+
   val oas_timeout_sec_override : float option
 
 

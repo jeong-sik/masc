@@ -86,6 +86,9 @@ module For_testing : sig
   val stream_idle_timeout_for_attempt :
     configured:float option -> float option
 
+  val binding_capacity_wait_timeout_s :
+    ?per_provider_timeout_s:float -> unit -> float option
+
   val sanitize_runtime_mcp_external_tool_choice :
     runtime_mcp_external_tools:bool ->
     Agent_sdk.Hooks.turn_params ->

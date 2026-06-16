@@ -26,6 +26,7 @@ type t = {
   autonomous_max_idle_turns : int field;
   turn_timeout_sec : float field;
   admission_wait_timeout_sec : float field;
+  binding_slot_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
   stream_idle_timeout_sec : float field;
   execution_idle_timeout_sec : float option field;
@@ -51,6 +52,7 @@ val reactive_max_idle_turns : unit -> int
 val autonomous_max_idle_turns : unit -> int
 val turn_timeout_sec : unit -> float
 val admission_wait_timeout_sec : unit -> float
+val binding_slot_wait_timeout_sec : unit -> float
 val stream_idle_timeout_sec : unit -> float
 val execution_idle_timeout_sec : unit -> float option
 (** Resolved [turn.execution_idle_timeout_sec].

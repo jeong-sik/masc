@@ -8,16 +8,21 @@
     ([declared_client_capacity] returns [None]). Before this module the only
     active provider gate was the single global [Fd_accountant.Provider_http]
     semaphore (default 16), shared across every provider — so it cannot hold a
-    single over-subscribed endpoint (e.g. ollama.com, ~10 concurrent) under its
-    own limit when several keepers are assigned to it (live runtime.toml
-    assigns 8 keepers to [ollama_cloud.deepseek-v4-flash]).
+    single over-subscribed endpoint under its own limit when several keepers are
+    assigned to the same runtime binding.
 
     The gate is a process-global registry of one [Eio.Semaphore.t] per capacity
     key (provider:model@base_url — see {!Runtime_candidate.capacity_key}).
-    Acquisition blocks until a slot is free: this is backpressure (the caller
-    waits its turn on the endpoint), not failure. The wait is bounded by the
-    caller's existing OAS stream/body timeout — the holder is released when its
-    turn completes, errors, or is cancelled. *)
+    Acquisition can either block until a slot is free or, when the caller
+    supplies a clock and wait timeout, fail as bounded backpressure. The holder
+    is released when its turn completes, errors, or is cancelled. *)
+
+type wait_timeout =
+  { key : string
+  ; wait_timeout_sec : float
+  ; in_flight : int
+  ; cap : int
+  }
 
 val with_slot : key:string -> max_concurrent:int -> (unit -> 'a) -> 'a
 (** [with_slot ~key ~max_concurrent f] runs [f] while holding one of the
@@ -29,16 +34,31 @@ val with_slot : key:string -> max_concurrent:int -> (unit -> 'a) -> 'a
     back to the existing global gate, never be throttled to a
     [Eio.Semaphore.make 0] deadlock.
 
-    The slot is released on normal return, exception, or fiber cancellation
-    (release cannot raise, so the [Fun.protect] finally is total). If [f]
-    never acquires because acquisition is cancelled, no slot is held and none
-    is released.
+    The slot is released on normal return, exception, or fiber cancellation via
+    [Eio.Switch.on_release]. If [f] never acquires because acquisition is
+    cancelled, no slot is held and none is released.
 
     The cap for a key is fixed at first acquisition. runtime.toml is
     startup-only ("restart masc-mcp after edits"), so a key's cap does not
     change within a process lifetime; a later call with a different
     [max_concurrent] for the same key reuses the first semaphore and is
     ignored. *)
+
+val with_slot_result :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?wait_timeout_sec:float ->
+  key:string ->
+  max_concurrent:int ->
+  (unit -> 'a) ->
+  ('a, wait_timeout) result
+(** [with_slot_result] is the bounded-acquire variant for hot keeper paths.
+
+    When [clock] and a positive finite [wait_timeout_sec] are both supplied,
+    waiting for a saturated key is capped by that duration. A timeout returns
+    [Error wait_timeout] without running [f] and without acquiring a slot.
+
+    Missing [clock], missing timeout, non-positive timeout, or
+    [max_concurrent <= 0] preserves [with_slot]'s unbounded/ungated behavior. *)
 
 val snapshot : unit -> (string * int * int) list
 (** [(key, in_flight, cap)] for every key that has been gated at least once.

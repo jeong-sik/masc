@@ -279,6 +279,36 @@ let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
          ~runtime_id
          ~response:run_result.response)
 
+let finite_positive = function
+  | Some value when Float.is_finite value && value > 0.0 -> Some value
+  | Some _ | None -> None
+
+let binding_capacity_wait_timeout_s ?per_provider_timeout_s () =
+  let binding_slot_wait_timeout_s =
+    Keeper_runtime_resolved.binding_slot_wait_timeout_sec ()
+  in
+  match finite_positive per_provider_timeout_s with
+  | Some provider_timeout_s ->
+    Some (Float.min provider_timeout_s binding_slot_wait_timeout_s)
+  | None -> Some binding_slot_wait_timeout_s
+
+let binding_capacity_wait_timeout_error ~runtime_id
+    (timeout : Runtime_binding_capacity.wait_timeout) =
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Capacity_backpressure
+       { runtime_id
+       ; source = Keeper_internal_error.Runtime_slot
+       ; detail =
+           Printf.sprintf
+             "provider binding capacity wait timed out after %.1fs \
+              (key=%s in_flight=%d cap=%d)"
+             timeout.wait_timeout_sec
+             timeout.key
+             timeout.in_flight
+             timeout.cap
+       ; retry_after = Keeper_internal_error.No_retry_hint
+       })
+
 (** Run a single provider attempt within the runtime.
 
     This is the extracted body of the [try_provider] closure that was
@@ -434,15 +464,26 @@ let run_try_provider
          | Some (_ : float) -> ()
          | None -> ());
         (* RFC-0153 §4.2.3: hold one of the binding's [max_concurrent] slots
-           for the whole attempt so every keeper assigned to one endpoint
-           (e.g. ollama_cloud.deepseek-v4-flash, 8 keepers in live runtime.toml)
-           cannot collectively exceed its provider concurrency limit. An
-           unconfigured binding ([max_concurrent <= 0]) runs ungated, falling
-           back to the global [Fd_accountant.Provider_http] gate. *)
-        Runtime_binding_capacity.with_slot
-          ~key:(Runtime_candidate.capacity_key candidate)
-          ~max_concurrent:(Runtime_candidate.max_concurrent candidate)
-          run_fn)
+           for the whole attempt so keepers assigned to the same runtime
+           binding cannot collectively exceed that binding's provider
+           concurrency limit. An unconfigured binding ([max_concurrent <= 0])
+           runs ungated, falling back to the global
+           [Fd_accountant.Provider_http] gate. *)
+        match
+          Runtime_binding_capacity.with_slot_result
+            ?clock:(Eio_context.get_clock_opt ())
+            ?wait_timeout_sec:
+              (binding_capacity_wait_timeout_s ?per_provider_timeout_s ())
+            ~key:(Runtime_candidate.capacity_key candidate)
+            ~max_concurrent:(Runtime_candidate.max_concurrent candidate)
+            run_fn
+        with
+        | Ok result -> result
+        | Error timeout ->
+          Error
+            (binding_capacity_wait_timeout_error
+               ~runtime_id:ctx.error_runtime_id
+               timeout))
     in
     let result =
       (* Restore typed provider-context enrichment (auth-env / not-found hints).
@@ -489,6 +530,7 @@ let run_try_provider
 module For_testing = struct
   let max_execution_time_for_attempt = max_execution_time_for_attempt
   let stream_idle_timeout_for_attempt = stream_idle_timeout_for_attempt
+  let binding_capacity_wait_timeout_s = binding_capacity_wait_timeout_s
   let sanitize_runtime_mcp_external_tool_choice =
     sanitize_runtime_mcp_external_tool_choice
   let apply_accept = apply_accept

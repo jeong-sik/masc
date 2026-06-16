@@ -1,7 +1,8 @@
 (* Tests for Runtime_binding_capacity — the per-binding provider concurrency
    gate (RFC-0153 §4.2.3). Verifies the gate caps simultaneous holders at
    [max_concurrent], runs ungated for the unconfigured [0] marker, releases the
-   slot on exception, and keeps distinct keys independent. *)
+   slot on exception/cancellation, bounds saturated-key wait, and keeps distinct
+   keys independent. *)
 
 open Alcotest
 
@@ -65,6 +66,69 @@ let test_release_on_exception () =
       ran := true);
   check bool "slot released after exception" true !ran
 
+(* A fiber cancelled while holding a slot must run the [Switch.on_release]
+   cleanup. The second cap-1 acquire proves the semaphore permit was restored;
+   the snapshot proves bookkeeping returned to zero. *)
+let test_release_on_cancellation () =
+  Eio_main.run @@ fun _env ->
+  let key = "cancel-key" in
+  let entered, resolve_entered = Eio.Promise.create () in
+  (try
+     Eio.Switch.run @@ fun sw ->
+     Eio.Fiber.fork ~sw (fun () ->
+       Runtime_binding_capacity.with_slot ~key ~max_concurrent:1 (fun () ->
+         Eio.Promise.resolve resolve_entered ();
+         let never, _resolve_never = Eio.Promise.create () in
+         Eio.Promise.await never));
+     Eio.Promise.await entered;
+     Eio.Switch.fail sw Exit
+   with Exit -> ());
+  let in_flight =
+    Runtime_binding_capacity.snapshot ()
+    |> List.find_map (fun (slot_key, count, _) ->
+      if String.equal slot_key key then Some count else None)
+  in
+  check (option int) "cancelled slot bookkeeping drained" (Some 0) in_flight;
+  let ran = ref false in
+  Runtime_binding_capacity.with_slot ~key ~max_concurrent:1 (fun () ->
+      ran := true);
+  check bool "slot reacquired after cancellation" true !ran
+
+(* A saturated key should be able to fail a bounded acquire without running the
+   protected body. This prevents one stuck holder from making every same-binding
+   waiter block forever. *)
+let test_acquire_wait_timeout () =
+  Eio_main.run @@ fun env ->
+  let key = "wait-timeout-key" in
+  let entered, resolve_entered = Eio.Promise.create () in
+  let release_holder, resolve_release_holder = Eio.Promise.create () in
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw (fun () ->
+    Runtime_binding_capacity.with_slot ~key ~max_concurrent:1 (fun () ->
+      Eio.Promise.resolve resolve_entered ();
+      Eio.Promise.await release_holder));
+  Eio.Promise.await entered;
+  let ran = ref false in
+  let result =
+    Runtime_binding_capacity.with_slot_result
+      ~clock:env#clock
+      ~wait_timeout_sec:0.001
+      ~key
+      ~max_concurrent:1
+      (fun () -> ran := true)
+  in
+  check bool "timed-out acquire does not run body" false !ran;
+  (match result with
+   | Ok () -> fail "bounded acquire unexpectedly succeeded"
+   | Error { key = timeout_key; in_flight; cap; _ } ->
+     check string "timeout key" key timeout_key;
+     check int "holder still in flight" 1 in_flight;
+     check int "cap reported" 1 cap);
+  Eio.Promise.resolve resolve_release_holder ();
+  Runtime_binding_capacity.with_slot ~key ~max_concurrent:1 (fun () ->
+      ran := true);
+  check bool "slot reacquired after holder released" true !ran
+
 (* Distinct keys get distinct semaphores sized by their own cap; the snapshot
    reports each key's configured cap. *)
 let test_distinct_keys () =
@@ -90,6 +154,10 @@ let () =
             test_zero_is_ungated;
           test_case "releases slot on exception" `Quick
             test_release_on_exception;
+          test_case "releases slot on cancellation" `Quick
+            test_release_on_cancellation;
+          test_case "bounded acquire times out while saturated" `Quick
+            test_acquire_wait_timeout;
           test_case "distinct keys are independent" `Quick test_distinct_keys;
         ] );
     ]

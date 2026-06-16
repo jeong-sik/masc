@@ -141,13 +141,15 @@ let test_applies_turn_execution_overrides () =
      llm_rerank_runtime = \"tool_rerank_fast\"\n\
      temperature = 0.65\n\
      max_output_tokens = 8192\n\
+     admission_wait_timeout_sec = 111\n\
+     binding_slot_wait_timeout_sec = 22\n\
      stream_idle_timeout_sec = 90\n\
      execution_idle_timeout_sec = 95\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 6" 6 count;
+  check int "applied 8" 8 count;
   check (option string) "llm rerank"
     (Some "true")
     (List.assoc_opt "MASC_KEEPER_LLM_RERANK" overrides);
@@ -160,6 +162,12 @@ let test_applies_turn_execution_overrides () =
   check (option string) "max output tokens"
     (Some "8192")
     (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides);
+  check (option string) "admission wait timeout"
+    (Some "111")
+    (List.assoc_opt "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC" overrides);
+  check (option string) "binding slot wait timeout"
+    (Some "22")
+    (List.assoc_opt "MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC" overrides);
   check (option string) "stream idle timeout"
     (Some "90")
     (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides);
@@ -460,6 +468,53 @@ let test_resolved_execution_idle_timeout_zero_disables () =
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.execution_idle_timeout_sec.source)
 
+let test_resolved_admission_wait_timeout_uses_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nadmission_wait_timeout_sec = 90\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" msg
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "admission wait timeout from toml"
+    90.0 runtime.admission_wait_timeout_sec.value;
+  check string "admission wait timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string
+       runtime.admission_wait_timeout_sec.source)
+
+let test_resolved_binding_slot_wait_timeout_defaults_to_short_backpressure () =
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "binding slot wait timeout default"
+    15.0 runtime.binding_slot_wait_timeout_sec.value;
+  check (option (float 0.0001)) "binding wait uses slot limit"
+    (Some 15.0)
+    (Keeper_turn_driver_try_provider.For_testing.binding_capacity_wait_timeout_s
+       ())
+
+let test_resolved_binding_slot_wait_timeout_uses_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nbinding_slot_wait_timeout_sec = 45\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" msg
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "binding slot wait timeout from toml"
+    45.0 runtime.binding_slot_wait_timeout_sec.value;
+  check string "binding slot wait timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string
+       runtime.binding_slot_wait_timeout_sec.source);
+  check (option (float 0.0001)) "per-provider timeout remains lower bound"
+    (Some 10.0)
+    (Keeper_turn_driver_try_provider.For_testing.binding_capacity_wait_timeout_s
+       ~per_provider_timeout_s:10.0 ())
+
 let test_resolved_runtime_prefers_env_over_toml () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
@@ -588,6 +643,9 @@ let () =
         ; test_case "execution idle timeout default disabled" `Quick test_resolved_execution_idle_timeout_default_disabled
         ; test_case "execution idle timeout uses toml" `Quick test_resolved_execution_idle_timeout_uses_toml
         ; test_case "execution idle timeout zero disables" `Quick test_resolved_execution_idle_timeout_zero_disables
+        ; test_case "admission wait timeout uses toml" `Quick test_resolved_admission_wait_timeout_uses_toml
+        ; test_case "binding slot wait default is short backpressure" `Quick test_resolved_binding_slot_wait_timeout_defaults_to_short_backpressure
+        ; test_case "binding slot wait timeout uses toml" `Quick test_resolved_binding_slot_wait_timeout_uses_toml
         ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
         ; test_case "cli subprocess idle default 120s" `Quick test_resolved_cli_subprocess_idle_default_120s
         ; test_case "cli subprocess idle from toml" `Quick test_resolved_cli_subprocess_idle_from_toml

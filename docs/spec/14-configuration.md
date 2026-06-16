@@ -448,13 +448,19 @@ provider binding table로 해석하지 않는다.
 ### 7.5 Client Capacity (Phase A/C3, #7606/#7623)
 
 Provider-model binding은 `max-concurrent`로 client-side capacity를
-선언한다. endpoint slot API가 없는 CLI provider(CLI-Tool-A / Provider-F
-CLI / CLI-Tool-B)는 이 값으로 semaphore를 구성한다. 각 keeper 호출 전에
-slot을 시도 획득하고, 실패 시 strategy filter가 해당 binding을 건너뛴다.
+선언한다. 각 keeper turn provider attempt는 binding capacity key별
+semaphore를 획득한 뒤 모델 호출을 수행한다. 슬롯이 없으면 bounded slot-wait
+ceiling 안에서 backpressure로 대기한다. ceiling은 configured per-provider
+timeout과 `MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC`의 lower bound이며,
+per-provider timeout이 없으면 resolved binding-slot wait default를 사용한다. 이
+대기가 초과되면 attempt는 typed `runtime_slot` capacity backpressure로
+종료되어 keeper turn이 무기한 같은 binding에 묶이지 않는다.
 
-`max-concurrent`는 binding 레이어에서 필수다. 두 keeper가 같은 binding을
-동시에 호출하면 두 번째 호출은 자동으로 다음 provider fallback 후보를
-시도한다.
+`max-concurrent`는 binding 레이어에서 필수다. `0`은 parser의
+unset/required marker로 취급되어 per-binding gate를 만들지 않으며, 기존
+global `Fd_accountant.Provider_http` gate만 적용된다. 양수 값은 같은
+capacity key(`provider:model@base_url`)를 공유하는 keeper 호출의 동시 실행
+수를 제한한다.
 
 ```toml
 [cli-tool-a.agent-code-spark]

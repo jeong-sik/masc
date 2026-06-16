@@ -56,6 +56,19 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   in
   let has_substantive_tools = has_substantive_tool_calls tool_names in
   let has_text = String.trim result.response_text <> "" in
+  (* RFC-0232: a budget-exhausted turn substitutes a synthetic continuation
+     notice for the model reply (runtime_agent.ml MaxTurnsExceeded arm). That
+     text is display-only ("no consumer may sniff this string"); gate the
+     visible-output *preview* on the typed turn outcome rather than on the raw
+     string being non-empty, so the dashboard stops showing the canned
+     "Continuation checkpoint saved; ..." sentence as if it were work output.
+     Scope is deliberately narrow: only last_preview is gated here — has_text
+     still drives the visible/noop/autonomous counters unchanged. *)
+  let is_visible_reply =
+    Keeper_turn_outcome.equal
+      (Keeper_turn_outcome.of_stop_reason result.stop_reason)
+      Keeper_turn_outcome.Visible_reply
+  in
   let validated_evidence = visible_run_validation result in
   let has_validated_evidence = Option.is_some validated_evidence in
   let visible_tool_signal_present =
@@ -170,14 +183,16 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
         last_preview =
           (if not update_proactive_rt || not is_scheduled_autonomous_cycle
            then rt.proactive_rt.last_preview
-           else if has_text then short_preview result.response_text
-           else if has_substantive_tools then
-             Printf.sprintf "(tools: %s)" (String.concat ", " tool_names)
            else
-             (match validated_evidence with
-              | Some v -> validated_evidence_preview v
-              | None -> rt.proactive_rt.last_preview)
-          );
+             select_proactive_preview
+               ~previous:rt.proactive_rt.last_preview
+               ~has_text
+               ~is_visible_reply
+               ~has_substantive_tools
+               ~tool_names
+               ~response_text:result.response_text
+               ~validated_evidence_preview:
+                 (Option.map validated_evidence_preview validated_evidence));
         consecutive_noop_count =
           (if update_proactive_rt && is_scheduled_autonomous_cycle then
              if is_noop_cycle ~has_text ~tools_used:tool_names

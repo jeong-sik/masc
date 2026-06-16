@@ -3,6 +3,41 @@ open Alcotest
 module KAR = Masc.Keeper_agent_run
 module KTN = Keeper_tool_name
 module KTP = Masc.Keeper_tool_progress
+module KUS = Masc.Keeper_unified_metrics_support
+
+(* RFC-0232: a budget-exhausted (Continuation_checkpoint) turn substitutes a
+   synthetic continuation notice for the reply text. That text is display-only;
+   the work preview must gate visible model text on [is_visible_reply] so the
+   canned "Continuation checkpoint saved; ..." sentence never surfaces as
+   output. These pin the preview precedence. *)
+let test_preview_shows_visible_model_text () =
+  check string "visible reply -> model text wins" "real answer"
+    (KUS.select_proactive_preview ~previous:"old" ~has_text:true
+       ~is_visible_reply:true ~has_substantive_tools:false ~tool_names:[]
+       ~response_text:"real answer" ~validated_evidence_preview:None)
+
+let test_preview_drops_continuation_notice () =
+  (* has_text is true (the synthetic notice is non-empty) but the outcome is
+     not a visible reply -> the notice must NOT become the preview. With no
+     tools and no evidence, the prior preview is kept. *)
+  check string "checkpoint notice does not overwrite preview" "old"
+    (KUS.select_proactive_preview ~previous:"old" ~has_text:true
+       ~is_visible_reply:false ~has_substantive_tools:false ~tool_names:[]
+       ~response_text:"Continuation checkpoint saved; keeper remains scheduled."
+       ~validated_evidence_preview:None)
+
+let test_preview_falls_back_to_tools_then_evidence () =
+  check string "checkpoint with tools -> tool summary"
+    "(tools: keeper_task_claim)"
+    (KUS.select_proactive_preview ~previous:"old" ~has_text:true
+       ~is_visible_reply:false ~has_substantive_tools:true
+       ~tool_names:[ "keeper_task_claim" ]
+       ~response_text:"Continuation checkpoint saved; keeper remains scheduled."
+       ~validated_evidence_preview:None);
+  check string "no text, no tools -> validated evidence" "(validated evidence)"
+    (KUS.select_proactive_preview ~previous:"old" ~has_text:false
+       ~is_visible_reply:true ~has_substantive_tools:false ~tool_names:[]
+       ~response_text:"" ~validated_evidence_preview:(Some "(validated evidence)"))
 
 let test_claim_tool_classification_covers_supported_claim_tools () =
   check
@@ -170,6 +205,20 @@ let () =
             "material progress does not special-case worktree reuse text"
             `Quick
             test_material_progress_does_not_special_case_worktree_reuse_text
+        ] )
+    ; ( "preview_precedence"
+      , [ test_case
+            "visible reply shows model text"
+            `Quick
+            test_preview_shows_visible_model_text
+        ; test_case
+            "continuation notice does not overwrite preview"
+            `Quick
+            test_preview_drops_continuation_notice
+        ; test_case
+            "falls back to tools then validated evidence"
+            `Quick
+            test_preview_falls_back_to_tools_then_evidence
         ] )
     ]
 ;;

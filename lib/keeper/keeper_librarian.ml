@@ -179,14 +179,16 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
      with
      | Some claim, Some confidence, Some category_str, Some turn when turn >= 0 ->
        let tool_call_id = optional_string_field "source_tool_call_id" fields in
-       Some
-         { claim
-         ; confidence
-         (* Parse-once at the producer boundary (RFC-0244 §2.3 / #21241; RFC-0246
-            §2.5): the LLM's free-text category becomes a typed [category] here, so
-            no surface string reaches the store or the consolidator — and an
-            [Ephemeral] label is born structurally non-promotable. *)
-         ; category = category_of_string category_str
+      (* Parse-once at the producer boundary: the LLM's free-text category becomes
+         a typed [category] here, so no surface string reaches the store or the
+         consolidator (RFC-0244 §2.3 / #21241; RFC-0246 §2.5). The category then
+         drives retention (RFC-0246 §2.3) — an [Ephemeral] coordination claim is
+         born with a short TTL and fast decay, durable knowledge with none. *)
+      let category = category_of_string category_str in
+      Some
+        { claim
+        ; confidence
+         ; category
          ; source = claim_source ~trace_id turn tool_call_id
          (* Tier-1 (per-keeper) facts carry no distinct-keeper corroboration set;
             the consolidator populates observed_by only on promotion (RFC-0244). *)
@@ -194,10 +196,10 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          ; access_count = 0
          ; first_seen = now
          ; last_accessed = now
-         ; valid_until = None
+         ; valid_until = category_valid_until ~now category
          ; stale_factor = 0.0
          ; last_verified_at = Some now
-         ; expected_lifetime_cycles = None
+         ; expected_lifetime_cycles = category_lifetime_cycles category
          ; schema_version
          }
      | (Some _, Some _, Some _, Some _)

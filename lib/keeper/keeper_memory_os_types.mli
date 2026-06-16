@@ -56,6 +56,25 @@ val category_of_string : string -> category
     join the promotable set — a future durable kind must be classified here at
     compile time. *)
 val is_promotable : category -> bool
+
+(** RFC-0246 §2.3 (forgetting): the hard-expiry timestamp a newly written fact of
+    this category should carry, given [now]. Exhaustive over {!category}. Only
+    [Ephemeral] (coordination boilerplate) gets a finite TTL — the brain's
+    episodic memory that fades; durable knowledge ([Fact]/[Constraint]/…) and
+    [Unknown] (conservative: we do not aggressively expire what we do not
+    understand) return [None] and never hard-expire. This is the write-side
+    producer that makes the previously-inert [valid_until] field (and the GC TTL
+    pass) reachable. *)
+val category_valid_until : now:float -> category -> float option
+
+(** RFC-0246 §2.3: the expected lifetime, in retention cycles, a newly written
+    fact of this category should carry — drives the per-fact truth-decay rate in
+    the retention policy ([truth_lambda_for_fact]). Exhaustive over {!category}.
+    [Ephemeral] decays fast (a few cycles); everything else returns [None] and
+    decays at the slow default rate. Makes the previously-inert
+    [expected_lifetime_cycles] field live. *)
+val category_lifetime_cycles : category -> int option
+
 (** A single semantic claim extracted from conversation history. *)
 type fact =
   { claim : string

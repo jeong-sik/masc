@@ -17,6 +17,7 @@ type t = {
   autonomous_max_idle_turns : int field;
   turn_timeout_sec : float field;
   admission_wait_timeout_sec : float field;
+  binding_slot_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
   stream_idle_timeout_sec : float field;
   execution_idle_timeout_sec : float option field;
@@ -45,6 +46,14 @@ let source_to_string = function
 
 let get_int = Env_config_core.get_int
 let get_float = Env_config_core.get_float
+
+let admission_wait_timeout_sec_env = "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"
+let binding_slot_wait_timeout_sec_env = "MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC"
+
+let get_clamped_float ~default ~min_value ~max_value name =
+  let value = get_float ~default name in
+  let value = if Float.is_finite value then value else default in
+  Float.max min_value (Float.min max_value value)
 
 let max_turns_per_call_min = 1
 let max_turns_per_call_max = 100
@@ -97,9 +106,12 @@ let turn_timeout_sec_live () =
        (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
 let admission_wait_timeout_sec_live () =
-  Float.max 5.0
-    (Float.min 1200.0
-       (180.0))
+  get_clamped_float ~default:180.0 ~min_value:5.0 ~max_value:1200.0
+    admission_wait_timeout_sec_env
+
+let binding_slot_wait_timeout_sec_live () =
+  get_clamped_float ~default:15.0 ~min_value:1.0 ~max_value:300.0
+    binding_slot_wait_timeout_sec_env
 
 let stream_idle_timeout_sec_live () =
   Float.max 5.0
@@ -138,11 +150,11 @@ let oas_timeout_override_sec_live ~turn_timeout_sec =
   match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
   | Some raw ->
       (* DET-OK: env override is parsed at the keeper runtime boundary;
-         malformed values resolve to the turn budget for compatibility with
-         previous behavior. *)
+         malformed values disable the legacy override, matching
+         Env_config_keeper.KeeperKeepalive.oas_timeout_sec_override. *)
       (match Float.of_string_opt (String.trim raw) with
        | Some parsed -> Some (Float.max 30.0 (Float.min turn_timeout_sec parsed))
-       | None -> Some turn_timeout_sec)
+       | None -> None)
   | None -> None
 
 (* SSOT: Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
@@ -203,8 +215,13 @@ let freeze_from_current () =
   in
   let admission_wait_timeout_sec =
     source_field
-      "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"
+      admission_wait_timeout_sec_env
       (admission_wait_timeout_sec_live ())
+  in
+  let binding_slot_wait_timeout_sec =
+    source_field
+      binding_slot_wait_timeout_sec_env
+      (binding_slot_wait_timeout_sec_live ())
   in
   let oas_timeout_override_sec =
     {
@@ -254,6 +271,7 @@ let freeze_from_current () =
     autonomous_max_idle_turns;
     turn_timeout_sec;
     admission_wait_timeout_sec;
+    binding_slot_wait_timeout_sec;
     oas_timeout_override_sec;
     stream_idle_timeout_sec;
     execution_idle_timeout_sec;
@@ -298,6 +316,7 @@ let to_yojson (runtime : t) =
       ("autonomous_max_idle_turns", field_to_yojson (fun value -> `Int value) runtime.autonomous_max_idle_turns);
       ("turn_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.turn_timeout_sec);
       ("admission_wait_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.admission_wait_timeout_sec);
+      ("binding_slot_wait_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.binding_slot_wait_timeout_sec);
       ("oas_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.oas_timeout_override_sec);
       ("stream_idle_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.stream_idle_timeout_sec);
       ("execution_idle_timeout_sec", field_to_yojson option_float_to_yojson runtime.execution_idle_timeout_sec);
@@ -326,6 +345,9 @@ let turn_timeout_sec () =
 
 let admission_wait_timeout_sec () =
   (current ()).admission_wait_timeout_sec.value
+
+let binding_slot_wait_timeout_sec () =
+  (current ()).binding_slot_wait_timeout_sec.value
 
 let stream_idle_timeout_sec () =
   (current ()).stream_idle_timeout_sec.value

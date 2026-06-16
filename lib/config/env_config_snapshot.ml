@@ -495,6 +495,10 @@ let keeper_keepalive_entries =
       "Max seconds since last heartbeat before presence sync required";
     entry ~default:"30" "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"
       "Max turns per single OAS Agent.run call (clamped 1-100)";
+    entry ~default:"180.0" "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"
+      "Legacy retry/admission wait budget; not used for provider binding slot waits";
+    entry ~default:"15.0" "MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC"
+      "Max wait for a saturated provider-model binding semaphore before runtime-slot backpressure";
     entry ~default:"(none)" "MASC_KEEPER_OAS_TIMEOUT_SEC"
       "Legacy optional override for OAS call timeout. When set, clamped to [30, turn_timeout_sec].";
     entry ~default:"2.0" "MASC_KEEPER_SLEEP_CHUNK_SEC"

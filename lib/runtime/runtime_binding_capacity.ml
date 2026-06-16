@@ -8,6 +8,13 @@ type slot =
   ; in_flight : int Atomic.t
   }
 
+type wait_timeout =
+  { key : string
+  ; wait_timeout_sec : float
+  ; in_flight : int
+  ; cap : int
+  }
+
 (* Process-global registry of one semaphore per capacity key. The Hashtbl is
    module-global mutable state shared across every keeper fiber/domain, so all
    access is serialized under [registry_mutex] per RFC-0239 (a top-level
@@ -32,35 +39,61 @@ let slot_for ~key ~max_concurrent =
       Hashtbl.replace registry key slot;
       slot)
 
-let with_slot ~key ~max_concurrent f =
-  (* [max_concurrent <= 0] = unconfigured binding (runtime.toml omits
-     [max-concurrent], parsed as the 0 "required" marker). Run ungated rather
-     than build a 0-permit semaphore that would deadlock on first acquire. *)
-  if max_concurrent <= 0
-  then f ()
-  else begin
-    let slot = slot_for ~key ~max_concurrent in
-    (* Acquire BEFORE [Fun.protect] is armed: if acquisition is cancelled it
-       raises here and no slot is held, so there is nothing to release. Once
-       [acquire] returns the slot is held; [Atomic.incr] and entering
-       [Fun.protect] are synchronous (no await point between), so the release
-       path is guaranteed to run for every held slot. *)
+let finite_positive = function
+  | Some value when Float.is_finite value && value > 0.0 -> Some value
+  | Some _ | None -> None
+
+let acquire ?clock ?wait_timeout_sec (slot : slot) =
+  match clock, finite_positive wait_timeout_sec with
+  | Some clock, Some wait_timeout_sec ->
+    (try
+       Eio.Time.with_timeout_exn clock wait_timeout_sec (fun () ->
+         Eio.Semaphore.acquire slot.sem);
+       Ok ()
+     with Eio.Time.Timeout ->
+       Error
+         { key = ""
+         ; wait_timeout_sec
+         ; in_flight = Atomic.get slot.in_flight
+         ; cap = slot.cap
+         })
+  | _, _ ->
     Eio.Semaphore.acquire slot.sem;
-    Atomic.incr slot.in_flight;
-    Fun.protect
-      ~finally:(fun () ->
-        (* fun-protect-finally-ok: [Atomic.decr] and [Eio.Semaphore.release]
-           do not raise, so the finally cannot mask the body's exception with
-           [Fun.Finally_raised]. *)
-        Atomic.decr slot.in_flight;
-        Eio.Semaphore.release slot.sem)
-      f
-  end
+    Ok ()
+
+let with_slot_result ?clock ?wait_timeout_sec ~key ~max_concurrent f =
+  (* [None] (or [Some n] with [n <= 0]) = unconfigured binding (runtime.toml
+     omits [max-concurrent], parsed as [None]). Run ungated rather than build a
+     0-permit semaphore that would deadlock on first acquire. *)
+  match max_concurrent with
+  | None -> Ok (f ())
+  | Some max_concurrent when max_concurrent <= 0 -> Ok (f ())
+  | Some max_concurrent ->
+    let slot = slot_for ~key ~max_concurrent in
+    (* Acquire before registering cleanup: if acquisition is cancelled it raises
+       here and no slot is held. After [acquire] returns, [Atomic.incr] and
+       [Switch.on_release] registration are synchronous, so every held slot has
+       a release hook before [f] can yield. *)
+    match acquire ?clock ?wait_timeout_sec slot with
+    | Error timeout -> Error { timeout with key }
+    | Ok () ->
+      Atomic.incr slot.in_flight;
+      Ok
+        (Eio.Switch.run (fun sw ->
+           Eio.Switch.on_release sw (fun () ->
+             Atomic.decr slot.in_flight;
+             Eio.Semaphore.release slot.sem);
+           f ()))
+
+let with_slot ~key ~max_concurrent f =
+  match with_slot_result ~key ~max_concurrent f with
+  | Ok value -> value
+  | Error _ -> assert false
 
 let snapshot () =
   Eio.Mutex.use_ro registry_mutex (fun () ->
     Hashtbl.fold
-      (fun key slot acc -> (key, Atomic.get slot.in_flight, slot.cap) :: acc)
+      (fun key (slot : slot) acc -> (key, Atomic.get slot.in_flight, slot.cap) :: acc)
       registry
       [])
   |> List.sort (fun (a, _, _) (b, _, _) -> String.compare a b)

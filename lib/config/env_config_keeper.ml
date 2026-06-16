@@ -339,6 +339,34 @@ module KeeperKeepalive = struct
          (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
   ;;
 
+  (** Legacy retry/admission wait budget. This value belongs to retry/admission
+      deadline math and must not be reused for provider binding semaphore waits.
+      Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 180.
+      Range: [5, 1200].
+      @category Timeouts
+      @ops_class operator *)
+  let admission_wait_timeout_sec =
+    Float.max
+      5.0
+      (Float.min 1200.0
+         (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+  ;;
+
+  (** Max wait for a saturated provider-model binding semaphore.
+      This is intentionally shorter than admission/turn budgets: waiting on one
+      hot binding should quickly become typed runtime-slot backpressure so the
+      keeper can try another candidate or fail without pinning the fleet.
+      Env: [MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC]. Default: 15.
+      Range: [1, 300].
+      @category Timeouts
+      @ops_class operator *)
+  let binding_slot_wait_timeout_sec =
+    Float.max
+      1.0
+      (Float.min 300.0
+         (get_float ~default:15.0 "MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC"))
+  ;;
+
 
   (** Per-call OAS timeout override in seconds.
 

@@ -104,6 +104,7 @@ logs. Candidates:
 | `operator_snapshot` refresh | 30–36 s | #9734 |
 | `a2a_tools` call | 300 s | — |
 | `tool_local_runtime_http` | 10 s | — |
+| provider binding slot wait | `MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC` default 15 s | RFC-0153 |
 | `admission_queue.wait_timeout_sec` | unused | #9639 note |
 
 ## Non-goals

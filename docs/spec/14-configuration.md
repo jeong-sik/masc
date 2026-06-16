@@ -448,16 +448,23 @@ provider binding table로 해석하지 않는다.
 ### 7.5 Client Capacity (Phase A/C3, #7606/#7623)
 
 Provider-model binding의 `max-concurrent`는 선택적 operator override다.
-누락은 정상값이며 "no static per-binding cap"을 뜻한다. 기본 provider 보호는
-global `Provider_http` gate, live health/backoff, provider-reported throttling,
-그리고 provider별 discovery/probe가 담당한다. 사람이 모든 binding에 cap을
-채우는 방식은 기본 운영 모델이 아니다.
+누락은 정상값이며 "no static per-binding cap"을 뜻한다. 각 keeper turn
+provider attempt는 binding capacity key별 semaphore를 획득한 뒤 모델 호출을
+수행한다. 슬롯이 없으면 bounded slot-wait ceiling 안에서 backpressure로
+대기한다. ceiling은 configured per-provider timeout과
+`MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC`의 lower bound이며, per-provider
+timeout이 없으면 resolved binding-slot wait default를 사용한다. 이 대기가
+초과되면 attempt는 typed `runtime_slot` capacity backpressure로 종료되어
+keeper turn이 무기한 같은 binding에 묶이지 않는다.
 
 `max-concurrent`를 설정하는 경우는 slot API나 provider-side admission signal이
-없는 취약 endpoint를 수동으로 보호해야 할 때뿐이다. 이 값은 runtime catalog
-metadata로 보존되지만, OAS multi-turn/tool 실행 전체를 제한하는 keeper-attempt
-cap으로 해석하면 안 된다. enforcement가 필요하면 provider HTTP transport call
-단위 또는 endpoint-discovery 단위에서 적용해야 한다.
+없는 취약 endpoint를 수동으로 보호해야 할 때뿐이다. 누락/0/음수는 per-binding
+gate를 만들지 않으며, 기존 global `Fd_accountant.Provider_http` gate만
+적용된다. 양수 값은 같은 capacity key(`provider:model@base_url`)를 공유하는
+keeper 호출의 동시 실행 수를 제한한다. 이 값은 runtime catalog metadata로
+보존되지만, OAS multi-turn/tool 실행 전체를 제한하는 keeper-attempt cap으로
+해석하면 안 된다. enforcement가 필요하면 provider HTTP transport call 단위 또는
+endpoint-discovery 단위에서 적용해야 한다.
 
 ```toml
 [cli-tool-a.agent-code-spark]

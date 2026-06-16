@@ -76,8 +76,10 @@ val resolve_overrides :
       min_interval_sec            = 900
 
       [turn]
-      stream_idle_timeout_sec   = 120
-      execution_idle_timeout_sec = 300
+      admission_wait_timeout_sec     = 180
+      binding_slot_wait_timeout_sec  = 15
+      stream_idle_timeout_sec        = 120
+      execution_idle_timeout_sec     = 300
       llm_rerank                  = true
 
       [web_search]

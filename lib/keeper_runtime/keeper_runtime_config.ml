@@ -32,6 +32,8 @@ let key_to_env =
     "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";
     (* [turn] *)
     "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";
+    "turn.admission_wait_timeout_sec",  "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC";
+    "turn.binding_slot_wait_timeout_sec", "MASC_KEEPER_BINDING_SLOT_WAIT_TIMEOUT_SEC";
     "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";
     "turn.stream_idle_timeout_sec",     "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC";
     "turn.execution_idle_timeout_sec",  "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC";

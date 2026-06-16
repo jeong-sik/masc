@@ -186,6 +186,7 @@ describe('HarnessHealth', () => {
     render(html`<${HarnessHealth} />`, container)
     await flushUi()
 
+    expect(container.querySelector('.v2-lab-surface')).not.toBeNull()
     expect(get).toHaveBeenCalledWith('/api/v1/dashboard/harness-health')
     expect(container.textContent).toContain('안전 감시')
     expect(container.textContent).toContain('감시 흐름도')

@@ -327,6 +327,30 @@ let add_delete_action_routes router =
          )
        ) request reqd)
 
+  (* Pin is an operator-curated board mutation: same CanAdmin gate and auth
+     helper as board/delete, so it lives alongside it rather than as an
+     agent-facing MCP tool (which would let any keeper self-pin). *)
+  |> Http.Router.post "/api/v1/dashboard/board/pin" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None ->
+                 respond_error ~request:req reqd (invalid_request "post_id")
+             | Some post_id ->
+             let pinned = Safe_ops.json_bool ~default:true "pinned" json in
+             match Board_dispatch.set_pinned ~post_id ~pinned with
+             | Ok () -> respond_ok ~request:req reqd
+             | Error err ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Board_types.show_board_error err)
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "post_id")
+         )
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/dashboard/tasks/delete" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->

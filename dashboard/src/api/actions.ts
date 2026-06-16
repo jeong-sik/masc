@@ -39,6 +39,11 @@ export async function deleteBoardPost(postId: string): Promise<boolean> {
   return resp.ok
 }
 
+export async function setBoardPostPinned(postId: string, pinned: boolean): Promise<boolean> {
+  const resp = await post<{ ok: boolean }>('/api/v1/dashboard/board/pin', { post_id: postId, pinned })
+  return resp.ok
+}
+
 export async function deleteTask(taskId: string): Promise<boolean> {
   const resp = await post<{ ok: boolean }>('/api/v1/dashboard/tasks/delete', { task_id: taskId })
   return resp.ok

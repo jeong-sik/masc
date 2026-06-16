@@ -894,6 +894,42 @@ let test_set_thread_id () =
               Alcotest.(check (option string)) "thread_id set"
                 (Some "thread-abc") p.thread_id
 
+let test_set_pinned () =
+  match
+    Board_dispatch.create_post ~author:"pin-test" ~content:"pin me"
+      ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      Alcotest.(check bool) "post starts unpinned" false post.pinned;
+      (match Board_dispatch.set_pinned ~post_id:pid ~pinned:true with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok () -> ());
+      (match Board_dispatch.get_post ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok p -> Alcotest.(check bool) "pinned set in memory" true p.pinned);
+      (* set_pinned marks the post dirty, so the flag must survive a restart
+         (unlike set_thread_id which is in-memory only). *)
+      Board.reset_global_for_test ();
+      Board_dispatch.reset_for_test ();
+      Board_dispatch.init_jsonl ();
+      (match Board_dispatch.get_post ~post_id:pid with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok p -> Alcotest.(check bool) "pinned survives restart" true p.pinned);
+      (match Board_dispatch.set_pinned ~post_id:pid ~pinned:false with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok () -> ());
+      match Board_dispatch.get_post ~post_id:pid with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok p -> Alcotest.(check bool) "unpinned after toggle off" false p.pinned
+
+let test_set_pinned_missing_post () =
+  match Board_dispatch.set_pinned ~post_id:"never-existed" ~pinned:true with
+  | Ok () -> Alcotest.fail "expected Post_not_found"
+  | Error (Board.Post_not_found _) -> ()
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 let test_flush () =
   Board_dispatch.flush ()
 
@@ -1322,6 +1358,8 @@ let () =
       Alcotest.test_case "search" `Quick (with_eio test_search);
       Alcotest.test_case "hearths" `Quick (with_eio test_hearths);
       Alcotest.test_case "set_thread_id" `Quick (with_eio test_set_thread_id);
+      Alcotest.test_case "set_pinned toggle + restart" `Quick (with_eio test_set_pinned);
+      Alcotest.test_case "set_pinned missing post" `Quick (with_eio test_set_pinned_missing_post);
       Alcotest.test_case "flush" `Quick (with_eio test_flush);
     ];
     "validation", [

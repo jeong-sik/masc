@@ -484,6 +484,7 @@ let create_post_with_outcome
                     ; votes_up = 0
                     ; votes_down = 0
                     ; reply_count = 0
+                    ; pinned = false
                     ; hearth
                     ; thread_id
                     }

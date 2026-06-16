@@ -274,6 +274,15 @@ export function splitVisiblePosts(posts: readonly BoardPost[]): VisibleBoardGrou
     else { totalDirect += 1 }
   })
 
+  // Operator-pinned posts float to the top of their category. Array.sort is
+  // stable, so the existing order within the pinned / unpinned subsets is kept.
+  const pinnedFirst = (a: BoardPost, b: BoardPost): number =>
+    Number(b.pinned ?? false) - Number(a.pinned ?? false)
+  buckets.article.posts.sort(pinnedFirst)
+  buckets.review.posts.sort(pinnedFirst)
+  buckets.notice.posts.sort(pinnedFirst)
+  buckets.system.posts.sort(pinnedFirst)
+
   const groups = (Object.entries(buckets) as [ContentCategory, typeof buckets.article][])
     .map(([category, b]) => ({ category, posts: b.posts, total: b.total, hidden: b.hidden }))
     .filter(g => g.total > 0)
@@ -386,6 +395,7 @@ export async function loadPostDetail(postId: string) {
       created_at: data.created_at,
       updated_at: data.updated_at,
       post_kind: data.post_kind,
+      pinned: data.pinned,
       classification_reason: data.classification_reason,
       flair: data.flair,
       hearth: data.hearth,

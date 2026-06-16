@@ -209,6 +209,33 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText(/기술 탐색: test topic/)).toBeInTheDocument()
   })
 
+  it('renders a 고정 badge for a pinned post', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-pinned',
+        title: '고정된 공지',
+        body: 'pinned content here',
+        author: 'ani1999',
+        pinned: true,
+      }),
+    ]
+    render(h(BoardSurface, null))
+    expect(screen.getByTitle('고정된 게시글')).toBeInTheDocument()
+  })
+
+  it('omits the 고정 badge for an unpinned post', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-plain',
+        title: '일반 글',
+        body: 'plain content here',
+        author: 'ani1999',
+      }),
+    ]
+    render(h(BoardSurface, null))
+    expect(screen.queryByTitle('고정된 게시글')).not.toBeInTheDocument()
+  })
+
   it('renders post authors as keyboard-discoverable links', () => {
     boardPosts.value = [
       makePost({

@@ -987,6 +987,7 @@ function canReuseBoardPost(previous: BoardPost, next: BoardPost): boolean {
     && previous.vote_balance === next.vote_balance
     && previous.comment_count === next.comment_count
     && previous.post_kind === next.post_kind
+    && previous.pinned === next.pinned
     && previous.classification_reason === next.classification_reason
     && previous.title === next.title
     && previous.body === next.body

@@ -152,6 +152,7 @@ describe('fetchDashboardExecutionTrust', () => {
       health: 'coverage_gap',
       stale_reason: 'execution_receipt_append_failed',
       coverage_gap_count: 1,
+      active_coverage_gap_count: 1,
       coverage_gaps: [
         {
           schema: 'masc.telemetry_coverage_gap.v1',
@@ -178,6 +179,7 @@ describe('fetchDashboardExecutionTrust', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/execution-trust')
     expect(result.coverage_gap_count).toBe(1)
+    expect(result.active_coverage_gap_count).toBe(1)
     expect(result.dashboard_surface_envelope).toMatchObject({
       schema: 'masc.dashboard_surface.v1',
       surface: '/api/v1/dashboard/execution-trust',
@@ -1819,6 +1821,7 @@ describe('fetchRuntimeProviders', () => {
             },
           },
         ],
+        config_path: '/Users/dancer/me/.masc/runtime.toml',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1829,6 +1832,7 @@ describe('fetchRuntimeProviders', () => {
     const result = await fetchRuntimeProviders()
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/providers')
+    expect(result.config_path).toBe('/Users/dancer/me/.masc/runtime.toml')
     expect(result.summary?.default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.providers[0]?.provider).toBe('runpod_mtp.qwen')
     expect(result.providers[0]?.provider_id).toBe('runpod_mtp')

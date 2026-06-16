@@ -6,26 +6,27 @@
     exactly one Runtime, so the candidate collapses to its provider config and
     the health/capacity/strategy/selection machinery is dropped.
 
-    [type t] is a record pairing the runtime's [Provider_config.t] with its
-    [max_concurrent] binding limit. The surviving members delegate to
+    [type t] is a record pairing the runtime's [Provider_config.t] with an
+    optional operator-declared [max_concurrent] override. [None] is the normal
+    no-static-cap path. The surviving members delegate to
     {!Runtime_agent} / {!Runtime_provider_binding}; error decoration is
     collapsed to identity. *)
 
 type t =
   { config : Llm_provider.Provider_config.t
-  ; max_concurrent : int
+  ; max_concurrent : int option
   }
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
-let of_provider_config ~(max_concurrent : int) (cfg : Llm_provider.Provider_config.t) : t =
+let of_provider_config ~(max_concurrent : int option) (cfg : Llm_provider.Provider_config.t) : t =
   { config = cfg; max_concurrent }
 
-let of_provider_configs (cfgs : (Llm_provider.Provider_config.t * int) list) : t list =
+let of_provider_configs (cfgs : (Llm_provider.Provider_config.t * int option) list) : t list =
   List.map (fun (cfg, max_concurrent) -> { config = cfg; max_concurrent }) cfgs
 
 let provider_cfg (t : t) : Llm_provider.Provider_config.t = t.config
-let max_concurrent (t : t) : int = t.max_concurrent
+let max_concurrent (t : t) : int option = t.max_concurrent
 
 let provider_label (t : t) =
   Runtime_provider_binding.provider_label_of_config t.config

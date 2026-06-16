@@ -447,14 +447,17 @@ provider binding table로 해석하지 않는다.
 
 ### 7.5 Client Capacity (Phase A/C3, #7606/#7623)
 
-Provider-model binding은 `max-concurrent`로 client-side capacity를
-선언한다. endpoint slot API가 없는 CLI provider(CLI-Tool-A / Provider-F
-CLI / CLI-Tool-B)는 이 값으로 semaphore를 구성한다. 각 keeper 호출 전에
-slot을 시도 획득하고, 실패 시 strategy filter가 해당 binding을 건너뛴다.
+Provider-model binding의 `max-concurrent`는 선택적 operator override다.
+누락은 정상값이며 "no static per-binding cap"을 뜻한다. 기본 provider 보호는
+global `Provider_http` gate, live health/backoff, provider-reported throttling,
+그리고 provider별 discovery/probe가 담당한다. 사람이 모든 binding에 cap을
+채우는 방식은 기본 운영 모델이 아니다.
 
-`max-concurrent`는 binding 레이어에서 필수다. 두 keeper가 같은 binding을
-동시에 호출하면 두 번째 호출은 자동으로 다음 provider fallback 후보를
-시도한다.
+`max-concurrent`를 설정하는 경우는 slot API나 provider-side admission signal이
+없는 취약 endpoint를 수동으로 보호해야 할 때뿐이다. 이 값은 runtime catalog
+metadata로 보존되지만, OAS multi-turn/tool 실행 전체를 제한하는 keeper-attempt
+cap으로 해석하면 안 된다. enforcement가 필요하면 provider HTTP transport call
+단위 또는 endpoint-discovery 단위에서 적용해야 한다.
 
 ```toml
 [cli-tool-a.agent-code-spark]
@@ -475,11 +478,9 @@ capacity 조회 순서: `Runtime_throttle` (llama-server /slots 기반) → `Run
 ```toml
 [glm-coding.glm-4-7-coding]
 is-default = false
-max-concurrent = 2
 
 [openai-compatible.gpt-4.1-mini]
 is-default = true
-max-concurrent = 4
 
 [tier.tier_medium]
 members = ["glm-coding.glm-4-7-coding", "openai-compatible.gpt-4.1-mini"]

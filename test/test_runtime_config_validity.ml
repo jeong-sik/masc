@@ -163,8 +163,6 @@ let test_runtime_toml_reserves_web_search_namespace () =
      max-context = 1024\n\
      \n\
      [local.sample]\n\
-     max-concurrent = 1\n\
-     \n\
      [runtime]\n\
      default = \"local.sample\"\n\
      \n\
@@ -183,6 +181,11 @@ let test_runtime_toml_reserves_web_search_namespace () =
   | Ok cfg ->
     check int "web_search is not a provider binding" 1
       (List.length cfg.Runtime_schema.bindings);
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "missing max-concurrent means no static cap" None
+         binding.Runtime_schema.max_concurrent
+     | _ -> ());
     check (option string) "default runtime" (Some "local.sample")
       cfg.Runtime_schema.default_runtime_id
 
@@ -211,6 +214,37 @@ let test_runtime_atomic_getters_are_consistent_after_init () =
        | Some id -> Option.is_some (Runtime.get_runtime_by_id id)
        | None -> false)
 
+let test_runtime_toml_parses_optional_max_concurrent () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-concurrent = 7\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse optional max-concurrent:\n%s" rendered
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "explicit max-concurrent opt-in" (Some 7)
+         binding.Runtime_schema.max_concurrent
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -227,5 +261,7 @@ let () =
           test_case "web_search is a reserved runtime TOML namespace" `Quick
             test_runtime_toml_reserves_web_search_namespace;
           test_case "atomic runtime getters are consistent after init" `Quick
-            test_runtime_atomic_getters_are_consistent_after_init ] )
+            test_runtime_atomic_getters_are_consistent_after_init;
+          test_case "max-concurrent is optional opt-in" `Quick
+            test_runtime_toml_parses_optional_max_concurrent ] )
     ]

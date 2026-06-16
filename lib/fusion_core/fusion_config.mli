@@ -4,7 +4,7 @@
     낸다 (CLAUDE.md §Unknown→Permissive 회피). [fusion] 섹션 자체가 없으면
     {!disabled}(비활성)을 반환한다 — opt-in OFF 기본.
 
-    설계 SSOT: docs/rfc/RFC-0249-fusion-panel-judge-deliberation.md §9 *)
+    설계 SSOT: docs/rfc/RFC-0251-fusion-panel-judge-deliberation.md §9 *)
 
 (** config 파싱/검증 에러 — 닫힌 합. *)
 type config_error =
@@ -12,6 +12,7 @@ type config_error =
   | Invalid_panel_size of string * int  (** (preset 이름, 패널 수) — 1..8 위반 *)
   | Missing_prompt of string
       (** preset의 panel/judge system prompt가 비어있음 (코드 default 금지) *)
+  | Invalid_max_concurrent_panels of int  (** max_concurrent_panels < 1 *)
   | Missing_default_preset of string  (** default_preset가 presets에 없음 *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]

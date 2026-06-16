@@ -768,10 +768,6 @@ let masc_fusion_schema =
         "string"
         "Panel preset name from runtime.toml [fusion.presets]. Omitted uses \
          the configured default_preset."
-    ; property
-        "web_tools"
-        "boolean"
-        "Allow panel models web search/fetch tools (default false)."
     ]
 ;;
 
@@ -1161,7 +1157,7 @@ let internal_descriptors : t list =
       ~input_schema:passthrough_object_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_ide_annotate
-    (* ── fusion deliberation (RFC-0249) ───────────────────────── *)
+    (* ── fusion deliberation (RFC-0251) ───────────────────────── *)
   ; in_process_descriptor
       ~id:"masc.fusion.deliberate"
       ~name:"masc_fusion"

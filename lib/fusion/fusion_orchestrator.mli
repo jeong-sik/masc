@@ -3,9 +3,9 @@
 
     {b 비차단은 호출자 책임}: 본 함수는 동기적이다(패널 N + 심판 1 완성을 기다림,
     ~7× 지연). 키퍼 턴을 막지 않으려면 호출자(예: masc_fusion 도구)가 별도
-    Eio fiber로 fork해서 호출하고, 키퍼는 즉시 진행한다(RFC-0249 §4).
+    Eio fiber로 fork해서 호출하고, 키퍼는 즉시 진행한다(RFC-0251 §4).
 
-    설계 SSOT: docs/rfc/RFC-0249-fusion-panel-judge-deliberation.md §4 *)
+    설계 SSOT: docs/rfc/RFC-0251-fusion-panel-judge-deliberation.md §4 *)
 
 (** 오케스트레이션 결과 (닫힌 합). *)
 type outcome =

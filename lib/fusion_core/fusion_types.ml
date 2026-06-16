@@ -1,5 +1,5 @@
 (* Fusion — 패널+심판 심의 루프의 타입드 계약 (구현).
-   계약/문서: fusion_types.mli, docs/rfc/RFC-0249-fusion-panel-judge-deliberation.md *)
+   계약/문서: fusion_types.mli, docs/rfc/RFC-0251-fusion-panel-judge-deliberation.md *)
 
 type usage =
   { input_tokens : int
@@ -84,7 +84,7 @@ type contradiction =
 type coverage_gap =
   { gap_topic : string
   ; addressed_by : string list
-  ; missing : string
+  ; missing : string option  (** 무엇이 빠졌는지. 미상이면 None (""로 압축하지 않음). *)
   }
 [@@deriving yojson, show, eq]
 
@@ -150,7 +150,6 @@ type fusion_request =
   ; preset : string
   ; depth : Fusion_depth.t
   ; trigger : fusion_trigger
-  ; web_tools : bool
   }
 [@@deriving yojson, show, eq]
 

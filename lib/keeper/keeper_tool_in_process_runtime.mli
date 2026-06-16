@@ -203,16 +203,17 @@ val handle_masc_schedule
   -> args:Yojson.Safe.t
   -> string
 
-(** RFC-0249 — [handle_masc_fusion] is the in-process handler for the
+(** RFC-0251 — [handle_masc_fusion] is the in-process handler for the
     [masc_fusion] out-of-band panel+judge deliberation tool.  It loads the
     [fusion] policy from runtime.toml, mints a fresh run_id, and delegates the
-    gate -> fiber fork -> orchestrator logic to {!Fusion_tool.handle}.  Needs
-    the Eio [sw]+[net] the keeper turn carries; without them it returns an
+    gate -> fiber fork -> orchestrator logic to {!Fusion_tool.handle}.
+
+    Resolves the server ROOT switch + net from {!Eio_context} (the
+    deliberation must outlive the keeper turn, so the turn-scoped switch is
+    NOT used).  When the root switch or net is unavailable it returns an
     explicit error JSON (no silent no-op).  Returns a status JSON string. *)
 val handle_masc_fusion
-  :  ?sw:Eio.Switch.t
-  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> config:Workspace.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> args:Yojson.Safe.t
   -> unit

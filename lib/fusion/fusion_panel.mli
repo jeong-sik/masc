@@ -8,7 +8,7 @@
     keeper 컨텍스트(Workspace.config + keeper_meta) 결합이 필요해 Phase 2b로 미룬다.
     도구가 없으므로 재귀 가드(masc_fusion 도구 배제)는 자동 충족된다.
 
-    설계 SSOT: docs/rfc/RFC-0249-fusion-panel-judge-deliberation.md §7.1 *)
+    설계 SSOT: docs/rfc/RFC-0251-fusion-panel-judge-deliberation.md §7.1 *)
 
 (** 패널을 병렬 실행해 각 모델의 결과를 [panel_outcome]으로 반환한다.
 

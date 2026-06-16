@@ -1,4 +1,4 @@
-# RFC-0249 — Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장)
+# RFC-0251 — Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장)
 
 - Status: Draft
 - Author: Vincent (yousleepwhen) + Claude

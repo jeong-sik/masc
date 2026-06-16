@@ -1,5 +1,5 @@
 (* Fusion — 결정론적 발동 게이트 (구현).
-   계약/문서: fusion_policy.mli, docs/rfc/RFC-0249 §6 *)
+   계약/문서: fusion_policy.mli, docs/rfc/RFC-0251 §6 *)
 
 type preset =
   { name : string
@@ -9,8 +9,6 @@ type preset =
   ; judge_system_prompt : string
   ; panel_timeout_s : float
   ; judge_timeout_s : float
-  ; max_tool_calls_per_panel : int
-  ; web_tools : bool
   }
 [@@deriving show, eq]
 

@@ -44,7 +44,7 @@ autonomous 16-keeper context. Neither is proven *here*; therefore **eval comes f
 staleness mtime trigger. Every *decision* is LLM judgment expressed as a prose
 prompt: what to save, what NOT to save, whether a recalled memory is still true
 (verify-then-recommend), which memories are relevant (a separate selector call),
-how to consolidate (the `/dream` reflective pass), what to forget (delete on
+how to consolidate (the consolidation pass), what to forget (delete on
 contradiction). There is no confidence float, no noisy-OR, no decay score, no count
 threshold anywhere. This RFC inverted that: it made the *decisions* deterministic
 and treated LLM judgment as a soft defect to engineer away (§2.6 deliberately
@@ -70,7 +70,7 @@ structure wrapping LLM judgment is the non-heuristic answer.
 | organ | §below | KEEP (structure / candidate-gen) | MOVE to judgment (the decision) | REJECTED as a decision mechanism |
 |---|---|---|---|---|
 | Encoding | §2.5 | closed-sum `category`, parse-once, `Unknown` arm — **KEPT** (P0a merged) | **producer "what NOT to save" judgment gate is now PRIMARY**: the librarian drops ephemeral/coordination *before* it becomes a fact (claude-code WHAT_NOT_TO_SAVE + "ask what was surprising / non-obvious"). The typed category is the *structure* the judgment fills, not a substitute for it | — |
-| Consolidation | §2.2 | the single off-hot-path sweep; ≥2-keeper co-occurrence as a **candidate** signal | **Dream-style reflective pass**: read candidates, merge into topic facts, **delete contradicted**, write durable-only — judgment decides what is canon | **count / noisy-OR promotion *as the decision*** |
+| Consolidation | §2.2 | the single off-hot-path sweep; ≥2-keeper co-occurrence as a **candidate** signal | **Consolidation pass (LLM)**: read candidates, merge into topic facts, **delete contradicted**, write durable-only — judgment decides what is canon | **count / noisy-OR promotion *as the decision*** |
 | Forgetting | §2.3 | `lifecycle` closed sum as a *recorded state* | **forget = delete-on-contradiction by judgment** + **read-time staleness reminder** surfaced to the recalling agent (claude-code `memoryAge`) | **TTL / `Low_confidence_decayed` auto-decay eviction** |
 | Recall | §2.1 | lexical seed (RFC-0244) + 1-hop graph as **candidate generators** | **judgment selection** — an LLM picks the relevant few from the candidate set (claude-code's selector) and *verifies before recommending* | **spreading-activation graph-walk *as the recall decision*** (demoted to candidate-gen; `α` is a candidate knob, not the ranker of record) |
 | Reconsolidation | §2.4 | entity-ref existence check — **KEPT** (a real deterministic structural fact, feeds judgment) | the *consequence* (demote / keep) is a judgment | **automatic confidence-cap-as-truth** |
@@ -103,7 +103,7 @@ Anti-fake-success discipline (user directive 2026-06-16 "가짜 성공 테스트
 visualization* substrate, and the entity-ref reconsolidation check are all retained.
 Withdrawn is their use as *decision-makers*. P0a (typed category) stays merged; P2a
 (edges) stays as candidate-gen, **not** the recall ranker. Phasing (§5) is reordered:
-**P-1 eval → P0 producer judgment gate → consolidation Dream pass → recall judgment
+**P-1 eval → P0 producer judgment gate → consolidation pass → recall judgment
 selection → delete dead scoring (`stale_factor`, TTL-GC).**
 
 ## §0 Context — the organs already built, and the ones missing
@@ -142,7 +142,7 @@ What a brain still lacks here:
 | spreading activation (recall a cue → neighbors light up) | recall ranks an independent list; no neighbor traversal | **MISSING** |
 | synaptic pruning / forgetting | `run_gc` (`keeper_memory_os_gc.ml:76`) has **0 lib callers**; `valid_until`/`stale_factor`/`expected_lifetime_cycles` are inert ×1 theatre (set once, no producer) | **MISSING** |
 | reconsolidation (is this memory still true?) | no re-verification of a fact against current code/state | **MISSING** |
-| sleep / dreaming | consolidator promotes, but does not link or forget — **and is switched off** (#21244) until encoding is typed (§2.5) | **BUILT, GATED OFF** |
+| sleep / consolidation | consolidator promotes, but does not link or forget — **and is switched off** (#21244) until encoding is typed (§2.5) | **BUILT, GATED OFF** |
 
 This RFC adds the four missing organs, on masc's terms: **deterministic, offline,
 no embeddings**; links are a **closed sum**, not a string; activation is a
@@ -367,7 +367,7 @@ offline/no-embedding tenet and slot onto the organs above (full extract:
   default-off, to stop returning N near-duplicate facts (the 456-redundancy churn)
   without any embedding.
 - **Single-writer consolidation pipeline** (OpenClaw Light-stage / Deep-promote /
-  REM-reflect; claude-code nightly `/dream` distill; rehydrate-from-source before
+  REM-reflect; claude-code nightly consolidation distill; rehydrate-from-source before
   promote). Confirms the §2.2 shape: exactly one writer to durable memory, staging
   and reflection non-mutating, text re-grounded at promote time — the antidote to
   the 1800→89-line confabulation drift.

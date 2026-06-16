@@ -1,5 +1,5 @@
 ---
-description: Memory OS dream-pass consolidation prompt (summarize/forget a keeper's facts)
+description: Memory OS consolidation prompt (summarize/forget a keeper's facts)
 category: keeper
 template_variables: [numbered_facts]
 ---

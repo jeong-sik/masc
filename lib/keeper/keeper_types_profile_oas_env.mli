@@ -10,7 +10,3 @@ val unified_max_tokens_override_of_oas_env
   :  ?keeper_name:string
   -> (string * string) list
   -> int option
-
-val oas_env_truthy : string -> bool
-val oas_env_has_non_empty : string -> (string * string) list -> bool
-val effective_oas_env : (string * string) list -> (string * string) list

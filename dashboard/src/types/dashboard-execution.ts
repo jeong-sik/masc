@@ -999,7 +999,6 @@ export interface GoalDetailKeeper {
   sandbox_profile: string
   network_mode: string
   runtime_id: string
-  approval_profile: string | null
   runtime_outcome: string | null
   latest_execution_outcome: string | null
   latest_execution_at: string | null

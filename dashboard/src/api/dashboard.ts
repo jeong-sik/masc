@@ -1539,7 +1539,6 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
     sandbox_profile: sandboxProfile,
     network_mode: networkMode,
     runtime_id: runtimeName,
-    approval_profile: asNullableString(raw.approval_profile),
     runtime_outcome: asNullableString(raw.runtime_outcome),
     latest_execution_outcome: asNullableString(raw.latest_execution_outcome),
     latest_execution_at: asNullableString(raw.latest_execution_at),

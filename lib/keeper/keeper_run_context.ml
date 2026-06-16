@@ -29,10 +29,6 @@ type run_context =
   ; receipt_started_at : string
   ; config_root : string
   ; runtime_config_path : string option
-  ; gemini_mcp_disabled : bool
-  ; approval_mode_effective : string option
-  ; approval_mode_derived : bool
-  ; keeper_oas_context : Keeper_types_profile.keeper_oas_context
   }
 
 let prepare_run_context
@@ -112,9 +108,6 @@ let prepare_run_context
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in
   (* 3. Build base system prompt from meta *)
-  let keeper_oas_context =
-    Keeper_types_profile.keeper_oas_context_of_defaults profile_defaults
-  in
   let config_root =
     let inputs = Config_dir_resolver.inputs_from_env () in
     let resolution =
@@ -124,9 +117,6 @@ let prepare_run_context
     resolution.Config_dir_resolver.config_root.path
   in
   let runtime_config_path = Runtime.config_path () in
-  let gemini_mcp_disabled = keeper_oas_context.gemini_mcp_disabled in
-  let approval_mode_effective = keeper_oas_context.gemini_approval_mode in
-  let approval_mode_derived = keeper_oas_context.gemini_approval_mode_derived in
   let persona_extended =
     Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
       profile_defaults
@@ -276,8 +266,4 @@ let prepare_run_context
   ; receipt_started_at
   ; config_root
   ; runtime_config_path
-  ; gemini_mcp_disabled
-  ; approval_mode_effective
-  ; approval_mode_derived
-  ; keeper_oas_context
   }

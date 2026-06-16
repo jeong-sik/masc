@@ -1205,7 +1205,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div>샌드박스</div>
         <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
         <div>승인</div>
-        <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
+        <div class="text-right text-text-body">${trust?.approval_state?.summary ?? '-'}</div>
         <div>런타임</div>
         <div class="text-right text-text-body">${keeper.runtime_id ?? executionRuntimeOutcome ?? '-'}</div>
         <div>결과</div>

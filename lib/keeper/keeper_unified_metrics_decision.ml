@@ -277,10 +277,6 @@ let append_decision_record
                   ("config_root", `String r.tool_surface.config_root);
                   ( "runtime_config_path",
                     Json_util.string_opt_to_json r.tool_surface.runtime_config_path );
-                  ("gemini_mcp_disabled", `Bool r.tool_surface.gemini_mcp_disabled);
-                  ( "approval_mode_effective",
-                    Json_util.string_opt_to_json r.tool_surface.approval_mode_effective );
-                  ("approval_mode_derived", `Bool r.tool_surface.approval_mode_derived);
                 ]
               in
                 let stop_reason_str =

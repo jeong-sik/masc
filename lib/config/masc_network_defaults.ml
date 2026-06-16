@@ -88,12 +88,11 @@ let is_cli_transport_url url =
   && String.sub url 0 plen = cli_transport_prefix
 
 (** Default URL for the local OpenAI-compatible runtime.
-    Override order: OAS_LOCAL_LLM_URL -> OAS_LOCAL_QWEN_URL -> local runtime. *)
+    Override order: OAS_LOCAL_LLM_URL -> local runtime. *)
 let local_llm_default_url =
-  match nonempty_env "OAS_LOCAL_LLM_URL", nonempty_env "OAS_LOCAL_QWEN_URL" with
-  | Some value, _ -> value
-  | _, Some value -> value
-  | _ -> ollama_default_url
+  match nonempty_env "OAS_LOCAL_LLM_URL" with
+  | Some value -> value
+  | None -> ollama_default_url
 
 (** Default port for the MASC HTTP server. *)
 let masc_http_default_port = 8935

@@ -427,11 +427,7 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
   let resolution_mode =
     Option.bind latest_tool_call (json_string_opt_member "approval_mode")
   in
-  let approval_profile =
-    Option.bind latest_receipt (fun receipt ->
-        receipt |> json_member "approval"
-        |> json_string_opt_member "profile")
-  in
+  ignore latest_receipt;
   let state =
     if pending_approval_count > 0 then "pending"
     else
@@ -448,7 +444,6 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
     [
       ("state", `String state);
       ("pending_count", `Int pending_approval_count);
-      ("profile", Json_util.string_opt_to_json approval_profile);
       ("resolution_mode", Json_util.string_opt_to_json resolution_mode);
       ("latest_event_kind", Json_util.string_opt_to_json latest_event_kind);
       ( "latest_event_at",

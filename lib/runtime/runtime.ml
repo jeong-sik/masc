@@ -110,29 +110,34 @@ let load_list ~(config_path : string)
 
 (* ---- Lazy default runtime singleton ---- *)
 
-let default_runtime_ref : t option ref = ref None
-let runtimes_ref : t list ref = ref []
+(** The runtime singletons are read from arbitrary call sites, including worker
+    domains spawned by the executor pool.  On OCaml 5 a plain [ref] write is not
+    guaranteed to be visible to another domain immediately; [Atomic.t] provides
+    the required memory barrier.  All writes go through [Atomic.set] and all
+    reads through [Atomic.get]. *)
+let default_runtime_ref : t option Atomic.t = Atomic.make None
+let runtimes_ref : t list Atomic.t = Atomic.make []
 
 (* keeper name → runtime id ["provider.model"], from [[runtime.assignments]].
    Populated by [init_default]; read by [runtime_id_for_keeper]. Validated at
    load (every target resolves to a runtime), so a hit here is always a
    configured runtime. *)
-let keeper_assignments_ref : (string * string) list ref = ref []
+let keeper_assignments_ref : (string * string) list Atomic.t = Atomic.make []
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let init_default ~config_path =
   match load_list ~config_path with
   | Ok (runtimes, rt, assignments) ->
-    runtimes_ref := runtimes;
-    default_runtime_ref := Some rt;
-    keeper_assignments_ref := assignments;
+    Atomic.set runtimes_ref runtimes;
+    Atomic.set default_runtime_ref (Some rt);
+    Atomic.set keeper_assignments_ref assignments;
     Ok ()
   | Error _ as e -> e
 
-let get_default_runtime () = !default_runtime_ref
-let get_runtimes () = !runtimes_ref
-let get_runtime_ids () = runtime_ids !runtimes_ref
+let get_default_runtime () = Atomic.get default_runtime_ref
+let get_runtimes () = Atomic.get runtimes_ref
+let get_runtime_ids () = runtime_ids (Atomic.get runtimes_ref)
 
 (* RFC persona⊥{model,runtime}: keeper→runtime assignment is sourced from
    [[runtime.assignments]] (runtime.toml SSOT), NOT from persona JSON or keeper
@@ -141,7 +146,7 @@ let get_runtime_ids () = runtime_ids !runtimes_ref
    only the OAS adapter resolves it to provider/model/spec). Reads
    [keeper_assignments_ref], never a module-level eager binding. *)
 let runtime_id_for_keeper (keeper_name : string) : string option =
-  List.assoc_opt keeper_name !keeper_assignments_ref
+  List.assoc_opt keeper_name (Atomic.get keeper_assignments_ref)
 ;;
 
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
@@ -150,7 +155,7 @@ let runtime_id_for_keeper (keeper_name : string) : string option =
    unknown id returns [None] so the driver fails fast (no silent substitution —
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =
-  List.find_opt (fun (rt : t) -> String.equal rt.id id) !runtimes_ref
+  List.find_opt (fun (rt : t) -> String.equal rt.id id) (Atomic.get runtimes_ref)
 ;;
 
 let max_context_of_runtime_id (id : string) : int option =
@@ -179,7 +184,7 @@ let preserve_thinking_of_runtime_id (id : string) : bool option =
    NB(R2): 함수 호출 시점에만 raise 하므로 호출자는 이 값을 모듈 top-level
    [let] 로 eager 바인딩하면 안 된다(config-less 테스트 바이너리 load crash). *)
 let get_default_runtime_id () =
-  match !default_runtime_ref with
+  match Atomic.get default_runtime_ref with
   | Some rt -> rt.id
   | None ->
     failwith

@@ -66,6 +66,8 @@ let try_handle
     | Error Cannot_parse -> error_json ~fields "Cannot parse command"
     | Error Too_complex -> error_json ~fields "Command too complex"
     | Error (Path_reject e) -> error_json ~fields:[ "blocked_cmd", `String cmd ] e
+    | Error (Approval_required { summary; _ }) -> error_json ~fields summary
+    | Error (Policy_denied { reason }) -> error_json ~fields reason
     | Ok result -> on_ok result
   in
   let sandbox_read_error ~target msg =

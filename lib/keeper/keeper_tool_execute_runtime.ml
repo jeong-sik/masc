@@ -433,6 +433,21 @@ let handle_tool_execute_typed
             error_json
               ~fields:(("blocked_cmd", `String cmd_for_log) :: typed_error_fields)
               e
+          | Error (Keeper_tool_execute_shell_ir.Approval_required { summary; bin }) ->
+            Log.Keeper.warn
+              "shell_ir approval_required keeper=%s cmd=%s bin=%s summary=%s"
+              meta.name
+              cmd_for_log
+              bin
+              summary;
+            typed_error_json summary
+          | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
+            Log.Keeper.warn
+              "shell_ir policy_denied keeper=%s cmd=%s reason=%s"
+              meta.name
+              cmd_for_log
+              reason;
+            typed_error_json reason
           | Ok result ->
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry

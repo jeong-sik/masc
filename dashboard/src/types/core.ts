@@ -57,7 +57,6 @@ export interface Task {
   assignee?: string
   assignee_kind?: string | null
   description?: string
-  worktree?: TaskWorktreeInfo | null
   created_at?: string
   updated_at?: string
   completed_at?: string
@@ -65,13 +64,6 @@ export interface Task {
   handoff_context?: TaskHandoffContext | null
   gate?: TaskGateSnapshot | null
   execution_links?: TaskExecutionLinks | null
-}
-
-export interface TaskWorktreeInfo {
-  branch: string
-  path: string
-  git_root: string
-  repo_name: string
 }
 
 interface TaskExecutionLinks {

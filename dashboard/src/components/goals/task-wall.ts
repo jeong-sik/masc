@@ -95,31 +95,21 @@ export function TaskWall() {
               <span class="text-text-muted">${col.tasks.length}</span>
             </div>
             <ul class="flex flex-col gap-0.5">
-              ${col.tasks.map(t => {
-                const branch = t.worktree?.branch
-                const titleAttr = branch
-                  ? `${t.id} · ${t.status ?? 'unknown'} · branch: ${branch}`
-                  : `${t.id} · ${t.status ?? 'unknown'}`
-                return html`
+              ${col.tasks.map(t => html`
                 <li key=${t.id}>
                   <button
                     type="button"
                     class="flex w-full items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-left text-2xs hover:border-[var(--accent-40)] hover:bg-[var(--accent-10)]"
-                    title=${titleAttr}
-                    aria-label=${branch
-                      ? `태스크 ${t.id} 열기: ${t.title}, branch ${branch}`
-                      : `태스크 ${t.id} 열기: ${t.title}`}
+                    title=${`${t.id} · ${t.status ?? 'unknown'}`}
+                    aria-label=${`태스크 ${t.id} 열기: ${t.title}`}
                     onClick=${() => navigate('workspace', { section: 'planning', task: t.id })}
                   >
                     <span aria-hidden="true" class="text-text-muted">${statusGlyph(t.status)}</span>
                     <span class="font-mono text-text-disabled">${t.id.slice(0, 6)}</span>
                     <span class="grow truncate">${t.title}</span>
-                    ${branch
-                      ? html`<span class="shrink-0 rounded-[var(--r-0)] bg-[var(--color-bg-elevated)] px-1 text-3xs font-mono text-text-muted" aria-label="worktree branch">${branch.length > 14 ? branch.slice(0, 13) + '…' : branch}</span>`
-                      : null}
                   </button>
                 </li>
-              `})}
+              `)}
             </ul>
           </div>
         `)}

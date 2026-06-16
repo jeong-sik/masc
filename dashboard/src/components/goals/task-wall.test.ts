@@ -53,12 +53,6 @@ describe('TaskWall', () => {
         status: 'claimed',
         priority: 1,
         assignee: 'keeper-alpha',
-        worktree: {
-          branch: 'feature/task-wall-long-branch',
-          path: '/tmp/worktree',
-          git_root: '/tmp/repo',
-          repo_name: 'masc',
-        },
       }),
       makeTask({
         id: 'task-unassigned',
@@ -92,7 +86,7 @@ describe('TaskWall', () => {
     const alphaColumn = screen.getByLabelText('keeper-alpha 태스크 2건')
     const alphaButtons = within(alphaColumn).getAllByRole('button')
     expect(alphaButtons[0]).toHaveAccessibleName(
-      '태스크 task-alpha-high 열기: Alpha higher priority, branch feature/task-wall-long-branch',
+      '태스크 task-alpha-high 열기: Alpha higher priority',
     )
     expect(alphaButtons[1]).toHaveAccessibleName('태스크 task-alpha-low 열기: Alpha lower priority')
   })

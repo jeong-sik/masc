@@ -455,10 +455,17 @@ let patched_keeper_status row ~keepalive_running =
   if not keepalive_running
   then `String "offline"
   else (
-    match keeper_agent_status_opt row with
-    | Some (("busy" | "active" | "listening" | "idle") as status) -> `String status
-    | Some ("offline" | "inactive") -> `String "offline"
-    | _ -> `String "idle")
+    (* RFC-0089: classify the row's display status via the typed surface_status
+       SSOT. busy/active/listening/idle pass through; inactive/offline collapse
+       to "offline"; anything outside the domain defaults to "idle". *)
+    match
+      Option.bind (keeper_agent_status_opt row)
+        Keeper_status_runtime.surface_status_of_string_opt
+    with
+    | Some ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s) ->
+      `String (Keeper_status_runtime.surface_status_to_string s)
+    | Some (Surface_offline | Surface_inactive) -> `String "offline"
+    | None -> `String "idle")
 ;;
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function

@@ -866,8 +866,42 @@ let test_librarian_runtime_provider_slot_gate () =
            | Some (Ok episode) ->
              Alcotest.(check string) "first trace" "trace-slot-a" episode.Types.trace_id
            | Some (Error msg) -> Alcotest.failf "first call failed: %s" msg
-           | None -> Alcotest.fail "first result missing");
+          | None -> Alcotest.fail "first result missing");
           Alcotest.(check int) "only one provider call entered" 1 (Atomic.get provider_calls))))
+;;
+
+let test_librarian_runtime_reports_fact_upsert_failure () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let keeper_id = "runtime-librarian-keeper" in
+        Unix.mkdir (Memory_io.facts_path ~keeper_id) 0o755;
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-runtime-upsert-failure"
+          ; generation = 8
+          ; messages = [ text_message "Please remember the runtime boundary." ]
+          }
+        in
+        match
+          Librarian_runtime.extract_and_append_with_provider
+            ~complete
+            ~clock
+            ~timeout_sec:1.0
+            ~sw
+            ~net
+            ~keeper_id
+            ~provider_cfg:(test_provider_cfg ())
+            inp
+        with
+        | Ok _ -> Alcotest.fail "expected fact upsert failure"
+        | Error msg ->
+          Alcotest.(check bool)
+            "fact upsert error returned to caller"
+            true
+            (contains "memory os fact upsert failed" msg))))
 ;;
 
 let test_policy_score () =
@@ -1892,6 +1926,33 @@ let test_recall_surfaces_shared_after_consolidation () =
            && not (contains "shared via" alpha_block)))))
 ;;
 
+let test_consolidator_rejects_corrupt_source_store () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let now = 1_000_000.0 in
+    Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now "shared fact");
+    let oc =
+      open_out_gen [ Open_append; Open_text ] 0o644 (Memory_io.facts_path ~keeper_id:"alpha")
+    in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{not-json}\n");
+    Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now "shared fact");
+    try
+      ignore (Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ());
+      Alcotest.fail "expected corrupt source store to fail loud"
+    with
+    | Invalid_argument msg ->
+      Alcotest.(check bool)
+        "error identifies consolidation input"
+        true
+        (contains "memory os consolidation input invalid" msg);
+      Alcotest.(check bool)
+        "error includes source fact store"
+        true
+        (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
+      Alcotest.(check bool) "error includes line number" true (contains ":2:" msg))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -1946,6 +2007,10 @@ let () =
             "librarian runtime provider slot gate"
             `Quick
             test_librarian_runtime_provider_slot_gate
+        ; Alcotest.test_case
+            "librarian runtime reports fact upsert failure"
+            `Quick
+            test_librarian_runtime_reports_fact_upsert_failure
         ] )
     ; ( "policy"
       , [ Alcotest.test_case "score ordering" `Quick test_policy_score
@@ -2090,6 +2155,10 @@ let () =
             "recall surfaces shared facts with provenance (private precedence)"
             `Quick
             test_recall_surfaces_shared_after_consolidation
+        ; Alcotest.test_case
+            "corrupt source store fails loud"
+            `Quick
+            test_consolidator_rejects_corrupt_source_store
         ] )
     ]
 ;;

@@ -1,6 +1,7 @@
 open Alcotest
 
 module TRM = Masc.Transport_read_model
+module TM = Masc.Transport_metrics
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
@@ -121,15 +122,33 @@ let test_transport_status_reports_streamable_http_protocol () =
     (List.mem "json-rpc" enabled_protocols)
 
 let test_websocket_discovery_uses_standalone_url () =
-  let json = TRM.websocket_discovery_json (make_context ()) in
-  check string "mode" "standalone"
-    Yojson.Safe.Util.(json |> member "mode" |> to_string);
-  check string "upgrade path" "/"
-    Yojson.Safe.Util.(json |> member "upgrade_path" |> to_string);
-  check string "ws_url uses standalone listener" "ws://127.0.0.1:8937/"
-    Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
-  check string "same-origin retained for diagnostics" "ws://127.0.0.1:8935/ws"
-    Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string)
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+      TM.set_ws_runtime_listening true;
+      Fun.protect
+        ~finally:(fun () -> TM.set_ws_runtime_listening false)
+        (fun () ->
+          let json = TRM.websocket_discovery_json (make_context ()) in
+          check string "mode" "standalone"
+            Yojson.Safe.Util.(json |> member "mode" |> to_string);
+          check string "upgrade path" "/"
+            Yojson.Safe.Util.(json |> member "upgrade_path" |> to_string);
+          check string "ws_url uses standalone listener" "ws://127.0.0.1:8937/"
+            Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
+          check string "same-origin retained for diagnostics" "ws://127.0.0.1:8935/ws"
+            Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string)))
+
+let test_websocket_discovery_does_not_treat_enabled_as_reachable () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+      TM.set_ws_runtime_listening false;
+      let json = TRM.websocket_discovery_json (make_context ()) in
+      check bool "enabled still advertises configured websocket" true
+        Yojson.Safe.Util.(json |> member "enabled" |> to_bool);
+      check bool "enabled alone is not listening" false
+        Yojson.Safe.Util.(json |> member "listening" |> to_bool);
+      check bool "enabled alone is not reachable" false
+        Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
+      check bool "standalone listener state remains explicit" false
+        Yojson.Safe.Util.(json |> member "standalone_listening" |> to_bool))
 
 let test_websocket_discovery_retains_same_origin_wss_diagnostic () =
   let ctx =
@@ -198,6 +217,8 @@ let () =
              test_transport_status_reports_streamable_http_protocol;
            test_case "websocket standalone URL" `Quick
              test_websocket_discovery_uses_standalone_url;
+           test_case "websocket enabled is not reachability" `Quick
+             test_websocket_discovery_does_not_treat_enabled_as_reachable;
            test_case "websocket HTTPS diagnostic URL" `Quick
              test_websocket_discovery_retains_same_origin_wss_diagnostic;
            test_case "forwarded base URL" `Quick

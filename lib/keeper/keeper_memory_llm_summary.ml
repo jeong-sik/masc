@@ -149,16 +149,36 @@ let summarize_with_provider
     ~sw
     ~net
     ~(provider_cfg : Llm_provider.Provider_config.t)
+    ~(max_concurrent : int option)
     ~trace_id
     ~texts
     () : string option =
   let provider_cfg = provider_for_summary provider_cfg in
   let messages = messages_for_summary ~trace_id ~texts in
-  let result, outcome =
+  (* RFC-0153 §4.2.4: gate the summary completion on the SAME per-binding
+     semaphore as keeper-turn / librarian traffic (keyed provider:model@base_url),
+     so total in-flight per binding is bounded across all callers. A slot
+     wait-timeout surfaces as a Capacity_backpressure http_error, handled like
+     any provider failure (try next provider). *)
+  let slot_key =
+    Runtime_provider_binding.provider_health_key_of_config provider_cfg
+  in
+  let gated_complete () =
     match
-      with_timeout ?clock ~timeout_sec (fun () ->
-        complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+      Runtime_binding_capacity.with_slot_result ?clock ~key:slot_key ~max_concurrent
+        (fun () -> complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
     with
+    | Ok response_result -> response_result
+    | Error `Slot_timeout ->
+      Error
+        (Llm_provider.Http_client.TimeoutError
+           { message =
+               Printf.sprintf "binding %s saturated (memory summary)" slot_key
+           ; phase = Llm_provider.Http_client.Capacity_backpressure
+           })
+  in
+  let result, outcome =
+    match with_timeout ?clock ~timeout_sec gated_complete with
     | None ->
         Log.Keeper.warn
           "memory LLM summary timed out trace_id=%s provider=%s timeout_sec=%.1f"
@@ -195,10 +215,10 @@ let summarize_with_providers
     () =
   let rec go = function
     | [] -> None
-    | provider_cfg :: rest -> (
+    | (provider_cfg, max_concurrent) :: rest -> (
         match
           summarize_with_provider ?complete ?clock ?timeout_sec ~runtime_id
-            ~sw ~net ~provider_cfg ~trace_id ~texts ()
+            ~sw ~net ~provider_cfg ~max_concurrent ~trace_id ~texts ()
         with
         | Some summary -> Some summary
         | None -> go rest)
@@ -233,7 +253,8 @@ let make
            summary uses the single default runtime's provider config. *)
         (match
            (match Runtime.get_default_runtime () with
-            | Some r -> Ok [ r.Runtime.provider_config ]
+            | Some r ->
+                Ok [ (r.Runtime.provider_config, r.Runtime.binding.max_concurrent) ]
             | None -> Error "no default runtime configured")
          with
          | Error err ->
@@ -243,7 +264,9 @@ let make
              None
          | Ok providers ->
              let providers =
-               List.filter is_direct_completion_provider providers
+               List.filter
+                 (fun (pc, _) -> is_direct_completion_provider pc)
+                 providers
              in
              if providers = [] then begin
                Log.Keeper.warn ~keeper_name:keeper_name

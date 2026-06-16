@@ -25,6 +25,7 @@ type config =
   provider_cfg : Llm_provider.Provider_config.t;
   provider : Agent_sdk.Provider.config;
   model_id : string;
+  max_concurrent : int option;
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
@@ -227,6 +228,50 @@ let provider_resource_slot_transport
 let provider_http_slot_transport transport =
   provider_resource_slot_transport ~kind:Provider_http transport
 
+(* RFC-0153 §4.2.4: per-binding HTTP-round-trip concurrency gate. Holds one of
+   the binding's [max_concurrent] permits (keyed [provider:model@base_url]) only
+   across the provider HTTP call, NOT across local tool/subprocess execution.
+   A wait-timeout surfaces as a typed Capacity_backpressure timeout phase, which
+   masc maps to Keeper_internal_error.Runtime_slot so keeper_binding_health
+   backoff fires. [max_concurrent = None] runs ungated (no semaphore). *)
+let provider_binding_slot_transport
+    ~(key : string)
+    ~(max_concurrent : int option)
+    ?clock
+    (transport : Llm_provider.Llm_transport.t)
+  : Llm_provider.Llm_transport.t =
+  let timeout_http_error () =
+    Llm_provider.Http_client.TimeoutError
+      { message =
+          Printf.sprintf
+            "binding %s saturated: no provider HTTP slot within %.0fs"
+            key
+            (Runtime_binding_capacity.default_wait_timeout_sec ())
+      ; phase = Llm_provider.Http_client.Capacity_backpressure
+      }
+  in
+  { complete_sync =
+      (fun req ->
+        match
+          Runtime_binding_capacity.with_slot_result ?clock ~key ~max_concurrent
+            (fun () -> transport.complete_sync req)
+        with
+        | Ok result -> result
+        | Error `Slot_timeout ->
+          (* [sync_result] is a record; surface the backpressure on [response]. *)
+          { Llm_provider.Llm_transport.response = Error (timeout_http_error ())
+          ; latency_ms = None
+          });
+    complete_stream =
+      (fun ?on_telemetry ~on_event req ->
+        match
+          Runtime_binding_capacity.with_slot_result ?clock ~key ~max_concurrent
+            (fun () -> transport.complete_stream ?on_telemetry ~on_event req)
+        with
+        | Ok result -> result
+        | Error `Slot_timeout -> Error (timeout_http_error ()));
+  }
+
 let provider_config_preserving_http_transport
     ~sw
     ~net
@@ -234,6 +279,7 @@ let provider_config_preserving_http_transport
     ?stream_idle_timeout_s
     ?body_timeout_s
     ~(provider_cfg : Llm_provider.Provider_config.t)
+    ~(max_concurrent : int option)
     ()
   : Llm_provider.Llm_transport.t =
   let http_transport =
@@ -251,30 +297,38 @@ let provider_config_preserving_http_transport
         request_runtime_fields_on_base_config ~base:provider_cfg req.config;
     }
   in
-  provider_http_slot_transport
-    { complete_sync =
-      (fun req ->
-        (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
-           per turn for each provider. Removed at Phase 0 closeout. *)
-        Log.Misc.debug
-          "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
-        http_transport.complete_sync (patch_request req));
-      complete_stream =
-      (fun ?on_telemetry ~on_event req ->
-        (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
-           per turn for each provider. Removed at Phase 0 closeout. *)
-        Log.Misc.debug
-          "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
-        http_transport.complete_stream ?on_telemetry ~on_event
-          (patch_request req));
-    }
+  let fd_gated =
+    provider_http_slot_transport
+      { complete_sync =
+        (fun req ->
+          (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
+             per turn for each provider. Removed at Phase 0 closeout. *)
+          Log.Misc.debug
+            "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
+          http_transport.complete_sync (patch_request req));
+        complete_stream =
+        (fun ?on_telemetry ~on_event req ->
+          (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
+             per turn for each provider. Removed at Phase 0 closeout. *)
+          Log.Misc.debug
+            "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
+          http_transport.complete_stream ?on_telemetry ~on_event
+            (patch_request req));
+      }
+  in
+  (* RFC-0153 §4.2.4: per-binding gate OUTERMOST, coarse global Fd_accountant
+     Provider_http pool INNERMOST. Key derived from the OAS-owned provider
+     config identity (provider:model@base_url) — same key as
+     Runtime_candidate.capacity_key. *)
+  let key = Runtime_provider_binding.provider_health_key_of_config provider_cfg in
+  provider_binding_slot_transport ~key ~max_concurrent ?clock fd_gated
 
-let transport_for_provider ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg () =
+let transport_for_provider ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg ~max_concurrent () =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
      over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
      per-request patching, not at transport construction, so it is no longer
      threaded here. *)
-  Ok (Some (provider_config_preserving_http_transport ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg ()))
+  Ok (Some (provider_config_preserving_http_transport ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg ~max_concurrent ()))
 
 let runtime_id_of_config (config : config) =
   let runtime_prefix = "runtime:" in
@@ -430,6 +484,7 @@ let build
       ?stream_idle_timeout_s:config.stream_idle_timeout_s
       ?body_timeout_s:config.body_timeout_s
       ~provider_cfg:config.provider_cfg
+      ~max_concurrent:config.max_concurrent
       ()
   with
   | Error _ as e -> e
@@ -534,6 +589,7 @@ let resume_from_checkpoint
       ?stream_idle_timeout_s:config.stream_idle_timeout_s
       ?body_timeout_s:config.body_timeout_s
       ~provider_cfg:config.provider_cfg
+      ~max_concurrent:config.max_concurrent
       ()
   with
   | Error _ as e -> e

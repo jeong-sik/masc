@@ -31,6 +31,7 @@ type config = {
   provider_cfg : Llm_provider.Provider_config.t;
   provider : Agent_sdk.Provider.config;
   model_id : string;
+  max_concurrent : int option;
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;

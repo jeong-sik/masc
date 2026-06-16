@@ -367,7 +367,12 @@ admission_wait_ms = 2000          # NEW (optional, default 2000)
 
 **multi-domain 주의**: masc 는 `Eio.Executor_pool` (`domain_count = max 2 (recommended-1)`) 로 multi-domain. `Eio.Semaphore` 의 cross-domain 거동은 **기존에 같은 경계에서 수용된 `Fd_accountant.Provider_http` semaphore 와 동일** (동일 transport record 의 layered decorator 라 항상 같은 domain 에서 실행). 따라서 본 변경은 새 cross-domain 리스크를 도입하지 않으며, cross-domain 강제 enforcement 가 측정상 필요해지면 두 게이트를 함께 마이그레이션한다 (별도 작업).
 
-**direct-caller 통합**: keeper turn 트래픽 (`Runtime_agent.run` → pipeline) 외에, `Complete.complete` 를 `?transport` 없이 직접 호출하는 masc 사이트 — Memory OS librarian (`keeper_librarian_runtime.ml`, 매 post-turn 발화), memory LLM summary (`keeper_memory_llm_summary.ml`), runtime probe/bench (`tool_local_runtime_verify.ml` / `tool_local_runtime_bench.ml`) — 도 같은 endpoint 를 친다. librarian 은 자체 unkeyed `Eio.Semaphore.make 1` (전역 1-slot) 을 들고 있어 산포된 동시성 게이트가 됨. 이들 direct caller 를 per-binding 게이트된 경로로 라우팅하고 librarian 의 make-1 을 registry 로 흡수한다 (산포 제거; librarian 은 본 RFC 가 겨냥한 provider-concurrency 과부하의 문서화된 원인).
+**direct-caller 통합**: keeper turn 트래픽 (`Runtime_agent.run` → pipeline) 외에, `Complete.complete` 를 `?transport` 없이 직접 호출해 같은 endpoint 를 치는 post-turn 메모리 경로 (`keeper_agent_run_post_turn_memory.ml` 에서 매 turn 발화) 를 같은 per-binding semaphore 로 묶는다 — 호출자와 무관하게 binding 당 총 in-flight 가 하나의 cap 으로 bounded.
+
+- **Memory OS librarian** (`keeper_librarian_runtime.ml`): 자체 unkeyed `Eio.Semaphore.make 1` (전역 1-slot, 산포된 게이트) 을 제거하고 `Runtime_binding_capacity` 로 흡수. binding 의 `max_concurrent` 를 `provider_for_runtime` 에서 같이 가져와 keeper-turn 과 동일 key (`provider:model@base_url`) 의 semaphore 를 공유. librarian 의 fast-fail wait (`MASC_KEEPER_MEMORY_OS_LIBRARIAN_SLOT_WAIT_SEC`, default 0.25s) 는 유지 (포화 시 best-effort memory 작업을 queue 하지 않고 `provider_slot_busy` 로 즉시 skip). librarian 은 본 RFC 가 겨냥한 provider-concurrency 과부하의 문서화된 원인 (memory: 2026-06-15/16 empty-response 53→62% spike).
+- **Memory LLM summary** (`keeper_memory_llm_summary.ml`): 동일 post-turn 경로. provider 후보를 `(provider_cfg, max_concurrent)` 쌍으로 resolve 하여 각 완료 호출을 per-binding 게이트로 감쌈. slot wait-timeout 은 Capacity_backpressure `http_error` 로 표면화되어 다음 provider 로 fallback.
+
+- **scope-out (진단 도구)**: runtime probe / bench (`tool_local_runtime_verify.ml` / `tool_local_runtime_bench.ml`) 는 게이트하지 않는다. 이들은 endpoint 의 raw 도달성/지연을 *측정*하는 operator-triggered 진단 도구로, 게이트를 적용하면 keeper 부하에 의해 측정이 왜곡되고 (목적 훼손) 빈도가 낮아 steady-state 부하가 아니다. 정상 keeper/memory 트래픽이 게이트되므로 이 결정은 보호 공백이 아니다.
 
 ### 4.3 Phase C — Adaptive Client-Side Throttling (Google SRE §21)
 

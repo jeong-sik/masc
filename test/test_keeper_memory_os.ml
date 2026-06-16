@@ -812,6 +812,7 @@ let test_librarian_runtime_appends_episode_bundle () =
              ~net
              ~keeper_id
              ~provider_cfg:(test_provider_cfg ())
+             ~max_concurrent:None
              inp
          with
          | Error msg -> Alcotest.fail msg
@@ -915,6 +916,7 @@ let test_librarian_runtime_provider_slot_gate () =
                     ~sw
                     ~net
                     ~provider_cfg:(test_provider_cfg ())
+                    ~max_concurrent:(Some 1)
                     (input "trace-slot-a")));
           Eio.Promise.await entered;
           Eio.Fiber.fork ~sw (fun () ->
@@ -927,6 +929,7 @@ let test_librarian_runtime_provider_slot_gate () =
                     ~sw
                     ~net
                     ~provider_cfg:(test_provider_cfg ())
+                    ~max_concurrent:(Some 1)
                     (input "trace-slot-b")));
           wait_for_ref ~clock "second librarian result" second;
           Eio.Promise.resolve resolve_release ();
@@ -968,6 +971,7 @@ let test_librarian_runtime_reports_fact_upsert_failure () =
             ~net
             ~keeper_id
             ~provider_cfg:(test_provider_cfg ())
+            ~max_concurrent:None
             inp
         with
         | Ok _ -> Alcotest.fail "expected fact upsert failure"

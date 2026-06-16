@@ -44,7 +44,10 @@ let runtime_mcp_policy_for_agent ~agent_name (t : t) runtime_mcp_policy =
     runtime_mcp_policy
 
 let default_config ~name ~system_prompt ~tools (t : t) =
-  Runtime_agent.default_config ~name ~provider_cfg:t.config ~system_prompt ~tools
+  (* RFC-0153 §4.2.4: carry the binding's per-binding HTTP cap into the agent
+     config so the provider transport decorator can gate this binding. *)
+  { (Runtime_agent.default_config ~name ~provider_cfg:t.config ~system_prompt ~tools)
+    with Runtime_agent.max_concurrent = t.max_concurrent }
 
 (* Runtime-label helpers for dashboard grouping. Delegates to the canonical
    local-runtime detector in Runtime_provider_binding (loopback + no-auth). *)

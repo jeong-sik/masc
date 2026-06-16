@@ -23,6 +23,10 @@ type config =
   ; provider_cfg : Llm_provider.Provider_config.t
   ; provider : Agent_sdk.Provider.config
   ; model_id : string
+  ; max_concurrent : int option
+    (* RFC-0153 §4.2.4: per-binding HTTP-round-trip concurrency cap, carried
+       from the runtime binding to the provider transport decorator. None = no
+       per-binding cap (coarse global Fd_accountant Provider_http pool only). *)
   ; priority : Llm_provider.Request_priority.t option
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
@@ -136,6 +140,7 @@ let default_config
   ; provider_cfg
   ; provider
   ; model_id = provider_cfg.model_id
+  ; max_concurrent = None
   ; priority = None
   ; system_prompt
   ; tools

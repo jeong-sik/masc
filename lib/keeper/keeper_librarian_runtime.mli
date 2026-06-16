@@ -71,6 +71,7 @@ val extract_with_provider
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> provider_cfg:Llm_provider.Provider_config.t
+  -> max_concurrent:int option
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
 
@@ -82,6 +83,7 @@ val extract_and_append_with_provider
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
+  -> max_concurrent:int option
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
 

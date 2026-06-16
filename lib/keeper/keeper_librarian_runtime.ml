@@ -39,7 +39,8 @@ let default_timeout_sec () =
 
 let provider_slot_busy = "librarian provider slot busy"
 
-let provider_slot = Eio.Semaphore.make 1
+(* RFC-0153 §4.2.4: the prior unkeyed [Eio.Semaphore.make 1] was removed; the
+   librarian now shares the per-binding Runtime_binding_capacity gate. *)
 
 let provider_slot_wait_sec () =
   Keeper_memory_bank_env.memory_env_float_logged
@@ -194,16 +195,24 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> None)
 ;;
 
-let with_provider_slot ?clock f =
+(* RFC-0153 §4.2.4: gate librarian completions on the SAME per-binding
+   semaphore as keeper-turn HTTP traffic (keyed [provider:model@base_url] in
+   Runtime_binding_capacity), so total in-flight per binding is bounded across
+   all callers. Replaces the prior unkeyed process-global [Eio.Semaphore.make 1]
+   (a scattered gate). The librarian keeps its fast-fail wait
+   ([provider_slot_wait_sec], default 0.25s): a saturated binding surfaces as
+   [provider_slot_busy] rather than queueing best-effort memory work. *)
+let with_provider_slot ?clock ~key ~max_concurrent f =
   match
-    with_timeout ?clock ~timeout_sec:(provider_slot_wait_sec ()) (fun () ->
-      Eio.Semaphore.acquire provider_slot)
+    Runtime_binding_capacity.with_slot_result
+      ?clock
+      ~wait_timeout_sec:(provider_slot_wait_sec ())
+      ~key
+      ~max_concurrent
+      f
   with
-  | None -> Error provider_slot_busy
-  | Some () ->
-    (* fun-protect-finally-ok: [Eio.Semaphore.release] only returns the
-       provider slot; it does not wait, acquire, or perform I/O. *)
-    Fun.protect ~finally:(fun () -> Eio.Semaphore.release provider_slot) f
+  | Ok result -> result
+  | Error `Slot_timeout -> Error provider_slot_busy
 ;;
 
 let extract_with_provider
@@ -213,13 +222,17 @@ let extract_with_provider
     ~sw
     ~net
     ~provider_cfg
+    ~(max_concurrent : int option)
     (inp : Keeper_librarian.input)
   =
   match messages_for_librarian inp with
   | Error _ as e -> e
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
-    with_provider_slot ?clock (fun () ->
+    let slot_key =
+      Runtime_provider_binding.provider_health_key_of_config provider_cfg
+    in
+    with_provider_slot ?clock ~key:slot_key ~max_concurrent (fun () ->
       let attempt messages =
         match
           with_timeout ?clock ~timeout_sec (fun () ->
@@ -250,9 +263,13 @@ let extract_and_append_with_provider
     ~net
     ~keeper_id
     ~provider_cfg
+    ~max_concurrent
     inp
   =
-  match extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg inp with
+  match
+    extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg
+      ~max_concurrent inp
+  with
   | Error _ as e -> e
   | Ok episode ->
     let now = episode.Keeper_memory_os_types.created_at in
@@ -314,12 +331,15 @@ let extract_and_append_with_provider
      | Error message -> Error ("memory os fact upsert failed: " ^ message))
 ;;
 
+(* Returns the provider config AND the binding's per-binding HTTP cap
+   (RFC-0153 §4.2.4) so the librarian shares the same Runtime_binding_capacity
+   semaphore as keeper-turn traffic on that binding. *)
 let provider_for_runtime ~runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
-  | Some rt -> Ok rt.Runtime.provider_config
+  | Some rt -> Ok (rt.Runtime.provider_config, rt.Runtime.binding.max_concurrent)
   | None ->
     (match Runtime.get_default_runtime () with
-     | Some rt -> Ok rt.Runtime.provider_config
+     | Some rt -> Ok (rt.Runtime.provider_config, rt.Runtime.binding.max_concurrent)
      | None -> Error "no runtime configured for librarian extraction")
 ;;
 
@@ -336,7 +356,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id inp =
              "memory os librarian skipped runtime=%s: %s"
              runtime_id
              err
-         | Ok provider_cfg ->
+         | Ok (provider_cfg, max_concurrent) ->
            if not (Keeper_memory_llm_summary.is_direct_completion_provider provider_cfg)
            then
              Log.Keeper.warn ~keeper_name:keeper_id
@@ -357,6 +377,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id inp =
                  ~net
                  ~keeper_id
                  ~provider_cfg
+                 ~max_concurrent
                  inp
              with
              | Ok episode ->

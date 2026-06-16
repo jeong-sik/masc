@@ -254,6 +254,29 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     ])
   })
 
+  it('reconciles a stream network failure when the server history has the completed reply', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-15T13:08:38Z'))
+    try {
+      streamKeeperMessage.mockRejectedValue(new TypeError('network error'))
+      fetchKeeperChatHistory.mockResolvedValue([
+        { role: 'user', content: '진행 상황?', ts: 1_781_528_918 },
+        { role: 'assistant', content: '서버에는 답변이 저장됐습니다.', ts: 1_781_528_920 },
+      ])
+
+      await sendKeeperThreadMessage('echo', '진행 상황?')
+
+      const thread = keeperThreads.value.echo ?? []
+      expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+        ['user', '진행 상황?', 'history'],
+        ['assistant', '서버에는 답변이 저장됐습니다.', 'history'],
+      ])
+      expect(keeperActionErrors.value.echo).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('resumes a pending request from storage and finalizes the transcript', async () => {
     upsertPendingKeeperChatRequest({
       requestId: 'kmsg_echo_1',

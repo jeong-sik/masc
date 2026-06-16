@@ -48,11 +48,7 @@ let handle_sub_board_create ~tool_name ~start_time args : Tool_result.result =
            (Printf.sprintf "SubBoard created: %s (/%s)" sb.Board.name sb.Board.slug))
       ()
   | Error e ->
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      (Board.show_board_error e)
+    Board_tool_format.error_of_board_error ~tool_name ~start_time e
 ;;
 
 let handle_sub_board_list ~tool_name ~start_time _args : Tool_result.result =
@@ -100,11 +96,7 @@ let handle_sub_board_get ~tool_name ~start_time args : Tool_result.result =
               sb.post_count))
       ()
   | Error e ->
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      (Board.show_board_error e)
+    Board_tool_format.error_of_board_error ~tool_name ~start_time e
 ;;
 
 let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
@@ -139,11 +131,7 @@ let handle_sub_board_update ~tool_name ~start_time args : Tool_result.result =
            (Printf.sprintf "SubBoard updated: %s (/%s)" sb.Board.name sb.Board.slug))
       ()
   | Error e ->
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      (Board.show_board_error e)
+    Board_tool_format.error_of_board_error ~tool_name ~start_time e
 ;;
 
 let handle_sub_board_delete ~tool_name ~start_time args : Tool_result.result =
@@ -156,9 +144,5 @@ let handle_sub_board_delete ~tool_name ~start_time args : Tool_result.result =
       ~data:(`String (Printf.sprintf "SubBoard deleted: %s" sub_board_id))
       ()
   | Error e ->
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      (Board.show_board_error e)
+    Board_tool_format.error_of_board_error ~tool_name ~start_time e
 ;;

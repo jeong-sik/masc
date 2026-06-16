@@ -1,0 +1,60 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC v2 — Indicators (loading / progress)
+   Ported from keeper-v2/styles/indicators.css into the dashboard
+   token system. Purely additive; loaded after primitives.css.
+   ══════════════════════════════════════════════════════════════ */
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 2px solid color-mix(in oklab, var(--volt) 22%, transparent);
+  border-top-color: var(--volt);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.spinner.sm { width: 13px; height: 13px; border-width: 1.5px; }
+.spinner.lg { width: 28px; height: 28px; border-width: 3px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* spinner + label — the canonical inline "working…" row */
+.loading-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--text-mid);
+}
+
+/* indeterminate bar — a volt segment sweeps the track.
+   For known progress keep using ProgressBar (segmented / percentage). */
+.loading-bar {
+  position: relative;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.loading-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 38%;
+  background: linear-gradient(90deg, transparent, var(--volt), transparent);
+  border-radius: var(--radius-pill);
+  animation: loading-sweep 1.15s ease-in-out infinite;
+}
+
+@keyframes loading-sweep { 0% { left: -40%; } 100% { left: 100%; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.4s; }
+  .loading-bar::before { animation-duration: 2s; }
+}

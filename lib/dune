@@ -550,7 +550,10 @@
   masc.repo_manager
   ;; Parse_outcome — RFC-0145 canonical helper for parse-with-failure
   ;; boundaries (replaces silent [try ... with _ -> None] pattern).
-  masc.parse_outcome)
+  masc.parse_outcome
+  ;; RFC-0249 — Fusion panel+judge deliberation pure core (types, gate, config,
+  ;; judge JSON parse). lib/fusion/ (OAS-calling glue) lives in this main lib.
+  masc.fusion_core)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation

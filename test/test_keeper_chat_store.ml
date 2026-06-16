@@ -187,6 +187,72 @@ let test_legacy_lines_parse_without_new_fields () =
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
 
+(* R3: every persisted row carries a producer-assigned id that is
+   non-empty, unique within a turn, and stable across reloads. *)
+let test_message_id_minted_unique_and_stable () =
+  let base_dir = temp_base_path "keeper-chat-store-id" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-id" in
+      K.append_turn ~base_dir ~keeper_name ~user_content:"run the checks"
+        ~user_attachments:[] ~assistant_content:"all green" ();
+      let ids_of () =
+        List.map (fun (m : K.chat_message) -> m.id) (K.load ~base_dir ~keeper_name)
+      in
+      let ids = ids_of () in
+      List.iter
+        (fun id ->
+          Alcotest.(check bool) "row id is non-empty" true (String.length id > 0))
+        ids;
+      Alcotest.(check int) "ids are unique across the turn" (List.length ids)
+        (List.length (List.sort_uniq String.compare ids));
+      Alcotest.(check (list string)) "ids stable across reloads" ids (ids_of ()))
+
+(* R3: rows written before the id field load with a deterministic id
+   derived at the read boundary, so it is stable across reloads and two
+   distinct rows get distinct ids — no index-derived synthesis. *)
+let test_legacy_row_gets_deterministic_id () =
+  let base_dir = temp_base_path "keeper-chat-store-legacy-id" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-legacy-id" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"role":"user","content":"hello","ts":1.0}|} ^ "\n"
+        ^ {|{"role":"assistant","content":"world","ts":1.0}|} ^ "\n");
+      let ids_of () =
+        List.map (fun (m : K.chat_message) -> m.id) (K.load ~base_dir ~keeper_name)
+      in
+      let first = ids_of () in
+      Alcotest.(check int) "two legacy rows loaded" 2 (List.length first);
+      List.iter
+        (fun id ->
+          Alcotest.(check bool) "legacy id non-empty" true (String.length id > 0))
+        first;
+      Alcotest.(check (list string)) "legacy ids deterministic across reloads"
+        first (ids_of ());
+      match first with
+      | [ a; b ] ->
+          Alcotest.(check bool) "distinct legacy rows get distinct ids" true (a <> b)
+      | _ -> Alcotest.fail "expected 2 legacy ids")
+
+(* R3: the /chat/history payload surfaces the id so the dashboard keys off
+   it instead of synthesising one. *)
+let test_to_json_array_exposes_id () =
+  let base_dir = temp_base_path "keeper-chat-store-id-json" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-id-json" in
+      K.append_user_message ~base_dir ~keeper_name ~content:"hi" ();
+      match K.to_json_array (K.load ~base_dir ~keeper_name) with
+      | `List (`Assoc fields :: _) ->
+          Alcotest.(check bool) "payload row carries an id" true
+            (List.mem_assoc "id" fields)
+      | _ -> Alcotest.fail "expected a non-empty json array of assoc rows")
+
 let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
   let base_dir = temp_base_path "keeper-chat-recent-context" in
   Fun.protect
@@ -862,6 +928,12 @@ let () =
             test_append_turn_roundtrip;
           Alcotest.test_case "legacy lines parse" `Quick
             test_legacy_lines_parse_without_new_fields;
+          Alcotest.test_case "message id minted unique and stable (R3)" `Quick
+            test_message_id_minted_unique_and_stable;
+          Alcotest.test_case "legacy row gets deterministic id (R3)" `Quick
+            test_legacy_row_gets_deterministic_id;
+          Alcotest.test_case "to_json_array exposes id (R3)" `Quick
+            test_to_json_array_exposes_id;
           Alcotest.test_case "recent context renders reply and tool evidence" `Quick
             test_recent_direct_context_renders_prior_reply_and_tool_evidence;
           Alcotest.test_case "recent context omits transport failure as reply" `Quick

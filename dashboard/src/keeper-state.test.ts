@@ -243,3 +243,52 @@ describe('thread history merge & persistence', () => {
     expect(keeperThreads.value.echo?.[0]?.id).toBe('e-5')
   })
 })
+
+describe('R3 producer-assigned message id', () => {
+  it('keys history entries off the server-minted id when present', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { id: 'msg-0001700000000000-0', role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { id: 'msg-0001700000000000-1', role: 'assistant', content: 'hello', ts: 1_780_000_000 },
+    ])
+    expect(entries.map(e => e.id)).toEqual([
+      'msg-0001700000000000-0',
+      'msg-0001700000000000-1',
+    ])
+  })
+
+  it('derives a stable content-keyed id when a row predates R3 (no id)', () => {
+    const first = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'same text', ts: 1_780_000_000 },
+    ])
+    const second = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'same text', ts: 1_780_000_000 },
+    ])
+    // Deterministic across calls — the former id was index/timestamp
+    // derived; the fallback is content derived so it never shifts.
+    expect(first[0]?.id).toBeTruthy()
+    expect(first[0]?.id).toBe(second[0]?.id)
+  })
+
+  it('keeps the fallback id stable regardless of page position (the old index bug)', () => {
+    const alone = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'stable', ts: 1_780_000_000 },
+    ])
+    const shifted = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'earlier', ts: 1_779_000_000 },
+      { role: 'assistant', content: 'reply', ts: 1_779_000_000 },
+      { role: 'user', content: 'stable', ts: 1_780_000_000 },
+    ])
+    const aloneId = alone.find(e => e.rawText === 'stable')?.id
+    const shiftedId = shifted.find(e => e.rawText === 'stable')?.id
+    expect(aloneId).toBeTruthy()
+    expect(shiftedId).toBe(aloneId)
+  })
+
+  it('gives different content different fallback ids', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'one', ts: 1_780_000_000 },
+      { role: 'user', content: 'two', ts: 1_780_000_000 },
+    ])
+    expect(entries[0]?.id).not.toBe(entries[1]?.id)
+  })
+})

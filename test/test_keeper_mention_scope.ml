@@ -48,7 +48,8 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
     ?(kind = Store.Row_kind.Utterance) content
   : Store.chat_message
   =
-  { role
+  { id = "test-msg"
+  ; role
   ; content
   ; ts
   ; attachments = None
@@ -185,7 +186,8 @@ let test_none_ts_assistant_still_clears () =
 ;;
 
 let tool_line : Store.chat_message =
-  { role = Store.Role.Tool
+  { id = "test-tool"
+  ; role = Store.Role.Tool
   ; content = "{}"
   ; ts = Some 10.5
   ; attachments = None

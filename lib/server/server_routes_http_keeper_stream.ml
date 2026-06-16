@@ -540,7 +540,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     else
       payload.message
   in
-  let attachment_json att =
+  let attachment_json (att : Keeper_chat_store.attachment) =
     `Assoc
       [ ("id", `String att.Keeper_chat_store.id);
         ("type", `String att.att_type);

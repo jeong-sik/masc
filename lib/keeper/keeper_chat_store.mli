@@ -105,6 +105,13 @@ type speaker = {
 }
 
 type chat_message = {
+  id : string;
+      (** R3: producer-assigned stable message id, minted once at append by
+          the sole writer ({!encode_line}) and read back verbatim, so the
+          dashboard keys off a server identity rather than synthesising an
+          index-derived id at render.  Rows written before R3 carry no
+          persisted id and are given a deterministic one at the read
+          boundary, so the field is total. *)
   role : Role.t;
   content : string;
   ts : float option;

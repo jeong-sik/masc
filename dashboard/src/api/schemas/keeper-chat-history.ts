@@ -44,6 +44,13 @@ export const SurfaceRefSchema = object({
 })
 
 export const KeeperChatHistoryMessageSchema = object({
+  // R3: producer-assigned stable message id (keeper_chat_store.ml mints it
+  // at append and the read boundary stamps legacy rows, so the backend now
+  // emits it on every row). Left optional for the deploy window — a
+  // dashboard deployed ahead of the backend would otherwise drop every
+  // message; the consumer falls back to a stable content-derived id when
+  // it is absent.
+  id: optional(string()),
   role: string(),
   content: string(),
   ts: number(),

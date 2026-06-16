@@ -106,7 +106,9 @@ let test_merge_batch () =
       (String.equal m.Keeper_chat_queue.content "first\n\nsecond\n\nthird");
     check
       "attachments concatenate in order"
-      (List.map (fun a -> a.Keeper_chat_store.id) m.Keeper_chat_queue.attachments
+      (List.map
+         (fun (a : Keeper_chat_store.attachment) -> a.Keeper_chat_store.id)
+         m.Keeper_chat_queue.attachments
        = [ "a"; "b" ]);
     check "timestamp is the first message's" (m.Keeper_chat_queue.timestamp = 1.0);
     check

@@ -12,6 +12,7 @@ module SR = Masc.Keeper_surface_read
 
 let msg ?ts ?source ?speaker ~role content : Store.chat_message =
   {
+    id = "test-msg";
     role;
     content;
     ts;

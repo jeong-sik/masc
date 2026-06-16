@@ -11,6 +11,118 @@ let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
 
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+;;
+
+let json_float_opt = function
+  | Some value -> `Float value
+  | None -> `Null
+;;
+
+let json_time_iso_opt = function
+  | Some value -> `String (Masc_domain.iso8601_of_unix_seconds value)
+  | None -> `Null
+;;
+
+let memory_os_fact_is_current ~now (fact : Keeper_memory_os_types.fact) =
+  match fact.valid_until with
+  | None -> true
+  | Some ts -> ts >= now
+;;
+
+let memory_os_episode_is_current ~now (episode : Keeper_memory_os_types.episode) =
+  match episode.valid_until with
+  | None -> true
+  | Some ts -> ts >= now
+;;
+
+let memory_os_count pred xs =
+  List.fold_left (fun count value -> if pred value then count + 1 else count) 0 xs
+;;
+
+let memory_os_read_episodes ~keeper_id ~n =
+  try Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n, None with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> [], Some (Printexc.to_string exn)
+;;
+
+let memory_os_read_facts ~keeper_id ~n =
+  try Keeper_memory_os_io.read_facts_tail ~keeper_id ~n, None with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> [], Some (Printexc.to_string exn)
+;;
+
+let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
+  `Assoc
+    [ "trace_id", `String episode.trace_id
+    ; "generation", `Int episode.generation
+    ; "created_at", `Float episode.created_at
+    ; "created_at_iso", `String (Masc_domain.iso8601_of_unix_seconds episode.created_at)
+    ; "valid_until", json_float_opt episode.valid_until
+    ; "valid_until_iso", json_time_iso_opt episode.valid_until
+    ; "current", `Bool (memory_os_episode_is_current ~now episode)
+    ; "terminal_marker", json_string_opt episode.terminal_marker
+    ; "claim_count", `Int (List.length episode.claims)
+    ; "summary", `String episode.episode_summary
+    ]
+;;
+
+let memory_os_dashboard_json ~keeper_id =
+  let now = Time_compat.now () in
+  let recent_episode_limit = 12 in
+  let fact_tail_limit = Keeper_memory_os_io.fact_recall_window in
+  let episodes, episode_error =
+    memory_os_read_episodes ~keeper_id ~n:recent_episode_limit
+  in
+  let facts, fact_error = memory_os_read_facts ~keeper_id ~n:fact_tail_limit in
+  let facts_path = Keeper_memory_os_io.facts_path ~keeper_id in
+  let keepers_dir = Filename.dirname facts_path in
+  let episodes_store = Filename.concat (Filename.concat keepers_dir keeper_id) "episodes" in
+  let current_episodes = memory_os_count (memory_os_episode_is_current ~now) episodes in
+  let current_facts = memory_os_count (memory_os_fact_is_current ~now) facts in
+  let terminal_marker_count =
+    memory_os_count
+      (fun (episode : Keeper_memory_os_types.episode) ->
+         Option.is_some episode.terminal_marker)
+      episodes
+  in
+  `Assoc
+    [ "schema", `String "keeper.memory_os.recall_observability.v1"
+    ; "keeper", `String keeper_id
+    ; "source", `String "memory_os_files"
+    ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
+    ; "facts_store", `String facts_path
+    ; "episodes_store", `String episodes_store
+    ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
+    ; "now", `Float now
+    ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
+    ; ( "read_errors"
+      , `List
+          (List.filter_map
+             (fun (scope, err) ->
+                Option.map (fun message -> `Assoc [ "scope", `String scope; "error", `String message ]) err)
+             [ "episodes", episode_error; "facts", fact_error ]) )
+    ; ( "episodes"
+      , `Assoc
+          [ "tail_limit", `Int recent_episode_limit
+          ; "shown", `Int (List.length episodes)
+          ; "current", `Int current_episodes
+          ; "expired", `Int (List.length episodes - current_episodes)
+          ; "terminal_markers", `Int terminal_marker_count
+          ; "items", `List (List.map (memory_os_episode_json ~now) episodes)
+          ] )
+    ; ( "facts"
+      , `Assoc
+          [ "tail_limit", `Int fact_tail_limit
+          ; "shown", `Int (List.length facts)
+          ; "current", `Int current_facts
+          ; "expired", `Int (List.length facts - current_facts)
+          ] )
+    ]
+;;
+
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -411,6 +523,7 @@ let handle_keeper_get_subroutes state req request reqd =
         ("health", `String health);
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
+        ("memory_os", memory_os_dashboard_json ~keeper_id:name);
         ("entries", `List entries);
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd

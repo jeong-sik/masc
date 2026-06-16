@@ -25,8 +25,12 @@ output, reproducible via the recorded label output.
 from __future__ import annotations
 import argparse, glob, json, os, subprocess, sys, re
 
-# GOLD: mirrors test/eval_memory_os_value.ml `gold` (the single SSOT for "what a
-# correct judge says"). Keep in sync with that file.
+# GOLD: the single irreducible HUMAN-anchored calibration set — the one manual
+# artifact left after moving all measurement to the LLM judge. It exists to keep the
+# judge honest (anti-rig): a judge that cannot reproduce these labels is not trusted.
+# Replacing it with LLM labels too would make the judge validate itself (circular);
+# the only non-manual alternative is a SEPARATE stronger reference model labelling it
+# (cross-model), which is a deliberate future option, not the default.
 GOLD: list[tuple[str, str]] = [
     ("The rondo sandbox blocks Write/Read tools on the masc repo", "durable"),
     ("The Write tool has a destructive guard that blocks ${} expansion", "durable"),

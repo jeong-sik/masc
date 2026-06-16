@@ -19,6 +19,7 @@
 open Keeper_memory_os_types
 
 module Io = Keeper_memory_os_io
+module Policy = Keeper_memory_os_policy
 
 (* Which categories are objective enough to share across keepers is a
    compile-time property of the closed [category] taxonomy
@@ -38,6 +39,34 @@ let default_confidence_threshold = 0.5
    the smallest set that distinguishes corroboration from a single keeper's echo
    (RFC-0244 §2.2). *)
 let default_min_keepers = 2
+
+(* A shared fact must reflect CURRENTLY-affirmed corroboration, not a one-time
+   historical agreement. Each contributor's confidence is discounted by how long
+   ago it was last verified ([Policy.truth_recency_factor], anchored on
+   [last_verified_at]); an observation no keeper has re-affirmed decays below the
+   [threshold] and the claim drops out of the shared tier on the next sweep —
+   without deleting anything, since each sweep rebuilds [_shared] wholesale.
+
+   This wires into consolidation the truth-recency that recall scoring already
+   applied. Eligibility previously gated on RAW [confidence] only, so a one-time
+   agreement at confidence 1.0 stayed eligible forever: stale coordination
+   boilerplate (mislabelled [Fact] before the librarian taxonomy fix) was
+   re-promoted on every sweep and never left the shared store. *)
+let default_promotion_recency_days = 2.0
+
+(* 1/e decay over [days] (the [Policy.default_truth_lambda] convention),
+   env-overridable. Shorter than recall's 30-day truth horizon: the shared tier
+   is a strong cross-agent claim, so it should require more recent
+   re-affirmation. Non-positive overrides fall back to the default. *)
+let promotion_recency_lambda () =
+  let days =
+    Keeper_memory_bank_env.memory_env_float_logged
+      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RECENCY_DAYS"
+      ~default:default_promotion_recency_days
+  in
+  let days = if days > 0.0 then days else default_promotion_recency_days in
+  1.0 /. (86400.0 *. days)
+;;
 
 let clamp01 v = Float.max 0.0 (Float.min 1.0 v)
 
@@ -59,8 +88,9 @@ type contribution =
   ; fact : fact
   }
 
-let eligible ~threshold fact =
-  fact.confidence >= threshold && is_promotable fact.category
+let eligible ~recency_lambda ~now ~threshold fact =
+  fact.confidence *. Policy.truth_recency_factor ~lambda:recency_lambda ~now fact >= threshold
+  && is_promotable fact.category
 ;;
 
 (* Pick the representative fact for a claim group: highest confidence, then
@@ -141,12 +171,13 @@ let promote_facts
       ~keeper_facts
       ()
   =
+  let recency_lambda = promotion_recency_lambda () in
   let groups : (string, contribution list) Hashtbl.t = Hashtbl.create 256 in
   List.iter
     (fun (keeper_id, facts) ->
        List.iter
          (fun fact ->
-            if eligible ~threshold fact
+            if eligible ~recency_lambda ~now ~threshold fact
             then (
               let key = normalize_claim fact.claim in
               let prev = Option.value (Hashtbl.find_opt groups key) ~default:[] in

@@ -2102,6 +2102,37 @@ let test_consolidator_below_threshold_excluded () =
   Alcotest.(check int) "below-threshold contributor excluded" 0 (List.length shared)
 ;;
 
+(* A shared fact must reflect recent corroboration. A contributor whose
+   [last_verified_at] is old has its confidence decayed below the floor by
+   [Policy.truth_recency_factor], so a 2-keeper claim with one stale contributor
+   is not promoted — even at raw confidence 1.0. The same claim with two FRESH
+   contributors promotes, proving the gate is recency, not the claim text. *)
+let test_consolidator_stale_contributor_excluded () =
+  let now = 2_000_000.0 in
+  let fresh c = mk_shared_fixture ~now ~confidence:1.0 c in
+  let stale c =
+    { (mk_shared_fixture ~now ~confidence:1.0 c) with
+      Types.last_verified_at = Some (now -. days 5)
+    }
+  in
+  let stale_pair =
+    [ "alpha", [ fresh "recency gated claim" ]; "beta", [ stale "recency gated claim" ] ]
+  in
+  let _c, shared_stale = Consolidator.promote_facts ~now ~keeper_facts:stale_pair () in
+  Alcotest.(check int)
+    "stale contributor does not corroborate (not promoted)"
+    0
+    (List.length shared_stale);
+  let fresh_pair =
+    [ "alpha", [ fresh "recency gated claim" ]; "beta", [ fresh "recency gated claim" ] ]
+  in
+  let _c2, shared_fresh = Consolidator.promote_facts ~now ~keeper_facts:fresh_pair () in
+  Alcotest.(check int)
+    "the same claim with two fresh contributors promotes (gate is recency, not claim)"
+    1
+    (List.length shared_fresh)
+;;
+
 (* Output is a deterministic function of the input: keeper input order does not
    change the result (observed_by sorted, claim order sorted). *)
 let test_consolidator_deterministic () =
@@ -2666,6 +2697,10 @@ let () =
             "below-threshold contributor excluded"
             `Quick
             test_consolidator_below_threshold_excluded
+        ; Alcotest.test_case
+            "stale contributor excluded (truth-recency promotion gate)"
+            `Quick
+            test_consolidator_stale_contributor_excluded
         ; Alcotest.test_case
             "deterministic regardless of input order"
             `Quick

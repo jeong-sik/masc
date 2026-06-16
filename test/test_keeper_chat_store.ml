@@ -129,7 +129,10 @@ let roles messages =
   List.map (fun (m : K.chat_message) -> K.Role.to_label m.role) messages
 
 let recent_roles lines =
-  List.map (fun (line : MS.recent_direct_line) -> line.role_label) lines
+  List.map
+    (fun (line : MS.recent_direct_line) ->
+      MS.direct_line_role_to_label line.role)
+    lines
 
 let test_append_turn_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-turn" in

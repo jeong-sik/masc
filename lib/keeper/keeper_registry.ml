@@ -628,12 +628,24 @@ let rec dispatch_event_with_audit
       (Keeper_state_machine.attribution_of_transition ~event result);
     (match result with
      | Ok tr when tr.new_phase <> tr.prev_phase ->
-       Log.Keeper.info
-         "registry: phase transition name=%s old=%s new=%s event=%s"
-         name
-         (Keeper_state_machine.phase_to_string tr.prev_phase)
-         (Keeper_state_machine.phase_to_string tr.new_phase)
-         (Keeper_state_machine.event_to_string event);
+       let from_phase_str = Keeper_state_machine.phase_to_string tr.prev_phase in
+       let to_phase_str = Keeper_state_machine.phase_to_string tr.new_phase in
+       let event_str = Keeper_state_machine.event_to_string event in
+       Log.Keeper.emit
+         Log.Info
+         ~category:Log.Fsm
+         ~details:
+           (`Assoc
+             [ "from_phase", `String from_phase_str
+             ; "to_phase", `String to_phase_str
+             ; "event", `String event_str
+             ])
+         (Printf.sprintf
+            "registry: phase transition name=%s old=%s new=%s event=%s"
+            name
+            from_phase_str
+            to_phase_str
+            event_str);
        (* Record transition in audit ring buffer for dashboard API *)
        Keeper_transition_audit.record_transition
          ~keeper_name:name
@@ -720,27 +732,51 @@ let rec dispatch_event_with_audit
                 (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason })
               ->
               record_followup_dispatch_rejection followup_event;
-              Log.Keeper.error
-                "registry(%s): followup dispatch failed: %s -> %s (%s)"
-                name
-                (Keeper_state_machine.phase_to_string from_phase)
-                (Keeper_state_machine.phase_to_string to_phase)
-                reason
+              let from_phase_str = Keeper_state_machine.phase_to_string from_phase in
+              let to_phase_str = Keeper_state_machine.phase_to_string to_phase in
+              Log.Keeper.emit
+                Log.Error
+                ~category:Log.Fsm
+                ~details:
+                  (`Assoc
+                    [ "from_phase", `String from_phase_str
+                    ; "to_phase", `String to_phase_str
+                    ; "reason", `String reason
+                    ])
+                (Printf.sprintf
+                   "registry(%s): followup dispatch failed: %s -> %s (%s)"
+                   name
+                   from_phase_str
+                   to_phase_str
+                   reason)
             | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
               record_followup_dispatch_rejection followup_event;
-              Log.Keeper.warn
-                "registry(%s): followup skipped, already terminal: %s (event: %s)"
-                name
-                (Keeper_state_machine.phase_to_string current)
-                attempted_event
+              let current_phase_str = Keeper_state_machine.phase_to_string current in
+              Log.Keeper.emit
+                Log.Warn
+                ~category:Log.Fsm
+                ~details:
+                  (`Assoc
+                    [ "current_phase", `String current_phase_str
+                    ; "attempted_event", `String attempted_event
+                    ])
+                (Printf.sprintf
+                   "registry(%s): followup skipped, already terminal: %s (event: %s)"
+                   name
+                   current_phase_str
+                   attempted_event)
             | Error (Keeper_state_machine.Precondition_violation { event = ev; reason })
               ->
               record_followup_dispatch_rejection followup_event;
-              Log.Keeper.warn
-                "registry(%s): followup skipped, precondition violated: %s (%s)"
-                name
-                ev
-                reason)
+              Log.Keeper.emit
+                Log.Warn
+                ~category:Log.Fsm
+                ~details:(`Assoc [ "event", `String ev; "reason", `String reason ])
+                (Printf.sprintf
+                   "registry(%s): followup skipped, precondition violated: %s (%s)"
+                   name
+                   ev
+                   reason))
          (List.filter_map
             (followup_event_of_entry_action ~phase:tr.new_phase)
             tr.entry_actions);
@@ -781,10 +817,17 @@ let rec dispatch_event_with_audit
          Keeper_metrics.(to_string LifecycleDispatchRejections)
          ~labels:[ "event", Keeper_state_machine.event_to_string event ]
          ();
-       Log.Keeper.warn
-         "registry: dispatch_event rejected name=%s error=%s"
-         name
-         (Keeper_state_machine.transition_error_to_string e);
+       let event_str = Keeper_state_machine.event_to_string event in
+       let error_str = Keeper_state_machine.transition_error_to_string e in
+       Log.Keeper.emit
+         Log.Warn
+         ~category:Log.Fsm
+         ~details:
+           (`Assoc
+             [ "event", `String event_str
+             ; "error", `String error_str
+             ])
+         (Printf.sprintf "registry: dispatch_event rejected name=%s error=%s" name error_str);
        Error e)
 ;;
 
@@ -813,10 +856,16 @@ let dispatch_event_unit ~base_path ?(origin = Generic_dispatch) name event =
   match dispatch_event_and_log ~base_path ~origin name event with
   | Ok _ -> ()
   | Error e ->
-    Log.Keeper.warn
-      "%s: dispatch_event failed: %s"
-      name
-      (Keeper_state_machine.transition_error_to_string e)
+    let error_str = Keeper_state_machine.transition_error_to_string e in
+    Log.Keeper.emit
+      Log.Warn
+      ~category:Log.Fsm
+      ~details:
+        (`Assoc
+          [ "event", `String (Keeper_state_machine.event_to_string event)
+          ; "error", `String error_str
+          ])
+      (Printf.sprintf "%s: dispatch_event failed: %s" name error_str)
 ;;
 
 let dispatch_event_with_audit_and_log
@@ -868,11 +917,15 @@ let prepare_fiber_launch ~base_path name =
           reset.  Log so the race is at least visible — caller
           (server_runtime_bootstrap.ml) is responsible for ensuring
           register_with_state has happened before this point. *)
-     Log.Keeper.warn
-       "registry: prepare_fiber_launch name=%s base_path=%s: entry not registered, \
-        skipping flag reset"
-       name
-       base_path);
+     Log.Keeper.emit
+       Log.Warn
+       ~category:Log.Fsm
+       ~details:(`Assoc [ "keeper", `String name; "base_path", `String base_path ])
+       (Printf.sprintf
+          "registry: prepare_fiber_launch name=%s base_path=%s: entry not registered, \
+           skipping flag reset"
+          name
+          base_path));
   dispatch_event ~base_path name Keeper_state_machine.Fiber_started
 ;;
 

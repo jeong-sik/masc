@@ -25,9 +25,22 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
          sequenced after [wrap_unit] would never run, so the
          diagnostic warn has to precede it for operators to see
          *which* transition violated. *)
-      Log.Keeper.warn ~keeper_name ~turn_id
-        "[fsm:transition:violation] %s -> %s (%s)"
-        violation.from_state violation.to_state violation.reason;
+      Log.Keeper.emit
+        Log.Warn
+        ~keeper_name
+        ~turn_id
+        ~category:Log.Fsm
+        ~details:
+          (`Assoc
+            [ "from_state", `String violation.from_state
+            ; "to_state", `String violation.to_state
+            ; "reason", `String violation.reason
+            ])
+        (Printf.sprintf
+           "[fsm:transition:violation] %s -> %s (%s)"
+           violation.from_state
+           violation.to_state
+           violation.reason);
       let stage = violation.from_state ^ "->" ^ violation.to_state in
       (* [Invalid_argument] (not [assert false]) carries an explicit
          message into the re-raise backtrace.  Operators reading a
@@ -116,12 +129,25 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
     | Some action, _ -> transition_action_label action
     | None, None -> "initial"
     | None, Some _ ->
-        Log.Keeper.warn ~keeper_name ~turn_id
-          "[fsm:transition:unclassified] %s -> %s — classify_transition \
-           has no arm for this (from, to) pair; add one in \
-           lib/turn_fsm/turn_fsm.ml::classify_transition so the \
-           audit trail captures the action"
-          prev_label state_label;
+        Log.Keeper.emit
+          Log.Warn
+          ~keeper_name
+          ~turn_id
+          ~category:Log.Fsm
+          ~details:
+            (`Assoc
+              [ "from_state", `String prev_label
+              ; "to_state", `String state_label
+              ; "action", `String "unclassified"
+              ; "reason", `String "classify_transition has no arm for this (from, to) pair"
+              ])
+          (Printf.sprintf
+             "[fsm:transition:unclassified] %s -> %s — classify_transition \
+              has no arm for this (from, to) pair; add one in \
+              lib/turn_fsm/turn_fsm.ml::classify_transition so the \
+              audit trail captures the action"
+             prev_label
+             state_label);
         "unclassified"
   in
   let stop_label =
@@ -131,9 +157,27 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
           c.stop_signaled_before c.stop_signaled_after
     | None -> ""
   in
-  Log.Keeper.info ~keeper_name ~turn_id
-    "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label
-    stop_label;
+  let stop_details =
+    match ctx with
+    | Some c ->
+      [ "stop_signaled_before", `Bool c.stop_signaled_before
+      ; "stop_signaled_after", `Bool c.stop_signaled_after
+      ]
+    | None -> []
+  in
+  Log.Keeper.emit
+    Log.Info
+    ~keeper_name
+    ~turn_id
+    ~category:Log.Fsm
+    ~details:
+      (`Assoc
+        ([ "from_state", `String prev_label
+         ; "to_state", `String state_label
+         ; "action", `String action_label
+         ]
+         @ stop_details))
+    (Printf.sprintf "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label stop_label);
   Keeper_transition_audit.record_turn_fsm_transition
     ~keeper_name
     { turn_fsm_turn_id = turn_id

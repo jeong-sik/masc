@@ -7,15 +7,18 @@ type t = {
   supabase_client : unit;
   neo4j_client : unit;
   mutable speculative_cache : (string * float array) option;
+  mutable pre_embed_id : int;
 }
 
 let create ~worker ~env_clock ~supabase_client ~neo4j_client =
-  { worker; env_clock; supabase_client; neo4j_client; speculative_cache = None }
+  { worker; env_clock; supabase_client; neo4j_client; speculative_cache = None; pre_embed_id = 0 }
 
 let pre_embed_speculative t ~sw ~current_input_prefix =
+  let my_ticket = t.pre_embed_id + 1 in
+  t.pre_embed_id <- my_ticket;
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Time.sleep t.env_clock 0.8;
-    if String.length current_input_prefix > 5 then
+    if t.pre_embed_id = my_ticket && String.length current_input_prefix > 5 then
       let vec = Masc_domain_worker.compute_local_embedding t.worker ~text:current_input_prefix in
       t.speculative_cache <- Some (current_input_prefix, vec)
   )

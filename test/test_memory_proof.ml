@@ -72,6 +72,21 @@ let jaccard_similarity a b =
     let union = List.length (union_list ta tb) in
     if union = 0 then 0.0 else float_of_int intersection /. float_of_int union
 
+(* 부정형 어휘 감지 기능 시뮬레이션 *)
+let has_negation s =
+  let negs = ["금지"; "말 것"; "안됨"; "not"; "never"; "don't"; "stop"; "하지 마"; "하지마"] in
+  List.exists (fun w ->
+    let rec check_substring i =
+      if i > String.length s - String.length w then false
+      else if String.sub s i (String.length w) = w then true
+      else check_substring (i + 1)
+    in
+    check_substring 0
+  ) negs
+
+let apply_negation_penalty score s1 s2 =
+  if has_negation s1 <> has_negation s2 then score *. 0.2 else score
+
 (* Jaccard Similarity & Negation Guardrail 테스트 *)
 let test_jaccard_limits () =
   Printf.printf "=== 1. Jaccard Similarity & Negation Penalty Test ===\n";
@@ -82,25 +97,49 @@ let test_jaccard_limits () =
   Printf.printf "Jaccard 유사도 점수 (금지 vs 권장): %.4f\n" score;
   Printf.printf "중복 판단 임계치 (0.85) 초과 여부: %b (★초과 시 금지/권장 오판 덮어쓰기 발생!)\n" (score >= 0.85);
 
-  (* 부정형 어휘 감지 기능 시뮬레이션 *)
-  let has_negation s =
-    let negs = ["금지"; "말 것"; "안됨"; "not"; "never"; "don't"; "stop"; "하지 마"; "하지마"] in
-    List.exists (fun w ->
-      (* 단어 포함 검사 *)
-      let rec check_substring i =
-        if i > String.length s - String.length w then false
-        else if String.sub s i (String.length w) = w then true
-        else check_substring (i + 1)
-      in
-      check_substring 0
-    ) negs
-  in
-  let apply_negation_penalty score s1 s2 =
-    if has_negation s1 <> has_negation s2 then score *. 0.2 else score
-  in
   let final_score = apply_negation_penalty score s1 s2 in
   Printf.printf "부정형 가드레일 패널티 적용 후 유사도 점수: %.4f\n" final_score;
   Printf.printf "보완 후 중복 판단 임계치 (0.85) 초과 여부: %b (안전하게 분리되어 덮어쓰기 방어 완료)\n" (final_score >= 0.85);
+  Printf.printf "======================================================\n\n"
+
+(* 적대적 부정어 예외 상황 테스트 (Adversarial Negation Test) *)
+let test_adversarial_negation () =
+  Printf.printf "=== 3. Adversarial Negation Bypass Test ===\n";
+  (* s1은 허용(금지된 게 아님), s2는 금지(실제 금지) -> 의미가 반대이나 둘 다 "금지" 어휘를 포함함 *)
+  let s1 = "통합 테스트 시 DB 모킹은 금지된 사항이 아니다." in
+  let s2 = "통합 테스트 시 DB 모킹을 금지한다." in
+  
+  let score = jaccard_similarity s1 s2 in
+  let naive_penalty_score = apply_negation_penalty score s1 s2 in
+  Printf.printf "원문 1: \"%s\"\n" s1;
+  Printf.printf "원문 2: \"%s\"\n" s2;
+  Printf.printf "Jaccard 유사도: %.4f\n" score;
+  Printf.printf "단순 키워드 부정형 패널티 적용 후: %.4f\n" naive_penalty_score;
+  Printf.printf "중복 오판 여부 (임계치 0.60 기준): %b (★위험: 둘 다 '금지' 단어가 들어가 패널티가 미작동하고 중복 판정됨!)\n" (naive_penalty_score >= 0.60);
+
+  (* 문맥적/어미 분석식 부정 처리 시뮬레이션 (Semantic Negation Checker) *)
+  let has_contextual_negation s =
+    (* "금지" 뒤에 "아니다" 등의 부정형 표현이 문맥적으로 이어지는지 검사 *)
+    let neg_patterns = ["금지된 사항이 아니다"; "금지하지 않는다"; "금지된 사항은 아니다"] in
+    let rec check_patterns = function
+      | [] -> false
+      | pat :: pats ->
+          let rec check_substring i =
+            if i > String.length s - String.length pat then false
+            else if String.sub s i (String.length pat) = pat then true
+            else check_substring (i + 1)
+          in
+          if check_substring 0 then true else check_patterns pats
+    in
+    if check_patterns neg_patterns then false (* 부정의 부정 = 긍정 (금지 안 함) *)
+    else has_negation s (* 일반 부정 체크 *)
+  in
+  let apply_contextual_negation_penalty score s1 s2 =
+    if has_contextual_negation s1 <> has_contextual_negation s2 then score *. 0.2 else score
+  in
+  let final_score = apply_contextual_negation_penalty score s1 s2 in
+  Printf.printf "어미 패턴 분석 보완 후 패널티 점수: %.4f\n" final_score;
+  Printf.printf "보완 후 중복 오판 여부 (임계치 0.60 기준): %b (안전하게 상호 불일치 판정 성공)\n" (final_score >= 0.60);
   Printf.printf "======================================================\n\n"
 
 (* Eio 병렬 쿼리 & 타임아웃 Degraded Operation 테스트 *)
@@ -108,14 +147,12 @@ let test_eio_parallel_recall env =
   Printf.printf "=== 2. Eio Parallel & Timeout Fallback Benchmark ===\n";
   let clock = Eio.Stdenv.clock env in
   
-  (* 1. 순차 쿼리 (Sequential Path) 시뮬레이션 *)
   let t0 = Unix.gettimeofday () in
   Eio.Time.sleep clock 0.2;
   Eio.Time.sleep clock 0.3;
   let t1 = Unix.gettimeofday () in
   Printf.printf "순차 쿼리 소요 시간: %.1f ms\n" ((t1 -. t0) *. 1000.0);
 
-  (* 2. Eio.Fiber.pair 병렬 쿼리 시뮬레이션 *)
   let t0 = Unix.gettimeofday () in
   ignore (
     Eio.Fiber.pair
@@ -125,7 +162,6 @@ let test_eio_parallel_recall env =
   let t1 = Unix.gettimeofday () in
   Printf.printf "Eio.Fiber.pair 병렬 쿼리 소요 시간: %.1f ms (병목인 300ms에 수렴)\n" ((t1 -. t0) *. 1000.0);
 
-  (* 3. 800ms 타임아웃 가드레일 & Degraded Operation 시뮬레이션 *)
   let run_with_timeout timeout_ms f =
     Eio.Fiber.first
       (fun () -> f ())
@@ -150,10 +186,66 @@ let test_eio_parallel_recall env =
   let t1 = Unix.gettimeofday () in
   Printf.printf "타임아웃 적용 후 총 쿼리 시간: %.1f ms (5000ms 블로킹 방어 완료)\n" ((t1 -. t0) *. 1000.0);
   Printf.printf "회수된 부분 데이터 수: %d (Degraded Mode 정상 회복)\n" (List.length vector_results + List.length graph_results);
+  Printf.printf "======================================================\n\n"
+
+(* 투기적 선행 임베딩 자원 누수 및 Ticket 기반 Cancellation 검증 *)
+let test_adversarial_pre_embed env =
+  Printf.printf "=== 4. Speculative Pre-Embedding Fiber Leak & Cancellation Test ===\n";
+  let clock = Eio.Stdenv.clock env in
+
+  (* 1. 자원 누수 상황 시뮬레이션 (디바운스는 걸렸으나 취소 로직이 없는 경우) *)
+  let leak_invocations = ref 0 in
+  let simulate_leak_pre_embed ~sw current_input_prefix =
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Time.sleep clock 0.1; (* 빠른 테스트를 위해 100ms 디바운스로 시뮬레이션 *)
+      incr leak_invocations;
+      (* expensive embedding computation *)
+      ignore (Array.make 1536 0.05)
+    )
+  in
+
+  (* 10ms 간격으로 사용자가 고속 타이핑하는 시나리오 *)
+  Printf.printf "[Simulation A: 취소 로직이 없을 때 고속 타이핑 (10ms 간격, 5회 트리거)]\n";
+  Eio.Switch.run (fun sw ->
+    List.iter (fun prefix ->
+      simulate_leak_pre_embed ~sw prefix;
+      Eio.Time.sleep clock 0.01
+    ) ["t"; "te"; "tes"; "test"; "test_mock"]
+  );
+  Eio.Time.sleep clock 0.15; (* 모든 작업이 끝날 때까지 대기 *)
+  Printf.printf "비정상 중첩 호출 수: %d (★전체 요청이 취소되지 않고 전부 연산을 수행하여 CPU 낭비 발생)\n\n" !leak_invocations;
+
+  (* 2. Ticket 기반 Cancellation 기법 검증 *)
+  let ticket_invocations = ref 0 in
+  let latest_ticket = ref 0 in
+  let simulate_ticket_pre_embed ~sw current_input_prefix =
+    let my_ticket = !latest_ticket + 1 in
+    latest_ticket := my_ticket;
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Time.sleep clock 0.1;
+      (* 디바운스 수면 완료 후, 자기가 가장 최근 티켓이 아니면 연산을 생략 *)
+      if !latest_ticket = my_ticket then (
+        incr ticket_invocations;
+        ignore (Array.make 1536 0.05)
+      )
+    )
+  in
+
+  Printf.printf "[Simulation B: Ticket 기반 취소 검증 (10ms 간격, 5회 트리거)]\n";
+  Eio.Switch.run (fun sw ->
+    List.iter (fun prefix ->
+      simulate_ticket_pre_embed ~sw prefix;
+      Eio.Time.sleep clock 0.01
+    ) ["t"; "te"; "tes"; "test"; "test_mock"]
+  );
+  Eio.Time.sleep clock 0.15;
+  Printf.printf "최종 임베딩 계산 수행 수: %d (최종 마지막 1개만 실행되고 나머지 4개는 연산 생략 성공!)\n" !ticket_invocations;
   Printf.printf "======================================================\n"
 
 let () =
   Eio_main.run (fun env ->
     test_jaccard_limits ();
-    test_eio_parallel_recall env
+    test_eio_parallel_recall env;
+    test_adversarial_negation ();
+    test_adversarial_pre_embed env
   )

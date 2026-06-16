@@ -8,10 +8,103 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0239", "0241", "0243", "0244"]
-implementation_prs: []
+implementation_prs: ["#21299 CLOSED — recency-gate consolidation, withdrawn as wrong-layer scoring (see §-1)"]
+revision: "2026-06-16 — decision-layer correction; see §-1 (READ FIRST)"
 ---
 
 # RFC-0247 — Memory OS as a brain
+
+## §-1 — Revision 2026-06-16: decision-layer correction (READ FIRST; supersedes the deterministic-decision framing below)
+
+**Trigger.** A side-by-side with Claude Code's own memory system
+(`~/me/.tmp/claude-code-memory-prompts.html`, the production reference) showed this
+RFC put determinism on the wrong layer. PR **#21299** (recency-gate consolidation)
+was **closed** as the concrete instance of the error. This section re-aims the RFC.
+§0–§6 below are kept for the typed-*structure* design they contribute, but every
+*decision* mechanism they specify (count-promotion, TTL-decay forgetting,
+spreading-activation as the recall decision) is reclassified here.
+
+**Verified evidence the scoring layer is unproven** (live store
+`~/me/.masc/config/keepers/`, 2026-06-16):
+- **Value never measured.** No eval/harness scores memory *quality* (recall
+  precision, keeper outcome). `test_keeper_memory_os.ml` tests *mechanism*
+  (noisy-OR is monotone) — "the code does what the code says," not "memory got
+  better." Direct **Harness-First violation** (CLAUDE.md §1).
+- **The only observable output is noise.** `_shared` — the sole product of the
+  count + noisy-OR promotion — is **17/17 coordination boilerplate**.
+- **A scoring input is dead.** `stale_factor` = `0.0` across **all 6462** live facts.
+
+The burden of proof is on the scoring machine; it has none. Claude Code's judgment
+approach is the production-proven reference — but is *also* unproven in masc's
+autonomous 16-keeper context. Neither is proven *here*; therefore **eval comes first
+(P-1) and gates everything.**
+
+**The layer error.** Claude Code makes exactly ONE thing deterministic —
+*structure*: the closed-union type taxonomy, file format, index-size limits, and a
+staleness mtime trigger. Every *decision* is LLM judgment expressed as a prose
+prompt: what to save, what NOT to save, whether a recalled memory is still true
+(verify-then-recommend), which memories are relevant (a separate selector call),
+how to consolidate (the `/dream` reflective pass), what to forget (delete on
+contradiction). There is no confidence float, no noisy-OR, no decay score, no count
+threshold anywhere. This RFC inverted that: it made the *decisions* deterministic
+and treated LLM judgment as a soft defect to engineer away (§2.6 deliberately
+extracted only claude-code's "deterministic subset" and rejected its judgment core).
+That extraction is the mistake. A deterministic proxy for a semantic judgment is
+what produces the boilerplate-promotion pathology: `noisy_or(confidences)` cannot
+tell "common" from "valuable"; a one-line LLM judgment can.
+
+**Corrected principle (the boundary):**
+
+> **Determinism = structure + cheap candidate generation. Judgment = the actual decision.**
+
+Scoring/graph/count are not deleted — they are **demoted** from *decider* to
+*candidate generator* feeding an LLM judgment that makes the call. This keeps
+reproducibility (candidate-gen is deterministic and testable) while putting semantic
+decisions where they belong. It is consistent with the anti-workaround bar: the
+opposite of LLM judgment is not determinism, it is *heuristics* (string classifiers,
+count thresholds, decay curves) — all of which the bar already rejects. Typed
+structure wrapping LLM judgment is the non-heuristic answer.
+
+**Re-classification of the organs** (decision-layer moves to judgment; structure stays typed):
+
+| organ | §below | KEEP (structure / candidate-gen) | MOVE to judgment (the decision) | REJECTED as a decision mechanism |
+|---|---|---|---|---|
+| Encoding | §2.5 | closed-sum `category`, parse-once, `Unknown` arm — **KEPT** (P0a merged) | **producer "what NOT to save" judgment gate is now PRIMARY**: the librarian drops ephemeral/coordination *before* it becomes a fact (claude-code WHAT_NOT_TO_SAVE + "ask what was surprising / non-obvious"). The typed category is the *structure* the judgment fills, not a substitute for it | — |
+| Consolidation | §2.2 | the single off-hot-path sweep; ≥2-keeper co-occurrence as a **candidate** signal | **Dream-style reflective pass**: read candidates, merge into topic facts, **delete contradicted**, write durable-only — judgment decides what is canon | **count / noisy-OR promotion *as the decision*** |
+| Forgetting | §2.3 | `lifecycle` closed sum as a *recorded state* | **forget = delete-on-contradiction by judgment** + **read-time staleness reminder** surfaced to the recalling agent (claude-code `memoryAge`) | **TTL / `Low_confidence_decayed` auto-decay eviction** |
+| Recall | §2.1 | lexical seed (RFC-0244) + 1-hop graph as **candidate generators** | **judgment selection** — an LLM picks the relevant few from the candidate set (claude-code's selector) and *verifies before recommending* | **spreading-activation graph-walk *as the recall decision*** (demoted to candidate-gen; `α` is a candidate knob, not the ranker of record) |
+| Reconsolidation | §2.4 | entity-ref existence check — **KEPT** (a real deterministic structural fact, feeds judgment) | the *consequence* (demote / keep) is a judgment | **automatic confidence-cap-as-truth** |
+
+**P-1 (new binding phase) — eval-first, before any removal or replacement.** Build a
+harness that measures memory *value*, baseline the current scoring machine (finally
+answering "효과적인가" with numbers), then gate every later phase on it. Metrics —
+LLM-as-judge over a **frozen, reproducible snapshot** + a hand-labeled calibration
+fixture, **never substring-matching**:
+- **`_shared` noise rate** — fraction of shared facts an LLM judges ephemeral vs
+  durable. Baseline ≈ 100%.
+- **store boilerplate rate** — fraction of all facts that are ephemeral-class.
+- **injected-recall usefulness** — of facts recalled into a turn, the fraction
+  plausibly useful for that turn (best-effort offline; disclose if traces are
+  insufficient rather than faking a number).
+
+Anti-fake-success discipline (user directive 2026-06-16 "가짜 성공 테스트 금지"):
+- **Non-vacuity** — prove durable knowledge *exists* in the store (the count=1
+  keeper-local constraints, e.g. "rondo sandbox blocked", "Write tool destructive
+  guard blocks `${}`") so "0% durable in `_shared`" is a real finding, not "there is
+  no durable knowledge to find."
+- **Teeth** — the eval must be *able to fail*; the current system must score badly
+  (it does). An eval that can't separate good from bad memory is vacuous.
+- **Calibration / anti-rig** — the judge must label both ways; feed it known-ephemeral
+  and known-durable fixtures and confirm correct classification before trusting it on
+  live data.
+
+**What still stands from §0–§6.** The typed substrate (category / edge / lifecycle as
+*data*), the anti-embedding stance, the v2 four-node graph as a *candidate /
+visualization* substrate, and the entity-ref reconsolidation check are all retained.
+Withdrawn is their use as *decision-makers*. P0a (typed category) stays merged; P2a
+(edges) stays as candidate-gen, **not** the recall ranker. Phasing (§5) is reordered:
+**P-1 eval → P0 producer judgment gate → consolidation Dream pass → recall judgment
+selection → delete dead scoring (`stale_factor`, TTL-GC).**
 
 ## §0 Context — the organs already built, and the ones missing
 

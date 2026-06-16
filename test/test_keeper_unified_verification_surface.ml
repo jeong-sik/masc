@@ -37,6 +37,7 @@ let sample_board_event : WO.pending_board_event =
     new_external_since = 0;
     latest_external_author = None;
     latest_external_preview = None;
+    provenance = WO.Human_direct;
   }
 
 let make_meta name : Masc.Keeper_meta_contract.keeper_meta =

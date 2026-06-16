@@ -9,8 +9,6 @@ import { persistentSignal } from './lib/persistent-signal'
 import { ringFocusClasses } from './components/common/ring'
 import { route, initRouter } from './router'
 import {
-  connectSSE,
-  disconnectSSE,
   pauseQueuedOasRuntimeIngress,
   resumeQueuedOasRuntimeIngress,
 } from './sse'
@@ -18,8 +16,6 @@ import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './name
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
-import { dashboardWsOnlyEnabled } from './dashboard-ws-cutover'
-import { startDashboardSseFallback } from './dashboard-transport-fallback'
 import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
@@ -135,12 +131,11 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
-    // Resolved once per mount; runtime changes require a reload.  The
-    // server-side fanout guarantees every event that hits /sse also hits
-    // the WS external-subscriber path, so turning SSE off is safe when
-    // operators have validated the WS channel in their environment.
-    const wsOnly = dashboardWsOnlyEnabled()
-    const stopSseFallback = startDashboardSseFallback({ wsOnly })
+    // WS/WSS is the sole dashboard transport. The server fans every
+    // broadcast to the WS external-subscriber path, and reconnect re-syncs
+    // via the hello/subscribe snapshot, so the SSE fallback path was
+    // removed (it carried a separate event-id space and caused stale-delta
+    // churn at the WS<->SSE boundary).
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -188,13 +183,6 @@ export function App() {
           .finally(() => {
             if (cancelled) return
             void connectDashboardWS(route.value)
-            // In cutover mode the WS channel is trusted to carry every
-            // broadcast (it is already registered as an Sse external
-            // subscriber on the server).  Opening the /sse EventSource in
-            // parallel only duplicates delivery; skip it.
-            if (!wsOnly) {
-              connectSSE()
-            }
             resumeQueuedOasRuntimeIngress()
           })
       })
@@ -223,11 +211,7 @@ export function App() {
 
     return () => {
       cancelled = true
-      stopSseFallback()
       disconnectDashboardWS()
-      if (!wsOnly) {
-        disconnectSSE()
-      }
       unsubSSE()
       stopPeriodicRefresh()
       stopErrorCleanup()

@@ -93,7 +93,6 @@ let mk_fact
   ; Types.first_seen = now -. age_seconds
   ; Types.last_accessed = now -. age_seconds
   ; Types.valid_until
-  ; Types.stale_factor = 0.0
   ; Types.last_verified_at = Some (now -. age_seconds)
   ; Types.expected_lifetime_cycles = None
   ; Types.schema_version = Types.schema_version
@@ -111,6 +110,8 @@ let mk_episode ~created_at claim_strings =
   ; Types.preserved_tool_refs = []
   ; Types.source_turn_range = None
   ; Types.created_at
+  ; Types.valid_until = None
+  ; Types.terminal_marker = None
   ; Types.schema_version = Types.schema_version
   }
 ;;

@@ -457,7 +457,7 @@ export function RuntimeMonitor() {
   const providerProbes = providerProbeMap(probe)
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <${Select}
           class="px-2 py-1 text-xs"
@@ -516,18 +516,18 @@ export function RuntimeMonitor() {
             ? providers?.providers.map(provider => {
                 const liveProbe = providerProbes.get(providerRuntimeKey(provider)) ?? null
                 return html`
-                <article class="p-4 rounded-[var(--r-1)] border border-card-border bg-card/40 backdrop-blur-sm shadow-[var(--shadow-1)] flex flex-col gap-2">
+                <article class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
-                      <strong class="text-sm text-text-strong">${provider.runtime_id ?? provider.provider}</strong>
-                      <span class="text-xs text-text-muted">${provider.provider_id ?? '(unknown provider)'}</span>
+                      <strong class="text-sm text-[var(--color-fg-primary)]">${provider.runtime_id ?? provider.provider}</strong>
+                      <span class="text-xs text-[var(--color-fg-muted)]">${provider.provider_id ?? '(unknown provider)'}</span>
                     </div>
                     <div class="flex items-center gap-2 flex-wrap justify-end">
                       <${StatusChip} tone=${runtimeProviderTone(provider)}>${runtimeStatusLabel(provider)}<//>
                       <${StatusChip} tone=${runtimeProbeTone(liveProbe)} uppercase=${false}>live ${runtimeProbeLabel(liveProbe)}<//>
                     </div>
                   </div>
-                  <div class="grid grid-cols-2 gap-3 text-xs text-text-body">
+                  <div class="grid grid-cols-2 gap-3 text-xs text-[var(--color-fg-secondary)]">
                     <div>model · ${provider.model_api_name ?? provider.model_id ?? '-'}</div>
                     <div>default · ${provider.is_default_runtime ? 'yes' : 'no'}</div>
                     <div>transport · ${provider.runtime_kind ?? provider.transport ?? '-'}</div>
@@ -538,7 +538,7 @@ export function RuntimeMonitor() {
                     <div>auth · ${runtimeProbeAuthLabel(liveProbe)}</div>
                   </div>
                   ${liveProbe?.probe_url || provider.endpoint_url
-                    ? html`<div class="truncate text-2xs text-text-muted" title=${liveProbe?.probe_url ?? provider.endpoint_url ?? ''}>
+                    ? html`<div class="truncate text-2xs text-[var(--color-fg-muted)]" title=${liveProbe?.probe_url ?? provider.endpoint_url ?? ''}>
                         probe · ${liveProbe?.probe_url ?? provider.endpoint_url}
                       </div>`
                     : null}
@@ -546,7 +546,7 @@ export function RuntimeMonitor() {
                     ? html`<div class="text-2xs text-[var(--status-bad)]">${liveProbe.error}</div>`
                     : null}
                   ${provider.discovery
-                    ? html`<div class="grid grid-cols-2 gap-3 text-xs text-text-body pt-2 border-t border-card-border/50">
+                    ? html`<div class="grid grid-cols-2 gap-3 text-xs text-[var(--color-fg-secondary)] pt-2 border-t border-[var(--color-border-default)]/50">
                         <div>discovery · ${provider.discovery.healthy ? 'healthy' : 'degraded'}</div>
                         <div>ctx · ${formatNumber(provider.discovery.ctx_size)}</div>
                         <div>slots · ${formatNumber(provider.discovery.busy_slots)}/${formatNumber(provider.discovery.total_slots)}</div>
@@ -597,11 +597,11 @@ export function RuntimeMonitor() {
                   metric.coverage_status === 'none'
                   || metric.coverage_status === 'partial'
                   || metric.coverage_status === 'error_only'
-                let articleClass = 'p-4 rounded-[var(--r-1)] border border-card-border bg-card/40 backdrop-blur-sm shadow-[var(--shadow-1)] flex flex-col gap-2'
+                let articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 backdrop-blur-sm flex flex-col gap-2'
                 if (isFailing) {
-                  articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--status-bad)] bg-[var(--status-bad)]/5 backdrop-blur-sm shadow-[var(--shadow-1)] flex flex-col gap-2'
+                  articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--status-bad)] bg-[var(--status-bad)]/5 backdrop-blur-sm flex flex-col gap-2'
                 } else if (hasCoverageGap) {
-                  articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--status-warn)]/5 backdrop-blur-sm shadow-[var(--shadow-1)] flex flex-col gap-2'
+                  articleClass = 'p-4 rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--status-warn)]/5 backdrop-blur-sm flex flex-col gap-2'
                 }
                 const runtimeLabel = metric.model_id
                 const ariaLabel = isFailing
@@ -616,8 +616,8 @@ export function RuntimeMonitor() {
                 >
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
-                      <strong class="text-sm text-text-strong">${runtimeLabel}</strong>
-                      <span class="text-xs text-text-muted">entries ${formatNumber(metric.entry_count)} · fallback ${formatNumber(metric.fallback_count)}</span>
+                      <strong class="text-sm text-[var(--color-fg-primary)]">${runtimeLabel}</strong>
+                      <span class="text-xs text-[var(--color-fg-muted)]">entries ${formatNumber(metric.entry_count)} · fallback ${formatNumber(metric.fallback_count)}</span>
                       ${metricCoverageText(metric)
                         ? html`<span class="text-2xs ${hasCoverageGap ? 'text-[var(--status-warn)]' : 'text-[var(--color-fg-muted)]'}">${metricCoverageText(metric)}</span>`
                         : null}
@@ -659,7 +659,7 @@ export function RuntimeMonitor() {
                         : null}
                     </div>
                   </div>
-                  <div class="grid grid-cols-3 gap-3 text-xs text-text-body">
+                  <div class="grid grid-cols-3 gap-3 text-xs text-[var(--color-fg-secondary)]">
                     <div>latency avg/p95 · ${fmtCoverageAwareNumber(metric, metric.avg_latency_ms, 1)} / ${fmtCoverageAwareNumber(metric, metric.p95_latency_ms, 1)} ms</div>
                     <div>wall tok/s p50/p95 · ${fmtCoverageAwareNumber(metric, metric.p50_tok_per_sec, 1)} / ${fmtCoverageAwareNumber(metric, metric.p95_tok_per_sec, 1)}</div>
                     <div>cost · ${fmtCoverageAwareCost(metric, metric.total_cost_usd)}</div>
@@ -667,10 +667,10 @@ export function RuntimeMonitor() {
                     <div>reasoning/cache · ${fmtCoverageAwareNumber(metric, metric.total_reasoning_tokens)} / ${fmtCoverageAwareNumber(metric, metric.total_cache_read_tokens)}</div>
                     <div>tools · ${formatNumber(metric.avg_tool_calls_per_turn, 1)}/turn (${formatNumber(metric.total_tool_calls)})</div>
                     ${metric.prompt_p50_tok_per_sec != null || metric.prompt_p95_tok_per_sec != null
-                      ? html`<div class="col-span-3 text-text-muted">prefill tok/s p50/p95 · ${formatNumber(metric.prompt_p50_tok_per_sec, 1)} / ${formatNumber(metric.prompt_p95_tok_per_sec, 1)} (prompt_eval only; complements wall + hw rows)</div>`
+                      ? html`<div class="col-span-3 text-[var(--color-fg-muted)]">prefill tok/s p50/p95 · ${formatNumber(metric.prompt_p50_tok_per_sec, 1)} / ${formatNumber(metric.prompt_p95_tok_per_sec, 1)} (prompt_eval only; complements wall + hw rows)</div>`
                       : null}
                     ${metric.hw_decode_p50_tok_per_sec != null
-                      ? html`<div class="col-span-3 text-text-muted">hw tok/s p50/p95 · ${formatNumber(metric.hw_decode_p50_tok_per_sec, 1)} / ${formatNumber(metric.hw_decode_p95_tok_per_sec, 1)} (decode-only; excludes queue/prefill/thinking)</div>`
+                      ? html`<div class="col-span-3 text-[var(--color-fg-muted)]">hw tok/s p50/p95 · ${formatNumber(metric.hw_decode_p50_tok_per_sec, 1)} / ${formatNumber(metric.hw_decode_p95_tok_per_sec, 1)} (decode-only; excludes queue/prefill/thinking)</div>`
                       : null}
                   </div>
                   ${(() => {
@@ -727,7 +727,7 @@ export function RuntimeMonitor() {
                         ${expandedModel.value === metric.model_id ? '▾' : '▸'} recent ${metric.recent_entries?.length ?? 0} turns
                       </button>
                       ${expandedModel.value === metric.model_id
-                        ? html`<div class="mt-1 border-t border-card-border/50 pt-2">
+                        ? html`<div class="mt-1 border-t border-[var(--color-border-default)]/50 pt-2">
                             <${Table}
                               columns=${recentEntryColumns}
                               rows=${metric.recent_entries ?? []}

@@ -989,7 +989,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     : null
 
   return html`
-    <div class="agent-page flex w-full flex-col gap-5 px-0 py-1">
+    <div class="v2-monitoring-surface agent-page flex w-full flex-col gap-5 px-0 py-1">
       <section class="monitor-surface-card monitor-surface-card-strong p-5" aria-label="에이전트 디렉터리">
         <div class="flex flex-col gap-5">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">

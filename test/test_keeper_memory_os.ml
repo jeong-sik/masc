@@ -1398,10 +1398,14 @@ let test_recall_omits_marker_for_fresh_fact () =
         match Recall.render_if_enabled ~keeper_id ~now () with
         | None -> Alcotest.fail "expected Some block for a persisted fresh fact"
         | Some block ->
+          (* Match the rendered marker's tail ("...ago — verify]"), not the bare
+             "[stale:" token — the recall wrapper prompt itself contains the
+             literal example "[stale: ... — verify]" (no age), so a looser check
+             would match the advisory prose rather than an actual fact marker. *)
           Alcotest.(check bool)
             "fresh fact carries no staleness marker"
             false
-            (contains "[stale:" block))))
+            (contains "ago — verify]" block))))
 ;;
 
 (* RFC-0244: a seed reranks recall — the lexically matching fact is lifted above a

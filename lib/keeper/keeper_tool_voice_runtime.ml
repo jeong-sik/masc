@@ -149,9 +149,7 @@ let handle_speak
               file so the dashboard can fetch /api/v1/voice/audio/<token>. *)
            let base_dir = config.Workspace.base_path in
            let surface = Surface_ref.Dashboard { session_id = None } in
-           Keeper_chat_store.append_assistant_message
-             ~base_dir ~keeper_name:meta.name ~content:message ~surface ();
-           let clip =
+           let clip : Keeper_chat_store.audio_clip option =
              match Json_util.get_string json "audio_file" with
              | Some path ->
                let token =
@@ -161,7 +159,7 @@ let handle_speak
                  Printf.sprintf "/api/v1/voice/audio/%s" token
                in
                Some
-                 { Keeper_chat_broadcast.token
+                 { Keeper_chat_store.token
                  ; audio_url = Some audio_url
                  ; mime = "audio/mpeg"
                  ; duration_sec = None
@@ -170,10 +168,21 @@ let handle_speak
                  }
              | None -> None
            in
+           Keeper_chat_store.append_assistant_message
+             ~base_dir ~keeper_name:meta.name ~content:message ~surface ?audio:clip ();
            (match clip with
             | Some c ->
               Keeper_chat_broadcast.chat_appended_with_audio
-                ~keeper_name:meta.name ~source:"agent" ~audio:c
+                ~keeper_name:meta.name
+                ~source:"agent"
+                ~audio:
+                  { Keeper_chat_broadcast.token = c.token
+                  ; audio_url = c.audio_url
+                  ; mime = c.mime
+                  ; duration_sec = c.duration_sec
+                  ; message_text = c.message_text
+                  ; device_id = c.device_id
+                  }
             | None ->
               Keeper_chat_broadcast.chat_appended
                 ~keeper_name:meta.name ~source:"agent");

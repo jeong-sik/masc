@@ -21,7 +21,7 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
   if (!worker) return null
 
   return html`
-    <${CollapsibleSection} title="워커 상태" mountWhenOpen=${true}>
+    <${CollapsibleSection} class="v2-monitoring-detail" title="워커 상태" mountWhenOpen=${true}>
       <div class="flex flex-col gap-1.5">
         <${WorkerInfoRow}>
           <${DetailLabel}>상태</${DetailLabel}>

@@ -43,7 +43,6 @@ Mapping target set (perl word-boundary, case-sensitive, both lowercase and capit
 | `claude` / `Claude` / `CLAUDE` (word, with path-prefix guard) | `agent-llm-a` / `Agent-LLM-A` / `AGENT-LLM-A` |
 | `codex_cli` / `gemini_cli` / `kimi_cli` / `claude_code` | `cli-tool-a..d` |
 | `Codex CLI` / `Gemini CLI` / `Claude Code` | `CLI-Tool-A..D` |
-| `OAS_CLAUDE_*` / `OAS_CODEX_*` / `OAS_GEMINI_*` env vars | `OAS_CLI_TOOL_A_*` / `OAS_CLI_TOOL_B_*` / `OAS_CLI_TOOL_C_*` |
 | `claude-3-5-sonnet-...`, `claude-sonnet-X.Y`, `claude-3.5` | `model-a-sonnet` |
 | `claude-haiku-X-Y` | `model-a-haiku` |
 | `claude-opus-X.Y` | `model-a-opus` |

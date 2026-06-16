@@ -186,6 +186,7 @@ export function RuntimeHealthSnapshot() {
 
   return html`
     <${SectionCard}
+      class="v2-monitoring-panel"
       label="런타임 상태 체크"
       status=${status}
       right=${html`

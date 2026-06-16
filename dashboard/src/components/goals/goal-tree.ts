@@ -1205,7 +1205,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div>샌드박스</div>
         <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
         <div>승인</div>
-        <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
+        <div class="text-right text-text-body">${trust?.approval_state?.summary ?? '-'}</div>
         <div>런타임</div>
         <div class="text-right text-text-body">${keeper.runtime_id ?? executionRuntimeOutcome ?? '-'}</div>
         <div>결과</div>
@@ -1222,7 +1222,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
           ` : null}
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
             ${trust?.approval_state?.state ? html`
-              <span>승인 상태 ${trust.approval_state.state}</span>
+              <span>승인 상태 ${trust.approval_state.state}${trust.approval_state.latest_event_at ? html` · <${TimeAgo} timestamp=${trust.approval_state.latest_event_at} />` : null}</span>
             ` : null}
             ${pendingApprovalId ? html`
               <span>승인 ID ${pendingApprovalId}</span>
@@ -1280,6 +1280,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ` : null}
             ${latestEvent.next_human_action ? html`
               <span>next ${latestEvent.next_human_action}</span>
+            ` : null}
+            ${latestEvent.trace_id ? html`
+              <span class="font-mono" title=${latestEvent.trace_id}>trace ${latestEvent.trace_id.slice(0, 8)}</span>
             ` : null}
           </div>
         </div>

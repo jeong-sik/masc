@@ -42,4 +42,5 @@
   time_compat
   fs_compat
   masc_log
+  otel_metric_store
   runtime_events))

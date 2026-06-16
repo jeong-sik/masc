@@ -9,6 +9,8 @@ import {
   queuedKeeperMessageToReply,
   streamKeeperMessage,
 } from './api/keeper'
+import { fetchKeeperToolCalls } from './api/dashboard'
+import { recordToolCallOutputs } from './tool-call-output-store'
 import { asString, isRecord } from './components/common/normalize'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
@@ -31,6 +33,7 @@ import {
   keeperStreamLastEventAt,
   keeperThreads,
   appendThreadEntry,
+  attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
   finalizeAssistantEntry,
@@ -162,6 +165,11 @@ export async function hydrateKeeperChatHistory(
     const history = await fetchKeeperChatHistory(keeperName)
     if (history.length === 0) return
     mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
+    // Tool outputs live on a separate surface (the chat stream carries only
+    // arguments); fetch them so ToolCallBubble can show results. Fire-and-
+    // forget so transcript hydration latency is unchanged, and the store
+    // update re-renders the affected bubbles when it lands.
+    void hydrateKeeperToolOutputs(keeperName)
   } catch (err) {
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
@@ -170,6 +178,24 @@ export async function hydrateKeeperChatHistory(
     setRecordValue(keeperActionErrors, keeperName, `이전 대화 불러오기 실패: ${message}`)
   } finally {
     setRecordValue(keeperHydrating, keeperName, false)
+  }
+}
+
+// Recent-window size for the tool-call output fetch; mirrors the inspector's
+// fetchKeeperToolCalls(name, 100) so the chat join covers the same horizon.
+const TOOL_OUTPUT_FETCH_LIMIT = 100
+
+/** Best-effort hydration of tool-call outputs into the shared store so the
+ *  chat ToolCallBubble can join results onto transcript rows by tool_use_id.
+ *  Failures are swallowed (logged): the transcript must render with or without
+ *  tool outputs. */
+async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
+  try {
+    const response = await fetchKeeperToolCalls(keeperName, TOOL_OUTPUT_FETCH_LIMIT)
+    recordToolCallOutputs(response.entries)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[keeper] tool-call output hydration failed for ${keeperName}:`, message)
   }
 }
 
@@ -390,11 +416,18 @@ export async function resumePendingKeeperChatRequests(name: string): Promise<voi
  *  persisted transcript so messages arriving through other connectors
  *  (Discord, Slack, agent MCP) appear without a page reload. Keepers
  *  whose transcript was never hydrated are skipped — the mount
- *  hydration fetches the full window when the panel first opens. */
-export function noteKeeperChatAppended(name: string): void {
+ *  hydration fetches the full window when the panel first opens.
+ *
+ *  If the event carries an RFC-0235 audio clip, we first try to attach
+ *  it to the matching assistant bubble that is already streaming. A
+ *  failed match still falls back to the history re-merge (the clip is
+ *  persisted server-side too). */
+export function noteKeeperChatAppended(name: string, audio?: unknown): void {
   const keeperName = name.trim()
   if (!keeperName) return
   if (!hydratedChatKeepers.has(keeperName)) return
+  const attached = audio != null && attachKeeperAudioClip(keeperName, audio)
+  if (attached) return
   const pending = chatRefreshTimers.get(keeperName)
   if (pending) clearTimeout(pending)
   chatRefreshTimers.set(keeperName, setTimeout(() => {

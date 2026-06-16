@@ -160,7 +160,7 @@ type agent_name_origin =
 type t = {
   uuid : string;                  (** Permanent unique identifier (UUIDv4 or hash) *)
   session_key : string;           (** Unique session identifier *)
-  agent_name : string;            (** Display name (e.g., "agent_llm_a-agent-001") *)
+  agent_name : string;            (** Display name (e.g., "claude-agent-001") *)
   agent_name_origin : agent_name_origin;
       (** Provenance of [agent_name] (see {!agent_name_origin}). *)
   channel : channel option;       (** Source channel if known *)

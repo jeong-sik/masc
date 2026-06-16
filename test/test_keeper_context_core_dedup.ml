@@ -171,6 +171,41 @@ let test_roundtrip_text_preserved () =
   Alcotest.(check string) "text preserved"
     (text_of original) (text_of reparsed)
 
+let test_roundtrip_preserves_thinking_type () =
+  let original : T.message =
+    {
+      T.role = T.Assistant;
+      content =
+        [
+          T.Thinking { thinking_type = "reasoning"; content = "chain" };
+          T.Thinking
+            { thinking_type = "anthropic-signature"; content = "signed" };
+          T.RedactedThinking "encrypted";
+          T.Text "done";
+        ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  let json = C.message_to_json original in
+  let reparsed = C.message_of_json json in
+  match reparsed.content with
+  | [
+   T.Thinking { thinking_type = first_type; content = first_content };
+   T.Thinking { thinking_type = second_type; content = second_content };
+   T.RedactedThinking blob;
+   T.Text text;
+  ] ->
+      Alcotest.(check string) "first thinking type" "reasoning" first_type;
+      Alcotest.(check string) "first thinking content" "chain" first_content;
+      Alcotest.(check string)
+        "second thinking type" "anthropic-signature" second_type;
+      Alcotest.(check string) "second thinking content" "signed" second_content;
+      Alcotest.(check string) "redacted thinking" "encrypted" blob;
+      Alcotest.(check string) "text" "done" text
+  | _ -> Alcotest.fail "expected thinking, thinking, redacted thinking, text"
+
 let () =
   Alcotest.run "keeper_context_core_dedup"
     [
@@ -189,6 +224,8 @@ let () =
             test_message_of_json_rejects_flat_content;
           Alcotest.test_case "round-trip text preserved" `Quick
             test_roundtrip_text_preserved;
+          Alcotest.test_case "round-trip thinking type preserved" `Quick
+            test_roundtrip_preserves_thinking_type;
         ] );
       ( "text_of_history_jsonl_json",
         [

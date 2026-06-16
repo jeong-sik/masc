@@ -197,7 +197,6 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          ; first_seen = now
          ; last_accessed = now
          ; valid_until = category_valid_until ~now category
-         ; stale_factor = 0.0
          ; last_verified_at = Some now
          ; expected_lifetime_cycles = category_lifetime_cycles category
          ; schema_version
@@ -257,6 +256,8 @@ let episode_of_output ?now (inp : input) (raw : string) : episode option =
               ; preserved_tool_refs
               ; source_turn_range = source_turn_range claims
               ; created_at = now
+              ; valid_until = None
+              ; terminal_marker = None
               ; schema_version
               }
           | None -> None)

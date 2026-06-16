@@ -139,12 +139,12 @@ describe('parseKeeperCompositeSnapshot', () => {
         ended_at: 1713398500,
         decision_stage: 'guard_ok',
         runtime_state: 'done',
-        selected_model: 'agent-llm-a-sonnet',
+        selected_model: 'claude-sonnet',
       },
     })
     expect(result.last_outcome).not.toBeNull()
     expect(result.last_outcome!.turn_id).toBe(5)
-    expect(result.last_outcome!.selected_model).toBe('agent-llm-a-sonnet')
+    expect(result.last_outcome!.selected_model).toBe('claude-sonnet')
   })
 
   it('parses optional execution receipt summary', () => {
@@ -157,7 +157,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         terminal_reason_code: 'config_error',
         operator_disposition: 'pause_human',
         operator_disposition_reason: 'tool_route_recoverable_failure',
-        model_used: 'cli-tool-d:auto',
+        model_used: 'claude-code:auto',
         stop_reason: 'max_turns',
         duration_ms: 87736,
         error: {
@@ -167,7 +167,7 @@ describe('parseKeeperCompositeSnapshot', () => {
         },
         runtime: {
           name: 'primary',
-          selected_model: 'cli-tool-d:auto',
+          selected_model: 'claude-code:auto',
           attempt_count: 2,
           fallback_applied: true,
           outcome: 'exhausted',

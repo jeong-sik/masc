@@ -76,18 +76,18 @@ display-name = "Ollama Local"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
 
-[models.provider_h]
+[models.qwen]
 api-name = "qwen3.5:35b-a3b-nvfp4"
 max-context = 128000
 tools-support = true
 streaming = true
 
-[ollama.provider_h]
+[ollama.qwen]
 is-default = true
 max-concurrent = 1
 
 [runtime.primary]
-members = ["ollama.provider_h"]
+members = ["ollama.qwen"]
 strategy = "failover"
 
 [runtime.primary]

@@ -113,7 +113,6 @@ type fact =
   ; first_seen : float
   ; last_accessed : float
   ; valid_until : float option
-  ; stale_factor : float
   ; last_verified_at : float option
   ; expected_lifetime_cycles : int option
   ; schema_version : string
@@ -129,6 +128,8 @@ type episode =
   ; preserved_tool_refs : string list
   ; source_turn_range : (int * int) option
   ; created_at : float
+  ; valid_until : float option
+  ; terminal_marker : string option
   ; schema_version : string
   }
 
@@ -250,7 +251,6 @@ let fact_to_json f =
     ; "access_count", `Int f.access_count
     ; "first_seen", `Float f.first_seen
     ; "last_accessed", `Float f.last_accessed
-    ; "stale_factor", `Float f.stale_factor
     ; "schema_version", `String f.schema_version
     ]
     @ optional_float_field "valid_until" f.valid_until
@@ -284,14 +284,6 @@ let fact_of_json (json : Yojson.Safe.t) =
           (* DET-OK: absent last_accessed inherits first_seen. *)
           let last_accessed = Option.value (json_float_field "last_accessed" fields) ~default:first_seen in
           let valid_until = json_float_field "valid_until" fields in
-          let stale_factor =
-            match json_float_field "stale_factor" fields with
-            | Some value -> clamp01 value
-            | None ->
-              (* DET-OK: legacy v1 facts had no stale marker, so they start
-                 as not-explicitly-stale and are still truth-aged by policy. *)
-              0.0
-          in
           let last_verified_at = json_float_field "last_verified_at" fields in
           (* DET-OK: absent observed_by defaults to empty (Tier-1 / legacy facts). *)
           let observed_by =
@@ -314,7 +306,6 @@ let fact_of_json (json : Yojson.Safe.t) =
             ; first_seen
             ; last_accessed
             ; valid_until
-            ; stale_factor
             ; last_verified_at
             ; expected_lifetime_cycles
             ; schema_version =
@@ -347,7 +338,11 @@ let episode_to_json e =
      ; "created_at", `Float e.created_at
      ; "schema_version", `String e.schema_version
      ]
-     @ range_json)
+     @ range_json
+     @ optional_float_field "valid_until" e.valid_until
+     @ (match e.terminal_marker with
+        | Some marker -> [ "terminal_marker", `String marker ]
+        | None -> []))
 ;;
 
 let episode_of_json (json : Yojson.Safe.t) =
@@ -381,6 +376,9 @@ let episode_of_json (json : Yojson.Safe.t) =
        in
        (* DET-OK: absent created_at defaults to epoch for migration safety. *)
        let created_at = Option.value (json_float_field "created_at" fields) ~default:0.0 in
+       (* DET-OK: legacy episodes had no TTL or terminal marker. *)
+       let valid_until = json_float_field "valid_until" fields in
+       let terminal_marker = json_string_field "terminal_marker" fields in
        Some
          { trace_id
          ; generation
@@ -391,6 +389,8 @@ let episode_of_json (json : Yojson.Safe.t) =
          ; preserved_tool_refs
          ; source_turn_range
          ; created_at
+         ; valid_until
+         ; terminal_marker
          ; schema_version =
              (* DET-OK: default to current schema for forward compatibility. *)
              Option.value (json_string_field "schema_version" fields) ~default:schema_version

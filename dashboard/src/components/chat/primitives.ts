@@ -8,7 +8,9 @@ import { useVoiceInput } from './voice-input'
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
-import type { KeeperConversationAttachment, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
+import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
+import type { ToolCallOutputBlob } from '../../api/dashboard'
+import { lookupToolCallOutput } from '../../tool-call-output-store'
 
 function surfaceLink(surface?: SurfaceRef | null): { url: string; label: string; icon: string } | null {
   if (!surface || !surface.kind) return null
@@ -269,6 +271,40 @@ function renderAttachmentCard(attachment: KeeperConversationAttachment) {
   `
 }
 
+function formatAudioDuration(seconds?: number | null): string {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return ''
+  const totalSec = Math.round(seconds)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return `${min}:${sec.toString().padStart(2, '0')}`
+}
+
+// RFC-0235 P1/P3: user-gesture play button for synthesized assistant
+// voice clips. Uses the native `<audio controls>` element (no autoplay).
+function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
+  const duration = formatAudioDuration(clip.durationSec)
+  return html`
+    <div
+      class="flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5"
+      data-chat-audio-clip
+    >
+      <audio
+        controls
+        preload="none"
+        src=${clip.audioUrl ?? `/api/v1/voice/audio/${encodeURIComponent(clip.token)}`}
+        class="h-8 max-w-[16rem]"
+        aria-label=${clip.messageText || '음성 메시지'}
+      />
+      ${duration
+        ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${duration}</span>`
+        : null}
+      ${clip.deviceId
+        ? html`<span class="text-2xs text-[var(--color-fg-muted)]" title=${`device: ${clip.deviceId}`}>🔊</span>`
+        : null}
+    </div>
+  `
+}
+
 function ChatMessageBubble({
   entry,
   showMetadata = true,
@@ -478,6 +514,9 @@ function ChatMessageBubble({
             </div>
           `
         : null}
+      ${entry.audio
+        ? html`<${AudioPlayer} clip=${entry.audio} />`
+        : null}
       ${entry.error
         ? html`
             <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
@@ -550,22 +589,73 @@ function ChatMessageBubble({
   `
 }
 
+// Pretty-print a JSON-looking string; leave anything else untouched. Shared by
+// the argument and output renderers so both read consistently.
+function prettyJsonish(text: string): string {
+  const trimmed = text.trimStart()
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return JSON.stringify(JSON.parse(text), null, 2)
+    } catch {
+      // not valid JSON — show as-is
+    }
+  }
+  return text
+}
+
+// Reduce a tool-call output (inline string or externalised blob descriptor)
+// to display text. Large outputs (e.g. keeper_context_status) are externalised
+// to the blob store and only a ~200-char preview is persisted (#20910); the
+// chat surfaces that preview and flags it truncated. The full bytes remain in
+// the dedicated tool-call inspector via on-demand artifact hydration.
+function toolOutputDisplay(
+  output: string | ToolCallOutputBlob,
+): { text: string; truncated: boolean } {
+  if (typeof output === 'object' && output !== null && '_blob' in output) {
+    return { text: prettyJsonish(output._blob.preview), truncated: true }
+  }
+  return { text: prettyJsonish(typeof output === 'string' ? output : ''), truncated: false }
+}
+
+const EMPTY_ARG_TEXTS = new Set(['', '{}', '[]'])
+const TOOL_BUBBLE_PREVIEW_MAX = 120
+
 // Compact collapsible card for tool call entries in the chat transcript.
+// `entry.text` carries the tool call's INPUT arguments only — accumulated
+// arg JSON from TOOL_CALL_ARGS (keeper-stream.ts) or the persisted arg row
+// (keeper-state.ts:507 "text = accumulated argument JSON"). The tool's
+// OUTPUT (result) is NOT in this entry; it lands in the live trace via
+// `appendLiveToolCall` (sse.ts) and is joined below from the tool-call output
+// store. Without an explicit "입력" (input) label and an empty-args marker, a
+// no-argument tool like keeper_tools_list renders as `▸ {}`, which reads as
+// "empty result". This surface labels args as input and renders `{}` as
+// "입력 없음".
 function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const [expanded, setExpanded] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
   const toolName = entry.label || 'tool'
-  const argsText = entry.text || ''
-  const isJson = argsText.trimStart().startsWith('{') || argsText.trimStart().startsWith('[')
-  let displayText = argsText
-  if (isJson) {
-    try {
-      displayText = JSON.stringify(JSON.parse(argsText), null, 2)
-    } catch {
-      // keep original
-    }
-  }
-  const preview = displayText.length > 120 ? displayText.slice(0, 120) + '...' : displayText
+  const displayArgs = prettyJsonish(entry.text || '')
+  const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
+
+  // Tool results never travel on the chat stream — they are joined here from
+  // the tool-call output store by this row's id (`tool-<tool_use_id>`). Null
+  // until that hydration lands, or for rows whose call had no provider id.
+  const outputEntry = lookupToolCallOutput(entry.id)
+  const outputView = outputEntry ? toolOutputDisplay(outputEntry.output) : null
+  const hasOutput = outputView !== null && outputView.text.trim() !== ''
+
+  // Collapsed glance prefers the result (the useful part for no-argument tools
+  // like keeper_context_status, whose args are just `{}`); falls back to the
+  // arguments until the output arrives. Empty args are labelled explicitly.
+  const previewSource = hasOutput
+    ? outputView.text
+    : isEmptyArgs
+      ? '입력 없음'
+      : displayArgs
+  const preview =
+    previewSource.length > TOOL_BUBBLE_PREVIEW_MAX
+      ? previewSource.slice(0, TOOL_BUBBLE_PREVIEW_MAX) + '...'
+      : previewSource
 
   return html`
     <article
@@ -580,6 +670,14 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       >
         <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-mono font-bold text-[var(--color-fg-muted)]">T</span>
         <span class="font-mono text-xs font-medium text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">입력</span>
+        ${outputEntry
+          ? html`<span
+              class=${`text-2xs ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-[var(--color-status-err)]'}`}
+              title=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
+              aria-label=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
+            >${outputEntry.success ? '✓' : '✗'}</span>`
+          : null}
         ${timestamp
           ? html`<span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
           : null}
@@ -587,8 +685,33 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       </button>
       ${expanded
         ? html`
-            <div class="border-t border-[var(--color-border-default)] px-3 py-2">
-              <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-64 overflow-y-auto">${displayText}</pre>
+            <div class="flex flex-col gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
+              ${isEmptyArgs
+                ? html`<div class="text-2xs font-mono text-[var(--color-fg-muted)]">입력 없음 (매개변수가 없는 도구)</div>`
+                : html`
+                    <div>
+                      <div class="mb-1 text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">arguments</div>
+                      <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-48 overflow-y-auto">${displayArgs}</pre>
+                    </div>
+                  `}
+              ${hasOutput
+                ? html`
+                    <div>
+                      <div class="mb-1 flex items-center gap-1 text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">
+                        <span>output</span>
+                        ${outputView.truncated
+                          ? html`<span class="font-normal normal-case text-[var(--color-fg-muted)]">· truncated, see tool inspector</span>`
+                          : null}
+                      </div>
+                      <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-64 overflow-y-auto">${outputView.text}</pre>
+                    </div>
+                  `
+                : null}
+              ${!hasOutput
+                ? isEmptyArgs
+                  ? html`<div class="text-2xs text-[var(--color-fg-muted)]">출력 대기 중…</div>`
+                  : html`<div class="text-3xs text-[var(--color-fg-muted)]">출력(결과)은 도구 실행 추적 패널에서 확인</div>`
+                : null}
             </div>
           `
         : html`

@@ -159,8 +159,6 @@ let finalize
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some keeper_visible_sandbox_root
     ; network_mode = meta.network_mode
-    ; approval_profile = acc.tool_surface.approval_mode_effective
-    ; approval_profile_derived = acc.tool_surface.approval_mode_derived
     ; runtime_id
     ; runtime_selected_model =
         Option.bind runtime_observation (fun obs -> obs.selected_model)

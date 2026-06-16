@@ -13,6 +13,28 @@ type event_class = Routine
 val event_class_to_string : event_class -> string
 (** Convert a structured event class to its stable JSON label. *)
 
+(** Log categories for dashboard filtering. *)
+type category =
+  | Fsm
+  | Lifecycle
+  | Directive
+  | Heartbeat
+  | Presence
+  | Task
+  | Tool
+  | Memory
+  | Telemetry
+  | Routine
+  | Boundary
+  | Uncategorized
+
+val category_to_string : category -> string
+(** Canonical lowercase wire label for a {!category}. *)
+
+val category_of_string_opt : string -> category option
+(** Parse a category from its wire label.  Returns [None] for
+    unrecognised input. *)
+
 val level_to_string : level -> string
 (** Convert level to string representation. *)
 
@@ -45,21 +67,21 @@ val format_utc_date_of : float -> string
     for unit tests; production code calls [Ring.date_string] which
     delegates here. *)
 
-val log : level -> ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
+val log : level -> ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 (** Log a message at the given level with optional context. *)
 
-val emit : level -> ?module_name:string -> ?details:Yojson.Safe.t -> string -> unit
+val emit : level -> ?module_name:string -> ?details:Yojson.Safe.t -> ?category:category -> string -> unit
 (** Log a preformatted structured message with optional JSON details. *)
 
-val emit_routine : ?module_name:string -> ?details:Yojson.Safe.t -> string -> unit
+val emit_routine : ?module_name:string -> ?details:Yojson.Safe.t -> ?category:category -> string -> unit
 (** Log repeatable housekeeping/telemetry through the central routine policy.
     The effective level is controlled by [MASC_LOG_ROUTINE_LEVEL] and defaults
     to [Debug]. Set it to [off] to suppress routine events entirely. *)
 
-val debug : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
-val info : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
-val warn : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
-val error : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
+val debug : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+val info : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+val warn : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+val error : ?ctx:string -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
 (** Mirror source kinds carried on every [Ring.entry]. *)
 type source =
@@ -100,6 +122,7 @@ module Ring : sig
     turn_id : int option;
     message : string;
     details : Yojson.Safe.t;
+    category : category option;
   }
 
   exception Entry_decode_error of string
@@ -121,6 +144,8 @@ module Ring : sig
     ?module_filter:string ->
     ?since_seq:int ->
     ?order:[< `Newest_first | `Oldest_first > `Newest_first ] ->
+    ?category_filter:string ->
+    ?exclude_category:string list ->
     unit ->
     entry list
 
@@ -149,18 +174,19 @@ val client_tool_host_error :
     [M.name] controls the env-var key MASC_LOG_{NAME}_LEVEL
     and the context prefix in log output. *)
 module type LOGGER = sig
-  val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> string -> unit
+  val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> ?category:category -> string -> unit
   val routine :
     ?details:Yojson.Safe.t ->
     ?keeper_name:string ->
     ?turn_id:int ->
+    ?category:category ->
     ('a, unit, string, unit) format4 ->
     'a
-  val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
-  val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
-  val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
-  val warning : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
-  val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+  val debug : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val info : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val warn : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val warning : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val error : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 end
 
 module Make (_ : sig val name : string end) : LOGGER

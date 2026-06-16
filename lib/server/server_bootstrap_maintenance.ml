@@ -72,31 +72,25 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* RFC-0244 Tier 2: memory-os cross-keeper consolidation. Off the keeper hot
-     path — every [interval]s it reads each keeper's Tier-1 store and rewrites the
-     shared semantic store (keepers/_shared.facts.jsonl) atomically; it never
-     mutates a keeper's own store, so it cannot race keeper writes (which only
-     touch their own file). This is the production caller that makes the shared
-     tier live; without it the consolidator is dead like [run_gc]. Per-tick
-     failures are caught so a corrupt store cannot cancel sibling fibers. The
-     kill switch mirrors the recall gate ([MASC_KEEPER_MEMORY_OS_RECALL]); when
-     disabled the shared store simply stops being refreshed (recall still reads
-     whatever is there).
-
-     P2-1: enabled by default.  The #21241 librarian taxonomy fix already
-     typed [default_promote_categories] so [Unknown] and other non-objective
-     labels are default-denied; remaining ephemeral [Fact] mis-labels are a
-     librarian prompt issue and are gated below by requiring >=2 distinct
-     keepers.  Operators can still disable via MASC_KEEPER_MEMORY_OS_CONSOLIDATION=0. *)
-  if
-    Keeper_memory_bank_env.memory_env_bool_logged
-      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-      ~default:true
-  then
-    fork_logged_fiber
-      ~sw
-      ~on_error:(log_server_fiber_crash "memory_os_consolidation")
-      (fun () ->
+  (* RFC-0244 Tier 2 cross-keeper consolidation: always-on, no
+     MASC_KEEPER_MEMORY_OS_CONSOLIDATION toggle. An env toggle on this fiber was
+     dead-code-with-a-switch -- an unproven fiber should not run, a proven one
+     needs no switch. The noise the #21244 dry-run found (ephemeral boilerplate
+     promoted into shared recall) predates the fixes built to stop it: the typed
+     [Ephemeral] category + [is_promotable] gate (#21241) -- the consolidator now
+     structurally skips non-promotable facts -- and the durability-gate
+     librarian prompt (#21257) that labels coordination boilerplate "ephemeral",
+     both merged after that dry-run. Off the keeper hot path: each [interval]s it
+     reads each keeper's Tier-1 store and rewrites the shared semantic store
+     (keepers/_shared.facts.jsonl) atomically, never touching a keeper's own
+     store, so it cannot race keeper writes. Per-tick failures are caught so a
+     corrupt store cannot cancel sibling fibers. Each sweep logs [promoted]: a
+     rising count is the regression signal to watch if producer labelling
+     drifts. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "memory_os_consolidation")
+    (fun () ->
       (* Coarse cadence: consolidation is advisory and off the hot path, so a
          full fleet rescan every 5 minutes is ample. *)
       let interval = 300.0 in
@@ -110,15 +104,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            in
            if report.Keeper_memory_os_consolidator.promoted > 0
            then
-             Log.Server.info
-               "memory_os_consolidation: keepers=%d promoted=%d"
+             Log.Server.info "memory_os_consolidation: keepers=%d promoted=%d"
                report.Keeper_memory_os_consolidator.keepers_scanned
                report.Keeper_memory_os_consolidator.promoted
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Log.Server.warn
-             "memory_os_consolidation: tick crashed: %s"
+           Log.Server.warn "memory_os_consolidation: tick crashed: %s"
              (Printexc.to_string exn));
         Eio.Time.sleep clock interval;
         loop ()

@@ -349,8 +349,8 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
         (Lib.Workspace.bind_session config
-           ~agent_name:"agent_code-test-agent"
-           ~agent_type_override:(Some "agent_code")
+           ~agent_name:"codex-test-agent"
+           ~agent_type_override:(Some "codex")
            ~capabilities:["typescript"]
            ());
       ignore

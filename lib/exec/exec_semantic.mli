@@ -6,7 +6,7 @@
     - [Exec_semantic] answers {i "how should the caller interpret the
       exit status of a command that already ran?"} (post-exec hint).
 
-    Inspired by agent_llm_a-code's [interpretCommandResult] in
+    Inspired by claude-code's [interpretCommandResult] in
     [src/utils/Shell.ts]. The agent harness literature
     ("harness-engineering" et al.) frames this as turning raw OS return
     codes into typed markers the agent loop can reason over without
@@ -14,7 +14,7 @@
 
     Rollout: additive JSON field. Gated by [MASC_BASH_SEMANTIC_EXIT]
     env flag during the bake-in window (see
-    [planning/agent_llm_a-plans/20m-me-workspace-yousleepwhen-masc-graceful-panda.md]
+    [planning/claude-plans/20m-me-workspace-yousleepwhen-masc-graceful-panda.md]
     Phase 1). *)
 
 type t =
@@ -61,7 +61,7 @@ val interpret_cmd :
     The first whitespace-separated token is treated as the argv head
     for tool-name heuristics; OOM detection scans the merged output.
 
-    Heuristics (ported from agent_llm_a-code [interpretCommandResult]):
+    Heuristics (ported from claude-code [interpretCommandResult]):
     - exit 128 on [git …]  -> [`Git_unknown_revision] when stderr names
       an unknown revision / ambiguous argument, else [`Git_not_a_repo]
     - exit 127             -> [`Tool_missing]

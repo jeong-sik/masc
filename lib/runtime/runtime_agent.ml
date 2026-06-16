@@ -158,8 +158,8 @@ let runtime_mcp_tool_requires_bound_actor =
 let runtime_mcp_policy_with_masc_agent_name =
   Runtime_transport.runtime_mcp_policy_with_masc_agent_name
 
-let cli_tool_a_can_auth_keeper_bound_runtime_mcp =
-  Runtime_transport.cli_tool_a_can_auth_keeper_bound_runtime_mcp
+let codex_cli_can_auth_keeper_bound_runtime_mcp =
+  Runtime_transport.codex_cli_can_auth_keeper_bound_runtime_mcp
 
 let runtime_mcp_policy_for_provider =
   Runtime_transport.runtime_mcp_policy_for_provider

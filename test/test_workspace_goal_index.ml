@@ -24,7 +24,7 @@ let with_test_env f =
   in
   Unix.mkdir tmp_dir 0o755;
   let config = Workspace.default_config tmp_dir in
-  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
   try
     f config;
     let _ = Workspace.reset config in

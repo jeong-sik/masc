@@ -14,7 +14,7 @@ default = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-http"
 endpoint = "https://runpod.example/v1"
 
 [providers.runpod_mtp.credentials]
@@ -42,7 +42,7 @@ describe('runtime TOML dashboard editing helpers', () => {
     expect(environment.providers[0]).toMatchObject({
       id: 'runpod_mtp',
       displayName: 'RunPod',
-      protocol: 'provider_d-http',
+      protocol: 'openai-http',
       transportKind: 'endpoint',
       endpoint: 'https://runpod.example/v1',
       credentialType: 'env',

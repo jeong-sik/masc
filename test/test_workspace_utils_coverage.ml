@@ -416,7 +416,7 @@ let test_sanitize_html_unicode () =
    ============================================================ *)
 
 let test_sanitize_agent_name_normal () =
-  check string "normal name" "agent_llm_a" (Workspace_utils.sanitize_agent_name "agent_llm_a")
+  check string "normal name" "claude" (Workspace_utils.sanitize_agent_name "claude")
 
 let test_sanitize_agent_name_xss () =
   check string "xss attempt" "&lt;script&gt;" (Workspace_utils.sanitize_agent_name "<script>")
@@ -521,7 +521,7 @@ let test_safe_filename_unicode () =
    ============================================================ *)
 
 let test_validate_file_path_normal () =
-  match Workspace_utils.validate_file_path "agents/agent_llm_a.json" with
+  match Workspace_utils.validate_file_path "agents/claude.json" with
   | Ok _ -> ()
   | Error e -> fail ("expected Ok, got: " ^ e)
 

@@ -90,7 +90,6 @@ type fact =
   ; first_seen : float
   ; last_accessed : float
   ; valid_until : float option
-  ; stale_factor : float
   ; last_verified_at : float option
   ; expected_lifetime_cycles : int option
   ; schema_version : string
@@ -107,6 +106,8 @@ type episode =
   ; preserved_tool_refs : string list
   ; source_turn_range : (int * int) option
   ; created_at : float
+  ; valid_until : float option
+  ; terminal_marker : string option
   ; schema_version : string
   }
 

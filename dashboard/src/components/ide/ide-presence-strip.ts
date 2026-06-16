@@ -41,6 +41,10 @@ export interface WorktreeEntry {
   readonly pr_number: number | null
   readonly pr_state: string | null
   readonly keeper_attached: boolean
+  /** Raw git remote (for clone/display); null when the worktree has no origin. */
+  readonly origin_url?: string | null
+  /** Browsable https URL derived from origin_url; null when unconvertible. */
+  readonly web_url?: string | null
 }
 
 interface PresenceContextSummary {
@@ -120,7 +124,11 @@ function isWorktreeEntry(value: unknown): value is WorktreeEntry {
     typeof obj['head_sha'] === 'string' &&
     (obj['pr_number'] === null || typeof obj['pr_number'] === 'number') &&
     (obj['pr_state'] === null || typeof obj['pr_state'] === 'string') &&
-    typeof obj['keeper_attached'] === 'boolean'
+    typeof obj['keeper_attached'] === 'boolean' &&
+    // origin_url / web_url are newer optional fields: tolerate absent (old
+    // server), null (no remote / unconvertible), or string.
+    (obj['origin_url'] === undefined || obj['origin_url'] === null || typeof obj['origin_url'] === 'string') &&
+    (obj['web_url'] === undefined || obj['web_url'] === null || typeof obj['web_url'] === 'string')
   )
 }
 
@@ -333,6 +341,10 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
     ? prLabel(wt.pr_number, wt.pr_state)
     : null
 
+  const dirtyCount = (wt?.changed_count ?? 0) + (wt?.staged_count ?? 0)
+  const webUrl = wt?.web_url ?? null
+  const originUrl = wt?.origin_url ?? null
+
   const canNavigate = contextAnchor !== null
   const navigate = (): void => {
     if (contextAnchor) focusIdeContextAnchor(contextAnchor)
@@ -343,7 +355,7 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
 
   return html`
     <li
-      title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}${prBadge ? ` · ${prBadge}` : ''}`}
+      title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}${prBadge ? ` · ${prBadge}` : ''}${originUrl ? ` · ${originUrl}` : ''}${dirtyCount > 0 ? ` · ${dirtyCount} dirty` : ''}`}
       aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}${focusLabel ? ` editing ${focusLabel}` : ''}`}
       role=${canNavigate ? 'button' : undefined}
       aria-disabled=${canNavigate ? undefined : 'true'}
@@ -387,6 +399,32 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
           background: wt?.pr_state === 'open' ? 'var(--color-status-ok)' : 'var(--color-bg-muted)',
           color: wt?.pr_state === 'open' ? 'var(--color-bg-page)' : 'var(--color-fg-muted)',
         }}>${prBadge}</span>
+      ` : null}
+      ${dirtyCount > 0 ? html`
+        <span
+          title=${`${wt?.changed_count ?? 0} changed, ${wt?.staged_count ?? 0} staged`}
+          style=${{
+            fontSize: 'var(--fs-9)',
+            padding: '0 3px',
+            borderRadius: 'var(--r-0)',
+            background: 'var(--warn-10)',
+            color: 'var(--warn-bright)',
+          }}
+        >●${dirtyCount}</span>
+      ` : null}
+      ${webUrl ? html`
+        <a
+          href=${webUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title=${`Open ${originUrl ?? webUrl}`}
+          onClick=${(e: Event) => e.stopPropagation()}
+          style=${{
+            fontSize: 'var(--fs-10)',
+            color: 'var(--color-accent-fg)',
+            textDecoration: 'none',
+          }}
+        >↗</a>
       ` : null}
       <span
         style=${{

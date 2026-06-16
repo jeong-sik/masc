@@ -28,7 +28,7 @@ default = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-http"
 endpoint = "https://runpod.example/v1"
 
 [providers.runpod_mtp.credentials]
@@ -37,7 +37,7 @@ key = "RUNPOD_API_KEY"
 
 [providers.openai]
 display-name = "OpenAI"
-protocol = "provider_d-http"
+protocol = "openai-http"
 endpoint = "https://api.openai.example/v1"
 
 [models.qwen]

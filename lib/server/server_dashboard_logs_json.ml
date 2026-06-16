@@ -25,6 +25,8 @@ let build
       ~min_level
       ~module_filter
       ~since_seq
+      ~category_filter
+      ~exclude_category
       (entries : Log.Ring.entry list)
   : Yojson.Safe.t
   =
@@ -65,6 +67,11 @@ let build
              ; "min_level", `Int min_level
              ; "module", `String module_filter
              ; "since_seq", Json_util.int_option_to_yojson since_seq
+             ; "category", Json_util.string_opt_to_json category_filter
+             ; ( "exclude_category"
+               , match exclude_category with
+                 | None -> `Null
+                 | Some xs -> `List (List.map (fun x -> `String x) xs) )
              ] )
        ; "returned", `Int (List.length entries)
        ; "latest_seq", Json_util.int_option_to_yojson (entry_seq_json newest)

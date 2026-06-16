@@ -176,7 +176,6 @@ export function executeOutputRouteLinks({
     sourceId: sourceParts.join(':'),
     goalId: task?.goal_id ?? undefined,
     taskId: taskId ?? undefined,
-    gitRef: task?.worktree?.branch,
     keeperId,
     telemetry: true,
     telemetryQuery: taskId ?? keeperId,

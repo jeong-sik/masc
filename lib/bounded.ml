@@ -74,7 +74,7 @@ module Usage_history = struct
   let min_samples_for_p95 = 10
   let unknown_agent_fallback = 1024
   (* RFC-0028 §4.2.  Conservative upper bound for one runtime turn's
-     output tokens against current defaults (model-d-mini / qwen3-9B /
+     output tokens against current defaults (gpt-mini / qwen3-9B /
      qwen3-35B-A3B).  No formal distribution evidence is
      attached today — this gap is acknowledged in the RFC.  Re-measure
      once distribution data lands. *)

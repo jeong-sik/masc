@@ -160,7 +160,7 @@ default = "legacy_openai_compat.test_model"
 
 [providers.legacy_openai_compat]
 display-name = "Legacy OpenAI-Compatible"
-protocol = "provider_d-http"
+protocol = "openai-http"
 endpoint = "https://legacy-openai-compatible.example/v1"
 
 [models.test_model]
@@ -176,13 +176,13 @@ max-concurrent = 1
   match Runtime_toml.parse_string content with
   | Ok _ -> fail "expected runtime TOML to reject legacy provider-letter alias"
   | Error errors ->
-    check bool "rejects provider_d-http"
+    check bool "rejects openai-http"
       true
       (List.exists
          (fun (err : Runtime_toml.parse_error) ->
             String.equal err.path "providers.legacy_openai_compat.protocol"
             && String.equal err.message
-                 "unknown protocol \"provider_d-http\": expected one of \
+                 "unknown protocol \"openai-http\": expected one of \
                   messages-cli, messages-http, openai-compatible-cli, \
                   openai-compatible-http, ollama-http")
          errors)

@@ -170,18 +170,6 @@ type keeper_profile_defaults =
   unknown_toml_keys : string list;
 }
 val empty_keeper_profile_defaults : keeper_profile_defaults
-type keeper_oas_context =
-  Keeper_types_profile_defaults.keeper_oas_context = {
-  env_pairs : (string * string) list;
-  gemini_mcp_disabled : bool;
-  gemini_approval_mode : string option;
-  gemini_approval_mode_derived : bool;
-  gemini_allowed_mcp_derived : bool;
-  claude_mcp_config : string option;
-}
-val empty_keeper_oas_context : keeper_oas_context
-val keeper_oas_context_of_defaults :
-  keeper_profile_defaults -> keeper_oas_context
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
@@ -222,9 +210,6 @@ val extract_oas_env_from_doc :
   Keeper_toml_loader.toml_doc -> (string * string) list
 val unified_max_tokens_override_of_oas_env :
   ?keeper_name:string -> (string * string) list -> int option
-val oas_env_truthy : string -> bool
-val oas_env_has_non_empty : string -> (string * string) list -> bool
-val effective_oas_env : (string * string) list -> (string * string) list
 val profile_defaults_of_toml :
   Keeper_toml_loader.toml_doc ->
   (keeper_profile_defaults, string) result

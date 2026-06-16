@@ -43,7 +43,7 @@ val openai_chat_completions_path : string
 
 (** [/chat/completions] — version-free path for [Provider_config.t] where
     [base_url] already includes the version segment.  Matches the OAS
-    SDK's internal default in [api_provider_d.ml]. *)
+    SDK's internal default in [api_openai.ml]. *)
 val chat_completions_path : string
 
 (** [/v1/models]. *)
@@ -52,7 +52,7 @@ val openai_models_path : string
 (** {1 CLI transport discriminator} *)
 
 (** ["cli:"] — prefix marking a CLI-backed transport (e.g.
-    [cli:agent_code]). *)
+    [cli:codex]). *)
 val cli_transport_prefix : string
 
 (** Strict prefix match for {!cli_transport_prefix}. *)
@@ -61,7 +61,7 @@ val is_cli_transport_url : string -> bool
 (** {1 Local LLM URL} *)
 
 (** Override order:
-    [OAS_LOCAL_LLM_URL] → [OAS_LOCAL_QWEN_URL] → {!ollama_default_url}. *)
+    [OAS_LOCAL_LLM_URL] -> {!ollama_default_url}. *)
 val local_llm_default_url : string
 
 (** {1 MASC HTTP server} *)

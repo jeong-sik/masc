@@ -57,7 +57,6 @@ export interface Task {
   assignee?: string
   assignee_kind?: string | null
   description?: string
-  worktree?: TaskWorktreeInfo | null
   created_at?: string
   updated_at?: string
   completed_at?: string
@@ -65,13 +64,6 @@ export interface Task {
   handoff_context?: TaskHandoffContext | null
   gate?: TaskGateSnapshot | null
   execution_links?: TaskExecutionLinks | null
-}
-
-export interface TaskWorktreeInfo {
-  branch: string
-  path: string
-  git_root: string
-  repo_name: string
 }
 
 interface TaskExecutionLinks {
@@ -519,6 +511,8 @@ export interface KeeperTrustLatestEvent {
   summary: string
   severity: 'ok' | 'warn' | 'bad'
   next_human_action?: string | null
+  // Trace id for deep-linking the causal event to its distributed trace.
+  trace_id?: string | null
 }
 
 export interface KeeperTrustApprovalPendingFirst {
@@ -533,6 +527,8 @@ export interface KeeperTrustApprovalState {
   summary?: string | null
   pending_count?: number | null
   pending_first?: KeeperTrustApprovalPendingFirst | null
+  // ISO8601 timestamp of the last approval-audit event.
+  latest_event_at?: string | null
 }
 
 export interface KeeperTrustExecutionSummary {
@@ -737,6 +733,19 @@ export interface KeeperConversationAttachment {
   data: string
 }
 
+// RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
+// `audioUrl` is the absolute/relative URL the dashboard uses for playback;
+// `token` is the capability in `/api/v1/voice/audio/<token>` used as a
+// fallback when the backend did not emit a full URL.
+export interface KeeperConversationAudioClip {
+  token: string
+  audioUrl?: string | null
+  mime: string
+  durationSec?: number | null
+  messageText: string
+  deviceId?: string | null
+}
+
 export type KeeperConversationStreamState =
   | 'opening'
   | 'thinking'
@@ -775,6 +784,7 @@ export interface KeeperConversationEntry {
   details?: KeeperConversationDetails | null
   error?: string | null
   surface?: SurfaceRef | null
+  audio?: KeeperConversationAudioClip | null
 }
 
 export interface KeeperStatusDetail {

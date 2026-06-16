@@ -72,8 +72,8 @@ let test_read_state_drops_legacy_active_agent_objects () =
             ( "active_agents",
               `List
                 [
-                  `Assoc [ ("name", `String "agent_code-swift-fox") ];
-                  `String "provider_f-brave-bear";
+                  `Assoc [ ("name", `String "codex-swift-fox") ];
+                  `String "gemini-brave-bear";
                   `Assoc [ ("agent_name", `String "keeper-sangsu-agent") ];
                   `Assoc [ ("id", `String "ignored") ];
                 ] );
@@ -84,7 +84,7 @@ let test_read_state_drops_legacy_active_agent_objects () =
       let state = Workspace.read_state config in
       check int "message_seq preserved" 7 state.message_seq;
       check (list string) "only canonical string active_agents recovered"
-        [ "provider_f-brave-bear" ]
+        [ "gemini-brave-bear" ]
         state.active_agents;
 
       let open Yojson.Safe.Util in
@@ -115,9 +115,9 @@ let test_read_state_filters_invalid_active_agent_entries () =
                 [
                   `Assoc [];
                   `Bool true;
-                  `Assoc [ ("name", `String "agent_code-swift-fox") ];
+                  `Assoc [ ("name", `String "codex-swift-fox") ];
                   `String "";
-                  `String "provider_f-brave-bear";
+                  `String "gemini-brave-bear";
                 ] );
           ]
       in
@@ -125,7 +125,7 @@ let test_read_state_filters_invalid_active_agent_entries () =
 
       let state = Workspace.read_state config in
       check (list string) "invalid entries filtered"
-        [ "provider_f-brave-bear" ]
+        [ "gemini-brave-bear" ]
         state.active_agents)
 
 let test_agent_of_yojson_accepts_numeric_last_seen () =
@@ -154,8 +154,8 @@ let test_agent_of_yojson_bootstraps_null_last_seen_from_session_bound_at () =
   let json =
     `Assoc
       [
-        ("name", `String "provider_f-cool-whale");
-        ("agent_type", `String "provider_f");
+        ("name", `String "gemini-cool-whale");
+        ("agent_type", `String "gemini");
         ("status", `String "busy");
         ("capabilities", `List []);
         ("current_task", `String "task-208");
@@ -165,7 +165,7 @@ let test_agent_of_yojson_bootstraps_null_last_seen_from_session_bound_at () =
   in
   match Masc_domain.agent_of_yojson json with
   | Ok agent ->
-      check string "agent parsed" "provider_f-cool-whale" agent.name;
+      check string "agent parsed" "gemini-cool-whale" agent.name;
       check (option string) "current_task preserved"
         (Some "task-208") agent.current_task;
       check string "last_seen bootstrapped from session_bound_at"
@@ -180,8 +180,8 @@ let test_agent_of_yojson_annotates_invalid_last_seen () =
   let json =
     `Assoc
       [
-        ("name", `String "provider_f-cool-whale");
-        ("agent_type", `String "provider_f");
+        ("name", `String "gemini-cool-whale");
+        ("agent_type", `String "gemini");
         ("status", `String "busy");
         ("capabilities", `List []);
         ("current_task", `Null);

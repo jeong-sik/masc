@@ -309,7 +309,7 @@ val board_post_detail_json :
 
     | Outcome | Status | Body |
     |---|---|---|
-    | Post missing | [404 Not Found] | [{"error":"Post not found"}] |
+    | Post missing | [404 Not Found] | [{"error":"Post not found: <id>"}] |
     | Found | [200 OK] | per response_format |
 
     Comment fetch errors (rare) silently degrade to empty

@@ -32,10 +32,7 @@
      1. Both judges resolve to [governance_judge_no_timeout] (i.e.
         [Float.infinity]) by default, so the bridge never wraps an
         advisory dashboard judge cycle in a timer.
-     2. Removed pre-SSOT env vars
-        ([MASC_OPERATOR_JUDGE_TIMEOUT_SEC],
-        [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC]) are ignored.
-     3. The canonical per-caller env var
+     2. The canonical per-caller env var
         ([MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] etc.) is the
         only per-judge override surface. *)
 
@@ -49,18 +46,11 @@ let () =
 
 module Cfg = Env_config_oas_bridge
 
-let legacy_envs =
-  [
-    "MASC_OPERATOR_JUDGE_TIMEOUT_SEC";
-    "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC";
-  ]
-
 let clear_all_envs () =
   Unix.putenv Cfg.global_env_var "";
   List.iter
     (fun caller -> Unix.putenv (Cfg.per_caller_env_var ~caller) "")
-    (Cfg.known_callers ());
-  List.iter (fun name -> Unix.putenv name "") legacy_envs
+    (Cfg.known_callers ())
 
 (* [dashboard_judge_default_sec] is the LEGACY pin (45.0s) that #9629
    originally bounded both judges to.  It is no longer the active
@@ -97,23 +87,8 @@ let test_judge_defaults_have_no_timeout () =
     Cfg.governance_judge_no_timeout
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ())
 
-let test_removed_envs_are_ignored () =
-  clear_all_envs ();
-  Unix.putenv "MASC_OPERATOR_JUDGE_TIMEOUT_SEC" "75.0";
-  Unix.putenv "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC" "90.0";
-  Alcotest.(check bool)
-    "Operator_judge ignores removed env (still infinite)"
-    true
-    (Float.is_infinite (Cfg.timeout_sec ~caller:Cfg.Operator_judge ()));
-  Alcotest.(check bool)
-    "Governance_judge ignores removed env (still infinite)"
-    true
-    (Float.is_infinite (Cfg.timeout_sec ~caller:Cfg.Governance_judge ()));
-  clear_all_envs ()
-
 let test_canonical_env_overrides_judge_default () =
   clear_all_envs ();
-  Unix.putenv "MASC_OPERATOR_JUDGE_TIMEOUT_SEC" "75.0";
   Unix.putenv
     (Cfg.per_caller_env_var ~caller:Cfg.Operator_judge)
     "55.0";
@@ -148,10 +123,8 @@ let () =
           Alcotest.test_case "judges listed in known_callers"
             `Quick test_judges_listed_in_known_callers;
         ] );
-      ( "removed_envs",
+      ( "canonical_env",
         [
-          Alcotest.test_case "removed envs are ignored"
-            `Quick test_removed_envs_are_ignored;
           Alcotest.test_case "canonical env overrides judge default"
             `Quick test_canonical_env_overrides_judge_default;
         ] );

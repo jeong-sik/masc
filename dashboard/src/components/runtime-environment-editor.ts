@@ -289,7 +289,7 @@ export function RuntimeEnvironmentEditor({
   }
 
   return html`
-    <div class="border-t border-[var(--color-border-divider)] pt-3" data-testid="runtime-environment-editor">
+    <div class="v2-monitoring-detail border-t border-[var(--color-border-divider)] pt-3" data-testid="runtime-environment-editor">
       <div class="mb-3 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div class="min-w-0">
           <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">

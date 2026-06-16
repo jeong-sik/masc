@@ -73,7 +73,7 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
     provider_display_name: providerName,
     model_id: runtimeId.split('.')[1],
     model_api_name: modelName,
-    protocol: 'provider_d-http',
+    protocol: 'openai-http',
     transport: 'http',
     runtime_kind: 'cloud',
     auth_kind: 'env',
@@ -124,7 +124,7 @@ describe('KeeperRuntimeModelEditor', () => {
     refs.providers.mockReset()
     refs.providers.mockResolvedValue({
       providers: [
-        makeRuntimeProvider('a.one', 'Provider A', 'model-a'),
+        makeRuntimeProvider('a.one', 'Provider A', 'claude'),
         makeRuntimeProvider('b.two', 'Provider B', 'model-b'),
       ],
     })
@@ -149,7 +149,7 @@ describe('KeeperRuntimeModelEditor', () => {
     expect(select!.value).toBe('a.one')
     await flush()
     expect(container.textContent).toContain('Provider A')
-    expect(container.textContent).toContain('model-a')
+    expect(container.textContent).toContain('claude')
   })
 
   it('patches runtime_id with the selected runtime and updates shared config', async () => {

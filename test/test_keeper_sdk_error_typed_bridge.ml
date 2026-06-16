@@ -131,7 +131,7 @@ let test_server_parse_rejection_split () =
     "provider_invalid_request_parse_error"
     (SdkE.Provider
        (Llm_provider.Error.InvalidRequest
-          { provider = "agent_llm_a"; reason = "unexpected character in JSON at byte 9" }))
+          { provider = "claude"; reason = "unexpected character in JSON at byte 9" }))
     ~provider:true
     ~model_:false
     ~server:true;

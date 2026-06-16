@@ -695,7 +695,7 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let json =
@@ -713,9 +713,9 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
       check bool "token_valid true" true (auth |> member "token_valid" |> to_bool);
       check string "requested actor surfaced" "dashboard"
         (auth |> member "requested_agent" |> to_string);
-      check string "token owner surfaced" "agent_code"
+      check string "token owner surfaced" "codex"
         (auth |> member "token_agent" |> to_string);
-      check string "effective actor canonicalized to token owner" "agent_code"
+      check string "effective actor canonicalized to token owner" "codex"
         (auth |> member "effective_agent" |> to_string);
       check bool "auth error cleared after canonicalization" true
         (match auth |> member "auth_error_code" with `Null -> true | _ -> false);
@@ -812,7 +812,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let actor =
@@ -825,7 +825,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
              ])
       in
       check (option string) "execution actor canonicalized to token owner"
-        (Some "agent_code") actor
+        (Some "codex") actor
 
 let test_verifier_of_request_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -833,7 +833,7 @@ let test_verifier_of_request_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let verifier =
@@ -846,7 +846,7 @@ let test_verifier_of_request_canonicalizes_token_owner () =
              ])
       in
       check string "verification verifier canonicalized to token owner"
-        "operator:agent_code" verifier
+        "operator:codex" verifier
 
 let test_dashboard_message_json_surfaces_temporal_decay_fields () =
   let message : Types.message =
@@ -1049,9 +1049,9 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
         ; "last_seen", `String "2026-05-20T00:00:00Z"
         ])
   in
-  write_agent ~name:"agent_code-active" ~agent_type:"agent_code" ~status:"active";
+  write_agent ~name:"codex-active" ~agent_type:"codex" ~status:"active";
   write_agent ~name:"keeper-active" ~agent_type:"keeper" ~status:"busy";
-  write_agent ~name:"agent_code-inactive" ~agent_type:"agent_code" ~status:"inactive";
+  write_agent ~name:"codex-inactive" ~agent_type:"codex" ~status:"inactive";
   let json =
     Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
   in
@@ -1200,6 +1200,22 @@ let test_telemetry_n_default_is_bounded () =
     "explicit positive n honoured"
     500 (resolve ~has_time_window:true ~n_param:(Some "500"))
 
+let test_git_remote_to_web_url () =
+  let check name input expected =
+    Alcotest.(check (option string)) name expected
+      (Server_routes_http_routes_dashboard.git_remote_to_web_url input)
+  in
+  check "scp-like git@ -> https" "git@github.com:jeong-sik/masc.git"
+    (Some "https://github.com/jeong-sik/masc");
+  check "https strips .git" "https://github.com/jeong-sik/masc.git"
+    (Some "https://github.com/jeong-sik/masc");
+  check "https without .git unchanged" "https://github.com/jeong-sik/masc"
+    (Some "https://github.com/jeong-sik/masc");
+  check "ssh:// drops scheme + userinfo" "ssh://git@github.com/o/r.git"
+    (Some "https://github.com/o/r");
+  check "empty -> None" "" None;
+  check "unrecognised shape -> None" "file:///local/path" None
+
 let () =
   run "dashboard_http_core"
     [
@@ -1277,5 +1293,7 @@ let () =
             test_project_snapshot_wire_returns_snapshot_when_populated;
           test_case "telemetry n default is bounded (freeze guard)" `Quick
             test_telemetry_n_default_is_bounded;
+          test_case "git remote -> web url normalisation" `Quick
+            test_git_remote_to_web_url;
         ] );
     ]

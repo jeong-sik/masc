@@ -37,6 +37,7 @@ const LogEntrySchema = object({
   message: string(),
   keeper_name: optional(nullable(string())),
   turn_id: optional(nullable(number())),
+  category: optional(nullable(string())),
   details: optional(nullable(record(string(), unknown()))),
 })
 
@@ -74,6 +75,8 @@ export interface LogsQuery {
   min_level?: number
   module?: string
   since_seq?: number | null
+  category?: string
+  exclude_category?: string
 }
 
 export interface LogsResponse {

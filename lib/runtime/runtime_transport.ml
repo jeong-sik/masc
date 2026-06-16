@@ -65,7 +65,7 @@ let add_masc_authorization_header = Runtime_transport_authorization.add_masc_aut
 
 (* Per-keeper authorization bridging extracted to
    [Runtime_transport_auth_bridging] (godfile decomp). *)
-let cli_tool_a_can_auth_keeper_bound_runtime_mcp = Runtime_transport_auth_bridging.cli_tool_a_can_auth_keeper_bound_runtime_mcp
+let codex_cli_can_auth_keeper_bound_runtime_mcp = Runtime_transport_auth_bridging.codex_cli_can_auth_keeper_bound_runtime_mcp
 let bridged_runtime_mcp_policy_for_agent = Runtime_transport_auth_bridging.bridged_runtime_mcp_policy_for_agent
 
 (* Provider-driven runtime MCP policy resolver extracted to

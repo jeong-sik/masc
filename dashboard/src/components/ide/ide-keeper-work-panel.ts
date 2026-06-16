@@ -50,14 +50,6 @@ const QUEUED_TASK_STYLE = {
   paddingTop: 'var(--sp-2)',
   borderTop: '1px solid var(--color-border-divider)',
 }
-const QUEUED_TASK_META_STYLE = {
-  overflow: 'hidden',
-  color: 'var(--color-fg-muted)',
-  fontSize: 'var(--fs-11)',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-}
-
 export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   const summary = keeperWorkSummary(keeperName, keepers.value, tasks.value)
   const keeper = summary.keeper
@@ -114,9 +106,6 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
                 <span>${currentTask.status ?? 'unknown'}</span>
               </div>
               <strong title=${currentTask.title}>${currentTask.title}</strong>
-              ${currentTask.worktree
-                ? html`<span title=${currentTask.worktree.path}>${currentTask.worktree.branch} · ${currentTask.worktree.repo_name}</span>`
-                : null}
               ${TaskRouteLinks(currentTask, summary.currentGoalId, summary.displayName)}
             </div>
           `
@@ -186,9 +175,6 @@ function QueuedTaskCards(
             <span>${task.status ?? 'unknown'}</span>
           </div>
           <strong title=${task.title}>${task.title}</strong>
-          ${task.worktree
-            ? html`<span style=${QUEUED_TASK_META_STYLE} title=${task.worktree.path}>${task.worktree.branch} · ${task.worktree.repo_name}</span>`
-            : null}
           ${TaskRouteLinks(task, fallbackGoalId, keeperId)}
         </div>
       `)}
@@ -239,7 +225,6 @@ function TaskRouteLinks(task: Task, fallbackGoalId: string | null, keeperId: str
   return KeeperWorkRouteLinks(routeLinksForContext({
     goalId: task.goal_id ?? fallbackGoalId ?? undefined,
     taskId: task.id,
-    gitRef: task.worktree?.branch,
     sessionId: execution.sessionId ?? undefined,
     operationId: execution.operationId ?? undefined,
     telemetryQuery: execution.telemetryQuery ?? undefined,

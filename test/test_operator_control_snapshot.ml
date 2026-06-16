@@ -186,14 +186,14 @@ let test_compute_context_ratio_does_not_infer_provider_budget () =
   let meta =
     {
       base with
-      models = [ "cli_tool_a:auto" ];
+      models = [ "codex_cli:auto" ];
       runtime =
         {
           base.runtime with
           usage =
             {
               base.runtime.usage with
-              last_model_used = "agent_code";
+              last_model_used = "codex";
               last_input_tokens = 2_106_223;
             };
         };
@@ -247,14 +247,14 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       let updated_meta =
         {
           meta with
-          models = [ "cli_tool_a:auto" ];
+          models = [ "codex_cli:auto" ];
           runtime =
             {
               meta.runtime with
               usage =
                 {
                   meta.runtime.usage with
-                  last_model_used = "agent_code";
+                  last_model_used = "codex";
                   last_input_tokens = 6_637_033;
                   last_total_tokens = 6_670_646;
                 };
@@ -422,7 +422,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
               `Assoc
                 [
                   ("name", `String "primary");
-                  ("selected_model", `String "model-c-coding");
+                  ("selected_model", `String "kimi-for-coding");
                   ("outcome", `String "completed");
                 ] );
             ("error", `Assoc [ ("kind", `String "contract") ]);
@@ -644,7 +644,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
               `Assoc
                 [
                   ("name", `String "primary");
-                  ("selected_model", `String "model-c-coding");
+                  ("selected_model", `String "kimi-for-coding");
                   ("outcome", `String "completed");
                 ] );
             ("ended_at", `String (Masc_domain.now_iso ()));
@@ -1280,8 +1280,8 @@ let test_digest_workspace_includes_tool_host_failure_attention () =
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Dashboard_tool_host_events.record ~fs:() config
         {
-          Dashboard_tool_host_events.agent_name = "agent_code";
-          client_name = "agent_code";
+          Dashboard_tool_host_events.agent_name = "codex";
+          client_name = "codex";
           tool_name = "masc_keeper_msg";
           transport = "mcp_http";
           phase = Some "tools/call";

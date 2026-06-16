@@ -3,11 +3,13 @@ import { beforeEach } from 'vitest'
 import {
   THREAD_ENTRY_CAP,
   appendThreadEntry,
+  attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   insertThreadEntryBefore,
   isVisibleDirectConversationEntry,
   keeperThreads,
   mergeServerHistoryEntries,
+  normalizeAudioClip,
   normalizeStatusDetail,
   removeThreadEntries,
   setStatusDetail,
@@ -178,6 +180,50 @@ describe('thread history merge & persistence', () => {
     expect(tool?.delivery).toBe('history')
   })
 
+  it('decodes persisted attachments so uploads survive a reload', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'see this',
+        ts: 1_780_000_000,
+        attachments: [
+          { id: 'att1', type: 'image', name: 'shot.png', size: 1234, mime_type: 'image/png', data: 'BASE64' },
+          { id: 'att2', type: 'doc', name: 'notes.txt', size: 9, mime_type: 'text/plain', data: 'ZZ' },
+        ],
+      },
+    ])
+    const atts = entries[0]?.attachments ?? []
+    expect(atts).toHaveLength(2)
+    // snake_case mime_type -> camelCase mimeType, type narrowed to image/file.
+    expect(atts[0]).toMatchObject({ id: 'att1', type: 'image', mimeType: 'image/png', data: 'BASE64' })
+    expect(atts[1]?.type).toBe('file')
+  })
+
+  it('drops attachment rows missing id or data (unrenderable)', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'x',
+        ts: 1_780_000_000,
+        attachments: [{ id: '', type: 'file', name: 'n', size: 0, mime_type: '', data: 'D' }],
+      },
+    ])
+    expect(entries[0]?.attachments).toBeUndefined()
+  })
+
+  it('marks a transport_failure row as error delivery, not a saved reply', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'do it', ts: 1_780_000_000 },
+      { role: 'assistant', content: 'Keeper request failed: timeout', ts: 1_780_000_000, kind: 'transport_failure' },
+    ])
+    expect(entries[1]?.delivery).toBe('error')
+    // A normal reply on the same role stays 'history'.
+    const ok = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'done', ts: 1_780_000_000 },
+    ])
+    expect(ok[0]?.delivery).toBe('history')
+  })
+
   it('drops tool rows that lack id or name and keeps the rest of the turn', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'hi', ts: 1_780_000_000 },
@@ -290,5 +336,116 @@ describe('R3 producer-assigned message id', () => {
       { role: 'user', content: 'two', ts: 1_780_000_000 },
     ])
     expect(entries[0]?.id).not.toBe(entries[1]?.id)
+  })
+})
+
+describe('RFC-0235 audio clip normalization', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+  })
+
+  function entry(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
+    return {
+      id: 'e-1',
+      role: 'user',
+      source: 'direct_user',
+      label: '사용자',
+      text: 'hello',
+      rawText: 'hello',
+      timestamp: '2026-06-10T00:00:00.000Z',
+      delivery: 'delivered',
+      streamState: null,
+      details: null,
+      ...partial,
+    }
+  }
+
+  it('normalizes snake_case history audio fields with a URL fallback', () => {
+    const clip = normalizeAudioClip({
+      token: 'clip-abc',
+      mime: 'audio/mpeg',
+      duration_sec: 7.5,
+      message_text: 'hello',
+      device_id: 'living-room',
+    })
+    expect(clip).toEqual({
+      token: 'clip-abc',
+      audioUrl: '/api/v1/voice/audio/clip-abc',
+      mime: 'audio/mpeg',
+      durationSec: 7.5,
+      messageText: 'hello',
+      deviceId: 'living-room',
+    })
+  })
+
+  it('preserves an explicit audio_url from SSE payloads', () => {
+    const clip = normalizeAudioClip({
+      token: 'clip-def',
+      audioUrl: 'https://cdn.example/voice/clip-def.mp3',
+      mime: 'audio/mpeg',
+      messageText: 'hi',
+    })
+    expect(clip?.audioUrl).toBe('https://cdn.example/voice/clip-def.mp3')
+  })
+
+  it('returns null for malformed audio objects', () => {
+    expect(normalizeAudioClip(null)).toBeNull()
+    expect(normalizeAudioClip({ token: 'x' })).toBeNull()
+    expect(normalizeAudioClip({ token: 'x', mime: 42 })).toBeNull()
+  })
+
+  it('carries audio clips through REST history into conversation entries', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'hello there',
+        ts: 1_780_000_000,
+        audio: {
+          token: 'hist-clip',
+          mime: 'audio/mpeg',
+          duration_sec: 3,
+          message_text: 'hello there',
+        },
+      },
+    ])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.audio?.token).toBe('hist-clip')
+    expect(entries[0]?.audio?.audioUrl).toBe('/api/v1/voice/audio/hist-clip')
+  })
+
+  it('attaches an SSE audio clip to the matching streaming assistant entry', () => {
+    appendThreadEntry('echo', entry({
+      id: 'reply-1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      text: 'hello operator',
+      rawText: 'hello operator',
+      delivery: 'streaming',
+    }))
+    const attached = attachKeeperAudioClip('echo', {
+      token: 'live-clip',
+      mime: 'audio/mpeg',
+      message_text: 'hello operator',
+      duration_sec: 4,
+    })
+    expect(attached).toBe(true)
+    expect(keeperThreads.value.echo?.[0]?.audio?.token).toBe('live-clip')
+  })
+
+  it('does not attach when no assistant text matches', () => {
+    appendThreadEntry('echo', entry({
+      id: 'reply-1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      text: 'different text',
+      rawText: 'different text',
+    }))
+    const attached = attachKeeperAudioClip('echo', {
+      token: 'live-clip',
+      mime: 'audio/mpeg',
+      message_text: 'hello operator',
+    })
+    expect(attached).toBe(false)
+    expect(keeperThreads.value.echo?.[0]?.audio).toBeUndefined()
   })
 })

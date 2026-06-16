@@ -41,7 +41,7 @@ const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) =>
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
-const noteKeeperChatAppended = vi.fn<(name: string) => void>()
+const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown) => void>()
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -334,7 +334,27 @@ describe('setupSSEReaction reconnect hydration', () => {
     })
     await flushAsyncWork()
 
-    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo')
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined)
+  })
+
+  it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {
+    const { sseStore } = await loadSseStore()
+    const audio = {
+      token: 'clip-1',
+      mime: 'audio/mpeg',
+      message_text: 'hello',
+      duration_sec: 3,
+    }
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_chat_appended',
+      name: 'echo',
+      connector: 'agent',
+      audio,
+    })
+    await flushAsyncWork()
+
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', audio)
   })
 
   it('routes board reaction changes through the board refresh budget', async () => {

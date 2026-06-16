@@ -35,10 +35,6 @@ let clamp01 value =
   Float.max 0.0 (Float.min 1.0 value)
 ;;
 
-let stale_penalty fact =
-  1.0 -. clamp01 fact.stale_factor
-;;
-
 let truth_anchor fact =
   match fact.last_verified_at with
   | Some ts -> ts
@@ -115,7 +111,6 @@ let score_fact
   fact.confidence
   *. recency_factor ~lambda ~now fact.last_accessed
   *. truth_recency_factor ~now fact
-  *. stale_penalty fact
   *. access_factor ~alpha fact.access_count
   *. lexical_relevance ~seed_tokens fact
 ;;

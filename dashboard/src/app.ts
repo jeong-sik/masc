@@ -9,8 +9,6 @@ import { persistentSignal } from './lib/persistent-signal'
 import { ringFocusClasses } from './components/common/ring'
 import { route, initRouter } from './router'
 import {
-  connectSSE,
-  disconnectSSE,
   pauseQueuedOasRuntimeIngress,
   resumeQueuedOasRuntimeIngress,
 } from './sse'
@@ -18,8 +16,6 @@ import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './name
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
-import { dashboardWsOnlyEnabled } from './dashboard-ws-cutover'
-import { startDashboardSseFallback } from './dashboard-transport-fallback'
 import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
@@ -135,12 +131,11 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false
-    // Resolved once per mount; runtime changes require a reload.  The
-    // server-side fanout guarantees every event that hits /sse also hits
-    // the WS external-subscriber path, so turning SSE off is safe when
-    // operators have validated the WS channel in their environment.
-    const wsOnly = dashboardWsOnlyEnabled()
-    const stopSseFallback = startDashboardSseFallback({ wsOnly })
+    // WS/WSS is the sole dashboard transport. The server fans every
+    // broadcast to the WS external-subscriber path, and reconnect re-syncs
+    // via the hello/subscribe snapshot, so the SSE fallback path was
+    // removed (it carried a separate event-id space and caused stale-delta
+    // churn at the WS<->SSE boundary).
 
     // Initialize hash router and compatible deep links
     initRouter()
@@ -188,13 +183,6 @@ export function App() {
           .finally(() => {
             if (cancelled) return
             void connectDashboardWS(route.value)
-            // In cutover mode the WS channel is trusted to carry every
-            // broadcast (it is already registered as an Sse external
-            // subscriber on the server).  Opening the /sse EventSource in
-            // parallel only duplicates delivery; skip it.
-            if (!wsOnly) {
-              connectSSE()
-            }
             resumeQueuedOasRuntimeIngress()
           })
       })
@@ -223,11 +211,7 @@ export function App() {
 
     return () => {
       cancelled = true
-      stopSseFallback()
       disconnectDashboardWS()
-      if (!wsOnly) {
-        disconnectSSE()
-      }
       unsubSSE()
       stopPeriodicRefresh()
       stopErrorCleanup()
@@ -270,7 +254,7 @@ export function App() {
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
     >
       <${SkipLink} />
-      <header class="${compactChromeMode ? 'hidden' : 'relative'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl">
+      <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[1080px]:flex-col max-[1080px]:items-stretch">
           <div class="flex min-w-0 flex-1 items-center gap-3 max-[860px]:flex-wrap">
@@ -284,12 +268,12 @@ export function App() {
               >
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
-              <div class="flex min-w-0 items-stretch overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
-                <div class="flex w-12 shrink-0 flex-col items-center justify-center border-r border-[var(--color-border-default)] bg-[var(--accent-10)] px-2 py-1 font-mono text-3xs font-semibold uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
+              <div class="v2-header-brand flex min-w-0 items-stretch overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+                <div class="v2-header-mark flex w-12 shrink-0 flex-col items-center justify-center border-r border-[var(--color-border-default)] bg-[var(--accent-10)] px-2 py-1 font-display text-2xs font-semibold uppercase leading-none tracking-[0.12em] text-[var(--color-accent-fg)]">
                   MASC
                 </div>
                 <div class="min-w-0 px-2.5 py-1">
-                  <div class="flex items-center gap-1.5 font-mono text-[var(--fs-9)] uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+                  <div class="v2-header-crumb flex items-center gap-1.5 font-ui text-[var(--fs-10)] uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
                     <span>${currentView?.label ?? 'Surface'}</span>
                     ${currentSection && currentSection.label !== currentView?.label
                       ? html`
@@ -298,7 +282,7 @@ export function App() {
                         `
                       : null}
                   </div>
-                  <h1 class="mt-1 min-w-0 truncate text-xs font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
+                  <h1 class="v2-header-title mt-1 min-w-0 truncate font-display text-xs font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
                     ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
                   </h1>
                 </div>
@@ -308,7 +292,7 @@ export function App() {
             <${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
           </div>
 
-          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
+          <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
             <${EmergencyStopControl} />
             <${Suspense} fallback=${authStatusFallback()}>
               <${LazyAuthStatus} />
@@ -351,7 +335,7 @@ export function App() {
             ${mobileMenuOpen.value ? html`
               <button type="button" aria-label="Close navigation" tabindex=${-1} class="hidden max-[768px]:block fixed inset-0 z-40 cursor-pointer bg-black/50" onClick=${() => { mobileMenuOpen.value = false }}></button>
             ` : null}
-            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 max-[768px]:fixed max-[768px]:inset-y-0 max-[768px]:left-0 max-[768px]:z-50 max-[768px]:m-0 max-[768px]:w-72 max-[768px]:max-h-none max-[768px]:rounded-none max-[768px]:border-r ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="v2-shell-rail ${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 max-[768px]:fixed max-[768px]:inset-y-0 max-[768px]:left-0 max-[768px]:z-50 max-[768px]:m-0 max-[768px]:w-72 max-[768px]:max-h-none max-[768px]:rounded-none max-[768px]:border-r ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
               <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
             </aside>
           `}

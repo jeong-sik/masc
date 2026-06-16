@@ -94,12 +94,12 @@ describe('AgentRuntimeStrip', () => {
       context_ratio: null,
       generation: null,
     })
-    mockKeeperDisplayModel.mockReturnValue({ label: 'Model', value: 'agent-llm-a-4' })
+    mockKeeperDisplayModel.mockReturnValue({ label: 'Model', value: 'claude-4' })
     mockKeeperActivityDisplay.mockReturnValue({ ageSeconds: null, label: '' })
     const container = document.createElement('div')
     render(h(AgentRuntimeStrip, { name: 'Alpha' }), container)
     expect(container.textContent).toContain('Model')
-    expect(container.textContent).toContain('agent-llm-a-4')
+    expect(container.textContent).toContain('claude-4')
   })
 
   it('renders activity when ageSeconds present', () => {

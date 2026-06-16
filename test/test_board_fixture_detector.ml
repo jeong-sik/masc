@@ -65,7 +65,7 @@ let test_real_keeper_names_not_flagged () =
     "post:p-abc:keeper-taskmaster-agent";
     "post:p-abc:sangsu";
     "post:p-abc:anyang-keepers";
-    "post:p-abc:agent_code-mcp-client";
+    "post:p-abc:codex-mcp-client";
     "post:p-abc:keeper-alert-bot";
     "post:p-abc:keeper-ramarama-agent";
     "post:p-abc:nick0cave";

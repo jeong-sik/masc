@@ -10,6 +10,7 @@ let default_max_episodes = 2
    without crowding out keeper-local memory. *)
 let default_max_shared_facts = 4
 let fact_tail_scan = 64
+let episode_tail_scan = 32
 let max_fact_text_len = 260
 let max_episode_text_len = 360
 let max_atom_len = 48
@@ -88,22 +89,69 @@ let sanitize_atom text =
     | c -> c)
 ;;
 
-let fact_is_current ~now fact =
+let fact_is_current ~now (fact : fact) =
   match fact.valid_until with
   | None -> true
   | Some ts -> ts >= now
+;;
+
+let episode_is_current ~now (episode : episode) =
+  match episode.valid_until with
+  | None -> true
+  | Some ts -> ts >= now
+;;
+
+(* Staleness horizon: a fact whose truth anchor is older than this is annotated
+   so the reader re-verifies before asserting it as live. One day mirrors the
+   ephemeral TTL horizon in [Keeper_memory_os_types]. *)
+let staleness_note_seconds = 86_400.0
+
+(* Coarse natural-language age. The prior recall line printed [stale=%.2f] from
+   the [stale_factor] field, but no keeper producer ever writes a non-zero
+   stale_factor (RFC-0244 staleness lives in [last_verified_at] / truth-recency),
+   so it rendered a constant [stale=0.00] that falsely signalled "fresh" on facts
+   of any age. A raw float also fails to trigger an LLM's staleness reasoning the
+   way a worded age does — the reader skips [stale=0.00] but reads "unverified
+   12d". So derive age from the truth anchor and render it in words. *)
+let humanize_age seconds =
+  let seconds = Float.max 0.0 seconds in
+  if seconds >= 86_400.0
+  then Printf.sprintf "%dd" (int_of_float (seconds /. 86_400.0))
+  else if seconds >= 3_600.0
+  then Printf.sprintf "%dh" (int_of_float (seconds /. 3_600.0))
+  else Printf.sprintf "%dm" (int_of_float (seconds /. 60.0))
+;;
+
+(* "" when the fact is recent enough that an age note would be noise (the
+   claude-code memoryAge insight: warn only past a threshold). Otherwise a
+   self-delimited bracket distinguishing never-verified facts (anchored on
+   [first_seen]) from facts confirmed long ago (anchored on [last_verified_at]). *)
+let staleness_marker ~now (fact : fact) =
+  let anchor =
+    match fact.last_verified_at with
+    | Some ts -> ts
+    | None -> fact.first_seen
+  in
+  let age = now -. anchor in
+  if age < staleness_note_seconds
+  then ""
+  else (
+    let age_text = humanize_age age in
+    match fact.last_verified_at with
+    | Some _ -> Printf.sprintf " [stale: last verified %s ago — verify]" age_text
+    | None -> Printf.sprintf " [stale: unverified, seen %s ago — verify]" age_text)
 ;;
 
 let render_fact ~now ?(seed_tokens = []) fact =
   let score = Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact in
   let source = fact.source in
   Printf.sprintf
-    "- [category=%s confidence=%.2f stale=%.2f score=%.3f turn=%d] %s"
+    "- [category=%s confidence=%.2f score=%.3f turn=%d]%s %s"
     (sanitize_atom (category_to_string fact.category))
     fact.confidence
-    fact.stale_factor
     score
     source.turn
+    (staleness_marker ~now fact)
     (sanitize_text ~max_len:max_fact_text_len fact.claim)
 ;;
 
@@ -118,19 +166,26 @@ let render_shared_fact ~now ?(seed_tokens = []) fact =
     | keepers -> "shared via " ^ String.concat "," (List.map sanitize_atom keepers)
   in
   Printf.sprintf
-    "- [%s category=%s confidence=%.2f score=%.3f] %s"
+    "- [%s category=%s confidence=%.2f score=%.3f]%s %s"
     provenance
     (sanitize_atom (category_to_string fact.category))
     fact.confidence
     score
+    (staleness_marker ~now fact)
     (sanitize_text ~max_len:max_fact_text_len fact.claim)
 ;;
 
 let render_episode episode =
+  let terminal =
+    match episode.terminal_marker with
+    | None -> ""
+    | Some marker -> Printf.sprintf " terminal=%s" (sanitize_atom marker)
+  in
   Printf.sprintf
-    "- [%s g%04d] %s"
+    "- [%s g%04d%s] %s"
     (sanitize_atom episode.trace_id)
     episode.generation
+    terminal
     (sanitize_text ~max_len:max_episode_text_len episode.episode_summary)
 ;;
 
@@ -260,7 +315,13 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = 
       |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
       |> take default_max_shared_facts
   in
-  let episodes = Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n:max_episodes in
+  let episodes =
+    Keeper_memory_os_io.read_episodes_tail
+      ~keeper_id
+      ~n:(max max_episodes episode_tail_scan)
+    |> List.filter (episode_is_current ~now)
+    |> take max_episodes
+  in
   match facts, shared_facts, episodes with
   | [], [], [] -> ""
   | _ ->

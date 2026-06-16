@@ -21,8 +21,8 @@
 val normalize_model_name : string -> string
 (** [normalize_model_name s] trims whitespace and strips the
     [":latest"] suffix when present.  Used by the keeper-detail
-    aggregator to dedupe model labels (e.g. ["agent_llm_a-sonnet"] vs
-    ["agent_llm_a-sonnet:latest"]). *)
+    aggregator to dedupe model labels (e.g. ["claude-sonnet"] vs
+    ["claude-sonnet:latest"]). *)
 
 (** {1 Per-keeper window statistics (runtime-visible)} *)
 

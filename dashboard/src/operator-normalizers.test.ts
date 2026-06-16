@@ -135,7 +135,7 @@ describe('normalizeOperatorDigest', () => {
         status: 'complete',
         confidence: 0.85,
         model_name: 'gpt-4.1',
-        runtime_name: 'provider-d',
+        runtime_name: 'openai',
       },
     })
     expect(result.judgment).not.toBeNull()
@@ -238,7 +238,7 @@ describe('normalizeOperatorSnapshot', () => {
           pipeline_stage: 'paused',
           paused: true,
           generation: 10,
-          active_model: 'agent-llm-a-sonnet',
+          active_model: 'claude-sonnet',
         },
         { name: 'dreamer', status: 'Idle' },
       ],

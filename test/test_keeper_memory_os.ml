@@ -61,7 +61,6 @@ let fact_fixture ~now () =
   ; Types.first_seen = now -. 86400.0
   ; Types.last_accessed = now -. 3600.0
   ; Types.valid_until = None
-  ; Types.stale_factor = 0.0
   ; Types.last_verified_at = Some (now -. 3600.0)
   ; Types.expected_lifetime_cycles = None
   ; Types.schema_version = Types.schema_version
@@ -197,6 +196,8 @@ let episode_fixture ~now ~trace_id ~generation ~summary =
   ; Types.preserved_tool_refs = []
   ; Types.source_turn_range = Some (0, 0)
   ; Types.created_at = now
+  ; Types.valid_until = None
+  ; Types.terminal_marker = None
   ; Types.schema_version = Types.schema_version
   }
 ;;
@@ -209,7 +210,6 @@ let test_json_roundtrip () =
   Alcotest.(check (float 0.001)) "confidence round-trip" f.confidence f2.Types.confidence;
   Alcotest.(check int) "access_count round-trip" f.access_count f2.Types.access_count;
   Alcotest.(check (float 0.001)) "first_seen round-trip" f.first_seen f2.Types.first_seen;
-  Alcotest.(check (float 0.001)) "stale_factor round-trip" f.stale_factor f2.Types.stale_factor;
   Alcotest.(check (option (float 0.001)))
     "last_verified_at round-trip"
     f.last_verified_at
@@ -224,6 +224,8 @@ let test_json_roundtrip () =
     ; Types.preserved_tool_refs = [ "call_a" ]
     ; Types.source_turn_range = Some (5, 5)
     ; Types.created_at = now
+    ; Types.valid_until = Some (now +. days 1)
+    ; Types.terminal_marker = Some "handoff_complete"
     ; Types.schema_version = Types.schema_version
     }
   in
@@ -233,7 +235,15 @@ let test_json_roundtrip () =
     e.episode_summary
     e2.Types.episode_summary;
   Alcotest.(check int) "claims length" 1 (List.length e2.Types.claims);
-  Alcotest.(check int) "open_items length" 1 (List.length e2.Types.open_items)
+  Alcotest.(check int) "open_items length" 1 (List.length e2.Types.open_items);
+  Alcotest.(check (option (float 0.001)))
+    "episode valid_until round-trip"
+    e.valid_until
+    e2.Types.valid_until;
+  Alcotest.(check (option string))
+    "episode terminal_marker round-trip"
+    e.terminal_marker
+    e2.Types.terminal_marker
 ;;
 
 let test_fact_v1_json_defaults_to_safe_staleness_fields () =
@@ -252,7 +262,6 @@ let test_fact_v1_json_defaults_to_safe_staleness_fields () =
   match Types.fact_of_json json with
   | None -> Alcotest.fail "expected legacy fact to parse"
   | Some fact ->
-    Alcotest.(check (float 0.001)) "default stale factor" 0.0 fact.Types.stale_factor;
     Alcotest.(check (option (float 0.001))) "missing last_verified_at" None fact.last_verified_at;
     Alcotest.(check (option int)) "missing lifetime cycles" None fact.expected_lifetime_cycles
 ;;
@@ -1012,15 +1021,7 @@ let test_policy_truth_age_not_reset_by_access () =
   Alcotest.(check bool)
     "truth-stale fact cannot be revived by access count"
     true
-    (Policy.score_fact ~now stale_but_frequently_recalled < Policy.score_fact ~now fresh);
-  let explicitly_stale = { fresh with Types.stale_factor = 1.0 } in
-  Alcotest.(check (float 0.001))
-    "stale_factor=1 zeroes score"
-    0.0
-    (Policy.score_fact ~now explicitly_stale);
-  match Policy.decide_retention (Policy.score_fact ~now explicitly_stale) with
-  | Policy.Discard -> ()
-  | Policy.KeepVerbatim -> Alcotest.fail "expected explicit stale fact to be discarded"
+    (Policy.score_fact ~now stale_but_frequently_recalled < Policy.score_fact ~now fresh)
 ;;
 
 let test_bump_access () =
@@ -1208,10 +1209,10 @@ let test_gc_dry_run_and_rewrite () =
       ; Types.valid_until = Some (now -. 1.0)
       }
     in
-    let explicit_stale =
+    let low_confidence =
       { keep with
-        Types.claim = "explicitly stale fact"
-      ; Types.stale_factor = 1.0
+        Types.claim = "low confidence fact"
+      ; Types.confidence = 0.0
       }
     in
     let duplicate_low =
@@ -1230,7 +1231,7 @@ let test_gc_dry_run_and_rewrite () =
     in
     List.iter
       (Memory_io.append_fact ~keeper_id)
-      [ keep; expired; explicit_stale; duplicate_low; duplicate_high ];
+      [ keep; expired; low_confidence; duplicate_low; duplicate_high ];
     let dry = GC.run_gc ~dry_run:true ~keeper_id ~now () in
     Alcotest.(check bool) "dry-run flag" true dry.GC.dry_run;
     Alcotest.(check int) "dry-run leaves file untouched" 5
@@ -1321,6 +1322,8 @@ let test_render_if_enabled_renders_persisted_memory () =
           ; Types.preserved_tool_refs = []
           ; Types.source_turn_range = Some (1, 2)
           ; Types.created_at = now
+          ; Types.valid_until = None
+          ; Types.terminal_marker = None
           ; Types.schema_version = Types.schema_version
           }
         in
@@ -1332,6 +1335,66 @@ let test_render_if_enabled_renders_persisted_memory () =
             "block carries the persisted claim"
             true
             (contains "Gated recall should surface saved facts" block))))
+;;
+
+(* An old, never-verified fact is rendered with a worded staleness marker that
+   names the age and asks for verification — the anti-confabulation cue. The
+   prior [stale=%.2f] annotation was always 0.00 (no producer writes it), so this
+   guards the truth-anchored age rendering that replaced it. *)
+let test_recall_marks_stale_fact () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "stale-fact-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "Function frobnicate lives in widget.ml"
+          ; Types.first_seen = now -. days 12
+          ; Types.last_verified_at = None
+          }
+        in
+        Memory_io.append_fact ~keeper_id fact;
+        match Recall.render_if_enabled ~keeper_id ~now () with
+        | None -> Alcotest.fail "expected Some block for a persisted stale fact"
+        | Some block ->
+          Alcotest.(check bool)
+            "stale fact carries a worded staleness marker"
+            true
+            (contains "[stale: unverified, seen 12d ago — verify]" block);
+          Alcotest.(check bool)
+            "dead stale=0.00 float annotation is gone"
+            false
+            (contains "stale=0.00" block))))
+;;
+
+(* A freshly-verified fact gets no staleness marker — the note fires only past
+   the threshold so recent facts stay noise-free. *)
+let test_recall_omits_marker_for_fresh_fact () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "fresh-fact-keeper" in
+        let now = 1_000_000.0 in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "User prefers terse output"
+          ; Types.first_seen = now -. days 30
+          ; Types.last_verified_at = Some now
+          }
+        in
+        Memory_io.append_fact ~keeper_id fact;
+        match Recall.render_if_enabled ~keeper_id ~now () with
+        | None -> Alcotest.fail "expected Some block for a persisted fresh fact"
+        | Some block ->
+          (* Match the rendered marker's tail ("...ago — verify]"), not the bare
+             "[stale:" token — the recall wrapper prompt itself contains the
+             literal example "[stale: ... — verify]" (no age), so a looser check
+             would match the advisory prose rather than an actual fact marker. *)
+          Alcotest.(check bool)
+            "fresh fact carries no staleness marker"
+            false
+            (contains "ago — verify]" block))))
 ;;
 
 (* RFC-0244: a seed reranks recall — the lexically matching fact is lifted above a
@@ -1367,6 +1430,8 @@ let test_render_context_seed_reranks_selection () =
           ; Types.preserved_tool_refs = []
           ; Types.source_turn_range = Some (1, 2)
           ; Types.created_at = now
+          ; Types.valid_until = None
+          ; Types.terminal_marker = None
           ; Types.schema_version = Types.schema_version
           }
         in
@@ -1408,6 +1473,8 @@ let test_render_context_empty_seed_matches_seedless () =
           ; Types.preserved_tool_refs = []
           ; Types.source_turn_range = Some (1, 2)
           ; Types.created_at = now
+          ; Types.valid_until = None
+          ; Types.terminal_marker = None
           ; Types.schema_version = Types.schema_version
           }
         in
@@ -1416,6 +1483,71 @@ let test_render_context_empty_seed_matches_seedless () =
           "empty seed is byte-identical to seedless"
           (Recall.render_context ~keeper_id ~now ())
           (Recall.render_context ~keeper_id ~now ~seed:"" ()))))
+;;
+
+let test_recall_filters_expired_episodes () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "episode-ttl-keeper" in
+      let now = 1_000_000.0 in
+      let expired =
+        { (episode_fixture
+             ~now
+             ~trace_id:"trace-expired"
+             ~generation:1
+             ~summary:"expired episode should not render")
+          with
+          Types.valid_until = Some (now -. 1.0)
+        }
+      in
+      let active =
+        { (episode_fixture
+             ~now
+             ~trace_id:"trace-active"
+             ~generation:2
+             ~summary:"active episode should render")
+          with
+          Types.valid_until = Some (now +. 1.0)
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id expired;
+      Memory_io.append_episode_bundle ~keeper_id active;
+      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:0 ~max_episodes:4 () in
+      Alcotest.(check bool)
+        "expired episode summary is omitted"
+        false
+        (contains "expired episode should not render" ctx);
+      Alcotest.(check bool)
+        "active episode summary remains"
+        true
+        (contains "active episode should render" ctx)))
+;;
+
+let test_recall_renders_terminal_episode_marker () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "episode-terminal-keeper" in
+      let now = 1_000_000.0 in
+      let episode =
+        { (episode_fixture
+             ~now
+             ~trace_id:"trace-terminal"
+             ~generation:3
+             ~summary:"terminal handoff summary")
+          with
+          Types.terminal_marker = Some "handoff_complete"
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id episode;
+      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:0 ~max_episodes:1 () in
+      Alcotest.(check bool)
+        "terminal marker is visible in episode line"
+        true
+        (contains "terminal=handoff_complete" ctx);
+      Alcotest.(check bool)
+        "terminal summary still renders"
+        true
+        (contains "terminal handoff summary" ctx)))
 ;;
 
 (* RFC-0239 R2: the append-only store keeps every re-confirmation of a claim as
@@ -1454,6 +1586,8 @@ let test_recall_dedups_repeated_claim () =
         ; Types.preserved_tool_refs = []
         ; Types.source_turn_range = Some (1, 9)
         ; Types.created_at = now
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
         ; Types.schema_version = Types.schema_version
         }
       in
@@ -1545,6 +1679,8 @@ let test_recall_context_renders_sanitized_memory () =
         ; Types.preserved_tool_refs = []
         ; Types.source_turn_range = Some (4, 6)
         ; Types.created_at = now
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
         ; Types.schema_version = Types.schema_version
         }
       in
@@ -1611,6 +1747,8 @@ let test_recall_context_preserves_admission_memory () =
         ; Types.preserved_tool_refs = []
         ; Types.source_turn_range = Some (7, 7)
         ; Types.created_at = now
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
         ; Types.schema_version = Types.schema_version
         }
       in
@@ -1624,6 +1762,8 @@ let test_recall_context_preserves_admission_memory () =
         ; Types.preserved_tool_refs = []
         ; Types.source_turn_range = Some (8, 8)
         ; Types.created_at = now +. 1.0
+        ; Types.valid_until = None
+        ; Types.terminal_marker = None
         ; Types.schema_version = Types.schema_version
         }
       in
@@ -2076,6 +2216,8 @@ let mk_episode ?(trace_id = "trace-ep") ?(generation = 0) ~created_at claim_stri
   ; Types.preserved_tool_refs = []
   ; Types.source_turn_range = None
   ; Types.created_at
+  ; Types.valid_until = None
+  ; Types.terminal_marker = None
   ; Types.schema_version = Types.schema_version
   }
 ;;
@@ -2498,6 +2640,14 @@ let () =
             `Quick
             test_render_if_enabled_renders_persisted_memory
         ; Alcotest.test_case
+            "stale fact gets a worded staleness marker"
+            `Quick
+            test_recall_marks_stale_fact
+        ; Alcotest.test_case
+            "fresh fact gets no staleness marker"
+            `Quick
+            test_recall_omits_marker_for_fresh_fact
+        ; Alcotest.test_case
             "seed reranks recall selection (RFC-0244)"
             `Quick
             test_render_context_seed_reranks_selection
@@ -2505,6 +2655,14 @@ let () =
             "empty seed matches seedless (RFC-0244)"
             `Quick
             test_render_context_empty_seed_matches_seedless
+        ; Alcotest.test_case
+            "expired episodes are omitted"
+            `Quick
+            test_recall_filters_expired_episodes
+        ; Alcotest.test_case
+            "terminal episode marker is rendered"
+            `Quick
+            test_recall_renders_terminal_episode_marker
         ; Alcotest.test_case
             "dedups repeated claim (RFC-0239 R2)"
             `Quick

@@ -108,7 +108,7 @@ let agent_status_of_yojson = function
 (** Agent metadata - session identification and environment info *)
 type agent_meta = {
   session_id: string;                     (* short UUID for unique identification *)
-  agent_type: string;                     (* agent_llm_a, provider_f, agent_code *)
+  agent_type: string;                     (* claude, gemini, codex *)
   pid: int option; [@default None]        (* process ID *)
   hostname: string option; [@default None] (* machine hostname *)
   tty: string option; [@default None]     (* terminal identifier *)
@@ -120,8 +120,8 @@ type agent_meta = {
 (** Agent info *)
 type agent = {
   id: Agent_id.t option; [@default None]  (* permanent UUID *)
-  name: string;                           (* unique nickname: agent_llm_a-swift-fox *)
-  agent_type: string; [@default "unknown"] (* original type: agent_llm_a, provider_f, agent_code *)
+  name: string;                           (* unique nickname: claude-swift-fox *)
+  agent_type: string; [@default "unknown"] (* original type: claude, gemini, codex *)
   status: agent_status;
   capabilities: string list;
   current_task: string option; [@default None]

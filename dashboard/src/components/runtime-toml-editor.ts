@@ -180,6 +180,7 @@ export function RuntimeTomlEditor() {
 
   return html`
     <${SectionCard}
+      class="v2-monitoring-panel"
       label="runtime.toml"
       testId="runtime-toml-editor"
       right=${html`

@@ -42,7 +42,7 @@ describe('RuntimeMonitor', () => {
           provider_display_name: 'RunPod MTP',
           model_id: 'qwen',
           model_api_name: 'Qwen/Qwen3-32B',
-          protocol: 'provider_d-http',
+          protocol: 'openai-http',
           transport: 'http',
           kind: 'cloud',
           runtime_kind: 'http',

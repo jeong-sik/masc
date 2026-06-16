@@ -2102,17 +2102,14 @@ observation and fix — silent cost of the pre-fix contract shape.
   vars are now declarative. `config/keepers/<name>.toml` accepts a new
   `[keeper.oas_env]` table whose entries are applied via `Unix.putenv`
   at turn start, right before any OAS call. Keys must match
-  `^OAS_(CLAUDE|CODEX|GEMINI)_.+` — anything else is silently dropped
+  current OAS env naming — anything else is silently dropped
   to block ambient env injection (e.g. a `PATH=/evil/bin` entry in a
   TOML cannot reach the process). Bool / int TOML values coerce to
   strings (`true` → `"1"`, `false` → `"0"`) so the OAS transport
   build_args side reads them uniformly.
-  - Default applied to all four built-in keepers (`analyst`, `executor`,
-    `scholar`, `verifier`): `OAS_CLAUDE_STRICT_MCP=1` +
-    `OAS_GEMINI_NO_MCP=1` — keeper subprocess calls no longer pull in
-    ambient MCP servers from the operator's `~/.claude.json` /
-    `~/.gemini/settings.json`, keeping behaviour deterministic across
-    deployments.
+  - Built-in keepers no longer inject transport-specific OAS env defaults.
+    MCP / approval policy now lives at the OAS transport/config boundary,
+    keeping keeper behavior deterministic without stale provider aliases.
   - `merge_keeper_profile_defaults` merges `oas_env` key-by-key: a
     persona-level base survives where the keeper TOML overlay doesn't
     override.

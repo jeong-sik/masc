@@ -43,7 +43,7 @@ let normalize_provider_id provider_id =
 let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind) =
   let base = [ ("Content-Type", "application/json") ] in
   match kind with
-  | Anthropic -> ("provider_a-version", "2023-06-01") :: base
+  | Anthropic -> ("anthropic-version", "2023-06-01") :: base
   | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base
 ;;
 

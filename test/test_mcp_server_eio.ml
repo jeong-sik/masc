@@ -952,7 +952,7 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
   let _bound =
-    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"codex" ~capabilities:[] ()
   in
   let _added =
     Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"managed-claim"
@@ -1131,7 +1131,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
   let _bound =
-    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"codex" ~capabilities:[] ()
   in
   ignore
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-claim"
@@ -1186,7 +1186,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
   let _bound =
-    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"codex" ~capabilities:[] ()
   in
   ignore
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-done"
@@ -1253,7 +1253,7 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
   let _bound =
-    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"agent_code" ~capabilities:[] ()
+    Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"codex" ~capabilities:[] ()
   in
   ignore
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"deprecated-claim"
@@ -1467,18 +1467,18 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
       ~workspace_initialized:(fun () -> false)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
-  let agent_code =
-    resolve (`Assoc [ ("agent_name", `String "agent_code") ])
+  let codex =
+    resolve (`Assoc [ ("agent_name", `String "codex") ])
   in
   Alcotest.(check string)
     "tool-domain agent_name does not override cached caller"
-    "cached-stale-nickname" agent_code.agent_name;
-  let provider_f =
-    resolve (`Assoc [ ("_agent_name", `String "provider_f"); ("agent_name", `String "agent_code") ])
+    "cached-stale-nickname" codex.agent_name;
+  let gemini =
+    resolve (`Assoc [ ("_agent_name", `String "gemini"); ("agent_name", `String "codex") ])
   in
   Alcotest.(check string)
     "internal _agent_name is caller over tool-domain agent_name"
-    "provider_f" provider_f.agent_name;
+    "gemini" gemini.agent_name;
   let cached = resolve (`Assoc []) in
   Alcotest.(check string)
     "cached session identity wins over generated fallback"
@@ -1552,12 +1552,12 @@ let test_execute_tool_internal_agent_name_is_caller_identity () =
        (`Assoc
          [
            ("_agent_name", `String "stable-admin");
-           ("agent_name", `String "agent_llm_a");
+           ("agent_name", `String "claude");
          ]));
   Alcotest.(check (option string))
     "agent_name is not caller fallback"
     None
-    (resolve (`Assoc [ ("agent_name", `String "agent_llm_a") ]));
+    (resolve (`Assoc [ ("agent_name", `String "claude") ]));
   Alcotest.(check (option string))
     "unknown internal marker does not fall back to agent_name"
     None
@@ -1565,7 +1565,7 @@ let test_execute_tool_internal_agent_name_is_caller_identity () =
        (`Assoc
          [
            ("_agent_name", `String "unknown");
-           ("agent_name", `String "agent_llm_a");
+           ("agent_name", `String "claude");
          ]))
 
 let check_task_still_todo config task_id =
@@ -2671,7 +2671,7 @@ let test_handle_request_resources_read_matrix () =
     {|---
 title: Alpha Doc
 source: https://example.com/alpha
-verified_by: agent_code
+verified_by: codex
 date: 2026-03-12
 tags: [alpha, keeper]
 ---

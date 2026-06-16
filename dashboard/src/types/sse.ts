@@ -226,6 +226,23 @@ export interface SSEEvent {
   audit_summary?: string
   audit_severity?: string
   audit_payload?: unknown
+  // RFC-0235 P1/P3: synthesized voice clip attached to keeper_chat_appended.
+  // Backend emits `audio: { token, mime, message_text, audio_url?,
+  // duration_sec?, device_id? }`. Optional; assistant transcript rows
+  // render a user-gesture play button when present.
+  audio?: SSEAudioClip
+}
+
+// RFC-0235 P1: nested audio payload inside `keeper_chat_appended` events.
+// Naming mirrors the backend JSON keys; normalizers map to camelCase on
+// the way into `KeeperConversationAudioClip`.
+export interface SSEAudioClip {
+  token: string
+  mime: string
+  message_text: string
+  audio_url?: string | null
+  duration_sec?: number | null
+  device_id?: string | null
 }
 
 // --- Journal ---

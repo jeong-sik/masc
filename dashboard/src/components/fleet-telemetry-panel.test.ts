@@ -28,7 +28,7 @@ const executionResponse = {
       total_turns: 9,
       last_latency_ms: 980,
       last_activity_ago_s: 320,
-      last_model_used: 'provider-k-5',
+      last_model_used: 'glm-5',
       recent_tool_names: [],
     },
   ],
@@ -472,7 +472,7 @@ describe('FleetTelemetryPanel', () => {
         metrics_series: [
           {
             ...metricSeriesPoint,
-            model_used: 'provider-k-5.1',
+            model_used: 'glm-5.1',
           },
         ],
       },
@@ -700,7 +700,7 @@ describe('FleetTelemetryPanel', () => {
           metrics_series: [
             {
               ...metricSeriesPoint,
-              model_used: 'provider-k-5.1',
+              model_used: 'glm-5.1',
             },
           ],
         },
@@ -722,7 +722,7 @@ describe('FleetTelemetryPanel', () => {
 
     expect(container.textContent).toContain('3 tool calls')
     expect(container.textContent).not.toContain('최근 도구 기록 없음')
-    expect(container.textContent).not.toContain('provider-k-5.1')
+    expect(container.textContent).not.toContain('glm-5.1')
   })
 
   it('shows partial telemetry warnings without treating tool quality as runtime state', async () => {

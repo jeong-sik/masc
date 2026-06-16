@@ -151,7 +151,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
   }, [filtered.length])
 
   return html`
-    <div class="flex flex-col gap-2">
+    <div class="v2-monitoring-detail flex flex-col gap-2">
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <${FilterChips} chips=${FILTER_CHIPS} active=${activeFilter} />
         <div class="flex items-center gap-2 text-2xs">

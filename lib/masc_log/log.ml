@@ -15,6 +15,50 @@ type source =
 
 type event_class = Routine
 
+type category =
+  | Fsm
+  | Lifecycle
+  | Directive
+  | Heartbeat
+  | Presence
+  | Task
+  | Tool
+  | Memory
+  | Telemetry
+  | Routine
+  | Boundary
+  | Uncategorized
+
+let category_to_string : category -> string = function
+  | Fsm -> "fsm"
+  | Lifecycle -> "lifecycle"
+  | Directive -> "directive"
+  | Heartbeat -> "heartbeat"
+  | Presence -> "presence"
+  | Task -> "task"
+  | Tool -> "tool"
+  | Memory -> "memory"
+  | Telemetry -> "telemetry"
+  | Routine -> "routine"
+  | Boundary -> "boundary"
+  | Uncategorized -> "uncategorized"
+
+let category_of_string_opt s : category option =
+  match String.lowercase_ascii (String.trim s) with
+  | "fsm" -> Some Fsm
+  | "lifecycle" -> Some Lifecycle
+  | "directive" -> Some Directive
+  | "heartbeat" -> Some Heartbeat
+  | "presence" -> Some Presence
+  | "task" -> Some Task
+  | "tool" -> Some Tool
+  | "memory" -> Some Memory
+  | "telemetry" -> Some Telemetry
+  | "routine" -> Some Routine
+  | "boundary" -> Some Boundary
+  | "uncategorized" -> Some Uncategorized
+  | _ -> None
+
 (** Current log level (Atomic for thread safety in OCaml 5) *)
 let current_level = Atomic.make 1 (* Info = 1 *)
 
@@ -55,7 +99,7 @@ let source_to_string = function
   | Legacy_traceln -> "legacy_traceln"
   | Client_tool_host -> "client_tool_host"
 
-let event_class_to_string = function
+let event_class_to_string : event_class -> string = function
   | Routine -> "routine"
 
 let has_prefix ~prefix value = String.starts_with ~prefix value
@@ -174,6 +218,7 @@ module Ring = struct
     turn_id : int option;
     message : string;
     details : Yojson.Safe.t;
+    category : category option;
   }
 
   (* Dashboard operators commonly inspect tool-call history over hours, not
@@ -191,6 +236,7 @@ module Ring = struct
       turn_id = None;
       message = "";
       details = `Null;
+      category = None;
     }
   let total = Atomic.make 0 (* total entries ever written *)
 
@@ -257,6 +303,10 @@ module Ring = struct
       | Some i -> `Int i
       | None -> `Null
     in
+    let category_json = match e.category with
+      | Some c -> `String (category_to_string c)
+      | None -> `Null
+    in
     `Assoc [
       ("seq", `Int e.seq);
       ("ts", `String e.ts);
@@ -267,6 +317,7 @@ module Ring = struct
       ("turn_id", turn_id_json);
       ("message", `String e.message);
       ("details", e.details);
+      ("category", category_json);
     ]
 
   let sink_matches_path path oc =
@@ -441,10 +492,16 @@ module Ring = struct
                    (Printf.sprintf "field turn_id: expected int or null, got %s"
                       (Yojson.Safe.to_string other)))
         in
+        let category =
+          match Yojson.Safe.Util.member "category" json with
+          | `String s -> category_of_string_opt s
+          | _ -> None
+        in
         {
           seq; ts; level; source; module_name;
           keeper_name; turn_id; message;
           details = Yojson.Safe.Util.member "details" json;
+          category;
         }
     | _ ->
         raise
@@ -547,6 +604,7 @@ module Ring = struct
       ?(details = `Null)
       ?keeper_name
       ?turn_id
+      ?category
       ~level
       ~module_name
       ~message
@@ -563,6 +621,7 @@ module Ring = struct
         turn_id;
         message;
         details;
+        category;
       } in
     buf.(idx) <- entry;
     if !file_channel <> None then
@@ -570,7 +629,10 @@ module Ring = struct
 
   let recent ?(limit = 200) ?(min_level = 0) ?(module_filter = "")
       ?since_seq
-      ?(order = `Newest_first) () : entry list =
+      ?(order = `Newest_first)
+      ?category_filter
+      ?exclude_category
+      () : entry list =
     let t = Atomic.get total in
     if t = 0 then []
     else begin
@@ -589,7 +651,30 @@ module Ring = struct
         let module_ok = module_filter = "" ||
           String.lowercase_ascii e.module_name =
           String.lowercase_ascii module_filter in
-        if level_ok && module_ok then begin
+        let category_ok =
+          match category_filter with
+          | None -> true
+          | Some filter ->
+              let filter_lower = String.lowercase_ascii filter in
+              if String.equal filter_lower "uncategorized" then
+                Option.is_none e.category
+              else
+                match e.category with
+                | Some c -> String.equal (category_to_string c) filter_lower
+                | None -> false
+        in
+        let exclude_ok =
+          match exclude_category with
+          | None -> true
+          | Some cats ->
+              match e.category with
+              | None -> true
+              | Some c ->
+                  let c_lower = String.lowercase_ascii (category_to_string c) in
+                  not (List.exists (fun ex ->
+                    String.equal c_lower (String.lowercase_ascii ex)) cats)
+        in
+        if level_ok && module_ok && category_ok && exclude_ok then begin
           entries := e :: !entries;
           incr count
         end;
@@ -672,7 +757,7 @@ module Ring = struct
 end
 
 (** Log a message at given level with optional context *)
-let log level ?(ctx : string option) fmt =
+let log level ?(ctx : string option) ?category fmt =
   Printf.ksprintf (fun msg ->
     if should_log level then begin
       let level_str = level_to_string level in
@@ -682,11 +767,11 @@ let log level ?(ctx : string option) fmt =
         | None -> Printf.sprintf "[%s] [%s]" (timestamp ()) level_str
       in
       Console_sink.write (prefix ^ " " ^ msg);
-      Ring.push ~level ~module_name ~message:msg ()
+      Ring.push ~level ~module_name ~message:msg ?category ()
     end
   ) fmt
 
-let emit level ?(module_name = "") ?(details = `Null) message =
+let emit level ?(module_name = "") ?(details = `Null) ?category message =
   if should_log level then begin
     let level_str = level_to_string level in
     let prefix =
@@ -696,7 +781,7 @@ let emit level ?(module_name = "") ?(details = `Null) message =
         Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) level_str module_name
     in
     Console_sink.write (prefix ^ " " ^ message);
-    Ring.push ~level ~module_name ~message ~details ()
+    Ring.push ~level ~module_name ~message ~details ?category ()
   end
 
 let details_with_event_class event_class details =
@@ -712,20 +797,20 @@ let details_with_event_class event_class details =
       `Assoc (event_class_field :: fields)
   | payload -> `Assoc [ event_class_field; ("payload", payload) ]
 
-let emit_event event_class level ?module_name ?(details = `Null) message =
+let emit_event event_class level ?module_name ?(details = `Null) ?category message =
   emit level ?module_name ~details:(details_with_event_class event_class details)
-    message
+    ?category message
 
-let emit_routine ?module_name ?(details = `Null) message =
+let emit_routine ?module_name ?(details = `Null) ?category message =
   match routine_level () with
   | None -> ()
-  | Some level -> emit_event Routine level ?module_name ~details message
+  | Some level -> emit_event Routine level ?module_name ~details ?category message
 
 (** Convenience functions *)
-let debug ?ctx fmt = log Debug ?ctx fmt
-let info ?ctx fmt = log Info ?ctx fmt
-let warn ?ctx fmt = log Warn ?ctx fmt
-let error ?ctx fmt = log Error ?ctx fmt
+let debug ?ctx ?category fmt = log Debug ?ctx ?category fmt
+let info ?ctx ?category fmt = log Info ?ctx ?category fmt
+let warn ?ctx ?category fmt = log Warn ?ctx ?category fmt
+let error ?ctx ?category fmt = log Error ?ctx ?category fmt
 
 (* RFC-0079: [~level] is now required for the mirror functions. The old
    [?level] option backed [infer_legacy_level], a string-prefix classifier
@@ -753,6 +838,7 @@ module type LOGGER = sig
     ?details:Yojson.Safe.t ->
     ?keeper_name:string ->
     ?turn_id:int ->
+    ?category:category ->
     string ->
     unit
 
@@ -760,23 +846,24 @@ module type LOGGER = sig
     ?details:Yojson.Safe.t ->
     ?keeper_name:string ->
     ?turn_id:int ->
+    ?category:category ->
     ('a, unit, string, unit) format4 ->
     'a
 
   val debug :
-    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
   val info :
-    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
   val warn :
-    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
   val warning :
-    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 
   val error :
-    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 end
 
 (** Module-specific loggers.
@@ -804,7 +891,7 @@ module Make (M : sig val name : string end) = struct
     in
     level_to_int level >= threshold
 
-  let emit level ?(details = `Null) ?keeper_name ?turn_id message =
+  let emit level ?(details = `Null) ?keeper_name ?turn_id ?category message =
     if should_log_module level then begin
       let level_str = level_to_string level in
       let prefix = match keeper_name with
@@ -816,28 +903,28 @@ module Make (M : sig val name : string end) = struct
               (timestamp ()) level_str M.name
       in
       Console_sink.write (prefix ^ " " ^ message);
-      Ring.push ?keeper_name ?turn_id
+      Ring.push ?keeper_name ?turn_id ?category
         ~level ~module_name:M.name ~message ~details ()
     end
 
-  let log_module level ?keeper_name ?turn_id fmt =
-    Printf.ksprintf (fun msg -> emit level ?keeper_name ?turn_id msg) fmt
+  let log_module level ?keeper_name ?turn_id ?category fmt =
+    Printf.ksprintf (fun msg -> emit level ?keeper_name ?turn_id ?category msg) fmt
 
-  let routine ?(details = `Null) ?keeper_name ?turn_id fmt =
+  let routine ?(details = `Null) ?keeper_name ?turn_id ?category fmt =
     Printf.ksprintf
       (fun msg ->
          match routine_level () with
          | None -> ()
          | Some level ->
              emit level ~details:(details_with_event_class Routine details)
-               ?keeper_name ?turn_id msg)
+               ?keeper_name ?turn_id ?category msg)
       fmt
 
-  let debug ?keeper_name ?turn_id fmt = log_module Debug ?keeper_name ?turn_id fmt
-  let info ?keeper_name ?turn_id fmt = log_module Info ?keeper_name ?turn_id fmt
-  let warn ?keeper_name ?turn_id fmt = log_module Warn ?keeper_name ?turn_id fmt
+  let debug ?keeper_name ?turn_id ?category fmt = log_module Debug ?keeper_name ?turn_id ?category fmt
+  let info ?keeper_name ?turn_id ?category fmt = log_module Info ?keeper_name ?turn_id ?category fmt
+  let warn ?keeper_name ?turn_id ?category fmt = log_module Warn ?keeper_name ?turn_id ?category fmt
   let warning = warn
-  let error ?keeper_name ?turn_id fmt = log_module Error ?keeper_name ?turn_id fmt
+  let error ?keeper_name ?turn_id ?category fmt = log_module Error ?keeper_name ?turn_id ?category fmt
 end
 
 (** Pre-defined module loggers *)

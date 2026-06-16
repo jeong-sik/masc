@@ -173,6 +173,90 @@ judge = "a"
       (List.mem (Fusion_config.Missing_default_preset "ghost") es)
   | Ok _ -> Alcotest.fail "expected Error Missing_default_preset"
 
+(* --- judge LLM-facing JSON parse (RFC-0249 §7.2) --- *)
+
+let jdecision = Alcotest.testable pp_judge_decision equal_judge_decision
+
+let valid_judge_json =
+  {|{
+    "consensus": [ { "text": "X is true", "supporting_models": ["a","b"] } ],
+    "contradictions": [ { "topic": "Y", "positions": [ {"model":"a","stance":"yes"}, {"model":"b","stance":"no"} ], "evidence": ["e1"] } ],
+    "partial_coverage": [ { "topic": "Z", "addressed_by": ["a"], "missing": "depth" } ],
+    "unique_insights": [ { "text": "novel", "model": "b" } ],
+    "blind_spots": [ "edge case" ],
+    "resolved_answer": "the answer",
+    "decision": { "kind": "answer", "answer": "the answer" }
+  }|}
+
+let test_judge_valid () =
+  match Fusion_judge_parse.of_string valid_judge_json with
+  | Ok js ->
+    Alcotest.(check string) "resolved" "the answer" js.resolved_answer;
+    Alcotest.(check int) "consensus" 1 (List.length js.consensus);
+    Alcotest.(check int) "contradictions" 1 (List.length js.contradictions);
+    Alcotest.(check int) "positions" 2
+      (List.length (List.hd js.contradictions).positions);
+    Alcotest.(check int) "blind_spots" 1 (List.length js.blind_spots);
+    Alcotest.check jdecision "decision" (Answer "the answer") js.decision
+  | Error e -> Alcotest.failf "expected Ok, got %s" e
+
+let test_judge_recommend () =
+  let s =
+    {|{ "resolved_answer": "r", "decision": { "kind": "recommend", "action": "claim task 5", "rationale": "best fit" } }|}
+  in
+  match Fusion_judge_parse.of_string s with
+  | Ok js ->
+    Alcotest.check jdecision "recommend"
+      (Recommend { action = "claim task 5"; rationale = "best fit" }) js.decision
+  | Error e -> Alcotest.failf "expected Ok, got %s" e
+
+let test_judge_insufficient () =
+  let s =
+    {|{ "resolved_answer": "r", "decision": { "kind": "insufficient", "missing": ["data","time"] } }|}
+  in
+  match Fusion_judge_parse.of_string s with
+  | Ok js ->
+    Alcotest.check jdecision "insufficient"
+      (Insufficient { missing_for_decision = [ "data"; "time" ] }) js.decision
+  | Error _ -> Alcotest.fail "expected Ok"
+
+let test_judge_unknown_kind () =
+  match
+    Fusion_judge_parse.of_string
+      {|{ "resolved_answer": "r", "decision": { "kind": "frobnicate" } }|}
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected Error on unknown decision kind"
+
+let test_judge_missing_resolved () =
+  match
+    Fusion_judge_parse.of_string {|{ "decision": { "kind": "answer", "answer": "a" } }|}
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected Error on missing resolved_answer"
+
+let test_judge_missing_decision () =
+  match Fusion_judge_parse.of_string {|{ "resolved_answer": "r" }|} with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected Error on missing decision"
+
+let test_judge_code_fence () =
+  let s =
+    "```json\n{ \"resolved_answer\": \"r\", \"decision\": { \"kind\": \"answer\", \"answer\": \"a\" } }\n```"
+  in
+  match Fusion_judge_parse.of_string s with
+  | Ok js -> Alcotest.(check string) "fenced resolved" "r" js.resolved_answer
+  | Error e -> Alcotest.failf "expected Ok, got %s" e
+
+let test_judge_tolerant_skip () =
+  (* one valid claim + one malformed (missing "text") -> only the valid one kept *)
+  let s =
+    {|{ "consensus": [ {"text":"ok"}, {"supporting_models":["a"]} ], "resolved_answer": "r", "decision": {"kind":"answer","answer":"a"} }|}
+  in
+  match Fusion_judge_parse.of_string s with
+  | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
+  | Error e -> Alcotest.failf "expected Ok, got %s" e
+
 let () =
   Alcotest.run "fusion_core"
     [ ( "gate"
@@ -195,5 +279,15 @@ let () =
         ; Alcotest.test_case "empty_presets" `Quick test_config_empty_presets
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
+        ] )
+    ; ( "judge_parse"
+      , [ Alcotest.test_case "valid" `Quick test_judge_valid
+        ; Alcotest.test_case "recommend" `Quick test_judge_recommend
+        ; Alcotest.test_case "insufficient" `Quick test_judge_insufficient
+        ; Alcotest.test_case "unknown_kind" `Quick test_judge_unknown_kind
+        ; Alcotest.test_case "missing_resolved" `Quick test_judge_missing_resolved
+        ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
+        ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
+        ; Alcotest.test_case "tolerant_skip" `Quick test_judge_tolerant_skip
         ] )
     ]

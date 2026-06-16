@@ -198,6 +198,27 @@ describe('parseSSEMessage', () => {
     expect(msg?.type).toBe('oas:slot_scheduler_observed')
   })
 
+  it('keeps oas telemetry tuple payloads instead of logging schema drift', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({
+      type: 'oas:telemetry_event',
+      event_type: 'telemetry_event',
+      ts_unix: 1781584363.694713,
+      payload: [
+        'Streaming_first_chunk',
+        {
+          provider: 'openai_compat',
+          model: 'deepseek-v4-flash',
+          ttfrc_ms: 3988.802909851074,
+        },
+      ],
+    })
+    expect(msg).not.toBeNull()
+    expect(msg?.type).toBe('oas:telemetry_event')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
   it('silently ignores MCP JSON-RPC control notifications on the SSE stream', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(parseSSEMessage({

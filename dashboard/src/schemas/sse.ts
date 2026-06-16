@@ -274,7 +274,7 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
   }
 
-  if (value.payload != null && !isRecord(value.payload)) {
+  if (value.payload != null && !isRecord(value.payload) && !value.type.startsWith('oas:')) {
     return fail('payload', 'Expected payload object')
   }
   if (value.attribution != null) {

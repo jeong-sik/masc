@@ -54,6 +54,8 @@ const logLimit = signal(200)
 const providerLogProvider = signal('')
 const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
+const categoryFilter = signal('')
+const hideFsmTransitions = signal(false)
 
 const POLL_INTERVAL_MS = 3000
 const LOG_ROW_HEIGHT = 92
@@ -78,6 +80,41 @@ const SOURCE_LABELS: Record<string, string> = {
   legacy_traceln: 'trace line',
   client_tool_host: 'client tool-host',
   sse: 'sse',
+}
+
+const CATEGORIES: readonly string[] = [
+  'fsm',
+  'lifecycle',
+  'directive',
+  'heartbeat',
+  'presence',
+  'task',
+  'tool',
+  'memory',
+  'telemetry',
+  'routine',
+  'boundary',
+  'uncategorized',
+]
+
+const CATEGORY_LABELS: Record<string, string> = {
+  fsm: 'FSM',
+  lifecycle: 'Lifecycle',
+  directive: 'Directive',
+  heartbeat: 'Heartbeat',
+  presence: 'Presence',
+  task: 'Task',
+  tool: 'Tool',
+  memory: 'Memory',
+  telemetry: 'Telemetry',
+  routine: 'Routine',
+  boundary: 'Boundary',
+  uncategorized: 'Uncategorized',
+}
+
+function categoryLabel(category: string | null | undefined): string | null {
+  if (!category) return null
+  return CATEGORY_LABELS[category] ?? category
 }
 
 type LoadMode = 'reset' | 'delta'
@@ -310,6 +347,8 @@ async function loadLogs(mode: LoadMode = 'reset') {
         limit: logLimit.value,
         level: levelFilter.value,
         module: appliedModuleFilter.value || undefined,
+        category: categoryFilter.value || undefined,
+        exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
       })
       const entries = sortLogEntries(resp.entries).slice(0, Math.max(1, logLimit.value))
       latestSeq.value = latestLogSeq(entries)
@@ -328,6 +367,8 @@ async function loadLogs(mode: LoadMode = 'reset') {
       level: levelFilter.value,
       module: appliedModuleFilter.value || undefined,
       since_seq: latestSeq.value ?? undefined,
+      category: categoryFilter.value || undefined,
+      exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
     })
     if (requestId !== latestRequestId) return
 
@@ -387,6 +428,7 @@ function renderLogRow(entry: LogEntry) {
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
   const routeLinks = logRouteLinks(entry)
+  const category = categoryLabel(entry.category)
   const diagnosticChip = failure
     ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
     : null
@@ -416,6 +458,9 @@ function renderLogRow(entry: LogEntry) {
       </div>
       <div class="flex flex-wrap items-start gap-1">
         <${StatusChip} tone=${sourceClass}>${sourceLabel(source)}</${StatusChip}>
+        ${category
+          ? html`<${MetaTag}>${category}</${MetaTag}>`
+          : null}
         ${clientName
           ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[var(--color-accent-fg)]" uppercase=${false}>${clientName}</${StatusChip}>`
           : null}
@@ -649,6 +694,8 @@ export function LogViewer() {
     const unsubscribeLevel = levelFilter.subscribe(restart)
     const unsubscribeModule = appliedModuleFilter.subscribe(restart)
     const unsubscribeLimit = logLimit.subscribe(restart)
+    const unsubscribeCategory = categoryFilter.subscribe(restart)
+    const unsubscribeHideFsm = hideFsmTransitions.subscribe(restart)
     const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
 
     return () => {
@@ -658,6 +705,8 @@ export function LogViewer() {
       unsubscribeLevel()
       unsubscribeModule()
       unsubscribeLimit()
+      unsubscribeCategory()
+      unsubscribeHideFsm()
       unsubscribeAutoRefresh()
     }
   }, [])
@@ -764,6 +813,31 @@ export function LogViewer() {
               options=${['100', '200', '500', '1000', '3000']}
               onInput=${(v: string) => { logLimit.value = parseInt(v, 10) }}
             />
+
+            <${Select}
+              class="logs-select px-3 py-2 text-xs"
+              name="log-category"
+              ariaLabel="Category"
+              value=${categoryFilter.value}
+              options=${[
+                { value: '', label: 'All categories' },
+                ...CATEGORIES.map(category => ({
+                  value: category,
+                  label: CATEGORY_LABELS[category] ?? category,
+                })),
+              ]}
+              onInput=${(v: string) => { categoryFilter.value = v }}
+            />
+
+            <label class="logs-hide-fsm-label flex items-center gap-1.5 cursor-pointer text-2xs text-[var(--color-fg-muted)]">
+              <${Checkbox}
+                name="log-hide-fsm"
+                ariaLabel="Hide FSM transitions"
+                checked=${hideFsmTransitions.value}
+                onChange=${(checked: boolean) => { hideFsmTransitions.value = checked }}
+              />
+              Hide FSM transitions
+            </label>
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">

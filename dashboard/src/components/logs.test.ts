@@ -15,6 +15,7 @@ function entry(overrides: Partial<LogEntry>): LogEntry {
     keeper_name: null,
     turn_id: null,
     details: null,
+    category: null,
     ...overrides,
   }
 }

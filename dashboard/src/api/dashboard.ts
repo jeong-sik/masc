@@ -128,6 +128,8 @@ export async function fetchLogs(opts?: {
   level?: string
   module?: string
   since_seq?: number
+  category?: string
+  exclude_category?: string
 }): Promise<LogsResponse> {
   const params = new URLSearchParams()
   if (opts?.limit) params.set('limit', String(opts.limit))
@@ -136,6 +138,8 @@ export async function fetchLogs(opts?: {
   if (typeof opts?.since_seq === 'number' && opts.since_seq >= 0) {
     params.set('since_seq', String(opts.since_seq))
   }
+  if (opts?.category) params.set('category', opts.category)
+  if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)
   const qs = params.toString()
   const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
   return parseLogsResponse(raw)

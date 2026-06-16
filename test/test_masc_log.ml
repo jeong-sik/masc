@@ -161,6 +161,7 @@ let test_entry_to_json_keeper_name_none_serializes_system () =
     turn_id = None;
     message = "test message";
     details = `Null;
+    category = None;
   } in
   let json = Log.Ring.entry_to_json entry in
   let keeper_name_val =
@@ -180,6 +181,7 @@ let test_entry_to_json_keeper_name_some_preserves () =
     turn_id = None;
     message = "test message";
     details = `Null;
+    category = None;
   } in
   let json = Log.Ring.entry_to_json entry in
   let keeper_name_val =

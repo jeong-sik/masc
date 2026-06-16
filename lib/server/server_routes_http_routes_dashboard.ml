@@ -529,12 +529,26 @@ let add_routes ~sw ~clock router =
              | Some v -> v
              | None -> ""
            in
+           let category_filter = Server_utils.query_param req "category" in
+           let exclude_category =
+             match Server_utils.query_param req "exclude_category" with
+             | None -> None
+             | Some raw ->
+                 let parts = String.split_on_char ',' raw in
+                 let trimmed = List.map String.trim parts in
+                 let non_empty = List.filter (fun s -> s <> "") trimmed in
+                 match non_empty with
+                 | [] -> None
+                 | xs -> Some xs
+           in
            let entries =
-             Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ()
+             Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq
+               ?category_filter ?exclude_category ()
            in
            let json =
              dashboard_logs_json ~config:(Mcp_server.workspace_config state) ~limit
-               ~level_filter ~applied_level ~min_level ~module_filter ~since_seq entries
+               ~level_filter ~applied_level ~min_level ~module_filter ~since_seq
+               ~category_filter ~exclude_category entries
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

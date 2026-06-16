@@ -25,6 +25,7 @@ import {
   type KeeperDecision,
   type DashboardFeedMetadata,
 } from '../api/dashboard'
+import { terminalReasonCodeLabel } from './fsm-hub-types'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
@@ -904,7 +905,7 @@ function KeeperDecisionsBoard({ events, limit, meta }: { events: KeeperDecision[
                 <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${e.keeper_name}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.event_type}</td>
                 <td class="px-2 py-1.5 text-left font-mono ${e.outcome === 'success' ? 'text-[var(--color-status-ok)]' : e.outcome === 'error' ? 'text-[var(--color-status-err)]' : 'text-text-muted'}">${e.outcome ?? '—'}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-text-muted">—</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted" title=${e.terminal_reason_code ?? ''}>${terminalReasonCodeLabel(e.terminal_reason_code) ?? '—'}</td>
                 <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.latency_ms == null ? '—' : `${Math.round(e.latency_ms)}ms`}</td>
                 <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.cost_usd == null ? '—' : formatCost(e.cost_usd)}</td>
                 <td class="px-2 py-1.5 text-center font-mono text-text-muted">${e.tool ?? '—'}</td>

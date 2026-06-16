@@ -1999,6 +1999,24 @@ describe('fetchKeeperDecisions', () => {
       worker_run_id: 'worker-decision',
     })
   })
+
+  it('decodes terminal_reason_code (and defaults to null when absent)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        events: [
+          { ts_unix: 1, keeper_name: 'k', event_type: 'turn', outcome: 'error', terminal_reason_code: 'runtime_exhausted' },
+          { ts_unix: 2, keeper_name: 'k', event_type: 'turn', outcome: 'success' },
+        ],
+        limit: 2,
+        generated_at: 1,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperDecisions(2)
+    expect(result.events[0]?.terminal_reason_code).toBe('runtime_exhausted')
+    expect(result.events[1]?.terminal_reason_code).toBeNull()
+  })
 })
 
 describe('fetchCostLatency', () => {

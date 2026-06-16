@@ -621,12 +621,21 @@ const EMPTY_ARG_TEXTS = new Set(['', '{}', '[]'])
 const TOOL_BUBBLE_PREVIEW_MAX = 120
 
 // Compact collapsible card for tool call entries in the chat transcript.
+// `entry.text` carries the tool call's INPUT arguments only — accumulated
+// arg JSON from TOOL_CALL_ARGS (keeper-stream.ts) or the persisted arg row
+// (keeper-state.ts:507 "text = accumulated argument JSON"). The tool's
+// OUTPUT (result) is NOT in this entry; it lands in the live trace via
+// `appendLiveToolCall` (sse.ts) and is joined below from the tool-call output
+// store. Without an explicit "입력" (input) label and an empty-args marker, a
+// no-argument tool like keeper_tools_list renders as `▸ {}`, which reads as
+// "empty result". This surface labels args as input and renders `{}` as
+// "입력 없음".
 function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const [expanded, setExpanded] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
   const toolName = entry.label || 'tool'
   const displayArgs = prettyJsonish(entry.text || '')
-  const hasArgs = !EMPTY_ARG_TEXTS.has(displayArgs.trim())
+  const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
 
   // Tool results never travel on the chat stream — they are joined here from
   // the tool-call output store by this row's id (`tool-<tool_use_id>`). Null
@@ -637,8 +646,12 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
 
   // Collapsed glance prefers the result (the useful part for no-argument tools
   // like keeper_context_status, whose args are just `{}`); falls back to the
-  // arguments until the output arrives.
-  const previewSource = hasOutput ? outputView.text : displayArgs
+  // arguments until the output arrives. Empty args are labelled explicitly.
+  const previewSource = hasOutput
+    ? outputView.text
+    : isEmptyArgs
+      ? '입력 없음'
+      : displayArgs
   const preview =
     previewSource.length > TOOL_BUBBLE_PREVIEW_MAX
       ? previewSource.slice(0, TOOL_BUBBLE_PREVIEW_MAX) + '...'
@@ -657,6 +670,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       >
         <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-mono font-bold text-[var(--color-fg-muted)]">T</span>
         <span class="font-mono text-xs font-medium text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">입력</span>
         ${outputEntry
           ? html`<span
               class=${`text-2xs ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-[var(--color-status-err)]'}`}
@@ -672,14 +686,14 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       ${expanded
         ? html`
             <div class="flex flex-col gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
-              ${hasArgs
-                ? html`
+              ${isEmptyArgs
+                ? html`<div class="text-2xs font-mono text-[var(--color-fg-muted)]">입력 없음 (매개변수가 없는 도구)</div>`
+                : html`
                     <div>
                       <div class="mb-1 text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">arguments</div>
                       <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-48 overflow-y-auto">${displayArgs}</pre>
                     </div>
-                  `
-                : null}
+                  `}
               ${hasOutput
                 ? html`
                     <div>
@@ -693,8 +707,10 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
                     </div>
                   `
                 : null}
-              ${!hasArgs && !hasOutput
-                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">출력 대기 중…</div>`
+              ${!hasOutput
+                ? isEmptyArgs
+                  ? html`<div class="text-2xs text-[var(--color-fg-muted)]">출력 대기 중…</div>`
+                  : html`<div class="text-3xs text-[var(--color-fg-muted)]">출력(결과)은 도구 실행 추적 패널에서 확인</div>`
                 : null}
             </div>
           `

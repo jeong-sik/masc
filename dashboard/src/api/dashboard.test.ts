@@ -361,6 +361,39 @@ describe('keeper tool telemetry fetchers', () => {
       trace_id: 'trace-tool-call-gap',
     })
   })
+
+  it('decodes semantic_outcome / semantic_success / goal_ids on an entry', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_context_status',
+            input: {},
+            output: 'blocked by policy',
+            success: true,
+            duration_ms: 5,
+            semantic_outcome: 'blocked',
+            semantic_success: false,
+            goal_ids: ['g-1', 'g-2'],
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+    const entry = result.entries[0]
+    // transport success=true but the parsed output was blocked.
+    expect(entry?.success).toBe(true)
+    expect(entry?.semantic_success).toBe(false)
+    expect(entry?.semantic_outcome).toBe('blocked')
+    expect(entry?.goal_ids).toEqual(['g-1', 'g-2'])
+  })
 })
 
 describe('fetchMemorySubsystems', () => {

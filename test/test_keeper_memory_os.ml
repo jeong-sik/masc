@@ -61,7 +61,6 @@ let fact_fixture ~now () =
   ; Types.first_seen = now -. 86400.0
   ; Types.last_accessed = now -. 3600.0
   ; Types.valid_until = None
-  ; Types.stale_factor = 0.0
   ; Types.last_verified_at = Some (now -. 3600.0)
   ; Types.expected_lifetime_cycles = None
   ; Types.schema_version = Types.schema_version
@@ -211,7 +210,6 @@ let test_json_roundtrip () =
   Alcotest.(check (float 0.001)) "confidence round-trip" f.confidence f2.Types.confidence;
   Alcotest.(check int) "access_count round-trip" f.access_count f2.Types.access_count;
   Alcotest.(check (float 0.001)) "first_seen round-trip" f.first_seen f2.Types.first_seen;
-  Alcotest.(check (float 0.001)) "stale_factor round-trip" f.stale_factor f2.Types.stale_factor;
   Alcotest.(check (option (float 0.001)))
     "last_verified_at round-trip"
     f.last_verified_at
@@ -264,7 +262,6 @@ let test_fact_v1_json_defaults_to_safe_staleness_fields () =
   match Types.fact_of_json json with
   | None -> Alcotest.fail "expected legacy fact to parse"
   | Some fact ->
-    Alcotest.(check (float 0.001)) "default stale factor" 0.0 fact.Types.stale_factor;
     Alcotest.(check (option (float 0.001))) "missing last_verified_at" None fact.last_verified_at;
     Alcotest.(check (option int)) "missing lifetime cycles" None fact.expected_lifetime_cycles
 ;;
@@ -1024,15 +1021,7 @@ let test_policy_truth_age_not_reset_by_access () =
   Alcotest.(check bool)
     "truth-stale fact cannot be revived by access count"
     true
-    (Policy.score_fact ~now stale_but_frequently_recalled < Policy.score_fact ~now fresh);
-  let explicitly_stale = { fresh with Types.stale_factor = 1.0 } in
-  Alcotest.(check (float 0.001))
-    "stale_factor=1 zeroes score"
-    0.0
-    (Policy.score_fact ~now explicitly_stale);
-  match Policy.decide_retention (Policy.score_fact ~now explicitly_stale) with
-  | Policy.Discard -> ()
-  | Policy.KeepVerbatim -> Alcotest.fail "expected explicit stale fact to be discarded"
+    (Policy.score_fact ~now stale_but_frequently_recalled < Policy.score_fact ~now fresh)
 ;;
 
 let test_bump_access () =
@@ -1220,10 +1209,10 @@ let test_gc_dry_run_and_rewrite () =
       ; Types.valid_until = Some (now -. 1.0)
       }
     in
-    let explicit_stale =
+    let low_confidence =
       { keep with
-        Types.claim = "explicitly stale fact"
-      ; Types.stale_factor = 1.0
+        Types.claim = "low confidence fact"
+      ; Types.confidence = 0.0
       }
     in
     let duplicate_low =
@@ -1242,7 +1231,7 @@ let test_gc_dry_run_and_rewrite () =
     in
     List.iter
       (Memory_io.append_fact ~keeper_id)
-      [ keep; expired; explicit_stale; duplicate_low; duplicate_high ];
+      [ keep; expired; low_confidence; duplicate_low; duplicate_high ];
     let dry = GC.run_gc ~dry_run:true ~keeper_id ~now () in
     Alcotest.(check bool) "dry-run flag" true dry.GC.dry_run;
     Alcotest.(check int) "dry-run leaves file untouched" 5

@@ -37,6 +37,7 @@
   test_keeper_cycle_channel
   test_keeper_identity_id
   test_keeper_idle_threshold_contract
+  test_keeper_context_layers
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -318,6 +319,7 @@
   test_keeper_cycle_channel
   test_keeper_identity_id
   test_keeper_idle_threshold_contract
+  test_keeper_context_layers
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection

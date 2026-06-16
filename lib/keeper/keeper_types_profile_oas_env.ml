@@ -1,10 +1,9 @@
-(** Scan a flat TOML doc for keys under [[keeper.oas_env]].  Only provider
-    OAS prefixes and [MASC_KEEPER_OAS_*] are accepted.  Any other entries are
-    dropped.  This guards against arbitrary process env injection via keeper
-    TOML.  Values are coerced to strings via
+(** Scan a flat TOML doc for keys under [[keeper.oas_env]]. Only current OAS
+    provider/control prefixes and [MASC_KEEPER_OAS_*] are accepted. Any other
+    entries are dropped. This guards against arbitrary process env injection via
+    keeper TOML. Values are coerced to strings via
     [string_of_toml_value_for_env] (bool -> "1"/"0"), so integers and booleans
-    in TOML map to the string shapes the OAS transport build_args already
-    understand. *)
+    in TOML map to the string shapes the active OAS env readers understand. *)
 let string_of_toml_value_for_env = function
   | Keeper_toml_loader.Toml_string s -> Some s
   | Keeper_toml_loader.Toml_int i -> Some (string_of_int i)
@@ -99,40 +98,4 @@ let unified_max_tokens_override_of_oas_env ?keeper_name pairs =
          raw
          keeper;
        None)
-;;
-
-let oas_env_truthy value =
-  match String.lowercase_ascii (String.trim value) with
-  | "1" | "true" | "yes" | "on" -> true
-  | _ -> false
-;;
-
-let oas_env_has_non_empty key pairs =
-  match List.assoc_opt key pairs with
-  | Some value when String.trim value <> "" -> true
-  | _ -> false
-;;
-
-let effective_oas_env pairs =
-  let gemini_mcp_disabled =
-    match List.assoc_opt "OAS_GEMINI_NO_MCP" pairs with
-    | Some value -> oas_env_truthy value
-    | None -> false
-  in
-  let pairs =
-    if
-      gemini_mcp_disabled
-      && not (oas_env_has_non_empty "OAS_GEMINI_APPROVAL_MODE" pairs)
-    then pairs @ [ "OAS_GEMINI_APPROVAL_MODE", "plan" ]
-    else pairs
-  in
-  (* Enable Gemini CLI MCP by default: when not explicitly disabled and
-     no operator override exists, inject the "masc" server name so the
-     Gemini CLI transport's --allowed-mcp-server-names flag allows the
-     MASC MCP server instead of the __oas_no_mcp__ marker. *)
-  if
-    (not gemini_mcp_disabled)
-    && not (oas_env_has_non_empty "OAS_GEMINI_ALLOWED_MCP" pairs)
-  then pairs @ [ "OAS_GEMINI_ALLOWED_MCP", "masc" ]
-  else pairs
 ;;

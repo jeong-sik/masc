@@ -594,7 +594,6 @@
   test_keeper_event_queue
   test_keeper_relevance_check
   test_actionable_path_action
-  test_effective_oas_env
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_cognitive_gravity

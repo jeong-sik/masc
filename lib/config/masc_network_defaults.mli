@@ -61,7 +61,7 @@ val is_cli_transport_url : string -> bool
 (** {1 Local LLM URL} *)
 
 (** Override order:
-    [OAS_LOCAL_LLM_URL] → [OAS_LOCAL_QWEN_URL] → {!ollama_default_url}. *)
+    [OAS_LOCAL_LLM_URL] -> {!ollama_default_url}. *)
 val local_llm_default_url : string
 
 (** {1 MASC HTTP server} *)

@@ -38,9 +38,6 @@ type tool_surface_metrics =
   { turn_lane : turn_lane
   ; config_root : string
   ; runtime_config_path : string option
-  ; gemini_mcp_disabled : bool
-  ; approval_mode_effective : string option
-  ; approval_mode_derived : bool
   }
 
 type turn_affordance =

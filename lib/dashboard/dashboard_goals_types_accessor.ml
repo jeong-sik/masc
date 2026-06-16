@@ -110,11 +110,6 @@ let receipt_sandbox_kind json =
   | Some sandbox -> Json_util.get_string sandbox "kind"
   | None -> None
 
-let receipt_approval_profile json =
-  match Json_util.assoc_member_opt "approval" json with
-  | Some approval -> Json_util.get_string approval "profile"
-  | None -> None
-
 let receipt_runtime_id json =
   match Json_util.assoc_member_opt "runtime" json with
   | Some runtime -> Json_util.get_string runtime "name"

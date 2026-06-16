@@ -31,9 +31,6 @@ let prepare_agent_setup
       ~(turn_affordances : string list)
       ~(config_root : string)
       ~(runtime_config_path : string option)
-      ~(gemini_mcp_disabled : bool)
-      ~(approval_mode_effective : string option)
-      ~(approval_mode_derived : bool)
       ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
       ~(tool_overlay : Agent_sdk.Tool_op.t ref option)
@@ -80,9 +77,6 @@ let prepare_agent_setup
         { turn_lane = Keeper_agent_tool_surface.Lane_text_only
         ; config_root
         ; runtime_config_path
-        ; gemini_mcp_disabled
-        ; approval_mode_effective
-        ; approval_mode_derived
         }
     ; requested_tool_names = []
     ; receipt_completion_contract_result =
@@ -660,7 +654,5 @@ let prepare_agent_setup
     ~start_turn_count ~generation
     ~runtime_id_string ~is_retry ~turn_affordances
     ~config_root ~runtime_config_path
-    ~gemini_mcp_disabled ~approval_mode_effective
-    ~approval_mode_derived
     ?max_cost_usd ~trajectory_acc
     ?runtime_manifest_context ?runtime_manifest_append ()

@@ -5,7 +5,7 @@ open Alcotest
     Verifies:
     - lib/server/server_startup_takeover.ml: "/tmp/masc-" literal = 0
       (PID lock now via host.run_dir).
-    - lib/server/server_runtime_bootstrap.ml: Provider_f admin-policy literals = 0
+    - lib/server/server_runtime_bootstrap.ml: provider-specific admin policy = 0
       (MASC bootstrap must not encode provider-specific OAS CLI policy).
     - server_startup_takeover invokes Host_config.host >= 1.
 
@@ -30,13 +30,7 @@ let test_no_gemini_specific_policy_wiring () =
       ~module_path:path
       ~needle:"gemini_headless_admin"
   in
-  let admin_env =
-    Ast_grep.count_string_literals
-      ~module_path:path
-      ~needle:"OAS_GEMINI_ADMIN_POLICY"
-  in
-  check int "gemini_headless_admin literals in runtime_bootstrap" 0 headless;
-  check int "OAS_GEMINI_ADMIN_POLICY literals in runtime_bootstrap" 0 admin_env
+  check int "gemini_headless_admin literals in runtime_bootstrap" 0 headless
 ;;
 
 let test_takeover_uses_host_config () =

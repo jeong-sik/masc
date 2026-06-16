@@ -236,12 +236,6 @@ let runtime_mcp_keeper_log_context_of_entry
     | ids -> Some ids
   in
   let config = Workspace.default_config entry.base_path in
-  let profile_defaults =
-    Keeper_types_profile.load_keeper_profile_defaults entry.meta.name
-  in
-  let keeper_oas_context =
-    Keeper_types_profile.keeper_oas_context_of_defaults profile_defaults
-  in
   {
     keeper_name = entry.name;
     agent_name = Some entry.meta.agent_name;
@@ -261,7 +255,7 @@ let runtime_mcp_keeper_log_context_of_entry
       Some (Keeper_alerting_path.effective_allowed_paths ~meta:entry.meta);
     network_mode =
       Some (Keeper_types_profile_sandbox.network_mode_to_string entry.meta.network_mode);
-    approval_mode = keeper_oas_context.gemini_approval_mode;
+    approval_mode = None;
     runtime_profile =
       (try Some (Keeper_meta_contract.runtime_id_of_meta entry.meta)
        with Failure _ -> None);

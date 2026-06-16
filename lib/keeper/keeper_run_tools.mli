@@ -101,9 +101,6 @@ val prepare_agent_setup
   -> turn_affordances:string list
   -> config_root:string
   -> runtime_config_path:string option
-  -> gemini_mcp_disabled:bool
-  -> approval_mode_effective:string option
-  -> approval_mode_derived:bool
   -> ?max_cost_usd:float
   -> trajectory_acc:Trajectory.accumulator option
   -> tool_overlay:Agent_sdk.Tool_op.t ref option

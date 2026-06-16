@@ -125,11 +125,6 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.50.0" };
 
-  { env_name = "MASC_KEEPER_WORKSPACE_SIGNAL_PROMPT_ENABLED";
-    description = "Global override for keeper workspace-signal prompt injection";
-    default = false; category = "keeper";
-    lifecycle = Active; since = "2.214.0" };
-
   { env_name = "MASC_KEEPER_DOCKER_PLAYGROUND";
     description = "Route Execute commands through Docker container";
     default = false; category = "keeper";

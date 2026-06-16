@@ -35,6 +35,37 @@ let metric_of_sample (s : sample) : M.t =
     M.sum ~name:s.name ~is_monotonic:false
       ~aggregation_temporality:M.Aggregation_temporality_cumulative [ dp ]
 
+(** Group samples by [(name, kind)] so that samples sharing the same metric
+    identity become a single [M.t] with multiple data points. This reduces the
+    number of protobuf metrics emitted per OTel export tick. *)
+let metrics_of_samples (samples : sample list) : M.t list =
+  let groups : (string * kind, sample list) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun s ->
+       let key = (s.name, s.kind) in
+       match Hashtbl.find_opt groups key with
+       | None -> Hashtbl.add groups key [ s ]
+       | Some ss -> Hashtbl.replace groups key (s :: ss))
+    samples;
+  Hashtbl.fold
+    (fun (name, kind) ss acc ->
+       let dps =
+         List.rev_map
+           (fun s -> M.float ~attrs:(attrs_of_labels s.labels) s.value)
+           ss
+       in
+       let metric =
+         match kind with
+         | Counter ->
+           M.sum ~name ~is_monotonic:true
+             ~aggregation_temporality:M.Aggregation_temporality_cumulative dps
+         | Gauge -> M.gauge ~name dps
+         | Histogram ->
+           M.sum ~name ~is_monotonic:false
+             ~aggregation_temporality:M.Aggregation_temporality_cumulative dps
+       in
+       metric :: acc)
+    groups []
+
 let register_source (f : unit -> sample list) : unit =
-  Opentelemetry.Metrics_callbacks.register (fun () ->
-      List.map metric_of_sample (f ()))
+  Opentelemetry.Metrics_callbacks.register (fun () -> metrics_of_samples (f ()))

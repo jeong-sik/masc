@@ -1,6 +1,6 @@
 (** Background shell task lifecycle for the Execute process surface.
 
-    Maps agent_llm_a-code's [backgroundTaskId] / [BashOutput] / [KillShell]
+    Maps claude-code's [backgroundTaskId] / [BashOutput] / [KillShell]
     triad onto OCaml Unix primitives.
 
     Tick 6a (current): pull-based.  [read] drains whatever is pending

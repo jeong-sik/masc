@@ -12,7 +12,7 @@
       dashboard_bonsai/src/keepers_fetch.ml  — client consumer
 
     SSOT for the JSON wire contract. Phase 1 artifact per
-    planning/agent_llm_a-plans/masc-eventual-parrot.md. *)
+    planning/claude-plans/masc-eventual-parrot.md. *)
 
 type keeper_status =
   | Live

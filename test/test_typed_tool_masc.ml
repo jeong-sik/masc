@@ -46,11 +46,11 @@ let test_parse_coerces_int_message () =
   | Error e -> Alcotest.fail ("expected coercion: " ^ e)
 
 let test_handler_success () =
-  match Tool_broadcast_typed.handle_broadcast "hello @agent_llm_a" with
+  match Tool_broadcast_typed.handle_broadcast "hello @claude" with
   | Ok output ->
     Alcotest.(check bool) "delivered" true output.delivered;
-    Alcotest.(check string) "message" "hello @agent_llm_a" output.broadcast_message;
-    Alcotest.(check (option string)) "mention" (Some "agent_llm_a") output.mention
+    Alcotest.(check string) "message" "hello @claude" output.broadcast_message;
+    Alcotest.(check (option string)) "mention" (Some "claude") output.mention
   | Error e -> Alcotest.fail ("handler failed: " ^ e)
 
 let test_handler_empty () =

@@ -1,7 +1,7 @@
 (* test/test_context_max_observed_9953.ml
 
    #9953: same model label was recording 3 different
-   [context_max] values across turns (cli_tool_d:auto getting
+   [context_max] values across turns (claude_code:auto getting
    42% / 17% / 41% split between 64k / 262k / 1M).  The data was
    in the JSONL ledger but invisible to Otel_metric_store dashboards.
 

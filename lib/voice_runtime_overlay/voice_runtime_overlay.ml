@@ -42,11 +42,11 @@ let string_of_transport = function
 ;;
 
 let openai_compat_adapter =
-  { canonical_name = "voice-provider_d-compat"
+  { canonical_name = "voice-openai-compat"
   ; transport = Openai_compat
   ; auth_mode = No_auth
   ; aliases =
-      [ "voice-provider_d-compat"; "openai_compat"; "provider_d"; "railway-elevenlabs-proxy" ]
+      [ "voice-openai-compat"; "openai_compat"; "openai"; "railway-elevenlabs-proxy" ]
   }
 ;;
 
@@ -147,7 +147,7 @@ let endpoint_supports_http_tts endpoint =
 ;;
 
 (* RFC-0166: the default per-agent voice mapping was a closed roster
-   of MCP-client names ("agent_llm_a"/"agent_code"/"provider_f"/"llama"). The
+   of MCP-client names ("claude"/"codex"/"gemini"/"llama"). The
    server holds no such roster; operators supply per-agent voices
    through [voice_bridge_core] config (TOML/JSON). When the
    operator has not configured anything, callers fall back to this

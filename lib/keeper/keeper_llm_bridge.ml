@@ -225,7 +225,7 @@ let run_with_timeout_and_fallback
          During the next overshoot, run
          ~/me/scripts/oas-hung-keeper-dump.sh to capture the fiber stack
          and identify the real layer.  Cross-ref:
-         jeong-sik/me planning/agent_llm_a-plans/oas-execution-cancellability.md *)
+         jeong-sik/me planning/claude-plans/oas-execution-cancellability.md *)
       let deadline =
         Timeout_policy.Deadline.make
           ~layer:Timeout_policy.Layer.Oas_bridge

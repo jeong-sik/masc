@@ -75,18 +75,18 @@ let write_dated_file dir month day lines =
 
 let test_event_agent_session_bounded () =
   let e = Telemetry_eio.Agent_session_bound {
-    agent_id = "agent_llm_a-001";
+    agent_id = "claude-001";
     capabilities = ["code"; "review"];
   } in
   match e with
   | Telemetry_eio.Agent_session_bound r ->
-      check string "agent_id" "agent_llm_a-001" r.agent_id;
+      check string "agent_id" "claude-001" r.agent_id;
       check int "capabilities" 2 (List.length r.capabilities)
   | _ -> fail "expected Agent_session_bound"
 
 let test_event_agent_unbound () =
   let e = Telemetry_eio.Agent_unbound {
-    agent_id = "agent_llm_a-001";
+    agent_id = "claude-001";
     reason = "session ended";
   } in
   match e with
@@ -97,7 +97,7 @@ let test_event_agent_unbound () =
 let test_event_task_started () =
   let e = Telemetry_eio.Task_started {
     task_id = "task-001";
-    agent_id = "agent_llm_a-001";
+    agent_id = "claude-001";
   } in
   match e with
   | Telemetry_eio.Task_started r ->
@@ -118,14 +118,14 @@ let test_event_task_completed () =
 
 let test_event_handoff_triggered () =
   let e = Telemetry_eio.Handoff_triggered {
-    from_agent = "agent_llm_a-001";
-    to_agent = "agent_code-001";
+    from_agent = "claude-001";
+    to_agent = "codex-001";
     reason = "context limit";
   } in
   match e with
   | Telemetry_eio.Handoff_triggered r ->
-      check string "from_agent" "agent_llm_a-001" r.from_agent;
-      check string "to_agent" "agent_code-001" r.to_agent
+      check string "from_agent" "claude-001" r.from_agent;
+      check string "to_agent" "codex-001" r.to_agent
   | _ -> fail "expected Handoff_triggered"
 
 let test_event_error_occurred () =
@@ -145,7 +145,7 @@ let test_event_tool_called () =
     tool_name = "masc_status";
     success = true;
     duration_ms = 100;
-    agent_id = Some "agent_llm_a-001";
+    agent_id = Some "claude-001";
     source = Some "external_mcp";
     session_id = Some "mcp-session-1";
     operation_id = Some "op-1";
@@ -612,7 +612,7 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
       let config = Workspace.default_config base_dir in
       Telemetry_eio.track_tool_called config ~tool_name:"masc_status"
-        ~success:true ~duration_ms:42 ~agent_id:"agent_code" ();
+        ~success:true ~duration_ms:42 ~agent_id:"codex" ();
       let summary = Telemetry_eio.summarize_tool_usage config in
       check int "total calls" 1 summary.total_calls;
       let stats =

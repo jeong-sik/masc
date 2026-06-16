@@ -699,7 +699,7 @@ let semantic_fields_of_executed (result : executed_result) : (string * Yojson.Sa
 ;;
 
 (* Tick 9: head+tail output cap — opt-in via MASC_BASH_OUTPUT_CAP.
-   Defaults match the agent_llm_a-code EndTruncatingAccumulator shape
+   Defaults match the claude-code EndTruncatingAccumulator shape
    (500 KB head + 500 KB tail).  Overrides via MASC_BASH_CAP_HEAD /
    MASC_BASH_CAP_TAIL let keepers experiment without code changes.
    Applies only to JSON emission; the record keeps the original

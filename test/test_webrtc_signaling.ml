@@ -24,7 +24,7 @@ let with_env name value f =
 let test_create_offer () =
   Eio_main.run (fun _env ->
     let offer_id = Wrtc.create_offer
-      ~from_agent:"agent_llm_a"
+      ~from_agent:"claude"
       ~ice_candidates:["candidate:1"]
       ~dtls_fingerprint:"sha256:abc" in
     Alcotest.(check bool) "offer_id not empty"
@@ -37,13 +37,13 @@ let test_create_offer () =
 let test_get_offer () =
   Eio_main.run (fun _env ->
     let offer_id = Wrtc.create_offer
-      ~from_agent:"provider_f"
+      ~from_agent:"gemini"
       ~ice_candidates:["c1"; "c2"]
       ~dtls_fingerprint:"sha256:xyz" in
     let offer = Wrtc.get_offer offer_id in
     Alcotest.(check bool) "offer found" true (Option.is_some offer);
     let o = Option.get offer in
-    Alcotest.(check string) "from_agent" "provider_f" o.from_agent;
+    Alcotest.(check string) "from_agent" "gemini" o.from_agent;
     Alcotest.(check int) "ice count" 2 (List.length o.ice_candidates);
     ignore (Wrtc.cleanup_expired_offers ~max_age_s:0.0 ()))
 
@@ -82,7 +82,7 @@ let test_double_accept () =
 
 let test_handle_offer_request () =
   Eio_main.run (fun _env ->
-    let body = {|{"agent_name":"agent_llm_a","ice_candidates":["c1"],"dtls_fingerprint":"fp"}|} in
+    let body = {|{"agent_name":"claude","ice_candidates":["c1"],"dtls_fingerprint":"fp"}|} in
     let result = Wrtc.handle_offer_request body in
     Alcotest.(check bool) "ok" true (Result.is_ok result);
     let json = Result.get_ok result in

@@ -73,15 +73,15 @@ let task_metric_option_keys =
 let saturated_task_metric : Metrics_store_eio.task_metric =
   {
     id = "metric-1";
-    agent_id = "keeper-agent_llm_a";
+    agent_id = "keeper-claude";
     task_id = "task-42";
     started_at = 1_777_120_000.0;
     completed_at = Some 1_777_120_001.0;
     success = false;
     error_message = Some "boom";
-    collaborators = [ "provider_f"; "agent_code" ];
-    handoff_from = Some "agent_llm_a";
-    handoff_to = Some "agent_code";
+    collaborators = [ "gemini"; "codex" ];
+    handoff_from = Some "claude";
+    handoff_to = Some "codex";
   }
 
 let null_field key fields =

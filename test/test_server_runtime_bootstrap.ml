@@ -467,13 +467,13 @@ let write_invalid_local_only_runtime base_path =
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
 
-[models.provider_h]
+[models.qwen]
 api-name = "qwen3.6:35b-a3b-mlx-bf16"
 max-context = 32768
 tools-support = false
 
 [runtime.invalid_local_lane]
-members = ["missing_provider.provider_h"]
+members = ["missing_provider.qwen"]
 
 [runtime.invalid_local_lane]
 tiers = ["invalid_local_lane"]
@@ -2425,7 +2425,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
             (List.mem "masc_status" tool_names)))
 
 let test_main_eio_self_heals_cli_agent_mcp_token_file () =
-  with_temp_dir "startup-agent_code-token-selfheal" (fun dir ->
+  with_temp_dir "startup-codex-token-selfheal" (fun dir ->
       let exe = find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
@@ -2437,17 +2437,17 @@ let test_main_eio_self_heals_cli_agent_mcp_token_file () =
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let auth_dir = Filename.concat dir ".masc/auth" in
-      let token_path = Filename.concat auth_dir "agent_code-mcp-client.token" in
+      let token_path = Filename.concat auth_dir "codex-mcp-client.token" in
       Fs_compat.mkdir_p auth_dir;
       let stale_hash =
         match
           Auth.save_raw_token_credential dir
-            ~agent_name:"agent_code-mcp-client" ~role:Masc_domain.Worker
-            ~raw_token:"stale-agent_code-raw-token"
+            ~agent_name:"codex-mcp-client" ~role:Masc_domain.Worker
+            ~raw_token:"stale-codex-raw-token"
         with
         | Ok cred -> cred.token
         | Error err ->
-            Alcotest.failf "failed to seed stale agent_code credential: %s"
+            Alcotest.failf "failed to seed stale codex credential: %s"
               (Masc_domain.masc_error_to_string err)
       in
       write_file token_path stale_hash;
@@ -2485,7 +2485,7 @@ let test_main_eio_self_heals_cli_agent_mcp_token_file () =
           if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
             prerr_endline
               (Printf.sprintf
-                 "main_eio agent_code token self-heal did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
+                 "main_eio codex token self-heal did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
                  (read_file log_file));
             Alcotest.skip ()
           end;
@@ -2495,18 +2495,18 @@ let test_main_eio_self_heals_cli_agent_mcp_token_file () =
             (repaired_raw <> stale_hash);
           Alcotest.(check int) "token file is private" 0o600 repaired_mode;
           let credential =
-            match Auth.load_credential dir "agent_code-mcp-client" with
+            match Auth.load_credential dir "codex-mcp-client" with
             | Some cred -> cred
-            | None -> Alcotest.fail "missing agent_code-mcp-client credential after startup"
+            | None -> Alcotest.fail "missing codex-mcp-client credential after startup"
           in
           Alcotest.(check bool) "existing role preserved" true
             (credential.role = Masc_domain.Worker);
-          Alcotest.(check (option string)) "agent_code credential does not expire"
+          Alcotest.(check (option string)) "codex credential does not expire"
             None credential.expires_at;
           Alcotest.(check string) "raw token hashes to stored credential"
             credential.token (Auth.sha256_hash repaired_raw);
           (match
-             Auth.verify_token dir ~agent_name:"agent_code-mcp-client"
+             Auth.verify_token dir ~agent_name:"codex-mcp-client"
                ~token:repaired_raw
            with
            | Ok _ -> ()
@@ -2538,7 +2538,7 @@ let test_main_eio_self_heals_cli_agent_mcp_token_file () =
               | Error err ->
                   Alcotest.failf "%s raw token should verify: %s"
                     agent_name (Masc_domain.masc_error_to_string err))
-            [ "agent_llm_a"; "provider_f" ]))
+            [ "claude"; "gemini" ]))
 
 let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
@@ -3125,7 +3125,7 @@ let () =
             "main_eio fresh bootstrap and MCP handshake"
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
           Alcotest.test_case
-            "main_eio self-heals agent_code mcp token file"
+            "main_eio self-heals codex mcp token file"
             `Slow test_main_eio_self_heals_cli_agent_mcp_token_file;
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"

@@ -342,7 +342,7 @@ let test_to_harness_verdict_approve () =
     task_id = "t1"; task_title = "Fix login";
     agent_name = "dreamer"; verdict = AR.Approve;
     gate = AR.Structured_tool; evaluator_runtime = "glm5";
-    generator_runtime = Some "agent_llm_a"; fallback_reason = None;
+    generator_runtime = Some "claude"; fallback_reason = None;
     timestamp = 0.0;
   } in
   let hv = Cal.to_harness_verdict record in

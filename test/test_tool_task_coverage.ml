@@ -1120,7 +1120,7 @@ let () = test "handle_claim_sets_planning_current_task" (fun () ->
 )
 
 let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1157,7 +1157,7 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1194,7 +1194,7 @@ let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun (
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1234,7 +1234,7 @@ let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_ta
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1274,7 +1274,7 @@ let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_ta
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1525,7 +1525,7 @@ let task_submit_evidence_notes =
 
 let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     add_priority_task ctx ~title:"No action alias";
     let result =
       Task.Tool.handle_transition
@@ -1546,7 +1546,7 @@ let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias"
 
 let () = test "transition_submit_pr_evidence_is_retired" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     add_priority_task ctx ~title:"CLI approval follow-up";
     let result =
       Task.Tool.handle_transition
@@ -1565,7 +1565,7 @@ let () = test "transition_submit_pr_evidence_is_retired" (fun () ->
 )
 
 let () = test "transition_pr_url_top_level_is_retired" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   add_priority_task ctx ~title:"No transport pr_url alias";
   let result =
     Task.Tool.handle_transition
@@ -1594,7 +1594,7 @@ let () = test "transition_pr_url_top_level_is_retired" (fun () ->
 
 let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1614,13 +1614,13 @@ let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun 
           ])
     in
     if not (Tool_result.is_success claim_result) then failwith (Tool_result.message claim_result);
-    assert_task_claimed_by ctx "agent_code-mcp-client";
+    assert_task_claimed_by ctx "codex-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
 let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1667,13 +1667,13 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
           ])
     in
     if not (Tool_result.is_success reclaim_result) then failwith (Tool_result.message reclaim_result);
-    assert_task_claimed_by ctx "agent_code-mcp-client";
+    assert_task_claimed_by ctx "codex-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
 let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc

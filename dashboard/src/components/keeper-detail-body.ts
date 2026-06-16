@@ -47,7 +47,7 @@ import { SessionTraceView } from './session-trace/session-trace-view'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
-import { KeeperTurnInspector } from './keeper-turn-inspector'
+import { KeeperMemoryOsRecallPanel, KeeperTurnInspector } from './keeper-turn-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperBDIPanel } from './keeper-bdi-panel'
 import { KeeperConfigPanel } from './keeper-config-panel'
@@ -119,6 +119,15 @@ export function KeeperDetailBody({
           <${CollapsibleSection} title="세션 활동 로그" open=${false} mountWhenOpen=${true}>
             <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
           <//>
+        <//>
+
+        <${KeeperDetailSection}
+          id="keeper-memory-os-recall"
+          eyebrow="메모리"
+          title="Memory OS recall"
+          lockedOpen=${true}
+        >
+          <${KeeperMemoryOsRecallPanel} keeperName=${keeper.name} />
         <//>
 
         <${KeeperDetailSection}

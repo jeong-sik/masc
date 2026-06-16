@@ -2710,11 +2710,52 @@ export type TurnRecordRow = {
   diff_vs_prev: TurnBlockDiff | null
 }
 
+export type MemoryOsEpisodeSummary = {
+  trace_id: string
+  generation: number
+  created_at: number
+  created_at_iso: string | null
+  valid_until: number | null
+  valid_until_iso: string | null
+  current: boolean
+  terminal_marker: string | null
+  claim_count: number
+  summary: string
+}
+
+export type MemoryOsTurnRecordSnapshot = {
+  schema: string
+  keeper: string
+  source: string
+  producer: string
+  facts_store: string
+  episodes_store: string
+  recall_enabled: boolean
+  now: number | null
+  now_iso: string | null
+  read_errors: { scope: string; error: string }[]
+  episodes: {
+    tail_limit: number
+    shown: number
+    current: number
+    expired: number
+    terminal_markers: number
+    items: MemoryOsEpisodeSummary[]
+  }
+  facts: {
+    tail_limit: number
+    shown: number
+    current: number
+    expired: number
+  }
+}
+
 export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   keeper: string
   count: number
   // malformed JSONL rows the server refused to decode (never repaired)
   skipped_rows: number
+  memory_os: MemoryOsTurnRecordSnapshot | null
   entries: TurnRecordRow[]
 }
 
@@ -2788,6 +2829,85 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
   }
 }
 
+function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
+  if (!isRecord(raw)) return null
+  const trace_id = asString(raw.trace_id)
+  const generation = asNumber(raw.generation)
+  const created_at = asNumber(raw.created_at)
+  const summary = asString(raw.summary)
+  if (!trace_id || generation == null || created_at == null || !summary) return null
+  return {
+    trace_id,
+    generation,
+    created_at,
+    created_at_iso: asNullableString(raw.created_at_iso),
+    valid_until: asNumber(raw.valid_until) ?? null,
+    valid_until_iso: asNullableString(raw.valid_until_iso),
+    current: asBoolean(raw.current, true) ?? true,
+    terminal_marker: asNullableString(raw.terminal_marker),
+    claim_count: asNumber(raw.claim_count, 0) ?? 0,
+    summary,
+  }
+}
+
+function decodeMemoryOsCounts(raw: unknown): {
+  tail_limit: number
+  shown: number
+  current: number
+  expired: number
+} | null {
+  if (!isRecord(raw)) return null
+  return {
+    tail_limit: asNumber(raw.tail_limit, 0) ?? 0,
+    shown: asNumber(raw.shown, 0) ?? 0,
+    current: asNumber(raw.current, 0) ?? 0,
+    expired: asNumber(raw.expired, 0) ?? 0,
+  }
+}
+
+function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null {
+  if (!isRecord(raw)) return null
+  const schema = asString(raw.schema)
+  const keeper = asString(raw.keeper)
+  const source = asString(raw.source)
+  const producer = asString(raw.producer)
+  const facts_store = asString(raw.facts_store)
+  const episodes_store = asString(raw.episodes_store)
+  const episodesRaw = isRecord(raw.episodes) ? raw.episodes : null
+  const facts = decodeMemoryOsCounts(raw.facts)
+  if (!schema || !keeper || !source || !producer || !facts_store || !episodes_store || !episodesRaw || !facts) {
+    return null
+  }
+  const episodesCounts = decodeMemoryOsCounts(episodesRaw)
+  if (!episodesCounts) return null
+  return {
+    schema,
+    keeper,
+    source,
+    producer,
+    facts_store,
+    episodes_store,
+    recall_enabled: asBoolean(raw.recall_enabled, true) ?? true,
+    now: asNumber(raw.now) ?? null,
+    now_iso: asNullableString(raw.now_iso),
+    read_errors: asRecordArray(raw.read_errors)
+      .map((item) => {
+        const scope = asString(item.scope)
+        const error = asString(item.error)
+        return scope && error ? { scope, error } : null
+      })
+      .filter((item): item is { scope: string; error: string } => item !== null),
+    episodes: {
+      ...episodesCounts,
+      terminal_markers: asNumber(episodesRaw.terminal_markers, 0) ?? 0,
+      items: asRecordArray(episodesRaw.items)
+        .map(decodeMemoryOsEpisode)
+        .filter((item): item is MemoryOsEpisodeSummary => item !== null),
+    },
+    facts,
+  }
+}
+
 function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   if (!isRecord(raw)) return null
   const keeper = asString(raw.keeper)
@@ -2797,6 +2917,7 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     keeper,
     count: asNumber(raw.count, 0),
     skipped_rows: asNumber(raw.skipped_rows, 0),
+    memory_os: decodeMemoryOsSnapshot(raw.memory_os),
     entries: asRecordArray(raw.entries)
       .map(decodeTurnRecordRow)
       .filter((row): row is TurnRecordRow => row !== null),

@@ -2231,6 +2231,109 @@ let test_edges_io_roundtrip () =
       Alcotest.failf "expected one association, got %d" (List.length other))
 ;;
 
+(* ---------- RFC-0246 §2.7 (P2a-2) spreading activation ---------- *)
+
+(* A fact linked to a strongly-scored neighbour gains alpha times the
+   association-weighted average of its recalled neighbours' base scores; an
+   unlinked fact gains nothing; alpha <= 0 yields no boost at all. *)
+let test_activation_boosts_lifts_linked () =
+  let base = [ "hi", 1.0; "lo", 0.1; "solo", 0.2 ] in
+  let assoc : Edges.association =
+    { Edges.a_src = "hi"
+    ; a_dst = "lo"
+    ; a_relation = Edges.Relates
+    ; weight = 1
+    ; first_seen = 0.0
+    ; last_seen = 0.0
+    }
+  in
+  let lookup k boosts = List.assoc_opt k boosts in
+  let boosts = Edges.activation_boosts ~alpha:0.5 ~associations:[ assoc ] ~base in
+  (match lookup "lo" boosts with
+   | Some b -> Alcotest.(check (float 1e-9)) "lo lifted by 0.5*base(hi)" 0.5 b
+   | None -> Alcotest.fail "expected a boost for the linked low fact");
+  (match lookup "hi" boosts with
+   | Some b -> Alcotest.(check (float 1e-9)) "hi lifted by 0.5*base(lo)" 0.05 b
+   | None -> Alcotest.fail "expected a boost for hi (linked to lo)");
+  Alcotest.(check (option (float 1e-9)))
+    "unlinked solo gets no boost"
+    None
+    (lookup "solo" boosts);
+  Alcotest.(check int)
+    "alpha <= 0 yields no boosts"
+    0
+    (List.length (Edges.activation_boosts ~alpha:0.0 ~associations:[ assoc ] ~base))
+;;
+
+let with_env name value f =
+  let old = Sys.getenv_opt name in
+  Unix.putenv name value;
+  (* Codebase convention: [Unix.putenv name ""] clears a var (no portable
+     [Unix.unsetenv]); the float env reader treats that as unset -> default. *)
+  Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value old ~default:"")) f
+;;
+
+let activation_alpha_env = "MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA"
+
+(* With activation disabled (alpha = 0, the default), recall is byte-identical
+   whether or not an edge store exists alongside the facts. *)
+let test_recall_activation_disabled_byte_identical () =
+  with_env activation_alpha_env "" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _ ->
+        let now = 1_000_000.0 in
+        let facts =
+          [ { (fact_fixture ~now ()) with Types.claim = "alpha one"; Types.confidence = 0.9 }
+          ; { (fact_fixture ~now ()) with Types.claim = "beta two"; Types.confidence = 0.8 }
+          ]
+        in
+        List.iter (Memory_io.append_fact ~keeper_id:"k") facts;
+        let before = Recall.render_context ~keeper_id:"k" ~now ~max_episodes:0 () in
+        Alcotest.(check bool) "precondition: recall is non-empty" true (String.length before > 0);
+        (* Add an edge store; with alpha = 0 it must not change the rendering. *)
+        Memory_io.append_edges
+          ~keeper_id:"k"
+          (Edges.co_occurrence_edges (mk_episode ~created_at:now [ "alpha one"; "beta two" ]));
+        let after = Recall.render_context ~keeper_id:"k" ~now ~max_episodes:0 () in
+        Alcotest.(check string) "alpha=0 ignores the edge store" before after)))
+;;
+
+(* With activation enabled, a low-base fact linked to a strongly-recalled fact is
+   lifted above an unlinked fact that outranks it on base score alone. *)
+let test_recall_activation_lifts_linked_fact () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _ ->
+      let now = 1_000_000.0 in
+      (* [a] scores highest (seed match + high confidence); [c] outranks [b] on
+         confidence alone, so without activation the top two are [a] and [c]. *)
+      let a = { (fact_fixture ~now ()) with Types.claim = "distinctive topic"; Types.confidence = 0.95 } in
+      let b = { (fact_fixture ~now ()) with Types.claim = "beta"; Types.confidence = 0.50 } in
+      let c = { (fact_fixture ~now ()) with Types.claim = "gamma"; Types.confidence = 0.60 } in
+      List.iter (Memory_io.append_fact ~keeper_id:"k") [ a; b; c ];
+      (* Link [a] and [b] so activation can carry [a]'s score to [b]. *)
+      Memory_io.append_edges
+        ~keeper_id:"k"
+        (Edges.co_occurrence_edges (mk_episode ~created_at:now [ "distinctive topic"; "beta" ]));
+      let render alpha =
+        with_env activation_alpha_env alpha (fun () ->
+          Recall.render_context ~keeper_id:"k" ~now ~max_facts:2 ~max_episodes:0 ~seed:"distinctive" ())
+      in
+      let disabled = render "" in
+      Alcotest.(check bool)
+        "disabled: unlinked higher-base gamma is in top-2"
+        true
+        (contains "gamma" disabled);
+      Alcotest.(check bool)
+        "disabled: linked lower-base beta is crowded out"
+        false
+        (contains "beta" disabled);
+      let enabled = render "50.0" in
+      Alcotest.(check bool)
+        "enabled: linked beta is lifted into top-2"
+        true
+        (contains "beta" enabled)))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -2470,6 +2573,18 @@ let () =
         ; Alcotest.test_case "edge codec round-trips" `Quick test_edge_codec_roundtrip
         ; Alcotest.test_case "aggregate counts Hebbian weight" `Quick test_edges_aggregate_weights
         ; Alcotest.test_case "edges IO round-trip" `Quick test_edges_io_roundtrip
+        ; Alcotest.test_case
+            "activation boosts lift linked facts (P2a-2)"
+            `Quick
+            test_activation_boosts_lifts_linked
+        ; Alcotest.test_case
+            "recall byte-identical when activation disabled (P2a-2)"
+            `Quick
+            test_recall_activation_disabled_byte_identical
+        ; Alcotest.test_case
+            "recall activation lifts linked fact (P2a-2)"
+            `Quick
+            test_recall_activation_lifts_linked_fact
         ] )
     ]
 ;;

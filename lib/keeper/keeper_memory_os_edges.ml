@@ -169,3 +169,44 @@ let aggregate (edges : edge list) : association list =
        | c -> c)
     | c -> c)
 ;;
+
+(* ---------- Spreading activation ---------- *)
+
+let activation_boosts ~alpha ~associations ~(base : (string * float) list) =
+  if alpha <= 0.0
+  then []
+  else (
+    let base_tbl = Hashtbl.create (List.length base * 2 + 1) in
+    List.iter (fun (k, s) -> Hashtbl.replace base_tbl k s) base;
+    (* Undirected neighbour index: each association lends both directions. *)
+    let nbr : (string, (string * float) list) Hashtbl.t = Hashtbl.create 256 in
+    let add a b w =
+      let cur = match Hashtbl.find_opt nbr a with Some l -> l | None -> [] in
+      Hashtbl.replace nbr a ((b, w) :: cur)
+    in
+    List.iter
+      (fun a ->
+         let w = float_of_int a.weight in
+         add a.a_src a.a_dst w;
+         add a.a_dst a.a_src w)
+      associations;
+    List.filter_map
+      (fun (k, _base_score) ->
+         match Hashtbl.find_opt nbr k with
+         | None -> None
+         | Some neighbours ->
+           (* Weighted average over neighbours that are themselves recalled, so a
+              fact linked to strongly-scored facts is lifted in proportion to the
+              association strength; absent neighbours contribute nothing. *)
+           let num, den =
+             List.fold_left
+               (fun (num, den) (n, w) ->
+                  match Hashtbl.find_opt base_tbl n with
+                  | Some base_n -> num +. (w *. base_n), den +. w
+                  | None -> num, den)
+               (0.0, 0.0)
+               neighbours
+           in
+           if den <= 0.0 then None else Some (k, alpha *. (num /. den)))
+      base)
+;;

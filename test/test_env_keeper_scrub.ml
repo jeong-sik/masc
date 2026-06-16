@@ -142,6 +142,27 @@ let c_messages_pins_even_without_host_locale () =
   Alcotest.(check bool) "LC_ALL= appended" true (mem "LC_ALL=" out)
 ;;
 
+let filter_environment_scrubs_proxy_credentials () =
+  let input =
+    [| "PATH=/usr/bin"
+     ; "HTTP_PROXY=https://operator:secret@proxy.example.com:8080"
+     ; "HTTPS_PROXY=https://user:pass@proxy.internal/path"
+     ; "NO_PROXY=localhost,.example.com"
+    |]
+  in
+  let out = Env_keeper_scrub.filter_environment input in
+  Alcotest.(check bool) "HTTP_PROXY value redacted" true
+    (mem "HTTP_PROXY=https://[REDACTED]@proxy.example.com:8080" out);
+  Alcotest.(check bool) "HTTPS_PROXY value redacted" true
+    (mem "HTTPS_PROXY=https://[REDACTED]@proxy.internal/path" out);
+  Alcotest.(check bool) "NO_PROXY preserved" true
+    (mem "NO_PROXY=localhost,.example.com" out);
+  Alcotest.(check bool) "raw proxy password stripped" false
+    (Array.to_list out |> List.exists (fun e ->
+       String_util.contains_substring e "secret"
+       || String_util.contains_substring e "pass"))
+;;
+
 let () =
   Alcotest.run
     "env keeper scrub"
@@ -159,6 +180,8 @@ let () =
             filter_environment_keeps_only_allowed
         ; Alcotest.test_case "drops unknown keys without equals" `Quick
             filter_environment_drops_entries_without_equals
+        ; Alcotest.test_case "scrubs proxy URL credentials" `Quick
+            filter_environment_scrubs_proxy_credentials
         ] )
     ; ( "c_messages_locale"
       , [ Alcotest.test_case "pins message locale to C" `Quick

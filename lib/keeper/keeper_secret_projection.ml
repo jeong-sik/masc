@@ -395,36 +395,60 @@ let dashboard_status_json ~base_path ~keeper_name =
               ~next_action)))
 ;;
 
-let write_env_file ~container_name entries =
+let rec ensure_dir path =
+  if path = "" || path = "." || path = "/" || Sys.file_exists path
+  then ()
+  else (
+    let parent = Filename.dirname path in
+    if parent <> path then ensure_dir parent;
+    try Unix.mkdir path 0o700 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+let private_tmp_dir ~base_path =
+  let dir = Filename.concat (Common.masc_dir_from_base_path ~base_path) "tmp" in
+  ensure_dir dir;
+  if not (Sys.is_directory dir)
+  then failwith (Printf.sprintf "keeper private tmp path is not a directory: %s" dir);
+  dir
+;;
+
+let write_env_file ~base_path ~container_name entries =
   if entries = []
   then Ok None
   else
+    let tmp_dir = private_tmp_dir ~base_path in
     let prefix =
       "masc_keeper_secret_env_"
       ^ Workspace_utils.safe_filename container_name
       ^ "_"
     in
     try
-      let path = Filename.temp_file prefix ".env" in
-      (try
-         Unix.chmod path 0o600;
-         let oc = open_out_gen [ Open_wronly; Open_trunc; Open_binary ] 0o600 path in
-         Fun.protect
-           ~finally:(fun () -> close_out oc)
-           (fun () ->
-              List.iter
-                (fun (name, value) ->
-                   output_string oc name;
-                   output_char oc '=';
-                   output_string oc value;
-                   output_char oc '\n')
-                entries);
-         Ok (Some path)
-       with
-       | exn ->
-         (try if Sys.file_exists path then Sys.remove path with
-          | Sys_error _ | Unix.Unix_error _ -> ());
-         raise exn)
+      let path, oc =
+        Filename.open_temp_file
+          ~temp_dir:tmp_dir
+          ~mode:[ Open_wronly; Open_binary ]
+          ~perms:0o600
+          prefix
+          ".env"
+      in
+      try
+        Fun.protect
+          ~finally:(fun () -> close_out_noerr oc)
+          (fun () ->
+             List.iter
+               (fun (name, value) ->
+                  output_string oc name;
+                  output_char oc '=';
+                  output_string oc value;
+                  output_char oc '\n')
+               entries);
+        Ok (Some path)
+      with
+      | exn ->
+        (try if Sys.file_exists path then Sys.remove path with
+         | Sys_error _ | Unix.Unix_error _ -> ());
+        raise exn
     with
     | Sys_error msg -> Error msg
     | Unix.Unix_error (err, fn, arg) ->
@@ -487,7 +511,7 @@ let docker_args_for_keeper ~base_path ~keeper_name ~container_name =
          (match collect_file_entries files_root with
           | Error _ as err -> err
           | Ok file_entries ->
-            (match write_env_file ~container_name env_entries with
+            (match write_env_file ~base_path ~container_name env_entries with
              | Error _ as err -> err
              | Ok env_file ->
                let env_args =

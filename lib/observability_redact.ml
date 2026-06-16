@@ -26,18 +26,36 @@ let is_denied_tool ~tool_name =
   let lower = String.lowercase_ascii tool_name in
   List.exists (fun infix -> String_util.contains_substring lower infix) denied_tool_infixes
 
-(** Sensitive value patterns — matches API keys, tokens, long hex strings.
-    24+ contiguous alphanumeric/base64 characters. *)
-let sensitive_value_re =
-  Re.compile (Re.repn (Re.alt [Re.alnum; Re.set "_/+=-"]) 24 None)
+(** Minimum length for the generic high-entropy token pattern. *)
+let default_min_secret_len = 20
+
+(** Generic high-entropy token pattern — alphanumeric/base64 characters. *)
+let generic_secret_re min_len =
+  Re.compile (Re.repn (Re.alt [Re.alnum; Re.set "_/+=-"]) min_len None)
 
 (** URL credential pattern — ://user:pass@ *)
 let url_credential_re =
   Re.compile (Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@'])
 
-let redact_patterns (s : string) : string =
-  let s = Re.replace_string url_credential_re ~by:"://[REDACTED]@" s in
-  Re.replace_string sensitive_value_re ~by:"[REDACTED]" s
+(** Common secret-bearing value patterns. Specific prefixes are listed before
+    the generic high-entropy matcher so short, well-known tokens are not missed
+    when they are embedded inside larger strings. *)
+let secret_res ?(min_len = default_min_secret_len) () =
+  let open Re in
+  [ url_credential_re
+  ; compile (seq [str "Bearer "; rep1 (compl [set " \t\r\n"])])
+  ; compile (seq [str "ghp_"; rep1 alnum])
+  ; compile (seq [str "github_pat_"; rep1 (alt [alnum; char '_'])])
+  ; compile (seq [str "sk-"; rep1 alnum])
+  ; compile (seq [str "AKIA"; repn alnum 16 (Some 16)])
+  ; generic_secret_re min_len
+  ]
+
+let redact_patterns ?min_len (s : string) : string =
+  List.fold_left
+    (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc)
+    s
+    (secret_res ?min_len ())
 
 let redact_text (s : string) : string =
   redact_patterns s

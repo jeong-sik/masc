@@ -36,7 +36,7 @@ export function DashboardSurfaceTabs({ items, currentTab }: DashboardSurfaceTabs
   const hasMatchingTab = items.some(item => item.id === currentTab)
 
   return html`
-    <nav class="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] max-[520px]:w-full max-[768px]:hidden" aria-label="Dashboard surfaces">
+    <nav class="v2-shell-tabs min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] max-[520px]:w-full max-[768px]:hidden" aria-label="Dashboard surfaces">
       <div
         role="tablist"
         aria-label="Dashboard surfaces"

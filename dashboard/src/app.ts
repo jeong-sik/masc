@@ -254,7 +254,7 @@ export function App() {
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
     >
       <${SkipLink} />
-      <header class="${compactChromeMode ? 'hidden' : 'relative'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl">
+      <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[1080px]:flex-col max-[1080px]:items-stretch">
           <div class="flex min-w-0 flex-1 items-center gap-3 max-[860px]:flex-wrap">
@@ -268,12 +268,12 @@ export function App() {
               >
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
-              <div class="flex min-w-0 items-stretch overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
-                <div class="flex w-12 shrink-0 flex-col items-center justify-center border-r border-[var(--color-border-default)] bg-[var(--accent-10)] px-2 py-1 font-mono text-3xs font-semibold uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
+              <div class="v2-header-brand flex min-w-0 items-stretch overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+                <div class="v2-header-mark flex w-12 shrink-0 flex-col items-center justify-center border-r border-[var(--color-border-default)] bg-[var(--accent-10)] px-2 py-1 font-display text-2xs font-semibold uppercase leading-none tracking-[0.12em] text-[var(--color-accent-fg)]">
                   MASC
                 </div>
                 <div class="min-w-0 px-2.5 py-1">
-                  <div class="flex items-center gap-1.5 font-mono text-[var(--fs-9)] uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+                  <div class="v2-header-crumb flex items-center gap-1.5 font-ui text-[var(--fs-10)] uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
                     <span>${currentView?.label ?? 'Surface'}</span>
                     ${currentSection && currentSection.label !== currentView?.label
                       ? html`
@@ -282,7 +282,7 @@ export function App() {
                         `
                       : null}
                   </div>
-                  <h1 class="mt-1 min-w-0 truncate text-xs font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
+                  <h1 class="v2-header-title mt-1 min-w-0 truncate font-display text-xs font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
                     ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
                   </h1>
                 </div>
@@ -292,7 +292,7 @@ export function App() {
             <${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
           </div>
 
-          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
+          <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
             <${EmergencyStopControl} />
             <${Suspense} fallback=${authStatusFallback()}>
               <${LazyAuthStatus} />

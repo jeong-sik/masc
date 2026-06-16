@@ -7,7 +7,9 @@
  */
 
 .v2-shell-rail,
-.v2-status-tray {
+.v2-status-tray,
+.v2-shell-header,
+.v2-health-strip {
   /* v5 Observatory dark-fantasy palette, calibrated against the v2
      colors_and_type.css "Dark Fantasy" theme. */
   --v2-ink:         #0a0e18;
@@ -511,4 +513,192 @@ aside.v2-status-tray .tray-action-link {
 aside.v2-status-tray .tray-action-link:hover {
   border-color: var(--v2-accent-brass-dim);
   color: var(--v2-accent-brass);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HEADER + HEALTH STRIP — v2 token bridge
+   Re-sets the dashboard legacy token ladder to the v2 navy/brass
+   palette for these two chrome surfaces only.
+   ═══════════════════════════════════════════════════════════════ */
+
+:is(.v2-shell-header, .v2-health-strip) {
+  /* Surfaces */
+  --bg-0: var(--v2-ink);
+  --bg-1: var(--v2-velvet);
+  --bg-2: var(--v2-card);
+  --bg-3: var(--v2-card-soft);
+  --bg-4: var(--v2-raised);
+
+  --color-bg-0: var(--v2-ink);
+  --color-bg-1: var(--v2-velvet);
+  --color-bg-2: var(--v2-card);
+  --color-bg-3: var(--v2-card-soft);
+  --color-bg-4: var(--v2-raised);
+  --color-bg-page: var(--v2-ink);
+  --color-bg-surface: var(--v2-velvet);
+  --color-bg-panel-alt: var(--v2-card);
+  --color-bg-elevated: var(--v2-card-soft);
+  --color-bg-hover: var(--v2-raised);
+
+  /* Hairlines */
+  --line-1: var(--v2-border);
+  --line-2: var(--v2-border-strong);
+  --line-3: var(--v2-border-soft);
+
+  --color-line-1: var(--v2-border);
+  --color-line-2: var(--v2-border-strong);
+  --color-line-3: var(--v2-border-soft);
+  --color-border-default: var(--v2-border);
+  --color-border-strong: var(--v2-border-strong);
+  --color-border-divider: var(--v2-border-soft);
+
+  /* Text */
+  --fg-1: var(--v2-text-bright);
+  --fg-2: var(--v2-text);
+  --fg-3: var(--v2-text-dim);
+  --fg-4: var(--v2-text-faint);
+
+  --color-fg-1: var(--v2-text-bright);
+  --color-fg-2: var(--v2-text);
+  --color-fg-3: var(--v2-text-dim);
+  --color-fg-4: var(--v2-text-faint);
+  --color-fg-primary: var(--v2-text-bright);
+  --color-fg-secondary: var(--v2-text);
+  --color-fg-muted: var(--v2-text-dim);
+  --color-fg-disabled: var(--v2-text-faint);
+
+  /* Brass accent */
+  --brass-1: #c4a265;
+  --brass-2: #a08040;
+  --brass-3: var(--v2-accent-brass-dim);
+  --brass-glow: 196 162 101;
+  --brass-soft: rgb(196 162 101 / .10);
+  --brass-fg: var(--brass-1);
+
+  --color-brass-1: var(--brass-1);
+  --color-brass-2: var(--brass-2);
+  --color-brass-3: var(--brass-3);
+  --color-brass-glow: var(--brass-glow);
+  --color-brass-soft: var(--brass-soft);
+  --color-brass-fg: var(--brass-fg);
+  --color-accent-fg: var(--brass-1);
+  --color-accent-fg-dim: var(--brass-3);
+  --color-accent-glow: var(--brass-glow);
+  --accent-12: rgb(var(--brass-glow) / .12);
+  --accent-22: rgb(var(--brass-glow) / .22);
+
+  /* Status */
+  --ok: var(--v2-ok);
+  --warn: var(--v2-warn);
+  --err: var(--v2-bad);
+  --ok-glow: 90 122 58;
+  --warn-glow: 160 106 26;
+  --err-glow: 160 24 24;
+
+  --color-ok: var(--v2-ok);
+  --color-warn: var(--v2-warn);
+  --color-err: var(--v2-bad);
+  --color-status-ok: var(--v2-ok);
+  --color-status-warn: var(--v2-warn);
+  --color-status-err: var(--v2-bad);
+  --color-ok-glow: var(--ok-glow);
+  --color-warn-glow: var(--warn-glow);
+  --color-err-glow: var(--err-glow);
+
+  /* Status soft/alpha slots used by chips and badges */
+  --ok-soft: rgb(90 122 58 / .10);
+  --ok-10: rgb(90 122 58 / .10);
+  --ok-30: rgb(90 122 58 / .30);
+  --ok-fg: #9abc7a;
+  --ok-border: rgb(90 122 58 / .35);
+
+  --warn-soft: rgb(160 106 26 / .12);
+  --warn-10: rgb(160 106 26 / .10);
+  --warn-12: rgb(160 106 26 / .12);
+  --warn-20: rgb(160 106 26 / .20);
+  --warn-fg: #d49a3a;
+  --warn-bright: #e0a040;
+  --warn-border: rgb(160 106 26 / .35);
+
+  --err-soft: rgb(160 24 24 / .12);
+  --bad-soft: rgb(160 24 24 / .15);
+  --bad-10: rgb(160 24 24 / .10);
+  --bad-30: rgb(160 24 24 / .30);
+  --err-fg: #d06060;
+  --bad-light: #e07070;
+  --err-border: rgb(160 24 24 / .40);
+
+  --color-ok-soft: var(--ok-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-err-soft: var(--err-soft);
+}
+
+/* ── Header chrome ── */
+.v2-shell-header {
+  /* Subtle brass hairline at the bottom edge (matches v2 topbar). */
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4), inset 0 -1px 0 rgba(138, 106, 40, 0.12);
+}
+
+.v2-shell-header .v2-header-brand {
+  border-color: var(--v2-border);
+  background: var(--v2-card);
+}
+
+.v2-shell-header .v2-header-mark {
+  border-color: var(--v2-border);
+  background: rgba(138, 106, 40, 0.10);
+  color: var(--brass-1);
+}
+
+.v2-shell-header .v2-header-crumb {
+  color: var(--v2-text-dim);
+}
+
+.v2-shell-header .v2-header-crumb .text-\[var\(--color-warn\)\] {
+  color: var(--v2-warn);
+}
+
+.v2-shell-header .v2-header-title {
+  color: var(--v2-text);
+}
+
+/* Surface tabs inside the header */
+.v2-shell-tabs [role="tablist"] {
+  border-color: var(--v2-border);
+  background: var(--v2-card-soft);
+}
+
+.v2-shell-tabs [role="tab"] {
+  border-color: transparent;
+  color: var(--v2-text-dim);
+}
+
+.v2-shell-tabs [role="tab"]:hover {
+  border-color: var(--v2-border);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--v2-text);
+}
+
+.v2-shell-tabs [role="tab"][aria-selected="true"] {
+  border-color: var(--v2-accent-brass-dim);
+  background: rgba(196, 162, 101, 0.12);
+  color: var(--brass-1);
+  box-shadow: inset 0 -1px 0 var(--v2-accent-brass-dim);
+}
+
+/* Header action area (emergency stop, auth, connection, theme, build) */
+.v2-shell-header .v2-header-actions {
+  color: var(--v2-text-dim);
+}
+
+/* ── Health strip chrome ── */
+.v2-health-strip {
+  border-color: var(--v2-border-soft);
+  background: var(--v2-ink);
+}
+
+.v2-health-strip .dashboard-health-chip {
+  font-family: var(--v2-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
 }

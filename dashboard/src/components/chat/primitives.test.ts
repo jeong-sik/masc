@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { KeeperConversationEntry } from '../../types'
+import type { ChatBlock, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
 import { ChatComposer, ChatTranscript } from './primitives'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
@@ -620,5 +620,255 @@ describe('ChatComposer IME composition guard', () => {
       new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
     )
     expect(sent).toBe(0)
+  })
+})
+
+describe('Keeper v2 chat blocks', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderBlocks(blocks: ChatBlock[]) {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'b1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            blocks,
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+  }
+
+  it('renders a callout block', () => {
+    renderBlocks([{ t: 'callout', severity: 'warn', html: '<strong>주의</strong>' }])
+
+    const callout = container.querySelector('[data-chat-block="callout"]')
+    expect(callout).not.toBeNull()
+    expect(callout?.classList.contains('warn')).toBe(true)
+    expect(callout?.textContent).toContain('주의')
+  })
+
+  it('renders a markdown table with numeric and muted cell flags', () => {
+    renderBlocks([
+      {
+        t: 'table',
+        head: ['name', { v: 'count', num: true }],
+        rows: [['a', { v: '42', num: true }], ['b', { v: 'n/a', muted: true }]],
+      },
+    ])
+
+    const table = container.querySelector('[data-chat-block="table"]')
+    expect(table).not.toBeNull()
+    const nums = [...container.querySelectorAll('.chat-block-cell-num')].map((el) => el.textContent)
+    expect(nums).toContain('count')
+    expect(nums).toContain('42')
+    const muted = container.querySelector('.chat-block-cell-muted')
+    expect(muted?.textContent).toBe('n/a')
+  })
+
+  it('renders a code block with caption', () => {
+    renderBlocks([{ t: 'code', cap: 'config.ml', html: 'let x = 1' }])
+
+    const code = container.querySelector('[data-chat-block="code"]')
+    expect(code).not.toBeNull()
+    expect(code?.textContent).toContain('config.ml')
+    expect(code?.textContent).toContain('let x = 1')
+  })
+
+  it('renders a shell block with prompt and exit status', () => {
+    renderBlocks([
+      {
+        t: 'shell',
+        title: 'keeper@worktree',
+        lines: [
+          { t: 'cmd', v: 'ls' },
+          { t: 'out', v: 'file.txt' },
+        ],
+        exit: 1,
+        dur: '0.3s',
+      },
+    ])
+
+    const shell = container.querySelector('[data-chat-block="shell"]')
+    expect(shell).not.toBeNull()
+    expect(shell?.textContent).toContain('keeper@worktree')
+    expect(shell?.textContent).toContain('$ ls')
+    expect(shell?.textContent).toContain('file.txt')
+    expect(shell?.textContent).toContain('exit 1')
+  })
+
+  it('renders an artifact card with open/download buttons', () => {
+    renderBlocks([{ t: 'artifact', kind: 'json', name: 'report.json', size: '12 KB', note: '3 items' }])
+
+    const artifact = container.querySelector('[data-chat-block="artifact"]')
+    expect(artifact).not.toBeNull()
+    expect(artifact?.textContent).toContain('report.json')
+    expect(artifact?.textContent).toContain('JSON')
+    const buttons = [...(artifact?.querySelectorAll('button') ?? [])].map((b) => b.textContent)
+    expect(buttons).toContain('열기')
+    expect(buttons).toContain('다운로드')
+  })
+
+  it('renders an attach card with inline svg', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'shape.svg',
+        dims: '64×64',
+        svg: '<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="red"/></svg>',
+        via: 'vision',
+        size: '1 KB',
+      },
+    ])
+
+    const attach = container.querySelector('[data-chat-block="attach"]')
+    expect(attach).not.toBeNull()
+    expect(attach?.textContent).toContain('shape.svg')
+    expect(attach?.textContent).toContain('64×64')
+    expect(attach?.querySelector('svg')).not.toBeNull()
+  })
+
+  it('renders a voice memo with waveform bars and transcript', () => {
+    renderBlocks([
+      {
+        t: 'voice',
+        secs: 14,
+        wave: [0.2, 0.5, 0.8, 0.3, 0.6],
+        via: 'whisper',
+        size: '24 KB',
+        transcript: 'hello world',
+      },
+    ])
+
+    const voice = container.querySelector('[data-chat-block="voice"]')
+    expect(voice).not.toBeNull()
+    expect(voice?.querySelectorAll('.chat-block-vbar').length).toBe(5)
+    expect(voice?.textContent).toContain('hello world')
+    expect(voice?.textContent).toContain('whisper')
+  })
+
+  it('toggles the voice memo play button label', async () => {
+    renderBlocks([{ t: 'voice', secs: 2, wave: [0.2, 0.5] }])
+
+    const play = container.querySelector('[data-chat-block="voice"] button') as HTMLButtonElement
+    expect(play?.textContent?.trim()).toBe('▶')
+    play.click()
+    await flushUi()
+    expect(play?.textContent?.trim()).toBe('❙❙')
+    play.click()
+    await flushUi()
+    expect(play?.textContent?.trim()).toBe('▶')
+  })
+
+  it('renders an image block', () => {
+    renderBlocks([{ t: 'image', src: '/img/screen.png', cap: '실행 화면' }])
+
+    const img = container.querySelector('[data-chat-block="image"] img') as HTMLImageElement | null
+    expect(img).not.toBeNull()
+    expect(img?.getAttribute('src')).toBe('/img/screen.png')
+    expect(container.textContent).toContain('실행 화면')
+  })
+
+  it('renders an svg block', () => {
+    renderBlocks([{ t: 'svg', svg: '<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="5"/></svg>', cap: 'diagram' }])
+
+    const svg = container.querySelector('[data-chat-block="svg"] svg')
+    expect(svg).not.toBeNull()
+    expect(container.textContent).toContain('diagram')
+  })
+
+  it('renders a trace block and expands a tool step', async () => {
+    renderBlocks([
+      {
+        t: 'trace',
+        trace: [
+          { kind: 'think', text: 'planning' },
+          { kind: 'tool', name: 'keeper_context_status', status: 'ok', dur: '0.2s', args: { path: 'a' }, result: '{"ok":true}' },
+        ],
+      },
+    ])
+
+    const trace = container.querySelector('[data-chat-block="trace"]')
+    expect(trace).not.toBeNull()
+    expect(trace?.textContent).toContain('planning')
+    expect(trace?.textContent).toContain('keeper_context_status')
+
+    const toolRow = container.querySelector('[data-chat-trace-step="tool"] .chat-block-tstep-row.click') as HTMLElement | null
+    expect(toolRow).not.toBeNull()
+    toolRow?.click()
+    await flushUi()
+
+    expect(trace?.textContent).toContain('args')
+    expect(trace?.textContent).toContain('"path"')
+    expect(trace?.textContent).toContain('result')
+  })
+
+  it('renders a link unfurl card with extracted hostname', () => {
+    renderBlocks([
+      {
+        t: 'link',
+        url: 'https://example.com/post',
+        title: 'Example post',
+        desc: 'A useful article',
+      },
+    ])
+
+    const link = container.querySelector('[data-chat-block="link"]') as HTMLAnchorElement | null
+    expect(link).not.toBeNull()
+    expect(link?.getAttribute('href')).toBe('https://example.com/post')
+    expect(link?.textContent).toContain('Example post')
+    expect(link?.textContent).toContain('example.com')
+  })
+
+  it('renders a broadcast card with recipient ack labels', () => {
+    renderBlocks([
+      {
+        t: 'broadcast',
+        scope: '@fleet',
+        via: 'keeper-net',
+        note: 'standby',
+        recipients: [
+          { id: 'masc', ack: 'acked', at: '12:00' },
+          { id: 'sangsu', ack: 'delivered' },
+        ],
+      },
+    ])
+
+    const bcast = container.querySelector('[data-chat-block="broadcast"]')
+    expect(bcast).not.toBeNull()
+    expect(bcast?.textContent).toContain('브로드캐스트')
+    expect(bcast?.textContent).toContain('standby')
+    expect(bcast?.textContent).toContain('확인함')
+    expect(bcast?.textContent).toContain('전달됨')
+    expect(bcast?.textContent).toContain('1/2 확인')
+  })
+
+  it('falls back to markdown text when blocks are not provided', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'm1', text: 'plain markdown reply' })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('plain markdown reply')
+    expect(container.querySelector('[data-chat-blocks]')).toBeNull()
   })
 })

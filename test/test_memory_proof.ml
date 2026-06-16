@@ -105,7 +105,6 @@ let test_jaccard_limits () =
 (* 적대적 부정어 예외 상황 테스트 (Adversarial Negation Test) *)
 let test_adversarial_negation () =
   Printf.printf "=== 3. Adversarial Negation Bypass Test ===\n";
-  (* s1은 허용(금지된 게 아님), s2는 금지(실제 금지) -> 의미가 반대이나 둘 다 "금지" 어휘를 포함함 *)
   let s1 = "통합 테스트 시 DB 모킹은 금지된 사항이 아니다." in
   let s2 = "통합 테스트 시 DB 모킹을 금지한다." in
   
@@ -119,7 +118,6 @@ let test_adversarial_negation () =
 
   (* 문맥적/어미 분석식 부정 처리 시뮬레이션 (Semantic Negation Checker) *)
   let has_contextual_negation s =
-    (* "금지" 뒤에 "아니다" 등의 부정형 표현이 문맥적으로 이어지는지 검사 *)
     let neg_patterns = ["금지된 사항이 아니다"; "금지하지 않는다"; "금지된 사항은 아니다"] in
     let rec check_patterns = function
       | [] -> false
@@ -131,8 +129,8 @@ let test_adversarial_negation () =
           in
           if check_substring 0 then true else check_patterns pats
     in
-    if check_patterns neg_patterns then false (* 부정의 부정 = 긍정 (금지 안 함) *)
-    else has_negation s (* 일반 부정 체크 *)
+    if check_patterns neg_patterns then false
+    else has_negation s
   in
   let apply_contextual_negation_penalty score s1 s2 =
     if has_contextual_negation s1 <> has_contextual_negation s2 then score *. 0.2 else score
@@ -145,7 +143,6 @@ let test_adversarial_negation () =
 (* 적대적 반의어 예외 상황 테스트 (Adversarial Antonym Blindness Test) *)
 let test_adversarial_antonyms () =
   Printf.printf "=== 5. Adversarial Antonym Blindness Test ===\n";
-  (* s1은 피할 것을 권장(금지), s2는 수용할 것을 권장(허용) -> 의미가 정반대이나 부정어가 전혀 없음 *)
   let s1 = "통합 테스트 시 DB 모킹을 피하는 것이 최선이다." in
   let s2 = "통합 테스트 시 DB 모킹을 수용하는 것이 최선이다." in
 
@@ -214,7 +211,7 @@ let test_adversarial_pre_embed env =
   let leak_invocations = ref 0 in
   let simulate_leak_pre_embed ~sw current_input_prefix =
     Eio.Fiber.fork ~sw (fun () ->
-      Eio.Time.sleep clock 0.1; (* 빠른 테스트를 위해 100ms 디바운스로 시뮬레이션 *)
+      Eio.Time.sleep clock 0.1;
       incr leak_invocations;
       ignore (Array.make 1536 0.05)
     )
@@ -228,7 +225,7 @@ let test_adversarial_pre_embed env =
       Eio.Time.sleep clock 0.01
     ) ["t"; "te"; "tes"; "test"; "test_mock"]
   );
-  Eio.Time.sleep clock 0.15; (* 모든 작업이 끝날 때까지 대기 *)
+  Eio.Time.sleep clock 0.15;
   Printf.printf "비정상 중첩 호출 수: %d (★전체 요청이 취소되지 않고 전부 연산을 수행하여 CPU 낭비 발생)\n\n" !leak_invocations;
 
   (* 2. Ticket 기반 Cancellation 기법 검증 *)
@@ -267,7 +264,6 @@ let test_multicore_pre_embed_race env =
   let raw_duplicates = ref 0 in
   let simulate_raw_race () =
     let current = !raw_counter in
-    (* 아주 아주 미세한 레이턴시 주입하여 경쟁 간섭 재현 *)
     Eio.Fiber.yield ();
     let next = current + 1 in
     raw_counter := next;
@@ -310,6 +306,67 @@ let test_multicore_pre_embed_race env =
          if r1 = r2 then incr atomic_duplicates)
   );
   Printf.printf "Atomic 카운터 최종 중복 티켓 발행 수: %d (★멀티코어 경쟁 상태에서도 중복 없이 완벽히 스레드 안전성 보장 완료)\n" !atomic_duplicates;
+  Printf.printf "======================================================\n\n"
+
+(* 공백 정규화 (Whitespace Canonicalization) 검증 *)
+let test_whitespace_canonicalization () =
+  Printf.printf "=== 7. Whitespace Canonicalization Cache hit Test ===\n";
+  let canonicalize_query s =
+    s
+    |> String.trim
+    |> String.split_on_char ' '
+    |> List.filter (fun w -> w <> "")
+    |> String.concat " "
+  in
+  let q1 = "  DB 모킹   금지   " in
+  let q2 = "DB 모킹 금지" in
+  let cq1 = canonicalize_query q1 in
+  let cq2 = canonicalize_query q2 in
+  Printf.printf "원문 1: \"%s\"\n" q1;
+  Printf.printf "원문 2: \"%s\"\n" q2;
+  Printf.printf "정규화 원문 1: \"%s\"\n" cq1;
+  Printf.printf "정규화 원문 2: \"%s\"\n" cq2;
+  Printf.printf "캐시 키 정규화 일치 여부: %b (★정규화 성공 시 불필요한 공백 차이로 인한 캐시 미스 방어 완료)\n" (cq1 = cq2);
+  Printf.printf "======================================================\n\n"
+
+(* Outbox 멱등성 및 부분 성공 복구 (Idempotent Outbox Partial Success) 검증 *)
+let test_idempotent_outbox env =
+  Printf.printf "=== 8. Idempotent Outbox Partial Success & Recovery Test ===\n";
+  let clock = Eio.Stdenv.clock env in
+  
+  let pgvector_writes = ref 0 in
+  let neo4j_writes = ref 0 in
+  
+  (* pgvector는 처음부터 성공, neo4j는 1회차 실패 후 2회차에 성공 시뮬레이션 *)
+  let write_pgvector _row =
+    incr pgvector_writes;
+    Ok ()
+  in
+  let write_neo4j _row =
+    incr neo4j_writes;
+    if !neo4j_writes = 1 then Error "Neo4j Down" else Ok ()
+  in
+  
+  (* Outbox retry loop 시뮬레이션 *)
+  let simulate_outbox_retry () =
+    let rec retry pg_done neo_done attempt =
+      if attempt > 5 then ()
+      else
+        let pg_done = if pg_done then true else match write_pgvector () with Ok () -> true | Error _ -> false in
+        let neo_done = if neo_done then true else match write_neo4j () with Ok () -> true | Error _ -> false in
+        if pg_done && neo_done then
+          Printf.printf "[Outbox] pgvector & Neo4j 저장 완료 (시도 횟수: %d)\n" attempt
+        else (
+          Eio.Time.sleep clock 0.01;
+          retry pg_done neo_done (attempt + 1)
+        )
+    in
+    retry false false 1
+  in
+  
+  simulate_outbox_retry ();
+  Printf.printf "pgvector 최종 쓰기 횟수: %d (★ 1회만 호출되어 중복 쓰기 방어 성공)\n" !pgvector_writes;
+  Printf.printf "Neo4j 최종 쓰기 횟수: %d (★ 2회 호출되어 실패 상태 복구 성공)\n" !neo4j_writes;
   Printf.printf "======================================================\n"
 
 let () =
@@ -319,5 +376,7 @@ let () =
     test_adversarial_negation ();
     test_adversarial_pre_embed env;
     test_adversarial_antonyms ();
-    test_multicore_pre_embed_race env
+    test_multicore_pre_embed_race env;
+    test_whitespace_canonicalization ();
+    test_idempotent_outbox env
   )

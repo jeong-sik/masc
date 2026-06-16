@@ -13,13 +13,21 @@ type t = {
 let create ~worker ~env_clock ~supabase_client ~neo4j_client =
   { worker; env_clock; supabase_client; neo4j_client; speculative_cache = None; pre_embed_id = Atomic.make 0 }
 
+let canonicalize_query s =
+  s
+  |> String.trim
+  |> String.split_on_char ' '
+  |> List.filter (fun w -> w <> "")
+  |> String.concat " "
+
 let pre_embed_speculative t ~sw ~current_input_prefix =
+  let clean_prefix = canonicalize_query current_input_prefix in
   let my_ticket = Atomic.fetch_and_add t.pre_embed_id 1 + 1 in
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Time.sleep t.env_clock 0.8;
-    if Atomic.get t.pre_embed_id = my_ticket && String.length current_input_prefix > 5 then
-      let vec = Masc_domain_worker.compute_local_embedding t.worker ~text:current_input_prefix in
-      t.speculative_cache <- Some (current_input_prefix, vec)
+    if Atomic.get t.pre_embed_id = my_ticket && String.length clean_prefix > 5 then
+      let vec = Masc_domain_worker.compute_local_embedding t.worker ~text:clean_prefix in
+      t.speculative_cache <- Some (clean_prefix, vec)
   )
 
 let query_supabase_mock _client _vector _max =
@@ -39,11 +47,11 @@ let query_neo4j_mock _client _query _max =
 
 let recall t ~query ~max_results =
   try
-    (* 1. 로컬 캐시 임베딩이 있으면 재사용, 없으면 로컬 worker 계산 *)
+    let clean_query = canonicalize_query query in
     let query_vector =
       match t.speculative_cache with
-      | Some (prefix, vec) when String.starts_with ~prefix query -> vec
-      | _ -> Masc_domain_worker.compute_local_embedding t.worker ~text:query
+      | Some (prefix, vec) when String.starts_with ~prefix clean_query -> vec
+      | _ -> Masc_domain_worker.compute_local_embedding t.worker ~text:clean_query
     in
     
     (* 2. Eio.Fiber.first와 sleep을 결합한 800ms 타임아웃 데코레이터 정의 *)

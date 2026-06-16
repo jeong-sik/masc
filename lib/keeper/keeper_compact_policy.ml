@@ -306,6 +306,14 @@ let compact_if_needed_typed
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Log.Harness.warn "[pre_compact] sse broadcast failed: %s" (Printexc.to_string exn)));
+    (match pre_compact_event with
+     | None -> ()
+     | Some _ ->
+       Keeper_event_publisher.publish_keeper_snapshot
+         ~keeper_name:meta.name
+         ~generation:meta.runtime.generation
+         ~context_ratio:ratio
+         ~message_count:msg_count);
     let messages, pair_repair_stats =
       let msgs_after_compact =
         (* Issue #8597 #1: dropped [~system_prompt] arg — compact

@@ -160,6 +160,10 @@ let record_utf8_repair ~surface ~path ~invalid_bytes =
           None)
   in
   emit_persistence_utf8_repair_metric ();
+  Otel_metric_store_core.inc_counter
+    Otel_metric_names.metric_persistence_utf8_repair
+    ~delta:(Float.of_int invalid_bytes)
+    ();
   match log_decision with
   | None -> ()
   | Some 0 ->
@@ -310,13 +314,28 @@ let repair_utf8_text_with_stats ?(surface = "persistence") ?path s =
 let repair_utf8_text ?surface ?path s =
   (repair_utf8_text_with_stats ?surface ?path s).text
 
-(** Parse JSON with detailed error reporting *)
+(** Parse JSON with detailed error reporting.
+
+    We still run the UTF-8 repair pass before parsing, but we avoid the
+    string copy when the input is already valid UTF-8.  Profiling showed the
+    unconditional repair pass was a major allocation hot spot because nearly
+    every JSON file we load is already valid UTF-8; the repair pass copied
+    the whole string and rebuilt it even when nothing needed fixing. *)
 let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
-  let str = repair_utf8_text ~surface:"json" ~path:context str in
-  try Ok (Yojson.Safe.from_string str)
-  with Yojson.Json_error msg ->
-    let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." str |> String_util.to_string in
-    Error (Printf.sprintf "[%s] JSON parse error: %s (input: %s)" context msg preview)
+  let trimmed = String.trim str in
+  if trimmed = "" then Ok (`Assoc [])
+  else
+    let repaired = repair_utf8_text_with_stats ~surface:"json" ~path:context trimmed in
+    try
+      if repaired.changed then Ok (Yojson.Safe.from_string repaired.text)
+      else Ok (Yojson.Safe.from_string trimmed)
+    with Yojson.Json_error msg ->
+      let preview =
+        String_util.utf8_safe ~max_bytes:53 ~suffix:"..."
+          (if repaired.changed then repaired.text else trimmed)
+        |> String_util.to_string
+      in
+      Error (Printf.sprintf "[%s] JSON parse error: %s (input: %s)" context msg preview)
 
 (** Read file contents with error handling.
     Uses Eio-native I/O via Fs_compat when available (after set_fs),
@@ -383,10 +402,17 @@ let result_to_option_logged ~on_drop ~surface ~reason ~path = function
 
 (** Read JSON file via Eio-native I/O (Fs_compat).
     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts.
-    Falls back to blocking I/O when Eio fs is not set. *)
+    Falls back to blocking I/O when Eio fs is not set.
+
+    Uses [parse_json_safe] so we skip the UTF-8 repair pass on the common
+    path where the file is already valid UTF-8. *)
 let read_json_eio (path : string) : Yojson.Safe.t =
-  let content = Fs_compat.load_file path |> repair_utf8_text ~surface:"json_eio" ~path in
-  Yojson.Safe.from_string content
+  let content = Fs_compat.load_file path in
+  match parse_json_safe ~context:path content with
+  | Ok json -> json
+  | Error msg ->
+      Log.Misc.warn "[read_json_eio] %s" msg;
+      `Assoc []
 
 (** List files in directory safely *)
 let list_dir_safe path : (string list, string) result =

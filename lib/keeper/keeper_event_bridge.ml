@@ -599,6 +599,12 @@ let prepare_pending_event evt =
          retry queue so every retry uses the same sanitized payload. *)
     let json = Inference_utils.sanitize_json_utf8 json in
     emit_native_event_log evt json;
+    (* P2-2: canonical in-memory event log. OAS events are published here so
+       REST/SSE subscribers and future replay tools have a single ordered
+       stream to consume. The log is bounded (10k events). *)
+    let (_ : Event_log.event_id) =
+      Event_log.publish ~source:"oas_event_bridge" ~kind:(relay_event_type json) json
+    in
     Some { json; attempts = 0; appended = false }
 ;;
 

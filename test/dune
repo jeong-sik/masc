@@ -33,6 +33,7 @@
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_librarian_retry
   test_surface_ref
   test_keeper_turn_outcome
   test_keeper_cycle_channel
@@ -317,6 +318,7 @@
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
+  test_keeper_librarian_retry
   test_surface_ref
   test_keeper_turn_outcome
   test_keeper_cycle_channel

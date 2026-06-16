@@ -588,12 +588,26 @@ function ChatMessageBubble({
 }
 
 // Compact collapsible card for tool call entries in the chat transcript.
+// `entry.text` carries the tool call's INPUT arguments only — accumulated
+// arg JSON from TOOL_CALL_ARGS (keeper-stream.ts) or the persisted arg row
+// (keeper-state.ts:507 "text = accumulated argument JSON"). The tool's
+// OUTPUT (result) is NOT in this entry; it lands in the live trace via
+// `appendLiveToolCall` (sse.ts) and renders in the trace / activity panels.
+// Without an explicit "입력" (input) label and an empty-args marker, a
+// no-argument tool like keeper_tools_list renders as `▸ {}`, which reads as
+// "empty result". This surface labels args as input and renders `{}` as
+// "입력 없음". Root fix (chat stream tool_result event so the result renders
+// inline) is tracked separately as Step 2.
 function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const [expanded, setExpanded] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
   const toolName = entry.label || 'tool'
   const argsText = entry.text || ''
-  const isJson = argsText.trimStart().startsWith('{') || argsText.trimStart().startsWith('[')
+  const trimmed = argsText.trim()
+  // No-argument tools stream `{}` or empty text; render as "입력 없음"
+  // instead of a bare `{}` that reads as an empty result.
+  const isEmptyArgs = trimmed === '' || trimmed === '{}'
+  const isJson = !isEmptyArgs && (trimmed.startsWith('{') || trimmed.startsWith('['))
   let displayText = argsText
   if (isJson) {
     try {
@@ -602,7 +616,9 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       // keep original
     }
   }
-  const preview = displayText.length > 120 ? displayText.slice(0, 120) + '...' : displayText
+  const preview = isEmptyArgs
+    ? '입력 없음'
+    : (displayText.length > 120 ? displayText.slice(0, 120) + '...' : displayText)
 
   return html`
     <article
@@ -617,6 +633,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       >
         <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-mono font-bold text-[var(--color-fg-muted)]">T</span>
         <span class="font-mono text-xs font-medium text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">입력</span>
         ${timestamp
           ? html`<span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
           : null}
@@ -625,7 +642,11 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       ${expanded
         ? html`
             <div class="border-t border-[var(--color-border-default)] px-3 py-2">
-              <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-64 overflow-y-auto">${displayText}</pre>
+              ${isEmptyArgs
+                ? html`<div class="text-2xs font-mono text-[var(--color-fg-muted)]">입력 없음 (매개변수가 없는 도구)</div>`
+                : html`<pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-64 overflow-y-auto">${displayText}</pre>`
+              }
+              <div class="mt-2 text-3xs text-[var(--color-fg-muted)]">출력(결과)은 도구 실행 추적 패널에서 확인</div>
             </div>
           `
         : html`

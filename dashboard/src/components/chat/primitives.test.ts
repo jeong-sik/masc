@@ -49,6 +49,48 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-delivery="saved"]')).not.toBeNull()
   })
 
+  it('renders no-argument tool call (args "{}") as "입력 없음", not a bare {}', () => {
+    // Regression: keeper_tools_list streams args `{}` (no params). The old
+    // ToolCallBubble rendered `T keeper_tools_list ▸ {}`, which read as an
+    // empty RESULT. The fix labels args as "입력" and renders `{}` as
+    // "입력 없음" so operators do not mistake a no-arg call for a no-result call.
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'tool-1',
+          role: 'tool',
+          source: 'tool_result',
+          label: 'keeper_tools_list',
+          text: '{}',
+        })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    expect(container.textContent).toContain('keeper_tools_list')
+    expect(container.textContent).toContain('입력')
+    expect(container.textContent).toContain('입력 없음')
+  })
+
+  it('labels tool-call arguments as "입력" and shows the arg JSON', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({
+          id: 'tool-2',
+          role: 'tool',
+          source: 'tool_result',
+          label: 'keeper_board_post',
+          text: '{"title":"hi"}',
+        })]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    expect(container.textContent).toContain('입력')
+    expect(container.textContent).toContain('keeper_board_post')
+    expect(container.textContent).toContain('"title"')
+  })
+
   it('hides saved badges in messenger mode but keeps live state badges', () => {
     render(
       html`<${ChatTranscript}

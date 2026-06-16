@@ -61,3 +61,17 @@ val co_occurrence_edges : Keeper_memory_os_types.episode -> edge list
 (* Fold append-only edge events into associations, sorted deterministically by
    (src, dst, relation). *)
 val aggregate : edge list -> association list
+
+(* One-step spreading activation (RFC-0246 §2.7, P2a-2). Given each recalled
+   fact's [base] score keyed by claim key, and the [associations] among facts,
+   return an additive boost per key: [alpha] times the association-weighted
+   average of the base scores of that key's neighbours that are themselves in
+   [base]. A key with no in-[base] neighbour receives no entry. With [alpha] <= 0
+   the result is empty (recall stays byte-identical). The boost is bounded by
+   [alpha] * (max neighbour base score), so the relative order of strongly-scored
+   facts is preserved while a low-lexical fact linked to recalled facts is lifted. *)
+val activation_boosts
+  :  alpha:float
+  -> associations:association list
+  -> base:(string * float) list
+  -> (string * float) list

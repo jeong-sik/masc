@@ -260,6 +260,46 @@ let git_status_counts ~cwd =
     !changed, !staged
 ;;
 
+(* Normalise a git remote into a browsable https URL. canonical_url_of_remote
+   (agent_observation) yields a slug ("github_com_owner_repo"), not a clickable
+   URL, so we map the common remote shapes here. Returns None for unrecognised
+   shapes rather than guessing. *)
+let git_remote_to_web_url remote =
+  let r = String.trim remote in
+  let strip_dotgit s =
+    if String.ends_with ~suffix:".git" s
+    then String.sub s 0 (String.length s - 4)
+    else s
+  in
+  if r = "" then None
+  else if String.starts_with ~prefix:"git@" r then
+    (* scp-like: git@host:owner/repo(.git) *)
+    (match String.index_opt r ':' with
+     | Some ci when ci > 4 ->
+       let host = String.sub r 4 (ci - 4) in
+       let path = String.sub r (ci + 1) (String.length r - ci - 1) in
+       if path = "" then None else Some ("https://" ^ host ^ "/" ^ strip_dotgit path)
+     | _ -> None)
+  else if String.starts_with ~prefix:"https://" r || String.starts_with ~prefix:"http://" r then
+    Some (strip_dotgit r)
+  else if String.starts_with ~prefix:"ssh://" r then
+    (* ssh://git@host/owner/repo(.git) -> drop scheme + optional userinfo *)
+    let rest = String.sub r 6 (String.length r - 6) in
+    let rest =
+      match String.index_opt rest '@' with
+      | Some ai -> String.sub rest (ai + 1) (String.length rest - ai - 1)
+      | None -> rest
+    in
+    if rest = "" then None else Some ("https://" ^ strip_dotgit rest)
+  else None
+;;
+
+let git_origin_url ~cwd =
+  match git_run ~cwd [ "config"; "--get"; "remote.origin.url" ] with
+  | Some s when String.trim s <> "" -> Some (String.trim s)
+  | _ -> None
+;;
+
 let worktree_info_to_json ~base_path w =
   let changed_count, staged_count = git_status_counts ~cwd:w.path in
   let keeper_attached =
@@ -267,6 +307,8 @@ let worktree_info_to_json ~base_path w =
     | Some b -> String.contains b '/'
     | None -> false
   in
+  let origin_url = git_origin_url ~cwd:w.path in
+  let web_url = Option.bind origin_url git_remote_to_web_url in
   `Assoc
     [ "worktree_path", `String w.path
     ; "branch", `String (Option.value ~default:"" w.branch)
@@ -276,6 +318,8 @@ let worktree_info_to_json ~base_path w =
     ; "pr_number", `Null
     ; "pr_state", `Null
     ; "keeper_attached", `Bool keeper_attached
+    ; "origin_url", (match origin_url with Some u -> `String u | None -> `Null)
+    ; "web_url", (match web_url with Some u -> `String u | None -> `Null)
     ]
 ;;
 

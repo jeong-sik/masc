@@ -356,6 +356,12 @@ let board_signal_entry_is_wakeup_candidate (entry : Keeper_registry.registry_ent
   | _ -> false
 ;;
 
+let paused_meta_allows_board_auto_resume (meta : keeper_meta) =
+  meta.paused
+  && Option.is_some
+       (Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta)
+;;
+
 let board_signal_wake_paused_keeper
       ~(config : Workspace.config)
       ~(stimulus : Keeper_event_queue.stimulus)
@@ -396,7 +402,10 @@ let board_signal_wake_keeper
   =
   let stimulus = board_signal_stimulus ~reason signal in
   if meta.paused
-  then board_signal_wake_paused_keeper ~config ~stimulus meta
+  then
+    if paused_meta_allows_board_auto_resume meta
+    then board_signal_wake_paused_keeper ~config ~stimulus meta
+    else Ok ()
   else (
     wakeup_keeper ~base_path:config.base_path ~stimulus meta.name;
     Ok ())
@@ -448,7 +457,8 @@ let wakeup_relevant_keeper_for_board_signal
                ()
            | None, _ | Some _, _ -> ());
           (match entry.phase, wake_reason with
-           | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention ->
+           | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention
+             when paused_meta_allows_board_auto_resume meta ->
              Some (meta, wake_reason)
            | Keeper_state_machine.Paused, _ -> None
            | Keeper_state_machine.Running, _ -> Some (meta, wake_reason)

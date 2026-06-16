@@ -27,6 +27,15 @@ let test_parse_json_safe_valid () =
   let result = parse_json_safe ~context:"test" {|{"foo": "bar"}|} in
   check bool "Ok on valid JSON" true (Result.is_ok result)
 
+let test_parse_json_safe_valid_utf8_no_repair () =
+  let open Safe_ops in
+  reset_persistence_utf8_repair_stats_for_tests ();
+  let result = parse_json_safe ~context:"clean" {|{"foo": "bar"}|} in
+  check bool "Ok on valid JSON" true (Result.is_ok result);
+  let stats = persistence_utf8_repair_stats () in
+  check int "no repair on clean UTF-8 input" 0 stats.repaired_reads;
+  check int "no invalid bytes on clean input" 0 stats.repaired_bytes
+
 let test_parse_json_safe_invalid () =
   let open Safe_ops in
   let result = parse_json_safe ~context:"test" "not json" in
@@ -468,6 +477,8 @@ let () =
     ];
     "parse_json_safe", [
       test_case "valid json" `Quick test_parse_json_safe_valid;
+      test_case "valid utf8 skips repair" `Quick
+        test_parse_json_safe_valid_utf8_no_repair;
       test_case "invalid json" `Quick test_parse_json_safe_invalid;
       test_case "repairs invalid utf8 inside string" `Quick
         test_parse_json_safe_repairs_invalid_utf8_inside_string;

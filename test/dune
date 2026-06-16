@@ -2159,3 +2159,8 @@
  (preprocess
   (pps ppx_safe_shell))
  (libraries alcotest masc.masc_exec masc.exec_policy))
+
+(test
+ (name test_memory_proof)
+ (modules test_memory_proof)
+ (libraries eio eio_main unix))

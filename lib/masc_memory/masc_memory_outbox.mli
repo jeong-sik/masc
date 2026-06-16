@@ -2,7 +2,7 @@ open Masc_memory_types
 
 type t
 
-val create : env_fs:Eio.Fs.dir Eio.Path.t -> db_path:string -> t
+val create : env_fs:Eio.Fs.dir_ty Eio.Path.t -> env_clock:float Eio.Time.clock_ty Eio.Resource.t -> db_path:string -> t
 val enqueue : t -> memory_row -> (unit, string) result
 val process_queue : 
   t -> 

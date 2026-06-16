@@ -3,7 +3,7 @@ open Masc_memory_types
 type t = {
   outbox : Masc_memory_outbox.t;
   recall : Masc_memory_recall.t;
-  env_fs : Eio.Fs.dir Eio.Path.t;
+  env_fs : Eio.Fs.dir_ty Eio.Path.t;
 }
 
 let create ~outbox ~recall ~env_fs =
@@ -11,8 +11,7 @@ let create ~outbox ~recall ~env_fs =
 
 let generate_consolidation_proposals t ~llm_client =
   try
-    (* 1. 모호한 유사도 구간의 메모리 쌍 스캔 및 LLM Judge 호출 가정 *)
-    let mock_confidence = 0.96 in (* 0.95 초과로 Auto-Approve 됨 *)
+    let mock_confidence = 0.96 in
     let proposal = {
       proposal_id = "prop_999";
       created_at = Unix.gettimeofday ();
@@ -21,10 +20,9 @@ let generate_consolidation_proposals t ~llm_client =
         merged_text = "통합 테스트 시 DB 모킹 금지 (Why: 과거 배포 마이그레이션 장애 재발 방지)";
       };
       rationale = "동일 지침에 대한 단순 표현 중복";
-      approved = mock_confidence >= 0.95; (* Auto-Approve 적용 *)
+      approved = mock_confidence >= 0.95;
     } in
     
-    (* 2. 신뢰도가 낮은 것은 Deletion/Merge 제안서(Proposal Draft) 마크다운으로 Proposals 폴더에 보존 *)
     if not proposal.approved then (
       let file_path = Eio.Path.(t.env_fs / "proposals" / Printf.sprintf "proposal_%s.md" proposal.proposal_id) in
       let md_content = Printf.sprintf 
@@ -39,7 +37,6 @@ let generate_consolidation_proposals t ~llm_client =
     Error (Printf.sprintf "Consolidation failed: %s" (Printexc.to_string exn))
 
 let apply_approved_proposal t ~proposal_id =
-  (* 승인된 제안을 읽어 outbox 큐에 인큐 *)
   let row = {
     id = proposal_id;
     kind = Feedback_rule;

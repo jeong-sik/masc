@@ -3,7 +3,7 @@ open Eio.Std
 
 type t = {
   worker : Masc_domain_worker.t;
-  env_clock : Eio.Time.clock;
+  env_clock : float Eio.Time.clock_ty Eio.Resource.t;
   supabase_client : unit;
   neo4j_client : unit;
   mutable speculative_cache : (string * float array) option;
@@ -12,11 +12,9 @@ type t = {
 let create ~worker ~env_clock ~supabase_client ~neo4j_client =
   { worker; env_clock; supabase_client; neo4j_client; speculative_cache = None }
 
-let pre_embed_speculative t ~current_input_prefix =
-  (* 800ms debounce 필터와 타임스탬프 계산을 통한 자원고갈 방어 *)
-  Eio.Fiber.fork ~sw:(Eio.Private.Effects.Active_switch |> Obj.magic) (fun () ->
-    Eio.Time.sleep t.env_clock 0.8; (* 800ms debounce *)
-    (* 마지막 조사나 마침표 부근에서만 pre-embedding 유발 *)
+let pre_embed_speculative t ~sw ~current_input_prefix =
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Time.sleep t.env_clock 0.8;
     if String.length current_input_prefix > 5 then
       let vec = Masc_domain_worker.compute_local_embedding t.worker ~text:current_input_prefix in
       t.speculative_cache <- Some (current_input_prefix, vec)

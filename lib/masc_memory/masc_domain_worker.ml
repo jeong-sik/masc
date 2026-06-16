@@ -1,5 +1,5 @@
 type t = {
-  domain_mgr : Eio.Domain_manager.t;
+  domain_mgr : Eio.Domain_manager.ty Eio.Domain_manager.t;
 }
 
 let create ~domain_mgr =

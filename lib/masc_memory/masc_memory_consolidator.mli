@@ -5,7 +5,7 @@ type t
 val create : 
   outbox:Masc_memory_outbox.t -> 
   recall:Masc_memory_recall.t ->
-  env_fs:Eio.Fs.dir Eio.Path.t ->
+  env_fs:Eio.Fs.dir_ty Eio.Path.t ->
   t
 
 val generate_consolidation_proposals : 

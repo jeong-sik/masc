@@ -1,21 +1,12 @@
-(** test_keeper_turn_fsm_wired_sites — Step 4 wiring marker.
+(** test_keeper_turn_fsm_wired_sites — turn FSM wiring markers.
 
     [test_keeper_turn_fsm_emit] pins the [Keeper_turn_fsm.emit_transition]
     *type surface*: a future signature drift fails compile.
 
-    But a future PR could *delete* one of the 11 wired
-    [emit_transition] call sites in [keeper_unified_turn.ml]
-    without breaking the build -- the build doesn't care if a
-    function is called.  Result: the fleet observability stack
-    silently regresses (Otel_metric_store counter loses a series, the
-    Grafana dashboard's panel goes flat, [bin/masc-trace]
-    timeline jumps over a state).
-
-    This marker reads [lib/keeper/keeper_unified_turn.ml]
-    and asserts that the [Keeper_turn_fsm.emit_transition] call
-    count meets the documented floor.  A delete fails this
-    test with a clear message; an add (more emits) is a no-op
-    on this test (the floor is a >=, not an =).
+    These markers read the source files that own the scheduled-turn
+    transitions. They catch accidental deletion and the subtler case where
+    success completion is emitted in both the caller and the success handler,
+    which would double-count completed turns in observability data.
 
     Cross-reference: [docs/observability/keeper-turn-fsm-metrics.md]
     "Wiring sites" table lists every emit call with its PR. *)
@@ -38,10 +29,9 @@ let rec find_repo_root dir =
     let parent = Filename.dirname dir in
     if String.equal parent dir then None else find_repo_root parent
 
-let locate_keeper_unified_turn () =
+let locate_repo_file rel =
   match find_repo_root (Sys.getcwd ()) with
-  | Some root ->
-      Filename.concat root "lib/keeper/keeper_unified_turn.ml"
+  | Some root -> Filename.concat root rel
   | None ->
       Alcotest.fail "could not locate dune-project ancestor of cwd"
 
@@ -59,33 +49,27 @@ let count_substring haystack needle =
     in
     loop 0 0
 
-(** Documented floor: 15 wired sites in [keeper_unified_turn.ml]
-    after Steps 4b/4c/4d/4g/4i/4j + SupervisorRequestsStop/HonorStopSignal.  Composition:
+(** Documented floor for the scheduled-turn source files that still emit
+    directly after the 2026 extraction pass:
 
-    | Step | site                                                  | count |
-    |------|-------------------------------------------------------|-------|
-    | 4c   | run_keeper_cycle entry [Idle -> Phase_gating]         | 1     |
-    | fix  | SupervisorRequestsStop at entry [Phase_gating -> Phase_gating] | 1 |
-    | fix  | HonorStopSignal at entry [Phase_gating -> Cancelled supervisor_stop] | 1 |
-    | 4b   | phase-gate skip [Phase_gating -> Done]                | 1     |
-    | 4g   | phase pass [Phase_gating -> Runtime_routing]          | 1     |
-    | 4b   | ollama saturated failure                              | 1     |
-    | 4b   | runtime build error                                   | 1     |
-    | 4g   | livelock Started [Runtime_routing -> Awaiting_provider] | 1   |
-    | 4b   | livelock Blocked                                      | 1     |
-    | 4i   | run_turn pre-call [Awaiting_provider -> Streaming]    | 1     |
-    | fix  | SupervisorRequestsStop in Eio.Cancel [Streaming -> Streaming] | 1 |
-    | 4j   | retry_loop exhaustion [Streaming -> Failed]           | 1     |
-    | 4d   | stop_reason [Streaming -> Completing]                 | 1     |
-    | 4c   | success exit [Completing -> Done]                     | 1     |
-    | Cycle 1b-iv | Eio.Cancel HonorStopSignal [Streaming -> Cancelled supervisor_stop] | 1 |
-    *)
-let documented_floor = 15
+    - [keeper_unified_turn.ml] owns entry, routing, pre-dispatch, streaming
+      failure/cancellation, and pre-provider transitions.
+    - [keeper_unified_turn_success.ml] owns the successful
+      [Streaming -> Completing -> Done] pair.
+
+    Other extracted handlers may emit their own terminal transitions; this test
+    intentionally does not count those modules. *)
+let documented_floor = 7
 
 let test_emit_call_count_floor () =
-  let path = locate_keeper_unified_turn () in
-  let body = read_file path in
-  let n = count_substring body "Keeper_turn_fsm.emit_transition" in
+  let unified_path = locate_repo_file "lib/keeper/keeper_unified_turn.ml" in
+  let success_path =
+    locate_repo_file "lib/keeper/keeper_unified_turn_success.ml"
+  in
+  let n =
+    count_substring (read_file unified_path) "Keeper_turn_fsm.emit_transition"
+    + count_substring (read_file success_path) "Keeper_turn_fsm.emit_transition"
+  in
   if n < documented_floor then
     Alcotest.failf
       "Keeper_turn_fsm.emit_transition call count regressed: \
@@ -101,6 +85,23 @@ let test_emit_call_count_floor () =
        documented_floor n)
     true (n >= documented_floor)
 
+let test_success_completion_transitions_owned_once () =
+  let unified =
+    read_file (locate_repo_file "lib/keeper/keeper_unified_turn.ml")
+  in
+  let success =
+    read_file (locate_repo_file "lib/keeper/keeper_unified_turn_success.ml")
+  in
+  Alcotest.(check int)
+    "success completion transitions not emitted by caller" 0
+    (count_substring unified "Keeper_turn_fsm.Completing");
+  Alcotest.(check int)
+    "success handler owns two completion-state references" 2
+    (count_substring success "Keeper_turn_fsm.Completing");
+  Alcotest.(check int)
+    "success handler owns one done transition" 1
+    (count_substring success "Keeper_turn_fsm.Done")
+
 let () =
   Alcotest.run "keeper_turn_fsm_wired_sites"
     [
@@ -109,5 +110,8 @@ let () =
           Alcotest.test_case
             "emit_transition call count meets documented floor"
             `Quick test_emit_call_count_floor;
+          Alcotest.test_case
+            "success completion transitions are single-owned"
+            `Quick test_success_completion_transitions_owned_once;
         ] );
     ]

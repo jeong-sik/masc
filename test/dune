@@ -594,7 +594,6 @@
   test_keeper_event_queue
   test_keeper_relevance_check
   test_actionable_path_action
-  test_keeper_turn_fsm_wired_sites
   test_effective_oas_env
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
@@ -1574,6 +1573,8 @@
 (include stanzas/test_keeper_tool_matrix.inc)
 
 (include stanzas/test_keeper_tool_policy_paths.inc)
+
+(include stanzas/test_keeper_turn_fsm_wired_sites.inc)
 
 (include stanzas/test_keeper_turn_fsm_tla_parity.inc)
 

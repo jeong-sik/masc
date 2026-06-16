@@ -479,6 +479,8 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                 {
                   meta with
                   paused;
+                  auto_resume_after_sec = None;
+                  runtime = { meta.runtime with last_blocker = None };
                   updated_at = Keeper_meta_contract.now_iso ();
                 }
               in
@@ -677,6 +679,8 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
                    {
                      meta with
                      paused = target;
+                     auto_resume_after_sec = None;
+                     runtime = { meta.runtime with last_blocker = None };
                      updated_at = Keeper_meta_contract.now_iso ();
                    }
                  in

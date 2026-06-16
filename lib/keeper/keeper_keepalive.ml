@@ -105,6 +105,16 @@ let persist_directive_meta_update
     Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta
 ;;
 
+let directive_paused_meta (meta : keeper_meta) paused =
+  {
+    meta with
+    paused;
+    auto_resume_after_sec = None;
+    runtime = { meta.runtime with last_blocker = None };
+    updated_at = now_iso ();
+  }
+;;
+
 let set_keeper_paused_state ~agent_name paused =
   with_keeper_entry_by_identity
     ~identity:agent_name
@@ -116,7 +126,7 @@ let set_keeper_paused_state ~agent_name paused =
         ();
       Log.Keeper.warn "directive %s: agent %s not in registry" action agent_name)
     (fun entry ->
-       let updated_meta = { entry.meta with paused; updated_at = now_iso () } in
+       let updated_meta = directive_paused_meta entry.meta paused in
        persist_directive_meta_update entry ~updated_meta;
        Keeper_registry.dispatch_event_unit
          ~base_path:entry.base_path

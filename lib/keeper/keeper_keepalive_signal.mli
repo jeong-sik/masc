@@ -171,6 +171,11 @@ val board_reactive_wakeup_allowed :
   -> signal:Board_dispatch.board_signal
   -> bool
 
+(** True when a paused keeper may be resumed by board-reactive wakeup.
+    Operator-owned pauses have [auto_resume_after_sec = None] and are not
+    resumed implicitly by board posts or comments. *)
+val paused_meta_allows_board_auto_resume : keeper_meta -> bool
+
 (** Select which keepers wake for a board signal (RFC-0020). Explicit mentions
     short-circuit and wake unconditionally (returned with [dropped = 0]); other
     typed reasons compete for [?total_limit] slots in candidate order. [None]

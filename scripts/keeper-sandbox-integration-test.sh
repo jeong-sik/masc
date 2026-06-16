@@ -162,6 +162,8 @@ run_test "T16: dune" none \
   'dune --version >/dev/null' true
 run_test "T16: dune version >= dune-project" none \
   'actual=$(dune --version); printf "%s\n%s\n" "$MASC_REQ_DUNE_VER" "$actual" | sort -V -C' true
+run_test "T16: agent_sdk findlib packages" none \
+  'ocamlfind query agent_sdk >/dev/null && ocamlfind query agent_sdk.llm_provider >/dev/null' true
 
 # T17: gh check (gh binary exists)
 run_test "T17: gh binary" none \

@@ -17,6 +17,18 @@ trap 'rm -rf "$tmpdir"' EXIT
 playground="$tmpdir/playground"
 mkdir -p "$playground"
 printf 'alpha\nbeta\ngamma\n' > "$playground/demo.txt"
+cat > "$playground/dune-project" <<'EOF'
+(lang dune 3.22)
+(name keeper_sandbox_probe)
+EOF
+cat > "$playground/dune" <<'EOF'
+(executable
+ (name probe)
+ (libraries agent_sdk agent_sdk.llm_provider))
+EOF
+cat > "$playground/probe.ml" <<'EOF'
+let () = ()
+EOF
 
 # Extract required dune version from dune-project: (lang dune X.Y)
 req_dune_ver="$(grep -E '^\(lang dune\b' "$repo_root/dune-project" \
@@ -34,7 +46,7 @@ docker run --rm -i \
   "$image_tag" \
   bash -l -s <<'BASH'
     set -euo pipefail
-    for cmd in sh bash git gh rg tree jq python3 node npm make opam dune; do
+    for cmd in sh bash git gh rg tree jq python3 node npm make opam dune ocamlfind; do
       command -v "$cmd" >/dev/null
     done
     # Verify sandbox dune version meets dune-project requirement (Fix C: sandbox launch invariant)
@@ -44,6 +56,9 @@ docker run --rm -i \
       exit 1
     fi
     printf "OK: sandbox dune %s >= required %s\n" "$actual_dune" "$MASC_REQ_DUNE_VER"
+    ocamlfind query agent_sdk >/dev/null
+    ocamlfind query agent_sdk.llm_provider >/dev/null
+    dune build ./probe.exe
     test "$(cat demo.txt)" = $'alpha\nbeta\ngamma'
     rg beta demo.txt >/dev/null
     printf "delta\n" >> append.txt

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # check-sandbox-dune-version.sh
 #
-# CI gate: verify that the dune version installed in Dockerfile.keeper-sandbox
-# meets or exceeds the (lang dune X.Y) requirement in dune-project.
+# CI gate: verify that Dockerfile.keeper-sandbox is aligned with the repo
+# build contract: dune is new enough and the image installs the pinned OCaml
+# dependency closure used by keeper repo tasks.
 #
 # Rationale: Ubuntu 24.04's ocaml-dune apt package provides dune 3.14 while
 # the repo dune-project requires (lang dune 3.22).  This script is wired into
@@ -46,5 +47,21 @@ else
          "$sandbox_ver" "$req_ver" >&2
   printf '  Fix: update Dockerfile.keeper-sandbox to install dune >= %s\n' \
          "$req_ver" >&2
+  exit 1
+fi
+
+if grep -q 'scripts/opam-pin-external-deps.sh' "$repo_root/Dockerfile.keeper-sandbox" \
+   && grep -q 'opam install . --deps-only -y' "$repo_root/Dockerfile.keeper-sandbox"; then
+  printf 'OK: sandbox installs repo opam dependency closure\n'
+else
+  printf 'FAIL: Dockerfile.keeper-sandbox does not install pinned repo dependencies\n' >&2
+  printf '  Fix: run scripts/opam-pin-external-deps.sh and opam install . --deps-only -y during image build\n' >&2
+  exit 1
+fi
+
+if grep -q 'agent_sdk.llm_provider' "$repo_root/scripts/keeper-sandbox-smoke.sh"; then
+  printf 'OK: sandbox smoke checks agent_sdk.llm_provider availability\n'
+else
+  printf 'FAIL: keeper-sandbox-smoke.sh must verify agent_sdk.llm_provider is available\n' >&2
   exit 1
 fi

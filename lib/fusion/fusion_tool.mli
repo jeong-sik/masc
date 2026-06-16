@@ -3,9 +3,9 @@
     키퍼 dispatch arm(lib/keeper)이 이 [handle]을 호출한다. 배선(descriptor/schema/
     typed match arm)은 키퍼 쪽에 얇게 두고, 게이트·예산·fiber fork 로직은 여기 둔다.
 
-    동작(RFC-0252 §4): args에서 prompt/preset/web_tools를 typed 파싱 → 게이트 판정
-    → [Allow]면 [Eio.Fiber.fork ~sw]로 out-of-band 심의를 띄우고 즉시 status JSON
-    반환(키퍼는 막히지 않음). [Deny]면 fiber 없이 사유를 즉시 반환(예산 미소모).
+    동작(RFC-0252 §4): args에서 prompt/preset를 typed 파싱 → 게이트 판정
+    → [Allow]면 [Eio.Fiber.fork_daemon ~sw]로 out-of-band 심의를 띄우고 즉시 status
+    JSON 반환(키퍼는 막히지 않음). [Deny]면 fiber 없이 사유를 즉시 반환(예산 미소모).
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §4/§6 *)
 
@@ -20,7 +20,7 @@ val hour_bucket_of_unix : float -> string
     @param now_unix 현재 유닉스초 (키퍼 clock에서; hour_bucket 산출).
     @param run_id correlation id (호출자가 생성 — fusion_tool은 무작위성 비포함).
     @param policy runtime.toml [fusion]에서 로드한 정책.
-    @param args 도구 입력 JSON (prompt 필수; preset/web_tools 선택). *)
+    @param args 도구 입력 JSON (prompt 필수; preset 선택). *)
 val handle
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

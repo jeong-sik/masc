@@ -23,15 +23,14 @@ let base_policy : Fusion_policy.t =
   ; low_confidence_threshold = 0.55
   ; high_stakes_task_kinds = [ "goal_decision" ]
   ; per_hour_budget = 20
-  ; max_cost_usd_per_call = 0.5
   }
 
 let req ?(preset = "budget") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool_call) ()
   : fusion_request =
   { run_id = "r1"; keeper = "k"; prompt = "p"; preset; depth; trigger }
 
-let decide ?(policy = base_policy) ?(hourly_count = 0) ?(estimated_cost_usd = 0.1) r =
-  Fusion_policy.decide ~policy ~hourly_count ~estimated_cost_usd r
+let decide ?(policy = base_policy) ?(hourly_count = 0) r =
+  Fusion_policy.decide ~policy ~hourly_count r
 
 (* --- gate branches (RFC-0252 §6) --- *)
 
@@ -72,11 +71,6 @@ let test_over_hourly () =
   Alcotest.check gate "hourly budget exceeded"
     (Deny Over_hourly_budget) (decide ~hourly_count:20 r)
 
-let test_over_cost () =
-  let r = req () in
-  Alcotest.check gate "cost cap exceeded"
-    (Deny Over_cost_cap) (decide ~estimated_cost_usd:0.6 r)
-
 let test_allow () =
   let r = req () in
   Alcotest.check gate "all pass -> allow" (Allow r) (decide r)
@@ -114,7 +108,6 @@ max_concurrent_panels = 2
 low_confidence_threshold = 0.55
 high_stakes_task_kinds = ["goal_decision"]
 per_hour_budget = 20
-max_cost_usd_per_call = 0.5
 [fusion.presets.budget]
 panel = ["a", "b", "c"]
 judge = "a"
@@ -194,6 +187,28 @@ judge = "a"
       (List.mem (Fusion_config.Missing_prompt "p1") es)
   | Ok _ -> Alcotest.fail "expected Error Missing_prompt"
 
+(* enabled인데 preset의 judge 모델 id 누락(="") → 빈 runtime_id로 종합 불가. 로드 거부. *)
+let test_config_missing_judge_model () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.gate]
+per_hour_budget = 20
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = ""
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Missing_judge_model present" true
+      (List.mem (Fusion_config.Missing_judge_model "p1") es)
+  | Ok _ -> Alcotest.fail "expected Error Missing_judge_model"
+
 let test_config_bad_concurrency () =
   let s =
     {|
@@ -214,6 +229,50 @@ judge_system_prompt = "j"
       (List.mem (Fusion_config.Invalid_max_concurrent_panels 0) es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_max_concurrent_panels"
 
+(* enabled + per_hour_budget=0 → gate가 count>=0으로 항상 deny-all. 로드 거부 강제. *)
+let test_config_bad_per_hour () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.gate]
+per_hour_budget = 0
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_per_hour_budget present" true
+      (List.mem (Fusion_config.Invalid_per_hour_budget 0) es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_per_hour_budget"
+
+(* enabled인데 default_preset 생략(="") → preset 생략 호출이 폴백할 default가 없어
+   항상 Preset_unknown ""로 deny. 빈 default_preset도 로드 거부. *)
+let test_config_empty_default_preset () =
+  let s =
+    {|
+[fusion]
+enabled = true
+[fusion.gate]
+per_hour_budget = 20
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Missing_default_preset \"\" present" true
+      (List.mem (Fusion_config.Missing_default_preset "") es)
+  | Ok _ -> Alcotest.fail "expected Error Missing_default_preset"
+
 (* Mirrors the disabled [fusion] seed shipped in config/runtime.toml: a
    populated default_preset + trio panel while enabled=false must parse to
    [Ok] (Empty_presets / Missing_default_preset are enabled-gated). Pins the
@@ -228,7 +287,6 @@ max_concurrent_panels = 2
 low_confidence_threshold = 0.6
 high_stakes_task_kinds = []
 per_hour_budget = 20
-max_cost_usd_per_call = 0.50
 [fusion.presets.trio]
 panel = [
   "deepseek.deepseek-v4-pro",
@@ -367,7 +425,6 @@ let () =
         ; Alcotest.test_case "high_stakes_listed" `Quick test_high_stakes_listed
         ; Alcotest.test_case "high_stakes_unlisted" `Quick test_high_stakes_unlisted
         ; Alcotest.test_case "over_hourly" `Quick test_over_hourly
-        ; Alcotest.test_case "over_cost" `Quick test_over_cost
         ; Alcotest.test_case "allow" `Quick test_allow
         ; Alcotest.test_case "explicit_budget_bound" `Quick test_explicit_still_budget_bound
         ] )
@@ -379,7 +436,10 @@ let () =
         ; Alcotest.test_case "invalid_size" `Quick test_config_invalid_size
         ; Alcotest.test_case "missing_default" `Quick test_config_missing_default
         ; Alcotest.test_case "missing_prompt" `Quick test_config_missing_prompt
+        ; Alcotest.test_case "missing_judge_model" `Quick test_config_missing_judge_model
         ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
+        ; Alcotest.test_case "bad_per_hour" `Quick test_config_bad_per_hour
+        ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ] )
     ; ( "judge_parse"

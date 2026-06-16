@@ -5,7 +5,9 @@ type config_error =
   | Empty_presets
   | Invalid_panel_size of string * int
   | Missing_prompt of string
+  | Missing_judge_model of string
   | Invalid_max_concurrent_panels of int
+  | Invalid_per_hour_budget of int
   | Missing_default_preset of string
   | Toml_type_error of string
 [@@deriving show, eq]
@@ -18,7 +20,6 @@ let disabled : Fusion_policy.t =
   ; low_confidence_threshold = 0.0
   ; high_stakes_task_kinds = []
   ; per_hour_budget = 0
-  ; max_cost_usd_per_call = 0.0
   }
 
 (* preset 한 명 파싱. 누락 필드는 명시적 default, 패널 크기는 검증(fail-fast). *)
@@ -49,6 +50,7 @@ let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
   if not (Fusion_policy.preset_size_ok p) then
     Error (Invalid_panel_size (name, List.length panel))
   else if not (Fusion_policy.preset_prompts_present p) then Error (Missing_prompt name)
+  else if not (Fusion_policy.preset_judge_present p) then Error (Missing_judge_model name)
   else Ok p
 
 (* [fusion] 존재 확정 후의 본 파싱. Otoml.Type_error는 of_toml이 감싼다. *)
@@ -71,10 +73,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   let per_hour_budget =
     Otoml.find_or ~default:0 toml Otoml.get_integer [ "fusion"; "gate"; "per_hour_budget" ]
   in
-  let max_cost_usd_per_call =
-    Otoml.find_or ~default:0.0 toml Otoml.get_float
-      [ "fusion"; "gate"; "max_cost_usd_per_call" ]
-  in
   let preset_entries =
     match Otoml.find_opt toml Otoml.get_table [ "fusion"; "presets" ] with
     | Some entries -> entries
@@ -94,10 +92,19 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
       Invalid_max_concurrent_panels max_concurrent_panels :: errors
     else errors
   in
+  (* per_hour_budget는 gate가 `count >= budget`로 판정하므로(fusion_policy.ml),
+     0/음수면 첫 호출부터 항상 deny-all = enabled-but-never-runs. 로드 단계 fail-fast. *)
+  let errors =
+    if enabled && per_hour_budget < 1 then
+      Invalid_per_hour_budget per_hour_budget :: errors
+    else errors
+  in
+  (* enabled면 default_preset가 비어있지 않고 presets에 존재해야 한다. preset 생략
+     호출이 default_preset로 폴백하는데, ""는 find_preset에서 항상 None→Preset_unknown
+     ""로 deny되므로 빈 문자열도 거부한다(silent per-call deny 방지). *)
   let errors =
     if
       enabled
-      && (not (String.equal default_preset ""))
       && not
            (List.exists
               (fun (p : Fusion_policy.preset) -> String.equal p.name default_preset)
@@ -115,7 +122,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
       ; low_confidence_threshold
       ; high_stakes_task_kinds
       ; per_hour_budget
-      ; max_cost_usd_per_call
       }
 
 let of_toml (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =

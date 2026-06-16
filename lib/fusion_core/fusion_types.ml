@@ -62,12 +62,6 @@ let answered_of outcomes =
     (function Answered a -> Some a | Failed _ -> None)
     outcomes
 
-let failure_count outcomes =
-  List.fold_left
-    (fun n -> function Failed _ -> n + 1 | Answered _ -> n)
-    0
-    outcomes
-
 type claim =
   { text : string
   ; supporting_models : string list
@@ -158,8 +152,6 @@ type deny_reason =
   | Preset_unknown of string
   | Depth_exceeded
   | Over_hourly_budget
-  | Over_cost_cap
-  | Rate_limited
   | Not_warranted
 [@@deriving yojson, show, eq]
 
@@ -168,8 +160,6 @@ let deny_reason_label = function
   | Preset_unknown _ -> "preset_unknown"
   | Depth_exceeded -> "depth_exceeded"
   | Over_hourly_budget -> "over_hourly_budget"
-  | Over_cost_cap -> "over_cost_cap"
-  | Rate_limited -> "rate_limited"
   | Not_warranted -> "not_warranted"
 
 type gate_decision =

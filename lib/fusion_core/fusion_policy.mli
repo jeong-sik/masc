@@ -35,6 +35,9 @@ val preset_size_ok : preset -> bool
 (** 패널·심판 system prompt가 둘 다 비어있지 않은가 (config 로드 시 fail-fast 검증). *)
 val preset_prompts_present : preset -> bool
 
+(** 심판 모델 id가 비어있지 않은가 (config 로드 시 fail-fast 검증). *)
+val preset_judge_present : preset -> bool
+
 (** 해석된 [fusion] config. {!Fusion_config}가 runtime.toml에서 생성한다. *)
 type t =
   { enabled : bool
@@ -44,7 +47,6 @@ type t =
   ; low_confidence_threshold : float
   ; high_stakes_task_kinds : string list
   ; per_hour_budget : int
-  ; max_cost_usd_per_call : float
   }
 [@@deriving show, eq]
 
@@ -59,14 +61,11 @@ val find_preset : t -> string -> preset option
     + [depth = Nested] → [Deny Depth_exceeded]
     + 트리거 부적격 → [Deny Not_warranted]
     + [hourly_count >= per_hour_budget] → [Deny Over_hourly_budget]
-    + [estimated_cost_usd > max_cost_usd_per_call] → [Deny Over_cost_cap]
     + 그 외 → [Allow request]
 
-    @param hourly_count 현재 1시간 윈도우에 이미 시작된 fusion 수 (orchestrator가 집계).
-    @param estimated_cost_usd preset 모델 가격 × 예상 토큰 (호출자 추정). *)
+    @param hourly_count 현재 1시간 윈도우에 이미 시작된 fusion 수 (orchestrator가 집계). *)
 val decide
   :  policy:t
   -> hourly_count:int
-  -> estimated_cost_usd:float
   -> Fusion_types.fusion_request
   -> Fusion_types.gate_decision

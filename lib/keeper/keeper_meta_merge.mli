@@ -13,4 +13,6 @@ val monotonic_usage_counters : t
     last_* observation fields stay with the caller. *)
 
 val heartbeat_fields_from_disk : t
-(** Alias of {!monotonic_usage_counters} for existing retry call sites. *)
+(** {!monotonic_usage_counters}, plus preservation of an operator-owned pause
+    already present on disk. This prevents stale turn/heartbeat writers from
+    clearing [paused=true] after an operator paused the keeper. *)

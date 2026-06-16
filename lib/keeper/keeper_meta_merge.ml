@@ -27,4 +27,24 @@ let monotonic_usage_counters ~(latest : Keeper_meta_contract.keeper_meta) ~(call
   ; runtime = { caller.runtime with usage }
   }
 
-let heartbeat_fields_from_disk = monotonic_usage_counters
+let is_operator_pause (meta : Keeper_meta_contract.keeper_meta) =
+  meta.paused
+  && Option.is_none meta.auto_resume_after_sec
+  && Option.is_none meta.runtime.last_blocker
+
+let preserve_operator_pause_from_disk
+      ~(latest : Keeper_meta_contract.keeper_meta)
+      ~(caller : Keeper_meta_contract.keeper_meta)
+  =
+  let merged = monotonic_usage_counters ~latest ~caller in
+  if is_operator_pause latest
+  then
+    {
+      merged with
+      paused = true;
+      auto_resume_after_sec = None;
+      runtime = { merged.runtime with last_blocker = None };
+    }
+  else merged
+
+let heartbeat_fields_from_disk = preserve_operator_pause_from_disk

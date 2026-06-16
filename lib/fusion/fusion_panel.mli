@@ -21,8 +21,8 @@
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
-  -> ?max_fibers:int
-  -> ?timeout_s:float
+  -> max_fibers:int
+  -> timeout_s:float
   -> models:string list
   -> system_prompt:string
   -> prompt:string

@@ -10,6 +10,8 @@
 type config_error =
   | Empty_presets  (** enabled=true인데 preset 0개 *)
   | Invalid_panel_size of string * int  (** (preset 이름, 패널 수) — 1..8 위반 *)
+  | Missing_prompt of string
+      (** preset의 panel/judge system prompt가 비어있음 (코드 default 금지) *)
   | Missing_default_preset of string  (** default_preset가 presets에 없음 *)
   | Toml_type_error of string  (** 필드 타입 불일치 (Otoml.Type_error) *)
 [@@deriving show, eq]

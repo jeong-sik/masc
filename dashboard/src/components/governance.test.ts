@@ -294,6 +294,7 @@ describe('Governance surface', () => {
     expect(judgeStatus).toBeTruthy()
     expect(judgeStatus?.textContent).toContain('Error')
     expect(judgeStatus?.textContent).toContain('runtime failed')
+    expect(judgeStatus?.classList.contains('v2-command-panel')).toBe(true)
   }, 20000)
 
   it('renders stale-visible judge status without collapsing to offline error', async () => {

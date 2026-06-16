@@ -1,3 +1,5 @@
+import { html } from 'htm/preact'
+import { render } from 'preact'
 import { describe, it, expect } from 'vitest'
 import {
   railStatusLabel,
@@ -14,6 +16,9 @@ import {
   filterVerdicts,
   filterPreCompactEvents,
   filterHandoffEvents,
+  EmptySignal,
+  HeroRailCard,
+  GateChart,
 } from './harness-health-sections'
 import type {
   HarnessHealthData,
@@ -583,5 +588,41 @@ describe('filterHandoffEvents', () => {
     const copy = items.slice()
     filterHandoffEvents(items, 'alpha')
     expect(items).toEqual(copy)
+  })
+})
+
+describe('harness section components render v2 lab markers', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('EmptySignal wears v2-lab-card', () => {
+    render(html`<${EmptySignal} text="empty" />`, container)
+    expect(container.querySelector('.v2-lab-card')).not.toBeNull()
+  })
+
+  it('HeroRailCard wears v2-lab-card', () => {
+    render(html`
+      <${HeroRailCard}
+        label="test"
+        status="healthy"
+        detail="detail"
+        freshness="fresh"
+      />
+    `, container)
+    expect(container.querySelector('.v2-lab-card')).not.toBeNull()
+  })
+
+  it('GateChart rows wear v2-lab-row', () => {
+    render(html`<${GateChart} distribution=${{ a: 1, b: 2 }} />`, container)
+    expect(container.querySelector('.v2-lab-row')).not.toBeNull()
   })
 })

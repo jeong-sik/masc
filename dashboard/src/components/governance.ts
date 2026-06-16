@@ -158,7 +158,7 @@ function GovernanceSummaryStrip() {
       />
     </div>
     <${JudgeStatusBar} />
-    ${governanceError.value ? html`<div class="mb-5 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[var(--rose-light)]">${governanceError.value}</div>` : null}
+    ${governanceError.value ? html`<div class="v2-command-panel mb-5 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[var(--rose-light)]">${governanceError.value}</div>` : null}
   `
 }
 
@@ -177,7 +177,7 @@ function JudgeStatusBar() {
     ? 'text-warn'
     : 'text-bad/80'
   return html`
-    <div class="mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs" data-testid="judge-status">
+    <div class="v2-command-panel mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
         <span class="font-medium text-text-muted">Judge runtime ${label}</span>

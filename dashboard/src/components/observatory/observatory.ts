@@ -116,7 +116,7 @@ function RangeSelector() {
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
-          class="rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
+          class="v2-monitoring-action rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
             current === preset
               ? 'bg-[var(--accent-20)] text-accent-fg'
               : 'text-text-muted hover:text-text-strong hover:bg-[var(--color-bg-elevated)]'

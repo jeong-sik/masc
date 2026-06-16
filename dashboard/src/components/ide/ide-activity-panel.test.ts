@@ -173,6 +173,7 @@ describe('IdeActivityPanel', () => {
     ])
 
     const surfaceLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-surface-link')]
+    expect(surfaceLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(surfaceLinks.map(link => link.textContent)).toEqual([
       'Goal1',
       'Task1',
@@ -194,11 +195,19 @@ describe('IdeActivityPanel', () => {
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
 
     const keeperLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-keeper-link')]
+    expect(keeperLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(keeperLinks.map(link => link.getAttribute('aria-label'))).toEqual(['Open Keeper sangsu'])
     fireEvent.click(keeperLinks[0]!)
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=sangsu')
 
+    const activityRows = [...container.querySelectorAll<HTMLLIElement>('.ide-activity-row')]
+    expect(activityRows.every(row => row.classList.contains('v2-ide-row'))).toBe(true)
+
+    const contextJump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
+    expect(contextJump?.classList.contains('v2-ide-action')).toBe(true)
+
     const activityRouteLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-activity-route-link')]
+    expect(activityRouteLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(container.querySelector('.ide-activity-route-count')?.textContent).toBe('CTX 10')
     expect(activityRouteLinks.map(link => link.textContent)).toEqual([
       'Code',
@@ -608,6 +617,7 @@ describe('IdeActivityPanel', () => {
     })
 
     const goalLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-run-progress-goal-links button')]
+    expect(goalLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(goalLinks.map(link => link.textContent)).toEqual(['Goal', 'Task'])
 
     fireEvent.click(goalLinks[0]!)

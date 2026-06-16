@@ -135,6 +135,8 @@ describe('PromptRegistryPanel', () => {
     await flush()
 
     expect(mocks.fetchDashboardPrompts).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('.v2-lab-panel')).not.toBeNull()
+    expect(container.querySelector('.v2-lab-row')).not.toBeNull()
     expect(container.textContent).toContain('프롬프트 레지스트리')
     expect(container.textContent).toContain('keeper.world')
     expect(container.textContent).toContain('/tmp/config/prompts/keeper.world.md')

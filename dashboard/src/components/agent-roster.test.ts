@@ -780,6 +780,22 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).toContain('상세 열기')
   })
 
+  it('applies v2 monitoring marker classes to roster surfaces and rows', async () => {
+    agents.value = [
+      makeAgent({ name: 'alpha-agent', current_task: 'alpha task' }),
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    expect(container.querySelector('aside.v2-monitoring-panel')).not.toBeNull()
+    expect(container.querySelector('section.v2-monitoring-panel')).not.toBeNull()
+    expect(container.querySelector('[data-testid="keeper-operations-row"]')?.classList.contains('v2-monitoring-roster-row')).toBe(true)
+    expect(container.querySelector('button.v2-monitoring-action')?.textContent).toContain('상세 열기')
+  })
+
   it('explains roster axes and renders blocker labels before raw codes', async () => {
     agents.value = [
       makeAgent({ name: 'keeper-executor-agent', status: 'active' }),

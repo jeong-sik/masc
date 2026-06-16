@@ -92,7 +92,7 @@ function StateRow({ row }: { row: StateBlockRow }) {
   return html`
     <article
       role="listitem"
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--warn-bright)] bg-[var(--color-bg-surface)] px-3.5 py-3"
+      class="v2-workspace-row rounded-[var(--r-1)] border border-[var(--color-border-default)] border-l-[3px] border-l-[var(--warn-bright)] bg-[var(--color-bg-surface)] px-3.5 py-3"
     >
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         ${row.message.seq !== undefined
@@ -112,7 +112,7 @@ function StateRow({ row }: { row: StateBlockRow }) {
       </div>
 
       <div
-        class="mt-3 rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-3 py-3"
+        class="v2-workspace-detail mt-3 rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-3 py-3"
         aria-label="State block"
       >
         <div class="mb-2 flex items-center gap-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">
@@ -160,11 +160,11 @@ export function StateBlockMessages() {
       </div>
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">State blocks</div>
           <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${rows.length}</div>
         </div>
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Sources</div>
           <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${sourceCount}</div>
         </div>

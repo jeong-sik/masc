@@ -172,7 +172,7 @@ function EventRow({
   return html`
     <button
       type="button"
-      class="w-full text-left px-3 py-2 border-b border-[var(--color-border-default)] flex items-center gap-3 text-xs ${rowBg}"
+      class="v2-monitoring-row w-full text-left px-3 py-2 border-b border-[var(--color-border-default)] flex items-center gap-3 text-xs ${rowBg}"
       onClick=${onSelect}
     >
       <span class="text-2xs font-mono text-[var(--color-fg-muted)] w-20 shrink-0">
@@ -294,7 +294,7 @@ export function AttributionPanel() {
     : null
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex flex-col gap-1">
         <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           Attribution — gate chain 관찰
@@ -323,7 +323,7 @@ export function AttributionPanel() {
             <div class="text-2xs text-[var(--color-fg-muted)]">
               필터: <span class="font-mono text-[var(--text-primary)]">${filterGate.value}</span>
               <button
-                class="ml-2 underline"
+                class="v2-monitoring-action ml-2 underline"
                 onClick=${() => { filterGate.value = null }}
               >
                 해제

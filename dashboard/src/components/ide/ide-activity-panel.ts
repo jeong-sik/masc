@@ -659,7 +659,7 @@ function RunProgressKeeperChip(entry: IdeRunProgressKeeperCount) {
         ? html`
           <button
             type="button"
-            class="ide-run-progress-keeper-link"
+            class="ide-run-progress-keeper-link v2-ide-action"
             title=${routeLink.evidence}
             aria-label=${`Open ${routeLink.evidence}`}
             onClick=${() => openIdeContextRouteLink(routeLink)}
@@ -684,7 +684,7 @@ function RunProgressSurfaceChip(surface: IdeRunProgressSurfaceCount) {
         ? html`
           <button
             type="button"
-            class="ide-run-progress-surface-link"
+            class="ide-run-progress-surface-link v2-ide-action"
             title=${routeLink.evidence}
             aria-label=${`Open ${routeLink.evidence}`}
             onClick=${() => openIdeContextRouteLink(routeLink)}
@@ -733,6 +733,7 @@ function RunProgressGoalTrack(goal: IdeRunProgressGoal) {
               <button
                 key=${link.id}
                 type="button"
+                class="v2-ide-action"
                 title=${link.evidence}
                 onClick=${() => openIdeContextRouteLink(link)}
               >${link.label}</button>
@@ -919,7 +920,7 @@ function ActivityRow(
 
   return html`
     <li
-      class="ide-activity-row"
+      class="ide-activity-row v2-ide-row"
       style=${{
         '--ide-activity-dot': dot,
       }}
@@ -962,7 +963,7 @@ function ActivityRow(
         ${hasEventContextFocus ? html`
           <button
             type="button"
-            class="ide-activity-context-jump"
+            class="ide-activity-context-jump v2-ide-action"
             aria-label=${activityContextLabel(item, eventFocusFile, eventFocusLine)}
             title=${activityContextTitle(eventFocusFile, eventFocusLine)}
             onClick=${() => focusIdeContextAnchor({
@@ -1006,7 +1007,7 @@ function ActivityRouteLink(link: IdeContextRouteLink) {
     <button
       key=${link.id}
       type="button"
-      class="ide-activity-route-link"
+      class="ide-activity-route-link v2-ide-action"
       title=${link.evidence}
       aria-label=${`Open ${link.evidence}`}
       onClick=${() => openIdeContextRouteLink(link)}

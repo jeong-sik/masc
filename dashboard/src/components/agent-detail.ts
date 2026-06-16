@@ -119,7 +119,7 @@ function filterTaskHistories(
 
 function TaskSummary({ task }: { task: Task }) {
   return html`
-    <div class="flex items-center gap-3 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 hover:bg-[var(--color-bg-surface)]/60 transition-colors px-3 py-2.5 rounded-[var(--r-1)]">
+    <div class="v2-monitoring-row flex items-center gap-3 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 hover:bg-[var(--color-bg-surface)]/60 transition-colors px-3 py-2.5 rounded-[var(--r-1)]">
       <${IdPill}>${task.id}<//>
       <span class="flex-1 text-sm text-[var(--color-fg-primary)] font-medium truncate">${task.title}</span>
       <${StatusBadge} status=${task.status} />
@@ -129,7 +129,7 @@ function TaskSummary({ task }: { task: Task }) {
 
 function TaskHistoryPanel({ row }: { row: TaskHistoryRow }) {
   return html`
-    <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] bg-[var(--color-bg-surface)]/40 p-4 hover:border-[var(--accent-30)] transition-colors group">
+    <div class="v2-monitoring-card border border-[var(--color-border-default)] rounded-[var(--r-1)] bg-[var(--color-bg-surface)]/40 p-4 hover:border-[var(--accent-30)] transition-colors group">
       <div class="mb-3">
         <${IdPill} class="group-hover:bg-[var(--accent-20)] transition-colors">${row.taskId}<//>
       </div>
@@ -321,7 +321,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class=${`px-4 py-2 text-sm font-semibold rounded-[var(--r-1)] border border-transparent bg-[var(--color-bg-hover)] text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] transition-colors duration-[var(--t-med)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+              class=${`v2-monitoring-action px-4 py-2 text-sm font-semibold rounded-[var(--r-1)] border border-transparent bg-[var(--color-bg-hover)] text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] transition-colors duration-[var(--t-med)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
               onClick=${closeAgentDetail}
             >
               닫기
@@ -362,7 +362,7 @@ export function AgentDetailOverlay() {
           <${SectionCard} label="최근 활동">
             ${lines.length === 0
               ? html`<div class="h-full min-h-30"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
-              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 px-3 py-2.5 font-mono text-xs text-[var(--color-fg-secondary)] leading-relaxed rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)]/60 transition-colors">${line}</div>`)}</div>`}
+              : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="v2-monitoring-row border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/40 px-3 py-2.5 font-mono text-xs text-[var(--color-fg-secondary)] leading-relaxed rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)]/60 transition-colors">${line}</div>`)}</div>`}
           <//>
         </div>
 
@@ -380,7 +380,7 @@ export function AgentDetailOverlay() {
                   ['속도', agentFitness.value.speed_score],
                   ['종합', agentFitness.value.overall_fitness],
                 ] as [string, number][]).map(([label, val]) => html`
-                  <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)]/30 p-3 text-center">
+                  <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)]/30 p-3 text-center">
                     <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">${label}</div>
                     <div class="text-lg font-bold ${val >= 0.7 ? 'text-[var(--color-status-ok)]' : val >= 0.4 ? 'text-[var(--color-status-warn)]' : 'text-[var(--bad-light)]'}">${formatPct(val)}</div>
                   </div>

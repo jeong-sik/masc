@@ -105,7 +105,7 @@ function HiddenDiagnosticsLinks() {
   ]
   return html`
     <section
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="v2-monitoring-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       aria-label="Hidden diagnostics"
     >
       <div class="flex flex-col gap-3">

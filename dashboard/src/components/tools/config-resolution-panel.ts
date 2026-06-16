@@ -29,7 +29,7 @@ function ConfigCard({
   children: unknown
 }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''}" title=${title}>
+    <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''}" title=${title}>
       ${children}
     </div>
   `
@@ -219,7 +219,7 @@ function ConfigTopologySummary({
   const repoFallbackActive = isRepoFallbackSource(resolution.config_root.source)
 
   return html`
-    <div class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+    <div class="v2-lab-panel mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
       <div class="flex flex-wrap items-center gap-2">
         <${StatusChip} tone="neutral" uppercase=${false}>TOML-only<//>
         <${StatusChip} tone=${repoFallbackActive ? 'warn' : 'neutral'} uppercase=${false}>
@@ -241,7 +241,7 @@ function WarningBlock({
   if (warnings.length === 0) return null
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
+    <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--yellow-bright-28)] bg-[var(--warn-10)] px-3 py-3">
       <div class="mb-2 text-2xs uppercase tracking-[var(--track-caps)] text-[var(--yellow-100)]">${title}</div>
       <div class="flex flex-col gap-2">
         ${warnings.map(warning => html`
@@ -406,7 +406,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
           const field: KeeperRuntimeField<number | null> | undefined = runtime[row.key]
           if (!field) return null
           return html`
-            <div class="flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+            <div class="v2-lab-row flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
               <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.label}</div>
               <div class="flex items-center gap-2">
                 <span class="font-mono text-xs text-[var(--color-fg-primary)]">${fmtKeeperValue(field.value, row.fmt)}</span>
@@ -500,7 +500,7 @@ function RuntimeProbePanel() {
           : null}
         <${Btn}
           size="sm"
-          class="ml-auto"
+          class="v2-lab-action ml-auto"
           onClick=${() => void load(true)}
         >
           ${state.value.loading ? 'probing...' : 'refresh probe'}
@@ -509,7 +509,7 @@ function RuntimeProbePanel() {
 
       ${state.value.error
         ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[var(--rose-fg)]">
+            <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[var(--rose-fg)]">
               ${state.value.error}
             </div>
           `
@@ -537,7 +537,7 @@ function RuntimeProbePanel() {
                   </div>
                   <div class="mt-3 flex flex-col gap-2">
                     ${providerProbes.map(item => html`
-                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
+                      <div class="v2-lab-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
                           <div class="min-w-0">
                             <div class="truncate text-xs font-medium text-[var(--color-fg-primary)]">${item.runtime_id ?? item.provider_id ?? '(unknown runtime)'}</div>
@@ -597,7 +597,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.observations?.map(item => html`
-                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2 text-xs text-[var(--color-fg-primary)]">
+                      <div class="v2-lab-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2 text-xs text-[var(--color-fg-primary)]">
                         ${item}
                       </div>
                     `)}
@@ -609,7 +609,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.errors?.map(item => html`
-                      <div class="rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[var(--rose-fg)]">
+                      <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[var(--rose-fg)]">
                         ${item}
                       </div>
                     `)}

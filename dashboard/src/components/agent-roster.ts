@@ -984,7 +984,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="v2-monitoring-surface agent-page flex w-full flex-col gap-5 px-0 py-1">
-      <section class="monitor-surface-card monitor-surface-card-strong p-5" aria-label="에이전트 디렉터리">
+      <section class="monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="에이전트 디렉터리">
         <div class="flex flex-col gap-5">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
             <div class="flex min-w-0 flex-col gap-2">
@@ -1005,7 +1005,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             </label>
           </div>
 
-          <div class="monitor-muted-panel p-3.5 md:p-4">
+          <div class="monitor-muted-panel v2-monitoring-panel p-3.5 md:p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div class="text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-secondary)] uppercase">상세 상태</div>
               <${FilterChips}
@@ -1040,7 +1040,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       </section>
 
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section class="monitor-surface-card monitor-surface-card-medium overflow-hidden" aria-label="Keeper operations list">
+        <section class="monitor-surface-card monitor-surface-card-medium v2-monitoring-panel overflow-hidden" aria-label="Keeper operations list">
           <!--
             2026-05-27 KEEPER OPERATIONS row redesign:
             - 현재 단계 column was almost always "-" for stuck keepers (the
@@ -1098,7 +1098,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   aria-pressed=${selected}
                   onClick=${() => setSelectedKey(row.key)}
                   onKeyDown=${handleRowKey}
-                  class="grid w-full cursor-pointer grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-fg', width: 2 })} lg:grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-surface)]' : 'bg-transparent'}"
+                  class="v2-monitoring-roster-row grid w-full cursor-pointer grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-fg', width: 2 })} lg:grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-surface)]' : 'bg-transparent'}"
                 >
                   <span class="flex min-w-0 items-center gap-3">
                     <span class="shrink-0">
@@ -1167,7 +1167,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </div>
         </section>
 
-        <aside class="monitor-surface-card monitor-surface-card-medium p-4" aria-label="Selected keeper detail">
+        <aside class="monitor-surface-card monitor-surface-card-medium v2-monitoring-panel p-4" aria-label="Selected keeper detail">
           ${selectedRow ? html`
             <div class="flex h-full flex-col gap-4">
               <div class="flex items-start justify-between gap-3">
@@ -1276,7 +1276,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <div class="mt-auto flex flex-wrap gap-2">
                 <button
                   type="button"
-                  class="inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-2 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--accent-20)]"
+                  class="v2-monitoring-action inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-2 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--accent-20)]"
                   aria-label=${selectedRow.detailLabel}
                   onClick=${selectedRow.openDetail}
                 >

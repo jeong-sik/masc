@@ -43,7 +43,7 @@ function CountChip({ name, count }: { name: string; count: number }) {
 
 function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest }) {
   return html`
-    <tr class="border-t border-[var(--color-border-default)]">
+    <tr class="v2-lab-row border-t border-[var(--color-border-default)]">
       <td class="py-2 pr-3 font-mono text-xs text-[var(--color-fg-secondary)]">${request.schedule_id}</td>
       <td class="py-2 pr-3">
         <${StatusChip} tone=${automationTone(request.status)} uppercase=${false}>${enumLabel(request.status)}<//>
@@ -107,7 +107,7 @@ export function ScheduledAutomationPanel({
       ${rows.length > 0
         ? html`
             <div class="overflow-x-auto">
-              <table class="min-w-full border-collapse text-left">
+              <table class="v2-lab-table min-w-full border-collapse text-left">
                 <thead class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">
                   <tr>
                     <th class="pb-2 pr-3 font-medium">schedule</th>

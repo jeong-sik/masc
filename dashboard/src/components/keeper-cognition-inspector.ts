@@ -163,7 +163,7 @@ function KeeperPicker({
           <div role="listitem">
             <button
               type="button"
-              class="${active
+              class="v2-monitoring-action ${active
                 ? 'border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--color-fg-primary)]'
                 : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'} inline-flex items-center gap-2 rounded-[var(--r-1)] border px-2 py-1 text-2xs transition-colors"
               aria-label=${keeper.name}
@@ -236,7 +236,7 @@ export function KeeperCognitionInspector() {
 
   return html`
     <section class="grid gap-4" aria-label="Keeper cognition inspector" data-testid="keeper-cognition-inspector">
-      <div class="monitor-muted-panel flex flex-col gap-3 px-4 py-3">
+      <div class="v2-monitoring-panel monitor-muted-panel flex flex-col gap-3 px-4 py-3">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div class="flex items-center gap-2">
             <${KeeperBadge} id=${selected.name} variant="full" size="md" />
@@ -246,7 +246,7 @@ export function KeeperCognitionInspector() {
           </div>
           <button
             type="button"
-            class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-2xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+            class="v2-monitoring-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-1.5 text-2xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)]"
             onClick=${() => openKeeperDetail(selected)}
           >
             Open detail

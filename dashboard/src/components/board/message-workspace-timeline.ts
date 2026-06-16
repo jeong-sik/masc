@@ -95,7 +95,7 @@ export function buildMessageWorkspaceModel(messageList: readonly Message[]): Mes
 function TimelineMessage({ row }: { row: TimelineRow }) {
   const preview = previewBoardMessage(row.message)
   return html`
-    <article class="grid grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3.5 py-3">
+    <article class="v2-workspace-row grid grid-cols-[3rem_minmax(0,1fr)] gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3.5 py-3">
       <div class="pt-0.5 text-right text-3xs font-semibold tabular-nums uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         ${row.message.seq !== undefined ? `#${row.message.seq}` : row.index + 1}
       </div>
@@ -166,15 +166,15 @@ export function MessageWorkspaceTimeline() {
       </div>
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Workspaces</div>
           <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.workspaces.length}</div>
         </div>
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Messages</div>
           <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.totalMessages}</div>
         </div>
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Signals</div>
           <div class="mt-1 text-sm font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.totalMentions} mentions · ${model.totalStateBlocks} state</div>
         </div>
@@ -192,7 +192,7 @@ export function MessageWorkspaceTimeline() {
                   type="button"
                   role="tab"
                   aria-selected=${workspace.workspace === activeWorkspace}
-                  class=${`rounded-[var(--r-1)] border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  class=${`v2-workspace-action rounded-[var(--r-1)] border px-3 py-1.5 text-xs font-medium transition-colors ${
                     workspace.workspace === activeWorkspace
                       ? 'border-[var(--color-accent)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
                       : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'

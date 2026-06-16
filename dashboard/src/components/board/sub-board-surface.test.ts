@@ -49,6 +49,7 @@ describe('SubBoardSurface', () => {
     expect(screen.getByText('2 members')).toBeTruthy()
     expect(screen.getByText('3 posts')).toBeTruthy()
     expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-workspace-panel')).not.toBeNull()
   })
 
   it('creates a sub-board with generated slug and trimmed members', async () => {

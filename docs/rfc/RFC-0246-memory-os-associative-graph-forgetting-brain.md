@@ -324,8 +324,21 @@ same way as the core phases.
 | **P0b** | re-enable the consolidation fiber (#21244 kill switch `false → true`) now that ephemeral is non-promotable; live re-run of the 6017-fact dry-run as the gate | live smoke: `_shared` populates with **durable** claims only; no "checkpoint saved"-class promotions |
 | **P1a** | `lifecycle` closed sum + write-side `valid_until` producer (per-category default lifetime, now exhaustive) + wire `run_gc` into sweep | unit: TTL pass now reachable; GC demotes by lifecycle, never dedups-on-read; `normalize_claim` SSOT folded |
 | **P1b** | truth-recency verifier (entity-ref → Stale Entity_gone) | unit: entity-present ⇒ Live; entity-gone ⇒ Stale+capped; no entity-ref ⇒ never staled |
-| **P2a** | `edge` type + `*.edges.jsonl` IO + deterministic lineage/cross-entity producers + spreading-activation recall (`α` flag, default 0 = byte-identical) | unit: edge codec round-trip; recall determinism; `α=0` ⇒ identical to RFC-0244; activation lifts a linked low-lexical fact above an unlinked one |
+| **P2a-1** | `relation` closed sum + `edge`/`association` types + `*.edges.jsonl` IO + the **co-occurrence `Relates` producer** wired at the librarian write path (§2.7) — write substrate only, no recall change | unit: codec round-trip incl. `Unknown` degrade; `n` distinct claims ⇒ `n*(n-1)/2` canonical edges; within-episode dedup; aggregate Hebbian weight; append→read IO round-trip — **DONE** |
+| **P2a-2** | spreading-activation recall (`α` flag, default 0 = byte-identical to RFC-0244) consuming `read_associations` | unit: `α=0` ⇒ identical to RFC-0244; activation lifts a linked low-lexical fact above an unlinked one |
 | **P2b** | contradiction→Board surfacing; earned-promotion gate (§2.6); optional MMR-Jaccard re-rank (default-off) | unit: contradiction emits a Board post, not a store overwrite; promotion requires ≥N recalls by ≥M queries |
+
+**Producer-first taxonomy (P2a invariant).** The `relation` sum grows one arm at a
+time, each arm landing WITH a deterministic producer. P2a-1 ships only `Relates`
+(co-occurrence within one episode — the only fully-deterministic inter-fact signal
+available, since episode claims are co-extracted by construction). Causal labels
+from the v2 design (diagnoses / derives / verifies) are **deliberately absent**:
+they would require an LLM classifier, which this RFC rejects. `Supersedes`
+(same-claim upsert in `merge_and_cap_facts`) and `Corroborates` (cross-keeper
+promotion in the consolidator) have real producers and are the next arms — added
+when wired, not speculatively. KNOWN LIMITATION: P2a-1 edges are append-only and
+unbounded (the §6 edge-explosion cap is deferred to a later slice with a measured
+trigger, disclosed in `keeper_memory_os_io.edges_path`, not silently capped).
 
 P0a is the binding constraint (it unblocks the production sleep cycle, #21244);
 P2a is the user's headline "brain" organ (the v2 memory-graph). Each phase is

@@ -215,6 +215,21 @@ let extract_and_append_with_provider
          "memory os fact upsert failed keeper=%s: %s"
          keeper_id
          (Printexc.to_string exn));
+    (* RFC-0246 §2.7: record the episode's co-occurrence associations. This is
+       enrichment for associative recall, not part of the fact contract, so a
+       failure here is logged and swallowed (Cancelled re-raised) exactly like
+       the fact upsert — edges never block a turn or the fact write above. *)
+    (try
+       Keeper_memory_os_io.append_edges
+         ~keeper_id
+         (Keeper_memory_os_edges.co_occurrence_edges episode)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.warn
+         "memory os edge write failed keeper=%s: %s"
+         keeper_id
+         (Printexc.to_string exn));
     Ok episode
 ;;
 

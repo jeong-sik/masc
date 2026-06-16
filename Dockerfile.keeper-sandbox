@@ -7,6 +7,14 @@
 #     REQUIRE_USERNS=false
 # - The host docker socket is typically mounted for DinD operations.
 # - Keeper GitHub/SSH credential bundles are projected at /tmp/keeper-creds.
+#
+# Dev environment: the full masc OCaml toolchain (OCaml 5.4 + dune 3.22 + all
+# masc opam dependencies, including the first-party pins) is baked in at BUILD
+# time. Keepers therefore build/test masc offline — runtime stays network-none
+# and read-only-rootfs hardened; no live `opam install` is needed or granted.
+# Recipe mirrors Dockerfile.worker-runtime (opam-pin-external-deps.sh +
+# `opam install . --deps-only`) so the dep set tracks masc.opam, not a
+# hand-maintained list. Pin bumps require an image rebuild to stay aligned.
 
 FROM ubuntu:24.04
 
@@ -24,24 +32,44 @@ RUN apt-get update \
       git \
       gh \
       jq \
+      m4 \
       make \
       nodejs \
       npm \
-      ocaml-nox \
       opam \
       openssh-client \
       python3 \
       ripgrep \
       tree \
+      pkg-config \
+      libssl-dev \
+      libsqlite3-dev \
+      libgmp-dev \
+      libffi-dev \
+      libzstd-dev \
+      zlib1g-dev \
+      libprotobuf-dev \
+      protobuf-compiler \
  && rm -rf /var/lib/apt/lists/*
 
-# Install dune 3.22 via opam.
-# Ubuntu 24.04's ocaml-dune apt package provides dune 3.14 only;
-# the repo dune-project requires (lang dune 3.22).
+# Bake the full masc dev toolchain at build time. dune-project + *.opam give
+# `opam install . --deps-only` the exact masc dependency set; the pin script
+# resolves the first-party packages (agent_sdk, mcp_protocol, ocaml-webrtc,
+# grpc-direct, compact-protocol) from their git sources. Build-time network is
+# available here; the runtime sandbox is not affected.
+WORKDIR /opt/masc-src
+COPY dune-project ./
+COPY *.opam ./
+COPY scripts ./scripts
+
 RUN opam init --disable-sandboxing --root "$OPAMROOT" --bare -y \
- && opam switch create default ocaml-system --root "$OPAMROOT" -y \
- && opam install --root "$OPAMROOT" -y dune.3.22.0 ppxlib ppx_deriving_yojson ppx_let ppx_deriving bisect_ppx ocaml-protoc-plugin \
- && rm -rf "$OPAMROOT/repo" "$OPAMROOT/.opam-switch/sources"
+ && opam switch create default ocaml-base-compiler.5.4.0 --root "$OPAMROOT" -y \
+ && eval "$(opam env --root "$OPAMROOT" --set-switch)" \
+ && scripts/opam-pin-external-deps.sh \
+ && opam install -y dune.3.22.0 \
+ && opam install . --deps-only -y \
+ && opam clean -a -c -y \
+ && rm -rf "$OPAMROOT/.opam-switch/sources" "$OPAMROOT/repo" /root/.cache
 
 ENV PATH="/opt/opam/default/bin:${PATH}"
 

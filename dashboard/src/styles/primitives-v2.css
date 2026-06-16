@@ -1,0 +1,222 @@
+/* primitives-v2.css — keeper-v2 atomic primitives ported to dashboard tokens.
+   Imported after primitives.css so these classes can compose with the
+   existing L0 primitives where useful. */
+
+/* ════════════════════════════════════════════════════════════════
+   Sigil / SigilChip — keeper identity monogram
+   ════════════════════════════════════════════════════════════════ */
+.sigil {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0;
+  color: var(--color-bg-page);
+  background: var(--kc, var(--kp1));
+  border-radius: var(--radius-sm);
+}
+
+.sigil.heartbeat {
+  box-shadow: 0 0 8px rgb(var(--kc-glow, var(--kp1-glow)) / 0.7);
+  animation: anim-heartbeat 1.4s var(--ease-inout) infinite;
+}
+
+.sigil-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--kc, var(--kp1));
+  padding: 2px 8px 2px 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in oklab, var(--kc, var(--kp1)) 40%, var(--color-border-default));
+  background: color-mix(in oklab, var(--kc, var(--kp1)) 9%, transparent);
+}
+
+.sigil-chip .sigil {
+  width: 17px;
+  height: 17px;
+  font-size: 9px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   FilterChip — single selectable roster filter
+   ════════════════════════════════════════════════════════════════ */
+.rfilter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-sans);
+  font-size: var(--fs-10);
+  font-weight: var(--fw-med);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  border: 1px solid var(--color-border-default);
+  background: transparent;
+  color: var(--color-fg-muted);
+  transition: background-color var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+
+.rfilter:hover {
+  color: var(--color-fg-secondary);
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+
+.rfilter.on {
+  color: var(--color-bg-page);
+  background: var(--color-accent-fg);
+  border-color: var(--color-accent-fg);
+  font-weight: var(--fw-semi);
+}
+
+.rfilter-n {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Stepper — +/- numeric control
+   ════════════════════════════════════════════════════════════════ */
+.set-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+}
+
+.set-stepper button {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: color var(--t-fast), background-color var(--t-fast);
+}
+
+.set-stepper button:hover {
+  color: var(--color-accent-fg);
+  background: var(--color-bg-hover);
+}
+
+.set-stepper .mono {
+  min-width: 18px;
+  text-align: center;
+  color: var(--color-fg-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Meter — horizontal quantity bar
+   ════════════════════════════════════════════════════════════════ */
+.meter {
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
+  overflow: hidden;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg));
+  transition: width var(--t-med) var(--ease-out);
+}
+
+.meter.hot > span {
+  background: linear-gradient(90deg, var(--color-status-warn), var(--color-status-err));
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Vital / Vitals — compact 2-column stat grid
+   ════════════════════════════════════════════════════════════════ */
+.vitals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--color-border-strong);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.vital {
+  background: var(--color-bg-elevated);
+  padding: 9px 11px;
+}
+
+.vital .vk {
+  font-size: var(--fs-9);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-fg-muted);
+  font-weight: var(--fw-semi);
+}
+
+.vital .vv {
+  font-family: var(--font-mono);
+  font-size: var(--fs-16);
+  color: var(--color-fg-primary);
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vital .vv.volt {
+  color: var(--color-accent-fg);
+}
+
+.vital .vv small {
+  font-size: var(--fs-10);
+  color: var(--color-fg-muted);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   StatCell — single stat tile (keeper-v2 overview family)
+   ════════════════════════════════════════════════════════════════ */
+.stat-cell {
+  background: var(--color-bg-surface);
+  padding: 13px 15px;
+}
+
+.stat-cell-k {
+  font-size: var(--fs-9);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-fg-muted);
+  font-weight: var(--fw-semi);
+}
+
+.stat-cell-v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-20);
+  color: var(--color-fg-primary);
+  margin-top: 5px;
+}
+
+.stat-cell-v small {
+  font-size: var(--fs-11);
+  color: var(--color-fg-muted);
+}
+
+.stat-cell-v.ok { color: var(--color-status-ok); }
+.stat-cell-v.warn { color: var(--color-status-warn); }
+.stat-cell-v.bad { color: var(--color-status-err); }
+.stat-cell-v.volt { color: var(--color-accent-fg); }

@@ -119,56 +119,6 @@ let decide_retention ?(discard_threshold = default_discard_score_threshold) scor
   if score <= discard_threshold then Discard else KeepVerbatim
 ;;
 
-let score_tool_result
-      ?(lambda = default_lambda)
-      ?(alpha = default_alpha)
-      ~now
-      ~created_at
-      ~was_successful
-      ~access_count
-      ()
-  =
-  let base_confidence = if was_successful then 0.9 else 0.5 in
-  base_confidence *. recency_factor ~lambda ~now created_at *. access_factor ~alpha access_count
-;;
-
-let string_contains substring str =
-  let sub_len = String.length substring in
-  let str_len = String.length str in
-  let rec aux i =
-    if i + sub_len > str_len
-    then false
-    else if String.sub str i sub_len = substring
-    then true
-    else aux (i + 1)
-  in
-  if sub_len = 0 then true else aux 0
-;;
-
-(** Bumps access counters for facts whose claims share a turn keyword. A cheap,
-    deterministic heuristic (no embedding model) kept offline. Tokenization uses the
-    [tokenize] SSOT (shared with the recall relevance factor); the claim match here
-    stays substring-based ([string_contains]) for its coarse access-bump purpose.
-
-    Note: this is a write (it mutates [access_count]/[last_accessed]). It is NOT
-    wired into recall, which is intentionally one-way at prompt time; the
-    turn-seeded ranking boost lives in [lexical_relevance] (read-only) instead. A
-    persistent variant belongs in the librarian write-path (RFC-0244 §2.1, deferred). *)
-let bump_access_for_turn ~now (facts : fact list) ~(turn_text : string) : fact list =
-  let tokens = tokenize turn_text in
-  let score_claim claim =
-    let lower = String.lowercase_ascii claim in
-    List.fold_left (fun acc tok -> if string_contains tok lower then acc + 1 else acc) 0 tokens
-  in
-  List.map
-    (fun f ->
-       let match_score = score_claim f.claim in
-       if match_score > 0
-       then { f with access_count = f.access_count + 1; last_accessed = now }
-       else f)
-    facts
-;;
-
 (* RFC-0243: weight of a single re-observation when blending confidence. The
    librarian re-extracting the same claim is one new observation, so confidence
    moves a bounded fraction toward the re-observed value rather than jumping to

@@ -45,29 +45,6 @@ val lexical_relevance : ?gain:float -> seed_tokens:string list -> fact -> float
 val truth_recency_factor : ?lambda:float -> now:float -> fact -> float
 val decide_retention : ?discard_threshold:float -> float -> retention_verdict
 
-(** Score an archived tool result. *)
-val score_tool_result
-  :  ?lambda:float
-  -> ?alpha:float
-  -> now:float
-  -> created_at:float
-  -> was_successful:bool
-  -> access_count:int
-  -> unit
-  -> float
-
-(** Lightweight keyword access bump.
-
-    Increments [access_count] and updates [last_accessed] for facts
-    whose claims contain at least one keyword from [turn_text]. This is
-    a cheap, deterministic heuristic to approximate recall without an
-    embedding model. *)
-val bump_access_for_turn
-  :  now:float
-  -> fact list
-  -> turn_text:string
-  -> fact list
-
 (** RFC-0243: bounded EMA weight for a single re-observation (see [blend_confidence]). *)
 val reaffirm_weight : float
 

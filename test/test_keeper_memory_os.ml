@@ -1024,21 +1024,6 @@ let test_policy_truth_age_not_reset_by_access () =
     (Policy.score_fact ~now stale_but_frequently_recalled < Policy.score_fact ~now fresh)
 ;;
 
-let test_bump_access () =
-  let now = 1_000_000.0 in
-  let f = fact_fixture ~now () in
-  let bumped = Policy.bump_access_for_turn ~now [ f ] ~turn_text:"User prefers concise" in
-  (match bumped with
-   | [ got ] -> Alcotest.(check int) "access bumped" 3 got.Types.access_count
-   | _ -> Alcotest.fail "expected one bumped fact");
-  let not_bumped =
-    Policy.bump_access_for_turn ~now [ f ] ~turn_text:"completely unrelated"
-  in
-  match not_bumped with
-  | [ got ] -> Alcotest.(check int) "access unchanged" 2 got.Types.access_count
-  | _ -> Alcotest.fail "expected one unchanged fact"
-;;
-
 (* RFC-0244: turn-seeded lexical relevance. *)
 
 let test_lexical_relevance_identity_for_empty_seed () =
@@ -2566,7 +2551,6 @@ let () =
             "truth age is not reset by access"
             `Quick
             test_policy_truth_age_not_reset_by_access
-        ; Alcotest.test_case "bump access" `Quick test_bump_access
         ; Alcotest.test_case
             "blend_confidence bounded convex (RFC-0243)"
             `Quick

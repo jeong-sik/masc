@@ -15,6 +15,39 @@ open Keeper_execution
 
 include Keeper_supervisor_launch
 
+(** RFC-0250: pure stale-run assessment for the no-turn-produced case.
+
+    Returns [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] — giving
+    the previously-producerless [Idle_turn] variant its first real producer —
+    when the keeper is [Running], is not in a turn ([in_turn = None], the
+    exact [Idle_turn] doc contract), has completed at least one turn
+    ([last_turn_ts > 0], so a fresh-start keeper is not mis-stamped), and
+    [now] exceeds [last_turn_ts] by more than [threshold]. Returns [None]
+    otherwise (alive, in-turn, or fresh-start).
+
+    Pure: the caller stamps the reason via [Keeper_registry.set_failure_reason]
+    and invokes [Keeper_execution_receipt.emit_stale_keeper_broadcast]. Keys on
+    [last_turn_ts], never on active-tool duration, so it does not re-introduce
+    the deliberately-removed per-turn wall-clock watchdog. *)
+let assess_stale_run
+    ~(phase : Keeper_state_machine.phase)
+    ~(in_turn : 'a option)
+    ~(last_turn_ts : float)
+    ~(now : float)
+    ~(threshold : float)
+    : Keeper_registry.failure_reason option
+  =
+  if Bool.( phase = Keeper_state_machine.Running
+            && Option.is_none in_turn
+            && last_turn_ts > 0.0
+            && now -. last_turn_ts > threshold )
+  then
+    let stall = now -. last_turn_ts in
+    Some
+      (Keeper_registry.Stale_turn_timeout
+         (Keeper_registry_types.Idle_turn { stall_seconds = stall }))
+  else None
+
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts =
@@ -254,7 +287,50 @@ let sweep_and_recover (ctx : _ context) =
             (match Eio.Promise.peek entry.done_p with
              | None when watchdog_stop_pending entry ->
                force_unresolved_watchdog_crash entry
-             | None -> () (* Alive — skip *)
+             | None ->
+               (* RFC-0250: stale-run window. A [Running] keeper whose
+                  [done_p] is unresolved and carries no [failure_reason]
+                  was assumed Alive, but a no-turn-produced stall is
+                  frozen-but-silent. Assess via the pure [assess_stale_run]
+                  (gives the closed [Idle_turn] variant its first real
+                  producer); when stale, stamp the reason and invoke the
+                  dead [emit_stale_keeper_broadcast] (its first call site).
+                  The next sweep's [watchdog_stop_pending] routes it to
+                  crash recovery exactly as [In_turn_hung]. *)
+               (match
+                  Env_config_runtime.Keeper_stale_run.threshold_sec_opt ()
+                with
+               | None -> ()
+               | Some threshold ->
+                 (match
+                    assess_stale_run
+                      ~phase:entry.phase
+                      ~in_turn:entry.current_turn_observation
+                      ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts
+                      ~now
+                      ~threshold
+                  with
+                 | None -> ()
+                 | Some reason ->
+                   let stall =
+                     now -. entry.meta.runtime.usage.last_turn_ts
+                   in
+                   Keeper_registry.set_failure_reason
+                     ~base_path
+                     entry.name
+                     (Some reason);
+                   Keeper_execution_receipt.emit_stale_keeper_broadcast
+                     ctx.config
+                     ~keeper_name:entry.name
+                     ~agent_name:entry.meta.agent_name
+                     ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta entry.meta)
+                     ~trace_id:
+                       (Keeper_id.Trace_id.to_string
+                          entry.meta.runtime.trace_id)
+                     ~generation:entry.meta.runtime.generation
+                     ~failure_reason:(Some reason)
+                     ~stale_seconds:stall
+                     ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts))
              | Some `Stopped -> to_unregister := entry :: !to_unregister
              | Some (`Crashed msg) -> queue_crashed_entry entry msg));
          Eio_guard.yield_step sweep_ym)

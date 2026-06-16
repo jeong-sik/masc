@@ -72,6 +72,7 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
       container.querySelectorAll<HTMLElement>('[role="treeitem"]'),
     )
     expect(treeItems.length).toBeGreaterThan(0)
+    expect(treeItems.every(el => el.classList.contains('v2-ide-row'))).toBe(true)
 
     const tabIndexes = treeItems.map(el => el.getAttribute('tabindex'))
     for (const idx of tabIndexes) {
@@ -118,6 +119,42 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     render(h(IdeExplorer, { fileTreeStore: store }), container)
 
     expect(container.textContent).not.toContain('Git changes')
+  })
+
+  it('marks the repository scan button and context route buttons with v2 action classes', () => {
+    const store = createFileTreeStore()
+    store.seed(SAMPLE)
+    ideContextFocus.value = {
+      file_path: 'runtime/router.ts',
+      line: 42,
+      surface: 'Task',
+      label: 'task task-runtime',
+      source_id: 'event-1',
+      activated_at_ms: Date.now(),
+      route_links: [
+        {
+          id: 'task:task-runtime',
+          label: 'Task',
+          tab: 'workspace',
+          params: { section: 'planning', view: 'default', task: 'task-runtime' },
+          evidence: 'Task task-runtime',
+        },
+      ],
+    }
+
+    render(h(IdeExplorer, {
+      fileTreeStore: store,
+      onRepositoryScan: async () => [],
+    }), container)
+
+    const scanButton = container.querySelector<HTMLButtonElement>('[aria-label="base path 아래 git 저장소 스캔"]')
+    expect(scanButton?.classList.contains('v2-ide-action')).toBe(true)
+
+    const focusedRow = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="treeitem"]'),
+    ).find(el => el.textContent?.includes('router.ts'))
+    const routeButtons = [...focusedRow!.querySelectorAll<HTMLButtonElement>('.ide-explorer-context-chip button')]
+    expect(routeButtons.every(button => button.classList.contains('v2-ide-action'))).toBe(true)
   })
 
   it('renders repository source in the explorer header', () => {
@@ -188,6 +225,7 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     expect(chip?.textContent).toContain('Task')
     expect(chip?.textContent).toContain('L42')
     const routeButtons = [...focusedRow!.querySelectorAll<HTMLButtonElement>('.ide-explorer-context-chip button')]
+    expect(routeButtons.every(button => button.classList.contains('v2-ide-action'))).toBe(true)
     expect(routeButtons.map(button => button.textContent)).toEqual(['Task', 'Telemetry'])
     expect(routeButtons.map(button => button.getAttribute('aria-label'))).toEqual([
       'Open Task task-runtime',

@@ -116,6 +116,9 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
 
+    expect(container.querySelector('.v2-ide-surface')).not.toBeNull()
+    expect(container.querySelectorAll('.v2-ide-panel').length).toBeGreaterThanOrEqual(3)
+    expect(container.querySelector('.v2-ide-toolbar')).not.toBeNull()
     expect(buttonByText(container, 'Time').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Tools').getAttribute('aria-pressed')).toBe('false')

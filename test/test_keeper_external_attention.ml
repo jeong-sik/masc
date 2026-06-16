@@ -96,6 +96,57 @@ let with_temp_base name f =
     ~finally:(fun () -> try remove_tree base_path with _ -> ())
     (fun () -> f base_path)
 
+(* F943: [record] dedups against a bounded recent tail, not the whole
+   (unbounded) store. A duplicate inside the window is still suppressed;
+   one pushed past the window is re-appended (rare, harmless). This pins
+   both halves of that contract and, by recording past the window
+   without parsing the whole file each time, exercises the O(window)
+   path. *)
+let test_record_dedup_window_bounded () =
+  with_temp_base "keeper-external-attention-window" @@ fun base_path ->
+  let keeper_name = "windowkeeper" in
+  let mk i =
+    item ~keeper_name
+      ~dedupe_key:(Printf.sprintf "discord:chan-1:msg-%d" i)
+      ()
+  in
+  let record_exn it =
+    match A.record ~base_path it with
+    | `Recorded -> ()
+    | `Duplicate _ -> Alcotest.fail "unexpected duplicate while filling"
+    | `Error d -> Alcotest.failf "record failed: %s" d
+  in
+  (* The oldest event, then enough distinct fillers to push it out of the
+     dedup window. Size the count from the measured per-event byte cost
+     so the test self-adjusts if the window or item shape changes. *)
+  let first = mk 0 in
+  record_exn first;
+  let line_bytes =
+    String.length (Yojson.Safe.to_string (A.event_to_json (A.Recorded first)))
+    + 1 (* newline *)
+  in
+  let fillers = (A.dedup_window_bytes / line_bytes) + 64 in
+  let last_filler = ref first in
+  for i = 1 to fillers do
+    let it = mk i in
+    record_exn it;
+    last_filler := it
+  done;
+  (* The oldest event has scrolled past the window: re-recording it is a
+     fresh append, not a duplicate. *)
+  (match A.record ~base_path first with
+   | `Recorded -> ()
+   | `Duplicate _ ->
+       Alcotest.fail "event older than the dedup window was treated as duplicate"
+   | `Error d -> Alcotest.failf "record failed: %s" d);
+  (* A recent event is still inside the window and is deduped. *)
+  match A.record ~base_path !last_filler with
+  | `Duplicate dup ->
+      Alcotest.(check string) "recent duplicate still caught"
+        !last_filler.A.event_id dup.A.event_id
+  | `Recorded -> Alcotest.fail "recent duplicate inside window was re-recorded"
+  | `Error d -> Alcotest.failf "record failed: %s" d
+
 let test_record_dedupes_and_reads_pending () =
   with_temp_base "keeper-external-attention-record" @@ fun base_path ->
   let att = item () in
@@ -192,6 +243,8 @@ let () =
         [
           Alcotest.test_case "record dedupes and reads pending" `Quick
             test_record_dedupes_and_reads_pending;
+          Alcotest.test_case "record dedup window is bounded (F943)" `Quick
+            test_record_dedup_window_bounded;
           Alcotest.test_case "claim, resolve, ignore projection" `Quick
             test_claim_resolution_and_ignore_projection;
           Alcotest.test_case "stale claim projects back to pending" `Quick

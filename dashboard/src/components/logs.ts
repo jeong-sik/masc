@@ -54,6 +54,8 @@ const logLimit = signal(200)
 const providerLogProvider = signal('')
 const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
+const categoryFilter = signal('')
+const hideFsmTransitions = signal(false)
 
 const POLL_INTERVAL_MS = 3000
 const LOG_ROW_HEIGHT = 92
@@ -78,6 +80,41 @@ const SOURCE_LABELS: Record<string, string> = {
   legacy_traceln: 'trace line',
   client_tool_host: 'client tool-host',
   sse: 'sse',
+}
+
+const CATEGORIES: readonly string[] = [
+  'fsm',
+  'lifecycle',
+  'directive',
+  'heartbeat',
+  'presence',
+  'task',
+  'tool',
+  'memory',
+  'telemetry',
+  'routine',
+  'boundary',
+  'uncategorized',
+]
+
+const CATEGORY_LABELS: Record<string, string> = {
+  fsm: 'FSM',
+  lifecycle: 'Lifecycle',
+  directive: 'Directive',
+  heartbeat: 'Heartbeat',
+  presence: 'Presence',
+  task: 'Task',
+  tool: 'Tool',
+  memory: 'Memory',
+  telemetry: 'Telemetry',
+  routine: 'Routine',
+  boundary: 'Boundary',
+  uncategorized: 'Uncategorized',
+}
+
+function categoryLabel(category: string | null | undefined): string | null {
+  if (!category) return null
+  return CATEGORY_LABELS[category] ?? category
 }
 
 type LoadMode = 'reset' | 'delta'
@@ -280,7 +317,7 @@ function sourceTone(source: string): string {
     case 'client_tool_host':
       return 'text-[var(--color-accent-fg)] bg-[var(--accent-10)] border-[var(--accent-22)]'
     case 'legacy_stderr':
-      return 'text-[var(--bad-light)] bg-[var(--brick-soft)] border-[var(--err-border)]'
+      return 'text-[var(--bad-light)] bg-[var(--err-soft)] border-[var(--err-border)]'
     case 'legacy_traceln':
       return 'text-[var(--warn-fg)] bg-[var(--warn-soft)] border-[var(--warn-border)]'
     default:
@@ -310,6 +347,8 @@ async function loadLogs(mode: LoadMode = 'reset') {
         limit: logLimit.value,
         level: levelFilter.value,
         module: appliedModuleFilter.value || undefined,
+        category: categoryFilter.value || undefined,
+        exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
       })
       const entries = sortLogEntries(resp.entries).slice(0, Math.max(1, logLimit.value))
       latestSeq.value = latestLogSeq(entries)
@@ -328,6 +367,8 @@ async function loadLogs(mode: LoadMode = 'reset') {
       level: levelFilter.value,
       module: appliedModuleFilter.value || undefined,
       since_seq: latestSeq.value ?? undefined,
+      category: categoryFilter.value || undefined,
+      exclude_category: hideFsmTransitions.value ? 'fsm' : undefined,
     })
     if (requestId !== latestRequestId) return
 
@@ -387,6 +428,7 @@ function renderLogRow(entry: LogEntry) {
   const sourceClass = sourceTone(source)
   const renderedMessage = renderLogMessage(entry)
   const routeLinks = logRouteLinks(entry)
+  const category = categoryLabel(entry.category)
   const diagnosticChip = failure
     ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
     : null
@@ -403,7 +445,7 @@ function renderLogRow(entry: LogEntry) {
   return html`
     <div
       key=${entry.seq}
-      class="logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-card border border-[var(--color-border-divider)] px-3 py-3 ${backgroundClass}"
+      class="logs-row v2-logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] px-3 py-3 ${backgroundClass}"
     >
       <div class="font-mono text-2xs whitespace-nowrap text-[color:var(--color-fg-muted)]">
         ${entry.ts.replace('T', ' ').replace('Z', '')}
@@ -416,6 +458,9 @@ function renderLogRow(entry: LogEntry) {
       </div>
       <div class="flex flex-wrap items-start gap-1">
         <${StatusChip} tone=${sourceClass}>${sourceLabel(source)}</${StatusChip}>
+        ${category
+          ? html`<${MetaTag}>${category}</${MetaTag}>`
+          : null}
         ${clientName
           ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[var(--color-accent-fg)]" uppercase=${false}>${clientName}</${StatusChip}>`
           : null}
@@ -491,7 +536,7 @@ function renderSummaryChip(label: string, value: string | number, tone = 'neutra
 
 function renderLogSummary(summary: LogWindowSummary) {
   return html`
-    <div class="mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
+    <div class="v2-logs-summary mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
       ${renderSummaryChip('ERROR', summary.errors, summary.errors > 0 ? 'bad' : 'neutral')}
       ${renderSummaryChip('WARN', summary.warnings, summary.warnings > 0 ? 'warn' : 'neutral')}
       ${renderSummaryChip('failure envelope', summary.failureEnvelopes, summary.failureEnvelopes > 0 ? 'info' : 'neutral')}
@@ -552,7 +597,7 @@ function renderProviderLogPanel() {
   }
 
   return html`
-    <div class="mx-3 mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+    <div class="v2-logs-provider-panel mx-3 mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-divider)] px-3 py-2">
         <div class="flex flex-wrap items-center gap-2 text-2xs">
           <${StatusChip} tone="info" uppercase=${false}>provider logs</${StatusChip}>
@@ -649,6 +694,8 @@ export function LogViewer() {
     const unsubscribeLevel = levelFilter.subscribe(restart)
     const unsubscribeModule = appliedModuleFilter.subscribe(restart)
     const unsubscribeLimit = logLimit.subscribe(restart)
+    const unsubscribeCategory = categoryFilter.subscribe(restart)
+    const unsubscribeHideFsm = hideFsmTransitions.subscribe(restart)
     const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
 
     return () => {
@@ -658,6 +705,8 @@ export function LogViewer() {
       unsubscribeLevel()
       unsubscribeModule()
       unsubscribeLimit()
+      unsubscribeCategory()
+      unsubscribeHideFsm()
       unsubscribeAutoRefresh()
     }
   }, [])
@@ -716,9 +765,9 @@ export function LogViewer() {
   const summary = summarizeLogWindow(logEntries)
 
   return html`
-    <div class="logs-viewer flex h-full min-h-0 flex-col gap-4">
-      <section class="contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
-        <div class="logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--color-border-divider)] px-4 py-4">
+    <div class="logs-viewer v2-logs-surface flex h-full min-h-0 flex-col gap-4">
+      <section class="v2-logs-panel contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
+        <div class="logs-toolbar v2-logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--color-border-divider)] px-4 py-4">
           <div class="logs-filters flex flex-wrap gap-2 items-center">
             <${Select}
               class="logs-select px-3 py-2 text-xs"
@@ -764,6 +813,31 @@ export function LogViewer() {
               options=${['100', '200', '500', '1000', '3000']}
               onInput=${(v: string) => { logLimit.value = parseInt(v, 10) }}
             />
+
+            <${Select}
+              class="logs-select px-3 py-2 text-xs"
+              name="log-category"
+              ariaLabel="Category"
+              value=${categoryFilter.value}
+              options=${[
+                { value: '', label: 'All categories' },
+                ...CATEGORIES.map(category => ({
+                  value: category,
+                  label: CATEGORY_LABELS[category] ?? category,
+                })),
+              ]}
+              onInput=${(v: string) => { categoryFilter.value = v }}
+            />
+
+            <label class="logs-hide-fsm-label flex items-center gap-1.5 cursor-pointer text-2xs text-[var(--color-fg-muted)]">
+              <${Checkbox}
+                name="log-hide-fsm"
+                ariaLabel="Hide FSM transitions"
+                checked=${hideFsmTransitions.value}
+                onChange=${(checked: boolean) => { hideFsmTransitions.value = checked }}
+              />
+              Hide FSM transitions
+            </label>
           </div>
 
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
@@ -805,7 +879,7 @@ export function LogViewer() {
         ${renderProviderLogPanel()}
 
         <div class="px-3 pt-3">
-          <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">
+          <div class="v2-logs-table-header grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">
             <div>timestamp</div>
             <div>level</div>
             <div>module</div>

@@ -122,6 +122,7 @@ type t =
   | CycleExceptions
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
+  | PromptUnknownToolTokens
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
@@ -203,7 +204,7 @@ type t =
   | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
-  | StaySilentLoopDetected
+  | NoProgressLoopDetected
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
@@ -348,6 +349,8 @@ let to_string = function
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
   | StateSnapshotSkippedNoState ->
     "masc_keeper_state_snapshot_skipped_no_state_total"
+  | PromptUnknownToolTokens ->
+    "masc_keeper_prompt_unknown_tool_tokens_total"
   | ProgressUpdatedLineFailures -> "masc_keeper_progress_updated_line_failures_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
@@ -436,7 +439,7 @@ let to_string = function
   | ExecuteLocalExecution -> "masc_keeper_execute_local_execution_total"
   | DockerRuntimeDiscarded -> "masc_keeper_docker_runtime_discarded_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
-  | StaySilentLoopDetected -> "masc_keeper_stay_silent_loop_detected_total"
+  | NoProgressLoopDetected -> "masc_keeper_no_progress_loop_detected_total"
   | UsageTrust -> "masc_keeper_usage_trust_total"
   | UsageAnomalyReason -> "masc_keeper_usage_anomaly_reason_total"
   | ConfigEnvParseFailures -> "masc_keeper_config_env_parse_failures_total"
@@ -491,7 +494,8 @@ let all : t list =
     ToolPolicyFailures; ReconcileFailures; DecisionAuditFlushFailures; OasCancel;
     ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
     PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
-    CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; ProgressUpdatedLineFailures;
+    CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; PromptUnknownToolTokens;
+    ProgressUpdatedLineFailures;
     SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;
     EpisodeCreateFailures; MemoryActivityEmitFailures; SupervisorSweepFailures; TomlReconcileSweepFailures;
     TomlReconcileDedup; ReconcileDisabled; ToolUsageFlushFailures; TurnTimeoutCommitted;
@@ -511,7 +515,7 @@ let all : t list =
     ProviderTimeoutWatchdogTermination; StaleTerminationThresholdBreached; StaleTerminationBatch; StaleBroadcastEmitFailures;
     OasRunTimeout; RuntimeSaturationSignal; ToolUseFailure; ToolNotAllowed;
     TurnGateRejectedTerminal; ReceiptUnmappedDisposition; ExecuteNetworkUpgrade; ExecuteLocalExecution;
-    DockerRuntimeDiscarded; ProactiveSkip; StaySilentLoopDetected; UsageTrust;
+    DockerRuntimeDiscarded; ProactiveSkip; NoProgressLoopDetected; UsageTrust;
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; RuntimeHttpProbeJsonParseFailures;
     PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;

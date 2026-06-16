@@ -99,8 +99,8 @@ let check_resolution ~msg ~raw_model ~canonical_model_id ~expected_model ~expect
 let test_non_empty_raw_model_wins () =
   check_resolution
     ~msg:"raw model"
-    ~raw_model:"agent_llm_a-code:auto"
-    ~canonical_model_id:(Some "provider_a:model-a-opus")
+    ~raw_model:"claude-code:auto"
+    ~canonical_model_id:(Some "anthropic:claude-opus")
     ~expected_model:"runtime"
     ~expected_source:"response_model"
 ;;
@@ -109,7 +109,7 @@ let test_empty_raw_falls_back_to_telemetry () =
   check_resolution
     ~msg:"telemetry fallback"
     ~raw_model:""
-    ~canonical_model_id:(Some " provider_a:model-a-opus ")
+    ~canonical_model_id:(Some " anthropic:claude-opus ")
     ~expected_model:"runtime"
     ~expected_source:"telemetry_resolved"
 ;;

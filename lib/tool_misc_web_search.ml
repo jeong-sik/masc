@@ -279,7 +279,7 @@ let parse_provider_csv raw =
   |> List.filter_map provider_of_string
 
 let env_present name =
-  match Sys.getenv_opt name |> Option.map String.trim with
+  match Env_config_core.raw_value_opt name |> Option.map String.trim with
   | Some value when not (String.equal value "") -> true
   | _ -> false
 
@@ -473,7 +473,7 @@ let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let searxng_base_url () =
   let url =
-    match Sys.getenv_opt "MASC_SEARXNG_URL" with
+    match Env_config_core.raw_value_opt "MASC_SEARXNG_URL" with
     | Some raw ->
         let normalized = raw |> String.trim |> strip_trailing_slashes in
         if String.equal normalized "" then searxng_default_url else normalized

@@ -71,7 +71,7 @@ let test_resolve_voice_aliases () =
   let elevenlabs = Option.get (Voice.resolve_adapter "elevenlabs") in
   check string "elevenlabs alias" "elevenlabs-direct" elevenlabs.canonical_name;
   let openai_compat = Option.get (Voice.resolve_adapter "openai_compat") in
-  check string "provider_d compat alias" "voice-provider_d-compat" openai_compat.canonical_name
+  check string "openai compat alias" "voice-openai-compat" openai_compat.canonical_name
 ;;
 
 let test_voice_auth_env_resolution () =
@@ -81,7 +81,7 @@ let test_voice_auth_env_resolution () =
     "elevenlabs auth env"
     (Some "ELEVENLABS_API_KEY")
     (Voice.auth_env_name elevenlabs);
-  let openai_compat = Option.get (Voice.resolve_adapter "voice-provider_d-compat") in
+  let openai_compat = Option.get (Voice.resolve_adapter "voice-openai-compat") in
   check
     (option string)
     "endpoint override auth env"
@@ -228,9 +228,9 @@ let test_stt_request_elevenlabs_direct () =
 
 let test_stt_request_openai_compat () =
   let endpoint : Voice_config.endpoint =
-    { id = "test-provider_d-stt"
+    { id = "test-openai-stt"
     ; kind = Voice_config.Openai_compat
-    ; base_url = Some "https://api.provider_d.com/v1"
+    ; base_url = Some "https://api.openai.com/v1"
     ; mcp_url = None
     ; health_url = None
     ; api_key_env = Some "OPENAI_API_KEY"
@@ -247,7 +247,7 @@ let test_stt_request_openai_compat () =
       ~model:"whisper-1"
   with
   | Ok req ->
-    check string "url" "https://api.provider_d.com/v1/audio/transcriptions" req.url;
+    check string "url" "https://api.openai.com/v1/audio/transcriptions" req.url;
     check
       bool
       "has Authorization header"
@@ -359,7 +359,7 @@ let test_keeper_voice_speak_failure_writes_no_memory_row () =
     let row =
       rows
       |> List.find_opt (fun row ->
-        String.equal row.Masc.Keeper_memory_bank.source "voice_output"
+        row.Masc.Keeper_memory_bank.source = Masc.Keeper_memory_bank.Voice_output
         && String.equal row.text message)
     in
     check bool "no voice_output row for failed speak" true (Option.is_none row))
@@ -390,7 +390,7 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
   let row =
     rows
     |> List.find_opt (fun row ->
-      String.equal row.Masc.Keeper_memory_bank.source "voice_output"
+      row.Masc.Keeper_memory_bank.source = Masc.Keeper_memory_bank.Voice_output
       && String.equal row.kind "progress"
       && String.equal row.text message)
   in
@@ -399,6 +399,39 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
     check string "fallback memory execution" "text_fallback"
       Yojson.Safe.Util.(member "execution" row.json |> to_string)
   | None -> fail "expected fallback voice_output progress memory row"
+;;
+
+(* Regression for the 2026-06-14 sangsu voice self-echo loop: the raw
+   voice_output row must stay durable in the memory bank, but it must not
+   appear in the auto-injected recent-note summary that drives the next
+   turn, or the model will answer its own spoken text repeatedly. *)
+let test_voice_output_row_is_excluded_from_memory_recent_notes () =
+  let config = test_config () in
+  let meta = make_keeper_meta "voice-recent-note-filter-keeper" in
+  let message = "this should not echo back as a recent note" in
+  let raw =
+    Masc.Keeper_tool_voice_runtime.handle_voice_tool
+      ~config
+      ~meta
+      ~name:"keeper_voice_speak"
+      ~args:(`Assoc [ "message", `String message ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  check bool "fallback memory recorded" true
+    Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
+  let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let lines = read_lines memory_path in
+  let summary =
+    Masc.Keeper_memory_bank.summarize_memory_bank_lines lines ~recent_limit:4
+  in
+  let has_voice_text =
+    List.exists
+      (fun (row : Masc.Keeper_memory_bank.keeper_memory_line) ->
+         String.equal row.text message)
+      summary.recent_notes
+  in
+  check bool "voice_output source not in recent_notes" false has_voice_text
 ;;
 
 let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
@@ -588,7 +621,7 @@ let () =
             "stt request elevenlabs direct"
             `Quick
             test_stt_request_elevenlabs_direct
-        ; test_case "stt request provider_d compat" `Quick test_stt_request_openai_compat
+        ; test_case "stt request openai compat" `Quick test_stt_request_openai_compat
         ; test_case "stt request mcp rejected" `Quick test_stt_request_mcp_rejected
         ] )
     ; ( "tts"
@@ -618,6 +651,10 @@ let () =
             "keeper_voice_speak fallback records memory"
             `Quick
             test_keeper_voice_speak_text_fallback_records_memory_bank_row
+        ; test_case
+            "voice_output row is excluded from memory recent notes"
+            `Quick
+            test_voice_output_row_is_excluded_from_memory_recent_notes
         ; test_case
             "session_start does not store session_name as voice"
             `Quick

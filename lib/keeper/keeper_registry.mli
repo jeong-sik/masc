@@ -287,7 +287,12 @@ module For_testing : sig
 end
 
 (** Set fiber_wakeup for a specific keeper. *)
-val wakeup : base_path:string -> string -> unit
+val wakeup : ?bypass_tombstone:bool -> base_path:string -> string -> unit
+(** [wakeup ~bypass_tombstone ~base_path name] signals the keeper's fiber. RFC-0246
+    P2: when [bypass_tombstone] is [false] (the default is [true], preserving
+    historical behaviour for operator/restart/resume callers), a keeper latched
+    in a no-progress loop is NOT woken — the no-progress self-wake loop cannot
+    restart. The no-progress pause-fallback path passes [~bypass_tombstone:false]. *)
 
 (** Set fiber_wakeup for all running keepers. *)
 val wakeup_all : ?base_path:string -> unit -> unit
@@ -305,16 +310,13 @@ val restore_supervisor_state :
   restart_count:int -> last_restart_ts:float ->
   crash_log:(float * string) list -> unit
 
-(** Last known agent count for roster-change detection. Returns 0 if not found. *)
-val get_last_agent_count : base_path:string -> string -> int
-
-(** Update last agent count for a keeper. No-op if not found. *)
-val set_last_agent_count : base_path:string -> string -> int -> unit
-
-(** Check if a board-reactive wakeup is allowed (debounce).
-    Records timestamp if allowed. Returns true for unregistered keepers. *)
+(** Check if a board-reactive wakeup is allowed (debounce). [dedup_key] is the
+    key under which the wake is deduped — RFC-0239 R4 passes a content
+    fingerprint rather than the raw post_id, so identical re-posts with fresh
+    post_ids collapse. Records timestamp if allowed. Returns true for
+    unregistered keepers. *)
 val board_wakeup_allowed :
-  base_path:string -> string -> post_id:string -> debounce_sec:float -> bool
+  base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
 
 (** Clear all board wakeup timestamps for a keeper. No-op if not found. *)
 val clear_board_wakeups : base_path:string -> string -> unit

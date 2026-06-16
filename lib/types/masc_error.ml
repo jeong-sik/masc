@@ -227,6 +227,36 @@ let code = function
   | RateLimitExceeded _ -> 429
   | CacheError _ -> 500
 
+(* [dashboard_auth_error_code] is the SSOT mapping from a typed
+   [masc_error] to the stable dashboard auth-error-code string that the
+   Bonsai dashboard's [DashboardShellAuthSummary.auth_error_code] /
+   keeper stream 401 retry gate consume (TS enum in
+   dashboard/src/types/dashboard-execution.ts). Introduced in #21040
+   for the shell summary; this top-level home lets both
+   [server_dashboard_http_core] (shell JSON) and [server_auth]
+   (401 error body) emit the same typed code without a second copy of
+   the classifier or a backward dependency.
+
+   The match is exhaustive on the outer [t] so a new auth-relevant
+   variant trips Warning 8 here instead of silently falling through.
+   The [Forbidden { agent = "browser"; action = "cross-origin HTTP
+   mutation" }] arm matches the literal action string produced in
+   [Server_auth.ensure_same_origin_browser_request]; that string pair
+   is a pre-existing coupling carried over verbatim from #21040, not a
+   new substring classifier. *)
+let dashboard_auth_error_code : t -> string option = function
+  | Auth (Auth_error.InvalidToken _) -> Some "invalid_token"
+  | Auth (Auth_error.TokenExpired _) -> Some "token_expired"
+  | Auth
+      (Auth_error.Forbidden
+         { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
+      Some "same_origin_blocked"
+  | Auth (Auth_error.Forbidden _) -> Some "insufficient_role"
+  | Auth (Auth_error.Unauthorized { reason; _ }) ->
+      Some (Auth_error.unauthorized_reason_to_string reason)
+  | Task _ | Agent _ | System _ | RateLimitExceeded _ | CacheError _ ->
+      Some "unknown"
+
 (* [is_retryable] mirrors [Error.is_retryable] in OAS so MASC-side
    callers don't have to fall back on an OAS-only predicate when
    reasoning about a [masc_error]. Conservative — when in doubt

@@ -27,20 +27,20 @@ let ctx_get_string ctx k =
 
 let test_basic_isolation () =
   (* Two keepers, each with their own context *)
-  let ctx_dreamer = Ctx.create () in
-  let ctx_coder = Ctx.create () in
+  let ctx_alice = Ctx.create () in
+  let ctx_bob = Ctx.create () in
   (* Each writes keeper-specific state *)
-  Ctx.set ctx_dreamer "keeper" (`String "dreamer");
-  Ctx.set ctx_dreamer "turn" (`Int 1);
-  Ctx.set ctx_dreamer "secret" (`String "dreamer_only");
-  Ctx.set ctx_coder "keeper" (`String "coder");
-  Ctx.set ctx_coder "turn" (`Int 5);
-  Ctx.set ctx_coder "work_item" (`String "PR-5677");
+  Ctx.set ctx_alice "keeper" (`String "alice");
+  Ctx.set ctx_alice "turn" (`Int 1);
+  Ctx.set ctx_alice "secret" (`String "alice_only");
+  Ctx.set ctx_bob "keeper" (`String "bob");
+  Ctx.set ctx_bob "turn" (`Int 5);
+  Ctx.set ctx_bob "work_item" (`String "PR-5677");
   (* Verify no cross-contamination *)
-  check string "dreamer keeper" "dreamer" (ctx_get_string ctx_dreamer "keeper");
-  check string "coder keeper" "coder" (ctx_get_string ctx_coder "keeper");
-  check bool "dreamer has no work_item" false (ctx_has_key ctx_dreamer "work_item");
-  check bool "coder has no secret" false (ctx_has_key ctx_coder "secret")
+  check string "alice keeper" "alice" (ctx_get_string ctx_alice "keeper");
+  check string "coder keeper" "bob" (ctx_get_string ctx_bob "keeper");
+  check bool "alice has no work_item" false (ctx_has_key ctx_alice "work_item");
+  check bool "coder has no secret" false (ctx_has_key ctx_bob "secret")
 
 (* ── Test: Checkpoint Roundtrip Isolation ─────────── *)
 

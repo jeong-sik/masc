@@ -1,5 +1,7 @@
 import { html } from 'htm/preact'
+import { memo } from 'preact/compat'
 import { useState, useRef, useEffect } from 'preact/hooks'
+import type { Keeper } from '../types'
 import { route } from '../router'
 import { keepers } from '../store'
 import { selectKeeper } from '../keeper-runtime'
@@ -26,12 +28,15 @@ import {
   useKeeperRuntimeTraceEvidence,
 } from './keeper-detail-hooks'
 import { evidenceFreshData } from './keeper-detail-evidence-state'
-import { KeeperLifecycleButtons } from './keeper-detail-lifecycle'
+import { KeeperLifecycleButtons, KeeperClearContextDialog } from './keeper-detail-lifecycle'
 import {
   KeeperDetailHeaderInfo,
   KeeperDetailMissingState,
 } from './keeper-detail-shell'
 import { KeeperDetailBody } from './keeper-detail-body'
+import { KeeperWorkspaceRoster } from './keeper-workspace/keeper-workspace-roster'
+import { KeeperWorkspaceChat } from './keeper-workspace/keeper-workspace-chat'
+import { KeeperWorkspaceRail } from './keeper-workspace/keeper-workspace-rail'
 import { ringFocusClasses } from './common/ring'
 
 const CLOSE_BUTTON_FOCUS_CLASS = ringFocusClasses({
@@ -55,8 +60,17 @@ export function KeeperDetailPage() {
       ? route.value.params.keeper?.trim()
       : ''
   if (!keeperName) return null
+  return html`<${KeeperDetailResolver} keeperName=${keeperName} />`
+}
 
-  // Resolve the active keeper. See [resolveKeeperForDetail] for semantics.
+// P0 render-perf: isolate the `keepers` signal subscription here. A heartbeat,
+// turn, or phase update on *any* keeper mutates the global `keepers` array and
+// would otherwise re-render the whole detail subtree (chat + rail + body,
+// ~1,400 LOC). keeper identity is reference-stable via `reconcileKeepers`, so
+// memoizing KeeperDetailContent below skips the heavy subtree whenever the
+// resolved keeper object did not change — which is every heartbeat that is
+// not this keeper's phase transition.
+function KeeperDetailResolver({ keeperName }: { keeperName: string }) {
   const keeper = resolveKeeperForDetail(
     keeperName,
     findKeeper(keeperName),
@@ -64,9 +78,25 @@ export function KeeperDetailPage() {
     keepers.value.length,
   )
   if (!keeper) {
-    return html`<${KeeperDetailMissingState} keeperName=${keeperName} onClose=${closeKeeperDetail} />`
+    // Keep the roster mounted so the operator can switch to a live keeper
+    // in place (a stale-watchdog kill or dead deep link must not strand the
+    // 3-pane shell). `data-detail="open"` drops the empty rail column and
+    // gives the missing-state card the full conversation span.
+    return html`
+      <div class="kw-grid" data-detail="open">
+        <${KeeperWorkspaceRoster} activeName=${keeperName} />
+        <div class="kw-detail">
+          <div class="kw-detail-scroll">
+            <${KeeperDetailMissingState} keeperName=${keeperName} onClose=${closeKeeperDetail} />
+          </div>
+        </div>
+      </div>
+    `
   }
+  return html`<${KeeperDetailContent} keeper=${keeper} />`
+}
 
+const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keeper: Keeper }) {
   const titleId = `keeper-detail-title-${keeper.name}`
   const effectiveStatus = keeperDisplayStatus(keeper)
   const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
@@ -77,6 +107,9 @@ export function KeeperDetailPage() {
   const [clearPending, setClearPending] = useState(false)
   const [purgePending, setPurgePending] = useState(false)
   const [checkpointRefreshToken, setCheckpointRefreshToken] = useState(0)
+  // 3-pane workspace is the default conversation view; "상세 보기" flips to
+  // the full tabbed KeeperDetailBody (FSM / 진단 / 정체성 / 설정 / 디버그).
+  const [detailOpen, setDetailOpen] = useState(false)
   // Latest transition's wall_clock_at_decision, in unix seconds.  Used by
   // the header KeeperPhaseAndStage to render "현재 phase에 머문 시간" without
   // requiring a new backend field — derivation is plan-approved trade-off.
@@ -97,6 +130,7 @@ export function KeeperDetailPage() {
     prevKeeperRef.current = keeper.name
     setDiagOpen(shouldOpenDiagnostics)
     setPhaseEnteredAtSec(null)
+    setDetailOpen(false)
   }
   useEffect(() => {
     selectedKeeper.value = keeper
@@ -191,7 +225,9 @@ export function KeeperDetailPage() {
     })()
   }
 
-  return html`
+  // Full tabbed detail (FSM / 진단 / 정체성 / 설정 / 디버그) — the original
+  // detail-page layout, preserved verbatim and surfaced behind "상세 보기".
+  const detailContent = html`
     <div class="mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8" data-route-focused-keeper=${keeper.name}>
       <div class="sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl">
         <div class="flex flex-col items-stretch justify-between gap-3 px-4 py-2.5 sm:flex-row sm:items-center sm:px-5">
@@ -199,7 +235,7 @@ export function KeeperDetailPage() {
             keeper=${keeper}
             titleId=${titleId}
             phaseEnteredAtSec=${phaseEnteredAtSec}
-            onClose=${closeKeeperDetail}
+            onClose=${() => setDetailOpen(false)}
           />
           <div class="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
             <button
@@ -250,4 +286,51 @@ export function KeeperDetailPage() {
       />
     </div>
   `
-}
+
+  return html`
+    <div class="kw-grid" data-detail=${detailOpen ? 'open' : 'closed'} data-route-focused-keeper=${keeper.name}>
+      <${KeeperWorkspaceRoster} activeName=${keeper.name} />
+      ${detailOpen
+        ? html`
+            <div class="kw-detail">
+              <div class="kw-detail-head">
+                <button type="button" class="kw-act" onClick=${() => setDetailOpen(false)}>← 대화로</button>
+                <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">${keeper.name} · 상세</strong>
+                <span class="flex-1"></span>
+                <button
+                  type="button"
+                  class=${`kw-act ${CLOSE_BUTTON_FOCUS_CLASS}`}
+                  onClick=${() => closeKeeperDetail()}
+                >← Keepers</button>
+              </div>
+              <div class="kw-detail-scroll">${detailContent}</div>
+            </div>
+          `
+        : html`
+            <${KeeperWorkspaceChat}
+              keeper=${keeper}
+              detailOpen=${false}
+              onToggleDetail=${() => setDetailOpen(true)}
+              onClear=${() => setClearDialogOpen(true)}
+            />
+            <${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => setDetailOpen(true)} />
+          `}
+    </div>
+    ${!detailOpen
+      ? html`<${KeeperClearContextDialog}
+          keeperName=${keeper.name}
+          open=${clearDialogOpen}
+          pending=${clearPending}
+          reason=${clearReason}
+          preserveSystemPrompt=${preserveSystemPrompt}
+          onClose=${() => {
+            if (clearPending) return
+            setClearDialogOpen(false)
+          }}
+          onReasonInput=${setClearReason}
+          onPreserveToggle=${setPreserveSystemPrompt}
+          onSubmit=${submitClearContext}
+        />`
+      : null}
+  `
+})

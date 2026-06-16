@@ -94,7 +94,7 @@ end = struct
 
      Issue #8625: length cap was 32 — also raised to 64 to match
      [Validation.Agent_id.validate]. Generated worker IDs like
-     [agent_code-task-claimer-20260419t102609z] (36 chars) bound fine but
+     [codex-task-claimer-20260419t102609z] (36 chars) bound fine but
      were rejected by board posts. (Supersedes PR #8631.) *)
   let max_agent_id_len = 64
   let valid_pattern =
@@ -158,6 +158,7 @@ type post = {
   votes_up: int;
   votes_down: int;
   reply_count: int;
+  pinned: bool;              (* Operator-curated pin (owner-gated): floats the post to the top of its category *)
   hearth: string option;     (* Topic category within the Board *)
   thread_id: string option;  (* Linked Conversation thread *)
 }

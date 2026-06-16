@@ -49,12 +49,6 @@ type deterministic_reason =
           separate counter in [Keeper_tools_oas]. It is considered
           deterministic only when the payload explicitly carries
           [error_class="deterministic"] and [recoverable=false]. *)
-  | Git_precondition_failed
-      (** git process precondition failed. Typed shell producers may
-          emit this for git exit 128 from structured command
-          classification plus process status; the deterministic
-          classifier intentionally does not re-parse stderr/output to
-          split missing refs from command usage. *)
   | Path_not_found
       (** A typed Execute path argument does not exist on the local
           filesystem. Emitted by pre-dispatch validation for [Safe]

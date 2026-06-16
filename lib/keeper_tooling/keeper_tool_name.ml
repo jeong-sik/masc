@@ -36,7 +36,6 @@ type t =
   | Memory_search
   | Memory_write
   | Search_files
-  | Stay_silent
   | Surface_read
   | Surface_post
   | Person_note_set
@@ -56,6 +55,57 @@ type t =
   | Voice_session_start
   | Voice_sessions
   | Voice_speak
+
+let all : t list =
+  [ Execute
+  ; Board_comment
+  ; Board_comment_vote
+  ; Board_curation_read
+  ; Board_curation_submit
+  ; Board_post_get
+  ; Board_list
+  ; Board_post
+  ; Board_search
+  ; Board_stats
+  ; Board_sub_board_create
+  ; Board_sub_board_delete
+  ; Board_sub_board_get
+  ; Board_sub_board_list
+  ; Board_sub_board_update
+  ; Board_vote
+  ; Broadcast
+  ; Context_status
+  ; Fs_edit
+  ; Fs_write
+  ; Fs_read
+  ; Ide_annotate
+  ; Handoff
+  ; Library_read
+  ; Library_search
+  ; Memory_search
+  ; Memory_write
+  ; Search_files
+  ; Surface_read
+  ; Surface_post
+  ; Person_note_set
+  ; Task_claim
+  ; Task_create
+  ; Task_done
+  ; Task_force_done
+  ; Task_force_release
+  ; Tasks_audit
+  ; Tasks_list
+  ; Time_now
+  ; Tool_search
+  ; Tools_list
+  ; Voice_agent
+  ; Voice_listen
+  ; Voice_session_end
+  ; Voice_session_start
+  ; Voice_sessions
+  ; Voice_speak
+  ]
+;;
 
 let to_string = function
   | Execute -> "tool_execute"
@@ -86,7 +136,6 @@ let to_string = function
   | Memory_search -> "keeper_memory_search"
   | Memory_write -> "keeper_memory_write"
   | Search_files -> "tool_search_files"
-  | Stay_silent -> "keeper_stay_silent"
   | Surface_read -> "keeper_surface_read"
   | Surface_post -> "keeper_surface_post"
   | Person_note_set -> "keeper_person_note_set"
@@ -137,7 +186,6 @@ let of_string = function
   | "keeper_memory_search" -> Some Memory_search
   | "keeper_memory_write" -> Some Memory_write
   | "tool_search_files" -> Some Search_files
-  | "keeper_stay_silent" -> Some Stay_silent
   | "keeper_surface_read" -> Some Surface_read
   | "keeper_surface_post" -> Some Surface_post
   | "keeper_person_note_set" -> Some Person_note_set
@@ -205,7 +253,6 @@ let is_keeper_board_tool = function
   | Memory_search
   | Memory_write
   | Search_files
-  | Stay_silent
   | Surface_read
   | Surface_post
   | Person_note_set

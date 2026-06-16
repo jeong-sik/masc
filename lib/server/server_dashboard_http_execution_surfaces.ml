@@ -31,10 +31,10 @@ let warm_shell_cache (state : Mcp_server.server_state) =
        let t0 = Time_compat.now () in
        let cache_shell_payload ~light =
          let cache_key =
-           dashboard_shell_cache_key ~light state.Mcp_server.workspace_config
+           dashboard_shell_cache_key ~light (Mcp_server.workspace_config state)
          in
          let compute () =
-           dashboard_shell_payload_json ~light state.Mcp_server.workspace_config
+           dashboard_shell_payload_json ~light (Mcp_server.workspace_config state)
          in
          match state.Mcp_server.clock with
          | Some clock ->
@@ -455,10 +455,17 @@ let patched_keeper_status row ~keepalive_running =
   if not keepalive_running
   then `String "offline"
   else (
-    match keeper_agent_status_opt row with
-    | Some (("busy" | "active" | "listening" | "idle") as status) -> `String status
-    | Some ("offline" | "inactive") -> `String "offline"
-    | _ -> `String "idle")
+    (* RFC-0089: classify the row's display status via the typed surface_status
+       SSOT. busy/active/listening/idle pass through; inactive/offline collapse
+       to "offline"; anything outside the domain defaults to "idle". *)
+    match
+      Option.bind (keeper_agent_status_opt row)
+        Keeper_status_runtime.surface_status_of_string_opt
+    with
+    | Some ((Surface_busy | Surface_active | Surface_listening | Surface_idle) as s) ->
+      `String (Keeper_status_runtime.surface_status_to_string s)
+    | Some (Surface_offline | Surface_inactive) -> `String "offline"
+    | None -> `String "idle")
 ;;
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
@@ -592,7 +599,7 @@ let broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
     available, each refresh runs in a pool domain with a domain-local Caqti
     pool. Falls back to in-domain compute. *)
 let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
-  let workspace_config = state.Mcp_server.workspace_config in
+  let workspace_config = (Mcp_server.workspace_config state) in
   let proc_mgr = state.Mcp_server.proc_mgr in
   (* Default keeps timeout < interval (60s) so Proactive_refresh's clamp
      at start does not fire every boot. Env var override can still push
@@ -668,7 +675,7 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   in
   let compute () =
     Server_dashboard_http_cache.mark_cached_surface_attempt transport_health_cache;
-    try Transport_metrics.transport_health_json ~config:state.Mcp_server.workspace_config with
+    try Transport_metrics.transport_health_json ~config:(Mcp_server.workspace_config state) with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
@@ -691,12 +698,12 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
         ~event_type:"transport_health_snapshot"
         (Server_dashboard_http_cache.cached_surface_json transport_health_cache
          |> with_transport_health_metadata
-              ~config:state.Mcp_server.workspace_config
+              ~config:(Mcp_server.workspace_config state)
               ~timeout_s))
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
-  let config = state.Mcp_server.workspace_config in
+  let config = (Mcp_server.workspace_config state) in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
   let fixture = query_param request "fixture" in
@@ -792,7 +799,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ?mono_clock:state.Mcp_server.mono_clock
       ~sw
       ~clock
-      ~config:state.Mcp_server.workspace_config
+      ~config:(Mcp_server.workspace_config state)
       (fun ~config ~sw:_ ->
          Dashboard_http_keeper.execution_trust_dashboard_json config
          |> with_projection_diagnostics ~surface:"execution_trust" ~started_at ~extra:[])
@@ -831,6 +838,6 @@ let dashboard_transport_health_http_json ~state =
     json
     (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())
   |> with_transport_health_metadata
-       ~config:state.Mcp_server.workspace_config
+       ~config:(Mcp_server.workspace_config state)
        ~timeout_s
 ;;

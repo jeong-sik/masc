@@ -211,7 +211,12 @@ let keeper_metrics_24h_json
           b.sample_points <- b.sample_points + 1;
           b.context_ratio_sum <- b.context_ratio_sum +. context_ratio;
           let channel = Safe_ops.json_string ~default:"turn" "channel" j in
-          if channel = "scheduled_autonomous" || channel = "proactive" then begin
+          let is_scheduled_autonomous =
+            match Keeper_world_observation.channel_of_string channel with
+            | Some c -> Keeper_world_observation.is_autonomous c
+            | None -> false
+          in
+          if is_scheduled_autonomous then begin
             incr proactive_points;
             b.proactive_points <- b.proactive_points + 1;
             let proactive_obj = Option.value ~default:`Null (Json_util.assoc_member_opt "proactive" j) in

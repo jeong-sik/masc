@@ -82,7 +82,7 @@ export function BoardKarmaPanel() {
       </div>
 
       <form
-        class="flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 sm:flex-row sm:items-end"
+        class="v2-workspace-panel flex flex-col gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 sm:flex-row sm:items-end"
         data-testid="karma-filter-form"
         onSubmit=${submitFilter}
       >
@@ -139,7 +139,7 @@ export function BoardKarmaPanel() {
                   : html`
                     <div class="grid gap-2">
                       ${ledger.totals.map((row, index) => html`
-                        <div key=${row.agent} class="flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-2">
+                        <div key=${row.agent} class="v2-workspace-row flex items-center justify-between gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-2">
                           <div class="min-w-0">
                             <div class="truncate text-sm font-medium text-[var(--color-fg-primary)]">${row.agent}</div>
                             <div class="font-mono text-2xs text-[var(--color-fg-muted)]">#${index + 1}</div>
@@ -164,7 +164,7 @@ export function BoardKarmaPanel() {
                   : html`
                     <div class="grid gap-2">
                       ${ledger.events.map((event, index) => html`
-                        <div key=${`${event.ts}:${event.recipient}:${event.voter}:${event.target_id}:${index}`} class="grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
+                        <div key=${`${event.ts}:${event.recipient}:${event.voter}:${event.target_id}:${index}`} class="v2-workspace-row grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
                           <div class="flex flex-wrap items-center gap-2 text-xs">
                             <span class="font-medium text-[var(--color-fg-primary)]">${event.recipient}</span>
                             <span class="font-mono tabular-nums text-[var(--ok-bright)]">${signedDelta(event.delta)}</span>

@@ -95,6 +95,7 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('Feature cleanup')
     expect(container.textContent).toContain('RuntimeMonitor')
     expect(container.textContent).toContain('VerificationSpecsPanel')
+    expect(container.querySelector('section[aria-label="Hidden diagnostics"].v2-monitoring-panel')).not.toBeNull()
   })
 
   it('default view uses progressive disclosure: Signal open, Diagnostic/Raw in collapsed <details>', async () => {
@@ -208,5 +209,15 @@ describe('RuntimePanel', () => {
 
     const filterChips = container.querySelector('[data-testid="filter-chips"]')
     expect(filterChips?.getAttribute('data-value')).toBe('providers')
+  })
+
+  it('wraps the panel in the v2 monitoring surface class', async () => {
+    route.value.params = {}
+    const { RuntimePanel } = await loadRuntimePanel()
+    render(html`<${RuntimePanel} />`, container)
+    await flushUi()
+
+    const surface = container.querySelector('.v2-monitoring-surface')
+    expect(surface).not.toBeNull()
   })
 })

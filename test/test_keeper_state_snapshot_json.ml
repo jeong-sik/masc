@@ -193,7 +193,7 @@ let test_finalizer_uses_structured_state_source () =
   Alcotest.(check string)
     "source"
     "model_structured_state"
-    state_snapshot_source;
+    (KMP.state_snapshot_source_to_string state_snapshot_source);
   Alcotest.(check (option string))
     "progress"
     (Some "Structured progress")
@@ -247,7 +247,7 @@ let test_finalizer_prefers_reported_state_snapshot () =
   Alcotest.(check string)
     "source"
     "model_structured_state_tool"
-    state_snapshot_source;
+    (KMP.state_snapshot_source_to_string state_snapshot_source);
   Alcotest.(check (option string))
     "progress"
     (Some "Reported through keeper_report_state")

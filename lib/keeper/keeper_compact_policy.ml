@@ -189,6 +189,11 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
 
+let checkpoint_compaction_strategies () =
+  Context_compact_oas.
+    [ PruneToolOutputs; MergeContiguous; SummarizeOld; DropLowImportance ]
+;;
+
 let compact_if_needed_typed
       ~(meta : keeper_meta)
       ~(now_ts : float)
@@ -220,9 +225,7 @@ let compact_if_needed_typed
     ctx, None, decision
   | Applied trigger ->
     (* PreCompact observability: log strategy and context state (#3165) *)
-    let strategies =
-      Context_compact_oas.[ PruneToolOutputs; MergeContiguous; DropLowImportance ]
-    in
+    let strategies = checkpoint_compaction_strategies () in
     (* Use OAS stub_tool_results instead of MASC's FoldCompleted —
          OAS owns context reduction, MASC is a consumer. *)
     (* V12: per-keeper config replaces the prior hardcoded
@@ -303,6 +306,14 @@ let compact_if_needed_typed
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Log.Harness.warn "[pre_compact] sse broadcast failed: %s" (Printexc.to_string exn)));
+    (match pre_compact_event with
+     | None -> ()
+     | Some _ ->
+       Keeper_event_publisher.publish_keeper_snapshot
+         ~keeper_name:meta.name
+         ~generation:meta.runtime.generation
+         ~context_ratio:ratio
+         ~message_count:msg_count);
     let messages, pair_repair_stats =
       let msgs_after_compact =
         (* Issue #8597 #1: dropped [~system_prompt] arg — compact

@@ -421,10 +421,17 @@ let handle_keeper_task_tool
          force-released. Example: reason='assignee offline >10 min, no heartbeat'."
     else (
       let agent = keeper_agent_sender ~meta in
-      let result = Workspace.force_release_task_r config ~agent_name:agent ~task_id () in
+      let outcome_result =
+        Workspace.force_release_task_outcome_r config ~agent_name:agent ~task_id ()
+      in
+      let result =
+        Result.map
+          (fun (o : Workspace.transition_outcome) -> o.message)
+          outcome_result
+      in
       let is_noop =
-        match result with
-        | Ok msg -> String_util.contains_substring_ci msg "no-op"
+        match outcome_result with
+        | Ok outcome -> outcome.noop
         | Error _ -> false
       in
       let () =
@@ -764,7 +771,8 @@ let handle_keeper_task_tool
     in
     let claim_scope, claimed_task_fields =
       match result with
-      | Workspace.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
+      | Workspace.Claim_next_claimed
+          { task_id; title; priority; released_task_id; scope_widened; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
           ( active_goal_scope_json ~meta ?matched_goal_id
               ~effective_mode:claim_goal_scope.mode
@@ -774,7 +782,7 @@ let handle_keeper_task_tool
               ( "claim_observation",
                 Task.Tool.build_claim_observation_payload
                   ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
-                  ~task_id );
+                  ~task_id ~scope_widened );
               ( "claimed_task",
                 `Assoc
                   [

@@ -31,7 +31,7 @@ let handle_read_resource_eio state id params =
         make_error_typed ~id Mcp_error_code.Invalid_params "Missing uri"
       else begin
         let resource_id, uri = Mcp_server.parse_masc_resource_uri uri_str in
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let registry = state.Mcp_server.session_registry in
 
         let read_messages_json ~since_seq ~limit =
@@ -126,8 +126,23 @@ let handle_read_resource_eio state id params =
           | "who.json" ->
               let statuses = Session.get_agent_statuses registry in
               ("application/json", Some (Yojson.Safe.pretty_to_string (`List statuses)))
-          (* `agents` / `agents.json` resource removed (2026-06-09): backed by
-             the dead .masc/agents/ registry. Live agent status = `who`. *)
+          | "agents" ->
+              let statuses = Session.get_agent_statuses registry in
+              let body =
+                if statuses = [] then "No active agents."
+                else Session.status_string registry
+              in
+              ("text/markdown", Some body)
+          | "agents.json" ->
+              let statuses = Session.get_agent_statuses registry in
+              let json =
+                `Assoc
+                  [
+                    ("replacement", `String "masc://who.json");
+                    ("agents", `List statuses);
+                  ]
+              in
+              ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "messages" | "messages/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in

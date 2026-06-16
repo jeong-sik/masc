@@ -8,6 +8,8 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { fetchKeeperTurnRecords } from '../api/dashboard'
 import type {
+  MemoryOsEpisodeSummary,
+  MemoryOsTurnRecordSnapshot,
   TurnBlock,
   TurnBlockDiff,
   TurnRecordRow,
@@ -41,6 +43,149 @@ function BlockRow({ block }: { block: TurnBlock }) {
       <span class="text-[var(--color-fg-disabled)]" title=${block.digest}>
         ${block.digest.slice(0, 12)}
       </span>
+    </div>
+  `
+}
+
+function latestMemoryOsBlock(rows: TurnRecordRow[]): TurnBlock | null {
+  for (const row of [...rows].reverse()) {
+    const block = row.record.blocks.find(item => item.block === 'memory_os_recall')
+    if (block) return block
+  }
+  return null
+}
+
+function compactIso(value: string | null): string {
+  if (!value) return 'none'
+  return value.replace('T', ' ').replace(/Z$/, 'Z')
+}
+
+function episodeTtlLabel(episode: MemoryOsEpisodeSummary): string {
+  if (!episode.valid_until_iso) return 'no TTL'
+  return episode.current
+    ? `until ${compactIso(episode.valid_until_iso)}`
+    : `expired ${compactIso(episode.valid_until_iso)}`
+}
+
+function MemoryOsEpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
+  return html`
+    <div class="min-w-0 border-t border-[var(--color-border-muted)] py-2 first:border-t-0">
+      <div class="mb-1 flex min-w-0 flex-wrap items-center gap-2">
+        <span class="font-mono text-2xs text-[var(--color-fg-default)]">
+          ${episode.trace_id} g${episode.generation.toString().padStart(4, '0')}
+        </span>
+        <span class="text-3xs font-mono ${episode.current ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-warn)]'}">
+          ${episodeTtlLabel(episode)}
+        </span>
+        ${episode.terminal_marker
+          ? html`<span class="rounded-[var(--r-1)] bg-[var(--accent-12)] px-1.5 py-0.5 text-3xs font-mono text-[var(--color-accent-fg)]">
+              terminal=${episode.terminal_marker}
+            </span>`
+          : null}
+        <span class="text-3xs text-[var(--color-fg-disabled)]">${episode.claim_count} claims</span>
+      </div>
+      <div class="line-clamp-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+        ${episode.summary}
+      </div>
+    </div>
+  `
+}
+
+function MemoryOsRecallSourcePanel({
+  snapshot,
+  rows,
+}: {
+  snapshot: MemoryOsTurnRecordSnapshot
+  rows: TurnRecordRow[]
+}) {
+  const latestBlock = latestMemoryOsBlock(rows)
+  const episodes = [...snapshot.episodes.items].reverse().slice(0, 5)
+  const readErrorText = snapshot.read_errors.map(item => `${item.scope}: ${item.error}`).join(' · ')
+
+  return html`
+    <section
+      class="mb-3 border-y border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-3"
+      data-testid="memory-os-recall-source"
+    >
+      <div class="flex min-w-0 flex-wrap items-start gap-3">
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-semibold text-[var(--color-fg-primary)]">Memory OS recall</div>
+          <div class="mt-0.5 text-3xs text-[var(--color-fg-muted)]">
+            ${snapshot.recall_enabled ? 'enabled' : 'disabled'}
+            <span class="mx-1" aria-hidden="true">·</span>
+            ${latestBlock
+              ? html`latest block <span class="font-mono">${latestBlock.bytes}B</span> <span class="font-mono text-[var(--color-fg-disabled)]">${latestBlock.digest.slice(0, 12)}</span>`
+              : 'latest block 없음'}
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 text-3xs">
+          <span class="font-mono text-[var(--color-fg-muted)]">
+            ep ${snapshot.episodes.current}/${snapshot.episodes.shown}
+          </span>
+          <span class="font-mono text-[var(--color-fg-muted)]">
+            expired ${snapshot.episodes.expired}
+          </span>
+          <span class="font-mono text-[var(--color-fg-muted)]">
+            terminal ${snapshot.episodes.terminal_markers}
+          </span>
+          <span class="font-mono text-[var(--color-fg-muted)]">
+            facts ${snapshot.facts.current}/${snapshot.facts.shown}
+          </span>
+        </div>
+      </div>
+
+      ${readErrorText
+        ? html`<div class="mt-2 text-2xs text-[var(--color-status-err)]">${readErrorText}</div>`
+        : null}
+
+      <div class="mt-2 divide-y divide-[var(--color-border-muted)]">
+        ${episodes.length === 0
+          ? html`<div class="py-2 text-2xs text-[var(--color-fg-disabled)]">recent episodes 없음</div>`
+          : episodes.map(episode => html`<${MemoryOsEpisodeRow} key=${`${episode.trace_id}-${episode.generation}-${episode.created_at}`} episode=${episode} />`)}
+      </div>
+
+      <details class="mt-2 text-3xs text-[var(--color-fg-disabled)]">
+        <summary class="cursor-pointer">stores</summary>
+        <div class="mt-1 break-all font-mono">facts: ${snapshot.facts_store}</div>
+        <div class="mt-1 break-all font-mono">episodes: ${snapshot.episodes_store}</div>
+      </details>
+    </section>
+  `
+}
+
+export function KeeperMemoryOsRecallPanel({ keeperName }: { keeperName: string }) {
+  const resource = useManagedAsyncResource<TurnRecordsResponse | null>(null)
+
+  useEffect(() => {
+    void resource.load(async (signal) => {
+      return await fetchKeeperTurnRecords(keeperName, 12, { signal })
+    })
+    return () => {
+      resource.cancel()
+    }
+  }, [keeperName, resource])
+
+  const response = resource.state.value.data
+
+  if (resource.state.value.loading) {
+    return html`<${LoadingState}>Memory OS recall 불러오는 중...<//>`
+  }
+
+  if (resource.state.value.error) {
+    return html`<div class="text-xs text-[var(--color-status-err)] p-3" role="alert">${resource.state.value.error}</div>`
+  }
+
+  if (!response?.memory_os) {
+    return html`
+      <div class="p-3 text-xs text-[var(--color-fg-muted)]">
+        Memory OS recall source 없음
+      </div>
+    `
+  }
+
+  return html`
+    <div class="p-2">
+      <${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${response.entries} />
     </div>
   `
 }
@@ -174,10 +319,14 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
   }
 
   const rows = response?.entries ?? []
+  const memoryOsPanel = response?.memory_os
+    ? html`<${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${rows} />`
+    : null
 
   if (rows.length === 0) {
     return html`
       <div class="p-4 space-y-1">
+        ${memoryOsPanel}
         <div class="text-xs text-[var(--color-fg-muted)]">턴 레코드 없음 (서버 재시작 이후 keeper 턴부터 기록됩니다)</div>
         <${FreshnessLine} data=${response ?? { source: 'turn_record' }} />
       </div>
@@ -197,6 +346,7 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
             </span>`
           : null}
       </div>
+      ${memoryOsPanel}
       ${sorted.map(row => html`<${TurnRow} key=${`${row.record.trace_id}-${row.record.absolute_turn}`} row=${row} />`)}
     </div>
   `

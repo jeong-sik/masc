@@ -81,6 +81,104 @@ let result_to_response ~tool_name ~start_time = function
       workflow_err_plain ~tool_name ~start_time
         (Masc_domain.masc_error_to_string e)
 
+let dedupe_keep_order values =
+  let seen = Hashtbl.create (List.length values) in
+  List.filter
+    (fun value ->
+      if String.equal value "" || Hashtbl.mem seen value
+      then false
+      else (
+        Hashtbl.replace seen value ();
+        true))
+    values
+
+let find_first_some f values =
+  let rec loop = function
+    | [] -> None
+    | value :: rest -> (
+        match f value with
+        | Some _ as result -> result
+        | None -> loop rest)
+  in
+  loop values
+
+let parse_wrapped_agent_name ~prefix ~suffix raw =
+  let plen = String.length prefix in
+  let slen = String.length suffix in
+  let len = String.length raw in
+  if len > plen + slen
+     && String.equal (String.sub raw 0 plen) prefix
+     && String.equal (String.sub raw (len - slen) slen) suffix
+  then Some (String.sub raw plen (len - plen - slen))
+  else None
+
+let wrapped_agent_name_candidate raw =
+  [ parse_wrapped_agent_name ~prefix:"keeper-" ~suffix:"-agent" raw
+  ; parse_wrapped_agent_name ~prefix:"keeper_" ~suffix:"_agent" raw
+  ; parse_wrapped_agent_name ~prefix:"keeper-" ~suffix:"_agent" raw
+  ; parse_wrapped_agent_name ~prefix:"keeper_" ~suffix:"-agent" raw
+  ]
+  |> find_first_some (fun candidate -> candidate)
+
+let strip_keeper_prefix raw =
+  let prefix = "keeper-" in
+  let plen = String.length prefix in
+  let len = String.length raw in
+  if len > plen && String.equal (String.sub raw 0 plen) prefix
+  then Some (String.sub raw plen (len - plen))
+  else None
+
+let canonical_keeper_agent_name name = Printf.sprintf "keeper-%s-agent" name
+
+let agent_name_lookup_candidates raw =
+  let trimmed = String.trim raw in
+  let canonical =
+    match wrapped_agent_name_candidate trimmed with
+    | Some value -> Some value
+    | None -> strip_keeper_prefix trimmed
+  in
+  let agent_alias =
+    match canonical with
+    | Some value -> Some (canonical_keeper_agent_name value)
+    | None ->
+      if String.equal trimmed "" then None else Some (canonical_keeper_agent_name trimmed)
+  in
+  dedupe_keep_order ([ trimmed ] @ Option.to_list canonical @ Option.to_list agent_alias)
+
+let metrics_json_with_resolution ~requested ~resolved json =
+  match json with
+  | `Assoc fields when not (String.equal requested resolved) ->
+      `Assoc
+        (fields
+         @ [ "requested_agent_name", `String requested
+           ; "resolved_agent_name", `String resolved
+           ])
+  | _ -> json
+
+let resolve_metrics_for_agent ctx ~requested ~days =
+  requested
+  |> agent_name_lookup_candidates
+  |> find_first_some (fun candidate ->
+    match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:candidate ~days with
+    | Some metrics -> Some (candidate, metrics)
+    | None -> None)
+
+let resolve_existing_metric_agent_id ctx ~requested ~days =
+  match resolve_metrics_for_agent ctx ~requested ~days with
+  | Some (resolved, _) -> resolved
+  | None -> (
+      match agent_name_lookup_candidates requested with
+      | first :: _ -> first
+      | [] -> String.trim requested)
+
+let find_agent_by_identity agents raw =
+  raw
+  |> agent_name_lookup_candidates
+  |> find_first_some (fun candidate ->
+    List.find_opt
+      (fun (agent : Masc_domain.agent) -> String.equal agent.name candidate)
+      agents)
+
 (* Issue #8501: Variant SSOT for masc_agent_card.action.  Adding a
    new constructor forces compilation in [agent_card_action_to_string]
    AND extends [valid_agent_card_action_strings]; the schema in
@@ -128,10 +226,11 @@ let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx
       "agent_name is required"
   else
     let days = get_int args "days" 7 in
-    match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:target ~days with
-    | Some metrics ->
+    match resolve_metrics_for_agent ctx ~requested:target ~days with
+    | Some (resolved, metrics) ->
         json_ok ~tool_name ~start_time
-          (Metrics_store_eio.agent_metrics_to_yojson metrics)
+          (Metrics_store_eio.agent_metrics_to_yojson metrics
+           |> metrics_json_with_resolution ~requested:target ~resolved)
     | None ->
         workflow_err_envelope ~tool_name ~start_time ~code:Not_found
           (Printf.sprintf "no metrics found for agent: %s" target)
@@ -255,7 +354,7 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
   let days = get_int args "days" 7 in
   let agents =
     match agent_opt with
-    | Some a -> [a]
+    | Some a -> [ resolve_existing_metric_agent_id ctx ~requested:a ~days ]
     | None ->
       (* Merge agents from metrics store AND workspace state.
          Without this, agents active on the board but without task metrics
@@ -326,12 +425,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
   | Some action ->
       let agents = Workspace.get_agents_raw ctx.config in
       let target = get_string_opt args "agent_name" in
-      let target_agent =
-        Option.bind target (fun name ->
-          List.find_opt
-            (fun (agent : Masc_domain.agent) -> String.equal agent.name name)
-            agents)
-      in
+      let target_agent = Option.bind target (find_agent_by_identity agents) in
       let json =
         `Assoc [
           ("schema", `String "masc.agent_card.v1");

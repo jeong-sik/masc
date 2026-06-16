@@ -52,6 +52,20 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let rec mkdir_p path =
+  if Sys.file_exists path then ()
+  else begin
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    Unix.mkdir path 0o755
+  end
+
 let with_cached_surface_success
       (surface : Server_dashboard_http_cache.cached_surface)
       json
@@ -681,7 +695,7 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let json =
@@ -699,9 +713,9 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
       check bool "token_valid true" true (auth |> member "token_valid" |> to_bool);
       check string "requested actor surfaced" "dashboard"
         (auth |> member "requested_agent" |> to_string);
-      check string "token owner surfaced" "agent_code"
+      check string "token owner surfaced" "codex"
         (auth |> member "token_agent" |> to_string);
-      check string "effective actor canonicalized to token owner" "agent_code"
+      check string "effective actor canonicalized to token owner" "codex"
         (auth |> member "effective_agent" |> to_string);
       check bool "auth error cleared after canonicalization" true
         (match auth |> member "auth_error_code" with `Null -> true | _ -> false);
@@ -729,6 +743,36 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
   check bool "token_valid false" false (auth |> member "token_valid" |> to_bool);
   check string "missing token code surfaced" "missing_token"
     (auth |> member "auth_error_code" |> to_string)
+
+let test_dashboard_shell_auth_json_rejects_stale_token_actor_hint () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = true }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  let json =
+    Server_dashboard_http_core.dashboard_shell_http_json
+      ~request:
+        (request_with_headers "/api/v1/dashboard/shell"
+           [
+             ("authorization", "Bearer stale-dashboard-token");
+             ("x-masc-agent", "dashboard");
+           ])
+      config
+  in
+  let open Yojson.Safe.Util in
+  let auth = json |> member "auth" in
+  check bool "token_valid false" false (auth |> member "token_valid" |> to_bool);
+  check string "requested actor surfaced for diagnosis" "dashboard"
+    (auth |> member "requested_agent" |> to_string);
+  check bool "effective actor not recovered from request hint" true
+    (match auth |> member "effective_agent" with `Null -> true | _ -> false);
+  check bool "effective role unavailable" true
+    (match auth |> member "effective_role" with `Null -> true | _ -> false);
+  check string "invalid token code surfaced" "invalid_token"
+    (auth |> member "auth_error_code" |> to_string);
+  check bool "keeper message blocked" false
+    (auth |> member "can_keeper_msg" |> to_bool)
 
 let test_dashboard_shell_snapshot_selector_injects_auth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -768,7 +812,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let actor =
@@ -781,7 +825,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
              ])
       in
       check (option string) "execution actor canonicalized to token owner"
-        (Some "agent_code") actor
+        (Some "codex") actor
 
 let test_verifier_of_request_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -789,7 +833,7 @@ let test_verifier_of_request_canonicalizes_token_owner () =
     { Masc_domain.default_auth_config with enabled = true; require_token = true }
   in
   Auth.save_auth_config config.base_path cfg;
-  match Auth.create_token config.base_path ~agent_name:"agent_code" ~role:Masc_domain.Worker with
+  match Auth.create_token config.base_path ~agent_name:"codex" ~role:Masc_domain.Worker with
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let verifier =
@@ -802,7 +846,7 @@ let test_verifier_of_request_canonicalizes_token_owner () =
              ])
       in
       check string "verification verifier canonicalized to token owner"
-        "operator:agent_code" verifier
+        "operator:codex" verifier
 
 let test_dashboard_message_json_surfaces_temporal_decay_fields () =
   let message : Types.message =
@@ -945,6 +989,47 @@ let test_dashboard_shell_light_includes_runtime_health_ssot () =
      | `Assoc _ -> true
      | _ -> false)
 
+let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let config_root =
+    Filename.concat
+      (Filename.concat config.base_path Common.masc_dirname)
+      "config"
+  in
+  let keepers_dir = Filename.concat config_root "keepers" in
+  mkdir_p keepers_dir;
+  write_file
+    (Filename.concat keepers_dir "base.toml")
+    "[keeper]\nautoboot_enabled = false\n";
+  write_file
+    (Filename.concat keepers_dir "alpha.toml")
+    "[keeper]\nautoboot_enabled = true\npersona_name = \"alpha\"\n";
+  write_file
+    (Filename.concat keepers_dir "beta.toml")
+    "[keeper]\nautoboot_enabled = true\npersona_name = \"beta\"\n";
+  with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () -> Config_dir_resolver.reset ())
+    (fun () ->
+      let json =
+        Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check int)
+        "configured_keepers follows declarative runtime keeper TOML"
+        2
+        (json |> member "configured_keepers" |> to_int);
+      Alcotest.(check int)
+        "persisted_keepers exposes durable meta count separately"
+        0
+        (json |> member "persisted_keepers" |> to_int);
+      Alcotest.(check int)
+        "counts.persisted_keepers mirrors top-level persisted_keepers"
+        0
+        (json |> member "counts" |> member "persisted_keepers" |> to_int))
+
 let test_dashboard_shell_light_counts_agents_from_summary_fields () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -964,9 +1049,9 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
         ; "last_seen", `String "2026-05-20T00:00:00Z"
         ])
   in
-  write_agent ~name:"agent_code-active" ~agent_type:"agent_code" ~status:"active";
+  write_agent ~name:"codex-active" ~agent_type:"codex" ~status:"active";
   write_agent ~name:"keeper-active" ~agent_type:"keeper" ~status:"busy";
-  write_agent ~name:"agent_code-inactive" ~agent_type:"agent_code" ~status:"inactive";
+  write_agent ~name:"codex-inactive" ~agent_type:"codex" ~status:"inactive";
   let json =
     Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
   in
@@ -1115,6 +1200,22 @@ let test_telemetry_n_default_is_bounded () =
     "explicit positive n honoured"
     500 (resolve ~has_time_window:true ~n_param:(Some "500"))
 
+let test_git_remote_to_web_url () =
+  let check name input expected =
+    Alcotest.(check (option string)) name expected
+      (Server_routes_http_routes_dashboard.git_remote_to_web_url input)
+  in
+  check "scp-like git@ -> https" "git@github.com:jeong-sik/masc.git"
+    (Some "https://github.com/jeong-sik/masc");
+  check "https strips .git" "https://github.com/jeong-sik/masc.git"
+    (Some "https://github.com/jeong-sik/masc");
+  check "https without .git unchanged" "https://github.com/jeong-sik/masc"
+    (Some "https://github.com/jeong-sik/masc");
+  check "ssh:// drops scheme + userinfo" "ssh://git@github.com/o/r.git"
+    (Some "https://github.com/o/r");
+  check "empty -> None" "" None;
+  check "unrecognised shape -> None" "file:///local/path" None
+
 let () =
   run "dashboard_http_core"
     [
@@ -1160,6 +1261,8 @@ let () =
             test_dashboard_shell_auth_json_canonicalizes_token_owner;
           test_case "shell auth reports missing token" `Quick
             test_dashboard_shell_auth_json_reports_missing_token;
+          test_case "shell auth rejects stale token actor hint" `Quick
+            test_dashboard_shell_auth_json_rejects_stale_token_actor_hint;
           test_case "shell snapshot selector injects auth" `Quick
             test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick
@@ -1176,6 +1279,8 @@ let () =
             test_shell_snapshot_wire_light_reads_shell_light;
           test_case "light shell carries runtime health SSOT" `Quick
             test_dashboard_shell_light_includes_runtime_health_ssot;
+          test_case "shell separates configured and persisted keeper counts" `Quick
+            test_dashboard_shell_separates_configured_and_persisted_keeper_counts;
           test_case "light shell counts agents from summary fields" `Quick
             test_dashboard_shell_light_counts_agents_from_summary_fields;
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick
@@ -1188,5 +1293,7 @@ let () =
             test_project_snapshot_wire_returns_snapshot_when_populated;
           test_case "telemetry n default is bounded (freeze guard)" `Quick
             test_telemetry_n_default_is_bounded;
+          test_case "git remote -> web url normalisation" `Quick
+            test_git_remote_to_web_url;
         ] );
     ]

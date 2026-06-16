@@ -11,6 +11,18 @@ body {
 html {
   overflow-y: scroll;
   scrollbar-gutter: stable;
+  /* iOS Safari auto-inflates font sizes in landscape / narrow columns;
+     pinning to 100% keeps the responsive --font-size-* scale honest on
+     mobile so "state at a glance" isn't distorted by the browser. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Kill the 300ms double-tap zoom delay on touch targets so taps feel
+   instant. Pinch-zoom stays available (a11y) — only the double-tap
+   gesture is reassigned to "instant activate". */
+a, button, [role="tab"], [role="button"] {
+  touch-action: manipulation;
 }
 
 body {

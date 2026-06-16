@@ -57,7 +57,6 @@ export interface Task {
   assignee?: string
   assignee_kind?: string | null
   description?: string
-  worktree?: TaskWorktreeInfo | null
   created_at?: string
   updated_at?: string
   completed_at?: string
@@ -65,13 +64,6 @@ export interface Task {
   handoff_context?: TaskHandoffContext | null
   gate?: TaskGateSnapshot | null
   execution_links?: TaskExecutionLinks | null
-}
-
-export interface TaskWorktreeInfo {
-  branch: string
-  path: string
-  git_root: string
-  repo_name: string
 }
 
 interface TaskExecutionLinks {
@@ -169,6 +161,7 @@ export interface BoardPost {
   author: string
   author_identity?: BoardActorIdentity | null
   post_kind?: 'direct' | 'automation' | 'system'
+  pinned?: boolean
   classification_reason?: string | null
   title: string
   body: string
@@ -436,11 +429,11 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'supervisor_paused',
   'synthetic_stall',
   'self_imposed_idle',
-  // Emitted by `lib/keeper/keeper_unified_turn_stay_silent.ml:76` when
-  // a keeper produces consecutive silent turns above the configured
+  // Emitted by `lib/keeper/keeper_unified_turn_no_progress.ml` when
+  // a keeper produces consecutive no-progress turns above the configured
   // threshold. Serialized via
-  // `keeper_meta_contract.ml:147 blocker_class_to_string Stay_silent_loop`.
-  'stay_silent_loop',
+  // `keeper_meta_contract.ml` blocker_class_to_string No_progress_loop.
+  'no_progress_loop',
   'sdk_max_turns_exceeded',
   'sdk_token_budget_exceeded',
   'sdk_cost_budget_exceeded',
@@ -518,6 +511,8 @@ export interface KeeperTrustLatestEvent {
   summary: string
   severity: 'ok' | 'warn' | 'bad'
   next_human_action?: string | null
+  // Trace id for deep-linking the causal event to its distributed trace.
+  trace_id?: string | null
 }
 
 export interface KeeperTrustApprovalPendingFirst {
@@ -532,6 +527,8 @@ export interface KeeperTrustApprovalState {
   summary?: string | null
   pending_count?: number | null
   pending_first?: KeeperTrustApprovalPendingFirst | null
+  // ISO8601 timestamp of the last approval-audit event.
+  latest_event_at?: string | null
 }
 
 export interface KeeperTrustExecutionSummary {
@@ -736,6 +733,19 @@ export interface KeeperConversationAttachment {
   data: string
 }
 
+// RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
+// `audioUrl` is the absolute/relative URL the dashboard uses for playback;
+// `token` is the capability in `/api/v1/voice/audio/<token>` used as a
+// fallback when the backend did not emit a full URL.
+export interface KeeperConversationAudioClip {
+  token: string
+  audioUrl?: string | null
+  mime: string
+  durationSec?: number | null
+  messageText: string
+  deviceId?: string | null
+}
+
 export type KeeperConversationStreamState =
   | 'opening'
   | 'thinking'
@@ -774,6 +784,7 @@ export interface KeeperConversationEntry {
   details?: KeeperConversationDetails | null
   error?: string | null
   surface?: SurfaceRef | null
+  audio?: KeeperConversationAudioClip | null
 }
 
 export interface KeeperStatusDetail {

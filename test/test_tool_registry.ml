@@ -78,12 +78,12 @@ let () =
             Tool_registry.reset ();
             Tool_registry.record_call_if_known
               ~source:Agent_internal
-              ~tool_name:"keeper_stay_silent"
+              ~tool_name:"keeper_time_now"
               ~success:true
               ~duration_ms:1
               ();
             let stats = Tool_registry.get_stats () in
-            let s = List.assoc "keeper_stay_silent" stats in
+            let s = List.assoc "keeper_time_now" stats in
             check int "call_count" 1 (Atomic.get s.call_count);
             check int "agent_internal_count" 1 (Atomic.get s.agent_internal_count))
         ; test_case "tracks source attribution" `Quick (fun () ->

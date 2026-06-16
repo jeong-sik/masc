@@ -1,0 +1,122 @@
+(** No-progress loop recovery helpers for the unified keeper turn. *)
+
+(* RFC-0020: the no-progress recovery stimulus carries no data — the consumer
+   only branches on the kind. streak/threshold are recorded in the failure
+   reason / blocker detail by the caller, not in the stimulus payload. *)
+let recovery_stimulus ~now ~keeper_name =
+  { Keeper_event_queue.post_id = "no-progress-loop:" ^ keeper_name
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = now
+  ; payload = Keeper_event_queue.No_progress_recovery
+  }
+;;
+
+let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
+  let detail =
+    Printf.sprintf
+      "no_progress loop detected: streak=%d threshold=%d; manual pause applied"
+      streak
+      threshold
+  in
+  let failure_reason =
+    Keeper_registry.Provider_runtime_error
+      { code = "no_progress_loop"
+      ; detail
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = None
+      ; reason = None
+      }
+  in
+  Keeper_registry.set_failure_reason
+    ~base_path:config.base_path
+    meta.Keeper_meta_contract.name
+    (Some failure_reason);
+  let stimulus =
+    recovery_stimulus ~now:(Time_compat.now ()) ~keeper_name:meta.name
+  in
+  Keeper_registry_event_queue.enqueue
+    ~base_path:config.base_path
+    meta.name
+    stimulus;
+  (try
+     Keeper_reaction_ledger.record_event_queue_stimulus
+       ~base_path:config.base_path
+       ~keeper_name:meta.name
+       stimulus
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Keeper.warn
+       "%s: failed to persist no-progress recovery stimulus in reaction ledger: %s"
+       meta.name
+         (Printexc.to_string exn));
+  let blocked_meta =
+    Keeper_meta_contract.map_runtime
+    (fun rt ->
+       { rt with
+         last_blocker =
+           Some
+             (Keeper_meta_contract.blocker_info_of_class
+                ~detail
+                Keeper_meta_contract.No_progress_loop)
+       })
+    meta
+  in
+  match
+    Keeper_turn_runtime_budget.sync_keeper_paused_state_with_resume_policy
+      ~config
+      ~meta:blocked_meta
+      ~paused:true
+      ~resume_policy:Keeper_supervisor_pause_policy.Manual_resume_required
+  with
+  | Ok paused_meta ->
+    Log.Keeper.warn
+      "%s: no_progress loop escalated to blocker and manual pause \
+       (streak=%d threshold=%d)"
+      meta.name
+      streak
+      threshold;
+    paused_meta
+  | Error pause_err ->
+    (* RFC-0246 P2: this is the no-progress pause-fallback wake. If pause sync
+       failed we used to wake the keeper as a recovery stimulus — but at this
+       point the keeper is already latched in a no-progress loop, so re-waking
+       just reruns the same empty turn (pause-fail -> wake -> no-progress ->
+       pause-fail). Pass [~bypass_tombstone:false] so a latched keeper stays
+       blocked instead of self-waking forever; an operator can force-resume. *)
+    Keeper_registry.wakeup ~bypass_tombstone:false ~base_path:config.base_path meta.name;
+    Log.Keeper.error
+      "%s: no_progress loop pause sync failed: %s; recovery stimulus queued \
+       instead (streak=%d threshold=%d)"
+      meta.name
+      pause_err
+      streak
+      threshold;
+    blocked_meta
+;;
+
+let clear_if_recovered ~(config : Workspace.config) meta ~previous_streak ~was_latched =
+  if was_latched then begin
+    match Keeper_registry.get ~base_path:config.base_path meta.Keeper_meta_contract.name with
+    | Some { Keeper_registry.last_failure_reason =
+               Some (Keeper_registry.Provider_runtime_error { code; _ })
+           ; _
+           }
+      when String.equal code "no_progress_loop" ->
+      Keeper_registry.set_failure_reason
+        ~base_path:config.base_path
+        meta.name
+        None;
+      Log.Keeper.info
+        "%s: no_progress loop recovered after progress turn \
+         (previous_streak=%d)"
+        meta.name
+        previous_streak
+    | _ -> ()
+  end;
+  match meta.runtime.last_blocker with
+  | Some { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop; _ } ->
+    Keeper_meta_contract.map_runtime (fun rt -> { rt with last_blocker = None }) meta
+  | _ -> meta
+;;

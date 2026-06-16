@@ -184,6 +184,33 @@ let test_with_test_file_no_warning () =
          String.equal f.category "testing")
        result.findings)
 
+let finding_ids result =
+  List.map
+    (fun (f : Adversarial_eval.advisory_finding) -> f.finding_id)
+    result.Adversarial_eval.findings
+
+let test_finding_ids_are_per_evaluation_deterministic () =
+  let big_diff =
+    String.concat "\n" (List.init 600 (fun i -> Printf.sprintf "+line %d" i))
+  in
+  let ctx =
+    Adversarial_eval.create_context ~session_id:"test"
+      ~inputs:
+        [
+          Diff big_diff;
+          Changed_file
+            {
+              path = "lib/hack.ml";
+              content = "let x = Obj.magic 42\nlet y = ignore (dangerous_call ())";
+            };
+        ]
+  in
+  let expected = [ "adv-0001"; "adv-0002"; "adv-0003"; "adv-0004"; "adv-0005" ] in
+  Alcotest.(check (list string)) "first evaluation ids" expected
+    (finding_ids (Adversarial_eval.evaluate ctx));
+  Alcotest.(check (list string)) "second evaluation ids" expected
+    (finding_ids (Adversarial_eval.evaluate ctx))
+
 (* --- Advisory flag test --- *)
 
 let test_always_advisory () =
@@ -232,6 +259,8 @@ let () =
           Alcotest.test_case "unsafe patterns" `Quick test_unsafe_pattern_detection;
           Alcotest.test_case "missing tests" `Quick test_missing_test_warning;
           Alcotest.test_case "with test file" `Quick test_with_test_file_no_warning;
+          Alcotest.test_case "finding ids are deterministic" `Quick
+            test_finding_ids_are_per_evaluation_deterministic;
         ] );
       ( "advisory",
         [

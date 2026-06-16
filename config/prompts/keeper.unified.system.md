@@ -49,14 +49,14 @@ Passive discovery tools (`keeper_tool_search` when visible, `keeper_tools_list`,
 ## Sandbox path conventions
 
 Your shell starts at the sandbox root, which is **not** a git repository.
-- Repos live at `repos/REPO_NAME/`.
-- For assigned code/PR work, work inside an existing task worktree: `repos/REPO_NAME/.worktrees/TASK_NAME/`. Do not use the direct repo root checkout as your task workspace.
+- Repos live at `repos/REPO_NAME/` — each clone is your own individual workspace.
+- For assigned code/PR work, work directly in your clone `repos/REPO_NAME/` on a task branch. Create it from the fetched origin default branch (`git fetch origin`, then `git checkout -b {your-name}/TASK_ID origin/main`) before editing; do not edit on the root `main` checkout. A git worktree is optional and is not provisioned for you — use `git worktree add` only if you choose to keep more than one branch checked out at once.
 - For `git` or any repo/forge CLI that needs a working copy, set `cwd` to the specific repo/worktree path when using Execute.
-  - Example for task work: `Execute { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/REPO_NAME/.worktrees/TASK_NAME" }`.
+  - Example for task work: `Execute { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/REPO_NAME" }`.
   - Execute accepts typed `executable`/`argv` or explicit `pipeline: [{ executable, argv }, ...]`; do not prepend `cd repos/REPO_NAME && ...`; use `cwd` instead.
 - For code search, do not run Execute pipelines like `cd repos/REPO && grep -rn "term" lib/ | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, or one scoped typed Execute argv call. To find a function/type definition, search the exact symbol with `Grep`; do not ask `keeper_tool_search` for source symbols.
 - `Read` does not support `start_line`, `end_line`, `offset`, or line-count limits. Its `limit` field is an approximate maximum byte count. After `Grep` finds the relevant file/line, use one scoped typed `Execute` command for a line slice if you need exact surrounding lines.
-- Do not scan all clones from Execute. Replace `rg term repos/` with `Grep { pattern: "term", path: "repos/REPO_NAME/.worktrees/TASK_NAME/lib" }`, and replace `git log --all --grep=term | head` with a scoped `Execute { executable: "git", argv: ["log", "--oneline", "-5", "--grep=term"], cwd: "repos/REPO_NAME/.worktrees/TASK_NAME" }`.
+- Do not scan all clones from Execute. Replace `rg term repos/` with `Grep { pattern: "term", path: "repos/REPO_NAME/lib" }`, and replace `git log --all --grep=term | head` with a scoped `Execute { executable: "git", argv: ["log", "--oneline", "-5", "--grep=term"], cwd: "repos/REPO_NAME" }`.
 - Read-only Execute can run local main-branch recovery. For branch checks, use `git status --short --branch`, `git branch --show-current`, or `git worktree list`; use `git checkout main` or `git switch main` only to restore the repo checkout to main.
 - Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `Read`, `Grep`, or one typed `Execute` argv call and let the tool error explain missing paths.
 - Do not put glob patterns into Execute path arguments, such as `find repos/REPO/lib -name nickname*`. Use Grep so the structured tool owns the pattern.
@@ -70,7 +70,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 Tool responses include a `cwd` field that reflects where the command actually ran. The exact path you see depends on your sandbox backend:
 
 - **Docker keepers** (sandbox_profile=docker, or Local-meta inside an enabled docker playground): `cwd` is the in-container path, e.g. `/home/keeper/playground/KEEPER/repos/REPO`. This is where commands actually executed inside your container. Pass that path back as a `cwd` argument on the next turn — relative form (`repos/REPO`) also works because the tool resolves both.
-- **Local keepers** (sandbox_profile=local, no docker upgrade): `cwd` is a host abs path under the operator's filesystem, e.g. `/Users/.../.masc/playground/KEEPER/repos/REPO`. This is the only form the tool accepts here.
+- **Local keepers** (sandbox_profile=local, no docker upgrade): `cwd` is a host abs path under the operator's runtime storage. Reuse the exact `cwd` returned by the previous tool response when local mode requires an absolute cwd; do not invent one from memory.
 
 Older turns in your context may show host paths (`/Users/...`) for what is now a Docker-effective keeper — that history is stale. Ignore the absolute form and re-issue using the relative path (`repos/REPO`); the response from the next call will surface the correct in-container `cwd`.
 

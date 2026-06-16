@@ -14,7 +14,7 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 348 unique knobs across 9 modules.
+**Total**: 347 unique knobs across 9 modules.
 
 **Typed getter classification**: 21/206 tagged (`operator`: 21, `algorithm`: 0, `unclassified`: 185).
 
@@ -70,7 +70,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 151 | Governance judge interval, clamped to >= 15s. Default: 60. |
 | `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 170 | Default model id. |
 | `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 166 | Default provider name. |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 162 | Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 162 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
 | `MASC_EVENT_BUFFER_SIZE` | typed:int | unclassified | unclassified | 113 | A2A event buffer size per subscription. Caps the in-memory event list to prevent unbounded growth. |
 | `MASC_GOAL_DISPATCH_RUNTIME` | typed:string | unclassified | unclassified | 186 | Goal dispatch runtime. Default: "task". |
 | `MASC_GOAL_MODELS` | string_literal | n/a | n/a | 182 | Goal models (comma-separated). |
@@ -92,7 +92,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 48 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
 | `MASC_SSE_KEEPALIVE_SEC` | typed:float | unclassified | unclassified | 108 | SSE keepalive interval (seconds). Frequency of `: keepalive` frames on command-plane SSE streams. Clamped to >= 1.0 t... |
 
-## Env_config_keeper (65 knobs; typed classification 2/53)
+## Env_config_keeper (64 knobs; typed classification 2/53)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -138,11 +138,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC` | typed:float | unclassified | unclassified | 492 | Backoff delay between gRPC reconnect attempts in seconds. Default: 5.0. Range: [1.0, 60.0]. |
 | `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | typed:int | unclassified | unclassified | 218 | Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. |
 | `MASC_KEEPER_HEARTBEAT_JITTER_FACTOR` | typed:float | unclassified | unclassified | 285 | Jitter factor applied to heartbeat interval (fraction of base). Default: 0.2 (20%). Range: [0.0, 0.5]. |
-| `MASC_KEEPER_IDLE_SKIP_THRESHOLD` | typed:int | unclassified | unclassified | 474 | Consecutive idle tool repetitions before on_idle hook issues Skip. Below this: graduated Nudge messages. With tool_ch... |
+| `MASC_KEEPER_IDLE_SKIP_THRESHOLD` | typed:int | unclassified | unclassified | 474 | Consecutive idle tool repetitions before on_idle hook issues Skip. Below this: graduated Nudge messages. Optional too... |
 | `MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES` | typed:int | unclassified | unclassified | 259 | Maximum consecutive heartbeat failures before raising Keeper_fiber_crash (structured crash via dispatch_event). Defau... |
 | `MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES` | typed:int | unclassified | unclassified | 519 | Maximum consecutive failures for the same (tool_name, args_hash) before blocking further attempts. Prevents infinite ... |
 | `MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES` | typed:int | unclassified | unclassified | 266 | Maximum consecutive unified turn failures before marking keeper as crashed. Covers LLM timeout, rate limit, and other... |
-| `MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS` | typed:int | unclassified | unclassified | 300 | Max idle turns for scheduled autonomous keeper turns. With tool_choice=Any and max_turns=50, keepers have workspace t... |
+| `MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS` | typed:int | unclassified | unclassified | 300 | Max idle turns for scheduled autonomous keeper turns. Keepers have workspace to explore multi-step tool sequences. 10... |
 | `MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE` | typed:int | unclassified | unclassified | 307 | Max idle turns for reactive (board/mention triggered) keeper turns. Reactive turns have an explicit trigger — more ... |
 | `MASC_KEEPER_MAX_SILENCE_SEC` | typed:float | unclassified | unclassified | 233 | Maximum seconds since last successful workspace heartbeat before presence sync is required again. Floor = keepalive i... |
 | `MASC_KEEPER_METRICS_MAX_BYTES` | typed:int | unclassified | unclassified | 78 | Maximum metrics file size in bytes before rotation (default: 10MB) |
@@ -151,7 +151,6 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS` | typed:int | unclassified | unclassified | 502 | Maximum proactive generation attempts before falling back. Default: 3. Range: [1, 10]. |
 | `MASC_KEEPER_REDUCER_CAP_TOKENS` | typed:int | unclassified | unclassified | 196 | Max message tokens retained by {!Agent_sdk.Context_reducer.cap_message_tokens} in the keeper run reducer pipeline.  D... |
 | `MASC_KEEPER_REDUCER_KEEP_RECENT` | typed:int | unclassified | unclassified | 205 | Recent messages kept verbatim by {!Agent_sdk.Context_reducer.cap_message_tokens}.  Default: 3. Range: [1, 20]. Env: [... |
-| `MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST` | string_literal | n/a | n/a | 633 | Comma-separated provider kind allowlist for every keeper runtime call. Values are OAS [Provider_config.string_of_prov... |
 | `MASC_KEEPER_SLEEP_CHUNK_SEC` | typed:float | unclassified | unclassified | 277 | Interruptible sleep chunk size in seconds. Smaller = faster wakeup response but more CPU polling. Default: 2.0. Range... |
 | `MASC_KEEPER_SMART_HEARTBEAT` | feature_flag | n/a | n/a | 243 | Master switch for adaptive heartbeat scheduling in the keepalive loop. When true, Keeper_heartbeat_smart.should_emit ... |
 | `MASC_KEEPER_SNAPSHOT_SEC` | typed:int | unclassified | unclassified | 179 | Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. |
@@ -337,9 +336,9 @@ the categorization roadmap. Newly-added typed getters in
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALLOW_ANONYMOUS_MUTATIONS` | string_literal | n/a | n/a | 29 |  |
-| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 640 |  |
-| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 644 |  |
-| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 646 |  |
+| `MASC_ASSETS_DIR` | string_literal | n/a | n/a | 638 |  |
+| `MASC_BASE_PATH_RESOLUTION_SOURCE` | string_literal | n/a | n/a | 642 |  |
+| `MASC_BASE_PATH_STRICT` | string_literal | n/a | n/a | 644 |  |
 | `MASC_BENCHMARK_RESULTS_DIR` | string_literal | n/a | n/a | 218 |  |
 | `MASC_CHANNEL_GATE_DEDUP_TTL_SEC` | string_literal | n/a | n/a | 308 |  |
 | `MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH` | string_literal | n/a | n/a | 310 |  |
@@ -372,8 +371,8 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_COMPACT_MAX_MESSAGES` | string_literal | n/a | n/a | 158 |  |
 | `MASC_KEEPER_COMPACT_MAX_TOKENS` | string_literal | n/a | n/a | 160 |  |
 | `MASC_KEEPER_COMPACT_RATIO` | string_literal | n/a | n/a | 156 |  |
-| `MASC_KEEPER_LLM_RERANK_RUNTIME` | string_literal | n/a | n/a | 550 |  |
-| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | string_literal | n/a | n/a | 498 |  |
+| `MASC_KEEPER_LLM_RERANK_RUNTIME` | string_literal | n/a | n/a | 548 |  |
+| `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | string_literal | n/a | n/a | 496 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN` | string_literal | n/a | n/a | 185 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 181 |  |
 | `MASC_KEEPER_RULE_GUARDRAIL_REPETITION` | string_literal | n/a | n/a | 179 |  |
@@ -381,32 +380,32 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX` | string_literal | n/a | n/a | 175 |  |
 | `MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX` | string_literal | n/a | n/a | 177 |  |
 | `MASC_KEEPER_RULE_REFLECT_REPETITION` | string_literal | n/a | n/a | 173 |  |
-| `MASC_KEEPER_TOOL_AFFINITY_K` | string_literal | n/a | n/a | 554 |  |
-| `MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS` | string_literal | n/a | n/a | 556 |  |
+| `MASC_KEEPER_TOOL_AFFINITY_K` | string_literal | n/a | n/a | 552 |  |
+| `MASC_KEEPER_TOOL_AFFINITY_LOOKBACK_DAYS` | string_literal | n/a | n/a | 554 |  |
 | `MASC_KEEPER_TOOL_COST_MAX_USD` | string_literal | n/a | n/a | 162 |  |
-| `MASC_KEEPER_TOOL_DECAY_TURNS` | string_literal | n/a | n/a | 558 |  |
-| `MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS` | string_literal | n/a | n/a | 506 |  |
-| `MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC` | string_literal | n/a | n/a | 508 |  |
+| `MASC_KEEPER_TOOL_DECAY_TURNS` | string_literal | n/a | n/a | 556 |  |
+| `MASC_KEEPER_TURN_LIVELOCK_MAX_ATTEMPTS` | string_literal | n/a | n/a | 504 |  |
+| `MASC_KEEPER_TURN_LIVELOCK_STUCK_AFTER_SEC` | string_literal | n/a | n/a | 506 |  |
 | `MASC_KEEPER_UNIFIED_MAX_TOKENS` | string_literal | n/a | n/a | 165 |  |
 | `MASC_KEEPER_UNIFIED_TEMP` | string_literal | n/a | n/a | 164 |  |
 | `MASC_LOCK_WARN_MS` | string_literal | n/a | n/a | 212 |  |
-| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 738 |  |
-| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 774 |  |
-| `MASC_RUNTIME_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 471 |  |
-| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 786 |  |
-| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 688 |  |
-| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 690 |  |
-| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 692 |  |
-| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 694 |  |
-| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 718 |  |
+| `MASC_OTEL_ENABLED` | string_literal | n/a | n/a | 736 |  |
+| `MASC_PLACEHOLDER_TOOLS_ENABLED` | string_literal | n/a | n/a | 772 |  |
+| `MASC_RUNTIME_ATTEMPT_LIVENESS` | string_literal | n/a | n/a | 469 |  |
+| `MASC_SEARXNG_URL` | string_literal | n/a | n/a | 784 |  |
+| `MASC_SHUTDOWN_CLEANUP_TIMEOUT` | string_literal | n/a | n/a | 686 |  |
+| `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 688 |  |
+| `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 690 |  |
+| `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 692 |  |
+| `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 716 |  |
 | `MASC_STRUCTURED_STATE` | string_literal | n/a | n/a | 148 |  |
 | `MASC_TELEMETRY_MAX_BYTES` | string_literal | n/a | n/a | 55 |  |
 | `MASC_TELEMETRY_RETENTION_DAYS` | string_literal | n/a | n/a | 52 |  |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 754 |  |
-| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 756 |  |
+| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | string_literal | n/a | n/a | 752 |  |
+| `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | string_literal | n/a | n/a | 754 |  |
 | `MASC_TLA_TRACE` | string_literal | n/a | n/a | 150 |  |
-| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 818 |  |
-| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 820 |  |
-| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 822 |  |
+| `MASC_WORKER_RUNTIME_BACKEND` | string_literal | n/a | n/a | 816 |  |
+| `MASC_WORKER_RUNTIME_DOCKER_IMAGE` | string_literal | n/a | n/a | 818 |  |
+| `MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL` | string_literal | n/a | n/a | 820 |  |
 | `MASC_WS_CLIENT_BUFFER_LIMIT_BYTES` | string_literal | n/a | n/a | 92 |  |
 | `MASC_WS_SLICE_INDEX_ENABLED` | string_literal | n/a | n/a | 95 |  |

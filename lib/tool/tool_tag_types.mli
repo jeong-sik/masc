@@ -20,11 +20,13 @@ type module_tag =
   | Mod_state
   | Mod_control
   | Mod_agent_timeline
+  | Mod_schedule
   | Mod_misc
   | Mod_library
   | Mod_external
   | Mod_inline
   | Mod_shard
+  | Mod_keeper_task
 
 (** Inferred effect classification for a tool. *)
 type effect_domain =

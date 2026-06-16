@@ -23,6 +23,7 @@ type workflow_rejection_info =
   { task_id : string option
   ; rule_id : string option
   ; tool_suggestion : string option
+  ; alternatives : string list
   ; hint : string option
   ; scope_policy : workflow_rejection_scope_policy
   }

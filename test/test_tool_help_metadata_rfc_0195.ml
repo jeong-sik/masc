@@ -119,10 +119,10 @@ let test_alternatives_never_dangling () =
       (String.concat ", " (List.map render dangling))
 
 let test_entry_json_omits_empty_fields () =
-  (* keeper_stay_silent has no curated examples/alternatives;
-     the JSON wire shape must omit both keys so existing
-     consumers see no field they did not see before. *)
-  let entry = lookup "keeper_stay_silent" in
+  (* keeper_time_now has no curated examples/alternatives; the JSON wire shape
+     must omit both keys so existing consumers see no field they did not see
+     before. *)
+  let entry = lookup "keeper_time_now" in
   let json = Registry.entry_json entry in
   match json with
   | `Assoc kvs ->

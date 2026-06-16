@@ -287,33 +287,31 @@ let persist_meta config path persisted =
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
 ;;
 
-let write_meta ?(force = false) config (m : Keeper_meta_contract.keeper_meta) : (unit, string) result =
+(* Version CAS only — there is no force/bypass path. Cumulative usage
+   counters are a monotone invariant (RFC-0225 §3.2, RFC-0237); a caller that
+   lost the race must resolve the conflict through [write_meta_with_merge],
+   never overwrite the disk snapshot. *)
+let write_meta config (m : Keeper_meta_contract.keeper_meta) : (unit, string) result =
   let path = keeper_meta_path config m.name in
-  if force
-  then (
-    let persisted = { m with meta_version = m.meta_version + 1 } in
-    persist_meta config path persisted)
-  else (
-    (* Version CAS: reject writes whose version doesn't match what's on disk. *)
-    match read_meta_file_path path with
-    | Ok (Some existing) ->
-      if existing.meta_version <> m.meta_version
-      then
-        Error
-          (Printf.sprintf
-             "meta version conflict for %s: expected %d, disk has %d"
-             m.name
-             m.meta_version
-             existing.meta_version)
-      else (
-        let persisted = { m with meta_version = m.meta_version + 1 } in
-        persist_meta config path persisted)
-    | Ok None ->
-      (* No existing file: initial write. *)
-      let persisted = { m with meta_version = 1 } in
-      persist_meta config path persisted
-    | Error msg ->
-      Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg))
+  match read_meta_file_path path with
+  | Ok (Some existing) ->
+    if existing.meta_version <> m.meta_version
+    then
+      Error
+        (Printf.sprintf
+           "meta version conflict for %s: expected %d, disk has %d"
+           m.name
+           m.meta_version
+           existing.meta_version)
+    else (
+      let persisted = { m with meta_version = m.meta_version + 1 } in
+      persist_meta config path persisted)
+  | Ok None ->
+    (* No existing file: initial write. *)
+    let persisted = { m with meta_version = 1 } in
+    persist_meta config path persisted
+  | Error msg ->
+    Error (Printf.sprintf "failed to read existing meta for CAS %s: %s" path msg)
 ;;
 
 let is_version_conflict_error msg =

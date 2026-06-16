@@ -86,6 +86,35 @@ sandbox_profile = "local"
 |}
        name)
 
+let write_keeper_toml_without_goal config_dir ~name ~will =
+  write_file
+    (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
+    (Printf.sprintf
+       {|
+[keeper]
+name = "%s"
+sandbox_profile = "local"
+proactive_enabled = false
+will = "%s"
+needs = "keep fleet safety diagnosable"
+desires = "avoid silent declarative boot failures"
+|}
+       name will);
+  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
+
+let write_empty_keeper_toml_without_goal config_dir ~name =
+  write_file
+    (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
+    (Printf.sprintf
+       {|
+[keeper]
+name = "%s"
+sandbox_profile = "local"
+proactive_enabled = false
+|}
+       name);
+  Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
+
 let with_restart_launch_noop f =
   Sup.with_restart_launch_noop_for_test f
 
@@ -540,6 +569,73 @@ let test_missing_persona_without_profile_or_toml_is_error () =
      with
      | Sup.Persona_drift_error -> true
      | Sup.Persona_drift_warn -> false)
+
+let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
+  {
+    config;
+    agent_name = "supervisor";
+    sw;
+    clock = Eio.Stdenv.clock env;
+    proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    net = Some (Eio.Stdenv.net env);
+  }
+
+let test_declarative_boot_materializes_goal_from_will () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "intent-only" in
+  let will = "watch fleet safety and repair keeper bootstrap" in
+  write_keeper_toml_without_goal config_dir ~name ~will;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let ctx = keeper_runtime_context env sw config in
+  Fun.protect
+    ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
+    (fun () ->
+      match KR.load_or_materialize_boot_meta ctx name with
+      | Error err -> fail err
+      | Ok resolution ->
+      check bool "materialized from declarative TOML" true resolution.materialized;
+      check string "goal derived from will" will resolution.meta.goal;
+      check bool "boot failure cleared" true
+        (Option.is_none
+           (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
+
+let test_declarative_boot_records_goal_required_failure () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "empty-intent" in
+  write_empty_keeper_toml_without_goal config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+  let ctx = keeper_runtime_context env sw config in
+  (match KR.load_or_materialize_boot_meta ctx name with
+   | Ok _ -> fail "expected declarative keeper without any intent to fail"
+   | Error err ->
+       check bool "failure mentions goal" true
+         (String_util.contains_substring err "goal is required"));
+  match KR.boot_meta_failure_for ~base_path:config.base_path ~name with
+  | None -> fail "expected boot meta failure to be recorded"
+  | Some failure ->
+      check string "failure keeper name" name failure.keeper_name;
+      check string "recorded failure cause" "goal_required"
+        (KR.boot_meta_failure_cause_label failure.cause);
+      check bool "recorded failure keeps raw error" true
+        (String_util.contains_substring failure.error "goal is required")
 
 let registered_entries names =
   Reg.clear ();
@@ -2089,6 +2185,70 @@ let test_persisted_blocker_survives_unregister () =
        | Ok None -> fail "meta missing after unregister"
        | Error err -> fail ("read_meta failed: " ^ err)))
 
+(* RFC-0250: assess_stale_run — pure stale-run window assessment. Covers the
+   [Idle_turn] variant's doc contract (Running + not-in-turn + last_turn_ts
+   older than threshold) and the negative cases that must NOT stamp it. *)
+let test_assess_stale_run () =
+  (* frozen: Running, not in a turn, last turn 200s ago, threshold 150s →
+     Some (Stale_turn_timeout (Idle_turn { stall_seconds = 200 })). *)
+  (match
+     Sup.assess_stale_run
+       ~phase:KSM.Running
+       ~in_turn:None
+       ~last_turn_ts:100.0
+       ~now:300.0
+       ~threshold:150.0
+   with
+   | Some (Reg.Stale_turn_timeout (Reg.Idle_turn { stall_seconds })) ->
+     check int "frozen stamps Idle_turn stall=200" 200
+       (int_of_float stall_seconds)
+   | _ -> check bool "frozen must stamp Idle_turn{200}" false true);
+  (* fresh: only 10s past last turn → None. *)
+  check bool "fresh → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:None
+          ~last_turn_ts:290.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* in-turn: a turn is live (Some _) → None — Idle_turn contract needs None. *)
+  check bool "in-turn → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:(Some ())
+          ~last_turn_ts:100.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* fresh-start: last_turn_ts = 0 → None — never mis-stamp a just-started keeper. *)
+  check bool "fresh-start (last_turn_ts=0) → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:None
+          ~last_turn_ts:0.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* not-running: Crashed → None. *)
+  check bool "crashed → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Crashed
+          ~in_turn:None
+          ~last_turn_ts:100.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* boundary: stall exactly == threshold → None (strict >). *)
+  check bool "boundary stall==threshold → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:None
+          ~last_turn_ts:150.0
+          ~now:300.0
+          ~threshold:150.0))
+
 let () =
   run "keeper_supervisor" [
     "backoff", [
@@ -2114,6 +2274,12 @@ let () =
         test_missing_persona_with_inline_toml_is_warn;
       test_case "missing persona without TOML is ERROR" `Quick
         test_missing_persona_without_profile_or_toml_is_error;
+    ];
+    "boot_meta_materialization", [
+      test_case "declarative boot derives missing goal from will" `Quick
+        test_declarative_boot_materializes_goal_from_will;
+      test_case "declarative boot records goal-required failure" `Quick
+        test_declarative_boot_records_goal_required_failure;
     ];
     "fiber_health", [
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;
@@ -2234,5 +2400,10 @@ let () =
         test_initial_auto_resume_capped_at_max;
       test_case "persisted blocker survives unregister" `Quick
         test_persisted_blocker_survives_unregister;
+    ];
+    "stale_run_window", [
+      test_case
+        "assess_stale_run covers frozen/fresh/in-turn/fresh-start/not-running/boundary"
+        `Quick test_assess_stale_run;
     ];
   ]

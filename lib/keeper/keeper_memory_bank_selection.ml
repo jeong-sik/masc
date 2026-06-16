@@ -275,7 +275,7 @@ let memory_candidates_from_snapshot
   in
   select_memory_candidates raw
 
-let memory_candidates_from_snapshot_source ~state_snapshot_source snapshot =
-  if state_snapshot_source_is_synthetic state_snapshot_source
+let memory_candidates_from_snapshot_gated ~is_synthetic snapshot =
+  if is_synthetic
   then empty_candidate_selection
   else memory_candidates_from_snapshot snapshot

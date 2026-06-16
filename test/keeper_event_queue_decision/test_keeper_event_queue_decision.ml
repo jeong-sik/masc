@@ -25,7 +25,7 @@ let decide ~smart_decision ~queue =
   else HS.Emit
 
 let make_stim post_id =
-  Q.{ post_id; urgency = Normal; arrived_at = 0.0; payload = "test" }
+  Q.{ post_id; urgency = Normal; arrived_at = 0.0; payload = Q.Bootstrap }
 
 let queue_with n =
   let stims = List.init n (fun i -> make_stim (Printf.sprintf "p%d" i)) in

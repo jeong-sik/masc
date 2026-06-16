@@ -235,8 +235,6 @@ let record_pre_dispatch_terminal_observation
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta)
     ; network_mode = meta.network_mode
-    ; approval_profile = None
-    ; approval_profile_derived = false
     ; runtime_id
     ; runtime_selected_model = None
     ; runtime_attempt_count = 0

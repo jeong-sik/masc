@@ -109,7 +109,7 @@ let mission_cache =
 let _mission_cache = mission_cache
 
 let start_mission_refresh_loop ~state ~sw ~clock =
-  let workspace_config = state.Mcp_server.workspace_config in
+  let workspace_config = (Mcp_server.workspace_config state) in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = state_dashboard_runtime_caps state in
   let mission_refresh_timeout_s = 60.0 in
@@ -154,7 +154,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
 let dashboard_briefing_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.workspace_config.base_path request
+    dashboard_actor_for_request ~base_path:(Mcp_server.workspace_config state).base_path request
   in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
@@ -164,7 +164,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
       ?mono_clock
       ~sw
       ~clock
-      ~config:state.Mcp_server.workspace_config
+      ~config:(Mcp_server.workspace_config state)
       (fun ~config ~sw ->
          Dashboard_briefing.json
            ?actor
@@ -193,7 +193,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
         dashboard_cache_key
-          state.Mcp_server.workspace_config
+          (Mcp_server.workspace_config state)
           "mission"
           (Option.value ~default:"" actor)
       in
@@ -215,10 +215,10 @@ let dashboard_session_http_json ~state ~sw ~clock request =
        Dashboard_briefing.session_json
          ?actor:
            (dashboard_actor_for_request
-              ~base_path:state.Mcp_server.workspace_config.base_path
+              ~base_path:(Mcp_server.workspace_config state).base_path
               request)
          ~session_id:trimmed_id
-         ~config:state.Mcp_server.workspace_config
+         ~config:(Mcp_server.workspace_config state)
          ~sw
          ~clock
          ~proc_mgr:state.Mcp_server.proc_mgr
@@ -249,14 +249,14 @@ let dashboard_session_http_json ~state ~sw ~clock request =
 
 let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.workspace_config.base_path request
+    dashboard_actor_for_request ~base_path:(Mcp_server.workspace_config state).base_path request
   in
   let force = bool_query_param request "force" ~default:false in
   let compute () =
     Dashboard_briefing_sections.json
       ?actor
       ~force
-      ~config:state.Mcp_server.workspace_config
+      ~config:(Mcp_server.workspace_config state)
       ~sw
       ~clock
       ~proc_mgr:state.Mcp_server.proc_mgr
@@ -267,7 +267,7 @@ let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   else (
     let cache_key =
       dashboard_cache_key
-        state.Mcp_server.workspace_config
+        (Mcp_server.workspace_config state)
         "mission_briefing"
         (Option.value ~default:"" actor)
     in
@@ -500,8 +500,11 @@ let dashboard_shell_payload_json
         dashboard_general_agent_count agents, agents_ms)
     in
     let tasks, tasks_ms = measure_ms "tasks" (fun () -> dashboard_tasks_safe config) in
+    let persisted_keepers, persisted_keepers_ms =
+      measure_ms "persisted_keepers" (fun () -> keeper_count config)
+    in
     let configured_keepers, configured_keepers_ms =
-      measure_ms "configured_keepers" (fun () -> keeper_count config)
+      measure_ms "configured_keepers" (fun () -> configured_keeper_count config)
     in
     let meta_cognition_r = ref (`Null, 0) in
     let config_resolution_r = ref (`Null, 0) in
@@ -553,8 +556,10 @@ let dashboard_shell_payload_json
             [ "agents", `Int general_agents
             ; "tasks", `Int (List.length tasks)
             ; "keepers", `Int active_keepers
+            ; "persisted_keepers", `Int persisted_keepers
             ; "total_runtimes", `Int (general_agents + active_keepers)
             ] )
+      ; "persisted_keepers", `Int persisted_keepers
       ; "configured_keepers", `Int configured_keepers
       ; "providers", provider_capacity_json ()
       ; "meta_cognition", meta_cognition_json
@@ -569,11 +574,13 @@ let dashboard_shell_payload_json
             ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
             ; "keeper_count_source", `String "runtime_keepalive"
-            ; "configured_keeper_count_source", `String "keeper_meta"
+            ; "configured_keeper_count_source", `String "keeper_toml"
+            ; "persisted_keeper_count_source", `String "keeper_meta"
             ; "status_ms", `Int status_ms
             ; "agents_ms", `Int agents_ms
             ; "tasks_ms", `Int tasks_ms
             ; "keepers_ms", `Int keepers_ms
+            ; "persisted_keepers_ms", `Int persisted_keepers_ms
             ; "configured_keepers_ms", `Int configured_keepers_ms
             ; "meta_cognition_ms", `Int meta_cognition_ms
             ; "config_resolution_ms", `Int config_resolution_ms
@@ -594,18 +601,11 @@ let dashboard_shell_payload_json
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.config)
   : Yojson.Safe.t
   =
-  let dashboard_auth_error_code = function
-    | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> Some "invalid_token"
-    | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> Some "token_expired"
-    | Masc_domain.Auth
-        (Masc_domain.Auth_error.Forbidden
-           { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
-      Some "same_origin_blocked"
-    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> Some "insufficient_role"
-    | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason; _ }) ->
-      Some (Masc_domain.Auth_error.unauthorized_reason_to_string reason)
-    | _ -> Some "unknown"
-  in
+  (* SSOT: typed-error → dashboard auth code lives in
+     [Masc_domain.dashboard_auth_error_code] so this shell summary and
+     the HTTP 401 error body ([Server_auth.auth_error_json]) emit the
+     same code. *)
+  let dashboard_auth_error_code = Masc_domain.dashboard_auth_error_code in
   let auth_cfg = Auth.load_auth_config config.base_path in
   let token = auth_token_from_request request in
   let token_credential_result =
@@ -627,7 +627,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
     | _ -> None
   in
   let resolved_agent_name_result =
-    match dashboard_actor_for_request ~base_path:config.base_path request with
+    match token_credential_result with
+    (* Keep stale bearer tokens visible as auth failures in shell summaries instead of
+       recovering a request actor hint as the effective actor. *)
+    | Some (Error err) -> Error err
+    | _ ->
+    (match dashboard_actor_for_request ~base_path:config.base_path request with
     | Some agent_name -> Ok agent_name
     | None ->
       if auth_cfg.enabled && auth_cfg.require_token && token_present
@@ -639,12 +644,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
                 ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound \
                              credential)"
                 }))
-      else Ok "dashboard"
+      else Ok "dashboard")
   in
   let effective_agent =
     match resolved_agent_name_result with
     | Ok agent_name -> Some agent_name
-    | Error _ -> requested_agent
+    | Error _ -> None
   in
   let effective_role_result =
     match resolved_agent_name_result with

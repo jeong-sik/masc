@@ -17,14 +17,28 @@
  */
 
 import {
+  array,
   number,
   object,
   optional,
   record,
   safeParse,
   string,
+  unknown,
   type InferOutput,
 } from 'valibot'
+
+// Attachment row shape persisted by keeper_chat_store.ml (to_json_array
+// :848-861): snake_case mime_type and an open `type` string. Normalized to
+// the camelCase KeeperConversationAttachment at the consume boundary.
+export const KeeperChatHistoryAttachmentSchema = object({
+  id: string(),
+  type: string(),
+  name: string(),
+  size: number(),
+  mime_type: string(),
+  data: string(),
+})
 
 export const SurfaceRefSchema = object({
   kind: string(),
@@ -43,7 +57,33 @@ export const SurfaceRefSchema = object({
   address: optional(record(string(), string())),
 })
 
+// RFC-0235 P1/P3: synthesized voice clip. Backend uses snake_case in
+// history rows (lib/keeper/keeper_chat_store.ml) and camelCase in SSE
+// payloads (lib/keeper/keeper_chat_broadcast.ml). We accept both at the
+// boundary and let normalizers canonicalize to camelCase.
+export const KeeperChatHistoryAudioClipSchema = object({
+  token: string(),
+  audio_url: optional(string()),
+  audioUrl: optional(string()),
+  mime: string(),
+  duration_sec: optional(number()),
+  durationSec: optional(number()),
+  message_text: optional(string()),
+  messageText: optional(string()),
+  device_id: optional(string()),
+  deviceId: optional(string()),
+})
+
+export type KeeperChatHistoryAudioClip = InferOutput<typeof KeeperChatHistoryAudioClipSchema>
+
 export const KeeperChatHistoryMessageSchema = object({
+  // R3: producer-assigned stable message id (keeper_chat_store.ml mints it
+  // at append and the read boundary stamps legacy rows, so the backend now
+  // emits it on every row). Left optional for the deploy window — a
+  // dashboard deployed ahead of the backend would otherwise drop every
+  // message; the consumer falls back to a stable content-derived id when
+  // it is absent.
+  id: optional(string()),
   role: string(),
   content: string(),
   ts: number(),
@@ -69,6 +109,18 @@ export const KeeperChatHistoryMessageSchema = object({
   speaker_id: optional(string()),
   speaker_name: optional(string()),
   speaker_authority: optional(string()),
+  // RFC-0235 P1/P3: audio clip field. The wire object is accepted as
+  // `unknown` at the boundary so malformed clips do not cause the whole
+  // message to be dropped; `normalizeAudioClip` validates before use.
+  audio: optional(unknown()),
+  // Persisted file/image uploads (keeper_chat_store.ml to_json_array
+  // :848-861). Without decoding these, a user's upload appears live but
+  // vanishes on reload even though it is on disk.
+  attachments: optional(array(KeeperChatHistoryAttachmentSchema)),
+  // Row kind (keeper_chat_store.ml :838-841). `transport_failure` is minted
+  // so a reload can tell a failed request apart from a real keeper reply;
+  // open string() per the same deploy-window rationale as `role`.
+  kind: optional(string()),
 })
 
 export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>

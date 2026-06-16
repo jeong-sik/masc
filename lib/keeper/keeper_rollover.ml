@@ -47,7 +47,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_core
 
-let log_orphan_tool_result_repair
+let log_tool_pair_repair
     ~keeper_name
     ~site
     (stats : Keeper_context_core.tool_pair_repair_stats) =
@@ -58,7 +58,17 @@ let log_orphan_tool_result_repair
         (`Assoc
             [ "keeper_name", `String keeper_name
             ; "site", `String site
+            ; "dropped_tool_uses", `Int stats.dropped_tool_uses
             ; "dropped_tool_results", `Int stats.dropped_tool_results
+            ; ( "dropped_tool_use_samples"
+              , `List
+                  (List.map
+                     (fun (tool_use_id, tool_name) ->
+                        `Assoc
+                          [ "tool_use_id", `String tool_use_id
+                          ; "tool_name", `String tool_name
+                          ])
+                     stats.dropped_tool_use_samples) )
             ; ( "dropped_tool_result_ids"
               , `List
                   (List.map
@@ -66,9 +76,11 @@ let log_orphan_tool_result_repair
                      stats.dropped_tool_result_ids) )
             ])
       (Printf.sprintf
-         "orphan_tool_result_repair keeper=%s site=%s dropped_tool_results=%d"
+         "tool_pair_repair keeper=%s site=%s dropped_tool_uses=%d \
+          dropped_tool_results=%d"
          keeper_name
          site
+         stats.dropped_tool_uses
          stats.dropped_tool_results)
 
 type handoff_rollover = {
@@ -104,7 +116,7 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | Stay_silent_loop
+  | No_progress_loop
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch
@@ -286,10 +298,10 @@ let maybe_rollover_oas_handoff
           in
           let save_ctx =
             let messages, pair_repair_stats =
-              repair_orphan_tool_result_messages_with_stats
+              repair_broken_tool_call_pairs_with_stats
                 (messages_of_context ctx)
             in
-            log_orphan_tool_result_repair
+            log_tool_pair_repair
               ~keeper_name:base_meta.agent_name
               ~site:"handoff_rollover"
               pair_repair_stats;

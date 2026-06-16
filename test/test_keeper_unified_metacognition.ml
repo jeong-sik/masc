@@ -52,7 +52,6 @@ let test_on_idle_board_get_nudge_names_post_id_discovery () =
         [ "keeper_board_get"
         ; "keeper_board_list"
         ; "keeper_board_search"
-        ; "keeper_stay_silent"
         ]
       ~tool_names:[ "keeper_board_get" ]
   in
@@ -60,9 +59,9 @@ let test_on_idle_board_get_nudge_names_post_id_discovery () =
   | Agent_sdk.Hooks.Nudge msg ->
     check
       bool
-      "board_get nudge says post_id is required"
+      "board_get nudge names the routable tool, not the hallucinated alias"
       true
-      (contains_substring msg "keeper_board_get requires post_id");
+      (contains_substring msg "keeper_board_post_get requires post_id");
     check
       bool
       "board_get nudge points to board discovery tools"
@@ -72,7 +71,7 @@ let test_on_idle_board_get_nudge_names_post_id_discovery () =
       bool
       "board_get nudge forbids empty args"
       true
-      (contains_substring msg "Do not call keeper_board_get with {}")
+      (contains_substring msg "Do not call keeper_board_post_get with {}")
   | other ->
     fail
       (Printf.sprintf
@@ -93,7 +92,6 @@ let test_on_idle_tools_list_loop_suggests_surface_read () =
         ; "keeper_broadcast"
         ; "keeper_tasks_list"
         ; "keeper_surface_read"
-        ; "keeper_stay_silent"
         ]
       ~tool_names:[ "keeper_tools_list" ]
   in
@@ -127,6 +125,94 @@ let test_on_idle_tools_list_loop_suggests_surface_read () =
             (Agent_sdk.Hooks.classify_decision other)))
 ;;
 
+let test_on_idle_tool_search_loop_suggests_code_search () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "keeper_context_status"
+        ; "keeper_tool_search"
+        ; "Grep"
+        ; "Read"
+        ; "Execute"
+        ]
+      ~tool_names:[ "keeper_tool_search" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "tool_search loop nudge explains schema-only search"
+      true
+      (contains_substring msg "discovers active tool schemas only");
+    check
+      bool
+      "tool_search loop nudge says it is not repo file search"
+      true
+      (contains_substring msg "does not search repository files");
+    check
+      bool
+      "tool_search loop prioritizes Grep"
+      true
+      (contains_substring msg "Available alternatives: Grep");
+    check
+      bool
+      "tool_search loop points at source symbol search"
+      true
+      (contains_substring msg "functions, types, or symbols")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
+let test_on_idle_tool_search_loop_maps_internal_file_tools () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "keeper_context_status"
+        ; "keeper_tool_search"
+        ; "tool_search_files"
+        ; "tool_read_file"
+        ; "tool_execute"
+        ]
+      ~tool_names:[ "keeper_tool_search" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "tool_search loop maps internal search_files to Grep"
+      true
+      (contains_substring msg "Available alternatives: Grep, Read, Execute");
+    check
+      bool
+      "tool_search loop maps internal ids in source hint"
+      true
+      (contains_substring msg "switch to Grep then Read then Execute");
+    check
+      bool
+      "tool_search loop does not expose internal search_files"
+      false
+      (contains_substring msg "tool_search_files");
+    check
+      bool
+      "tool_search loop does not expose internal execute"
+      false
+      (contains_substring msg "tool_execute")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
 let test_on_idle_final_warning_before_skip () =
   let decision =
     HK.on_idle_decision_with_threshold
@@ -139,9 +225,9 @@ let test_on_idle_final_warning_before_skip () =
   | Agent_sdk.Hooks.Nudge msg ->
     check
       bool
-      "final warning mentions stay_silent"
+      "final warning mentions direct no-work/status response"
       true
-      (contains_substring msg "stay_silent")
+      (contains_substring msg "direct no-work/status response")
   | other ->
     fail
       (Printf.sprintf
@@ -228,6 +314,14 @@ let () =
             "on_idle tools_list loop suggests surface_read"
             `Quick
             test_on_idle_tools_list_loop_suggests_surface_read
+        ; test_case
+            "on_idle tool_search loop suggests code search"
+            `Quick
+            test_on_idle_tool_search_loop_suggests_code_search
+        ; test_case
+            "on_idle tool_search loop maps internal file tools"
+            `Quick
+            test_on_idle_tool_search_loop_maps_internal_file_tools
         ; test_case
             "on_idle final warning before skip"
             `Quick

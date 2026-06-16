@@ -108,7 +108,7 @@
   keeper_unified_metrics_json_support
   keeper_unified_metrics_support
   keeper_unified_turn_event_bus
-  keeper_unified_turn_stay_silent
+  keeper_unified_turn_no_progress
   keeper_unified_turn_success
   keeper_unified_turn_failure
   keeper_unified_turn_phase_plan
@@ -190,6 +190,7 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
+  keeper_memory_os_gc
   keeper_memory_os_io
   keeper_memory_os_recall)
  (libraries
@@ -249,6 +250,7 @@
   ;; leaf sub-library. The parent library still references those modules
   ;; unqualified, so it must depend on the leaf explicitly.
   masc.tool_types
+  masc_schedule
   masc.tool_contract_prompts
   ;; Shared leaf helpers extracted out of include_subdirs-unqualified ownership.
   masc.lockfree_atomic
@@ -360,10 +362,10 @@
   ;; + to_yojson / of_yojson serializers).
   masc.chronicle_event
   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark + scoring closure
-  ;; extracted to lib/tool_call_quality_benchmark/. 8 modules, ~2065 LoC,
-  ;; deps: stdlib + Yojson + masc_core + time_compat. Bundles benchmark
-  ;; family (6) + reward_advice_artifact + post_verifier to break the
-  ;; Reward_advice_artifact ↔ Tool_call_quality_benchmark_types cycle.
+  ;; extracted to lib/tool_call_quality_benchmark/. 6 diagnostic-only
+  ;; benchmark modules, ~2065 LoC, deps: stdlib + Yojson + masc_core +
+  ;; time_compat. Post_verifier and reward_advice_artifact were removed in
+  ;; PR #21019; the library is now diagnostic-only.
   masc.tool_call_quality_benchmark
   ;; RFC-0056 Phase 1I — Keeper_event_queue (first lib/keeper/ leaf)
   ;; extracted to lib/keeper_event_queue/. 91+87 LoC, deps: stdlib +

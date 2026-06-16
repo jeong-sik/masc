@@ -100,33 +100,21 @@ let compute_diversity ~(available_tools : string list)
   let threshold = max 1 (total_calls / 100) in
   let underused = available_tools
     |> List.filter (fun tool ->
-      not (String.equal tool "keeper_stay_silent")
-      && (not (SS.mem tool used_set)
-          || List.exists (fun s -> s.name = tool && s.count < threshold) stats))
+      not (SS.mem tool used_set)
+      || List.exists (fun s -> s.name = tool && s.count < threshold) stats)
   in
   { total_calls; unique_tools; available_tools = n_available;
     entropy = raw_h; normalized_entropy = norm_h;
     underused_tools = underused; overused_tools = overused }
 
-let record_underused_tool_metrics ~keeper_name ~available_tools summary =
-  let available_tools = List.sort_uniq String.compare available_tools in
+let record_underused_tool_metrics ~keeper_name ~available_tools:_ summary =
   let underused_tools =
     List.sort_uniq String.compare summary.underused_tools
   in
   Otel_metric_store.set_gauge
     Keeper_metrics.(to_string ToolUnderusedAllowedCount)
     ~labels:[ ("keeper", keeper_name) ]
-    (float_of_int (List.length underused_tools));
-  List.iter
-    (fun tool ->
-       let value =
-         if List.mem tool underused_tools then 1.0 else 0.0
-       in
-       Otel_metric_store.set_gauge
-         Keeper_metrics.(to_string ToolUnderusedAllowed)
-         ~labels:[ ("keeper", keeper_name); ("tool", tool) ]
-         value)
-    available_tools
+    (float_of_int (List.length underused_tools))
 
 (** Default normalized entropy threshold.  Below this, the keeper is
     considered to be in an exploitation-only pattern.

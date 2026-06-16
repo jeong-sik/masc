@@ -1,0 +1,230 @@
+/* MASC Dashboard v2 — global theme bridge.
+ *
+ * Maps the legacy dashboard token ladder to the v5 Observatory dark-fantasy
+ * palette so existing components pick up new colors without a full rewrite.
+ * Paper theme remains opt-in via data-theme="paper".
+ *
+ * Source: /Users/dancer/Downloads/v2/_ds/masc-design-system-a925c77f-042a-40f5-ac15-0675a4a58d3f/ui_kits/dashboard/styles/base.css
+ *         /Users/dancer/Downloads/v2/_ds/masc-design-system-a925c77f-042a-40f5-ac15-0675a4a58d3f/colors_and_type.css
+ */
+
+:root,
+[data-theme="dark-fantasy"] {
+  /* v5 dashboard surfaces */
+  --bg-ink:        #0a0e18;
+  --bg-velvet:     #0f1524;
+  --bg-card:       #131a2a;
+  --bg-card-soft:  #161d30;
+  --bg-raised:     #1a2238;
+
+  --border-soft:   rgba(120, 140, 180, 0.09);
+  --border:        rgba(120, 140, 180, 0.13);
+  --border-strong: rgba(140, 160, 200, 0.18);
+
+  --text-bright:   #e8eef8;
+  --text-primary:  #b8c4dc;
+  --text-dim:      #5a6a88;
+  --text-faint:    #4a5a78;
+
+  --accent-brass:     #c4a265;
+  --accent-brass-dim: #5a4618;
+
+  --status-ok:    #5a7a3a;
+  --status-warn:  #a06a1a;
+  --status-bad:   #a01818;
+
+  /* Legacy surface stack → v2 */
+  --bg-0: var(--bg-ink);
+  --bg-1: var(--bg-velvet);
+  --bg-2: var(--bg-card);
+  --bg-3: var(--bg-card-soft);
+  --bg-4: var(--bg-raised);
+
+  --color-bg-0: var(--bg-ink);
+  --color-bg-1: var(--bg-velvet);
+  --color-bg-2: var(--bg-card);
+  --color-bg-3: var(--bg-card-soft);
+  --color-bg-4: var(--bg-raised);
+  --color-bg-page: var(--bg-ink);
+  --color-bg-surface: var(--bg-velvet);
+  --color-bg-panel-alt: var(--bg-card);
+  --color-bg-elevated: var(--bg-card-soft);
+  --color-bg-hover: var(--bg-raised);
+
+  /* Legacy hairlines → v2 */
+  --line-1: var(--border);
+  --line-2: var(--border-strong);
+  --line-3: var(--border-soft);
+
+  --color-line-1: var(--border);
+  --color-line-2: var(--border-strong);
+  --color-line-3: var(--border-soft);
+  --color-border-default: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-divider: var(--border-soft);
+
+  /* Legacy text → v2 */
+  --fg-1: var(--text-bright);
+  --fg-2: var(--text-primary);
+  --fg-3: var(--text-dim);
+  --fg-4: var(--text-faint);
+
+  --color-fg-1: var(--text-bright);
+  --color-fg-2: var(--text-primary);
+  --color-fg-3: var(--text-dim);
+  --color-fg-4: var(--text-faint);
+  --color-fg-primary: var(--text-bright);
+  --color-fg-secondary: var(--text-primary);
+  --color-fg-muted: var(--text-dim);
+  --color-fg-disabled: var(--text-faint);
+
+  /* Legacy brass → v2 */
+  --brass-1: var(--accent-brass);
+  --brass-2: #a08040;
+  --brass-3: var(--accent-brass-dim);
+  --brass-glow: 196 162 101;
+  --brass-soft: rgb(196 162 101 / .10);
+
+  --color-brass-1: var(--accent-brass);
+  --color-brass-2: #a08040;
+  --color-brass-3: var(--accent-brass-dim);
+  --color-brass-glow: var(--brass-glow);
+  --color-brass-soft: var(--brass-soft);
+  --color-brass-fg: var(--accent-brass);
+  --color-accent-fg: var(--accent-brass);
+  --color-accent-fg-dim: var(--accent-brass-dim);
+  --color-accent-glow: var(--brass-glow);
+  --accent-6: rgb(var(--brass-glow) / .06);
+  --accent-8: rgb(var(--brass-glow) / .08);
+  --accent-10: rgb(var(--brass-glow) / .10);
+  --accent-12: rgb(var(--brass-glow) / .12);
+  --accent-15: rgb(var(--brass-glow) / .15);
+  --accent-18: rgb(var(--brass-glow) / .18);
+  --accent-20: rgb(var(--brass-glow) / .20);
+  --accent-22: rgb(var(--brass-glow) / .22);
+  --accent-25: rgb(var(--brass-glow) / .25);
+  --accent-30: rgb(var(--brass-glow) / .30);
+  --accent-35: rgb(var(--brass-glow) / .35);
+  --accent-36: rgb(var(--brass-glow) / .36);
+  --accent-40: rgb(var(--brass-glow) / .40);
+  --accent-50: rgb(var(--brass-glow) / .50);
+  --color-accent: var(--accent-brass);
+  --color-accent-soft: var(--brass-soft);
+
+  /* Legacy status → v2 */
+  --ok: var(--status-ok);
+  --warn: var(--status-warn);
+  --err: var(--status-bad);
+  --ok-glow: 90 122 58;
+  --warn-glow: 160 106 26;
+  --err-glow: 160 24 24;
+
+  --color-ok: var(--status-ok);
+  --color-warn: var(--status-warn);
+  --color-err: var(--status-bad);
+  --color-status-ok: var(--status-ok);
+  --color-status-warn: var(--status-warn);
+  --color-status-err: var(--status-bad);
+  --color-ok-glow: var(--ok-glow);
+  --color-warn-glow: var(--warn-glow);
+  --color-err-glow: var(--err-glow);
+
+  /* Status soft/alpha slots */
+  --ok-soft: rgb(90 122 58 / .10);
+  --ok-6: rgb(90 122 58 / .06);
+  --ok-8: rgb(90 122 58 / .08);
+  --ok-10: rgb(90 122 58 / .10);
+  --ok-12: rgb(90 122 58 / .12);
+  --ok-20: rgb(90 122 58 / .20);
+  --ok-22: rgb(90 122 58 / .22);
+  --ok-25: rgb(90 122 58 / .25);
+  --ok-28: rgb(90 122 58 / .28);
+  --ok-30: rgb(90 122 58 / .30);
+  --ok-fg: #9abc7a;
+  --ok-border: rgb(90 122 58 / .35);
+
+  --warn-soft: rgb(160 106 26 / .12);
+  --warn-10: rgb(160 106 26 / .10);
+  --warn-12: rgb(160 106 26 / .12);
+  --warn-20: rgb(160 106 26 / .20);
+  --warn-22: rgb(160 106 26 / .22);
+  --warn-25: rgb(160 106 26 / .25);
+  --warn-30: rgb(160 106 26 / .30);
+  --warn-fg: #d49a3a;
+  --warn-bright: #e0a040;
+  --warn-border: rgb(160 106 26 / .35);
+
+  --err-soft: rgb(160 24 24 / .12);
+  --bad-soft: rgb(160 24 24 / .15);
+  --bad-6: rgb(160 24 24 / .06);
+  --bad-8: rgb(160 24 24 / .08);
+  --bad-10: rgb(160 24 24 / .10);
+  --bad-12: rgb(160 24 24 / .12);
+  --bad-20: rgb(160 24 24 / .20);
+  --bad-22: rgb(160 24 24 / .22);
+  --bad-25: rgb(160 24 24 / .25);
+  --bad-28: rgb(160 24 24 / .28);
+  --bad-30: rgb(160 24 24 / .30);
+  --err-fg: #d06060;
+  --bad-light: #e07070;
+  --err-border: rgb(160 24 24 / .40);
+
+  --color-ok-soft: var(--ok-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-err-soft: var(--err-soft);
+
+  /* Misc legacy slots */
+  --color-idle: #6a6a6a;
+  --color-stalled: #8a6aa0;
+  --color-info: #6a8eb0;
+  --color-scrollbar-thumb: #2a1f1a;
+  --color-scrollbar-thumb-hover: #3d2e22;
+
+  /* Legacy component tokens → v2 */
+  --text: var(--color-fg-primary);
+  --bg-subtle: var(--color-bg-elevated);
+  --border-subtle: var(--border-soft);
+  --color-border-subtle: var(--border-soft);
+  --surface-inset: var(--color-bg-page);
+  --input-border: var(--color-border-strong);
+  --input-bg: var(--color-bg-page);
+  --shadow-1: 0 1px 2px 0 rgb(0 0 0 / .18);
+  --shadow-panel: 0 1px 3px 0 rgb(0 0 0 / .18);
+  --elev-6-shadow: 0 18px 45px -6px rgb(0 0 0 / .35);
+
+  /* Legacy purple / stalled / paused → v2 warn/idle */
+  --purple: #9a7ab0;
+  --purple-12: rgb(154 122 176 / .12);
+  --purple-24: rgb(154 122 176 / .24);
+  --stalled-fg: #b090c8;
+  --paused: var(--status-warn);
+  --paused-10: var(--warn-10);
+  --paused-20: var(--warn-20);
+
+  /* Legacy gold → v2 brass */
+  --gold-8: rgb(196 162 101 / .08);
+  --gold-10: rgb(196 162 101 / .10);
+  --gold-15: rgb(196 162 101 / .15);
+
+  /* Card tokens used by unmigrated surfaces */
+  --color-card: var(--bg-card);
+  --color-card-border: var(--border);
+
+  /* Bad/error semantic aliases */
+  --color-bad: var(--bad);
+  --color-bad-fg: var(--bad-light);
+  --color-bad-soft: var(--bad-soft);
+  --bad-muted: rgb(var(--err-glow) / .25);
+
+  /* Warning / danger fg aliases */
+  --color-warning-fg: var(--warn-fg);
+  --color-danger-fg: var(--err-fg);
+
+  /* Text / accent aliases */
+  --color-text-disabled: var(--color-fg-disabled);
+  --color-accent-muted: var(--color-brass-2);
+  --track-section: var(--track-caps);
+
+  /* Form-fitting gold bright alias */
+  --ff-gold-bright: var(--color-accent-fg);
+}

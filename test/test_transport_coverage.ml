@@ -233,12 +233,12 @@ let test_request_with_params () =
   let req : Transport.request = {
     id = Some "req-002";
     method_name = "masc_start";
-    params = `Assoc [("agent_name", `String "agent_llm_a")];
+    params = `Assoc [("agent_name", `String "claude")];
     headers = [];
   } in
   let open Yojson.Safe.Util in
   let agent = req.params |> member "agent_name" |> to_string in
-  check string "param value" "agent_llm_a" agent
+  check string "param value" "claude" agent
 
 (* ============================================================
    response Tests

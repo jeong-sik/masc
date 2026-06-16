@@ -793,7 +793,7 @@ describe('getTraceSummary', () => {
             kind: 'lifecycle',
             sourceLane: 'oas',
             summary: 'LLM 요청',
-            detail: { durable_kind: 'llm_request', turn: 1, model: 'provider-h', input_tokens: 100 },
+            detail: { durable_kind: 'llm_request', turn: 1, model: 'qwen', input_tokens: 100 },
           },
           {
             id: 'r2',
@@ -802,7 +802,7 @@ describe('getTraceSummary', () => {
             kind: 'lifecycle',
             sourceLane: 'oas',
             summary: 'LLM 요청',
-            detail: { durable_kind: 'llm_request', turn: 2, model: 'provider-h', input_tokens: 200 },
+            detail: { durable_kind: 'llm_request', turn: 2, model: 'qwen', input_tokens: 200 },
           },
           {
             id: 'e1',

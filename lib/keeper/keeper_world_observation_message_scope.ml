@@ -34,8 +34,22 @@ let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 ;;
 
+(* RFC-0232 P1: the direct-line role is a closed sum, not a string label.
+   The projection has exactly three shapes (a tool row is shown as its call
+   name); [to_label] is the single place the display vocabulary lives, so the
+   renderer never re-derives semantics from a free string. *)
+type direct_line_role =
+  | User
+  | Assistant
+  | Tool_call
+
+let direct_line_role_to_label = function
+  | User -> "user"
+  | Assistant -> "assistant"
+  | Tool_call -> "tool_call"
+
 type recent_direct_line = {
-  role_label : string;
+  role : direct_line_role;
   speaker_label : string option;
   content : string;
 }
@@ -93,7 +107,7 @@ let recent_direct_conversation_of_messages
       match m.role with
       | Keeper_chat_store.Role.User ->
         Some
-          { role_label = "user"
+          { role = User
           ; speaker_label = Some (speaker_display m)
           ; content
           }
@@ -101,11 +115,14 @@ let recent_direct_conversation_of_messages
         (match m.kind with
          | Keeper_chat_store.Row_kind.Transport_failure -> None
          | Keeper_chat_store.Row_kind.Utterance ->
-           Some
-             { role_label = "assistant"
-             ; speaker_label = None
-             ; content
-             })
+           (match m.audio with
+            | Some _ -> None
+            | None ->
+              Some
+                { role = Assistant
+                ; speaker_label = None
+                ; content
+                }))
       | Keeper_chat_store.Role.Tool ->
         (match m.tool_call_name with
          | None -> None
@@ -114,7 +131,7 @@ let recent_direct_conversation_of_messages
            if name = "" then None
            else
              Some
-               { role_label = "tool_call"
+               { role = Tool_call
                ; speaker_label = None
                ; content = name
                }))
@@ -145,7 +162,8 @@ let render_recent_direct_conversation_context
         | None -> ""
         | Some value -> Printf.sprintf "/%s" value
       in
-      Printf.sprintf "- %s%s: %s" line.role_label speaker line.content
+      Printf.sprintf "- %s%s: %s"
+        (direct_line_role_to_label line.role) speaker line.content
     in
     String.concat "\n"
       ([

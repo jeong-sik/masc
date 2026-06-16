@@ -34,7 +34,6 @@ type t =
   | Memory_search
   | Memory_write
   | Search_files
-  | Stay_silent
   | Surface_read
   | Surface_post
   | Person_note_set
@@ -54,6 +53,9 @@ type t =
   | Voice_session_start
   | Voice_sessions
   | Voice_speak
+
+val all : t list
+(** All keeper tool-name variants. *)
 
 val to_string : t -> string
 val of_string : string -> t option

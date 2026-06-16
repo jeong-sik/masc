@@ -102,9 +102,9 @@ describe('isPlaceholderModel', () => {
   })
 
   it('returns false for real model names', () => {
-    expect(isPlaceholderModel('model-a-sonnet')).toBe(false)
-    expect(isPlaceholderModel('model-d')).toBe(false)
-    expect(isPlaceholderModel('cli-tool-d:auto')).toBe(false)
+    expect(isPlaceholderModel('claude-sonnet')).toBe(false)
+    expect(isPlaceholderModel('gpt')).toBe(false)
+    expect(isPlaceholderModel('claude-code:auto')).toBe(false)
   })
 
   it('is case-insensitive', () => {
@@ -122,7 +122,7 @@ describe('normalizeModelText', () => {
   })
 
   it('returns trimmed text for valid models', () => {
-    expect(normalizeModelText(' model-a-sonnet ')).toBe('model-a-sonnet')
+    expect(normalizeModelText(' claude-sonnet ')).toBe('claude-sonnet')
   })
 })
 
@@ -159,10 +159,10 @@ describe('buildFleetRows runtime labels', () => {
         keepalive_running: true,
         runtime_id: 'oas-keeper_unified',
         runtime_canonical: 'primary',
-        active_model_label: 'cli-tool-a:auto',
+        active_model_label: 'codex-cli:auto',
         trust: {
           execution_summary: {
-            provider_selected_model: 'provider-a:model-a-sonnet',
+            provider_selected_model: 'anthropic:claude-sonnet',
             provider_attempt_count: 2,
             provider_fallback_applied: true,
             runtime_outcome: 'passed_to_next_model',
@@ -181,7 +181,7 @@ describe('buildFleetRows runtime labels', () => {
             is_compaction: false,
             compaction_saved_tokens: 0,
             compaction_trigger: null,
-            model_used: 'provider-a:model-a-sonnet',
+            model_used: 'anthropic:claude-sonnet',
             cost_usd: 0,
             handoff_to_model: null,
             handoff_new_generation: null,
@@ -195,14 +195,14 @@ describe('buildFleetRows runtime labels', () => {
             wall_tokens_per_second: null,
             inference_telemetry: null,
             runtime_id: 'primary',
-            runtime_selected_model: 'provider-a:model-a-sonnet',
+            runtime_selected_model: 'anthropic:claude-sonnet',
             runtime_attempt_count: 2,
             runtime_outcome: 'passed_to_next_model',
             runtime_strategy: 'round_robin',
             fallback_applied: true,
             fallback_hops: 1,
-            fallback_from: 'provider-d:gpt-5.4',
-            fallback_to: 'provider-a:model-a-sonnet',
+            fallback_from: 'openai:gpt-5.4',
+            fallback_to: 'anthropic:claude-sonnet',
             fallback_reason: 'turn_timeout',
           },
         ],

@@ -50,8 +50,7 @@ let shard_base : shard =
   { name = "base"
   ; tools = base_tools
   ; read_only_tools =
-      [ "keeper_stay_silent"
-      ; "keeper_time_now"
+      [ "keeper_time_now"
       ; "keeper_context_status"
       ; "keeper_memory_search"
       ; "keeper_tools_list"

@@ -235,12 +235,6 @@ module RuntimeSaturationSignal : sig
 end
 
 
-(** {1 Runtime runtime overrides} *)
-
-module KeeperRuntimeProviderFilter : sig
-  val provider_allowlist : unit -> string list option
-end
-
 (** {1 Transient retry backoff} *)
 
 module KeeperRetryBackoff : sig

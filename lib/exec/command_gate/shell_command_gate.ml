@@ -389,35 +389,6 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
      | Nested_pipeline -> Error (`Too_complex Unsupported_nested_pipeline))
 ;;
 
-let gate_typed ~ir ~syntax_policy ~path_policy ~sandbox () : verdict =
-  (* Typed callers have already crossed their schema boundary, so this
-     entrypoint intentionally skips raw-string parsing while preserving
-     the same policy and verdict surface as [gate_raw]. *)
-  match parse_only_to_stages (PD.Parsed ir) with
-  | Error (`Cannot_parse reason) -> Cannot_parse { reason }
-  | Error (`Too_complex reason) -> Too_complex { reason }
-  | Ok stages -> apply_policy ~syntax_policy ~path_policy ~sandbox ~stages
-;;
-
-let gate_raw ~text ~syntax_policy ~path_policy ~sandbox () : verdict =
-  match Masc_exec_bash_parser.Bash.parse_string text with
-  | PD.Parsed ir -> gate_typed ~ir ~syntax_policy ~path_policy ~sandbox ()
-  | PD.Parse_error _ -> Cannot_parse { reason = Parse_error }
-  | PD.Parse_aborted reason -> Cannot_parse { reason = Parse_aborted reason }
-  | PD.Too_complex reason ->
-    Too_complex { reason = Unsupported_construct reason }
-;;
-
-let lower_typed_pipeline ~stages ~sandbox () : verdict =
-  match stages with
-  | [] -> Cannot_parse { reason = Parse_error }
-  | _ ->
-    let stages = stages_with_sandbox ~sandbox stages in
-    (match make_context ~stages with
-     | None -> Cannot_parse { reason = Parse_error }
-     | Some context -> Allow context)
-;;
-
 let verdict_tag = function
   | Allow _ -> "allow"
   | Reject _ -> "reject"
@@ -453,6 +424,74 @@ let too_complex_reason_tag = function
   | Unsupported_construct `Background -> "background"
   | Unsupported_construct `Redirect -> "redirect"
   | Unsupported_construct (`Unknown_construct _) -> "unknown_construct"
+;;
+
+let log_verdict ~source = function
+  | Allow _ -> ()
+  | Reject { context; reason; diagnostic } ->
+    Logs.warn (fun m ->
+      m
+        "Shell_command_gate.reject source=%s verdict=%s reason=%s diagnostic=%s stage_bins=%s"
+        source
+        (verdict_tag (Reject { context; reason; diagnostic }))
+        (reject_reason_tag reason)
+        diagnostic
+        (String.concat "," context.stage_bins))
+  | Cannot_parse { reason } ->
+    Logs.warn (fun m ->
+      m
+        "Shell_command_gate.cannot_parse source=%s verdict=%s reason=%s"
+        source
+        (verdict_tag (Cannot_parse { reason }))
+        (parse_reason_tag reason))
+  | Too_complex { reason } ->
+    Logs.warn (fun m ->
+      m
+        "Shell_command_gate.too_complex source=%s verdict=%s reason=%s"
+        source
+        (verdict_tag (Too_complex { reason }))
+        (too_complex_reason_tag reason))
+;;
+
+let gate_typed ~ir ~syntax_policy ~path_policy ~sandbox () : verdict =
+  (* Typed callers have already crossed their schema boundary, so this
+     entrypoint intentionally skips raw-string parsing while preserving
+     the same policy and verdict surface as [gate_raw]. *)
+  let verdict =
+    match parse_only_to_stages (PD.Parsed ir) with
+    | Error (`Cannot_parse reason) -> Cannot_parse { reason }
+    | Error (`Too_complex reason) -> Too_complex { reason }
+    | Ok stages -> apply_policy ~syntax_policy ~path_policy ~sandbox ~stages
+  in
+  log_verdict ~source:"typed" verdict;
+  verdict
+;;
+
+let gate_raw ~text ~syntax_policy ~path_policy ~sandbox () : verdict =
+  let verdict =
+    match Masc_exec_bash_parser.Bash.parse_string text with
+    | PD.Parsed ir -> gate_typed ~ir ~syntax_policy ~path_policy ~sandbox ()
+    | PD.Parse_error _ -> Cannot_parse { reason = Parse_error }
+    | PD.Parse_aborted reason -> Cannot_parse { reason = Parse_aborted reason }
+    | PD.Too_complex reason ->
+      Too_complex { reason = Unsupported_construct reason }
+  in
+  log_verdict ~source:"raw" verdict;
+  verdict
+;;
+
+let lower_typed_pipeline ~stages ~sandbox () : verdict =
+  let verdict =
+    match stages with
+    | [] -> Cannot_parse { reason = Parse_error }
+    | _ ->
+      let stages = stages_with_sandbox ~sandbox stages in
+      (match make_context ~stages with
+       | None -> Cannot_parse { reason = Parse_error }
+       | Some context -> Allow context)
+  in
+  log_verdict ~source:"typed_pipeline" verdict;
+  verdict
 ;;
 
 let stage_count context = List.length context.stage_bins

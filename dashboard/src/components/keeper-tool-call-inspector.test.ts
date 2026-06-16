@@ -1,5 +1,19 @@
 import { describe, it, expect } from 'vitest'
-import { blobMarkerOfOutput, formatInput } from './keeper-tool-call-inspector'
+import { blobMarkerOfOutput, deriveKeeperToolCallDossier, formatInput } from './keeper-tool-call-inspector'
+import type { ToolCallEntry } from '../api/dashboard'
+
+function toolCall(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
+  return {
+    ts: 1,
+    keeper: 'k',
+    tool: 'keeper_context_status',
+    input: {},
+    output: 'ok',
+    success: true,
+    duration_ms: 5,
+    ...overrides,
+  }
+}
 
 describe('formatInput', () => {
   it('returns dash for null', () => {
@@ -72,5 +86,29 @@ describe('blobMarkerOfOutput', () => {
   it('returns null for inline string outputs', () => {
     expect(blobMarkerOfOutput('{"ok":true}')).toBeNull()
     expect(blobMarkerOfOutput('')).toBeNull()
+  })
+})
+
+describe('deriveKeeperToolCallDossier semantic outcome', () => {
+  it('counts a transport-ok but semantic-fail call as failed', () => {
+    const dossier = deriveKeeperToolCallDossier(
+      [toolCall({ success: true, semantic_success: false, semantic_outcome: 'blocked' })],
+      null,
+    )
+    expect(dossier.headline).toBe('1 failed / 1')
+    expect(dossier.tone).toBe('bad')
+    const latest = dossier.cards.find(c => c.key === 'latest')
+    // The latest card surfaces the failure mode, not a bare 'ok'/'failed'.
+    expect(latest?.detail).toContain('blocked')
+    expect(latest?.tone).toBe('bad')
+  })
+
+  it('keeps a clean call clean and falls back to transport success', () => {
+    const dossier = deriveKeeperToolCallDossier(
+      [toolCall({ success: true })],
+      null,
+    )
+    expect(dossier.headline).toBe('1 calls clean')
+    expect(dossier.tone).toBe('ok')
   })
 })

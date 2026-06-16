@@ -8,6 +8,7 @@
 import type {
   Attribution,
   AttributionOutcome,
+  SSEAudioClip,
   SSEEvent,
   SSEEventType,
 } from '../types/sse'
@@ -154,6 +155,25 @@ function fail<T = never>(path: string | undefined, message: string): SafeParseRe
 
 import { isRecord } from '../lib/type-guards'
 
+function isOptionalString(value: unknown): boolean {
+  return value == null || typeof value === 'string'
+}
+
+function isOptionalNumber(value: unknown): boolean {
+  return value == null || (typeof value === 'number' && Number.isFinite(value))
+}
+
+export function isSSEAudioClip(value: unknown): value is SSEAudioClip {
+  if (!isRecord(value)) return false
+  if (typeof value.token !== 'string') return false
+  if (typeof value.mime !== 'string') return false
+  if (typeof value.message_text !== 'string') return false
+  if (!isOptionalString(value.audio_url)) return false
+  if (!isOptionalNumber(value.duration_sec)) return false
+  if (!isOptionalString(value.device_id)) return false
+  return true
+}
+
 function isIgnorableMcpNotification(value: unknown): boolean {
   if (!isRecord(value)) return false
   if (value.jsonrpc !== '2.0') return false
@@ -274,12 +294,15 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     }
   }
 
-  if (value.payload != null && !isRecord(value.payload)) {
+  if (value.payload != null && !isRecord(value.payload) && !value.type.startsWith('oas:')) {
     return fail('payload', 'Expected payload object')
   }
   if (value.attribution != null) {
     const attribution = AttributionSchema.safeParse(value.attribution)
     if (!attribution.success) return attribution
+  }
+  if (value.audio != null && !isSSEAudioClip(value.audio)) {
+    return fail('audio', 'Expected audio clip object')
   }
 
   return ok(value as unknown as SSEMessage)

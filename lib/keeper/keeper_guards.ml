@@ -223,7 +223,7 @@ let planner_alternative_for_gate ~stage ~tool_name =
   match stage with
   | "streak_gate" ->
     Printf.sprintf
-      "planner_alternative=\"stop retrying %s; choose a different tool, batch remaining work, or call keeper_stay_silent\""
+      "planner_alternative=\"stop retrying %s; choose a different tool, batch remaining work, or report no-work/blocker directly\""
       tool_name
   | "keeper_deny" ->
     "planner_alternative=\"choose an allowed replacement tool, change plan, or request operator approval\""
@@ -232,7 +232,7 @@ let planner_alternative_for_gate ~stage ~tool_name =
   | "destructive_guard" ->
     "planner_alternative=\"use a safe read-only command, narrow the path, or request operator approval\""
   | _ ->
-    "planner_alternative=\"change plan, choose a different tool, or call keeper_stay_silent\""
+    "planner_alternative=\"change plan, choose a different tool, or report no-work/blocker directly\""
 
 let log_gate_rejection ?reason_key ~keeper_name ~stage ~tool_name ~reason_code fmt =
   Printf.ksprintf
@@ -535,7 +535,7 @@ let streak_guard
       if new_count >= threshold then begin
         let reason_text =
           Printf.sprintf
-            "%s called %d times consecutively. Use a DIFFERENT tool or keeper_stay_silent"
+            "%s called %d times consecutively. Use a DIFFERENT tool or finish with a direct no-work/blocker response"
             tool_name new_count
         in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in

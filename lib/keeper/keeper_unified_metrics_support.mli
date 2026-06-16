@@ -102,11 +102,24 @@ val work_kind_of_turn_mode : turn_mode -> string
 val work_kind_of_json : Yojson.Safe.t -> string option
 
 val decision_channel_of_observation :
-  Keeper_world_observation.world_observation -> string
-
-val is_scheduled_autonomous_channel : string -> bool
+  Keeper_world_observation.world_observation ->
+  Keeper_world_observation.keeper_cycle_channel
 
 val is_scheduled_autonomous_cycle_of_observation :
   Keeper_world_observation.world_observation -> bool
 
 val response_requests_confirmation : string -> bool
+
+val select_proactive_preview :
+  previous:string ->
+  has_text:bool ->
+  is_visible_reply:bool ->
+  has_substantive_tools:bool ->
+  tool_names:string list ->
+  response_text:string ->
+  validated_evidence_preview:string option ->
+  string
+(** RFC-0232 scheduled-autonomous work preview, by precedence: visible model
+    text (only when [is_visible_reply], so the synthetic continuation notice on
+    a budget-exhausted turn is not shown as output) -> substantive tool calls ->
+    validated evidence -> [previous]. Pure for unit testing. *)

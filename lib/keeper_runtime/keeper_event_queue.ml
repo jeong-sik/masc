@@ -10,11 +10,29 @@ let urgency_rank = function
 
 type post_id = string
 
+type board_stimulus_kind =
+  | Post_created
+  | Comment_added
+
+type board_stimulus = {
+  kind : board_stimulus_kind;
+  author : string;
+  title : string;
+  content : string;
+  hearth : string option;
+  updated_at : float option;
+}
+
+type stimulus_payload =
+  | Board_signal of board_stimulus
+  | Bootstrap
+  | No_progress_recovery
+
 type stimulus = {
   post_id : post_id;
   urgency : urgency;
   arrived_at : float;
-  payload : string;
+  payload : stimulus_payload;
 }
 
 type t =
@@ -71,35 +89,19 @@ let sort_by_urgency (queue : t) : t =
        (fun a b -> Int.compare (urgency_rank a.urgency) (urgency_rank b.urgency))
   |> of_list
 
-type stimulus_class =
-  | Board_signal
-  | Bootstrap
-  | Stay_silent_recovery
-  | Unsupported of string
+let payload_kind_label = function
+  | Board_signal _ -> "board_signal"
+  | Bootstrap -> "bootstrap"
+  | No_progress_recovery -> "no_progress_recovery"
 
-let classify (s : stimulus) : stimulus_class =
-  let has_prefix prefix =
-    let payload_len = String.length s.payload in
-    let prefix_len = String.length prefix in
-    payload_len >= prefix_len
-    && String.equal (String.sub s.payload 0 prefix_len) prefix
-  in
-  if String.equal s.payload "Keeper bootstrap signal" then Bootstrap
-  else if has_prefix "{\"source\":\"stay_silent_recovery\"" then
-    Stay_silent_recovery
-  (* Board signals carry JSON with "source":"board_signal". Lightweight
-     prefix check avoids a full Yojson parse in the data layer. *)
-  else if has_prefix "{\"source\":\"board_signal\"" then Board_signal
-  else
-    Unsupported
-      (String.sub s.payload 0 (min 40 (String.length s.payload)))
+let is_board_signal = function
+  | Board_signal _ -> true
+  | Bootstrap | No_progress_recovery -> false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
   let now = Unix.gettimeofday () in
   let is_board_in_window s =
-    match classify s with
-    | Board_signal -> Float.abs (now -. s.arrived_at) <= window_sec
-    | _ -> false
+    is_board_signal s.payload && Float.abs (now -. s.arrived_at) <= window_sec
   in
   let board, rest = List.partition is_board_in_window (to_list queue) in
   (to_list (sort_by_urgency (of_list board)), of_list rest)

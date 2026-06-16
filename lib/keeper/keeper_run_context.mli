@@ -26,10 +26,6 @@ type run_context =
   ; receipt_started_at : string
   ; config_root : string
   ; runtime_config_path : string option
-  ; gemini_mcp_disabled : bool
-  ; approval_mode_effective : string option
-  ; approval_mode_derived : bool
-  ; keeper_oas_context : Keeper_types_profile.keeper_oas_context
   }
 
 val prepare_run_context :

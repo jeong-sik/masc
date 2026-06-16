@@ -83,7 +83,7 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
   const open = pathsExpanded.value
   return html`
     <${SurfaceCard}
-      class="mb-3 !border-[var(--color-border-default)] !bg-[var(--color-bg-surface)]"
+      class="mb-3 !border-[var(--color-border-default)] !bg-[var(--color-bg-surface)] v2-connector-paths-strip"
       data-panel="connector-paths-strip"
     >
       <button

@@ -1906,12 +1906,12 @@
       },
       "targets": [
         {
-          "expr": "masc_keeper_stay_silent_streak{keeper=~\"$keeper\"}",
+          "expr": "masc_keeper_no_progress_streak{keeper=~\"$keeper\"}",
           "legendFormat": "{{keeper}}",
           "refId": "A"
         }
       ],
-      "title": "Stay Silent Streak",
+      "title": "No Progress Streak",
       "transparent": true,
       "type": "stat"
     },

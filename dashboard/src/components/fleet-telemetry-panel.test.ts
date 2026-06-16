@@ -28,7 +28,7 @@ const executionResponse = {
       total_turns: 9,
       last_latency_ms: 980,
       last_activity_ago_s: 320,
-      last_model_used: 'provider-k-5',
+      last_model_used: 'glm-5',
       recent_tool_names: [],
     },
   ],
@@ -466,13 +466,13 @@ describe('FleetTelemetryPanel', () => {
           tool_call_count: 3,
           top_tools: [
             { tool: 'masc_status', count: 2 },
-            { tool: 'keeper_stay_silent', count: 1 },
+            { tool: 'keeper_board_post', count: 1 },
           ],
         },
         metrics_series: [
           {
             ...metricSeriesPoint,
-            model_used: 'provider-k-5.1',
+            model_used: 'glm-5.1',
           },
         ],
       },
@@ -490,7 +490,7 @@ describe('FleetTelemetryPanel', () => {
       tool_calls: 3,
       tool_activity_known: true,
     })
-    expect(rows[0]?.recent_tools).toEqual(['masc_status', 'keeper_stay_silent'])
+    expect(rows[0]?.recent_tools).toEqual(['masc_status', 'keeper_board_post'])
   })
 
   it('redacts display model and uses freshest keeper activity helpers for fleet rows', async () => {
@@ -700,7 +700,7 @@ describe('FleetTelemetryPanel', () => {
           metrics_series: [
             {
               ...metricSeriesPoint,
-              model_used: 'provider-k-5.1',
+              model_used: 'glm-5.1',
             },
           ],
         },
@@ -722,7 +722,7 @@ describe('FleetTelemetryPanel', () => {
 
     expect(container.textContent).toContain('3 tool calls')
     expect(container.textContent).not.toContain('최근 도구 기록 없음')
-    expect(container.textContent).not.toContain('provider-k-5.1')
+    expect(container.textContent).not.toContain('glm-5.1')
   })
 
   it('shows partial telemetry warnings without treating tool quality as runtime state', async () => {

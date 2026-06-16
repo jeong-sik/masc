@@ -297,17 +297,6 @@ let synonyms : (string * string list) list =
       ; "tool for"
       ; "which tool"
       ] )
-  ; ( "keeper_stay_silent"
-    , [ "do nothing"
-      ; "skip turn"
-      ; "no action"
-      ; "stay quiet"
-      ; "no response"
-      ; "silent"
-      ; "침묵"
-      ; "대기"
-      ; "아무것도 안함"
-      ] )
   ; ( "keeper_tasks_audit"
     , [ "audit tasks"
       ; "orphaned tasks"

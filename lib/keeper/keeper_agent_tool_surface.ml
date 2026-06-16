@@ -38,9 +38,6 @@ type tool_surface_metrics =
   { turn_lane : turn_lane
   ; config_root : string
   ; runtime_config_path : string option
-  ; gemini_mcp_disabled : bool
-  ; approval_mode_effective : string option
-  ; approval_mode_derived : bool
   }
 
 type turn_affordance =
@@ -185,7 +182,6 @@ let tool_search_alias_entries =
   ; "keeper_board_stats", "게시판 통계 활동 참여 게시글수"
   ; "keeper_board_curation_read", "게시판 AI 큐레이션 추천순서 하이라이트"
   ; "keeper_board_curation_submit", "게시판 AI 큐레이션 요약 태그 답변매칭 건강도 제출"
-  ; "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기"
   ; "keeper_tool_search", "도구 검색 발견 찾기 어떤도구"
   ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
   ; "tool_read_file", "파일 읽기 소스코드 설정"

@@ -128,6 +128,8 @@ export async function fetchLogs(opts?: {
   level?: string
   module?: string
   since_seq?: number
+  category?: string
+  exclude_category?: string
 }): Promise<LogsResponse> {
   const params = new URLSearchParams()
   if (opts?.limit) params.set('limit', String(opts.limit))
@@ -136,6 +138,8 @@ export async function fetchLogs(opts?: {
   if (typeof opts?.since_seq === 'number' && opts.since_seq >= 0) {
     params.set('since_seq', String(opts.since_seq))
   }
+  if (opts?.category) params.set('category', opts.category)
+  if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)
   const qs = params.toString()
   const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
   return parseLogsResponse(raw)
@@ -590,6 +594,9 @@ export interface DashboardRuntimeProvidersResponse {
     default_runtime_id?: string | null
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
+  // Resolved filesystem path of the runtime.toml the server actually loaded
+  // (Runtime.config_path); answers "which config is live" in the monitor.
+  config_path?: string | null
 }
 
 export interface BucketMetric {
@@ -760,6 +767,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
     providers: asRecordArray(raw.providers)
       .map(decodeRuntimeProviderSnapshot)
       .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
+    config_path: asNullableString(raw.config_path),
   }
 }
 
@@ -983,6 +991,11 @@ export interface KeeperDecision {
   tool: string | null
   duration_ms: number | null
   match_count: number | null
+  // Closed-sum terminal cause of the turn (completed / api_error /
+  // runtime_exhausted / tool_contract / required_tool_use_unsatisfied),
+  // computed by dashboard_http_keeper_feeds.ml; the table can only show the
+  // coarse `outcome` without it.
+  terminal_reason_code: string | null
 }
 
 export interface KeeperDecisionContext {
@@ -1052,6 +1065,7 @@ function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
     tool: asNullableString(raw.tool),
     duration_ms: asNumber(raw.duration_ms) ?? null,
     match_count: asNumber(raw.match_count) ?? null,
+    terminal_reason_code: asNullableString(raw.terminal_reason_code),
   }
 }
 
@@ -1251,6 +1265,7 @@ function decodeGoalKeeperTrustLatestEvent(raw: unknown): GoalKeeperTrustLatestEv
     summary,
     severity,
     next_human_action: asNullableString(raw.next_human_action),
+    trace_id: asNullableString(raw.trace_id),
   }
 }
 
@@ -1269,6 +1284,7 @@ function decodeGoalKeeperTrustApprovalState(raw: unknown): GoalKeeperTrustApprov
           blocker_class: asNullableString(pendingFirst.blocker_class),
         }
       : null,
+    latest_event_at: asNullableString(raw.latest_event_at),
   }
 }
 
@@ -1535,7 +1551,6 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
     sandbox_profile: sandboxProfile,
     network_mode: networkMode,
     runtime_id: runtimeName,
-    approval_profile: asNullableString(raw.approval_profile),
     runtime_outcome: asNullableString(raw.runtime_outcome),
     latest_execution_outcome: asNullableString(raw.latest_execution_outcome),
     latest_execution_at: asNullableString(raw.latest_execution_at),
@@ -1660,12 +1675,49 @@ export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
   registered_count: number
 }
 
+export interface DashboardScheduledAutomationFsm {
+  state: string
+  active_count: number
+  terminal_count: number
+  next_due_at?: string | null
+}
+
+export interface DashboardScheduledAutomationRequest {
+  schedule_id: string
+  status: string
+  risk_class: string
+  approval_required: boolean
+  source: string
+  requested_at?: number
+  requested_at_iso?: string
+  due_at?: number
+  due_at_iso?: string
+  expires_at?: number | null
+  expires_at_iso?: string | null
+  payload_digest?: string
+  payload_kind?: string | null
+}
+
+export interface DashboardScheduledAutomation {
+  schema?: string
+  source?: string
+  generated_at?: string
+  request_count: number
+  request_limit: number
+  truncated: boolean
+  counts: Record<string, number>
+  derived_counts?: Record<string, number>
+  fsm: DashboardScheduledAutomationFsm
+  requests: DashboardScheduledAutomationRequest[]
+}
+
 export interface DashboardToolsResponse {
   generated_at?: string
   config_resolution?: DashboardConfigResolution
   runtime_resolution?: DashboardRuntimeResolution
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
+  scheduled_automation?: DashboardScheduledAutomation
 }
 
 export type {
@@ -2335,6 +2387,9 @@ export type TelemetryFreshnessMetadata = {
   exists?: boolean
   coverage_gaps?: TelemetryCoverageGap[]
   coverage_gap_count?: number
+  // Count of gaps not yet recovered (source latest_ts < gap ts), distinct from
+  // the total coverage_gap_count — the actionable "still failing" number.
+  active_coverage_gap_count?: number
 }
 
 export type DashboardSurfaceEnvelope = {
@@ -2446,6 +2501,7 @@ function decodeTelemetryFreshnessMetadata(raw: Record<string, unknown>): Telemet
     exists: asBoolean(raw.exists),
     coverage_gaps: coverageGaps,
     coverage_gap_count: asNumber(raw.coverage_gap_count, coverageGaps.length),
+    active_coverage_gap_count: asNumber(raw.active_coverage_gap_count),
   }
 }
 
@@ -2550,6 +2606,25 @@ export type ToolCallEntry = {
   lane?: string
   // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
   execution_id?: string
+  // RFC-0233 PR-2: provider call id (oas-event join key). Equals the chat tool
+  // row's tool_call_id for the same execution, so the chat ToolCallBubble can
+  // join this entry's output onto the transcript. Absent when the call carried
+  // no provider id (synthesised tc-<position> rows) or on pre-PR-2 logs.
+  tool_use_id?: string
+  // Parsed-output failure mode, distinct from the transport `success` above
+  // (keeper_tool_call_log.ml semantic_outcome_of_output): success / no_match /
+  // partial / blocked / timeout / runtime_error / policy_denied /
+  // structured_error / tool_failure. Left open-string for forward-compat — the
+  // backend can mint a new outcome ahead of the dashboard; the renderer maps
+  // known values and shows the raw label otherwise.
+  semantic_outcome?: string
+  // Whether the parsed output signals success. A call can be transport
+  // success=true while semantic_success=false (e.g. blocked/timeout), which the
+  // binary `success` flag alone renders as green/ok.
+  semantic_success?: boolean
+  // Goal id(s) this call was attributed to (conditional on the row carrying
+  // them), for goal-scoped drill-down alongside task_id/turn.
+  goal_ids?: string[]
 }
 
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
@@ -2601,6 +2676,10 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
     execution_id: asString(raw.execution_id),
+    tool_use_id: asString(raw.tool_use_id),
+    semantic_outcome: asString(raw.semantic_outcome),
+    semantic_success: asBoolean(raw.semantic_success),
+    goal_ids: asStringArray(raw.goal_ids),
   }
 }
 
@@ -2669,11 +2748,52 @@ export type TurnRecordRow = {
   diff_vs_prev: TurnBlockDiff | null
 }
 
+export type MemoryOsEpisodeSummary = {
+  trace_id: string
+  generation: number
+  created_at: number
+  created_at_iso: string | null
+  valid_until: number | null
+  valid_until_iso: string | null
+  current: boolean
+  terminal_marker: string | null
+  claim_count: number
+  summary: string
+}
+
+export type MemoryOsTurnRecordSnapshot = {
+  schema: string
+  keeper: string
+  source: string
+  producer: string
+  facts_store: string
+  episodes_store: string
+  recall_enabled: boolean
+  now: number | null
+  now_iso: string | null
+  read_errors: { scope: string; error: string }[]
+  episodes: {
+    tail_limit: number
+    shown: number
+    current: number
+    expired: number
+    terminal_markers: number
+    items: MemoryOsEpisodeSummary[]
+  }
+  facts: {
+    tail_limit: number
+    shown: number
+    current: number
+    expired: number
+  }
+}
+
 export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   keeper: string
   count: number
   // malformed JSONL rows the server refused to decode (never repaired)
   skipped_rows: number
+  memory_os: MemoryOsTurnRecordSnapshot | null
   entries: TurnRecordRow[]
 }
 
@@ -2747,6 +2867,85 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
   }
 }
 
+function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
+  if (!isRecord(raw)) return null
+  const trace_id = asString(raw.trace_id)
+  const generation = asNumber(raw.generation)
+  const created_at = asNumber(raw.created_at)
+  const summary = asString(raw.summary)
+  if (!trace_id || generation == null || created_at == null || !summary) return null
+  return {
+    trace_id,
+    generation,
+    created_at,
+    created_at_iso: asNullableString(raw.created_at_iso),
+    valid_until: asNumber(raw.valid_until) ?? null,
+    valid_until_iso: asNullableString(raw.valid_until_iso),
+    current: asBoolean(raw.current, true) ?? true,
+    terminal_marker: asNullableString(raw.terminal_marker),
+    claim_count: asNumber(raw.claim_count, 0) ?? 0,
+    summary,
+  }
+}
+
+function decodeMemoryOsCounts(raw: unknown): {
+  tail_limit: number
+  shown: number
+  current: number
+  expired: number
+} | null {
+  if (!isRecord(raw)) return null
+  return {
+    tail_limit: asNumber(raw.tail_limit, 0) ?? 0,
+    shown: asNumber(raw.shown, 0) ?? 0,
+    current: asNumber(raw.current, 0) ?? 0,
+    expired: asNumber(raw.expired, 0) ?? 0,
+  }
+}
+
+function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null {
+  if (!isRecord(raw)) return null
+  const schema = asString(raw.schema)
+  const keeper = asString(raw.keeper)
+  const source = asString(raw.source)
+  const producer = asString(raw.producer)
+  const facts_store = asString(raw.facts_store)
+  const episodes_store = asString(raw.episodes_store)
+  const episodesRaw = isRecord(raw.episodes) ? raw.episodes : null
+  const facts = decodeMemoryOsCounts(raw.facts)
+  if (!schema || !keeper || !source || !producer || !facts_store || !episodes_store || !episodesRaw || !facts) {
+    return null
+  }
+  const episodesCounts = decodeMemoryOsCounts(episodesRaw)
+  if (!episodesCounts) return null
+  return {
+    schema,
+    keeper,
+    source,
+    producer,
+    facts_store,
+    episodes_store,
+    recall_enabled: asBoolean(raw.recall_enabled, true) ?? true,
+    now: asNumber(raw.now) ?? null,
+    now_iso: asNullableString(raw.now_iso),
+    read_errors: asRecordArray(raw.read_errors)
+      .map((item) => {
+        const scope = asString(item.scope)
+        const error = asString(item.error)
+        return scope && error ? { scope, error } : null
+      })
+      .filter((item): item is { scope: string; error: string } => item !== null),
+    episodes: {
+      ...episodesCounts,
+      terminal_markers: asNumber(episodesRaw.terminal_markers, 0) ?? 0,
+      items: asRecordArray(episodesRaw.items)
+        .map(decodeMemoryOsEpisode)
+        .filter((item): item is MemoryOsEpisodeSummary => item !== null),
+    },
+    facts,
+  }
+}
+
 function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   if (!isRecord(raw)) return null
   const keeper = asString(raw.keeper)
@@ -2756,6 +2955,7 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     keeper,
     count: asNumber(raw.count, 0),
     skipped_rows: asNumber(raw.skipped_rows, 0),
+    memory_os: decodeMemoryOsSnapshot(raw.memory_os),
     entries: asRecordArray(raw.entries)
       .map(decodeTurnRecordRow)
       .filter((row): row is TurnRecordRow => row !== null),

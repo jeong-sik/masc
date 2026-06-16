@@ -6,7 +6,13 @@ val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string
 val next_model_hint_of_meta : keeper_meta -> string option
 val string_of_fiber_health : fiber_health -> string
-val agent_status_text : Yojson.Safe.t -> string
+(** Parse the "status" field of an agent-status snapshot blob (produced by
+    {!parse_agent_status}) into the closed [Masc_domain.agent_status] ADT.
+    Returns [None] when the field is absent or not one of the four canonical
+    lowercase labels, so callers classify the closed domain exhaustively
+    instead of comparing string literals. *)
+val agent_runtime_status_opt : Yojson.Safe.t -> Masc_domain.agent_status option
+
 val agent_runtime_has_live_signal : Yojson.Safe.t -> bool
 val parse_agent_status : Workspace.config -> agent_name:string -> Yojson.Safe.t
 val keeper_reply_snapshot_of_history :
@@ -47,6 +53,23 @@ val keeper_health_state :
   now_ts:float ->
   unit ->
   keeper_health
+
+(** Keeper display status derived from (keeper_health x agent_status). Closed so
+    consumers that classify it match exhaustively. "paused" is a control-plane
+    override applied above this layer, not a member of this domain. *)
+type surface_status =
+  | Surface_active
+  | Surface_busy
+  | Surface_listening
+  | Surface_inactive
+  | Surface_offline
+  | Surface_idle
+
+val surface_status_to_string : surface_status -> string
+
+(** Parse a wire/display status string into {!surface_status}; [None] when the
+    value is outside the six labels (e.g. "paused" or drift). *)
+val surface_status_of_string_opt : string -> surface_status option
 
 val keeper_surface_status :
   agent_status:Yojson.Safe.t ->

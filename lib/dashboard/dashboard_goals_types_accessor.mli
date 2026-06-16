@@ -51,7 +51,6 @@ val link_source_of_values : string list -> string
 val receipt_error_kind : Yojson.Safe.t -> string option
 val receipt_error_message : Yojson.Safe.t -> string option
 val receipt_sandbox_kind : Yojson.Safe.t -> string option
-val receipt_approval_profile : Yojson.Safe.t -> string option
 val receipt_runtime_id : Yojson.Safe.t -> string option
 val receipt_runtime_outcome : Yojson.Safe.t -> string option
 val receipt_runtime_fallback_applied : Yojson.Safe.t -> bool

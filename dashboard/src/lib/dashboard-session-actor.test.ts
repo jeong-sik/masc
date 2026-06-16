@@ -25,15 +25,15 @@ describe('dashboard session actor runtime', () => {
   it('prefers the canonical actor once the shell has validated it', () => {
     window.history.replaceState({}, '', '/?agent=local-hint')
 
-    expect(setCanonicalDashboardActor('agent-code')).toBe('agent-code')
-    expect(currentCanonicalDashboardActor()).toBe('agent-code')
+    expect(setCanonicalDashboardActor('codex')).toBe('codex')
+    expect(currentCanonicalDashboardActor()).toBe('codex')
     expect(currentDashboardActorHint()).toBe('local-hint')
-    expect(currentDashboardActorName()).toBe('agent-code')
+    expect(currentDashboardActorName()).toBe('codex')
   })
 
   it('clears the canonical actor when asked', () => {
     window.history.replaceState({}, '', '/')
-    setCanonicalDashboardActor('agent-code')
+    setCanonicalDashboardActor('codex')
     setCanonicalDashboardActor(null)
 
     expect(currentCanonicalDashboardActor()).toBeNull()

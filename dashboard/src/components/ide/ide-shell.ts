@@ -641,7 +641,7 @@ export function IdeShell() {
 
   return html`
     <section
-      class="ide-plane-shell"
+      class="ide-plane-shell v2-ide-surface"
       role="region"
       aria-label="Code IDE shell"
       data-terminal-open=${terminalOpen ? 'true' : 'false'}
@@ -698,7 +698,7 @@ export function IdeShell() {
         class="ide-plane-grid"
         role="presentation"
       >
-        <div class="ide-plane-tree">
+        <div class="ide-plane-tree v2-ide-panel">
           <${IdeExplorer}
             fileTreeStore=${workspaceStore.fileTreeStore}
             workspaceSource=${workspaceStore.workspaceSource}
@@ -711,7 +711,7 @@ export function IdeShell() {
           />
         </div>
         <div
-          class="ide-plane-editor"
+          class="ide-plane-editor v2-ide-panel"
         >
           <${IdeEditor}
             activeView=${activeView}
@@ -731,7 +731,7 @@ export function IdeShell() {
           ? null
           : html`
             <div
-              class="ide-plane-conversation"
+              class="ide-plane-conversation v2-ide-panel"
               data-testid="ide-right-rail"
             >
               <div
@@ -754,7 +754,7 @@ export function IdeShell() {
         ${railsCollapsed
           ? null
           : html`
-            <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
+            <div class="ide-plane-activity v2-ide-panel" style=${{ minHeight: 0 }}>
               <${IdeActivityPanel}
                 activeFile=${activeFilePath}
                 annotations=${annotations}

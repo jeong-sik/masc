@@ -35,11 +35,12 @@ val runtime_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
 (** {1 Provider resolution} *)
 
 val resolve_runtime_providers :
-  ?provider_filter:string list ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   runtime_id:string -> unit ->
   (Llm_provider.Provider_config.t list, string) result
-(** Resolve runtime provider configs via MASC Runtime_config. *)
+(** Resolve the requested runtime's provider config via the RFC-0207 runtime
+    catalog. An empty [runtime_id] resolves the default runtime; a non-empty
+    id that is not a configured runtime returns [Error] — never the default
+    runtime (no Unknown→Permissive substitution, RFC-0206 §2.1; audit F8). *)
 
 (** {1 Keeper name translation (injected)} *)
 
@@ -74,11 +75,11 @@ val runtime_mcp_policy_for_provider :
 (** Normalise a runtime MCP policy for a specific provider, injecting the
     keeper's agent name when applicable. *)
 
-val cli_tool_a_cannot_carry_keeper_bound_runtime_mcp :
+val codex_cli_cannot_carry_keeper_bound_runtime_mcp :
   keeper_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   bool
-(** [true] when the provider is cli_tool_a and the policy includes tools that
-    require a bound-actor (keeper-scoped) runtime MCP — cli_tool_a cannot
+(** [true] when the provider is codex_cli and the policy includes tools that
+    require a bound-actor (keeper-scoped) runtime MCP — codex_cli cannot
     carry these across its CLI subprocess boundary. *)

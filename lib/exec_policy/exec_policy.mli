@@ -53,6 +53,15 @@ val path_argument_values : string -> string list -> string list
 
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 
+val existing_sibling_dirs_hint : ?workdir:string -> string -> string option
+(** For a required directory [path] that is missing on disk, enumerate the
+    real child-directory names under its nearest existing ancestor (read via
+    [Sys.readdir]) and render them as a [Cwd_not_directory] hint. Grounds
+    caller self-correction in filesystem truth (e.g. a stale
+    ["repos/masc-mcp"] yields the real ["repos/"] entries) without a rename
+    table or any substring/similarity matching. [None] when no existing
+    ancestor directory has child directories to surface. *)
+
 val validate_shell_ir_paths :
   ?keeper_id:string ->
   ?base_path:string ->

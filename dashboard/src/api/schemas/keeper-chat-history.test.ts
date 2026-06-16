@@ -106,6 +106,19 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.speaker_authority).toBeUndefined()
   })
 
+  it('passes the R3 producer-assigned id through when present', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({ id: 'msg-0001700000000000-0' }),
+    )
+    expect(out?.id).toBe('msg-0001700000000000-0')
+  })
+
+  it('accepts rows without an id (pre-R3 backend during the deploy window)', () => {
+    const out = safeParseKeeperChatHistoryMessage(validMessage())
+    expect(out).not.toBeNull()
+    expect(out?.id).toBeUndefined()
+  })
+
   it('composes in a filter chain — drops garbage entries silently', () => {
     const raw: unknown[] = [
       validMessage(),
@@ -120,5 +133,39 @@ describe('safeParseKeeperChatHistoryMessage', () => {
       .filter((m): m is KeeperChatHistoryMessage => m !== null)
     expect(cleaned).toHaveLength(3)
     expect(cleaned.map(m => m.role)).toEqual(['user', 'assistant', 'system'])
+  })
+
+  it('passes RFC-0235 audio clips through (snake_case history shape)', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        audio: {
+          token: 'clip-123',
+          audio_url: 'https://cdn.example/voice/clip-123.mp3',
+          mime: 'audio/mpeg',
+          duration_sec: 12.34,
+          message_text: 'hello',
+          device_id: ' living-room',
+        },
+      }),
+    )
+    expect(out?.audio).toEqual({
+      token: 'clip-123',
+      audio_url: 'https://cdn.example/voice/clip-123.mp3',
+      mime: 'audio/mpeg',
+      duration_sec: 12.34,
+      message_text: 'hello',
+      device_id: ' living-room',
+    })
+  })
+
+  it('passes malformed audio objects through so the consumer can validate safely', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({ audio: { token: 'only-token' } }),
+    )
+    expect(out).not.toBeNull()
+    // The boundary keeps the raw object; normalization filters out invalid
+    // clips without dropping the whole history row.
+    expect(out?.audio).toEqual({ token: 'only-token' })
   })
 })

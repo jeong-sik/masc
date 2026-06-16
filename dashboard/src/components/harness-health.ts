@@ -266,7 +266,7 @@ export function HarnessHealth() {
   } else if (data) {
     overviewContent = html`
       <div class="space-y-4">
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
+        <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div class="max-w-3xl">
               <${SectionCap}>keeper 장기 실행 중 평가/압축/교체가 정상인지 감시합니다<//>
@@ -276,7 +276,7 @@ export function HarnessHealth() {
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
+                class="v2-lab-action rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => { void loadHarnessHealth() }}
               >새로고침</button>
             </div>
@@ -308,7 +308,7 @@ export function HarnessHealth() {
           </div>
         </div>
 
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
+        <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
           ${data.scope_note}
         </div>
 
@@ -318,12 +318,12 @@ export function HarnessHealth() {
   }
 
   return html`
-    <div class="space-y-4">
-      <${SectionCard} label="안전 감시" class="section">
+    <div class="v2-lab-surface flex flex-col gap-4">
+      <${SectionCard} label="안전 감시" class="section v2-lab-panel">
         ${overviewContent}
       <//>
 
-      <${SectionCard} label="감시 흐름도" class="section">
+      <${SectionCard} label="감시 흐름도" class="section v2-lab-panel">
         ${!data || !flowSource ? html`
           <${EmptySignal} text="감시 흐름 데이터가 없습니다." />
         ` : html`
@@ -344,14 +344,14 @@ export function HarnessHealth() {
             />
 
             ${fallbackPct > 80 ? html`
-              <div class="rounded-[var(--r-1)] border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
+              <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--warn-30)] bg-[var(--warn-12)] px-4 py-3">
                 <div class="mb-1 text-sm font-medium text-[var(--color-status-warn)]">평가 모델 미연결</div>
                 <div class="text-xs text-[var(--color-status-warn)]">
                   전체 ${cal.total_verdicts}건 중 ${fallbackCount}건이 대체 처리됐습니다.
                   지금은 평가 모델보다 기본 규칙이 더 많이 작동합니다.
                 </div>
                 ${fallbackReasons.length > 0 ? html`
-                  <details class="mt-2">
+                  <details class="v2-lab-detail mt-2">
                     <summary class="cursor-pointer text-xs text-[var(--color-status-warn)] opacity-70">최근 에러 (${fallbackReasons.length}건)</summary>
                     <div class="mt-1 space-y-1">
                       ${fallbackReasons.map(reason => html`
@@ -379,7 +379,7 @@ export function HarnessHealth() {
               ] satisfies KpiStripIslandData['cells']}
             />
 
-            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
+            <div class="v2-lab-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
               인간 라벨 ${cal.labeled_count}건이 calibration ground truth입니다. 값이 0이면 runtime health는 볼 수 있어도 evaluator accuracy는 아직 검증되지 않았습니다.
             </div>
 

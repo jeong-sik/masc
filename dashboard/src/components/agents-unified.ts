@@ -83,7 +83,7 @@ export function AgentsUnified() {
   }))
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <${FilterChips}
         chips=${viewChips}
         value=${currentView}
@@ -126,7 +126,7 @@ export function AgentsUnified() {
 function FleetAndFsmHubPanel() {
   const [pinned, setPinned] = useState<string | null>(null)
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-panel flex flex-col gap-4">
       <${FleetFsmMatrix} onSelectKeeper=${(name: string) => setPinned(name)} />
       <${CompositeFsmFlowchart} />
       <${FsmHub} selectedName=${pinned} />

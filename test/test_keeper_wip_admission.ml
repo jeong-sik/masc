@@ -1,6 +1,8 @@
 open Alcotest
 
 module Admission = Masc.Keeper_wip_admission
+module Task_runtime = Masc.Keeper_tool_task_runtime
+module U = Yojson.Safe.Util
 
 let scope ?goal_id ?(category = Admission.Fix) repo =
   { Admission.repo; goal_id; category }
@@ -63,6 +65,7 @@ let test_rejects_goal_cap () =
   | Reject rejection ->
     check string "reason" "goal_cap"
       (Admission.reject_reason_to_string rejection.reason);
+    check string "axis" "goal" (Admission.reject_reason_axis rejection.reason);
     check string "scope key" "goal:goal-a" rejection.scope_key
 
 let test_rejects_category_cap_across_repos () =
@@ -103,6 +106,8 @@ let test_decision_json_rejects_with_scope_key () =
   let json = Admission.decision_to_json decision in
   check string "reason" "global_cap"
     Yojson.Safe.Util.(json |> member "reason" |> to_string);
+  check string "axis" "global"
+    Yojson.Safe.Util.(json |> member "axis" |> to_string);
   check string "scope key" "global"
     Yojson.Safe.Util.(json |> member "scope_key" |> to_string)
 
@@ -117,9 +122,107 @@ let test_scope_of_task_uses_repo_goal_and_title_category () =
          ~title:"refactor(keeper): split claim gate"
          "task-001")
   in
-  check string "repo" "masc" scope.repo;
+  check string "repo" "fallback" scope.repo;
   check (option string) "goal" (Some "goal-a") scope.goal_id;
   check string "category" "refactor" (Admission.category_to_string scope.category)
+
+let temp_dir () =
+  let dir = Filename.temp_file "test_keeper_wip_admission_" "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.is_directory path
+    then (
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Unix.unlink path
+  in
+  try rm dir with
+  | _ -> ()
+
+let add_goal_task config ~goal_id ~title =
+  let result =
+    Masc.Workspace.add_task config ~goal_id ~title ~priority:3
+      ~description:"wip admission fixture"
+  in
+  if not (Astring.String.is_prefix ~affix:"Added task" result)
+  then fail ("add_task failed: " ^ result)
+
+let claim_task_exn config ~agent_name ~task_id =
+  match Masc.Workspace.claim_task_r config ~agent_name ~task_id () with
+  | Ok _ -> ()
+  | Error err -> fail ("claim_task_r failed: " ^ Masc_domain.masc_error_to_string err)
+
+let meta_with_active_goal goal_id =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "keeper-wip-cap"
+        ; "agent_name", `String "keeper-wip-cap-agent"
+        ; "trace_id", `String "trace-wip-cap"
+        ; "active_goal_ids", `List [ `String goal_id ]
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
+
+let test_keeper_task_claim_wip_cap_reports_claim_admission () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let goal, _ =
+         match Goal_store.upsert_goal config ~title:"WIP cap goal" () with
+         | Ok payload -> payload
+         | Error msg -> fail msg
+       in
+       for i = 1 to 4 do
+         add_goal_task config ~goal_id:goal.id
+           ~title:(Printf.sprintf "fix: WIP cap fixture %d" i)
+       done;
+       claim_task_exn config ~agent_name:"keeper-a-agent" ~task_id:"task-001";
+       claim_task_exn config ~agent_name:"keeper-b-agent" ~task_id:"task-002";
+       claim_task_exn config ~agent_name:"keeper-c-agent" ~task_id:"task-003";
+       let payload =
+         Task_runtime.handle_keeper_task_tool ~config
+           ~meta:(meta_with_active_goal goal.id)
+           ~name:"keeper_task_claim" ~args:(`Assoc [])
+       in
+       let json = Yojson.Safe.from_string payload in
+       check bool "claim result present" true
+         (json |> U.member "result" <> `Null);
+       check string "wip kind" "claim_wip_admission"
+         (json |> U.member "wip_admission" |> U.member "kind" |> U.to_string);
+       check string "top-level action"
+         "finish_or_release_existing_wip_before_claiming_more"
+         (json |> U.member "wip_admission" |> U.member "action" |> U.to_string);
+       let rejection =
+         match
+           json |> U.member "wip_admission" |> U.member "rejections" |> U.to_list
+         with
+         | first :: _ -> first
+         | [] -> fail "expected at least one WIP rejection"
+       in
+       check string "rejection reason" "goal_cap"
+         (rejection |> U.member "reason" |> U.to_string);
+       check string "rejection axis" "goal"
+         (rejection |> U.member "axis" |> U.to_string);
+       check string "cap kind" "wip_claim_admission"
+         (rejection |> U.member "cap_kind" |> U.to_string);
+       check string "rejection action"
+         "finish_or_release_existing_wip_before_claiming_more"
+         (rejection |> U.member "action" |> U.to_string);
+       check bool "scope note distinguishes claim cap" true
+         (Astring.String.is_infix ~affix:"not a request to create a new repo"
+            (rejection |> U.member "scope_note" |> U.to_string));
+       check bool "message tells keeper not to bypass with new work" true
+         (Astring.String.is_infix ~affix:"do not create unrelated repos"
+            (json |> U.member "result" |> U.to_string)))
 
 let test_active_items_only_include_claimed_or_in_progress () =
   let tasks =
@@ -141,6 +244,55 @@ let test_active_items_only_include_claimed_or_in_progress () =
        (fun item -> Admission.category_to_string item.Admission.scope.category)
        active)
 
+let test_goalless_task_exempt_from_goal_cap () =
+  (* RFC-0245: a goalless claim must not be rejected by the per-goal cap even
+     when the goalless ([None]) bucket is at/over [max_per_goal]. With
+     max_per_goal=1 and one goalless active item, the old behavior rejected;
+     the exemption must now admit. *)
+  let active = [ item "repo-a" "one" ] in
+  match Admission.decide ~caps active ~scope:(scope "repo-b") with
+  | Admission.Admit { active_count_after_admit } ->
+    check int "active after admit" 2 active_count_after_admit
+  | Reject rejection ->
+    fail
+      (Printf.sprintf "goalless claim unexpectedly rejected: %s"
+         (Admission.reject_reason_to_string rejection.reason))
+
+let test_goalless_tasks_never_goal_capped () =
+  (* RFC-0245: many goalless active items, each in a distinct repo/category so
+     only the per-goal cap could fire — it must not, because goalless tasks
+     share no goal scope to collide on. *)
+  let active =
+    [ item ~category:Admission.Fix "repo-a" "one"
+    ; item ~category:Admission.Docs "repo-b" "two"
+    ; item ~category:Admission.Refactor "repo-c" "three"
+    ]
+  in
+  match
+    Admission.decide ~caps active
+      ~scope:(scope ~category:Admission.Test "repo-d")
+  with
+  | Admission.Admit _ -> ()
+  | Reject rejection ->
+    fail
+      (Printf.sprintf "goalless claim unexpectedly rejected by %s"
+         (Admission.reject_reason_to_string rejection.reason))
+
+let test_goalless_still_bounded_by_global_cap () =
+  (* RFC-0245 non-goal: exempting goalless from the *goal* cap must NOT remove
+     the global blast-radius cap. With max_global=1 and one active item, a
+     goalless claim is still rejected — by global_cap, not goal_cap. *)
+  let active = [ item "repo-a" "one" ] in
+  match
+    Admission.decide
+      ~caps:{ caps with max_global = Some 1 }
+      active ~scope:(scope "repo-b")
+  with
+  | Admission.Admit _ -> fail "expected global cap rejection for goalless claim"
+  | Reject rejection ->
+    check string "reason" "global_cap"
+      (Admission.reject_reason_to_string rejection.reason)
+
 let () =
   run "Keeper_wip_admission"
     [ ( "caps"
@@ -156,7 +308,15 @@ let () =
             test_decision_json_rejects_with_scope_key
         ; test_case "task scope uses repo goal and title category" `Quick
             test_scope_of_task_uses_repo_goal_and_title_category
+        ; test_case "keeper_task_claim reports WIP claim admission cap" `Quick
+            test_keeper_task_claim_wip_cap_reports_claim_admission
         ; test_case "active items include active WIP only" `Quick
             test_active_items_only_include_claimed_or_in_progress
+        ; test_case "goalless task exempt from goal cap" `Quick
+            test_goalless_task_exempt_from_goal_cap
+        ; test_case "goalless tasks never goal-capped" `Quick
+            test_goalless_tasks_never_goal_capped
+        ; test_case "goalless still bounded by global cap" `Quick
+            test_goalless_still_bounded_by_global_cap
         ] )
     ]

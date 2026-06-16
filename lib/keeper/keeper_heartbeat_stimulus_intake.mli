@@ -13,10 +13,6 @@ open Keeper_execution
     for [u] ([immediate] / [normal] / [low]). *)
 val stimulus_urgency_to_string : Keeper_event_queue.urgency -> string
 
-(** [stimulus_class_to_string c] returns the Otel_metric_store / log label for
-    a stimulus class. *)
-val stimulus_class_to_string : Keeper_event_queue.stimulus_class -> string
-
 (** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
     stimulus into a pending board event, threading the keeper meta's
     continuity summary. *)
@@ -44,7 +40,7 @@ type heartbeat_event_intake = {
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store, logs the consumption, and returns a list of
     pending board events derived from [stim] (empty for non-board
-    classes). [Stay_silent_recovery] also writes a reaction-ledger entry. *)
+    classes). [No_progress_recovery] also writes a reaction-ledger entry. *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta

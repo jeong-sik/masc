@@ -13,9 +13,15 @@ let memory_subsystems_entry_cache
      * (string * Keeper_memory_policy.keeper_memory_line) list
      * (string * string) list)
       option
-      ref
+      Atomic.t
   =
-  ref None
+  Atomic.make None
+;;
+
+(** Single-flight mutex for refreshing the memory-subsystems cache. The cache
+    itself is an [Atomic.t] so readers can check the TTL without contending for
+    the lock; only a miss contends and one fiber performs the expensive IO. *)
+let memory_subsystems_entry_cache_mu = Eio.Mutex.create ()
 ;;
 
 let dashboard_memory_subsystems_include_entries request =
@@ -29,48 +35,58 @@ let dashboard_memory_subsystems_include_entries request =
 let load_memory_subsystems_entries ~(config : Workspace_utils.config) =
   (* NDT-OK: wall-clock read only gates a dashboard cache TTL. *)
   let now = Unix.gettimeofday () in
-  match !memory_subsystems_entry_cache with
-  | Some (base_path, cached_at, rows, errors)
-    when String.equal base_path config.base_path
-         && now -. cached_at < memory_subsystems_entry_cache_ttl_sec ->
+  let is_fresh = function
+    | Some (base_path, cached_at, _rows, _errors) ->
+      String.equal base_path config.base_path
+      && now -. cached_at < memory_subsystems_entry_cache_ttl_sec
+    | None -> false
+  in
+  match Atomic.get memory_subsystems_entry_cache with
+  | Some (base_path, cached_at, rows, errors) as cached when is_fresh cached ->
     (rows, errors)
   | _ ->
-    let rows, errors =
-      try
-        Keeper_meta_store.keeper_names config
-        |> List.fold_left
-             (fun (rows_acc, errs_acc) keeper ->
-               match
-                 Keeper_memory_recall.read_keeper_memory_summary_result
-                   config
-                   ~name:keeper
-                   ~max_bytes:120000
-                   ~max_lines:180
-                   ~recent_limit:30
-               with
-               | Ok summary ->
-                 let rows =
-                   List.map
-                     (fun (row : Keeper_memory_policy.keeper_memory_line) ->
-                       keeper, row)
-                     summary.recent_notes
-                 in
-                 List.rev_append rows rows_acc, errs_acc
-               | Error exn_class ->
-                 let label =
-                   Keeper_memory_recall_exn_class.to_label exn_class
-                 in
-                 rows_acc, (keeper, label) :: errs_acc)
-             ([], [])
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | _ -> [], []
-    in
-    let rows = List.rev rows in
-    let errors = List.rev errors in
-    memory_subsystems_entry_cache
-    := Some (config.base_path, now, rows, errors);
-    rows, errors
+    Eio.Mutex.use_rw ~protect:true memory_subsystems_entry_cache_mu
+    @@ fun () ->
+    (match Atomic.get memory_subsystems_entry_cache with
+     | Some (base_path, cached_at, rows, errors) as cached when is_fresh cached ->
+       (rows, errors)
+     | _ ->
+       let rows, errors =
+         try
+           Keeper_meta_store.keeper_names config
+           |> List.fold_left
+                (fun (rows_acc, errs_acc) keeper ->
+                  match
+                    Keeper_memory_recall.read_keeper_memory_summary_result
+                      config
+                      ~name:keeper
+                      ~max_bytes:120000
+                      ~max_lines:180
+                      ~recent_limit:30
+                  with
+                  | Ok summary ->
+                    let rows =
+                      List.map
+                        (fun (row : Keeper_memory_policy.keeper_memory_line) ->
+                          keeper, row)
+                        summary.recent_notes
+                    in
+                    List.rev_append rows rows_acc, errs_acc
+                  | Error exn_class ->
+                    let label =
+                      Keeper_memory_recall_exn_class.to_label exn_class
+                    in
+                    rows_acc, (keeper, label) :: errs_acc)
+                ([], [])
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> [], []
+       in
+       let rows = List.rev rows in
+       let errors = List.rev errors in
+       Atomic.set memory_subsystems_entry_cache
+         (Some (config.base_path, now, rows, errors));
+       rows, errors)
 ;;
 
 let dashboard_memory_subsystems_http_json

@@ -202,89 +202,92 @@ let test_visibility_gate_preserves_busy () =
    Skip_busy. *)
 
 module KKS = Masc.Keeper_keepalive_signal
+module KWOBS = Masc.Keeper_world_observation_board_signal
 
-let test_board_wakeup_selection_caps_generic_activity () =
-  let selected, dropped =
-    KKS.select_board_wakeup_candidates
-      ~generic_limit:2
+(* Compare selected wake reasons by their stable label so the typed variant
+   stays printable in Alcotest's (string) testable. *)
+let reason_label = KWOBS.wake_reason_label
+let labeled selected = List.map (fun (item, r) -> item, reason_label r) selected
+
+let make_board_resume_meta ?(paused = false) ?auto_resume_after_sec name =
+  let json =
+    `Assoc
       [
-        "a", Some "board_activity";
-        "b", Some "board_activity";
-        "c", Some "board_activity";
-        "d", None;
+        ("name", `String name);
+        ("agent_name", `String ("keeper-" ^ name));
+        ("trace_id", `String ("trace-" ^ name));
+        ("goal", `String "test");
+        ("sandbox_profile", `String "local");
+        ("network_mode", `String "inherit");
+        ("tool_access", `List []);
       ]
   in
-  check (list (pair string string)) "selected generic wakeups"
-    [ "a", "board_activity"; "b", "board_activity" ]
-    selected;
-  check int "dropped generic wakeups" 1 dropped
+  match Keeper_meta_json_parse.meta_of_json json with
+  | Error err -> fail ("meta_of_json failed: " ^ err)
+  | Ok meta -> { meta with paused; auto_resume_after_sec }
+
+let test_board_auto_resume_rejects_operator_pause () =
+  let meta = make_board_resume_meta ~paused:true "operator-paused" in
+  check bool "operator pause is not board-auto-resumable" false
+    (KKS.paused_meta_allows_board_auto_resume meta)
+
+let test_board_auto_resume_allows_auto_paused_keeper () =
+  let meta =
+    make_board_resume_meta ~paused:true ~auto_resume_after_sec:3600.0
+      "auto-paused"
+  in
+  check bool "auto-paused keeper is board-auto-resumable" true
+    (KKS.paused_meta_allows_board_auto_resume meta)
 
 let test_board_wakeup_selection_keeps_explicit_mentions () =
   let selected, dropped =
     KKS.select_board_wakeup_candidates
-      ~generic_limit:1
       [
-        "a", Some "board_activity";
-        "b", Some "explicit_mention";
-        "c", Some "explicit_mention";
+        "a", Some KWOBS.Thread_reply_after_self_comment;
+        "b", Some KWOBS.Explicit_mention;
+        "c", Some KWOBS.Explicit_mention;
       ]
   in
+  (* Explicit mentions short-circuit: they wake unconditionally, the
+     non-explicit candidate is excluded, and there are no cap drops. *)
   check (list (pair string string)) "selected explicit wakeups"
     [ "b", "explicit_mention"; "c", "explicit_mention" ]
-    selected;
-  check int "dropped generic wakeups" 0 dropped
+    (labeled selected);
+  check int "no drops when explicit present" 0 dropped
 
-let test_board_wakeup_selection_keeps_specific_reasons_past_generic_cap () =
+let test_board_wakeup_selection_drops_none_reasons () =
   let selected, dropped =
     KKS.select_board_wakeup_candidates
-      ~generic_limit:1
       [
-        "a", Some "board_activity";
-        "b", Some "thread_reply_after_self_comment";
-        "c", Some "board_activity";
+        "a", Some KWOBS.Thread_reply_after_self_comment;
+        "b", None;
+        "c", Some (KWOBS.Stigmergy { score = 10 });
       ]
   in
-  check (list (pair string string)) "selected mixed wakeups"
-    [ "b", "thread_reply_after_self_comment"; "a", "board_activity" ]
-    selected;
-  check int "dropped generic wakeups" 1 dropped
+  (* [None] reasons (no relevance match) are dropped; real reasons survive in
+     candidate order and the stigmergy score is carried end-to-end. *)
+  check (list (pair string string)) "None dropped, real reasons kept"
+    [ "a", "thread_reply_after_self_comment"; "c", "stigmergy: score=10" ]
+    (labeled selected);
+  check int "no cap drops under total limit" 0 dropped
 
 let test_board_wakeup_selection_caps_total_non_explicit () =
-  (* Non-generic reasons are prioritized over board_activity before total cap *)
   let selected, dropped =
     KKS.select_board_wakeup_candidates
-      ~generic_limit:4
       ~total_limit:2
       [
-        "a", Some "board_activity";
-        "b", Some "thread_reply_after_self_comment";
-        "c", Some "board_activity";
-        "d", Some "thread_reply_after_self_comment";
+        "a", Some (KWOBS.Stigmergy { score = 5 });
+        "b", Some KWOBS.Thread_reply_after_self_comment;
+        "c", Some (KWOBS.Stigmergy { score = 5 });
+        "d", Some KWOBS.Thread_reply_after_self_comment;
       ]
   in
-  check (list (pair string string)) "selected total wakeups"
-    [ "b", "thread_reply_after_self_comment"; "d", "thread_reply_after_self_comment" ]
-    selected;
-  check int "dropped total wakeups" 2 dropped
-
-let test_board_wakeup_selection_total_limit_prefers_non_generic () =
-  (* A late non-generic entry must survive when a generic entry would displace it
-     under candidate order alone.  After prioritization the two non-generic items
-     fill the cap and the generic one is dropped instead. *)
-  let selected, dropped =
-    KKS.select_board_wakeup_candidates
-      ~generic_limit:5
-      ~total_limit:2
-      [
-        "a", Some "board_activity";
-        "b", Some "board_activity";
-        "c", Some "thread_reply_after_self_comment";
-      ]
-  in
-  check (list (pair string string)) "non-generic survives cap"
-    [ "c", "thread_reply_after_self_comment"; "a", "board_activity" ]
-    selected;
-  check int "dropped generic" 1 dropped
+  (* Non-explicit reasons compete for [total_limit] slots in candidate order;
+     the overflow is dropped. *)
+  check (list (pair string string)) "first two non-explicit kept in order"
+    [ "a", "stigmergy: score=5"; "b", "thread_reply_after_self_comment" ]
+    (labeled selected);
+  check int "overflow dropped" 2 dropped
 
 let test_after_wake_idle_woken_continues () =
   let next = Unix.gettimeofday () +. 60.0 in
@@ -420,16 +423,16 @@ let () =
       test_case "busy decision is preserved" `Quick test_visibility_gate_preserves_busy;
     ];
     "board_wakeup_selection", [
-      test_case "generic board activity is capped"
-        `Quick test_board_wakeup_selection_caps_generic_activity;
-      test_case "explicit mentions bypass generic cap"
+      test_case "explicit mentions bypass and win"
         `Quick test_board_wakeup_selection_keeps_explicit_mentions;
-      test_case "specific reasons survive generic cap"
-        `Quick test_board_wakeup_selection_keeps_specific_reasons_past_generic_cap;
+      test_case "None reasons are dropped, real reasons kept"
+        `Quick test_board_wakeup_selection_drops_none_reasons;
       test_case "total non-explicit fanout is capped"
         `Quick test_board_wakeup_selection_caps_total_non_explicit;
-      test_case "total limit prefers non-generic over board_activity"
-        `Quick test_board_wakeup_selection_total_limit_prefers_non_generic;
+      test_case "operator pauses are not board-auto-resumed"
+        `Quick test_board_auto_resume_rejects_operator_pause;
+      test_case "auto-paused keepers can be board-auto-resumed"
+        `Quick test_board_auto_resume_allows_auto_paused_keeper;
     ];
     "missed_wakeup_gap", [
       test_case "Skip_idle + Woken -> resumes (MissedWakeup spec gap)"

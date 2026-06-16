@@ -31,7 +31,6 @@ let finalize
     ~(result : Runtime_agent.run_result)
     ~checkpoint_persistence_error
     ~post_turn_t0
-    ?provider_filter
     ~runtime_id_string
     ~prompt_metrics
     ~ctx_composition
@@ -73,7 +72,7 @@ let finalize
   in
   let resume_merge =
     pre_dispatch_compacted
-    || String.equal state_snapshot_source "synthesized"
+    || Keeper_memory_policy.state_snapshot_source_is_synthetic state_snapshot_source
     || is_budget_exhausted result.stop_reason
   in
   let { Keeper_agent_run_sidecar.working_state = _
@@ -202,7 +201,6 @@ let finalize
       ~state_snapshot_source
       ~librarian_messages
       ~post_turn_t0
-      ?provider_filter
       ~runtime_id:runtime_id_string
       ~inference_telemetry:result.response.telemetry
       ();

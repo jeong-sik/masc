@@ -14,23 +14,20 @@ let string_contains_substring_ci = String_util.string_contains_substring_ci
 (* ── Observation / decision helpers ─────────────── *)
 
 let decision_channel_of_observation
-    (observation : Keeper_world_observation.world_observation) : string =
+    (observation : Keeper_world_observation.world_observation) :
+    Keeper_world_observation.keeper_cycle_channel =
   if observation.pending_mentions <> []
      || observation.pending_board_events <> []
      || observation.pending_scope_messages <> []
   then
-    "turn"
+    Keeper_world_observation.Reactive
   else
-    "scheduled_autonomous"
-
-let is_scheduled_autonomous_channel =
-  Keeper_world_observation.is_autonomous_channel
+    Keeper_world_observation.Scheduled_autonomous
 
 let is_scheduled_autonomous_cycle_of_observation
     (observation : Keeper_world_observation.world_observation) : bool =
-  String.equal
+  Keeper_world_observation.is_autonomous
     (decision_channel_of_observation observation)
-    "scheduled_autonomous"
 
 let scheduled_autonomous_outcome_of_result
     ~(has_text : bool) ~(has_tool_calls : bool) :
@@ -370,17 +367,40 @@ let validated_evidence_preview
       Printf.sprintf "(validated evidence: %s)"
         (String.concat ", " names)
 
+(* RFC-0232: the scheduled-autonomous "what is this keeper doing" preview, by
+   precedence. [is_visible_reply] is the typed turn outcome
+   ([Keeper_turn_outcome.of_stop_reason]) — a budget-exhausted turn substitutes
+   a synthetic continuation notice for the reply text, which is display-only and
+   must not be sniffed as model output, so visible model text only wins when the
+   outcome is [Visible_reply]. Then substantive tool calls, then validated
+   evidence, else the prior preview is kept (never overwritten with a synthetic
+   filler). Pure so the precedence is unit-testable without a keeper_meta. *)
+let select_proactive_preview
+    ~(previous : string)
+    ~(has_text : bool)
+    ~(is_visible_reply : bool)
+    ~(has_substantive_tools : bool)
+    ~(tool_names : string list)
+    ~(response_text : string)
+    ~(validated_evidence_preview : string option)
+  : string =
+  if has_text && is_visible_reply then short_preview response_text
+  else if has_substantive_tools then
+    Printf.sprintf "(tools: %s)" (String.concat ", " tool_names)
+  else match validated_evidence_preview with
+    | Some preview -> preview
+    | None -> previous
+
 let accountability_evidence_refs
     ~(trace_id : string)
     ~(turn_number : int)
     ~(result : Keeper_agent_run.run_result)
     ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
   let tool_refs =
-    let stay_silent = "keeper_stay_silent" in
     Keeper_agent_result.tool_names result
     |> List.filter_map (fun tool_name ->
            let trimmed = String.trim tool_name in
-           if trimmed = "" || String.equal trimmed stay_silent then None
+           if trimmed = "" then None
            else Some ("tool:" ^ trimmed))
   in
   let validation_refs =

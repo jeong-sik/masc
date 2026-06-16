@@ -269,7 +269,7 @@ let create_handler
                  (List.map (fun (key, value) -> (key, `String value)) arguments)
              in
              match
-               Mcp_prompt_surface.get_json ~config:state.Mcp_server.workspace_config
+               Mcp_prompt_surface.get_json ~config:(Mcp_server.workspace_config state)
                  ~name:prompt.name ~arguments:args_json
                  Config.raw_all_tool_schemas
              with

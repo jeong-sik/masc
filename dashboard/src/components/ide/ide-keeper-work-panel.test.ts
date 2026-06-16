@@ -28,7 +28,7 @@ describe('IdeKeeperWorkPanel', () => {
 
     expect(container.textContent).toContain('KEEPER WORK')
     expect(container.textContent).toContain('task-151')
-    expect(container.textContent).toContain('Fix agent-code runtime config')
+    expect(container.textContent).toContain('Fix codex runtime config')
     expect(container.textContent).toContain('tool_route_recoverable_failure')
     expect(container.textContent).toContain('inspect_provider_tool_contract')
     expect(container.textContent).toContain('masc_claim_next')
@@ -42,7 +42,7 @@ describe('IdeKeeperWorkPanel', () => {
     )
 
     expect(summary.currentTaskId).toBe('task-151')
-    expect(summary.currentTask?.title).toBe('Fix agent-code runtime config')
+    expect(summary.currentTask?.title).toBe('Fix codex runtime config')
     expect(summary.activeTasks).toHaveLength(1)
     expect(summary.activeTaskCount).toBe(1)
   })
@@ -81,8 +81,15 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).toContain('50%')
     expect(container.textContent).toContain('Goal')
     expect(container.textContent).toContain('Task')
+    expect(container.querySelectorAll('.ide-keeper-work-card.v2-ide-card').length).toBeGreaterThanOrEqual(1)
+    expect(container.querySelector('.ide-keeper-work-goal.v2-ide-card')).not.toBeNull()
     expect(container.querySelector('.ide-keeper-work-goal .ide-keeper-work-route-count')?.textContent)
       .toBe('CTX 2')
+
+    const goalLinks = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('.ide-keeper-work-goal .ide-keeper-work-links button'),
+    )
+    expect(goalLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
 
     fireEvent.click(buttonByText(container, 'Goal'))
     expect(window.location.hash).toBe('#workspace?section=planning&goal=goal-runtime')
@@ -105,16 +112,15 @@ describe('IdeKeeperWorkPanel', () => {
     const taskLinks = Array.from(
       container.querySelectorAll<HTMLButtonElement>('.ide-keeper-work-card .ide-keeper-work-links button'),
     )
+    expect(taskLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(container.querySelector('.ide-keeper-work-card .ide-keeper-work-route-count')?.textContent)
-      .toBe('CTX 5')
+      .toBe('CTX 4')
     expect(taskLinks.map(link => link.textContent)).toEqual([
       'Goal',
       'Task',
-      'Git',
       'Telemetry',
       'Keeper',
     ])
-    expect(buttonByText(container, 'Git').title).toBe('Git fix/runtime')
     expect(buttonByText(container, 'Telemetry').title)
       .toBe('Fleet telemetry event log · session sess-151 · operation op-151 · query op-151')
 
@@ -134,12 +140,6 @@ describe('IdeKeeperWorkPanel', () => {
         title: 'Wire keeper queue context',
         status: 'in_progress',
         goal_id: 'goal-next',
-        worktree: {
-          branch: 'feat/keeper-queue',
-          path: '/workspace/.worktrees/keeper-queue',
-          git_root: '/workspace',
-          repo_name: 'masc',
-        },
         execution_links: {
           session_id: 'sess-next',
         },
@@ -165,7 +165,6 @@ describe('IdeKeeperWorkPanel', () => {
     expect(queueButtons.map(button => button.textContent)).toEqual([
       'Goal',
       'Task',
-      'Git',
       'Telemetry',
       'Keeper',
     ])
@@ -212,15 +211,9 @@ function keeperFixture(): Keeper {
 function taskFixture(partial: Partial<Task> = {}): Task {
   return {
     id: 'task-151',
-    title: 'Fix agent-code runtime config',
+    title: 'Fix codex runtime config',
     status: 'claimed',
     assignee: 'sangsu',
-    worktree: {
-      branch: 'fix/runtime',
-      path: '/workspace/.worktrees/fix-runtime',
-      git_root: '/workspace',
-      repo_name: 'masc',
-    },
     ...partial,
   }
 }

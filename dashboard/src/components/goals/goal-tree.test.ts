@@ -185,8 +185,9 @@ describe('GoalTree', () => {
     mocks.fetchDashboardGoalsTree.mockResolvedValue(treePayload)
     mocks.fetchDashboardGoalDetail.mockResolvedValue(detailPayload)
 
-    render(html`<${GoalTree} />`)
+    const { container } = render(html`<${GoalTree} />`)
 
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
     await waitFor(() => {
       expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id'))
         .toBe('goal-child')

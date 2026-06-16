@@ -27,25 +27,29 @@ let trimmed_env name =
 
 let bot_token_opt () = trimmed_env "DISCORD_BOT_TOKEN"
 
-(* Trigger policy parser. Closed match — adding a new variant breaks
-   compile at every call site rather than silently falling through. *)
+(* Default trigger policy when none is configured (empty/unset). The
+   "quiet, mention-triggered bot" baseline per RFC-0203. *)
+let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
+
+(* Parse a configured trigger policy. Delegates to the single strict
+   parser in Discord_gateway_state so config and the (test-covered)
+   canonical grammar can never drift. An empty value is "unset" and
+   silently takes the default; a non-empty value that fails to parse
+   (typo, removed variant) is logged and falls back to the default
+   rather than being silently coerced into a policy the operator did
+   not write. *)
 let parse_trigger_policy raw : Gw.trigger_policy =
   let s = String.trim raw in
-  if String.equal s "" then Gw.Mention_or_thread
+  if String.equal s "" then default_trigger_policy
   else
-    match s with
-    | "mention_only" -> Gw.Mention_only
-    | "mention_or_thread" -> Gw.Mention_or_thread
-    | "all" -> Gw.All
-    | other ->
-      let prefix = "user_only:" in
-      let plen = String.length prefix in
-      if String.length other > plen
-         && String.equal (String.sub other 0 plen) prefix
-      then
-        let id = String.trim (String.sub other plen (String.length other - plen)) in
-        if String.equal id "" then Gw.Mention_or_thread else Gw.User_only id
-      else Gw.Mention_or_thread
+    match Discord_gateway_state.parse_trigger_policy s with
+    | Ok policy -> policy
+    | Error msg ->
+      Log.Server.warn
+        "discord trigger_policy %S rejected (%s); using default %s"
+        s msg
+        (Discord_gateway_state.trigger_policy_to_string default_trigger_policy);
+      default_trigger_policy
 
 let resolved_trigger_policy () =
   let from_toml () =
@@ -395,6 +399,7 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
       ; content
       ; mentions_bot
       ; explicit_mentions_bot
+      ; author_is_bot = _
       ; message_reference_channel_id
       ; message_reference_message_id
       ; referenced_message_author_id
@@ -510,7 +515,7 @@ let start ~sw ~env ~clock ~state =
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net
-        ~config:state.Mcp_server.workspace_config
+        ~config:(Mcp_server.workspace_config state)
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
@@ -529,13 +534,13 @@ let start ~sw ~env ~clock ~state =
             on_event
               ~dispatch
               ~clock
-              ~base_dir:state.Mcp_server.workspace_config.base_path
+              ~base_dir:(Mcp_server.workspace_config state).base_path
               ev)
           ~on_ambient:(fun ev ->
             (* Read base_path per event: [workspace_config] is mutable
                (workspace-switch tools swap it). *)
             on_ambient
-              ~base_dir:state.Mcp_server.workspace_config.base_path ev)
+              ~base_dir:(Mcp_server.workspace_config state).base_path ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

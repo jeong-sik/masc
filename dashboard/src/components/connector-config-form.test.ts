@@ -167,6 +167,7 @@ describe('ConnectorConfigForm', () => {
     expect(mockedPost).not.toHaveBeenCalled()
     const panel = container.querySelector('[data-in-process-config-panel]')
     expect(panel).toBeTruthy()
+    expect(container.querySelector('.v2-connector-config-form')).not.toBeNull()
     expect(panel?.textContent).toContain('server in-process')
     expect(panel?.textContent).toContain('DISCORD_BOT_TOKEN')
     expect(panel?.textContent).not.toContain('Save')

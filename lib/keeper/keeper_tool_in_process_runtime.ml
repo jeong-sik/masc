@@ -17,10 +17,6 @@ let handle_time_now ~args:_ =
     (`Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ])
 ;;
 
-let handle_stay_silent ~args:_ =
-  Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ])
-;;
-
 let handle_tools_list ~(meta : keeper_meta) ~args:_ =
   Keeper_tool_shared_runtime.keeper_tools_list_json ~meta
 ;;
@@ -315,6 +311,11 @@ let handle_masc_control ~(config : Workspace.config) ~(meta : keeper_meta) ~name
 let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
   Tool_agent_timeline.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_schedule.context = { config; agent_name = meta.name } in
+  Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
 (* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]

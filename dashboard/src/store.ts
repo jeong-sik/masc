@@ -182,6 +182,96 @@ export function setKeeperFilterToAll(allNames: readonly string[]): void {
   selectedKeeperFilter.value = new Set(allNames)
 }
 
+const KEEPER_RELATIVE_AGE_FIELDS = new Set<string>([
+  'keeper_age_s',
+  'last_activity_ago_s',
+  'last_turn_ago_s',
+  'last_handoff_ago_s',
+  'last_compaction_ago_s',
+  'last_proactive_ago_s',
+  'next_eligible_at_s',
+])
+
+function relativeAgeRenderBucket(value: unknown): unknown {
+  if (value == null) return null
+  if (typeof value !== 'number' || !Number.isFinite(value)) return value
+  const seconds = Math.max(0, value)
+  const bucketSeconds =
+    seconds < 60
+      ? 10
+      : seconds < 3_600
+        ? 60
+        : 300
+  return Math.floor(seconds / bucketSeconds)
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function stableValueEqual(left: unknown, right: unknown, key?: string): boolean {
+  if (key && KEEPER_RELATIVE_AGE_FIELDS.has(key)) {
+    return relativeAgeRenderBucket(left) === relativeAgeRenderBucket(right)
+  }
+  if (Object.is(left, right)) return true
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return false
+    if (left.length !== right.length) return false
+    return left.every((value, index) => stableValueEqual(value, right[index]))
+  }
+  if (isPlainRecord(left) || isPlainRecord(right)) {
+    if (!isPlainRecord(left) || !isPlainRecord(right)) return false
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)])
+    for (const key of keys) {
+      if (!stableValueEqual(left[key], right[key], key)) return false
+    }
+    return true
+  }
+  return false
+}
+
+function keeperRenderEqual(previous: Keeper, next: Keeper): boolean {
+  const previousRecord = previous as unknown as Record<string, unknown>
+  const nextRecord = next as unknown as Record<string, unknown>
+  const keys = new Set([...Object.keys(previousRecord), ...Object.keys(nextRecord)])
+  for (const key of keys) {
+    if (KEEPER_RELATIVE_AGE_FIELDS.has(key)) {
+      if (relativeAgeRenderBucket(previousRecord[key]) !== relativeAgeRenderBucket(nextRecord[key])) {
+        return false
+      }
+      continue
+    }
+    if (!stableValueEqual(previousRecord[key], nextRecord[key], key)) return false
+  }
+  return true
+}
+
+/** Reconcile keeper rows so high-frequency execution snapshots do not
+ *  recreate the whole roster/detail tree for clock-only drift.
+ *
+ *  The backend emits relative age fields as floating seconds, so every
+ *  fresh snapshot can differ even when the keeper's actual state did not.
+ *  Keep those fields at display-resolution while still updating immediately
+ *  for status, lifecycle, model, goal, blocker, tool, and context changes.
+ */
+export function reconcileKeepers(previous: Keeper[], next: Keeper[]): Keeper[] {
+  if (previous.length === 0) return next
+  const previousByName = new Map(previous.map(keeper => [keeper.name, keeper]))
+  let changed = previous.length !== next.length
+  const merged = next.map((keeper, index) => {
+    const old = previousByName.get(keeper.name)
+    if (!changed && previous[index]?.name !== keeper.name) {
+      changed = true
+    }
+    if (old && keeperRenderEqual(old, keeper)) {
+      return old
+    }
+    changed = true
+    return keeper
+  })
+  return changed ? merged : previous
+}
+
 // --- Board state ---
 
 export const boardPosts = signal<BoardPost[]>([])
@@ -915,7 +1005,7 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)
   messages.value = workspaceChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
-  keepers.value = normalizeKeepers(data.keepers)
+  keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)
@@ -987,6 +1077,7 @@ function canReuseBoardPost(previous: BoardPost, next: BoardPost): boolean {
     && previous.vote_balance === next.vote_balance
     && previous.comment_count === next.comment_count
     && previous.post_kind === next.post_kind
+    && previous.pinned === next.pinned
     && previous.classification_reason === next.classification_reason
     && previous.title === next.title
     && previous.body === next.body

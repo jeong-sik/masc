@@ -91,23 +91,21 @@ val provider_attempt_finished_decision :
 
 val run_named :
   runtime_id:string ->
-  ?base_path:string ->
   ?keeper_name:string ->
   goal:string ->
-  ?provider_filter:string list ->
   ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->
-  ?max_idle_turns:int ->
+  ?max_turns:int ->
+  max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
-  ?wait_timeout_sec:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
@@ -161,4 +159,12 @@ module For_testing : sig
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val last_tool_progress_context_string_of_messages :
+    Agent_sdk.Types.message list -> string option
+
+  val sdk_error_of_nonretryable_attempt_error :
+    original_error:Agent_sdk.Error.sdk_error ->
+    Llm_provider.Http_client.http_error ->
+    Agent_sdk.Error.sdk_error
 end

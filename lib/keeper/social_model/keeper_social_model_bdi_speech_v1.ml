@@ -155,11 +155,7 @@ let tools_include_keeper tool tools =
   List.exists (keeper_tool_name_matches tool) tools
 
 let inferred_tool_surface tools =
-  if tools = [ "keeper_stay_silent" ] then
-    Some
-      ( { speech_act = Types.Stay_silent; delivery_surface = Types.Silent }
-      , Types.Tool_only_stay_silent )
-  else if tools_include_keeper "keeper_board_comment" tools then
+  if tools_include_keeper "keeper_board_comment" tools then
     Some
       ( {
           speech_act = Types.Comment_board;
@@ -385,16 +381,15 @@ let apply_output_to_result ~(meta : keeper_meta)
   | Stay_silent, Silent when tool_names = [] ->
       ({ result with response_text = "" }, state)
   | _ ->
-      let response_text =
-        match
-          Keeper_tool_response.normalize_response_text
-            ~text:visible_response_body
-            ~tool_names ()
-        with
-        | Ok normalized -> normalized
-        | Error _ -> visible_response_body
-      in
-      ({ result with response_text }, state)
+      (* RFC-0232: carry the real reply text verbatim. Previously an empty body
+         with tool calls was replaced by the synthetic
+         "Completed without a textual reply. Tools used: ..." string, which
+         leaked into the dashboard work preview as if it were model output (no
+         consumer sniffs it). Keeping the body empty lets downstream surfaces
+         (select_proactive_preview) fall back to the typed tool summary. The
+         lane-persistence reply is rendered separately in keeper_agent_run and
+         is intentionally left non-empty (#20870 watermark-stall failure mode). *)
+      ({ result with response_text = visible_response_body }, state)
 
 let apply_to_result ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)

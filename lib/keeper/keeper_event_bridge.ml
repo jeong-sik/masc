@@ -49,6 +49,19 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
     Log.Oas_event.routine ~details:json "%s" message
   in
   let log message = log_at Log.Info message in
+  (* Per-turn and per-tool lifecycle is emitted at [routine] (default Debug), not
+     Info, because it is a redundant TEXT rendering of events already carried by
+     two authoritative planes: (1) for keeper agents, the keeper hook logs the
+     richer "[Keeper] ... tool_call ... outcome=... out_len=" / "[Keeper/...] turn="
+     lines at Info; (2) for every agent, [Event_log.publish] + [Sse.broadcast]
+     (see [prepare_pending_event]) carry the structured stream the dashboard and
+     REST/SSE subscribers actually consume. Demoting these four high-frequency
+     arms removes the Info-level console doubling without losing the data — it
+     stays retrievable at Debug and the structured/SSE planes are untouched. This
+     is deduplication against an existing SSOT, not symptom suppression: there is
+     no recurring failure being hidden. Agent- and context-level lifecycle below
+     stay at Info (no keeper-hook duplicate, low frequency). [TurnReady] already
+     uses [log_routine] for the same reason. *)
   match evt.payload with
   | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
     log (Printf.sprintf "agent started agent=%s task_id=%s" agent_name task_id)
@@ -60,13 +73,14 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
          task_id
          elapsed)
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
-    log (Printf.sprintf "turn started agent=%s turn=%d" agent_name turn)
+    log_routine (Printf.sprintf "turn started agent=%s turn=%d" agent_name turn)
   | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
-    log (Printf.sprintf "turn completed agent=%s turn=%d" agent_name turn)
+    log_routine (Printf.sprintf "turn completed agent=%s turn=%d" agent_name turn)
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
-    log (Printf.sprintf "tool called agent=%s tool_name=%s" agent_name tool_name)
+    log_routine (Printf.sprintf "tool called agent=%s tool_name=%s" agent_name tool_name)
   | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
-    log (Printf.sprintf "tool completed agent=%s tool_name=%s" agent_name tool_name)
+    log_routine
+      (Printf.sprintf "tool completed agent=%s tool_name=%s" agent_name tool_name)
   | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
     (* [substrate:tool_surface] — deterministic per-turn snapshot of the
          tool list the LLM actually sees this turn (after guardrails,
@@ -599,6 +613,12 @@ let prepare_pending_event evt =
          retry queue so every retry uses the same sanitized payload. *)
     let json = Inference_utils.sanitize_json_utf8 json in
     emit_native_event_log evt json;
+    (* P2-2: canonical in-memory event log. OAS events are published here so
+       REST/SSE subscribers and future replay tools have a single ordered
+       stream to consume. The log is bounded (10k events). *)
+    let (_ : Event_log.event_id) =
+      Event_log.publish ~source:"oas_event_bridge" ~kind:(relay_event_type json) json
+    in
     Some { json; attempts = 0; appended = false }
 ;;
 

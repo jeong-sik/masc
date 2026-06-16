@@ -11,7 +11,7 @@ let test_status_agents_response_roundtrip () =
   let resp =
     T.StatusResponse.
       { agents =
-          [ { T.name = "agent_code"
+          [ { T.name = "codex"
             ; status = "active"
             ; capabilities = [ "code" ]
             ; last_heartbeat_ms = 1000L
@@ -28,7 +28,7 @@ let test_status_agents_response_roundtrip () =
   let decoded = T.StatusResponse.of_bytes bytes in
   Alcotest.(check int) "agent count" 1 (List.length decoded.agents);
   let agent = List.hd decoded.agents in
-  Alcotest.(check string) "agent name" "agent_code" agent.T.name;
+  Alcotest.(check string) "agent name" "codex" agent.T.name;
   Alcotest.(check string) "agent task" "T-001" agent.T.current_task_id
 
 let test_tool_call_error_response_roundtrip () =
@@ -88,7 +88,7 @@ let test_tool_call_response_roundtrip () =
 
 let test_tool_call_request_roundtrip () =
   let req = T.ToolCallRequest.{
-    agent_name = "agent_llm_a";
+    agent_name = "claude";
     session_id = "s-1";
     tool_name = "masc_status";
     arguments_json = {|{"workspace":"main"}|};
@@ -101,9 +101,9 @@ let test_tool_call_request_roundtrip () =
 
 let test_broadcast_request_roundtrip () =
   let req = T.BroadcastRequest.{
-    agent_name = "provider_f";
+    agent_name = "gemini";
     message = "starting work";
-    mentions = ["agent_llm_a"; "agent_code"];
+    mentions = ["claude"; "codex"];
   } in
   let bytes = T.BroadcastRequest.to_bytes req in
   let decoded = T.BroadcastRequest.of_bytes bytes in
@@ -122,7 +122,7 @@ let test_event_roundtrip () =
   let event = T.Event.{
     seq = 100L;
     event_type = "message";
-    source_agent = "agent_code";
+    source_agent = "codex";
     timestamp_ms = 1700000000000L;
     payload_json = {|{"text":"hello"}|};
   } in
@@ -130,20 +130,20 @@ let test_event_roundtrip () =
   let decoded = T.Event.of_bytes bytes in
   Alcotest.(check int64) "seq" 100L decoded.seq;
   Alcotest.(check string) "type" "message" decoded.event_type;
-  Alcotest.(check string) "source" "agent_code" decoded.source_agent;
+  Alcotest.(check string) "source" "codex" decoded.source_agent;
   Alcotest.(check string) "payload" event.payload_json decoded.payload_json
 
 let test_status_response_roundtrip () =
   let resp = T.StatusResponse.{
     agents = [{
-      T.name = "agent_llm_a"; status = "active";
+      T.name = "claude"; status = "active";
       capabilities = ["code"; "review"];
       last_heartbeat_ms = 1000L; session_bound_at_ms = 500L;
       current_task_id = "";
     }];
     tasks = [{
       T.id = "T-1"; title = "Fix bug"; status = "claimed";
-      assigned_to = "agent_llm_a"; priority = 2;
+      assigned_to = "claude"; priority = 2;
     }];
     message_count = 10;
     workspace_path = "/tmp/test-workspace";

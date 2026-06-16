@@ -68,6 +68,18 @@ function sessionStorageOrNull(): Storage | null {
   }
 }
 
+function sameOriginWebSocketUrl(wsUrl: string): boolean {
+  if (typeof window === 'undefined' || typeof window.location === 'undefined') return true
+  const expectedProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  if (window.location.protocol !== 'https:' && window.location.protocol !== 'http:') return true
+  try {
+    const parsed = new URL(wsUrl, window.location.href)
+    return parsed.protocol === expectedProtocol && parsed.host === window.location.host
+  } catch {
+    return false
+  }
+}
+
 function readCachedWsUrl(): string | null {
   const storage = sessionStorageOrNull()
   if (!storage) return null
@@ -75,7 +87,12 @@ function readCachedWsUrl(): string | null {
     const raw = storage.getItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
     if (!raw) return null
     const data = JSON.parse(raw) as { ws_url?: unknown }
-    return typeof data.ws_url === 'string' && data.ws_url.length > 0 ? data.ws_url : null
+    if (typeof data.ws_url !== 'string' || data.ws_url.length === 0) return null
+    if (!sameOriginWebSocketUrl(data.ws_url)) {
+      storage.removeItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
+      return null
+    }
+    return data.ws_url
   } catch {
     // Eviction must not propagate: in restricted storage contexts the
     // initial getItem can throw, and a follow-up removeItem can throw too.
@@ -646,11 +663,19 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     if (socket !== ws) return
     const wasReady = dashboardWsReady.value
     const closeError = new Error(formatCloseEventError(event))
+    // Clean close (wasClean=true) is server-initiated (shutdown/redeploy/idle),
+    // not a degraded-WS error. Leaving lastError set on a clean close would trip
+    // the SSE fallback (dashboard-transport-fallback.ts) for every clean close ->
+    // reconnect window, producing the "dashboard keeps falling back to SSE"
+    // symptom. Abnormal closes (wasClean=false: network drop, code 1006/1011)
+    // keep lastError set so the fallback still engages. reconnect runs either
+    // way; pending RPCs are rejected either way (socket is gone).
+    const clean = event.wasClean === true
     clearHeartbeatTimer()
     batch(() => {
       dashboardWsConnected.value = false
       dashboardWsReady.value = false
-      dashboardWsLastError.value = closeError.message
+      dashboardWsLastError.value = clean ? null : closeError.message
     })
     if (!wasReady) clearCachedWsUrl()
     lastSubscribeKey = ''

@@ -1,11 +1,6 @@
 /* MASC Dashboard — Responsive Overrides (Task 292) */
 
 @media (max-width: 1024px) {
-  .app-shell {
-    width: calc(100% - 16px);
-    margin: 8px auto 16px;
-  }
-
   .dashboard-header {
     flex-direction: column;
     align-items: flex-start;
@@ -34,6 +29,16 @@
     --font-size-2xs: 10px;
   }
 
+  /* Tailwind text-* utilities default to their own scale (text-sm=0.875rem)
+     and bypass the --font-size-* tokens above — so pre-this-change only legacy
+     --fs-* shrank on mobile. Re-point the common text utilities at the scaled
+     tokens so the whole dashboard shrinks consistently. Unlayered rules beat
+     Tailwind @layer utilities (see base.css header note), so no !important. */
+  .text-2xs { font-size: var(--font-size-2xs); }
+  .text-xs { font-size: var(--font-size-xs); }
+  .text-sm { font-size: var(--font-size-sm); }
+  .text-base { font-size: var(--font-size-base); }
+
   .header-title-wrap h1 {
     font-size: var(--fs-22);
   }
@@ -57,6 +62,15 @@
   .dashboard-panel {
     padding: 12px !important;
   }
+
+  .dashboard-main-scroll {
+    padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dashboard-status-tray,
+  .dashboard-focus-mode-toggle {
+    bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 @media (max-width: 480px) {
@@ -77,5 +91,17 @@
     justify-content: flex-start !important;
     padding-bottom: 4px;
     &::-webkit-scrollbar { display: none; }
+  }
+}
+
+/* Touch targets — coarse pointers (touch) and narrow viewports deserve
+   the WCAG 2.5.5 / Apple HIG 44px minimum. height (inline on .btn / py on
+   ActionButton) and min-height (this) are independent properties, so
+   desktop keeps the compact inline height while touch/narrow lifts to 44px.
+   Icon-only .btn (22x22) is excluded — its square geometry is intentional. */
+@media (max-width: 768px), (pointer: coarse) {
+  .btn:not([data-icon="true"]),
+  [data-action-button] {
+    min-height: 44px;
   }
 }

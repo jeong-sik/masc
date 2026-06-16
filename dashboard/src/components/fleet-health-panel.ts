@@ -173,7 +173,7 @@ function ToolMonitorLaneLink({
 function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
   if (rows.length === 0) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-8 text-center text-2xs text-[var(--color-fg-muted)]">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-8 text-center text-2xs text-[var(--color-fg-muted)]">
         No tool attention rows.
       </div>
     `
@@ -191,7 +191,7 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
           <${RouteLink}
             tab="monitoring"
             params=${{ section: 'fleet-health', view: 'tool-quality', tool: row.name }}
-            class="block rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3"
+            class="v2-monitoring-card block rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3"
           >
             <div class="truncate font-mono text-xs text-[var(--color-fg-primary)]" title=${row.name}>${normalizedToolName(row.name)}</div>
             <div class="mt-2 grid grid-cols-2 gap-2 text-3xs">
@@ -220,8 +220,8 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
         `
       })}
     </div>
-    <div class="hidden overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] sm:block">
-      <table class="w-full text-2xs" aria-label="Tool attention rows">
+    <div class="v2-monitoring-card hidden overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] sm:block">
+      <table class="v2-monitoring-table w-full text-2xs" aria-label="Tool attention rows">
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
             <th scope="col" class="px-3 py-2 text-left font-medium">Tool</th>
@@ -239,7 +239,7 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
                 ? 'text-[var(--color-status-warn)]'
                 : 'text-[var(--bad-light)]'
             return html`
-              <tr class="border-b border-[var(--color-border-default)]/30 last:border-b-0">
+              <tr class="v2-monitoring-row border-b border-[var(--color-border-default)]/30 last:border-b-0">
                 <td class="max-w-[18rem] truncate px-3 py-2 font-mono text-[var(--color-fg-primary)]" title=${row.name}>
                   <${RouteLink}
                     tab="monitoring"
@@ -329,14 +329,14 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
   const readErrors = fleetSafety?.paused_keepers_health?.read_errors ?? []
   if (details.length === 0 && readErrors.length === 0) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
         No paused keeper detail rows.
       </div>
     `
   }
   return html`
-    <div class="overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
-      <table class="w-full text-2xs" aria-label="Paused keeper blockers">
+    <div class="v2-monitoring-card overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+      <table class="v2-monitoring-table w-full text-2xs" aria-label="Paused keeper blockers">
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
             <th scope="col" class="px-3 py-2 text-left font-medium">Keeper</th>
@@ -347,7 +347,7 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
         </thead>
         <tbody>
           ${details.map(row => html`
-            <tr class="border-b border-[var(--color-border-default)]/30 last:border-b-0">
+            <tr class="v2-monitoring-row border-b border-[var(--color-border-default)]/30 last:border-b-0">
               <td class="px-3 py-2 font-mono text-[var(--color-fg-primary)]">${row.name}</td>
               <td class="px-3 py-2 text-[var(--color-fg-secondary)]" title=${blockerDetailText(row) ?? undefined}>${pausedKindText(row)}</td>
               <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${secondsText(row.paused_elapsed_sec)}</td>
@@ -355,7 +355,7 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
             </tr>
           `)}
           ${readErrors.map(row => html`
-            <tr class="border-b border-[var(--color-border-default)]/30 last:border-b-0">
+            <tr class="v2-monitoring-row border-b border-[var(--color-border-default)]/30 last:border-b-0">
               <td class="px-3 py-2 font-mono text-[var(--bad-light)]">${row.keeper}</td>
               <td class="px-3 py-2 text-[var(--bad-light)]" colspan="3">${row.error}</td>
             </tr>
@@ -374,13 +374,13 @@ function RuntimeCdalBlock({ cdal }: { cdal: DashboardCdalHealth | null }) {
   const terminalSamples = completeness?.sample_terminal_incomplete_run_ids ?? []
   if (!cdal) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
         CDAL runtime snapshot unavailable.
       </div>
     `
   }
   return html`
-    <div class="grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-2xs">
+    <div class="v2-monitoring-card grid gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-3 text-2xs">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <span class="font-mono text-[var(--color-fg-primary)]">${cdal.writer_status ?? 'unknown'}</span>
         <${StatusChip}
@@ -507,7 +507,7 @@ function ToolMonitorDefaultBoard() {
 
   return html`
     <section class="grid gap-4" data-testid="tool-monitor-default">
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Tool Monitor</div>
@@ -525,7 +525,7 @@ function ToolMonitorDefaultBoard() {
           <div class="flex items-center gap-2">
             ${loading ? html`<span class="text-3xs text-[var(--color-fg-muted)]" role="status">refreshing</span>` : null}
             <button
-              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-1 text-3xs text-[var(--color-fg-secondary)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+              class="v2-monitoring-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-1 text-3xs text-[var(--color-fg-secondary)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => { void refreshSharedToolQuality({ windowHours: TOOL_MONITOR_WINDOW_HOURS }) }}
               aria-label="Tool monitor refresh"
             >Refresh</button>
@@ -587,7 +587,7 @@ function ToolMonitorDefaultBoard() {
         </div>
 
         <div class="grid content-start gap-4">
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+          <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Lanes</div>
             <div class="grid gap-2">
               <${ToolMonitorLaneLink}
@@ -614,7 +614,7 @@ function ToolMonitorDefaultBoard() {
             </div>
           </div>
 
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+          <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Failure categories</div>
             <${FailureCategoryList} quality=${quality} />
           </div>
@@ -628,7 +628,7 @@ export function FleetHealthPanel() {
   const view = activeView.value
 
   return html`
-    <div class="contain-content flex flex-col gap-4">
+    <div class="v2-monitoring-surface contain-content flex flex-col gap-4">
       <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keeper tool operations</div>
       <${FilterChips}
         chips=${VIEW_CHIPS}

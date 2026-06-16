@@ -8,7 +8,12 @@ type match_result =
 
 type comment_status = [ `Never | `No_new_external | `New_external of int * string * string ]
 
-val of_stimulus_payload : string -> Board_dispatch.board_signal option
+val board_signal_of_board_stimulus
+  :  post_id:string
+  -> Keeper_event_queue.board_stimulus
+  -> Board_dispatch.board_signal
+(** Total conversion from the typed event-queue board payload to the
+    [Board_dispatch.board_signal] the matchers consume (RFC-0020). *)
 
 val post_id_string : Board.post -> string
 val compare_cursor_token : float * string -> float * string -> int
@@ -27,8 +32,21 @@ val check_self_comment_status
   -> post_id:string
   -> comment_status
 
+type wake_reason =
+  | Explicit_mention
+  | Stigmergy of { score : int }
+  | Thread_reply_after_self_comment
+(** Closed set of reasons a keeper wakes for a board signal (RFC-0020).
+    Replaces the prior [string option] contract; consumers match exhaustively
+    so the previously dead ["board_activity"] generic bucket is gone. *)
+
+val wake_reason_label : wake_reason -> string
+(** Stable string label for logs/metrics. *)
+
 val wake_reason
   :  continuity_summary:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
-  -> string option
+  -> wake_reason option
+(** [None] means the relevance pipeline found no reason for this keeper to
+    wake (counted as [BoardSignalNoWakeTotal] by the caller). *)

@@ -31,7 +31,7 @@ let tmpdir () =
   dir
 
 let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
-    ?(notes = "Implemented JWT refresh token rotation") ?(agent = "dreamer") ()
+    ?(notes = "Implemented JWT refresh token rotation") ?(agent = "alice") ()
   : AR.review_request =
   { task_title = title; task_description = desc;
     completion_notes = notes; agent_name = agent; task_id = "test-task-eval" }
@@ -340,9 +340,9 @@ let test_to_harness_verdict_approve () =
   let record : Cal.verdict_record = {
     record_type = Cal.Verdict_record; notes_hash = "abc";
     task_id = "t1"; task_title = "Fix login";
-    agent_name = "dreamer"; verdict = AR.Approve;
+    agent_name = "alice"; verdict = AR.Approve;
     gate = AR.Structured_tool; evaluator_runtime = "glm5";
-    generator_runtime = Some "agent_llm_a"; fallback_reason = None;
+    generator_runtime = Some "claude"; fallback_reason = None;
     timestamp = 0.0;
   } in
   let hv = Cal.to_harness_verdict record in
@@ -356,7 +356,7 @@ let test_to_harness_verdict_reject () =
   let record : Cal.verdict_record = {
     record_type = Cal.Verdict_record; notes_hash = "def";
     task_id = "t2"; task_title = "Deploy fix";
-    agent_name = "coder"; verdict = AR.Reject "too short";
+    agent_name = "bob"; verdict = AR.Reject "too short";
     gate = AR.Length; evaluator_runtime = "local";
     generator_runtime = None; fallback_reason = None;
     timestamp = 0.0;

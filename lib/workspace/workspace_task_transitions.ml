@@ -8,7 +8,15 @@ open Workspace_backlog
 include Workspace_task_classify
 include Workspace_task_create
 include Workspace_task_claim
-let transition_task_r
+(* RFC-0088 §1 follow-up (#21065 review): typed surface for the idempotent
+   no-op transition. Previously the only signal was the "(no-op)" substring in
+   the [Ok msg] string, which callers had to sniff with substring matching. *)
+type transition_outcome =
+  { message : string
+  ; noop : bool
+  }
+
+let transition_task_outcome_r
       config
       ~agent_name
       ~task_id
@@ -22,7 +30,7 @@ let transition_task_r
       ?handoff_context
       ?(force = false)
       ()
-  : string Masc_domain.masc_result
+  : transition_outcome Masc_domain.masc_result
   =
   let open Result.Syntax in
   let* () =
@@ -360,10 +368,13 @@ let transition_task_r
         then
 (* Idempotent no-op: status unchanged, skip write/events. Match None explicitly so set_current=Some is never silently dropped. *)
           Ok
-            (Printf.sprintf
-               "%s already %s (no-op)"
-               task_id
-               (task_status_to_string task.task_status))
+            { message =
+                Printf.sprintf
+                  "%s already %s (no-op)"
+                  task_id
+                  (task_status_to_string task.task_status)
+            ; noop = true
+            }
         else (
           let backlog_update =
             Workspace_task_transition_executor.build_backlog_update
@@ -606,14 +617,50 @@ let transition_task_r
            | Masc_domain.Approve_verification
            | Masc_domain.Reject_verification -> ());
           Ok
-            (Printf.sprintf
-               "%s %s → %s"
-               task_id
-               (task_status_to_string task.task_status)
-               (task_status_to_string new_status)))
+            { message =
+                Printf.sprintf
+                  "%s %s → %s"
+                  task_id
+                  (task_status_to_string task.task_status)
+                  (task_status_to_string new_status)
+            ; noop = false
+            })
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
   |> Workspace_task_verification.flatten_lock_result
+;;
+
+let transition_task_r
+      config
+      ~agent_name
+      ~task_id
+      ~action
+      ?prepare_verification_request
+      ?compensate_verification_request
+      ?prepare_verification_verdict
+      ?expected_version
+      ?notes
+      ?reason
+      ?handoff_context
+      ?force
+      ()
+  : string Masc_domain.masc_result
+  =
+  transition_task_outcome_r
+    config
+    ~agent_name
+    ~task_id
+    ~action
+    ?prepare_verification_request
+    ?compensate_verification_request
+    ?prepare_verification_verdict
+    ?expected_version
+    ?notes
+    ?reason
+    ?handoff_context
+    ?force
+    ()
+  |> Result.map (fun outcome -> outcome.message)
 ;;

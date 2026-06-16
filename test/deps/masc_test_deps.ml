@@ -22,8 +22,8 @@ let init_eio_clock ?sw env =
 
 let init_keeper_tool_registry () =
   if not (Tool_dispatch.is_tag_registry_initialized ()) then
-    let _ = Masc.Mcp_server_eio.governance_defaults in
-    ()
+    (Masc.Unified_tool_registry.register_all ();
+     Masc.Unified_tool_registry.enforce_visible_tag_coverage ())
 
 (** Test fixture parser for [keeper_meta] JSON.
 

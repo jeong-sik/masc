@@ -116,9 +116,18 @@ let compute_metrics_window
         let tokens = Safe_ops.json_int ~default:0 "context_tokens" j in
         let context_max = Safe_ops.json_int ~default:0 "context_max" j in
         let channel = Safe_ops.json_string ~default:"turn" "channel" j in
-        let is_turn = channel = "turn" in
-        let is_heartbeat = channel = "heartbeat" in
-        let is_scheduled_autonomous = channel = "scheduled_autonomous" || channel = "proactive" in
+        let parsed_channel = Keeper_world_observation.channel_of_string channel in
+        let is_turn =
+          match parsed_channel with
+          | Some Keeper_world_observation.Reactive -> true
+          | _ -> false
+        in
+        let is_heartbeat = String.equal channel "heartbeat" in
+        let is_scheduled_autonomous =
+          match parsed_channel with
+          | Some c -> Keeper_world_observation.is_autonomous c
+          | None -> false
+        in
         let is_interaction = is_turn || is_scheduled_autonomous in
         let compacted = Safe_ops.json_bool ~default:false "compacted" j in
         let gen = Safe_ops.json_int ~default:generation "generation" j in

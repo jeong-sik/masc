@@ -84,6 +84,11 @@ let () =
   let open Tool_dispatch in
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
   Board_tool.register ();
+  (* P0-1 unified tool registry ratchet: fill any gaps left by module-load
+     [Tool_spec] registrations and ensure every LLM-visible schema has a tag.
+     Safe to call multiple times; existing registrations are preserved. *)
+  Unified_tool_registry.register_all ();
+  Unified_tool_registry.enforce_visible_tag_coverage ();
   mark_tag_registry_initialized ();
   (* Inject masc_* schemas into keeper bridge for surface/policy filtering.
      Uses Config.raw_all_tool_schemas, including domain-adapter schemas not

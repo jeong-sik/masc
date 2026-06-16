@@ -25,6 +25,7 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
      ; "votes_down", `Int p.votes_down
      ; "score", `Int (p.votes_up - p.votes_down)
      ; "reply_count", `Int p.reply_count
+     ; "pinned", `Bool p.pinned
      ]
      @ (match p.hearth with
         | Some h -> [ "hearth", `String h ]

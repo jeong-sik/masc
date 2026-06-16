@@ -149,7 +149,7 @@ function ToolTable({
   }
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-2xs" aria-label="도구 품질 메트릭">
+      <table class="v2-monitoring-table w-full text-2xs" aria-label="도구 품질 메트릭">
         <thead>
           <tr class="text-[var(--color-fg-disabled)] border-b border-[var(--color-border-default)]">
             <th scope="col" class="text-left py-1 font-normal">도구</th>
@@ -165,8 +165,8 @@ function ToolTable({
               : t.success_pct >= 80 ? 'text-[var(--color-status-warn)]' : 'text-[var(--bad-light)]'
             const isHighlighted = highlightTool && t.name === highlightTool
             const rowClass = isHighlighted
-              ? 'border-b border-[var(--warn-20)] bg-[var(--warn-10)] ring-1 ring-[var(--warn-20)]0/40'
-              : 'border-b border-[var(--color-border-default)] border-opacity-30'
+              ? 'v2-monitoring-row border-b border-[var(--warn-20)] bg-[var(--warn-10)] ring-1 ring-[var(--warn-20)]0/40'
+              : 'v2-monitoring-row border-b border-[var(--color-border-default)] border-opacity-30'
             return html`
               <tr class=${rowClass} ref=${isHighlighted ? ((el: HTMLElement | null) => el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })) : undefined}>
                 <td class="py-0.5 font-mono">${t.name.replace('keeper_', '').replace('masc_', 'm:')}${isHighlighted ? html`<span class="ml-1 text-3xs text-[var(--color-status-warn)]">◀ selected</span>` : null}</td>
@@ -228,7 +228,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   const labelIndices = pickAxisLabelIndices(n)
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-baseline justify-between mb-1.5 gap-2">
         <${Eyebrow}>성공률 추이</${Eyebrow}>
         <div class="flex items-baseline gap-1.5 leading-tight">
@@ -340,7 +340,7 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
         const fillClass = k.success_pct >= 95 ? 'bg-[var(--ok-10)]' : k.success_pct >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
         const textColor = k.success_pct >= 95 ? 'text-[var(--color-status-ok)]' : k.success_pct >= 90 ? 'text-[var(--color-status-warn)]' : 'text-[var(--bad-light)]'
         return html`
-          <div class="flex items-center gap-2 text-2xs">
+          <div class="v2-monitoring-row flex items-center gap-2 text-2xs">
             <span class="w-40 truncate text-[var(--color-fg-disabled)] font-mono" title=${k.name}>${k.name}</span>
             <${ProgressBar} pct=${k.success_pct} size="sm" class=${fillClass} trackClass="flex-1 bg-[var(--bg-subtle)]" />
             <span class="w-12 text-right font-mono ${textColor}">${k.success_pct.toFixed(1)}%</span>
@@ -358,7 +358,7 @@ function FailureList({ categories }: { categories: FailureCategory[] }) {
   return html`
     <div class="flex flex-col gap-1">
       ${top.map(c => html`
-        <div class="flex items-center justify-between text-2xs">
+        <div class="v2-monitoring-row flex items-center justify-between text-2xs">
           <span class="font-mono text-[var(--bad-light)]/80 truncate flex-1 mr-2">${c.category}</span>
           <span class="text-[var(--color-fg-disabled)] shrink-0">${c.count}x</span>
         </div>
@@ -396,7 +396,7 @@ export function ToolQualityPanel() {
   const coverageGap = coverageGapDisplay(d)
 
   return html`
-    <div class="flex flex-col gap-4 p-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4 p-4">
       <div class="flex items-center justify-between">
         <div>
           <h2 class="text-sm font-medium">도구 호출 품질</h2>
@@ -418,7 +418,7 @@ export function ToolQualityPanel() {
         </div>
         <div class="flex flex-col items-end gap-0.5 leading-tight shrink-0">
           <button
-            class="text-3xs px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--bg-subtle)] text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
+            class="v2-monitoring-action text-3xs px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--bg-subtle)] text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
             onClick=${handleRefreshToolQualityClick}
             aria-label="도구 품질 새로고침"
           >새로고침</button>

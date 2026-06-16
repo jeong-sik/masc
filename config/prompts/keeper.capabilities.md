@@ -23,7 +23,7 @@ NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_
 After pushing a prepared branch for assigned code work, create or update the remote PR through Execute as an ordinary typed-argv CLI call from scoped repo cwd. PR creation is not a keeper-native tool concept.
 Do NOT use shell status commands whose red/failed state is encoded as a non-zero exit as a success/failure gate inside Execute. Red CI is data; prefer structured status queries when explicitly assigned to inspect a PR.
 Do NOT use shell redirects or chaining. Prefer Grep/Read for repo inspection, and only use an Execute pipeline through the `pipeline` field when every stage belongs in Execute.
-Do NOT use Execute for grep/rg pipelines such as `cd repos/REPO_NAME && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "repos/REPO_NAME/.worktrees/TASK_NAME/lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
+Do NOT use Execute for grep/rg pipelines such as `cd repos/REPO_NAME && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "repos/REPO_NAME/lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
 Do NOT run repo-wide Execute scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use Grep with a scoped repo path, or run `git log --oneline -5 --grep=term` from the target repo cwd.
 ## Tool error grammar (how to read a failed tool result)
 
@@ -44,25 +44,25 @@ Short form: hint → fix args → retry once → if still stuck, judgment reques
 
 Public tool examples:
   BAD:  raw shell text: "git log --oneline | head -5"
-  GOOD: Execute executable="git" argv=["log","--oneline","-5"] cwd=repos/REPO_NAME/.worktrees/TASK_NAME
+  GOOD: Execute executable="git" argv=["log","--oneline","-5"] cwd=repos/REPO_NAME
   BAD:  raw shell text: "cd repos && ls"
   GOOD: Execute executable="ls" argv=["repos"]
   BAD:  raw shell text: "find /home/keeper -name \"board\" 2>/dev/null"
   GOOD: Execute executable="find" argv=[".","-maxdepth","3","-name","board"]
   BAD:  raw shell text: "find repos/REPO_NAME/lib -name nickname*"
-  GOOD: Grep pattern="nickname" path=repos/REPO_NAME/.worktrees/TASK_NAME/lib glob="*.ml"
+  GOOD: Grep pattern="nickname" path=repos/REPO_NAME/lib glob="*.ml"
   BAD:  raw shell text: "rg -n \"foo\\|bar\" repos/REPO_NAME/lib 2>/dev/null | head -20"
-  GOOD: Grep pattern="foo|bar" path=repos/REPO_NAME/.worktrees/TASK_NAME/lib
+  GOOD: Grep pattern="foo|bar" path=repos/REPO_NAME/lib
   BAD:  raw shell text: "cd repos/REPO_NAME && grep -rn \"exec_semantic\" lib/ --include=\"*.ml\" | head -40"
-  GOOD: Grep pattern="exec_semantic" path=repos/REPO_NAME/.worktrees/TASK_NAME/lib glob="*.ml"
+  GOOD: Grep pattern="exec_semantic" path=repos/REPO_NAME/lib glob="*.ml"
   BAD:  raw shell text: "git log --oneline --all --grep=\"15731\" 2>/dev/null | head -5"
-  GOOD: Execute executable="git" argv=["log","--oneline","-5","--grep=15731"] cwd=repos/REPO_NAME/.worktrees/TASK_NAME
+  GOOD: Execute executable="git" argv=["log","--oneline","-5","--grep=15731"] cwd=repos/REPO_NAME
   BAD:  raw shell text: "rg \"add_comment\" repos/ --include '*.ml' --include '*.mli' -l"
-  GOOD: Grep pattern="add_comment" path=repos/REPO_NAME/.worktrees/TASK_NAME/lib glob="*.ml"
+  GOOD: Grep pattern="add_comment" path=repos/REPO_NAME/lib glob="*.ml"
   BAD:  raw shell text: "cat file 2>/dev/null || echo missing"
   GOOD: Read file_path=file                                 (let the tool error explain missing files)
   BAD:  Read file_path=file start_line=20 end_line=40
-  GOOD: Grep pattern="target_symbol" path=repos/REPO_NAME/.worktrees/TASK_NAME/lib glob="*.ml"
+  GOOD: Grep pattern="target_symbol" path=repos/REPO_NAME/lib glob="*.ml"
   BAD:  raw shell text: "ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND"
   GOOD: Execute executable="ls" argv=["path"]              (let the tool error explain missing paths)
   BAD:  raw shell text: "python3 -c 'open(path).write(text)'"
@@ -70,7 +70,7 @@ Public tool examples:
   BAD:  raw shell text: "keeper_board_list"       (MASC tool invoked as a program)
   GOOD: keeper_board_list {}                          (call the JSON tool directly)
   BAD:  raw shell text: "dune fmt file.ml"
-  GOOD: Execute executable="dune" argv=["fmt","--check"] cwd=repos/REPO_NAME/.worktrees/TASK_NAME
+  GOOD: Execute executable="dune" argv=["fmt","--check"] cwd=repos/REPO_NAME
 
 ## What you can do with your tools
 
@@ -82,7 +82,7 @@ File operations:
 - Git history: Execute `executable="git" argv=["log","--oneline","-10"]` with cwd inside the target repo.
 - Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo.
 - Read-only branch/worktree inspection: use `git status --short --branch`, `git branch --show-current`, or `git worktree list`. `git checkout main` and `git switch main` are allowed as local main-branch recovery commands; do not use arbitrary branch checkout, `git add`, `git commit`, `git push`, or `git worktree add` unless the active schema explicitly exposes write-capable Execute and the task is assigned code work.
-- Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline: [{ executable, argv }, ...]`. For code/PR work and repo-hosting CLIs, set cwd to `repos/REPO_NAME/.worktrees/TASK_NAME`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: prefer structured status queries over status commands that fail on red checks.
+- Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline: [{ executable, argv }, ...]`. For code/PR work and repo-hosting CLIs, set cwd to `repos/REPO_NAME`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: prefer structured status queries over status commands that fail on red checks.
 - Execute returns stdout/stderr automatically. Do not pass `stdout` or `stderr` objects unless you explicitly want to discard output.
 - Write or create a file: Edit/Write when the active schema exposes them. Writable scope: your sandbox only.
 - Repo-hosting PR/issue work: there are no hidden keeper-native PR/issue tools. If an assigned task explicitly requires a repo-hosting operation and Execute is visible, use the ordinary CLI through typed `executable`/`argv` from a scoped repo cwd. Create or edit PRs only after pushing from the prepared repo checkout.
@@ -90,18 +90,18 @@ File operations:
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
   - `mind/` — notes, drafts, scratchpads
-  - `repos/` — git clones (one per repo, e.g. `repos/REPO_NAME/`) — task work should happen inside `repos/REPO_NAME/.worktrees/TASK_NAME/`
+  - `repos/` — git clones (one per repo, e.g. `repos/REPO_NAME/`) — task work should happen inside `repos/REPO_NAME/`
   - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
 - Clones: use the exact tool listed in your active schema. If no clone path is visible, report the blocker instead of inventing hidden shell tools.
 
 Repo setup:
 1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block), use the exact allowed tool or Execute path allowed by the active schema. If no such path is allowed, report the missing clone as a blocker.
-2. Work in `repos/{repo}/.worktrees/{task}/` for code/PR changes. If that worktree is missing, report the blocker or use the visible worktree/provisioning workflow when assigned. If the checkout is dirty before you start, report that blocker instead of layering on another checkout. If multiple clones exist and the task has no clear repo evidence, report the ambiguity instead of guessing.
+2. Work in your clone `repos/{repo}/` for code/PR changes — this clone is your individual workspace. Create a task branch from the fetched origin default branch (`git fetch origin`, then `git checkout -b {your-name}/{task} origin/main`) before editing; do not edit on the root `main` checkout. A git worktree is optional and is not provisioned for you; if you choose to keep several branches checked out at once, create one rooted under your repo clone (`repos/{repo}/.worktrees/...`) from `origin/main`. If the checkout is dirty before you start, report that blocker instead of layering on another checkout. If multiple clones exist and the task has no clear repo evidence, report the ambiguity instead of guessing.
 3. If setup returns `ok: false`, STOP. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
 
 PR workflow (write/execute-capable schema required):
-1. Work inside `repos/{repo}/.worktrees/{task}/`. Run `git status --short`; if clean, create/switch the task branch there. If it is dirty before you start, stop and report the blocker.
+1. Work inside your clone `repos/{repo}/`. Run `git status --short`; if clean, create or switch to the task branch (`git fetch origin`, then `git checkout -b {your-name}/{task} origin/main`). If it is dirty before you start, stop and report the blocker.
 2. `Read`/`Grep` -> `Edit`/`Write` — read first, then edit
 3. `Execute executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the prepared repo checkout
 4. Use Execute typed argv to open or update the remote PR after push, only for the assigned repo checkout.

@@ -195,7 +195,7 @@ export function summarizeOverviewTile(
   if (stateLabel === 'stale' || stateLabel === 'disconnected' || connector.gate_healthy === false) {
     return {
       badge: '주의',
-      badgeClass: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
+      badgeClass: 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)]',
       detail: stateLabel === 'stale'
         ? 'heartbeat가 stale 상태입니다 · 로그와 gate 상태를 확인하세요'
         : stateLabel === 'disconnected'
@@ -216,7 +216,7 @@ export function summarizeOverviewTile(
 
   return {
     badge: '정상',
-    badgeClass: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]',
+    badgeClass: 'border-[var(--ok-border)] bg-[var(--ok-10)] text-[var(--color-status-ok)]',
     detail: `실행 중 · ${bindingCount} ${bindingCount === 1 ? 'binding' : 'bindings'} active`,
   }
 }
@@ -262,7 +262,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
     <${SurfaceCard}
       class=${`flex min-w-0 flex-col gap-3 !bg-[var(--color-bg-surface)] !p-3 transition-colors ${
         selected
-          ? '!border-[var(--color-accent-fg)] shadow-[0_0_0_1px_var(--accent-18)]'
+          ? '!border-[var(--color-accent-fg)] shadow-[0_0_0_1px_var(--accent-22)]'
           : '!border-[var(--color-border-default)] hover:!border-[var(--color-border-default)]'
       }`}
       data-overview-tile=${id}
@@ -286,7 +286,7 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
             ${uptimeLabel !== null
               ? html`
                   <span
-                    class="rounded-[var(--r-0)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
+                    class="rounded-[var(--r-0)] border border-[var(--ok-border)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
                     data-uptime-chip
                     title="last_ready_at 기준 경과 시간"
                   >${uptimeLabel}</span>
@@ -371,8 +371,8 @@ const TILE_ACTION_TONE_CLASS: Record<'start' | 'stop', string> = {
   // across per-tile + bulk controls. The per-tile button is deliberately
   // block-width and text-xs so it reads as the primary action of the
   // tile, distinct from the smaller pill row above.
-  start: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)] hover:bg-[var(--ok-10)]',
-  stop: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-10)]',
+  start: 'border-[var(--ok-border)] bg-[var(--ok-10)] text-[var(--color-status-ok)] hover:bg-[var(--ok-10)]',
+  stop: 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-10)]',
 }
 
 /** The prominent per-tile Start/Stop button. Reference UIs (Vercel
@@ -442,7 +442,7 @@ const TILE_NOTICE_TONE_CLASS: Record<'error' | 'stale', string> = {
   // Rose for hard errors (sidecar reported an explicit failure),
   // amber for stale (data hasn't refreshed but no explicit error).
   // Matches Sentry \"issue\" rose + Vercel \"warning\" amber convention.
-  error: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
+  error: 'border-[var(--err-border)] bg-[var(--bad-10)] text-[var(--bad-light)]',
   stale: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
 }
 
@@ -706,7 +706,7 @@ function IncidentBanner({ droppedIds }: { droppedIds: string[] }) {
     .join(', ')
   return html`
     <${SurfaceCard}
-      class="mb-2 flex items-center gap-2 !border-[var(--bad-20)] !bg-[var(--bad-10)] !px-3 !py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
+      class="mb-2 flex items-center gap-2 !border-[var(--err-border)] !bg-[var(--bad-10)] !px-3 !py-1.5 text-2xs font-semibold text-[var(--bad-light)]"
       data-incident-banner
       role="alert"
     >
@@ -748,13 +748,13 @@ export function ConnectorOverviewStrip({
   const droppedIds = detectRecentDrops(stripMemory.value, connectors, Date.now())
   const summary = summarizeConnectorStrip(connectors, keeperCount)
   return html`
-    <${SurfaceCard} class="mb-4 !p-3" data-overview-strip-root>
+    <${SurfaceCard} class="mb-4 !p-3 v2-connector-overview-strip" data-overview-strip-root>
       <${IncidentBanner} droppedIds=${droppedIds} />
       <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div class="flex flex-wrap items-center gap-2">
           <${StatusSummaryLine} summary=${summary} connectors=${connectors} />
           ${discordTriggerPolicy && discordTriggerPolicy !== 'unknown'
-            ? html`<span class="rounded-[var(--r-0)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-0.5 text-3-xs font-medium text-[var(--color-fg-secondary)]">trigger: ${discordTriggerPolicy}</span>`
+            ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-secondary)]">trigger: ${discordTriggerPolicy}</span>`
             : null
           }
         </div>

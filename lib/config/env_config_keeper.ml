@@ -287,14 +287,14 @@ module KeeperKeepalive = struct
 
   (** {2 Idle Turn Constants}
 
-      With tool_choice=Any, keepers always call tools.  Idle detection
-      now only fires when the same tool+args pattern repeats.  Higher
-      thresholds allow legitimate multi-step exploration (e.g., calling
+      Keepers may call tools or finish with text. Idle detection only
+      fires when the same tool+args pattern repeats. Higher thresholds
+      allow legitimate multi-step exploration (e.g., calling
       keeper_tool_search with different queries). *)
 
   (** Max idle turns for scheduled autonomous keeper turns.
-      With tool_choice=Any and max_turns=50, keepers have workspace to
-      explore.  10 idle turns × ~5K tokens = ~50K budget.
+      Keepers have workspace to explore multi-step tool sequences.
+      10 idle turns × ~5K tokens = ~50K budget.
       Env: [MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS]. Default: 10. *)
   let max_idle_turns_autonomous =
     max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
@@ -466,9 +466,9 @@ module KeeperKeepalive = struct
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
-      With tool_choice=Any, the model always calls tools, so idle
-      detection triggers on repeated tool calls.  4 catches loops
-      quickly while still allowing legitimate exploration.
+      Optional tool use means this only applies after repeated tool
+      calls.  4 catches loops quickly while still allowing legitimate
+      exploration.
       Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 4. *)
   let idle_skip_threshold =
     max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
@@ -603,47 +603,12 @@ module RuntimeSaturationSignal = struct
     get_bool ~default:false "MASC_RUNTIME_SATURATION_SIGNAL_ENABLED"
 end
 
-(** {1 Runtime Runtime Overrides}
-
-    Runtime-only narrowing of the MASC runtime provider set. The underlying
-    runtime profile (loaded from [runtime.toml]) is unchanged; this filter is
-    applied by the named-runtime execution path via [~provider_filter] on every
-    keeper turn, so switching between full runtime and a single-provider
-    fallback is a pure env-var change with no file or code edit.
-
-    Use case: GLM endpoint outage (e.g. z.ai quota exhausted), Ollama-only
-    hard mode, or A/B testing a single provider. *)
-module KeeperRuntimeProviderFilter = struct
-  (** Comma-separated provider kind allowlist for every keeper runtime call.
-      Values are OAS [Provider_config.string_of_provider_kind]:
-      [ollama], [glm], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
-      [provider_c], [cli_tool_c], [cli_tool_b], [cli_tool_a].
-      Matching is case-insensitive; empty entries are dropped.
-
-      Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Keeper_turn_driver.run_named], which applies it during MASC runtime
-      provider resolution. The runtime keeps only matching providers from
-      the resolved profile; if the filter leaves zero providers, OAS falls back
-      to the unfiltered profile (see [apply_provider_filter] safety net).
-
-      [None] (env var unset or blank) = full runtime, unfiltered.
-
-      Env: [MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST]. Default: unset. *)
-  let provider_allowlist () : string list option =
-    match Env_config_core.raw_value_opt "MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST" with
-    | None -> None
-    | Some raw ->
-      let parts =
-        raw
-        |> String.split_on_char ','
-        |> List.map String.trim
-        |> List.filter (fun s -> s <> "")
-      in
-      (match parts with
-       | [] -> None
-       | _ -> Some parts)
-  ;;
-end
+(* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
+   deleted (audit F8): its value was threaded as [?provider_filter] into
+   [Keeper_turn_driver.run_named] and [Keeper_memory_llm_summary.make], both of
+   which silently ignored it after the RFC-0206 single-runtime purge. The knob
+   was dead while its docs were live; deletion documents reality. Provider
+   selection is runtime.toml SSOT ([runtime].default / [[runtime.assignments]]). *)
 
 (** {1 Transient Retry Backoff}
 

@@ -279,6 +279,16 @@ let test_profile_defaults_feed_identity_prompt () =
   check bool "profile instructions in system prompt" true
     (contains ~needle:"Instructions:\nsoul instructions" system)
 
+let test_no_goal_prompt_blocks_repo_creation_question () =
+  with_repo_prompt_config @@ fun () ->
+  let system = system_prompt base_observation in
+  check bool "no active goal guidance present" true
+    (contains ~needle:"You have no active goal" system);
+  check bool "no repo creation question guard present" true
+    (contains
+       ~needle:"Do not ask the operator what repo, goal, or task to create"
+       system)
+
 let () =
   init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
@@ -300,5 +310,7 @@ let () =
             test_namespace_state_names_running_keeper_fibers;
           test_case "profile defaults feed identity prompt" `Quick
             test_profile_defaults_feed_identity_prompt;
+          test_case "no-goal prompt blocks repo creation question" `Quick
+            test_no_goal_prompt_blocks_repo_creation_question;
         ] );
     ]

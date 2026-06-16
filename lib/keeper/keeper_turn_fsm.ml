@@ -25,9 +25,22 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
          sequenced after [wrap_unit] would never run, so the
          diagnostic warn has to precede it for operators to see
          *which* transition violated. *)
-      Log.Keeper.warn ~keeper_name ~turn_id
-        "[fsm:transition:violation] %s -> %s (%s)"
-        violation.from_state violation.to_state violation.reason;
+      Log.Keeper.emit
+        Log.Warn
+        ~keeper_name
+        ~turn_id
+        ~category:Log.Fsm
+        ~details:
+          (`Assoc
+            [ "from_state", `String violation.from_state
+            ; "to_state", `String violation.to_state
+            ; "reason", `String violation.reason
+            ])
+        (Printf.sprintf
+           "[fsm:transition:violation] %s -> %s (%s)"
+           violation.from_state
+           violation.to_state
+           violation.reason);
       let stage = violation.from_state ^ "->" ^ violation.to_state in
       (* [Invalid_argument] (not [assert false]) carries an explicit
          message into the re-raise backtrace.  Operators reading a
@@ -52,14 +65,18 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
         (fun () -> invalid_arg detail)
 
 (* Per-keeper last-transition wallclock, used to record the dwell time
-   spent in [prev] state when a transition fires. Single-domain Eio
-   means Hashtbl ops are atomic at OCaml level (no preemption inside a
-   single op), so no explicit mutex is required. Stale entries left
-   behind by terminal transitions are bounded by keeper count. *)
+   spent in [prev] state when a transition fires. Keeper turns run on
+   concurrent Eio fibers, so serialize Hashtbl access with an [Eio.Mutex.t].
+   Stale entries left behind by terminal transitions are bounded by keeper
+   count. *)
 let last_transition_at : (string, float) Hashtbl.t = Hashtbl.create 64
+let last_transition_mu = Eio.Mutex.create ()
 
 let observe_phase_dwell ~keeper_name ~from_label =
-  match Hashtbl.find_opt last_transition_at keeper_name with
+  match
+    Eio.Mutex.use_ro last_transition_mu (fun () ->
+      Hashtbl.find_opt last_transition_at keeper_name)
+  with
   | None -> ()
   | Some prev_at ->
     let now = Unix.gettimeofday () in
@@ -82,7 +99,8 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   (match prev with
    | Some _ -> observe_phase_dwell ~keeper_name ~from_label:prev_label
    | None -> ());
-  Hashtbl.replace last_transition_at keeper_name now;
+  Eio.Mutex.use_rw ~protect:true last_transition_mu (fun () ->
+    Hashtbl.replace last_transition_at keeper_name now);
   let classified =
     match prev with
     | Some from_state ->
@@ -111,12 +129,25 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
     | Some action, _ -> transition_action_label action
     | None, None -> "initial"
     | None, Some _ ->
-        Log.Keeper.warn ~keeper_name ~turn_id
-          "[fsm:transition:unclassified] %s -> %s — classify_transition \
-           has no arm for this (from, to) pair; add one in \
-           lib/turn_fsm/turn_fsm.ml::classify_transition so the \
-           audit trail captures the action"
-          prev_label state_label;
+        Log.Keeper.emit
+          Log.Warn
+          ~keeper_name
+          ~turn_id
+          ~category:Log.Fsm
+          ~details:
+            (`Assoc
+              [ "from_state", `String prev_label
+              ; "to_state", `String state_label
+              ; "action", `String "unclassified"
+              ; "reason", `String "classify_transition has no arm for this (from, to) pair"
+              ])
+          (Printf.sprintf
+             "[fsm:transition:unclassified] %s -> %s — classify_transition \
+              has no arm for this (from, to) pair; add one in \
+              lib/turn_fsm/turn_fsm.ml::classify_transition so the \
+              audit trail captures the action"
+             prev_label
+             state_label);
         "unclassified"
   in
   let stop_label =
@@ -126,9 +157,27 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
           c.stop_signaled_before c.stop_signaled_after
     | None -> ""
   in
-  Log.Keeper.info ~keeper_name ~turn_id
-    "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label
-    stop_label;
+  let stop_details =
+    match ctx with
+    | Some c ->
+      [ "stop_signaled_before", `Bool c.stop_signaled_before
+      ; "stop_signaled_after", `Bool c.stop_signaled_after
+      ]
+    | None -> []
+  in
+  Log.Keeper.emit
+    Log.Info
+    ~keeper_name
+    ~turn_id
+    ~category:Log.Fsm
+    ~details:
+      (`Assoc
+        ([ "from_state", `String prev_label
+         ; "to_state", `String state_label
+         ; "action", `String action_label
+         ]
+         @ stop_details))
+    (Printf.sprintf "[fsm:transition] %s -> %s action=%s%s" prev_label state_label action_label stop_label);
   Keeper_transition_audit.record_turn_fsm_transition
     ~keeper_name
     { turn_fsm_turn_id = turn_id

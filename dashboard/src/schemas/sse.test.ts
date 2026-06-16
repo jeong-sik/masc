@@ -171,6 +171,43 @@ describe('SSEMessageSchema', () => {
     })
     expect(r.success).toBe(true)
   })
+
+  it('accepts keeper_chat_appended with RFC-0235 audio clip', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_appended',
+      name: 'keeper-1',
+      connector: 'agent',
+      ts_unix: 1_712_000_000,
+      audio: {
+        token: 'clip-123',
+        mime: 'audio/mpeg',
+        message_text: 'hello operator',
+        audio_url: 'https://cdn.example/voice/clip-123.mp3',
+        duration_sec: 5.2,
+        device_id: 'dashboard',
+      },
+    })
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.audio).toEqual({
+        token: 'clip-123',
+        mime: 'audio/mpeg',
+        message_text: 'hello operator',
+        audio_url: 'https://cdn.example/voice/clip-123.mp3',
+        duration_sec: 5.2,
+        device_id: 'dashboard',
+      })
+    }
+  })
+
+  it('rejects malformed audio clip on keeper_chat_appended', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_appended',
+      name: 'keeper-1',
+      audio: { token: 'clip-123' },
+    })
+    expect(r.success).toBe(false)
+  })
 })
 
 describe('parseSSEMessage', () => {
@@ -196,6 +233,27 @@ describe('parseSSEMessage', () => {
     })
     expect(msg).not.toBeNull()
     expect(msg?.type).toBe('oas:slot_scheduler_observed')
+  })
+
+  it('keeps oas telemetry tuple payloads instead of logging schema drift', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({
+      type: 'oas:telemetry_event',
+      event_type: 'telemetry_event',
+      ts_unix: 1781584363.694713,
+      payload: [
+        'Streaming_first_chunk',
+        {
+          provider: 'openai_compat',
+          model: 'deepseek-v4-flash',
+          ttfrc_ms: 3988.802909851074,
+        },
+      ],
+    })
+    expect(msg).not.toBeNull()
+    expect(msg?.type).toBe('oas:telemetry_event')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
   })
 
   it('silently ignores MCP JSON-RPC control notifications on the SSE stream', () => {

@@ -101,8 +101,55 @@ let persist_directive_meta_update
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", entry.name; "site", "directive_persist" ]
       ();
-    Log.Keeper.warn "directive meta persist failed for %s: %s" entry.name msg;
+    Log.Keeper.emit
+      Log.Warn
+      ~category:Log.Heartbeat
+      ~details:(`Assoc [ "keeper", `String entry.name; "error", `String msg ])
+      (Printf.sprintf "directive meta persist failed for %s: %s" entry.name msg);
     Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta
+;;
+
+let directive_paused_meta (meta : keeper_meta) paused =
+  {
+    meta with
+    paused;
+    auto_resume_after_sec = None;
+    runtime = { meta.runtime with last_blocker = None };
+    updated_at = now_iso ();
+  }
+;;
+
+let log_directive_agent_not_in_registry ~agent_name ~action =
+  let known_keeper () =
+    match Keeper_tool_shared_runtime.find_registry_meta ~keeper_name:agent_name ~source_layer:"directive" with
+    | Some _ -> true
+    | None ->
+      (match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
+       | None -> false
+       | Some canonical_name ->
+         Option.is_some
+           (Keeper_tool_shared_runtime.find_registry_meta
+              ~keeper_name:canonical_name
+              ~source_layer:"directive"))
+  in
+  if known_keeper ()
+  then
+    Log.Keeper.emit
+      Log.Debug
+      ~category:Log.Directive
+      ~details:
+        (`Assoc
+          [ "agent_name", `String agent_name
+          ; "action", `String action
+          ; "reason", `String "not_yet_registered"
+          ])
+      (Printf.sprintf "directive %s: agent %s not yet registered" action agent_name)
+  else
+    Log.Keeper.emit
+      Log.Warn
+      ~category:Log.Directive
+      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String action ])
+      (Printf.sprintf "directive %s: agent %s not in registry" action agent_name)
 ;;
 
 let set_keeper_paused_state ~agent_name paused =
@@ -114,9 +161,9 @@ let set_keeper_paused_state ~agent_name paused =
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "pause_resume_not_in_registry" ]
         ();
-      Log.Keeper.warn "directive %s: agent %s not in registry" action agent_name)
+      log_directive_agent_not_in_registry ~agent_name ~action)
     (fun entry ->
-       let updated_meta = { entry.meta with paused; updated_at = now_iso () } in
+       let updated_meta = directive_paused_meta entry.meta paused in
        persist_directive_meta_update entry ~updated_meta;
        Keeper_registry.dispatch_event_unit
          ~base_path:entry.base_path
@@ -143,7 +190,7 @@ let wakeup_keeper_by_agent_name ~agent_name =
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "wakeup_not_in_registry" ]
         ();
-      Log.Keeper.warn "directive wakeup: agent %s not in registry" agent_name)
+      log_directive_agent_not_in_registry ~agent_name ~action:"wakeup")
     (fun entry -> wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
@@ -155,7 +202,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "claim_not_in_registry" ]
         ();
-      Log.Keeper.warn "directive claim: agent %s not in registry" agent_name)
+      log_directive_agent_not_in_registry ~agent_name ~action:"claim")
     (fun entry ->
        let updated_meta =
          { entry.meta with current_task_id = Some task_id; updated_at = now_iso () }
@@ -176,10 +223,18 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
 let process_directive ~agent_name directive =
   match directive with
   | "pause" ->
-    Log.Keeper.info "directive: pausing keeper %s" agent_name;
+    Log.Keeper.emit
+      Log.Info
+      ~category:Log.Directive
+      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "pause" ])
+      (Printf.sprintf "directive: pausing keeper %s" agent_name);
     set_keeper_paused_state ~agent_name true
   | "resume" ->
-    Log.Keeper.info "directive: resuming keeper %s" agent_name;
+    Log.Keeper.emit
+      Log.Info
+      ~category:Log.Directive
+      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "resume" ])
+      (Printf.sprintf "directive: resuming keeper %s" agent_name);
     set_keeper_paused_state ~agent_name false
   | "wakeup" ->
     (* Auto-resume on wakeup: dashboard "깨우기" surfaces a single button,
@@ -207,24 +262,52 @@ let process_directive ~agent_name directive =
     Keeper_turn_livelock.reset_keeper_livelock ~keeper:agent_name;
     if entry_paused
     then (
-      Log.Keeper.info "directive: waking up %s (was paused — auto-resuming)" agent_name;
+      Log.Keeper.emit
+        Log.Info
+        ~category:Log.Directive
+        ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup_auto_resume" ])
+        (Printf.sprintf "directive: waking up %s (was paused — auto-resuming)" agent_name);
       set_keeper_paused_state ~agent_name false)
     else (
-      Log.Keeper.debug "directive: waking up %s" agent_name;
+      Log.Keeper.emit
+        Log.Debug
+        ~category:Log.Directive
+        ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup" ])
+        (Printf.sprintf "directive: waking up %s" agent_name);
       wakeup_keeper_by_agent_name ~agent_name)
   | s when String.length s > 6 && String.starts_with s ~prefix:"claim:" ->
     let task_id = String.sub s 6 (String.length s - 6) in
     (match Keeper_id.Task_id.of_string task_id with
      | Ok parsed_task_id ->
-       Log.Keeper.info "directive: server assigned task %s to %s" task_id agent_name;
+       Log.Keeper.emit
+         Log.Info
+         ~category:Log.Directive
+         ~details:
+           (`Assoc
+             [ "agent_name", `String agent_name
+             ; "action", `String "claim"
+             ; "task_id", `String task_id
+             ])
+         (Printf.sprintf "directive: server assigned task %s to %s" task_id agent_name);
        assign_keeper_task_from_directive ~agent_name ~task_id:parsed_task_id
      | Error err ->
-       Log.Keeper.warn
-         "directive: ignoring invalid task assignment for %s (%s): %s"
-         agent_name
-         task_id
-         err)
-  | unknown -> Log.Keeper.warn "unknown gRPC directive for %s: %s" agent_name unknown
+       Log.Keeper.emit
+         Log.Warn
+         ~category:Log.Directive
+         ~details:
+           (`Assoc
+             [ "agent_name", `String agent_name
+             ; "action", `String "claim"
+             ; "task_id", `String task_id
+             ; "error", `String err
+             ])
+         (Printf.sprintf "directive: ignoring invalid task assignment for %s (%s): %s" agent_name task_id err))
+  | unknown ->
+    Log.Keeper.emit
+      Log.Warn
+      ~category:Log.Directive
+      ~details:(`Assoc [ "agent_name", `String agent_name; "directive", `String unknown ])
+      (Printf.sprintf "unknown gRPC directive for %s: %s" agent_name unknown)
 ;;
 
 (* ── gRPC heartbeat stream ── *)
@@ -240,10 +323,16 @@ let reconcile_current_task_id_for_heartbeat ~config ~agent_name =
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[ "keeper", agent_name; "phase", "grpc_heartbeat" ]
       ();
-    Log.Keeper.warn
-      "gRPC heartbeat: failed to reconcile current_task_id for %s: %s"
-      agent_name
-      (Printexc.to_string exn);
+    Log.Keeper.emit
+      Log.Warn
+      ~category:Log.Heartbeat
+      ~details:
+        (`Assoc
+          [ "keeper", `String agent_name; "error", `String (Printexc.to_string exn) ])
+      (Printf.sprintf
+         "gRPC heartbeat: failed to reconcile current_task_id for %s: %s"
+         agent_name
+         (Printexc.to_string exn));
     false
 ;;
 
@@ -308,14 +397,21 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
           }
       }
     in
-    (match write_meta ~force:true ctx.config synced with
+    (match
+       write_meta_with_merge
+         ~merge:Keeper_meta_merge.monotonic_usage_counters ctx.config synced
+     with
      | Ok () -> ()
      | Error e ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string WriteMetaFailures)
          ~labels:[ "keeper", synced.name; "phase", "bootstrap" ]
          ();
-       Log.Keeper.warn "write_meta failed (bootstrap): %s" e);
+       Log.Keeper.emit
+         Log.Warn
+         ~category:Log.Heartbeat
+         ~details:(`Assoc [ "keeper", `String synced.name; "error", `String e ])
+         (Printf.sprintf "write_meta failed (bootstrap): %s" e));
     synced
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -324,7 +420,11 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", m.name; "phase", "bootstrap-catch" ]
       ();
-    Log.Keeper.error "workspace presence bootstrap failed: %s" (Printexc.to_string exn);
+    Log.Keeper.emit
+      Log.Error
+      ~category:Log.Heartbeat
+      ~details:(`Assoc [ "keeper", `String m.name; "error", `String (Printexc.to_string exn) ])
+      (Printf.sprintf "workspace presence bootstrap failed: %s" (Printexc.to_string exn));
     m
 ;;
 
@@ -369,10 +469,18 @@ let dispatch_fiber_started ~base_path keeper_name =
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", keeper_name; "site", "fiber_started_rejected" ]
       ();
-    Log.Keeper.warn
-      "keeper %s: Fiber_started rejected during launch: %s"
-      keeper_name
-      (Keeper_state_machine.transition_error_to_string err)
+    Log.Keeper.emit
+      Log.Warn
+      ~category:Log.Fsm
+      ~details:
+        (`Assoc
+          [ "keeper", `String keeper_name
+          ; "error", `String (Keeper_state_machine.transition_error_to_string err)
+          ])
+      (Printf.sprintf
+         "keeper %s: Fiber_started rejected during launch: %s"
+         keeper_name
+         (Keeper_state_machine.transition_error_to_string err))
 ;;
 
 (* ── Registry lifecycle helpers ── *)
@@ -449,9 +557,11 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       Keeper_metrics.(to_string HeartbeatFailures)
       ~labels:[ "keeper", m.name; "phase", "identity_drift_unrepairable" ]
       ();
-    Log.Keeper.error
-      "start_keepalive skipped %s: identity drift could not be repaired"
-      m.name
+    Log.Keeper.emit
+      Log.Error
+      ~category:Log.Heartbeat
+      ~details:(`Assoc [ "keeper", `String m.name; "reason", `String "identity_drift_unrepairable" ])
+      (Printf.sprintf "start_keepalive skipped %s: identity drift could not be repaired" m.name)
   | Some m ->
     let existing_entry =
       Keeper_registry.get ~base_path:ctx.config.base_path m.name
@@ -475,14 +585,27 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
     in
     (match existing_entry with
      | Some entry when reclaimable_stale_entry entry ->
-       Log.Keeper.info
-         "start_keepalive: reclaiming stale registered entry %s phase=%s"
-         m.name
-         (Keeper_state_machine.phase_to_string entry.phase);
+       Log.Keeper.emit
+         Log.Info
+         ~category:Log.Heartbeat
+         ~details:
+           (`Assoc
+             [ "keeper", `String m.name
+             ; "phase", `String (Keeper_state_machine.phase_to_string entry.phase)
+             ])
+         (Printf.sprintf
+            "start_keepalive: reclaiming stale registered entry %s phase=%s"
+            m.name
+            (Keeper_state_machine.phase_to_string entry.phase));
        Keeper_registry.unregister ~base_path:ctx.config.base_path m.name
      | _ -> ());
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
-    then Log.Keeper.info "start_keepalive: skipped %s (already registered)" m.name
+    then
+      Log.Keeper.emit
+        Log.Info
+        ~category:Log.Heartbeat
+        ~details:(`Assoc [ "keeper", `String m.name ])
+        (Printf.sprintf "start_keepalive: skipped %s (already registered)" m.name)
     else
       match Keeper_registry.spawn_slots_decision () with
       | Error reason ->
@@ -565,10 +688,18 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
               Keeper_metrics.(to_string CleanupTrackingFailures)
               ~labels:[ "keeper", live_meta.name; "site", "heartbeat_finally" ]
               ();
-            Log.Keeper.warn
-              "%s: cleanup_tracking in heartbeat finally raised: %s"
-              live_meta.name
-              (Printexc.to_string e)
+            Log.Keeper.emit
+              Log.Warn
+              ~category:Log.Heartbeat
+              ~details:
+                (`Assoc
+                  [ "keeper", `String live_meta.name
+                  ; "error", `String (Printexc.to_string e)
+                  ])
+              (Printf.sprintf
+                 "%s: cleanup_tracking in heartbeat finally raised: %s"
+                 live_meta.name
+                 (Printexc.to_string e))
         in
         Eio_guard.protect
           (fun () ->
@@ -601,10 +732,18 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                    Keeper_metrics.(to_string HeartbeatFailures)
                    ~labels:[ "keeper", live_meta.name; "phase", "loop_crash" ]
                    ();
-                 Log.Keeper.error
-                   "heartbeat loop for %s crashed: %s"
-                   live_meta.name
-                   (Printexc.to_string exn);
+                 Log.Keeper.emit
+                   Log.Error
+                   ~category:Log.Heartbeat
+                   ~details:
+                     (`Assoc
+                       [ "keeper", `String live_meta.name
+                       ; "error", `String (Printexc.to_string exn)
+                       ])
+                   (Printf.sprintf
+                      "heartbeat loop for %s crashed: %s"
+                      live_meta.name
+                      (Printexc.to_string exn));
                  record_crash (Keeper_registry.Exception (Printexc.to_string exn))))
           ~finally:safe_cleanup_tracking))
 ;;

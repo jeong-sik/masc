@@ -49,7 +49,6 @@ let handle_filesystem ctx descriptor args =
   | Tool_execute
   | Tool_search_files
   | Tool_time_now
-  | Tool_stay_silent
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status
@@ -73,6 +72,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit -> None
 ;;
@@ -103,7 +103,6 @@ let handle_shell_ir ctx descriptor args =
   | Tool_edit_file
   | Tool_write_file
   | Tool_time_now
-  | Tool_stay_silent
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status
@@ -127,6 +126,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit -> None
 ;;
@@ -136,8 +136,6 @@ let handle_in_process ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_time_now ->
     Some (Keeper_tool_in_process_runtime.handle_time_now ~args)
-  | Tool_stay_silent ->
-    Some (Keeper_tool_in_process_runtime.handle_stay_silent ~args)
   | Tool_tools_list ->
     Some (Keeper_tool_in_process_runtime.handle_tools_list ~meta:ctx.meta ~args)
   | Tool_tool_search ->
@@ -266,6 +264,13 @@ let handle_in_process ctx descriptor args =
   | Tool_masc_agent_timeline_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_agent_timeline
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_masc_schedule_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_schedule
          ~config:ctx.config
          ~meta:ctx.meta
          ~name

@@ -129,6 +129,15 @@ let authority_of_label = function
   | "external" -> Some External
   | _ -> None
 
+type audio_clip = {
+  token : string;
+  audio_url : string option;
+  mime : string;
+  duration_sec : float option;
+  message_text : string;
+  device_id : string option;
+}
+
 type speaker = {
   speaker_id : string option;
   speaker_name : string option;
@@ -136,6 +145,13 @@ type speaker = {
 }
 
 type chat_message = {
+  id : string;
+      (* R3: producer-assigned stable message id.  Minted once at append
+         by [encode_line] (the sole writer) and read back verbatim, so the
+         dashboard keys off a server identity instead of synthesising an
+         index-derived id at render.  Rows written before R3 carry no
+         persisted id and are given a deterministic one at the read
+         boundary ([legacy_message_id]); the field is therefore total. *)
   role : Role.t;
   content : string;
   ts : float option;
@@ -152,6 +168,7 @@ type chat_message = {
   conversation_id : string option;
   external_message_id : string option;
   speaker : speaker option;
+  audio : audio_clip option;
   mentions : Keeper_identity.Keeper_id.t list;
       (* RFC-0232 §3.3: parsed once at append from the persisted content
          (plus connector-provided explicit mentions); [] = none.  Rows
@@ -194,9 +211,54 @@ let speaker_fields = function
       @ opt_string_field "speaker_name" sp.speaker_name
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
+(* RFC-0235 P1: nested ["audio"] assoc so the clip stays one unit on the
+   JSONL row. Absent on rows written before voice transport; reads as
+   [None] (the dashboard renders text-only, matching any non-voice turn). *)
+let audio_to_json a =
+  let base =
+    [ ("token", `String a.token)
+    ; ("mime", `String a.mime)
+    ; ("message_text", `String a.message_text)
+    ]
+  in
+  match a.duration_sec with
+  | None -> base
+  | Some d -> base @ [ ("duration_sec", `Float d) ]
+
+let audio_fields = function
+  | None -> []
+  | Some a -> [ ("audio", `Assoc (audio_to_json a)) ]
+
+(* R3: producer-assigned message id.  [encode_line] is the sole writer, so
+   minting here makes it impossible to persist a row without an id.  The
+   process-monotonic counter disambiguates the user/tool/assistant rows of
+   one turn (they share a timestamp); the microsecond timestamp orders ids
+   across processes.  Minted ids are persisted, so reads are deterministic
+   even though the mint itself is not. *)
+let message_id_counter = Atomic.make 0
+
+let mint_message_id ~ts =
+  let n = Atomic.fetch_and_add message_id_counter 1 in
+  Printf.sprintf "msg-%016.0f-%d" (ts *. 1_000_000.) n
+
+(* Rows written before R3 carry no persisted id.  Derive a stable one at
+   the read boundary from the row's timestamp and content so the dashboard
+   keys off a single deterministic id and never synthesises an
+   index-derived one that shifts when history pages are merged.  Two
+   byte-identical legacy rows collapse to the same id, which is acceptable:
+   they are indistinguishable and predate the per-row identity. *)
+let legacy_message_id ~ts ~content =
+  let ts_part =
+    match ts with
+    | Some t -> Printf.sprintf "%016.0f" (t *. 1_000_000.)
+    | None -> "nots"
+  in
+  Printf.sprintf "legacy-%s-%s" ts_part
+    (String.sub (Digest.to_hex (Digest.string content)) 0 12)
+
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
-    ?(mentions = []) ?(kind = Row_kind.Utterance) ()
+    ?audio ?(mentions = []) ?(kind = Row_kind.Utterance) ()
     : string =
   (* RFC-0232 P5: the label is a derivation of the typed surface — the
      single site that turns a [Surface_ref.t] into the legacy [source]
@@ -208,6 +270,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     | Some s -> [ ("surface", Surface_ref.to_json s) ]
   in
   let base_fields = [
+    ("id", `String (mint_message_id ~ts));
     ("role", `String (Role.to_label role));
     ("content", `String content);
     ("ts", `Float ts);
@@ -228,7 +291,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     match attachments with
     | None | Some [] -> []
     | Some atts ->
-        let att_json = List.map (fun att ->
+        let att_json = List.map (fun (att : attachment) ->
           `Assoc [
             ("id", `String att.id);
             ("type", `String att.att_type);
@@ -260,6 +323,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     @ opt_string_field "conversation_id" conversation_id
     @ opt_string_field "external_message_id" external_message_id
     @ speaker_fields speaker
+    @ audio_fields audio
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
@@ -341,7 +405,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id () =
+    ?surface ?conversation_id ?audio () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -349,7 +413,7 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ()
+      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ?audio ()
     in
     Fs_compat.append_file path (line ^ "\n")
   with
@@ -454,6 +518,35 @@ let parse_line ~file_path (line : string) : chat_message option =
                  ~detail:"speaker_id/speaker_name without speaker_authority");
           None
     in
+    let audio =
+      match Json_util.assoc_member_opt "audio" json with
+      | Some (`Assoc fields) ->
+          let get k =
+            match List.assoc_opt k fields with
+            | Some (`String s) -> Some s
+            | _ -> None
+          in
+          (match get "token", get "mime" with
+           | Some token, Some mime ->
+               let duration_sec =
+                 match List.assoc_opt "duration_sec" fields with
+                 | Some (`Float f) -> Some f
+                 | _ -> None
+               in
+               let message_text = Option.value (get "message_text") ~default:"" in
+               let audio_url = get "audio_url" in
+               let device_id = get "device_id" in
+               Some { token; audio_url; mime; duration_sec; message_text; device_id }
+           | _ ->
+               (* audio without token+mime is malformed; drop the field but
+                  keep the row (text-only render). *)
+               report_persistence_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path:file_path
+                 ~detail:"audio field missing token/mime";
+               None)
+      | _ -> None
+    in
     let attachments =
       match Json_util.assoc_member_opt "attachments" json with
       | Some (`List att_list) ->
@@ -555,10 +648,15 @@ let parse_line ~file_path (line : string) : chat_message option =
             ~detail:"tool chat row missing non-empty tool_call_name";
           None
       | Some role ->
+          let id =
+            match opt_string "id" with
+            | Some persisted -> persisted
+            | None -> legacy_message_id ~ts ~content
+          in
           Some
-            { role; content; ts; attachments; tool_call_id; tool_call_name;
+            { id; role; content; ts; attachments; tool_call_id; tool_call_name;
               source; surface; conversation_id; external_message_id; speaker;
-              mentions; kind }
+              audio; mentions; kind }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -728,7 +826,8 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
     (List.map
        (fun m ->
          `Assoc
-           ([ ("role", `String (Role.to_label m.role));
+           ([ ("id", `String m.id);
+              ("role", `String (Role.to_label m.role));
               ("content", `String m.content);
             ] @ (match m.ts with
                  | Some t -> [("ts", `Float t)]
@@ -749,7 +848,7 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
               @ (match m.attachments with
                  | None | Some [] -> []
                  | Some atts ->
-                     let att_json = List.map (fun att ->
+                     let att_json = List.map (fun (att : attachment) ->
                        `Assoc [
                          ("id", `String att.id);
                          ("type", `String att.att_type);
@@ -759,5 +858,6 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
                          ("data", `String att.data);
                        ]
                      ) atts in
-                     [("attachments", `List att_json)])))
+                     [("attachments", `List att_json)])
+              @ audio_fields m.audio))
        messages)

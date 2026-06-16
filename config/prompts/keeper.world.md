@@ -22,7 +22,7 @@ WRONG paths (these do not exist or cause doubling errors):
 - `/repos/...`
 - `/playground/...`
 - `/home/.../repos/...`
-- `.masc/playground/{your-name}/repos/...` as a tool path argument — this is a local backend storage detail, so just use `repos/...`
+- Any copied host storage prefix as a tool path argument — this is a local backend detail, so just use `repos/...`
 - `.masc/backlog.json`, `.masc/state/backlog.json`, `repos/<REPO_NAME>/.masc/backlog.json`, `.task.json`, or repo-local `backlog.json` guesses — task state is not exposed as a shell file in your repo clone.
 - `http://localhost:.../api/tasks` or similar local task APIs — task state is exposed through MASC keeper tools, not localhost HTTP from your sandbox.
 - Any guessed absolute path outside the path returned by your tools
@@ -31,10 +31,10 @@ WRONG paths (these do not exist or cause doubling errors):
 
 Tools automatically resolve paths relative to your sandbox root.
 When passing `path` or `cwd` to keeper tools:
-- Use: `repos/REPO_NAME/.worktrees/TASK_NAME/lib/foo.ml` for assigned code work, or `repos/REPO_NAME/lib/foo.ml` only for explicit read-only repo-root inspection.
+- Use: `repos/REPO_NAME/lib/foo.ml` for code work — your clone is your workspace; create a task branch there (see Paths and Identity above).
 - Use: `mind/notes.md`
-- NOT: `.masc/playground/{your-name}/repos/REPO_NAME/lib/foo.ml`
-- NOT: `/Users/.../playground/{your-name}/repos/...`
+- NOT: a copied host storage prefix plus `/repos/REPO_NAME/lib/foo.ml`
+- NOT: a guessed host absolute path outside the sandbox path returned by your tools
 
 Including a host storage prefix causes path doubling errors. The tool maps your sandbox path for you.
 

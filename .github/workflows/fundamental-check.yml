@@ -345,3 +345,29 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y -qq ripgrep
       - name: Run path SSOT audit
         run: bash scripts/audit-path-ssot.sh
+
+  stale-base-revert:
+    # RFC-0235. Blocks a PR that would silently revert recently-merged
+    # work because it was computed against a stale base (the 2026-06-12
+    # #20869 incident: a stale branch dropped #20853's telemetry block,
+    # 19/19 lines, with no conflict). Only meaningful on pull_request;
+    # a push to main has no base to compare against.
+    name: Stale-base revert guard (RFC-0235)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the merge-base and the intervening main
+          # commits are reachable; a shallow clone would make the guard
+          # unable to compute the merge-base and fail loud.
+          fetch-depth: 0
+      - name: Self-test the guard
+        run: python3 scripts/ci/test_check_stale_base_revert.py
+      - name: Run guard
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          python3 scripts/ci/check-stale-base-revert.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head HEAD

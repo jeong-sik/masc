@@ -557,7 +557,7 @@ describe('AgentRoster live-only cards', () => {
   it('renders keeper cards from live runtime data and ignores stale mission brief fields', async () => {
     agents.value = [
       makeAgent({
-        name: 'agent-code-mcp-client',
+        name: 'codex-mcp-client',
         current_task: 'agent fallback task',
         model: 'gpt-5.4',
       }),
@@ -565,7 +565,7 @@ describe('AgentRoster live-only cards', () => {
     keepers.value = [
       {
         name: 'nick0cave',
-        agent_name: 'agent-code-mcp-client',
+        agent_name: 'codex-mcp-client',
         status: 'idle',
         last_heartbeat: '2026-04-23T09:59:00Z',
         last_autonomous_action_at: '2026-04-23T09:58:00Z',
@@ -589,7 +589,7 @@ describe('AgentRoster live-only cards', () => {
       sessions: [],
       agent_briefs: [
         {
-          agent_name: 'agent-code-mcp-client',
+          agent_name: 'codex-mcp-client',
           current_work: 'stale mission work',
           recent_output_preview: 'stale mission preview',
           last_activity_at: '2026-04-23T06:00:00Z',
@@ -598,7 +598,7 @@ describe('AgentRoster live-only cards', () => {
       keeper_briefs: [
         {
           name: 'nick0cave',
-          agent_name: 'agent-code-mcp-client',
+          agent_name: 'codex-mcp-client',
           current_work: 'stale keeper brief work',
           latest_tool_names: ['stale_tool'],
           last_autonomous_action_at: '2026-04-23T06:00:00Z',
@@ -778,6 +778,22 @@ describe('AgentRoster live-only cards', () => {
 
     expect(container.querySelector('aside h3')?.textContent).toContain('beta-agent')
     expect(container.textContent).toContain('상세 열기')
+  })
+
+  it('applies v2 monitoring marker classes to roster surfaces and rows', async () => {
+    agents.value = [
+      makeAgent({ name: 'alpha-agent', current_task: 'alpha task' }),
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    expect(container.querySelector('aside.v2-monitoring-panel')).not.toBeNull()
+    expect(container.querySelector('section.v2-monitoring-panel')).not.toBeNull()
+    expect(container.querySelector('[data-testid="keeper-operations-row"]')?.classList.contains('v2-monitoring-roster-row')).toBe(true)
+    expect(container.querySelector('button.v2-monitoring-action')?.textContent).toContain('상세 열기')
   })
 
   it('explains roster axes and renders blocker labels before raw codes', async () => {
@@ -962,7 +978,7 @@ describe('AgentRoster live-only cards', () => {
         name: 'keeper-sangsu-agent',
         status: 'active',
         last_seen: '2026-04-24T17:55:00Z',
-        model: 'agent-llm-a',
+        model: 'claude',
       }),
     ]
     keepers.value = [
@@ -970,8 +986,8 @@ describe('AgentRoster live-only cards', () => {
         name: 'sangsu',
         agent_name: 'keeper-sangsu-agent',
         status: 'active',
-        active_model: 'cli-tool-d:auto',
-        model: 'agent-llm-a',
+        active_model: 'claude-code:auto',
+        model: 'claude',
         last_heartbeat: '2026-04-24T17:54:00Z',
         last_autonomous_action_at: '2026-04-24T12:00:00Z',
         last_activity_ago_s: 21_600,
@@ -989,8 +1005,8 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('sangsu')
     expect(text).toContain('하트비트')
     expect(text).toContain('6분 전')
-    expect(text).not.toContain('cli-tool-d:auto')
+    expect(text).not.toContain('claude-code:auto')
     expect(text).not.toContain('마지막 행동 이후')
-    expect(text).not.toContain('최근 모델agent-llm-a')
+    expect(text).not.toContain('최근 모델claude')
   })
 })

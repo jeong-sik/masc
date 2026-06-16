@@ -611,7 +611,7 @@ let save_oas_checkpoint
       version = Agent_sdk.Checkpoint.checkpoint_version;
       session_id = session.session_id;
       agent_name;
-      model = "runtime";
+      model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;
       system_prompt = Some (system_prompt_of_context ctx);
       messages = checkpoint_messages;
       created_at = Time_compat.now ();

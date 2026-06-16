@@ -9,20 +9,17 @@ let with_temp_base f =
   f base_path
 ;;
 
-let board_payload ?updated_at ~post_id () =
-  `Assoc
-    ([ "source", `String "board_signal"
-     ; "kind", `String "post_created"
-     ; "post_id", `String post_id
-     ; "author", `String "operator"
-     ; "title", `String "Ship reaction ledger"
-     ; "content", `String "Please react"
-     ]
-     @
-     match updated_at with
-     | Some value -> [ "updated_at_unix", `Float value ]
-     | None -> [])
-  |> Yojson.Safe.to_string
+let board_payload ?updated_at ~post_id:(_ : string) () :
+  Keeper_event_queue.stimulus_payload
+  =
+  Keeper_event_queue.Board_signal
+    { kind = Keeper_event_queue.Post_created
+    ; author = "operator"
+    ; title = "Ship reaction ledger"
+    ; content = "Please react"
+    ; hearth = None
+    ; updated_at
+    }
 ;;
 
 let board_stimulus ?(post_id = "post-42") ?updated_at () :
@@ -35,22 +32,13 @@ let board_stimulus ?(post_id = "post-42") ?updated_at () :
   }
 ;;
 
-let stay_silent_recovery_stimulus ?(keeper_name = "silent-keeper") () :
+let no_progress_recovery_stimulus ?(keeper_name = "no-progress-keeper") () :
   Keeper_event_queue.stimulus
   =
-  let payload =
-    `Assoc
-      [ "source", `String "stay_silent_recovery"
-      ; "keeper", `String keeper_name
-      ; "streak", `Int 10
-      ; "threshold", `Int 10
-      ]
-    |> Yojson.Safe.to_string
-  in
-  { post_id = "stay-silent-loop:" ^ keeper_name
+  { post_id = "no-progress-loop:" ^ keeper_name
   ; urgency = Immediate
   ; arrived_at = 1234.5
-  ; payload
+  ; payload = Keeper_event_queue.No_progress_recovery
   }
 ;;
 
@@ -282,10 +270,10 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     (complete_summary |> member "pending_stimulus_count" |> to_int)
 ;;
 
-let test_stay_silent_recovery_stimulus_is_typed () =
+let test_no_progress_recovery_stimulus_is_typed () =
   with_temp_base @@ fun base_path ->
-  let keeper_name = "silent-keeper" in
-  let stimulus = stay_silent_recovery_stimulus ~keeper_name () in
+  let keeper_name = "no-progress-keeper" in
+  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
@@ -295,18 +283,18 @@ let test_stay_silent_recovery_stimulus_is_typed () =
     |> latest_row
   in
   check_member_string
-    "stay-silent stimulus kind"
-    "stay_silent_recovery"
+    "no-progress stimulus kind"
+    "no_progress_recovery"
     "kind"
     (row |> member "stimulus");
   check string "stable stimulus prefix" "stimulus:"
     (String.sub (row |> member "stimulus_id" |> to_string) 0 9)
 ;;
 
-let test_stay_silent_recovery_reaction_clears_pending () =
+let test_no_progress_recovery_reaction_clears_pending () =
   with_temp_base @@ fun base_path ->
-  let keeper_name = "silent-keeper" in
-  let stimulus = stay_silent_recovery_stimulus ~keeper_name () in
+  let keeper_name = "no-progress-keeper" in
+  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
@@ -359,29 +347,9 @@ let test_unknown_reaction_degrades_summary () =
     (summary |> member "pending_stimulus_count" |> to_int)
 ;;
 
-let test_malformed_typed_payload_degrades_summary () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "malformed-payload-keeper" in
-  let stimulus =
-    { Keeper_event_queue.post_id = "bad-board"
-    ; urgency = Immediate
-    ; arrived_at = 1234.5
-    ; payload = {|{"source":"board_signal"|}
-    }
-  in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "malformed payload summary status" "degraded" "status" summary;
-  check bool "malformed payload requires operator action" true
-    (summary |> member "operator_action_required" |> to_bool);
-  check int "payload parse error counted" 1
-    (summary |> member "payload_parse_error_count" |> to_int)
-;;
+(* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
+   payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
+   covered a parse-error path that can no longer occur and was removed. *)
 
 let () =
   run
@@ -412,21 +380,17 @@ let () =
             `Quick
             test_summary_cursor_ack_respects_post_id_tiebreaker
         ; test_case
-            "stay-silent recovery stimulus is typed"
+            "no-progress recovery stimulus is typed"
             `Quick
-            test_stay_silent_recovery_stimulus_is_typed
+            test_no_progress_recovery_stimulus_is_typed
         ; test_case
-            "stay-silent recovery reaction clears pending"
+            "no-progress recovery reaction clears pending"
             `Quick
-            test_stay_silent_recovery_reaction_clears_pending
+            test_no_progress_recovery_reaction_clears_pending
         ; test_case
             "unknown reaction degrades summary"
             `Quick
             test_unknown_reaction_degrades_summary
-        ; test_case
-            "malformed typed payload degrades summary"
-            `Quick
-            test_malformed_typed_payload_degrades_summary
         ] )
     ]
 ;;

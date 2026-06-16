@@ -198,7 +198,7 @@ describe('IdeConversationRail', () => {
         choice: null,
         reason: null,
         context: null,
-        model_used: 'provider-k:auto',
+        model_used: 'glm:auto',
         latency_ms: null,
         cost_usd: null,
         input_tokens: null,
@@ -208,6 +208,7 @@ describe('IdeConversationRail', () => {
         tool: null,
         duration_ms: null,
         match_count: null,
+        terminal_reason_code: null,
       }],
     )
 
@@ -315,7 +316,7 @@ describe('IdeConversationRail', () => {
             keeper_name: 'scholar',
             event_type: 'turn_completed',
             outcome: 'success',
-            model_used: 'provider-k:auto',
+            model_used: 'glm:auto',
             latency_ms: null,
             cost_usd: null,
             input_tokens: null,

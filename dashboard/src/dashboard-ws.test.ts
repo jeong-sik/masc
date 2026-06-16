@@ -88,7 +88,7 @@ function installWebSocketMocks(): void {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
     enabled: true,
     listening: true,
-    ws_url: 'ws://127.0.0.1:8937/',
+    ws_url: 'ws://localhost:3000/ws',
   }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
@@ -105,7 +105,7 @@ function installControlledDiscovery(): Array<(response: Response) => void> {
   return resolvers
 }
 
-function wsDiscoveryResponse(wsUrl = 'ws://127.0.0.1:8937/'): Response {
+function wsDiscoveryResponse(wsUrl = 'ws://localhost:3000/ws'): Response {
   return new Response(JSON.stringify({
     enabled: true,
     listening: true,
@@ -303,12 +303,12 @@ describe('dashboard websocket route subscriptions', () => {
     const latestConnect = connectDashboardWS({ tab: 'workspace', params: { section: 'board' } })
     expect(discoveries).toHaveLength(2)
 
-    discoveries[1]!(wsDiscoveryResponse('ws://127.0.0.1:8937/latest'))
+    discoveries[1]!(wsDiscoveryResponse('ws://localhost:3000/ws?latest'))
     await latestConnect
     expect(mockSockets).toHaveLength(1)
-    expect(mockSockets[0]!.url).toBe('ws://127.0.0.1:8937/latest')
+    expect(mockSockets[0]!.url).toBe('ws://localhost:3000/ws?latest')
 
-    discoveries[0]!(wsDiscoveryResponse('ws://127.0.0.1:8937/stale'))
+    discoveries[0]!(wsDiscoveryResponse('ws://localhost:3000/ws?stale'))
     await staleConnect
     await flushPromises()
 
@@ -368,8 +368,61 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
 
     expect(mockSockets).toHaveLength(2)
-    expect(mockSockets[1]!.url).toBe('ws://127.0.0.1:8937/')
+    expect(mockSockets[1]!.url).toBe('ws://localhost:3000/ws')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears lastError on a clean close so the SSE fallback does not engage', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    // Server-initiated clean close (wasClean=true) is not a degraded-WS error:
+    // lastError stays null so the SSE fallback (dashboard-transport-fallback.ts)
+    // does not fire. reconnect still runs.
+    socket.close({ code: 1001, reason: 'server restart', wasClean: true })
+    expect(dashboardWsLastError.value).toBe(null)
+    expect(dashboardWsReady.value).toBe(false)
+  })
+
+  it('sets lastError on an abnormal close so the SSE fallback can engage', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    socket.close({ code: 1006, reason: 'connect failed', wasClean: false })
+    expect(dashboardWsLastError.value).not.toBe(null)
+    expect(dashboardWsLastError.value).toContain('code=1006')
+  })
+
+  it('drops cached websocket discovery from a different origin', async () => {
+    installWebSocketMocks()
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>
+    sessionStorage.setItem('masc.dashboard.ws.discovery.v1', JSON.stringify({
+      ws_url: 'ws://127.0.0.1:8937/',
+    }))
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(mockSockets).toHaveLength(1)
+    expect(mockSockets[0]!.url).toBe('ws://localhost:3000/ws')
   })
 
   it('invalidates cached discovery when the cached socket closes before it is ready', async () => {
@@ -377,13 +430,13 @@ describe('dashboard websocket route subscriptions', () => {
     mockSockets.length = 0
     vi.stubGlobal('WebSocket', MockWebSocket)
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(wsDiscoveryResponse('ws://127.0.0.1:8937/stale'))
-      .mockResolvedValueOnce(wsDiscoveryResponse('ws://127.0.0.1:8937/fresh'))
+      .mockResolvedValueOnce(wsDiscoveryResponse('ws://localhost:3000/ws?stale'))
+      .mockResolvedValueOnce(wsDiscoveryResponse('ws://localhost:3000/ws?fresh'))
     vi.stubGlobal('fetch', fetchMock)
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     const staleSocket = mockSockets[0]!
-    expect(staleSocket.url).toBe('ws://127.0.0.1:8937/stale')
+    expect(staleSocket.url).toBe('ws://localhost:3000/ws?stale')
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
     staleSocket.close({ code: 1006, reason: 'connect failed', wasClean: false })
@@ -392,7 +445,7 @@ describe('dashboard websocket route subscriptions', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(mockSockets).toHaveLength(2)
-    expect(mockSockets[1]!.url).toBe('ws://127.0.0.1:8937/fresh')
+    expect(mockSockets[1]!.url).toBe('ws://localhost:3000/ws?fresh')
   })
 
   it('subscribes the latest route captured while hello is still in flight', async () => {

@@ -477,6 +477,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         if (rawKind === 'human' || rawKind === 'direct') return 'direct'
         return rawKind === 'automation' || rawKind === 'system' ? rawKind : undefined
       })(),
+    pinned: raw.pinned === true,
     classification_reason: asString(raw.classification_reason, '').trim() || null,
     title,
     body,

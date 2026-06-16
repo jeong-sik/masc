@@ -106,7 +106,6 @@ let test_applies_sleep_and_throttle_overrides () =
      fairness_cooldown_sec = 3\n\
      [heartbeat]\n\
      sleep_chunk_sec = 1.5\n\
-     board_generic_wakeup_limit = 5\n\
      board_wakeup_max = 6\n\
      [turn]\n\
      capacity_limit = 3\n\
@@ -115,7 +114,7 @@ let test_applies_sleep_and_throttle_overrides () =
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied sleep/throttle overrides" 7 count;
+  check int "applied sleep/throttle overrides" 6 count;
   check (option string) "autoboot max canonical env"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_AUTOBOOT_MAX" overrides);
@@ -125,9 +124,6 @@ let test_applies_sleep_and_throttle_overrides () =
   check (option string) "sleep chunk"
     (Some "1.5")
     (List.assoc_opt "MASC_KEEPER_SLEEP_CHUNK_SEC" overrides);
-  check (option string) "board generic wakeup limit"
-    (Some "5")
-    (List.assoc_opt "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT" overrides);
   check (option string) "board wakeup max"
     (Some "6")
     (List.assoc_opt "MASC_KEEPER_BOARD_WAKEUP_MAX" overrides);

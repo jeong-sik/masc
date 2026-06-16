@@ -11,6 +11,118 @@ let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
 
+let json_string_opt = function
+  | Some value -> `String value
+  | None -> `Null
+;;
+
+let json_float_opt = function
+  | Some value -> `Float value
+  | None -> `Null
+;;
+
+let json_time_iso_opt = function
+  | Some value -> `String (Masc_domain.iso8601_of_unix_seconds value)
+  | None -> `Null
+;;
+
+let memory_os_fact_is_current ~now (fact : Keeper_memory_os_types.fact) =
+  match fact.valid_until with
+  | None -> true
+  | Some ts -> ts >= now
+;;
+
+let memory_os_episode_is_current ~now (episode : Keeper_memory_os_types.episode) =
+  match episode.valid_until with
+  | None -> true
+  | Some ts -> ts >= now
+;;
+
+let memory_os_count pred xs =
+  List.fold_left (fun count value -> if pred value then count + 1 else count) 0 xs
+;;
+
+let memory_os_read_episodes ~keeper_id ~n =
+  try Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n, None with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> [], Some (Printexc.to_string exn)
+;;
+
+let memory_os_read_facts ~keeper_id ~n =
+  try Keeper_memory_os_io.read_facts_tail ~keeper_id ~n, None with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> [], Some (Printexc.to_string exn)
+;;
+
+let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
+  `Assoc
+    [ "trace_id", `String episode.trace_id
+    ; "generation", `Int episode.generation
+    ; "created_at", `Float episode.created_at
+    ; "created_at_iso", `String (Masc_domain.iso8601_of_unix_seconds episode.created_at)
+    ; "valid_until", json_float_opt episode.valid_until
+    ; "valid_until_iso", json_time_iso_opt episode.valid_until
+    ; "current", `Bool (memory_os_episode_is_current ~now episode)
+    ; "terminal_marker", json_string_opt episode.terminal_marker
+    ; "claim_count", `Int (List.length episode.claims)
+    ; "summary", `String episode.episode_summary
+    ]
+;;
+
+let memory_os_dashboard_json ~keeper_id =
+  let now = Time_compat.now () in
+  let recent_episode_limit = 12 in
+  let fact_tail_limit = Keeper_memory_os_io.fact_recall_window in
+  let episodes, episode_error =
+    memory_os_read_episodes ~keeper_id ~n:recent_episode_limit
+  in
+  let facts, fact_error = memory_os_read_facts ~keeper_id ~n:fact_tail_limit in
+  let facts_path = Keeper_memory_os_io.facts_path ~keeper_id in
+  let keepers_dir = Filename.dirname facts_path in
+  let episodes_store = Filename.concat (Filename.concat keepers_dir keeper_id) "episodes" in
+  let current_episodes = memory_os_count (memory_os_episode_is_current ~now) episodes in
+  let current_facts = memory_os_count (memory_os_fact_is_current ~now) facts in
+  let terminal_marker_count =
+    memory_os_count
+      (fun (episode : Keeper_memory_os_types.episode) ->
+         Option.is_some episode.terminal_marker)
+      episodes
+  in
+  `Assoc
+    [ "schema", `String "keeper.memory_os.recall_observability.v1"
+    ; "keeper", `String keeper_id
+    ; "source", `String "memory_os_files"
+    ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
+    ; "facts_store", `String facts_path
+    ; "episodes_store", `String episodes_store
+    ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
+    ; "now", `Float now
+    ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
+    ; ( "read_errors"
+      , `List
+          (List.filter_map
+             (fun (scope, err) ->
+                Option.map (fun message -> `Assoc [ "scope", `String scope; "error", `String message ]) err)
+             [ "episodes", episode_error; "facts", fact_error ]) )
+    ; ( "episodes"
+      , `Assoc
+          [ "tail_limit", `Int recent_episode_limit
+          ; "shown", `Int (List.length episodes)
+          ; "current", `Int current_episodes
+          ; "expired", `Int (List.length episodes - current_episodes)
+          ; "terminal_markers", `Int terminal_marker_count
+          ; "items", `List (List.map (memory_os_episode_json ~now) episodes)
+          ] )
+    ; ( "facts"
+      , `Assoc
+          [ "tail_limit", `Int fact_tail_limit
+          ; "shown", `Int (List.length facts)
+          ; "current", `Int current_facts
+          ; "expired", `Int (List.length facts - current_facts)
+          ] )
+    ]
+;;
+
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -31,7 +143,7 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
     else
-      let base_dir = state.Mcp_server.workspace_config.base_path in
+      let base_dir = (Mcp_server.workspace_config state).base_path in
       let messages =
         Keeper_chat_store.load ~base_dir ~keeper_name:name
       in
@@ -46,7 +158,7 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
     else
-      let base_dir = state.Mcp_server.workspace_config.base_path in
+      let base_dir = (Mcp_server.workspace_config state).base_path in
       let notes = Keeper_person_notes.notes ~base_dir ~keeper_name:name in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
         (`List
@@ -62,7 +174,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.workspace_config name in
+      let (st, json) = keeper_checkpoint_inventory_json (Mcp_server.workspace_config state) name in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
@@ -83,7 +195,7 @@ let handle_keeper_get_subroutes state req request reqd =
         |> max 1 |> min trajectory_max_limit
       in
       let st, json =
-        keeper_runtime_trace_json state.Mcp_server.workspace_config name
+        keeper_runtime_trace_json (Mcp_server.workspace_config state) name
           ?trace_id ?turn_id ~limit ()
       in
       let status : Httpun.Status.t =
@@ -95,7 +207,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let (st, json) =
         Dashboard_http_keeper.keeper_config_json config name
       in
@@ -108,7 +220,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let (st, json) =
         Dashboard_http_keeper.keeper_bdi_snapshot_json config name
       in
@@ -126,7 +238,7 @@ let handle_keeper_get_subroutes state req request reqd =
            [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
         reqd
     else
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
       let window_hours =
         Server_utils.int_query_param req "window_hours"
@@ -246,7 +358,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let entries =
         Keeper_tool_call_log.read_recent ~keeper_name:name ~n:limit ()
       in
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
       let latest_ts =
         List.fold_left
@@ -328,7 +440,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Server_utils.int_query_param req "limit" ~default:50
         |> max 1 |> min trajectory_max_limit
       in
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let store = Keeper_types_support.keeper_turn_record_store config name in
       let raw_rows = Dated_jsonl.read_recent store limit in
       (* Strict decode: malformed rows are counted and reported, never
@@ -411,6 +523,7 @@ let handle_keeper_get_subroutes state req request reqd =
         ("health", `String health);
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
+        ("memory_os", memory_os_dashboard_json ~keeper_id:name);
         ("entries", `List entries);
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
@@ -424,7 +537,7 @@ let handle_keeper_get_subroutes state req request reqd =
            [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
         reqd
     else
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       (match Keeper_meta_store.read_meta config name with
        | Error e ->
          respond_error ~status:`Internal_server_error reqd e
@@ -502,7 +615,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Server_utils.int_query_param req "limit" ~default:20
         |> max 1 |> min 50
       in
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       let phase = Keeper_registry.get_phase ~base_path name in
       let phase_str = match phase with
         | Some p -> `String (Keeper_state_machine.phase_to_string p)
@@ -543,14 +656,14 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       let limit =
         Server_utils.int_query_param req "limit" ~default:10
         |> max 1 |> min 100
       in
       (* Use keeper name as agent_name for eval lookup.
          Keepers may also have a separate agent_name — look up both. *)
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let agent_name_opt =
         match Keeper_meta_store.read_meta config name with
         | Ok (Some m) when m.agent_name <> name -> Some m.agent_name
@@ -590,16 +703,16 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       let phase = Keeper_registry.get_phase ~base_path name in
       let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
       let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
       let stats = Thompson_sampling.get_stats name in
       let meta = Keeper_meta_store.read_meta
-          state.Mcp_server.workspace_config name in
+          (Mcp_server.workspace_config state) name in
       let turn_outcome : [`Ok | `Failed] option =
-        match Keeper_registry.get ~base_path:state.Mcp_server.workspace_config.base_path name with
+        match Keeper_registry.get ~base_path:(Mcp_server.workspace_config state).base_path name with
         | Some entry when entry.turn_consecutive_failures > 0 ->
           Some `Failed
         | Some _ -> Some `Ok
@@ -646,7 +759,7 @@ let handle_keeper_get_subroutes state req request reqd =
         | Ok (Some _) ->
           (match
              Keeper_memory.read_keeper_memory_summary_result
-               state.Mcp_server.workspace_config
+               (Mcp_server.workspace_config state)
                ~name ~max_bytes:120_000 ~max_lines:200 ~recent_limit:0
            with
            | Ok summary ->
@@ -720,7 +833,7 @@ let handle_keeper_get_subroutes state req request reqd =
        (LT-16b, upcoming). *)
     let json =
       Server_dashboard_http.dashboard_fleet_composite_json
-        ~config:state.Mcp_server.workspace_config ()
+        ~config:(Mcp_server.workspace_config state) ()
     in
     Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/composite" then
@@ -731,7 +844,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       (match Keeper_registry.get ~base_path name with
        | None ->
          respond_error ~status:`Not_found reqd
@@ -739,14 +852,14 @@ let handle_keeper_get_subroutes state req request reqd =
        | Some entry ->
          let json =
            Server_dashboard_http.dashboard_keeper_composite_json
-             ~config:state.Mcp_server.workspace_config entry
+             ~config:(Mcp_server.workspace_config state) entry
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)
   else if req_path = prefix ^ "regime" then
     (* 7th FSM axis MVP: fleet-wide behavioral-regime snapshot. Same
        purity contract as the composite route above, uses the
        [Keeper_behavioral_regime_observer] pure projection. *)
-    let base_path = state.Mcp_server.workspace_config.base_path in
+    let base_path = (Mcp_server.workspace_config state).base_path in
     let snapshots =
       Keeper_behavioral_regime_observer.all_snapshots ~base_path ()
     in
@@ -768,7 +881,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = state.Mcp_server.workspace_config.base_path in
+      let base_path = (Mcp_server.workspace_config state).base_path in
       (match Keeper_registry.get ~base_path name with
        | None ->
          respond_error ~status:`Not_found reqd

@@ -1,20 +1,11 @@
 (** Tool_shard_types_schemas_base — [base_tools] always-on schemas
-    every keeper sees (silence, time, context status, memory r/w,
+    every keeper sees (time, context status, memory r/w,
     tool self-introspection). *)
 
 open Tool_shard_types_enum_mirrors
 
 let base_tools : Masc_domain.tool_schema list =
-  [ (* Stay silent: no-op tool for tool_choice=Any turns.
-     Lets the model explicitly skip a turn without being forced
-     to call a real tool when there is nothing to do. *)
-    { name = "keeper_stay_silent"
-    ; description =
-        "Do nothing this turn. Call when you have no pending work and no information to \
-         share. Costs no resources. Prefer this over calling a tool with no purpose."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-    }
-  ; (* Time *)
+  [ (* Time *)
     { name = "keeper_time_now"
     ; description =
         "Get current server time. Returns now_iso (ISO8601) and now_unix (float). Use to \

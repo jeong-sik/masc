@@ -154,18 +154,37 @@ val wakeup_all_keepers : ?base_path:string -> unit -> unit
 (** Board-reactive debounce interval (seconds), from runtime config. *)
 val board_reactive_debounce_sec : float
 
-val board_reactive_generic_wakeup_limit : int
-
 val board_reactive_wakeup_max : int
 
-val board_reactive_wakeup_allowed :
-  base_path:string -> keeper_name:string -> post_id:string -> bool
+(** [board_wakeup_dedup_key] is the content fingerprint a board wakeup is
+    deduped under (RFC-0239 R4): normalized (author,title,content), or the
+    [post_id] when title+content are empty. Exposed for testing. *)
+val board_wakeup_dedup_key :
+  post_id:string -> author:string -> title:string -> content:string -> string
 
+(** Check if a board-reactive wakeup is allowed for [keeper_name] given the
+    incoming [signal]. Debounced on the signal's content fingerprint
+    (RFC-0239 R4), not its post_id, so identical re-posts collapse. *)
+val board_reactive_wakeup_allowed :
+  base_path:string
+  -> keeper_name:string
+  -> signal:Board_dispatch.board_signal
+  -> bool
+
+(** True when a paused keeper may be resumed by board-reactive wakeup.
+    Operator-owned pauses have [auto_resume_after_sec = None] and are not
+    resumed implicitly by board posts or comments. *)
+val paused_meta_allows_board_auto_resume : keeper_meta -> bool
+
+(** Select which keepers wake for a board signal (RFC-0020). Explicit mentions
+    short-circuit and wake unconditionally (returned with [dropped = 0]); other
+    typed reasons compete for [?total_limit] slots in candidate order. [None]
+    reasons are dropped. Returns the selected [(item, reason)] pairs and the
+    number of non-explicit candidates dropped by the cap. *)
 val select_board_wakeup_candidates :
-  ?generic_limit:int ->
   ?total_limit:int ->
-  ('a * string option) list ->
-  ('a * string) list * int
+  ('a * Keeper_world_observation_board_signal.wake_reason option) list ->
+  ('a * Keeper_world_observation_board_signal.wake_reason) list * int
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.board_signal -> unit

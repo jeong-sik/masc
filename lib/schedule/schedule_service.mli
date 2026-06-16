@@ -54,6 +54,11 @@ val reject :
   unit ->
   (Schedule_domain.schedule_request, service_error) result
 
+val cancel :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  (Schedule_domain.schedule_request, service_error) result
+
 val due_candidates :
   Workspace_utils.config ->
   now:float ->

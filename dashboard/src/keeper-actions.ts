@@ -3,14 +3,21 @@ import { runOperatorAction } from './api/core'
 import {
   cancelQueuedKeeperMessage,
   fetchKeeperChatHistory,
+  fetchQueuedKeeperMessageResult,
+  isTerminalQueuedKeeperMessage,
+  queuedKeeperMessageError,
+  queuedKeeperMessageToReply,
   streamKeeperMessage,
 } from './api/keeper'
+import { fetchKeeperToolCalls } from './api/dashboard'
+import { recordToolCallOutputs } from './tool-call-output-store'
 import { asString, isRecord } from './components/common/normalize'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
   KeeperConversationAttachment,
   KeeperConversationDelivery,
+  KeeperConversationEntry,
   KeeperDiagnostic,
   KeeperStatusDetail,
 } from './types'
@@ -26,6 +33,7 @@ import {
   keeperStreamLastEventAt,
   keeperThreads,
   appendThreadEntry,
+  attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
   finalizeAssistantEntry,
@@ -33,6 +41,7 @@ import {
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
+  removeThreadEntries,
   setActiveStream,
   setRecordValue,
   setStatusDetail,
@@ -41,6 +50,13 @@ import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-strea
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
 } from './config/constants'
+import {
+  hasPendingKeeperChatRequest,
+  pendingKeeperChatRequestsForKeeper,
+  removePendingKeeperChatRequest,
+  type PendingKeeperChatRequest,
+  upsertPendingKeeperChatRequest,
+} from './keeper-chat-pending'
 
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
@@ -149,6 +165,11 @@ export async function hydrateKeeperChatHistory(
     const history = await fetchKeeperChatHistory(keeperName)
     if (history.length === 0) return
     mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
+    // Tool outputs live on a separate surface (the chat stream carries only
+    // arguments); fetch them so ToolCallBubble can show results. Fire-and-
+    // forget so transcript hydration latency is unchanged, and the store
+    // update re-renders the affected bubbles when it lands.
+    void hydrateKeeperToolOutputs(keeperName)
   } catch (err) {
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
@@ -160,21 +181,253 @@ export async function hydrateKeeperChatHistory(
   }
 }
 
+// Recent-window size for the tool-call output fetch; mirrors the inspector's
+// fetchKeeperToolCalls(name, 100) so the chat join covers the same horizon.
+const TOOL_OUTPUT_FETCH_LIMIT = 100
+
+/** Best-effort hydration of tool-call outputs into the shared store so the
+ *  chat ToolCallBubble can join results onto transcript rows by tool_use_id.
+ *  Failures are swallowed (logged): the transcript must render with or without
+ *  tool outputs. */
+async function hydrateKeeperToolOutputs(keeperName: string): Promise<void> {
+  try {
+    const response = await fetchKeeperToolCalls(keeperName, TOOL_OUTPUT_FETCH_LIMIT)
+    recordToolCallOutputs(response.entries)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[keeper] tool-call output hydration failed for ${keeperName}:`, message)
+  }
+}
+
 // Trailing per-keeper debounce for keeper_chat_appended pushes so a
 // burst of turns (queue drain, multi-connector traffic) coalesces into
 // one history refetch instead of one round-trip per message.
 const chatRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const CHAT_APPENDED_REFRESH_DELAY_MS = 400
+const PENDING_KEEPER_CHAT_POLL_MS = 2_000
+const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
+  '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
+const STREAM_FAILURE_HISTORY_SKEW_MS = 30_000
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function entryTimeMs(entry: KeeperConversationEntry): number | null {
+  if (!entry.timestamp) return null
+  const ms = Date.parse(entry.timestamp)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function hasServerAssistantAfterLocalMessage(
+  entries: readonly KeeperConversationEntry[],
+  message: string,
+  sentAtMs: number | null,
+): boolean {
+  const expectedText = message.trim()
+  if (!expectedText) return false
+  let matchedUser = false
+
+  for (const entry of entries) {
+    const tsMs = entryTimeMs(entry)
+    if (
+      sentAtMs !== null
+      && tsMs !== null
+      && tsMs < sentAtMs - STREAM_FAILURE_HISTORY_SKEW_MS
+    ) {
+      continue
+    }
+
+    if (entry.role === 'user' && entry.text.trim() === expectedText) {
+      matchedUser = true
+      continue
+    }
+
+    if (matchedUser && entry.role === 'assistant' && entry.text.trim() !== '') {
+      return true
+    }
+  }
+
+  return false
+}
+
+async function reconcileStreamFailureFromServerHistory(
+  keeperName: string,
+  message: string,
+  localUserId: string,
+  localAssistantId: string,
+): Promise<boolean> {
+  const localUser = (keeperThreads.value[keeperName] ?? [])
+    .find(entry => entry.id === localUserId) ?? null
+  const sentAtMs = localUser ? entryTimeMs(localUser) : null
+  const history = await fetchKeeperChatHistory(keeperName)
+  const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
+  if (!hasServerAssistantAfterLocalMessage(historyEntries, message, sentAtMs)) {
+    return false
+  }
+
+  mergeServerHistoryEntries(keeperName, historyEntries)
+  removeThreadEntries(keeperName, [localUserId, localAssistantId])
+  return true
+}
+
+function pendingUserEntryId(requestId: string): string {
+  return `pending-user-${requestId}`
+}
+
+function pendingAssistantEntryId(requestId: string): string {
+  return `pending-assistant-${requestId}`
+}
+
+function isMissingQueuedKeeperRequestError(err: unknown): boolean {
+  const record = isRecord(err) ? err : null
+  const method = asString(record?.method, '').trim().toUpperCase()
+  const status = typeof record?.status === 'number' ? record.status : null
+  const path = asString(record?.path, '').trim()
+  const message = err instanceof Error ? err.message : ''
+  if (method === 'GET' && status === 404 && path.startsWith('/api/v1/gate/message/requests/')) {
+    return message.includes('request_id not found')
+  }
+  return message.includes('/api/v1/gate/message/requests/')
+    && message.includes('request_id not found')
+}
+
+function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
+  const existing = keeperThreads.value[request.keeperName] ?? []
+  const userId = pendingUserEntryId(request.requestId)
+  const assistantId = pendingAssistantEntryId(request.requestId)
+  if (!existing.some(entry => entry.id === userId)) {
+    appendThreadEntry(request.keeperName, {
+      id: userId,
+      role: 'user',
+      source: 'direct_user',
+      label: 'You',
+      text: request.message,
+      timestamp: new Date(request.submittedAt).toISOString(),
+      delivery: 'delivered',
+      streamState: null,
+      attachments: request.attachments,
+      details: null,
+    })
+  }
+  if (!existing.some(entry => entry.id === assistantId)) {
+    appendThreadEntry(request.keeperName, {
+      id: assistantId,
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: request.keeperName,
+      text: '',
+      rawText: '',
+      timestamp: null,
+      delivery: 'queued',
+      streamState: 'opening',
+      details: null,
+    })
+  }
+  return assistantId
+}
+
+const resumingKeeperChatRequests = new Set<string>()
+
+async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
+  const key = `${request.keeperName}:${request.requestId}`
+  if (resumingKeeperChatRequests.has(key)) return
+  resumingKeeperChatRequests.add(key)
+  const assistantId = ensurePendingThreadEntries(request)
+  setRecordValue(keeperSending, request.keeperName, true)
+  setRecordValue(keeperActionErrors, request.keeperName, null)
+  setRecordValue(keeperStreamStartedAt, request.keeperName, request.submittedAt)
+  setRecordValue(keeperStreamLastEventAt, request.keeperName, Date.now())
+  try {
+    for (;;) {
+      const result = await fetchQueuedKeeperMessageResult(request.requestId)
+      setRecordValue(keeperStreamLastEventAt, request.keeperName, Date.now())
+      if (!isTerminalQueuedKeeperMessage(result)) {
+        await sleep(PENDING_KEEPER_CHAT_POLL_MS)
+        continue
+      }
+
+      const reply = queuedKeeperMessageToReply(result)
+      const isCheckpoint = reply.details?.turnOutcome === 'continuation_checkpoint'
+      const isError = result.status !== 'done' || result.ok === false
+      const errorMessage = isError ? queuedKeeperMessageError(result) : null
+      let assistantDelivery: KeeperConversationDelivery = 'delivered'
+      if (isCheckpoint) {
+        assistantDelivery = 'queued'
+      } else if (isError) {
+        assistantDelivery = 'error'
+      }
+      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+        delivery: isError ? 'error' : 'delivered',
+        error: errorMessage,
+      })
+      finalizeAssistantEntry(request.keeperName, assistantId, {
+        text: isCheckpoint ? '' : reply.text,
+        rawText: reply.details?.replyText ?? reply.text,
+        delivery: assistantDelivery,
+        streamState: null,
+        timestamp: new Date().toISOString(),
+        details: reply.details,
+        error: errorMessage,
+      })
+      if (errorMessage) setRecordValue(keeperActionErrors, request.keeperName, errorMessage)
+      removePendingKeeperChatRequest(request.requestId)
+      await hydrateKeeperChatHistory(request.keeperName, { force: true })
+      return
+    }
+  } catch (err) {
+    if (isMissingQueuedKeeperRequestError(err)) {
+      removePendingKeeperChatRequest(request.requestId)
+      finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
+        delivery: 'error',
+        error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+      })
+      finalizeAssistantEntry(request.keeperName, assistantId, {
+        text: '',
+        rawText: '',
+        delivery: 'error',
+        streamState: null,
+        timestamp: new Date().toISOString(),
+        error: QUEUED_KEEPER_REQUEST_LOST_MESSAGE,
+      })
+      setRecordValue(keeperActionErrors, request.keeperName, QUEUED_KEEPER_REQUEST_LOST_MESSAGE)
+      await hydrateKeeperChatHistory(request.keeperName, { force: true })
+      return
+    }
+    const message = err instanceof Error ? err.message : `Failed to resume ${request.keeperName} chat request`
+    setRecordValue(keeperActionErrors, request.keeperName, `대기 중 메시지 복구 실패: ${message}`)
+  } finally {
+    resumingKeeperChatRequests.delete(key)
+    if (!hasPendingKeeperChatRequest(request.keeperName)) {
+      setRecordValue(keeperSending, request.keeperName, false)
+      setRecordValue(keeperStreamStartedAt, request.keeperName, null)
+      setRecordValue(keeperStreamLastEventAt, request.keeperName, null)
+    }
+  }
+}
+
+export async function resumePendingKeeperChatRequests(name: string): Promise<void> {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  await Promise.all(pendingKeeperChatRequestsForKeeper(keeperName).map(resumePendingKeeperChatRequest))
+}
 
 /** React to a server `keeper_chat_appended` push: re-merge the
  *  persisted transcript so messages arriving through other connectors
  *  (Discord, Slack, agent MCP) appear without a page reload. Keepers
  *  whose transcript was never hydrated are skipped — the mount
- *  hydration fetches the full window when the panel first opens. */
-export function noteKeeperChatAppended(name: string): void {
+ *  hydration fetches the full window when the panel first opens.
+ *
+ *  If the event carries an RFC-0235 audio clip, we first try to attach
+ *  it to the matching assistant bubble that is already streaming. A
+ *  failed match still falls back to the history re-merge (the clip is
+ *  persisted server-side too). */
+export function noteKeeperChatAppended(name: string, audio?: unknown): void {
   const keeperName = name.trim()
   if (!keeperName) return
   if (!hydratedChatKeepers.has(keeperName)) return
+  const attached = audio != null && attachKeeperAudioClip(keeperName, audio)
+  if (attached) return
   const pending = chatRefreshTimers.get(keeperName)
   if (pending) clearTimeout(pending)
   chatRefreshTimers.set(keeperName, setTimeout(() => {
@@ -266,6 +519,7 @@ export async function sendKeeperThreadMessage(
   const controller = new AbortController()
   setActiveStream(keeperName, assistantId, controller)
   let requestId: string | null = null
+  let requestTerminalSeen = false
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
@@ -276,6 +530,20 @@ export async function sendKeeperThreadMessage(
         setRecordValue(keeperStreamLastEventAt, keeperName, Date.now())
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {
           requestId = asString(event.value.request_id, '').trim() || requestId
+          if (requestId) {
+            upsertPendingKeeperChatRequest({
+              requestId,
+              keeperName,
+              message,
+              submittedAt: Date.now(),
+              ...(attachments ? { attachments } : {}),
+            })
+          }
+        }
+        if (event.type === 'CUSTOM' && event.name === 'KEEPER_REQUEST_TERMINAL' && isRecord(event.value)) {
+          requestTerminalSeen = true
+          const terminalRequestId = asString(event.value.request_id, '').trim()
+          if (terminalRequestId) removePendingKeeperChatRequest(terminalRequestId)
         }
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
@@ -289,6 +557,17 @@ export async function sendKeeperThreadMessage(
     const finalText = finalEntry?.text.trim() ?? ''
 
     if (!outcome.terminal) {
+      if (requestId) {
+        removeThreadEntries(keeperName, [localId, assistantId])
+        await resumePendingKeeperChatRequest({
+          requestId,
+          keeperName,
+          message,
+          submittedAt: Date.now(),
+          ...(attachments ? { attachments } : {}),
+        })
+        return
+      }
       // The SSE connection closed without RUN_FINISHED / RUN_ERROR —
       // keep the partial text but mark the entry so the operator can
       // tell a cut stream from a completed reply.
@@ -316,6 +595,7 @@ export async function sendKeeperThreadMessage(
       timestamp: new Date().toISOString(),
       error: null,
     })
+    if (requestId) removePendingKeeperChatRequest(requestId)
   } catch (err) {
     if (isAbortError(err)) {
       if (requestId) {
@@ -324,6 +604,7 @@ export async function sendKeeperThreadMessage(
         } catch (cancelErr) {
           console.warn(`[keeper] queue cancel failed for ${keeperName}`, cancelErr instanceof Error ? cancelErr.message : cancelErr)
         }
+        removePendingKeeperChatRequest(requestId)
       }
       finalizeAssistantEntry(keeperName, assistantId, {
         delivery: 'timeout',
@@ -347,6 +628,24 @@ export async function sendKeeperThreadMessage(
       delivery: 'error' as KeeperConversationDelivery,
       error: errorMessage,
     })
+    if (requestTerminalSeen && requestId) removePendingKeeperChatRequest(requestId)
+    try {
+      const reconciled = await reconcileStreamFailureFromServerHistory(
+        keeperName,
+        message,
+        localId,
+        assistantId,
+      )
+      if (reconciled) {
+        setRecordValue(keeperActionErrors, keeperName, null)
+        return
+      }
+    } catch (reconcileErr) {
+      console.warn(
+        `[keeper] stream failure history reconciliation failed for ${keeperName}`,
+        reconcileErr instanceof Error ? reconcileErr.message : reconcileErr,
+      )
+    }
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {

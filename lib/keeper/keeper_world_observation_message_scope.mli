@@ -20,14 +20,29 @@ val is_self_author
 
 val is_keeper_authored_message : string -> bool
 
+type direct_line_role =
+  | User
+  | Assistant
+  | Tool_call
+(** RFC-0232 P1: closed-sum role for a direct-conversation line, replacing the
+    former [role_label : string]. The renderer derives the display label from
+    this via {!direct_line_role_to_label}; no consumer re-derives semantics
+    from a free string. *)
+
+val direct_line_role_to_label : direct_line_role -> string
+(** Display vocabulary SSOT: [User -> "user"], [Assistant -> "assistant"],
+    [Tool_call -> "tool_call"]. *)
+
 type recent_direct_line = {
-  role_label : string;
+  role : direct_line_role;
   speaker_label : string option;
   content : string;
 }
 (** Bounded transcript line for direct-chat continuity. Tool rows retain
     only the call name; assistant transport failures are omitted because
-    they are server failures, not keeper utterances. *)
+    they are server failures, not keeper utterances. Assistant rows carrying
+    synthesized voice audio are also omitted from this prompt context so the
+    keeper does not quote its own spoken output back into the next turn. *)
 
 val recent_direct_conversation_of_messages
   :  ?limit:int

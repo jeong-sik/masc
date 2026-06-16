@@ -575,7 +575,7 @@ describe('TelemetryUnified', () => {
           ts: 1_775_709_200,
           name: 'keeper-heart',
           channel: 'turn',
-          model_used: 'provider-k-5.1',
+          model_used: 'glm-5.1',
           tool_call_count: 1,
         },
       ],
@@ -607,7 +607,7 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     expect(container.textContent).toContain('하트비트 · fleet heartbeat · 2 events')
-    expect(container.textContent).not.toContain('model=provider-k-5.1')
+    expect(container.textContent).not.toContain('model=glm-5.1')
   })
 
   it('collapses interleaved heartbeat + oas snapshot polling across multiple keepers into one group (#13002)', async () => {
@@ -914,8 +914,8 @@ describe('TelemetryUnified', () => {
         payload: {
           agent: 'oas-tier-group.ollama_cloud_stable',
           provider_kind: 'openai_compat',
-          model_id: 'model-c:cloud',
-          provider_model_id: 'model-c:cloud',
+          model_id: 'kimi-k2.6:cloud',
+          provider_model_id: 'kimi-k2.6:cloud',
           base_url: 'https://ollama.com/v1',
           endpoint: 'https://ollama.com/v1/chat/completions',
         },
@@ -1235,7 +1235,7 @@ describe('filterTelemetryDisplayItems', () => {
       ts: 1_775_709_200,
       name: 'keeper-bravo',
       channel: 'turn_end',
-      model_used: 'provider-k-4.6',
+      model_used: 'glm-4.6',
       tool_call_count: 2,
       success: true,
     },

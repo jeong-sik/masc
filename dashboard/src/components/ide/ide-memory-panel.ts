@@ -73,12 +73,12 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
   }, [fetchMemory])
 
   return html`
-    <div class="ide-memory-panel" data-testid="ide-memory-panel">
+    <div class="ide-memory-panel v2-ide-panel" data-testid="ide-memory-panel">
       <div class="ide-memory-panel__header">
         <span class="ide-memory-panel__title">Memory</span>
         <span>
           <button
-            class="ide-memory-panel__refresh"
+            class="ide-memory-panel__refresh v2-ide-action"
             onClick=${fetchMemory}
             disabled=${loading}
             title="Refresh memory entries"
@@ -97,7 +97,7 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
                 ${entries.map(
                   (entry) => html`
                     <div
-                      class="ide-memory-panel__entry"
+                      class="ide-memory-panel__entry v2-ide-row"
                       key=${entry.id}
                       data-kind=${entry.kind}
                     >

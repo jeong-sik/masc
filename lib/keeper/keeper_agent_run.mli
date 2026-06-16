@@ -58,7 +58,6 @@ val per_provider_timeout_for_turn
      @param world_observation Structured keeper world snapshot used by
             advisory execution-progress checks. When omitted, the progress check
             does not infer world state from prompt text.
-    @param provider_filter Optional provider restriction
     @param generation Current generation counter
     @param max_turns Maximum agent turns (default from env config)
     @param max_idle_turns Maximum consecutive idle turns before stop
@@ -87,7 +86,6 @@ val run_turn
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
-  -> ?provider_filter:string list
   -> generation:int
   -> ?max_turns:int
   -> max_idle_turns:int

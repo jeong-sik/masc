@@ -138,6 +138,19 @@ val guarded_dispatch
     fan-out. The dispatch return is typed [Tool_result.result option]; the old
     [dispatch]/[dispatch_structured] entry points are gone. *)
 
+val dispatch_many
+  :  ?max_concurrency:int
+  -> sw:Eio.Switch.t
+  -> (Tool_token.t * Yojson.Safe.t) list
+  -> (Tool_token.t * Tool_result.result option) list
+(** Run multiple independent tool calls concurrently.
+
+    Each call executes through {!guarded_dispatch} (pre-hooks, handler,
+    result transformer, observers) under the provided [sw]. The result list
+    preserves the input order. When [max_concurrency] is provided and
+    positive, a semaphore caps the number of calls running in parallel;
+    otherwise calls fan out with unbounded concurrency. *)
+
 (** {1 Introspection} *)
 
 (* RFC-0084 host-config-cleanup-J — [val v2_enabled] removed.
@@ -162,7 +175,7 @@ type module_tag =
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
-  | Mod_control | Mod_agent_timeline | Mod_misc
+  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_misc
   | Mod_library
   (* [Mod_external]: dispatched by a server-boundary handler in the
      composition root, not by a peer [Tool_*] module. The tool layer
@@ -170,6 +183,7 @@ type module_tag =
   | Mod_external
   | Mod_inline
   | Mod_shard
+  | Mod_keeper_task
 
 val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag -> unit
 (** Register tool names from a schema list with a module tag. *)
@@ -195,6 +209,10 @@ val is_tag_registry_initialized : unit -> bool
 val all_registered_names : unit -> string list
 (** Every tool name registered in the tag registry. Handler-only
     registrations are intentionally invisible. Iteration order is
+    unspecified. *)
+
+val all_schema_names : unit -> string list
+(** Every tool name registered in the schema registry. Iteration order is
     unspecified. *)
 
 val find_similar_names :

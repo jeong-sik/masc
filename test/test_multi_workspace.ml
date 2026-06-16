@@ -69,7 +69,7 @@ let test_join_uses_default_namespace () =
           Atomic.set Workspace_hooks.observe_agent_lifecycle_fn (fun _config ~agent_id:_ ~event ~details:_ ->
               captured_event_kind := Some (Workspace_hooks.agent_lifecycle_event_to_string event));
           let result =
-            Workspace.bind_session config ~agent_name:"agent_llm_a"
+            Workspace.bind_session config ~agent_name:"claude"
               ~capabilities:[ "debug" ] ()
           in
           check bool "join succeeds" true

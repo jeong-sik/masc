@@ -86,7 +86,7 @@ let test_multi_runtime_accumulation () =
   let net = require_net () in
   (* Provider A: 2 turns *)
   let agent_a = Agent_sdk.Agent.create ~net ~config:{ Agent_sdk.Types.default_config with
-    name = "runtime-a"; model = "provider-a" } () in
+    name = "runtime-a"; model = "anthropic" } () in
   Agent_sdk.Agent.set_state agent_a { (Agent_sdk.Agent.state agent_a) with
     messages = [
       Agent_sdk.Types.user_msg "t1";
@@ -125,17 +125,17 @@ let test_multi_runtime_accumulation () =
 let test_resume_preserves_checkpoint_model () =
   let net = require_net () in
   let agent = Agent_sdk.Agent.create ~net ~config:{ Agent_sdk.Types.default_config with
-    model = "provider-a-model" } () in
+    model = "anthropic-model" } () in
   Agent_sdk.Agent.set_state agent { (Agent_sdk.Agent.state agent) with
     messages = [Agent_sdk.Types.user_msg "hello"];
     turn_count = 1;
   };
   let cp = Agent_sdk.Agent.checkpoint agent in
-  Alcotest.(check string) "checkpoint model" "provider-a-model" cp.model;
+  Alcotest.(check string) "checkpoint model" "anthropic-model" cp.model;
   (* Resume without config override — checkpoint model is preserved *)
   let resumed = Agent_sdk.Agent.resume ~net ~checkpoint:cp () in
   let state = Agent_sdk.Agent.state resumed in
-  Alcotest.(check string) "resumed keeps checkpoint model" "provider-a-model"
+  Alcotest.(check string) "resumed keeps checkpoint model" "anthropic-model"
     (Agent_sdk.Types.model_to_string state.config.model)
 
 (* ================================================================ *)

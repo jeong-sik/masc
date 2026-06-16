@@ -1,6 +1,7 @@
 open Alcotest
 
 module TRM = Masc.Transport_read_model
+module TM = Masc.Transport_metrics
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
@@ -120,6 +121,55 @@ let test_transport_status_reports_streamable_http_protocol () =
   check bool "enabled_protocols includes canonical json-rpc path" true
     (List.mem "json-rpc" enabled_protocols)
 
+let test_websocket_discovery_uses_standalone_url () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+      TM.set_ws_runtime_listening true;
+      Fun.protect
+        ~finally:(fun () -> TM.set_ws_runtime_listening false)
+        (fun () ->
+          let json = TRM.websocket_discovery_json (make_context ()) in
+          check string "mode" "standalone"
+            Yojson.Safe.Util.(json |> member "mode" |> to_string);
+          check string "upgrade path" "/"
+            Yojson.Safe.Util.(json |> member "upgrade_path" |> to_string);
+          check string "ws_url uses standalone listener" "ws://127.0.0.1:8937/"
+            Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
+          check string "same-origin retained for diagnostics" "ws://127.0.0.1:8935/ws"
+            Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string)))
+
+let test_websocket_discovery_does_not_treat_enabled_as_reachable () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+      TM.set_ws_runtime_listening false;
+      let json = TRM.websocket_discovery_json (make_context ()) in
+      check bool "enabled still advertises configured websocket" true
+        Yojson.Safe.Util.(json |> member "enabled" |> to_bool);
+      check bool "enabled alone is not listening" false
+        Yojson.Safe.Util.(json |> member "listening" |> to_bool);
+      check bool "enabled alone is not reachable" false
+        Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
+      check bool "standalone listener state remains explicit" false
+        Yojson.Safe.Util.(json |> member "standalone_listening" |> to_bool))
+
+let test_websocket_discovery_retains_same_origin_wss_diagnostic () =
+  let ctx =
+    TRM.make_http_context
+      ~base_url:"https://example.com/root/"
+      ~host:"example.com"
+      ()
+  in
+  let json = TRM.websocket_discovery_json ctx in
+  check string "wss preserves base path" "wss://example.com/root/ws"
+    Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string)
+
+let test_advertised_base_url_uses_forwarded_proto_without_internal_port () =
+  let headers =
+    Httpun.Headers.of_list
+      [ "host", "masc.example.com"; "x-forwarded-proto", "https" ]
+  in
+  let request = Httpun.Request.create ~headers `GET "/ws" in
+  check string "forwarded https base" "https://masc.example.com"
+    (Server_routes_http_runtime.advertised_base_url request)
+
 let test_context_from_env_uses_default_loopback_base_url () =
   with_env "MASC_HTTP_BASE_URL" None (fun () ->
       with_env "MASC_HOST" (Some "0.0.0.0") (fun () ->
@@ -165,6 +215,14 @@ let () =
              test_transport_status_http_shape_extends_tool_shape;
            test_case "transport status includes json-rpc protocol" `Quick
              test_transport_status_reports_streamable_http_protocol;
+           test_case "websocket standalone URL" `Quick
+             test_websocket_discovery_uses_standalone_url;
+           test_case "websocket enabled is not reachability" `Quick
+             test_websocket_discovery_does_not_treat_enabled_as_reachable;
+           test_case "websocket HTTPS diagnostic URL" `Quick
+             test_websocket_discovery_retains_same_origin_wss_diagnostic;
+           test_case "forwarded base URL" `Quick
+             test_advertised_base_url_uses_forwarded_proto_without_internal_port;
          ] );
       ( "env",
         [

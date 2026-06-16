@@ -152,7 +152,7 @@ key = " OLLAMA_CLOUD_API_KEY "
         | None -> fail "expected credential")
      | _ -> fail "expected one provider")
 
-let test_runtime_toml_canonicalizes_legacy_protocol_alias () =
+let test_runtime_toml_rejects_legacy_protocol_aliases () =
   let content =
     {|
 [runtime]
@@ -160,7 +160,7 @@ default = "legacy_openai_compat.test_model"
 
 [providers.legacy_openai_compat]
 display-name = "Legacy OpenAI-Compatible"
-protocol = "provider_d-http"
+protocol = "openai-http"
 endpoint = "https://legacy-openai-compatible.example/v1"
 
 [models.test_model]
@@ -174,6 +174,44 @@ max-concurrent = 1
 |}
   in
   match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML to reject legacy provider-letter alias"
+  | Error errors ->
+    check bool "rejects openai-http"
+      true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+            String.equal err.path "providers.legacy_openai_compat.protocol"
+            && String.equal err.message
+                 "unknown protocol \"openai-http\": expected one of \
+                  messages-cli, messages-http, openai-compatible-cli, \
+                  openai-compatible-http, ollama-http")
+         errors)
+
+let test_runtime_toml_accepts_messages_caching_capability () =
+  let content =
+    {|
+[runtime]
+default = "anthropic.claude-opus-4"
+
+[providers.anthropic]
+display-name = "Anthropic"
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+
+[providers.anthropic.capabilities]
+uses-messages-caching = true
+
+[models.claude-opus-4]
+api-name = "claude-opus-4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[anthropic.claude-opus-4]
+max-concurrent = 2
+|}
+  in
+  match Runtime_toml.parse_string content with
   | Error errors ->
     fail
       (errors
@@ -183,12 +221,11 @@ max-concurrent = 1
   | Ok config ->
     (match config.providers with
      | [ provider ] ->
-       check string "canonical protocol" "openai-compatible-http"
-         provider.Runtime_schema.protocol;
-       check bool "chat-completions api format" true
-         (match provider.Runtime_schema.api_format with
-          | Chat_completions_api -> true
-          | Messages_api | Ollama_api -> false)
+       (match provider.Runtime_schema.capabilities with
+        | Some caps ->
+          check bool "uses_anthropic_caching from uses-messages-caching" true
+            caps.uses_anthropic_caching
+        | None -> fail "expected provider capabilities")
      | _ -> fail "expected one provider")
 
 let deepseek_runtime_toml =
@@ -484,6 +521,68 @@ let provider_cfg () =
   | Ok provider_cfg -> provider_cfg
   | Error msg -> failf "unexpected adapter error: %s" msg
 
+(* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
+   Provider_config. Before the fix the adapter dropped both binding
+   fields, so keep_alive fell back to OAS_OLLAMA_KEEP_ALIVE / "-1" and
+   num_ctx to the Ollama Modelfile default. *)
+let ollama_keep_alive_runtime_toml =
+  {|
+[runtime]
+default = "ollama.qwen-local"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen-local]
+api-name = "qwen3:32b"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[ollama.qwen-local]
+max-concurrent = 1
+keep-alive = "30m"
+num-ctx = 16384
+|}
+
+let test_runtime_adapter_threads_binding_keep_alive_and_num_ctx () =
+  match Runtime_toml.parse_string ollama_keep_alive_runtime_toml with
+  | Error errors ->
+    failf
+      "expected Ollama keep-alive runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       check (option string) "binding keep_alive parsed" (Some "30m")
+         binding.Runtime_schema.keep_alive;
+       check (option int) "binding num_ctx parsed" (Some 16384)
+         binding.Runtime_schema.num_ctx;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check bool "kind" true
+            (provider_cfg.kind = Llm_provider.Provider_config.Ollama);
+          check (option string) "provider config keep_alive" (Some "30m")
+            provider_cfg.keep_alive;
+          check (option int) "provider config num_ctx" (Some 16384)
+            provider_cfg.num_ctx)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default () =
+  let provider_cfg = provider_cfg () in
+  check (option string) "keep_alive unset without TOML value" None
+    provider_cfg.keep_alive;
+  check (option int) "num_ctx unset without TOML value" None
+    provider_cfg.num_ctx
+
 let runtime_or_fail ?(provider = runpod_provider) () =
   let cfg =
     { Runtime_schema.providers = [ provider ]
@@ -704,6 +803,98 @@ let test_runtime_agent_max_turns_is_continuation_checkpoint () =
   check string "status" "continuation_checkpoint" lifecycle.status;
   check (option string) "no error" None lifecycle.error
 
+let test_runtime_agent_context_uses_configured_turn_budget () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config = { config with max_turns = 7 } in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder_without_approval
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_sdk.Builder.build_safe builder with
+      | Error err -> fail (Agent_sdk.Error.to_string err)
+      | Ok agent ->
+        check int "builder max_turns" 7
+          (Agent_sdk.Agent.state agent).config.max_turns;
+        Eio.Switch.on_release sw (fun () ->
+          Agent_sdk.Agent.close agent)));
+  let checkpoint =
+    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "oas-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_sdk.Types.empty_usage
+    ; turn_count = 24
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_sdk.Types.default_config.response_format
+    ; thinking_budget = None
+    ; cache_system_prompt = false
+    ; max_input_tokens = None
+    ; max_total_tokens = None
+    ; context = Agent_sdk.Context.create ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  check int "resume adds fresh per-call turn budget" 31
+    prepared.agent_config.max_turns
+
+let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
+  let tool =
+    Agent_sdk.Tool.create
+      ~name:"probe_tool"
+      ~description:"probe tool"
+      ~parameters:[]
+      (fun _input -> Ok { content = "ok" })
+  in
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[ tool ]
+  in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder_without_approval
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_sdk.Builder.build_safe builder with
+      | Error err -> fail (Agent_sdk.Error.to_string err)
+      | Ok agent ->
+        let agent_config = (Agent_sdk.Agent.state agent).config in
+        check
+          (option string)
+          "tool_choice remains unset"
+          None
+          (Option.map Agent_sdk.Types.show_tool_choice agent_config.tool_choice);
+        Eio.Switch.on_release sw (fun () ->
+          Agent_sdk.Agent.close agent)))
+
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
    streaming timeout. *)
@@ -760,9 +951,13 @@ let () =
             `Quick
             test_runtime_toml_trims_env_credential_key
         ; test_case
-            "runtime TOML canonicalizes legacy protocol alias"
+            "runtime TOML rejects legacy protocol aliases"
             `Quick
-            test_runtime_toml_canonicalizes_legacy_protocol_alias
+            test_runtime_toml_rejects_legacy_protocol_aliases
+        ; test_case
+            "runtime TOML reads uses-messages-caching capability"
+            `Quick
+            test_runtime_toml_accepts_messages_caching_capability
         ; test_case
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick
@@ -784,6 +979,14 @@ let () =
             `Quick
             test_runtime_adapter_materializes_glm_coding_provider
         ; test_case
+            "runtime adapter threads binding keep-alive and num-ctx"
+            `Quick
+            test_runtime_adapter_threads_binding_keep_alive_and_num_ctx
+        ; test_case
+            "runtime adapter leaves keep-alive and num-ctx unset by default"
+            `Quick
+            test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default
+        ; test_case
             "runtime agent terminal observation carries model identity"
             `Quick
             test_runtime_agent_terminal_observation_uses_runtime_identity
@@ -799,6 +1002,14 @@ let () =
             "max turns is continuation checkpoint"
             `Quick
             test_runtime_agent_max_turns_is_continuation_checkpoint
+        ; test_case
+            "runtime agent context uses configured turn budget"
+            `Quick
+            test_runtime_agent_context_uses_configured_turn_budget
+        ; test_case
+            "runtime agent context leaves tool_choice unset with tools"
+            `Quick
+            test_runtime_agent_context_leaves_tool_choice_unset_with_tools
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

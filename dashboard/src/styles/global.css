@@ -33,6 +33,17 @@
 @import "./tools.css";
 @import "./ui.css";
 @import "./responsive.css";
+@import "./v2-shell.css";
+@import "./v2-theme.css";
+@import "./v2-logs.css";
+@import "./v2-overview.css";
+@import "./v2-connectors.css";
+@import "./v2-monitoring.css";
+@import "./v2-command.css";
+@import "./v2-workspace.css";
+@import "./v2-monitoring-leftovers.css";
+@import "./v2-lab.css";
+@import "./v2-ide.css";
 @import "./a11y.css"; /* after feature styles so reduced-motion overrides win */
 
 /* Strangler Fig migration bridge — bridges legacy CSS hooks to
@@ -221,3 +232,22 @@ tbody tr:hover {
 @utility ok { border-color: var(--ok-22); }
 @utility warn { border-color: var(--warn-soft); }
 @utility bad { border-color: rgb(var(--err-glow) / .15); }
+
+/* Legacy utility aliases surfaced by unmigrated components.
+   These are defined here so foundation PR preserves layout without
+   touching every component file; they are removed once consumers
+   switch to standard Tailwind utilities. */
+@utility leading-paragraph { line-height: 1.45; }
+@utility leading-airy { line-height: 1.6; }
+@utility tracking-3 { letter-spacing: 0.03em; }
+@utility text-md { font-size: var(--font-size-md); }
+@utility min-w-35 { min-width: 140px; }
+@utility min-w-45 { min-width: 180px; }
+@utility max-w-65 { max-width: 260px; }
+@utility max-w-190 { max-width: 760px; }
+@utility max-h-70 { max-height: 280px; }
+@utility max-h-75 { max-height: 300px; }
+@utility max-h-130 { max-height: 520px; }
+@utility max-h-150 { max-height: 600px; }
+@utility min-h-65 { min-height: 260px; }
+@utility min-h-75 { min-height: 300px; }

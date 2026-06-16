@@ -18,6 +18,7 @@ import { ActionButton } from '../common/button'
 import { ToolExecutor } from '../tool-executor/tool-executor'
 import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
+import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 
 type ToolsView = 'inventory' | 'executor'
 const activeView = signal<ToolsView>('inventory')
@@ -44,11 +45,11 @@ export function Tools() {
   }, [])
 
   return html`
-    <div>
+    <div class="v2-lab-surface flex flex-col gap-4">
       <div class="flex gap-2 mb-4">
-        <${ActionButton} variant=${activeView.value === 'inventory' ? 'primary' : 'ghost'} size="md"
+        <${ActionButton} variant=${activeView.value === 'inventory' ? 'primary' : 'ghost'} size="md" class="v2-lab-action"
           onClick=${() => { activeView.value = 'inventory' }}>인벤토리<//>
-        <${ActionButton} variant=${activeView.value === 'executor' ? 'primary' : 'ghost'} size="md"
+        <${ActionButton} variant=${activeView.value === 'executor' ? 'primary' : 'ghost'} size="md" class="v2-lab-action"
           onClick=${() => { activeView.value = 'executor' }}>도구 실행기<//>
       </div>
       ${activeView.value === 'executor' ? html`<${ToolExecutor} />` : html`<div>
@@ -59,7 +60,11 @@ export function Tools() {
 
       <${PromptRegistryPanel} />
 
-      <${SectionCard} label="시스템 도구 목록" class="section mb-4">
+      <${SectionCard} label="예약 자동화 FSM" class="section v2-lab-panel mb-4">
+        <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} />
+      <//>
+
+      <${SectionCard} label="시스템 도구 목록" class="section v2-lab-panel mb-4">
         <${FullInventoryView}
           inventory=${inventory}
           loading=${loading}
@@ -67,7 +72,7 @@ export function Tools() {
         />
       <//>
 
-      <${SectionCard} label="도구 사용 현황" class="section mb-4">
+      <${SectionCard} label="도구 사용 현황" class="section v2-lab-panel mb-4">
         ${usage
           ? html`
               <div class="text-xs text-[var(--color-fg-muted)] mb-2">

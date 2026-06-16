@@ -50,14 +50,6 @@ const QUEUED_TASK_STYLE = {
   paddingTop: 'var(--sp-2)',
   borderTop: '1px solid var(--color-border-divider)',
 }
-const QUEUED_TASK_META_STYLE = {
-  overflow: 'hidden',
-  color: 'var(--color-fg-muted)',
-  fontSize: 'var(--fs-11)',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-}
-
 export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
   const summary = keeperWorkSummary(keeperName, keepers.value, tasks.value)
   const keeper = summary.keeper
@@ -108,21 +100,18 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
         </div>
         ${currentTask
           ? html`
-            <div class="ide-keeper-work-card">
+            <div class="ide-keeper-work-card v2-ide-card">
               <div class="ide-keeper-work-card-top">
                 <span>${currentTask.id}</span>
                 <span>${currentTask.status ?? 'unknown'}</span>
               </div>
               <strong title=${currentTask.title}>${currentTask.title}</strong>
-              ${currentTask.worktree
-                ? html`<span title=${currentTask.worktree.path}>${currentTask.worktree.branch} · ${currentTask.worktree.repo_name}</span>`
-                : null}
               ${TaskRouteLinks(currentTask, summary.currentGoalId, summary.displayName)}
             </div>
           `
           : summary.currentTaskId
             ? html`
-              <div class="ide-keeper-work-card">
+              <div class="ide-keeper-work-card v2-ide-card">
                 <div class="ide-keeper-work-card-top">
                   <span>${summary.currentTaskId}</span>
                   <span>runtime</span>
@@ -138,7 +127,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
           ? GoalProgressCard(currentGoal, currentGoalProgress, summary.currentTaskId)
           : summary.currentGoalId
             ? html`
-              <div class="ide-keeper-work-goal" role="status">
+              <div class="ide-keeper-work-goal v2-ide-card" role="status">
                 <div class="ide-keeper-work-card-top">
                   <span>GOAL PROGRESS</span>
                   <span>${summary.currentGoalId}</span>
@@ -174,7 +163,7 @@ function QueuedTaskCards(
   const shownTasks = tasks.slice(0, 3)
   const hiddenCount = Math.max(0, tasks.length - shownTasks.length)
   return html`
-    <div class="ide-keeper-work-card" aria-label="Keeper active task queue">
+    <div class="ide-keeper-work-card v2-ide-card" aria-label="Keeper active task queue">
       <div class="ide-keeper-work-card-top">
         <span>ACTIVE QUEUE</span>
         <span>${tasks.length} queued</span>
@@ -186,9 +175,6 @@ function QueuedTaskCards(
             <span>${task.status ?? 'unknown'}</span>
           </div>
           <strong title=${task.title}>${task.title}</strong>
-          ${task.worktree
-            ? html`<span style=${QUEUED_TASK_META_STYLE} title=${task.worktree.path}>${task.worktree.branch} · ${task.worktree.repo_name}</span>`
-            : null}
           ${TaskRouteLinks(task, fallbackGoalId, keeperId)}
         </div>
       `)}
@@ -207,7 +193,7 @@ function GoalProgressCard(
   const pctLabel = progress ? formatProgressPct(progress) : '0%'
   const pctValue = progress ? Math.round(progress.ratio * 100) : 0
   return html`
-    <div class="ide-keeper-work-goal" role="status" aria-label=${`Goal ${goal.id} progress ${pctLabel}`}>
+    <div class="ide-keeper-work-goal v2-ide-card" role="status" aria-label=${`Goal ${goal.id} progress ${pctLabel}`}>
       <div class="ide-keeper-work-card-top">
         <span>GOAL PROGRESS</span>
         <span>${horizonLabel(goal.horizon)} · ${goalPhaseLabel(goal.phase)}</span>
@@ -239,7 +225,6 @@ function TaskRouteLinks(task: Task, fallbackGoalId: string | null, keeperId: str
   return KeeperWorkRouteLinks(routeLinksForContext({
     goalId: task.goal_id ?? fallbackGoalId ?? undefined,
     taskId: task.id,
-    gitRef: task.worktree?.branch,
     sessionId: execution.sessionId ?? undefined,
     operationId: execution.operationId ?? undefined,
     telemetryQuery: execution.telemetryQuery ?? undefined,
@@ -274,6 +259,7 @@ function KeeperWorkRouteLinks(
         <button
           key=${link.id}
           type="button"
+          class="v2-ide-action"
           title=${link.evidence}
           onClick=${() => openIdeContextRouteLink(link)}
         >${link.label}</button>
@@ -377,7 +363,11 @@ export function keeperWorkSummary(
       trust?.next_human_action,
       keeper?.next_human_action,
     ),
-    recentOutput: firstNonEmptyString(keeper?.recent_output_preview, keeper?.recent_input_preview),
+    recentOutput: firstNonEmptyString(
+      keeper?.recent_output_preview,
+      keeper?.recent_input_preview,
+      keeper?.last_proactive_preview,
+    ),
     recentTools: keeper?.recent_tool_names ?? keeper?.latest_tool_names ?? EMPTY_TOOLS,
     runtimeBlocker: firstNonEmptyString(keeper?.runtime_blocker_summary, keeper?.last_blocker),
   }

@@ -40,23 +40,21 @@ let runtime_candidates_of_providers =
   Keeper_turn_driver_admission.runtime_candidates_of_providers
 let run_named
     ~runtime_id
-    ?base_path
     ?(keeper_name = "")
     ~goal
-    ?provider_filter
     ?priority
     ?session_id
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
-    ?(max_idle_turns = 3)
+    ?(max_turns = Agent_sdk.Types.default_config.max_turns)
+    ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
-    ?wait_timeout_sec
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -111,11 +109,10 @@ let run_named
     | None -> enable_thinking
   in
   let preserve_thinking = runtime_seed.preserve_thinking in
-  (* Parameters that only fed the deleted multi-candidate machinery
-     (provider selection and admission queue gating). *)
-  ignore provider_filter;
-  ignore base_path;
-  ignore wait_timeout_sec;
+  (* Audit F8: the former [?provider_filter] / [?base_path] /
+     [?wait_timeout_sec] parameters only fed the deleted multi-candidate
+     machinery and were silently ignored here; they are removed from the
+     signature so callers cannot pass dead routing knobs. *)
   (* RFC-0207: dispatch to the *requested* runtime (a keeper's persona [model]
      selection or the global default, both produced by [runtime_id_of_meta])
      instead of unconditionally the default.  A requested id that does not
@@ -143,16 +140,11 @@ let run_named
   in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
-  let execution_idle_timeout_s =
-    (* Keep parsing [turn.execution_idle_timeout_sec] for compatibility, but do
-       not forward it on the keeper path until OAS proves active tool execution
-       is excluded from idle accounting. Otherwise this becomes another MASC
-       knob that can kill a healthy long-running tool call. *)
-    let (_resolved_but_not_forwarded : float option) =
-      Keeper_runtime_resolved.execution_idle_timeout_sec ()
-    in
-    None
-  in
+  (* RFC-0206: execution_idle_timeout is intentionally not forwarded on the
+     keeper path until OAS proves active tool execution is excluded from idle
+     accounting. Passing [None] keeps the previous behavior without exposing a
+     dead compatibility knob. *)
+  let execution_idle_timeout_s = None in
   let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
     runtime_id;
     error_runtime_id;
@@ -164,6 +156,7 @@ let run_named
     system_prompt;
     tools;
     initial_messages;
+    max_turns;
     max_idle_turns;
     stream_idle_timeout_s;
     execution_idle_timeout_s;
@@ -220,4 +213,11 @@ module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
+  let last_tool_progress_context_string_of_messages messages =
+    messages
+    |> Keeper_turn_driver_try_provider.For_testing.last_tool_progress_context_of_messages
+    |> Keeper_turn_driver_try_provider.For_testing.format_last_tool_progress_context
+
+  let sdk_error_of_nonretryable_attempt_error =
+    Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
 end

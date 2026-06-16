@@ -407,7 +407,7 @@ const runtimeBlockerLabels = {
   supervisor_paused: 'Supervisor 일시정지',
   synthetic_stall: '합성 상태 정체',
   self_imposed_idle: '자체 대기',
-  stay_silent_loop: 'Stay-silent 루프',
+  no_progress_loop: 'No-progress 루프',
   sdk_max_turns_exceeded: 'SDK 최대 턴 초과',
   sdk_token_budget_exceeded: 'SDK 토큰 예산 초과',
   sdk_cost_budget_exceeded: 'SDK 비용 예산 초과',
@@ -496,10 +496,10 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (blockerClass === 'self_imposed_idle') {
     return 'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.'
   }
-  if (blockerClass === 'stay_silent_loop') {
-    // keeper_unified_turn_stay_silent.ml: consecutive silent turns above
-    // threshold latched the blocker. Auto-clears on first non-silent turn.
-    return 'Keeper가 연속으로 빈 응답을 내고 있어 정지된 것 같습니다. 다음 실제 응답이 나오면 자동 해제됩니다.'
+  if (blockerClass === 'no_progress_loop') {
+    // keeper_unified_turn_no_progress.ml: consecutive no-progress turns above
+    // threshold latch the blocker. Auto-clears on first progress turn.
+    return 'Keeper가 연속으로 진행 없는 턴을 내고 있어 정지된 것 같습니다. 다음 실제 진행이 나오면 자동 해제됩니다.'
   }
   return null
 }
@@ -545,4 +545,28 @@ export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | n
   if (paused) return '일시정지됨'
   if (blocker) return `차단 요인 · ${blocker}`
   return null
+}
+
+/** One-line "what is this keeper doing" preview, shared by every keeper roster
+ *  and summary surface so they agree on precedence.
+ *
+ *  Precedence: a real message output (recent_output/input_preview) first, then
+ *  the most recent proactive turn's preview, then the goal / current-task
+ *  fallbacks. The proactive preview matters because a proactive-only keeper
+ *  never broadcasts — `recent_output_preview` is message-bus derived and stays
+ *  empty for it — so its work surfaces solely through `last_proactive_preview`.
+ *  Reading only the message fields left every proactive keeper rendering the
+ *  bare "최근 작업 요약 없음" placeholder while the live signal sat unread on the
+ *  same card (last_proactive_preview populated 13/15 in the fleet, all five
+ *  message/goal fields 0/15). Returns null when no signal exists. */
+export function keeperWorkPreview(keeper: Keeper | null | undefined): string | null {
+  if (!keeper) return null
+  return firstNonEmptyString(
+    keeper.recent_output_preview,
+    keeper.recent_input_preview,
+    keeper.last_proactive_preview,
+    keeper.short_goal,
+    keeper.goal,
+    keeper.agent?.current_task,
+  )
 }

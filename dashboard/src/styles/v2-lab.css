@@ -1,0 +1,90 @@
+/* MASC Dashboard v2 — Lab surface (Tools + Safety Harness).
+ *
+ * Scoped to .v2-lab-* so unmigrated surfaces keep their legacy styling.
+ *
+ * Colors come from v2-theme.css; this file handles surface-specific
+ * layout, hairlines, hover states, and brass accent touches.
+ */
+
+.v2-lab-surface,
+.v2-lab-panel,
+.v2-lab-card,
+.v2-lab-row,
+.v2-lab-action,
+.v2-lab-table,
+.v2-lab-detail {
+  --v2-lab-top-glow: rgb(var(--brass-glow) / 0.04);
+}
+
+/* ── Panels / cards ───────────────────────────────────────────────────────── */
+
+.v2-lab-panel,
+.v2-lab-card,
+.v2-lab-surface [data-surface-card] {
+  box-shadow: inset 0 1px 0 var(--v2-lab-top-glow);
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-lab-panel:hover,
+.v2-lab-card:hover,
+.v2-lab-surface [data-surface-card]:hover {
+  border-color: var(--color-border-strong);
+}
+
+/* ── Rows (lists, tables) ─────────────────────────────────────────────────── */
+
+.v2-lab-row,
+.v2-lab-table tbody tr,
+.v2-lab-panel table tbody tr,
+.v2-lab-detail table tbody tr {
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-lab-row:hover,
+.v2-lab-table tbody tr:hover,
+.v2-lab-panel table tbody tr:hover,
+.v2-lab-detail table tbody tr:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+
+/* ── Action buttons ───────────────────────────────────────────────────────── */
+
+.v2-lab-action:not(:disabled),
+.v2-lab-panel .v2-lab-action:not(:disabled),
+.v2-lab-surface [data-action-button]:not(:disabled) {
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.v2-lab-action:not(:disabled):hover,
+.v2-lab-surface [data-action-button]:not(:disabled):hover {
+  border-color: var(--color-accent-fg);
+  background: var(--color-brass-soft);
+}
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+
+.v2-lab-table,
+.v2-lab-panel table,
+.v2-lab-detail table {
+  border-color: var(--color-border-default);
+}
+
+.v2-lab-table thead,
+.v2-lab-panel table thead,
+.v2-lab-detail table thead {
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.v2-lab-table th,
+.v2-lab-panel table th,
+.v2-lab-detail table th {
+  color: var(--color-fg-muted);
+}
+
+.v2-lab-table td,
+.v2-lab-panel table td,
+.v2-lab-detail table td {
+  color: var(--color-fg-secondary);
+  border-bottom: 1px solid var(--color-border-default);
+}

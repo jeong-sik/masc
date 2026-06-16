@@ -126,10 +126,20 @@ let json_bool key json default =
 let json_float_opt key json =
   Safe_ops.json_float_opt key json
 
-let agent_status_text agent_status =
-  json_string_opt "status" agent_status
-  |> Option.value ~default:"unknown"
-  |> String.lowercase_ascii
+(* RFC-0089 (String Classifier to Typed Variant). The agent-status snapshot
+   blob's "status" field is produced exclusively by [parse_agent_status], which
+   serializes a typed [Masc_domain.agent_status] (active | busy | listening |
+   inactive). Parse it back into the closed ADT here so the liveness/surface
+   consumers below match the four constructors exhaustively instead of comparing
+   string literals — the compiler then rejects any arm naming a value outside
+   the domain. The previous string-literal matches carried dead "idle"/"offline"
+   arms (keeper_health vocabulary this producer never emits); those vanish under
+   the typed match. Unknown / absent / garbage "status" parses to [None],
+   preserving the old "unknown"-default semantics (neither live nor inactive). *)
+let agent_runtime_status_opt agent_status : Masc_domain.agent_status option =
+  match json_string_opt "status" agent_status with
+  | Some s -> Masc_domain.agent_status_of_string_opt (String.lowercase_ascii s)
+  | None -> None
 
 let agent_last_seen_ts_opt agent_status =
   match json_string_opt "last_seen" agent_status with
@@ -140,16 +150,16 @@ let agent_last_seen_ago_s agent_status =
   json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
 
 let agent_runtime_has_live_signal agent_status =
-  match agent_status_text agent_status with
-  | "active" | "busy" | "listening" | "idle" ->
+  match agent_runtime_status_opt agent_status with
+  | Some (Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening) ->
       agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
-  | _ -> false
+  | Some Masc_domain.Inactive | None -> false
 
 let agent_runtime_has_live_work agent_status =
-  match agent_status_text agent_status with
-  | "active" | "busy" | "listening" ->
+  match agent_runtime_status_opt agent_status with
+  | Some (Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening) ->
       agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
-  | _ -> false
+  | Some Masc_domain.Inactive | None -> false
 
 let string_contains_ci = String_util.contains_substring_ci
 
@@ -344,11 +354,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   | Fiber_dead -> KH_dead
   | Fiber_alive | Fiber_unknown ->
   let agent_exists = json_bool "exists" agent_status false in
-  let agent_status_text =
-    json_string_opt "status" agent_status
-    |> Option.value ~default:"unknown"
-    |> String.lowercase_ascii
-  in
+  let agent_runtime_status = agent_runtime_status_opt agent_status in
   let last_seen_ago_s =
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
@@ -366,7 +372,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
   in
   if
     (not keepalive_running)
-    && (not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive")
+    && (not agent_exists || agent_runtime_status = Some Masc_domain.Inactive)
   then KH_offline
   (* H-4 fix: true zombies are stale regardless of keepalive state *)
   else if is_zombie then KH_stale
@@ -501,6 +507,40 @@ let augment_keeper_diagnostic_json
         :: filtered)
   | other -> other
 
+(* RFC-0089 — the keeper "surface status" is the display status that
+   [keeper_surface_status] derives from (keeper_health × agent_status). It is
+   carried on the wire as a string and re-classified by literal in the operator
+   align step, the server row patcher, and the dashboard pressure ranker. Close
+   it into a sum so the producer builds it exhaustively and those consumers
+   match it via [surface_status_of_string_opt] instead of comparing literals.
+   "paused" is NOT part of this domain — it is a control-plane override
+   (meta.paused) applied one layer above, at operator_control_snapshot. *)
+type surface_status =
+  | Surface_active
+  | Surface_busy
+  | Surface_listening
+  | Surface_inactive
+  | Surface_offline
+  | Surface_idle
+
+let surface_status_to_string = function
+  | Surface_active -> "active"
+  | Surface_busy -> "busy"
+  | Surface_listening -> "listening"
+  | Surface_inactive -> "inactive"
+  | Surface_offline -> "offline"
+  | Surface_idle -> "idle"
+
+let surface_status_of_string_opt s =
+  match String.lowercase_ascii (String.trim s) with
+  | "active" -> Some Surface_active
+  | "busy" -> Some Surface_busy
+  | "listening" -> Some Surface_listening
+  | "inactive" -> Some Surface_inactive
+  | "offline" -> Some Surface_offline
+  | "idle" -> Some Surface_idle
+  | _ -> None
+
 let keeper_surface_status
     ~(agent_status : Yojson.Safe.t)
     ~(diagnostic : Yojson.Safe.t) =
@@ -509,18 +549,21 @@ let keeper_surface_status
     |> Option.value ~default:"offline"
     |> keeper_health_or_offline ~source:"keeper_surface_status"
   in
-  let agent_runtime_status =
-    json_string_opt "status" agent_status |> Option.map String.lowercase_ascii
+  let agent_runtime_status = agent_runtime_status_opt agent_status in
+  let surface =
+    match health_state with
+    | KH_healthy -> (
+        match agent_runtime_status with
+        | Some Masc_domain.Active -> Surface_active
+        | Some Masc_domain.Busy -> Surface_busy
+        | Some Masc_domain.Listening -> Surface_listening
+        | Some Masc_domain.Inactive -> Surface_offline
+        | None -> Surface_active)
+    | KH_idle -> Surface_idle
+    | KH_stale | KH_degraded | KH_zombie | KH_dead -> Surface_inactive
+    | KH_offline -> Surface_offline
   in
-  match health_state with
-  | KH_healthy -> (
-      match agent_runtime_status with
-      | Some (("active" | "busy" | "listening" | "idle") as status) -> status
-      | Some ("offline" | "inactive") -> "offline"
-      | _ -> "active")
-  | KH_idle -> "idle"
-  | KH_stale | KH_degraded | KH_zombie | KH_dead -> "inactive"
-  | KH_offline -> "offline"
+  surface_status_to_string surface
 
 let keeper_diagnostic_json
     ~(meta : keeper_meta)

@@ -30,6 +30,46 @@ let cleanup_dir dir =
   in
   rm dir
 
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then ()
+  else if Sys.file_exists dir then ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+
+let with_config_dir dir f =
+  let config_dir = Filename.concat (Filename.concat dir ".masc") "config" in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      f ~config_dir ~keepers_dir)
+
+let write_keeper_toml ~keepers_dir ~name =
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "local"
+goal = "Dashboard keeper fixture"
+|}
+
 let save_jsonl path entries =
   let body =
     entries
@@ -255,11 +295,13 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
+      write_keeper_toml ~keepers_dir ~name:"sangsu";
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
         (Lib.Workspace.bind_session config
@@ -297,16 +339,18 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
+      write_keeper_toml ~keepers_dir ~name:"sangsu";
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
         (Lib.Workspace.bind_session config
-           ~agent_name:"agent_code-test-agent"
-           ~agent_type_override:(Some "agent_code")
+           ~agent_name:"codex-test-agent"
+           ~agent_type_override:(Some "codex")
            ~capabilities:["typescript"]
            ());
       ignore
@@ -375,7 +419,7 @@ let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       ignore (Lib.Workspace.init config ~agent_name:None);
       let masc_dir = Lib.Workspace.masc_dir config in
       save_jsonl
@@ -440,7 +484,7 @@ let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       ignore (Lib.Workspace.init config ~agent_name:None);
       let masc_dir = Lib.Workspace.masc_dir config in
       save_jsonl
@@ -519,7 +563,7 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Lib.Mcp_server.workspace_config in
+      let config = Lib.Mcp_server.workspace_config state in
       warm_execution_cache ();
       let cached_shell =
         `Assoc
@@ -612,7 +656,7 @@ let test_last_good_shell_fallback_preserves_counts () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      ignore (Lib.Workspace.init state.Lib.Mcp_server.workspace_config ~agent_name:None);
+      ignore (Lib.Workspace.init (Lib.Mcp_server.workspace_config state) ~agent_name:None);
       warm_execution_cache ();
       (* Warm the shell cache so last_good_shell gets populated. *)
       Server_dashboard_http.warm_shell_cache state;

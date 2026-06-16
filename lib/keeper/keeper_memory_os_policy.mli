@@ -1,28 +1,49 @@
-(** Keeper_memory_os_policy — deterministic importance scoring and
-    retention decisions for the Memory OS. *)
+(** Keeper_memory_os_policy — deterministic importance scoring for the
+    Memory OS. *)
 
 open Keeper_memory_os_types
 
-(** Explicit retention verdict. The librarian extracts facts; this
-    policy decides how each fact should be materialised in working
-    memory. *)
-type retention_verdict =
-  | KeepVerbatim
-  | Summarize
-  | ReferenceOnly
-  | Discard
-
 val default_lambda : float
 val default_alpha : float
-val keep_verbatim_score_threshold : float
-val summarize_score_threshold : float
+val default_truth_lambda : float
+val default_max_access_factor : float
+val default_discard_score_threshold : float
+
+type retention_verdict =
+  | KeepVerbatim
+  | Discard
 
 (** Composite importance score for a fact.
 
-    Score = confidence × recency × access_boost
-    where recency follows an exponential forgetting curve and
-    access_boost is [(1 + access_count) ** alpha]. *)
-val score_fact : ?lambda:float -> ?alpha:float -> now:float -> fact -> float
+    Score = confidence × access_recency × truth_recency ×
+    stale_penalty × access_boost × lexical_relevance.  [access_recency] uses
+    [last_accessed], while [truth_recency] uses [last_verified_at] or
+    [first_seen] so recall cannot make an unverified claim fresh again.
+
+    [seed_tokens] (RFC-0244) is the current turn's token set; when omitted (or
+    empty) [lexical_relevance] is [1.0] and the score is byte-identical to the
+    pre-RFC-0244 formula. *)
+val score_fact
+  :  ?lambda:float
+  -> ?alpha:float
+  -> ?seed_tokens:string list
+  -> now:float
+  -> fact
+  -> float
+
+(** RFC-0244: deduped set of lowercased word tokens (length > 2). The shared SSOT
+    tokenizer for turn-seeded recall and the keyword access bump. *)
+val tokenize : string -> string list
+
+(** RFC-0244: deterministic lexical relevance multiplier in [[1.0, 1.0 +. gain]].
+    [seed_tokens = []] yields [1.0] (multiplicative identity). With a seed, a fact
+    is boosted by the fraction of the turn's distinct tokens its claim covers
+    (token-set intersection). Pure function of [(seed_tokens, fact.claim)] — offline,
+    no embedding. *)
+val lexical_relevance : ?gain:float -> seed_tokens:string list -> fact -> float
+
+val truth_recency_factor : ?lambda:float -> now:float -> fact -> float
+val decide_retention : ?discard_threshold:float -> float -> retention_verdict
 
 (** Score an archived tool result. *)
 val score_tool_result
@@ -35,11 +56,6 @@ val score_tool_result
   -> unit
   -> float
 
-(** Map a score to a retention verdict using fixed thresholds. *)
-val decide_retention : float -> retention_verdict
-
-val verdict_to_string : retention_verdict -> string
-
 (** Lightweight keyword access bump.
 
     Increments [access_count] and updates [last_accessed] for facts
@@ -51,3 +67,18 @@ val bump_access_for_turn
   -> fact list
   -> turn_text:string
   -> fact list
+
+(** RFC-0243: bounded EMA weight for a single re-observation (see [blend_confidence]). *)
+val reaffirm_weight : float
+
+(** Blend a prior confidence with a re-observed confidence (bounded EMA). The
+    result is a convex combination of the two, so it stays in [0, 1] and moves a
+    fixed fraction toward [observed]. *)
+val blend_confidence : prior:float -> observed:float -> float
+
+(** Fold a re-observation into an existing fact: blends confidence toward the
+    re-observed value, increments [access_count], and refreshes [last_accessed]
+    and [last_verified_at]. Identity and first-seen provenance are preserved.
+    This is the write-time merge law that makes the score's re-observation
+    signals live (RFC-0243). *)
+val reobserve_fact : now:float -> existing:fact -> incoming:fact -> fact

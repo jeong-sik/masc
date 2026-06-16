@@ -28,16 +28,26 @@ val workflow_rejection_payload_json :
   ?tool_suggestion:string ->
   ?hint:string ->
   ?scope_policy:string ->
+  ?recoverable:bool ->
   ?alternatives:string list ->
   ?extra_fields:(string * Yojson.Safe.t) list ->
   string ->
   string
 
 val build_claim_observation_payload :
-  now:float -> agent_name:string -> task_id:string -> Yojson.Safe.t
+  now:float ->
+  agent_name:string ->
+  task_id:string ->
+  scope_widened:bool ->
+  Yojson.Safe.t
 
 val append_claim_observation :
-  string -> now:float -> agent_name:string -> task_id:string -> string
+  string ->
+  now:float ->
+  agent_name:string ->
+  task_id:string ->
+  scope_widened:bool ->
+  string
 
 val verdict_to_string : Anti_rationalization.review_result -> string
 

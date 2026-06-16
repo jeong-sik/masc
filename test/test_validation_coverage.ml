@@ -17,13 +17,13 @@ module Validation = Validation
    ============================================================ *)
 
 let test_agent_id_valid_simple () =
-  match Validation.Agent_id.validate "agent_llm_a" with
-  | Ok t -> check string "to_string" "agent_llm_a" (Validation.Agent_id.to_string t)
+  match Validation.Agent_id.validate "claude" with
+  | Ok t -> check string "to_string" "claude" (Validation.Agent_id.to_string t)
   | Error e -> fail e
 
 let test_agent_id_valid_with_dash () =
-  match Validation.Agent_id.validate "agent_llm_a-opus" with
-  | Ok t -> check string "to_string" "agent_llm_a-opus" (Validation.Agent_id.to_string t)
+  match Validation.Agent_id.validate "claude-opus" with
+  | Ok t -> check string "to_string" "claude-opus" (Validation.Agent_id.to_string t)
   | Error e -> fail e
 
 let test_agent_id_valid_with_underscore () =

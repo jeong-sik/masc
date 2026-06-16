@@ -179,7 +179,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
             | Some sw, Some clock ->
                 Ok
                   {
-                    base_path = state.Mcp_server.workspace_config.base_path;
+                    base_path = (Mcp_server.workspace_config state).base_path;
                     sw;
                     clock;
                     handle_request =
@@ -203,7 +203,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
     get_base_path =
       (fun () ->
         match current_server_state_opt () with
-        | Some state -> state.Mcp_server.workspace_config.base_path
+        | Some state -> (Mcp_server.workspace_config state).base_path
         | None -> Server_mcp_transport_http.default_base_path ());
     verify_mcp_auth =
       (fun ~base_path request ->

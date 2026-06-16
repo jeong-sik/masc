@@ -140,6 +140,32 @@ describe('Governance surface', () => {
     expect(container.textContent).not.toContain('심의 의견 제출')
   }, 20000)
 
+  it('wraps the governance view in the v2 command surface class', async () => {
+    const response: DashboardGovernanceResponse = {
+      generated_at: '2026-03-26T00:00:00Z',
+      summary: { judge_online: false },
+      items: [],
+      activity: [],
+      judgments: [],
+      pending_actions: [],
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(response),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('.v2-command-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-command-panel')).not.toBeNull()
+  }, 20000)
+
   it('auto-refreshes the live judge surface while visible', async () => {
     const response: DashboardGovernanceResponse = {
       generated_at: '2026-04-21T00:00:00Z',
@@ -148,7 +174,7 @@ describe('Governance surface', () => {
       activity: [],
       judgments: [],
       pending_actions: [],
-      judge: { judge_online: true, model_used: 'provider-f', keeper_name: 'governance-judge' },
+      judge: { judge_online: true, model_used: 'gemini', keeper_name: 'governance-judge' },
     }
     const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
     const fetchDashboardGovernance = vi.fn<() => Promise<DashboardGovernanceResponse>>()
@@ -203,8 +229,8 @@ describe('Governance surface', () => {
         {
           judgment_id: 'j-1',
           target_kind: 'agent_health',
-          target_id: 'dreamer',
-          summary: 'Agent dreamer has been zombie for 30 minutes.',
+          target_id: 'alice',
+          summary: 'Agent alice has been zombie for 30 minutes.',
           confidence: 0.85,
           generated_at: '2026-03-30T00:00:00Z',
           recommended_action: { action_kind: 'recover', resolved_tool: 'masc_operator_confirm', reason: 'zombie agent detected' },
@@ -228,7 +254,7 @@ describe('Governance surface', () => {
 
     expect(container.textContent).toContain('AI Judge')
     expect(container.textContent).toContain('agent_health')
-    expect(container.textContent).toContain('dreamer')
+    expect(container.textContent).toContain('alice')
     expect(container.textContent).toContain('85%')
     expect(container.textContent).toContain('recover')
     expect(container.textContent).toContain('masc_operator_confirm')
@@ -268,6 +294,7 @@ describe('Governance surface', () => {
     expect(judgeStatus).toBeTruthy()
     expect(judgeStatus?.textContent).toContain('Error')
     expect(judgeStatus?.textContent).toContain('runtime failed')
+    expect(judgeStatus?.classList.contains('v2-command-panel')).toBe(true)
   }, 20000)
 
   it('renders stale-visible judge status without collapsing to offline error', async () => {
@@ -284,7 +311,7 @@ describe('Governance surface', () => {
         cached_judgments_visible: true,
         last_error: 'Execution timed out after 60.0s',
         keeper_name: 'governance-judge',
-        model_used: 'provider-k:test',
+        model_used: 'glm:test',
         generated_at: '2026-04-23T00:00:00Z',
       },
       judgments: [],

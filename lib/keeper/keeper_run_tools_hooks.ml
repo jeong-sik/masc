@@ -48,6 +48,11 @@ type ctx =
   ; tools : Agent_sdk.Tool.t list
   }
 
+let relax_strict_tool_choice_for_keeper = function
+  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) ->
+    Some Agent_sdk.Types.Auto
+  | other -> other
+
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
@@ -63,9 +68,6 @@ let assemble_hooks
       ~(turn_affordances : string list)
       ~(config_root : string)
       ~(runtime_config_path : string option)
-      ~(gemini_mcp_disabled : bool)
-      ~(approval_mode_effective : string option)
-      ~(approval_mode_derived : bool)
       ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
@@ -100,9 +102,6 @@ let assemble_hooks
   <- { turn_lane = initial_turn_lane
      ; config_root
      ; runtime_config_path
-     ; gemini_mcp_disabled
-     ; approval_mode_effective
-     ; approval_mode_derived
      };
   Keeper_run_tools_hook_accumulator.record_requested_tool_names
       acc
@@ -342,10 +341,24 @@ let assemble_hooks
                      persisted facts/episodes (read side; the write side is
                      the librarian wired in #20897). Opt-in via
                      MASC_KEEPER_MEMORY_OS_RECALL. *)
+                  let recall_seed =
+                    (* RFC-0244: the current turn's user text seeds lexical
+                       reranking. Mirrors the [last_user_text] fold in
+                       [compute_tool_surface]; "" (no user turn) tokenizes to the
+                       empty set, so recall falls back to the seedless ranking. *)
+                    List.fold_left
+                      (fun acc (m : Agent_sdk.Types.message) ->
+                         match m.role with
+                         | Agent_sdk.Types.User -> Agent_sdk.Types.text_of_content m.content
+                         | _ -> acc)
+                      ""
+                      messages
+                  in
                   match
                     Keeper_memory_os_recall.render_if_enabled
                       ~keeper_id:meta.name
                       ~now:(Time_compat.now ())
+                      ~seed:recall_seed
                       ()
                   with
                   | None -> ctx
@@ -356,12 +369,12 @@ let assemble_hooks
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter
                 in
-                let clear_inherited_strict_tool_choice = function
-                  | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> None
-                  | other -> other
-                in
+                (* OAS treats [None] in AdjustParams as "keep the base
+                   config", so strict choices must be explicitly relaxed.
+                   Tools remain available, but the model may finish without
+                   another forced tool call. *)
                 let tool_choice =
-                  clear_inherited_strict_tool_choice current_params.tool_choice
+                  relax_strict_tool_choice_for_keeper current_params.tool_choice
                 in
                 let lane = computed_turn_lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names
@@ -371,9 +384,6 @@ let assemble_hooks
                 <- { turn_lane = lane
                    ; config_root
                    ; runtime_config_path
-                   ; gemini_mcp_disabled
-                   ; approval_mode_effective
-                   ; approval_mode_derived
                    };
                 let thinking_enabled_effective =
                   match current_params.enable_thinking with
@@ -408,7 +418,6 @@ let assemble_hooks
                     (Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
                   ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
                   ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
-                  ?approval_mode:approval_mode_effective
                   ~runtime_profile:runtime_id_string
                   ();
                 (ignore hook_t0;

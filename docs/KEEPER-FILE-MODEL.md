@@ -153,7 +153,6 @@ These are still accepted by the loader, but for consistency they should be used 
 | `policy_voice_enabled` | bool | Override persona voice policy |
 | `proactive_enabled` | bool | Override default proactive scheduling |
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
-| `workspace_signal_prompt_enabled` | bool | Override workspace-signal prompt behavior |
 | `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on the single sandbox root |
 | `tool_access` | string array | Explicit tool candidate profile names |
 | `tool_denylist` | string array | Tool names blocked after candidate profile resolution |

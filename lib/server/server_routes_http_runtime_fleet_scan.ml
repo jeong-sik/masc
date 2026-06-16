@@ -194,7 +194,7 @@ let paused_keepers_health_json () =
   let running_names = running_paused_keeper_names () in
   let durable_scan =
     match current_server_state_opt () with
-    | Some state -> durable_paused_keeper_scan state.Mcp_server.workspace_config
+    | Some state -> durable_paused_keeper_scan (Mcp_server.workspace_config state)
     | None -> empty_paused_keeper_scan
   in
   paused_keepers_health_json_of_scan ~running_names durable_scan
@@ -236,6 +236,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
     sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
   in
   let is_configured name = List.exists (String.equal name) configured_names in
+  let should_count_autoboot_target name = is_configured name in
   let scan =
     all_names
     |> List.fold_left
@@ -257,7 +258,11 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
            match Keeper_meta_store.read_meta config name with
            | Ok (Some meta) ->
              let autoboot_enabled = effective_autoboot_enabled name meta in
-             let acc = if autoboot_enabled then add_autoboot acc meta.name else acc in
+             let acc =
+               if autoboot_enabled && should_count_autoboot_target meta.name
+               then add_autoboot acc meta.name
+               else acc
+             in
              let acc =
                if (not meta.paused) && autoboot_enabled
                then add_bootable acc meta.name
@@ -289,14 +294,26 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
                }
              else acc
            | Ok None ->
-             if Keeper_meta_store.declarative_autoboot_enabled_by_default name
+             if
+               should_count_autoboot_target name
+               && Keeper_meta_store.declarative_autoboot_enabled_by_default name
              then add_autoboot acc name |> fun acc -> add_bootable acc name
              else acc
            | Error err ->
              (* Preserve the existing conservative behavior: unreadable meta is
-                still counted as autoboot/bootable so the operator sees a
-                degraded fleet instead of a silently shrinking target. *)
-             let acc = add_autoboot acc name |> fun acc -> add_bootable acc name in
+                still counted as autoboot/bootable for configured keepers so
+                the operator sees a degraded fleet instead of a silently
+                shrinking target. *)
+             let acc =
+               if should_count_autoboot_target name
+               then add_autoboot acc name |> fun acc -> add_bootable acc name
+               else acc
+             in
+             let autoboot_read_errors =
+               if should_count_autoboot_target name
+               then (name, err) :: acc.autoboot_scan.read_errors
+               else acc.autoboot_scan.read_errors
+             in
              {
                acc with
                paused_scan =
@@ -307,7 +324,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
                autoboot_scan =
                  {
                    acc.autoboot_scan with
-                   read_errors = (name, err) :: acc.autoboot_scan.read_errors;
+                   read_errors = autoboot_read_errors;
                  };
              })
          {
@@ -340,7 +357,8 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
   }
 
 let autoboot_enabled_keeper_scan config =
-  sorted_unique_strings (Keeper_meta_store.configured_keeper_names config @ Keeper_meta_store.keeper_names config)
+  Keeper_meta_store.configured_keeper_names config
+  |> sorted_unique_strings
   |> List.fold_left
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with
@@ -377,40 +395,63 @@ let empty_keeper_phase_counts =
 type keeper_phase_snapshot =
   { counts : keeper_phase_counts
   ; running_names : string list
+  ; recovering_names : string list
+  ; executable_names : string list
+  ; phase_names : (string * string) list
   }
 
 let keeper_phase_snapshot ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.fold_left
        (fun acc (entry : Keeper_registry.registry_entry) ->
+          let acc =
+            {
+              acc with
+              phase_names =
+                (entry.name, Keeper_state_machine.phase_to_string entry.phase)
+                :: acc.phase_names;
+            }
+          in
           let counts = acc.counts in
-          let executable =
-            if Keeper_state_machine.can_execute_turn entry.phase then
-              counts.executable + 1
-            else counts.executable
+          let can_execute = Keeper_state_machine.can_execute_turn entry.phase in
+          let executable = if can_execute then counts.executable + 1 else counts.executable in
+          let executable_names =
+            if can_execute then entry.name :: acc.executable_names
+            else acc.executable_names
           in
           (* Keepers in Failing phase with restart budget remaining are
              expected to recover on the next heartbeat cycle — count them
              separately so fleet safety does not report a spurious shortfall
              during transient failures (issue #17218). *)
-          let recovering =
+          let is_recovering =
             match entry.phase with
             | Keeper_state_machine.Failing
-              when entry.conditions.restart_budget_remaining ->
-              counts.recovering + 1
-            | _ -> counts.recovering
+              when entry.conditions.restart_budget_remaining -> true
+            | _ -> false
+          in
+          let recovering =
+            if is_recovering then counts.recovering + 1 else counts.recovering
+          in
+          let recovering_names =
+            if is_recovering then entry.name :: acc.recovering_names
+            else acc.recovering_names
           in
           match entry.phase with
           | Keeper_state_machine.Running ->
             {
               counts = { counts with running = counts.running + 1; executable };
               running_names = entry.name :: acc.running_names;
+              recovering_names;
+              executable_names;
+              phase_names = acc.phase_names;
             }
           | Keeper_state_machine.Failing ->
             {
               acc with
               counts =
                 { counts with failing = counts.failing + 1; recovering; executable };
+              recovering_names;
+              executable_names;
             }
           | Keeper_state_machine.Offline
           | Keeper_state_machine.Overflowed
@@ -423,16 +464,151 @@ let keeper_phase_snapshot ?base_path () =
           | Keeper_state_machine.Restarting
           | Keeper_state_machine.Dead
           | Keeper_state_machine.Zombie ->
-            { acc with counts = { counts with executable } })
-       { counts = empty_keeper_phase_counts; running_names = [] }
+            { acc with counts = { counts with executable }; executable_names })
+       {
+         counts = empty_keeper_phase_counts;
+         running_names = [];
+         recovering_names = [];
+         executable_names = [];
+         phase_names = [];
+       }
   |> fun snapshot ->
-  { snapshot with running_names = sorted_unique_strings snapshot.running_names }
+  {
+    snapshot with
+    running_names = sorted_unique_strings snapshot.running_names;
+    recovering_names = sorted_unique_strings snapshot.recovering_names;
+    executable_names = sorted_unique_strings snapshot.executable_names;
+    phase_names =
+      List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_names;
+  }
 
 let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
+
+let string_set_of_list values =
+  List.fold_left (fun acc value -> String_set.add value acc) String_set.empty values
+
+let json_string_list_field field = function
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`List values) ->
+          values
+          |> List.filter_map (function
+               | `String value -> Some value
+               | _ -> None)
+          |> sorted_unique_strings
+      | _ -> [])
+  | _ -> []
+
+type blocked_keeper_reason =
+  | Durable_paused_autoboot_enabled
+  | Meta_read_error
+  | Not_bootable
+  | Boot_failure of Keeper_runtime.boot_meta_failure_cause
+  | Phase of string
+  | Not_registered
+  | Not_running
+  | Unknown
+
+let blocked_keeper_reason_label = function
+  | Durable_paused_autoboot_enabled -> "durable_paused_autoboot_enabled"
+  | Meta_read_error -> "meta_read_error"
+  | Not_bootable -> "not_bootable"
+  | Boot_failure cause -> Keeper_runtime.boot_meta_failure_cause_label cause
+  | Phase phase -> "phase_" ^ phase
+  | Not_registered -> "not_registered"
+  | Not_running -> "not_running"
+  | Unknown -> "unknown"
+
+let blocked_keeper_action = function
+  | Durable_paused_autoboot_enabled -> "resume_or_leave_paused"
+  | Meta_read_error -> "repair_keeper_meta_file"
+  | Not_bootable -> "add_keeper_toml_or_disable_stale_autoboot_meta"
+  | Boot_failure Keeper_runtime.Missing_meta -> "run_keeper_up_or_recreate_meta"
+  | Boot_failure Keeper_runtime.Meta_read_error -> "repair_keeper_meta_file"
+  | Boot_failure Keeper_runtime.Config_parse_failed
+  | Boot_failure Keeper_runtime.Invalid_profile ->
+      "repair_keeper_toml_config"
+  | Boot_failure Keeper_runtime.Sandbox_profile_required ->
+      "add_sandbox_profile_to_keeper_toml"
+  | Boot_failure Keeper_runtime.Goal_required ->
+      "add_goal_or_goal_horizon_to_keeper_toml"
+  | Boot_failure Keeper_runtime.Materialization_failed ->
+      "inspect_keeper_autoboot_logs"
+  | Phase _
+  | Not_registered ->
+      "start_or_recover_keeper"
+  | Not_running -> "start_or_recover_keeper"
+  | Unknown -> "inspect_keeper_autoboot_logs"
+
+let blocked_keeper_detail_json
+    ?base_path
+    ?phase
+    ~bootable_set
+    ~capacity_set
+    ~paused_set
+    ~read_error_set
+    name =
+  let is_paused = String_set.mem name paused_set in
+  let is_bootable = String_set.mem name bootable_set in
+  let is_capacity = String_set.mem name capacity_set in
+  let has_read_error = String_set.mem name read_error_set in
+  let last_failure =
+    match base_path with
+    | None -> None
+    | Some base_path -> Keeper_runtime.boot_meta_failure_for ~base_path ~name
+  in
+  let reason =
+    if is_paused then Durable_paused_autoboot_enabled
+    else if has_read_error then Meta_read_error
+    else
+      match last_failure with
+      | Some failure -> Boot_failure failure.Keeper_runtime.cause
+      | None ->
+          if not is_bootable then Not_bootable
+          else if not is_capacity then
+            (match phase with
+             | Some phase -> Phase phase
+             | None -> Not_registered)
+          else Unknown
+  in
+  let last_failure_fields =
+    match last_failure with
+    | None ->
+        [
+          ("last_bootstrap_reason", `Null);
+          ("last_bootstrap_error", `Null);
+          ("last_bootstrap_recorded_at", `Null);
+        ]
+    | Some failure ->
+        [
+          ( "last_bootstrap_reason"
+          , `String
+              (Keeper_runtime.boot_meta_failure_cause_label
+                 failure.Keeper_runtime.cause) );
+          ("last_bootstrap_error", `String failure.Keeper_runtime.error);
+          ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
+        ]
+  in
+  `Assoc
+    ([
+       ("keeper", `String name);
+       ("name", `String name);
+       ("reason", `String (blocked_keeper_reason_label reason));
+       ("action", `String (blocked_keeper_action reason));
+       ("phase", Json_util.string_opt_to_json phase);
+       ("bootable", `Bool is_bootable);
+       ("reaction_capacity", `Bool is_capacity);
+       ("paused", `Bool is_paused);
+       ("meta_read_error", `Bool has_read_error);
+     ]
+     @ last_failure_fields)
 
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
     ?autoboot_scan:autoboot_scan_override
+    ?phase_snapshot
+    ?base_path
+    ?reaction_capacity_names
     ~phase_counts
     ~paused_keepers_json
     () =
@@ -443,8 +619,8 @@ let keeper_fleet_safety_health_json
       match current_server_state_opt () with
       | Some state ->
         (try
-           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.workspace_config
-           , autoboot_enabled_keeper_scan state.Mcp_server.workspace_config )
+           ( Keeper_runtime.bootable_keeper_names (Mcp_server.workspace_config state)
+           , autoboot_enabled_keeper_scan (Mcp_server.workspace_config state) )
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
@@ -456,6 +632,39 @@ let keeper_fleet_safety_health_json
   in
   let bootable_count = List.length bootable_names in
   let target_count = List.length autoboot_scan.autoboot_names in
+  let runtime_base_path =
+    match base_path with
+    | Some _ as value -> value
+    | None ->
+      current_server_state_opt ()
+      |> Option.map (fun state -> (Mcp_server.workspace_config state).base_path)
+  in
+  let fallback_running_names =
+    match reaction_capacity_names with
+    | Some names -> sorted_unique_strings names
+    | None -> running_keeper_names ?base_path:runtime_base_path ()
+  in
+  let running_names =
+    match phase_snapshot with
+    | Some snapshot -> snapshot.running_names
+    | None -> fallback_running_names
+  in
+  let recovering_names =
+    match phase_snapshot with
+    | Some snapshot -> snapshot.recovering_names
+    | None -> []
+  in
+  let executable_names =
+    match phase_snapshot with
+    | Some snapshot -> snapshot.executable_names
+    | None -> fallback_running_names
+  in
+  let phase_names =
+    match phase_snapshot with
+    | Some snapshot -> snapshot.phase_names
+    | None -> []
+  in
+  let phase_name name = List.assoc_opt name phase_names in
   let minimum_running_fibers =
     if target_count <= 1 then target_count else 2
   in
@@ -492,6 +701,12 @@ let keeper_fleet_safety_health_json
        | _ -> 0)
     | _ -> 0
   in
+  let names_not_in active_names =
+    let active_names = sorted_unique_strings active_names in
+    autoboot_scan.autoboot_names
+    |> List.filter (fun name -> not (List.mem name active_names))
+    |> sorted_unique_strings
+  in
   let status =
     if no_executable_keeper_fibers then "blocked"
     else if no_running_fibers then "degraded"
@@ -504,6 +719,41 @@ let keeper_fleet_safety_health_json
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
     then reaction_capacity_shortfall_count
     else 0
+  in
+  let blocked_keeper_names =
+    if no_executable_keeper_fibers then names_not_in executable_names
+    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
+    then names_not_in (running_names @ recovering_names)
+    else []
+  in
+  let active_capacity_names =
+    if no_executable_keeper_fibers then executable_names
+    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
+    then running_names @ recovering_names
+    else running_names
+  in
+  let bootable_set = string_set_of_list bootable_names in
+  let capacity_set = string_set_of_list active_capacity_names in
+  let paused_set =
+    paused_keepers_json
+    |> json_string_list_field "autoboot_enabled_names"
+    |> string_set_of_list
+  in
+  let read_error_set =
+    autoboot_scan.read_errors |> List.map fst |> string_set_of_list
+  in
+  let blocked_keeper_reasons =
+    blocked_keeper_names
+    |> List.map
+         (fun name ->
+           blocked_keeper_detail_json
+             ?base_path:runtime_base_path
+             ?phase:(phase_name name)
+             ~bootable_set
+             ~capacity_set
+             ~paused_set
+             ~read_error_set
+             name)
   in
   let blocker =
     if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
@@ -531,9 +781,14 @@ let keeper_fleet_safety_health_json
              autoboot_scan.read_errors) )
     ; "running_keeper_fiber_count", `Int phase_counts.running
     ; "healthy_running_keeper_fiber_count", `Int phase_counts.running
+    ; "running_keeper_names", `List (List.map (fun name -> `String name) running_names)
     ; "failing_keeper_fiber_count", `Int phase_counts.failing
     ; "recovering_keeper_fiber_count", `Int phase_counts.recovering
+    ; ( "recovering_keeper_names"
+      , `List (List.map (fun name -> `String name) recovering_names) )
     ; "executable_keeper_fiber_count", `Int phase_counts.executable
+    ; ( "executable_keeper_names"
+      , `List (List.map (fun name -> `String name) executable_names) )
     ; "effective_reaction_capacity_count", `Int phase_counts.running
     ; "executable_reaction_capacity_count", `Int phase_counts.executable
     ; "target_reaction_capacity_count", `Int target_count
@@ -551,6 +806,9 @@ let keeper_fleet_safety_health_json
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
     ; "blocked_count", `Int blocked_count
     ; "blocked_keepers", `Int blocked_count
+    ; ( "blocked_keeper_names"
+      , `List (List.map (fun name -> `String name) blocked_keeper_names) )
+    ; "blocked_keeper_reasons", `List blocked_keeper_reasons
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers

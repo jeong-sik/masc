@@ -307,7 +307,7 @@ let save_through_sidecar ~session_dir ~resume_merge ~next_items ~keeper_turn_id 
        ~oas_turn_count:1
        ~session_dir
        ~state_snapshot:(snapshot_with ~next_items ())
-       ~state_snapshot_source:"model_state_block"
+       ~state_snapshot_source:Masc.Keeper_memory_policy.State_block
        ~resume_merge
        ~append_manifest:noop_manifest
        ())

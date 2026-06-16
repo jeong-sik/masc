@@ -513,7 +513,6 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                     ~max_idle_turns:
                       (Keeper_runtime_resolved.reactive_max_idle_turns ())
                     ?oas_timeout_s:keeper_msg_oas_timeout_s
-                    ?provider_filter:(Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
                     ~generation:meta.runtime.generation
                     ?on_event
                     ~trajectory_acc
@@ -621,7 +620,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                    ~latency_ms
                    ~turn_cost:(turn_cost_for_result result)
                    ~turn_generation:lifecycle.turn_generation
-                   ~channel:"turn"
+                   ~channel:Keeper_world_observation.Reactive
                    ~snapshot_source:"keeper_turn_msg"
                    ~context_ratio:lifecycle.context_ratio
                    ~context_tokens:lifecycle.context_tokens
@@ -667,16 +666,13 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                     tool_names
                     |> List.exists (fun tool_name ->
                            let trimmed = String.trim tool_name in
-                           trimmed <> ""
-                           && not (String.equal trimmed "keeper_stay_silent"))
+                           trimmed <> "")
                   in
                   let tool_refs =
                     tool_names
                     |> List.filter_map (fun tool_name ->
                            let trimmed = String.trim tool_name in
-                           if trimmed = ""
-                              || String.equal trimmed "keeper_stay_silent"
-                           then None
+                           if trimmed = "" then None
                            else Some ("tool:" ^ trimmed))
                   in
                   let turn_refs =

@@ -127,7 +127,6 @@ const NOISY_TOOL_NAMES = new Set([
   'masc_messages',
   'masc_agents',
   'keeper_tasks_list',
-  'keeper_stay_silent',
   'extend_turns',
 ])
 
@@ -795,7 +794,7 @@ function TelemetryCachePanel({
   ].filter((part): part is string => Boolean(part))
   const cacheRows = telemetryCacheEntries.slice(0, 3)
   return html`
-    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" aria-label="Telemetry cache freshness">
+    <section class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" aria-label="Telemetry cache freshness">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Query cache</div>
@@ -863,7 +862,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
   const provenanceRows = telemetrySourceProvenanceRows(src)
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 min-w-35">
       <div class="flex items-center gap-2 mb-1">
         <span class="font-mono font-bold ${meta.color}">${meta.icon}</span>
         <span class="text-xs font-medium text-[var(--color-fg-primary)]">${meta.label}</span>
@@ -908,7 +907,7 @@ function EntryRow({ entry, routeFocused = false }: { entry: TelemetryEntry; rout
 
   return html`
     <div
-      class=${`border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors ${focusedClasses}`}
+      class=${`v2-monitoring-row border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors ${focusedClasses}`}
       data-route-focused-telemetry=${routeFocused ? 'true' : undefined}
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
@@ -988,7 +987,7 @@ function GroupRow({ item, routeFocused = false }: { item: Extract<TelemetryDispl
 
   return html`
     <div
-      class=${`border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors ${focusedClasses}`}
+      class=${`v2-monitoring-row border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors ${focusedClasses}`}
       data-route-focused-telemetry=${routeFocused ? 'true' : undefined}
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
@@ -1083,7 +1082,7 @@ function TelemetryRouteFocusPanel({
   const badges = telemetryRouteFocusBadges(focus)
   return html`
     <section
-      class="rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
       data-testid="telemetry-route-focus"
       aria-label="Telemetry route focus"
     >
@@ -1105,7 +1104,7 @@ function TelemetryRouteFocusPanel({
         </div>
         <button
           type="button"
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="v2-monitoring-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
           onClick=${clearTelemetryRouteFocus}
         >
           CLEAR
@@ -1313,8 +1312,8 @@ export function TelemetryUnified() {
   const condensed = useMemo(() => condensedStats(displayItems), [displayItems])
 
   return html`
-    <div class="flex flex-col gap-4">
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
+      <div class="v2-monitoring-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
         <div class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">런타임 진단</div>
         <div class="mt-2 flex flex-wrap gap-2">
           <span class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-disabled)]">MASC: keeper/tool/agent store</span>
@@ -1447,7 +1446,7 @@ export function TelemetryUnified() {
         </div>
       ` : null}
 
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] overflow-hidden">
+      <div class="v2-monitoring-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] overflow-hidden">
         <div class="px-3 py-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
           MASC telemetry store entries ${entries.length.toLocaleString()}건
           ${isFilteringEntries

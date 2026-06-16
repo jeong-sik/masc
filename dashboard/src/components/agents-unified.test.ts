@@ -156,4 +156,12 @@ describe('AgentsUnified', () => {
     expect(container.querySelector('[data-testid="fsm-hub"]')).not.toBeNull()
   })
 
+  it('marks the FSM hub panel with the v2 monitoring panel class', () => {
+    mockRoute.value = { tab: 'monitoring', params: { view: 'fsm' }, postId: null }
+    render(h(AgentsUnified, null), container)
+    const panel = container.querySelector('.v2-monitoring-panel')
+    expect(panel).not.toBeNull()
+    expect(panel!.contains(container.querySelector('[data-testid="fleet-fsm-matrix"]'))).toBe(true)
+  })
+
 })

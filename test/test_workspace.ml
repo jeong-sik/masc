@@ -129,18 +129,18 @@ let test_add_and_claim_task () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = workspace_config tmp_dir in
-  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
 
   (* Add task *)
   let add_result = Workspace.add_task config ~title:"Test Task" ~priority:1 ~description:"Test" in
   Alcotest.(check bool) "add success" true (contains_check add_result);
 
   (* Claim task *)
-  let claim_result = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
+  let claim_result = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
   Alcotest.(check bool) "claim success" true (contains_check claim_result);
 
   (* Try to claim again - should fail *)
-  let claim2_result = Workspace.claim_task config ~agent_name:"provider_f" ~task_id:"task-001" in
+  let claim2_result = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
   Alcotest.(check bool) "double claim blocked" true (contains_warning claim2_result);
 
   (* Cleanup *)
@@ -182,10 +182,10 @@ let test_broadcast_message () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = workspace_config tmp_dir in
-  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
 
   (* Broadcast *)
-  let result = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:"Hello @provider_f!" in
+  let result = Workspace.broadcast config ~from_agent:"claude" ~content:"Hello @gemini!" in
   Alcotest.(check bool) "broadcast success" true (String.contains result '[');
 
   (* Get messages *)
@@ -307,7 +307,7 @@ let test_event_log () =
   let _ = Workspace.init config ~agent_name:None in
 
   (* Broadcast should create event log *)
-  let result = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:"Test event" in
+  let result = Workspace.broadcast config ~from_agent:"claude" ~content:"Test event" in
 
   (* Verify broadcast returned a valid response (contains timestamp marker) *)
   Alcotest.(check bool) "broadcast returns response" true (String.length result > 0);
@@ -340,7 +340,7 @@ let with_test_env f =
     (Printf.sprintf "masc_test_%d_%d" (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))) in
   Unix.mkdir tmp_dir 0o755;
   let config = workspace_config tmp_dir in
-  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
   try
     f config;
     let _ = Workspace.reset config in
@@ -352,12 +352,12 @@ let with_test_env f =
 
 let test_lifecycle_messages_are_typed () =
   with_test_env (fun config ->
-    let join_result = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
+    let join_result = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] () in
     Alcotest.(check bool) "join success" true
       (str_contains join_result "joined");
-    let leave_result = Workspace.end_session config ~agent_name:"provider_f" in
+    let leave_result = Workspace.end_session config ~agent_name:"gemini" in
     Alcotest.(check bool) "leave success" true (str_contains leave_result "left");
-    ignore (Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[] ());
+    ignore (Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] ());
 
     let messages = Workspace.get_all_messages_raw config ~since_seq:0 in
     let has_msg_type msg_type =
@@ -397,7 +397,7 @@ let with_memory_test_env f =
     backend_config;
     backend = Workspace_utils.Memory memory_backend;
   } in
-  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
   try
     f config;
     let _ = Workspace.reset config in
@@ -415,42 +415,42 @@ let test_complete_without_claim () =
     let _ = Workspace.add_task config ~title:"Unclaimed" ~priority:1 ~description:"" in
 
     (* Try to complete without claiming - should fail *)
-    let result = transition_done config ~agent_name:"agent_llm_a" ~task_id:"task-001" ~notes:"" in
+    let result = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
     Alcotest.(check bool) "complete without claim blocked" true (contains_error result)
   )
 
 let test_complete_by_wrong_agent () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
+    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
-    (* Provider_f tries to complete agent_llm_a's task - should fail *)
-    let result = transition_done config ~agent_name:"provider_f" ~task_id:"task-001" ~notes:"" in
+    (* Provider_f tries to complete claude's task - should fail *)
+    let result = transition_done config ~agent_name:"gemini" ~task_id:"task-001" ~notes:"" in
     Alcotest.(check bool) "wrong agent blocked" true (contains_error result);
     Alcotest.(check bool) "wrong agent points at current assignee" true
-      (str_contains result "current_assignee=agent_llm_a")
+      (str_contains result "current_assignee=claude")
   )
 
 let test_complete_nonexistent_task () =
   with_test_env (fun config ->
-    let result = transition_done config ~agent_name:"agent_llm_a" ~task_id:"task-999" ~notes:"" in
+    let result = transition_done config ~agent_name:"claude" ~task_id:"task-999" ~notes:"" in
     Alcotest.(check bool) "nonexistent task" true (contains_error result)
   )
 
 let test_claim_nonexistent_task () =
   with_test_env (fun config ->
-    let result = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-999" in
+    let result = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-999" in
     Alcotest.(check bool) "claim nonexistent" true (contains_error result)
   )
 
 let test_double_complete () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
-    let _ = transition_done config ~agent_name:"agent_llm_a" ~task_id:"task-001" ~notes:"first" in
+    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"first" in
 
     (* Done is idempotent at the Workspace FSM layer. *)
-    let result = transition_done config ~agent_name:"agent_llm_a" ~task_id:"task-001" ~notes:"second" in
+    let result = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"second" in
     Alcotest.(check bool) "double complete is no-op" true (contains_check result);
     Alcotest.(check bool) "double complete mentions no-op" true
       (str_contains result "no-op")
@@ -460,23 +460,23 @@ let test_double_complete () =
 
 let test_leave_removes_agent () =
   with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["test"] () in
+    let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:["test"] () in
 
     (* Check agent exists *)
     let status1 = Workspace.status config in
-    Alcotest.(check bool) "provider_f in status" true (String.length status1 > 0);
+    Alcotest.(check bool) "gemini in status" true (String.length status1 > 0);
 
     (* Leave *)
-    let result = Workspace.end_session config ~agent_name:"provider_f" in
+    let result = Workspace.end_session config ~agent_name:"gemini" in
     Alcotest.(check bool) "leave success" true (contains_check result)
   )
 
 let test_double_join () =
   with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["test"] () in
+    let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:["test"] () in
 
     (* Join again - should update or warn *)
-    let result = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["updated"] () in
+    let result = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:["updated"] () in
     (* Either success (update) or warning is acceptable *)
     Alcotest.(check bool) "double join handled" true (String.length result > 0)
   )
@@ -511,14 +511,14 @@ let test_special_chars_in_message () =
   with_test_env (fun config ->
     (* Test special characters, unicode, JSON-unsafe chars *)
     let msg = "Hello \"world\" with 'quotes' and\nnewlines\tand\t한글!" in
-    let result = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:msg in
+    let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
     Alcotest.(check bool) "special chars handled" true (String.length result > 0)
   )
 
 let test_agent_name_with_special_chars () =
   with_test_env (fun config ->
     (* Agent name with dots, dashes should work *)
-    let result = Workspace.bind_session config ~agent_name:"model-a-sonnet-sonnet" ~capabilities:[] () in
+    let result = Workspace.bind_session config ~agent_name:"claude-sonnet-sonnet" ~capabilities:[] () in
     Alcotest.(check bool) "special agent name" true (contains_check result)
   )
 
@@ -536,12 +536,12 @@ let test_priority_boundaries () =
 let test_task_state_after_claim () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"State Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
+    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
 
     (* Verify task list shows claimed state *)
     let tasks = Workspace.list_tasks config in
     Alcotest.(check bool) "shows claimed" true (String.length tasks > 0);
-    Alcotest.(check bool) "has agent_llm_a" true (str_contains tasks "agent_llm_a" ||
+    Alcotest.(check bool) "has claude" true (str_contains tasks "claude" ||
                                               str_contains tasks "Claimed")
   )
 
@@ -553,12 +553,12 @@ let test_multiple_tasks_independent () =
     let _ = Workspace.add_task config ~title:"Task C" ~priority:3 ~description:"" in
 
     (* Claim one, complete another - verify independence *)
-    let _ = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
-    let _ = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-002" in
-    let _ = transition_done config ~agent_name:"agent_llm_a" ~task_id:"task-001" ~notes:"" in
+    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-002" in
+    let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
 
     (* Task 002 should still be claimable to complete *)
-    let result = transition_done config ~agent_name:"agent_llm_a" ~task_id:"task-002" ~notes:"" in
+    let result = transition_done config ~agent_name:"claude" ~task_id:"task-002" ~notes:"" in
     Alcotest.(check bool) "independent tasks" true (contains_check result)
   )
 
@@ -569,9 +569,9 @@ let test_rapid_claim_sequence () =
     let _ = Workspace.add_task config ~title:"Race" ~priority:1 ~description:"" in
 
     (* Simulate rapid claims from different agents *)
-    let r1 = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
-    let r2 = Workspace.claim_task config ~agent_name:"provider_f" ~task_id:"task-001" in
-    let r3 = Workspace.claim_task config ~agent_name:"agent_code" ~task_id:"task-001" in
+    let r1 = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let r2 = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-001" in
+    let r3 = Workspace.claim_task config ~agent_name:"codex" ~task_id:"task-001" in
 
     (* Only first should succeed *)
     Alcotest.(check bool) "first wins" true (contains_check r1);
@@ -587,22 +587,22 @@ let test_multiple_agents_multiple_tasks () =
     let _ = Workspace.add_task config ~title:"C" ~priority:3 ~description:"" in
 
     (* Each agent claims different task *)
-    let r1 = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
-    let r2 = Workspace.claim_task config ~agent_name:"provider_f" ~task_id:"task-002" in
-    let r3 = Workspace.claim_task config ~agent_name:"agent_code" ~task_id:"task-003" in
+    let r1 = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+    let r2 = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-002" in
+    let r3 = Workspace.claim_task config ~agent_name:"codex" ~task_id:"task-003" in
 
-    Alcotest.(check bool) "agent_llm_a gets 001" true (contains_check r1);
-    Alcotest.(check bool) "provider_f gets 002" true (contains_check r2);
-    Alcotest.(check bool) "agent_code gets 003" true (contains_check r3);
+    Alcotest.(check bool) "claude gets 001" true (contains_check r1);
+    Alcotest.(check bool) "gemini gets 002" true (contains_check r2);
+    Alcotest.(check bool) "codex gets 003" true (contains_check r3);
 
     (* Each completes their own *)
-    let c1 = transition_done config ~agent_name:"agent_llm_a" ~task_id:"task-001" ~notes:"" in
-    let c2 = transition_done config ~agent_name:"provider_f" ~task_id:"task-002" ~notes:"" in
-    let c3 = transition_done config ~agent_name:"agent_code" ~task_id:"task-003" ~notes:"" in
+    let c1 = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let c2 = transition_done config ~agent_name:"gemini" ~task_id:"task-002" ~notes:"" in
+    let c3 = transition_done config ~agent_name:"codex" ~task_id:"task-003" ~notes:"" in
 
-    Alcotest.(check bool) "agent_llm_a done" true (contains_check c1);
-    Alcotest.(check bool) "provider_f done" true (contains_check c2);
-    Alcotest.(check bool) "agent_code done" true (contains_check c3)
+    Alcotest.(check bool) "claude done" true (contains_check c1);
+    Alcotest.(check bool) "gemini done" true (contains_check c2);
+    Alcotest.(check bool) "codex done" true (contains_check c3)
   )
 
 (* --- Recovery & Edge Condition Tests --- *)
@@ -618,9 +618,9 @@ let test_reinit_existing_workspace () =
 let test_operations_preserve_state () =
   with_test_env (fun config ->
     (* Do a bunch of operations *)
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["test"] () in
+    let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:["test"] () in
     let _ = Workspace.add_task config ~title:"X" ~priority:1 ~description:"" in
-    let _ = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:"hello" in
+    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"hello" in
 
     (* Status should show all state *)
     let status = Workspace.status config in
@@ -658,10 +658,10 @@ let test_event_log_on_claim_done () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = workspace_config tmp_dir in
-  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
   let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-  let _ = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"task-001" in
-  let _ = transition_done config ~agent_name:"agent_llm_a" ~task_id:"task-001" ~notes:"done" in
+  let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
+  let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"done" in
 
   (* Verify task state via Workspace.read_backlog (backend-agnostic) *)
   let backlog = Workspace.read_backlog config in
@@ -683,23 +683,23 @@ let contains_heartbeat result =
 
 let test_heartbeat_updates_lastseen () =
   with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
+    let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] () in
 
     (* Send heartbeat *)
-    let result = Workspace.heartbeat config ~agent_name:"provider_f" in
+    let result = Workspace.heartbeat config ~agent_name:"gemini" in
     Alcotest.(check bool) "heartbeat success" true (contains_heartbeat result)
   )
 
 let test_is_agent_session_bound_after_default_join () =
   with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:[] () in
+    let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] () in
     let agents : Masc_domain.agent list = Workspace.get_agents_raw config in
     let gemini_name =
       match List.find_opt (fun (agent : Masc_domain.agent) ->
-        String.length agent.name >= 6 && String.sub agent.name 0 6 = "provider_f"
+        String.length agent.name >= 6 && String.sub agent.name 0 6 = "gemini"
       ) agents with
       | Some agent -> agent.name
-      | None -> failwith "expected provider_f agent"
+      | None -> failwith "expected gemini agent"
     in
     Alcotest.(check bool) "bound agent detected" true
       (Workspace.is_agent_session_bound config ~agent_name:gemini_name)
@@ -791,8 +791,8 @@ let agent_current_task config ~agent_name =
    by [Workspace.claim_task] matches the [<nickname>.json] agent file. The
    production board issue (RFC-0034.d §1) was reported with nicknames
    (e.g. nick0cave), so this models the actual desync surface. *)
-let stale_nick = "agent_llm_a-stale-fox"
-let other_nick = "agent_llm_a-other-bear"
+let stale_nick = "claude-stale-fox"
+let other_nick = "claude-other-bear"
 
 let test_release_stale_claims_clears_agent_current_task () =
   with_test_env (fun config ->
@@ -1043,7 +1043,7 @@ let test_empty_agent_name_claim () =
 let test_empty_task_id_claim () =
   with_test_env (fun config ->
     (* Empty task_id should be rejected *)
-    let result = Workspace.claim_task config ~agent_name:"agent_llm_a" ~task_id:"" in
+    let result = Workspace.claim_task config ~agent_name:"claude" ~task_id:"" in
     Alcotest.(check bool) "empty task_id rejected" true (contains_error result)
   )
 
@@ -1070,7 +1070,7 @@ let test_emoji_in_message () =
   with_test_env (fun config ->
     (* Emoji characters should be preserved *)
     let msg = "🚀 Launching feature! 🎉" in
-    let result = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:msg in
+    let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
     Alcotest.(check bool) "emoji preserved" true (str_contains result "🚀")
   )
 
@@ -1092,9 +1092,9 @@ let test_reset_clears_all_state () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = workspace_config tmp_dir in
-  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
   let _ = Workspace.add_task config ~title:"Task" ~priority:1 ~description:"" in
-  let _ = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:"Hello" in
+  let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Hello" in
 
   (* Reset *)
   let _ = Workspace.reset config in
@@ -1112,10 +1112,10 @@ let test_reinit_after_reset () =
   Unix.mkdir tmp_dir 0o755;
 
   let config = workspace_config tmp_dir in
-  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let _ = Workspace.init config ~agent_name:(Some "claude") in
   let _ = Workspace.reset config in
   (* Reinit should work *)
-  let result = Workspace.init config ~agent_name:(Some "agent_llm_a") in
+  let result = Workspace.init config ~agent_name:(Some "claude") in
   Alcotest.(check bool) "reinit after reset" true (contains_check result);
 
   let _ = Workspace.reset config in
@@ -1128,7 +1128,7 @@ let test_reinit_after_reset () =
 let test_very_long_message () =
   with_test_env (fun config ->
     let long_msg = String.make 10000 'x' in
-    let result = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:long_msg in
+    let result = Workspace.broadcast config ~from_agent:"claude" ~content:long_msg in
     Alcotest.(check bool) "long message handled" true (String.length result > 0)
   )
 
@@ -1136,16 +1136,16 @@ let test_message_with_json_chars () =
   with_test_env (fun config ->
     (* JSON special characters should be escaped properly *)
     let msg = "{\"key\": \"value\", \"array\": [1,2,3]}" in
-    let result = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:msg in
+    let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
     Alcotest.(check bool) "json chars handled" true (String.length result > 0)
   )
 
 let test_message_sequence () =
   with_test_env (fun config ->
     (* Messages should have incrementing sequence numbers *)
-    let _ = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:"First" in
-    let _ = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:"Second" in
-    let _ = Workspace.broadcast config ~from_agent:"agent_llm_a" ~content:"Third" in
+    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"First" in
+    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Second" in
+    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Third" in
 
     let msgs = Workspace.get_messages config ~since_seq:0 ~limit:10 in
     Alcotest.(check bool) "has messages" true (str_contains msgs "First" || str_contains msgs "Third")
@@ -1373,33 +1373,33 @@ let test_cleanup_zombies_releases_tasks () =
 let test_rejoin_preserves_identity () =
   with_test_env (fun config ->
     (* 1. Join: get a nickname *)
-    let join1 = Workspace.bind_session config ~agent_name:"agent_llm_a" ~capabilities:["code"] () in
+    let join1 = Workspace.bind_session config ~agent_name:"claude" ~capabilities:["code"] () in
     Alcotest.(check bool) "first join success" true (contains_check join1);
 
     (* Extract nickname from active_agents *)
     let state1 = Workspace.read_state config in
     let nick1 = List.find (fun name ->
-      String.length name > 6 && String.sub name 0 6 = "agent_llm_a"
+      String.length name > 6 && String.sub name 0 6 = "claude"
     ) state1.active_agents in
 
     (* 2. Leave *)
-    let leave_result = Workspace.end_session config ~agent_name:"agent_llm_a" in
+    let leave_result = Workspace.end_session config ~agent_name:"claude" in
     Alcotest.(check bool) "leave success" true (contains_check leave_result);
 
     (* Agent should be removed from active_agents but file preserved *)
     let state2 = Workspace.read_state config in
     let still_active = List.exists (fun name ->
-      String.length name > 6 && String.sub name 0 6 = "agent_llm_a"
+      String.length name > 6 && String.sub name 0 6 = "claude"
     ) state2.active_agents in
     Alcotest.(check bool) "not in active_agents after leave" false still_active;
 
     (* 3. Re-join: should get the SAME nickname *)
-    let join2 = Workspace.bind_session config ~agent_name:"agent_llm_a" ~capabilities:["code"; "review"] () in
+    let join2 = Workspace.bind_session config ~agent_name:"claude" ~capabilities:["code"; "review"] () in
     Alcotest.(check bool) "rejoin success" true (contains_check join2);
 
     let state3 = Workspace.read_state config in
     let nick2 = List.find (fun name ->
-      String.length name > 6 && String.sub name 0 6 = "agent_llm_a"
+      String.length name > 6 && String.sub name 0 6 = "claude"
     ) state3.active_agents in
 
     (* The key assertion: same nickname after rejoin *)
@@ -1408,39 +1408,39 @@ let test_rejoin_preserves_identity () =
 
 let test_rejoin_restores_active_status () =
   with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["search"] () in
-    let _ = Workspace.end_session config ~agent_name:"provider_f" in
+    let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:["search"] () in
+    let _ = Workspace.end_session config ~agent_name:"gemini" in
 
     (* Re-join *)
-    let result = Workspace.bind_session config ~agent_name:"provider_f" ~capabilities:["search"] () in
+    let result = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:["search"] () in
     Alcotest.(check bool) "rejoin success" true (contains_check result);
 
     (* Should be back in active_agents *)
     let state = Workspace.read_state config in
     let is_active = List.exists (fun name ->
-      String.length name > 6 && String.sub name 0 6 = "provider_f"
+      String.length name > 6 && String.sub name 0 6 = "gemini"
     ) state.active_agents in
     Alcotest.(check bool) "back in active_agents" true is_active
   )
 
 let test_multiple_rejoin_cycles () =
   with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"agent_code" ~capabilities:["impl"] () in
+    let _ = Workspace.bind_session config ~agent_name:"codex" ~capabilities:["impl"] () in
     let state1 = Workspace.read_state config in
     let nick1 = List.find (fun name ->
-      String.length name > 5 && String.sub name 0 5 = "agent_code"
+      String.length name > 5 && String.sub name 0 5 = "codex"
     ) state1.active_agents in
 
     (* Three leave/rejoin cycles *)
     for _ = 1 to 3 do
-      let _ = Workspace.end_session config ~agent_name:"agent_code" in
-      let _ = Workspace.bind_session config ~agent_name:"agent_code" ~capabilities:["impl"] () in
+      let _ = Workspace.end_session config ~agent_name:"codex" in
+      let _ = Workspace.bind_session config ~agent_name:"codex" ~capabilities:["impl"] () in
       ()
     done;
 
     let state_final = Workspace.read_state config in
     let nick_final = List.find (fun name ->
-      String.length name > 5 && String.sub name 0 5 = "agent_code"
+      String.length name > 5 && String.sub name 0 5 = "codex"
     ) state_final.active_agents in
 
     Alcotest.(check string) "identity stable across 3 cycles" nick1 nick_final
@@ -1556,7 +1556,7 @@ let test_keeper_detection_by_agent_type () =
   Alcotest.(check bool) "keeper-*-agent name detected" true is_keeper_by_name;
 
   (* Neither name nor type matches *)
-  let not_keeper = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"agent_llm_a" in
+  let not_keeper = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"claude" in
   Alcotest.(check bool) "non-keeper correctly rejected" false not_keeper
 
 (** BUG-6: Heartbeat Mutex protects concurrent access *)
@@ -1584,27 +1584,27 @@ let test_heartbeat_concurrent_start_stop () =
   Alcotest.(check int) "list empty after cleanup" 0 (List.length (Heartbeat.list ()))
 
 (** BUG-006: Task transitions should succeed when the caller uses the unsuffixed
-    keeper name (e.g. "keeper-coder") but the task was claimed under the
-    canonical "-agent" form (e.g. "keeper-coder-agent").  Reproduces the
+    keeper name (e.g. "keeper-bob") but the task was claimed under the
+    canonical "-agent" form (e.g. "keeper-bob-agent").  Reproduces the
     identity mismatch: "claimed by 'keeper-X-agent', caller is 'keeper-X'". *)
 let test_bug006_transition_with_unsuffixed_name () =
   with_test_env (fun config ->
     (* Join with canonical agent name to establish the identity recorded at claim time *)
-    let _ = Workspace.bind_session config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Workspace.bind_session config ~agent_name:"keeper-bob-agent" ~capabilities:["code"] () in
     let _ = Workspace.add_task config ~title:"BUG-006 Task" ~priority:1 ~description:"" in
-    (* Claim using the canonical name — assignee is recorded as "keeper-coder-agent" *)
-    (match Workspace.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
+    (* Claim using the canonical name — assignee is recorded as "keeper-bob-agent" *)
+    (match Workspace.claim_task_r config ~agent_name:"keeper-bob-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
-    (* Transition (start) using the unsuffixed name — should resolve to "keeper-coder-agent" *)
-    (match Workspace.transition_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (* Transition (start) using the unsuffixed name — should resolve to "keeper-bob-agent" *)
+    (match Workspace.transition_task_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
              ~action:Masc_domain.Start () with
      | Ok _ -> ()
      | Error e ->
          Alcotest.failf "start with unsuffixed name failed (BUG-006): %s"
            (Masc_domain.show_masc_error e));
     (* Complete using the unsuffixed name — same resolution path *)
-    (match transition_done_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (match transition_done_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
              ~notes:"done" with
      | Ok _ -> ()
      | Error e ->
@@ -1614,13 +1614,13 @@ let test_bug006_transition_with_unsuffixed_name () =
 
 let test_bug006_cancel_with_unsuffixed_name () =
   with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Workspace.bind_session config ~agent_name:"keeper-bob-agent" ~capabilities:["code"] () in
     let _ = Workspace.add_task config ~title:"BUG-006 Cancel Task" ~priority:1 ~description:"" in
-    (match Workspace.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
+    (match Workspace.claim_task_r config ~agent_name:"keeper-bob-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
-    (* Cancel using the unsuffixed name — should resolve to "keeper-coder-agent" *)
-    (match Workspace.cancel_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (* Cancel using the unsuffixed name — should resolve to "keeper-bob-agent" *)
+    (match Workspace.cancel_task_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
              ~reason:"test" with
      | Ok _ -> ()
      | Error e ->

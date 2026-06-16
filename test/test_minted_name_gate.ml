@@ -44,7 +44,7 @@ let test_stable_never_transient () =
         (Printf.sprintf "Stable %S is never transient" name)
         false
         (Caller.minted_name_is_transient (Caller.Stable name)))
-    [ "provider_f"; "agent-xxxx"; "swift-fox"; "role-swift-fox"; "" ]
+    [ "gemini"; "agent-xxxx"; "swift-fox"; "role-swift-fox"; "" ]
 
 let test_ephemeral_always_transient () =
   (* [Ephemeral] is the system-minted origin (own ["agent-…"] fallback or
@@ -64,7 +64,7 @@ let test_resolved_external_reproduces_old () =
      one arm of a total match, not a standalone classifier). *)
   (* Non-transient externals. *)
   check_external_arm_matches_old "alice";
-  check_external_arm_matches_old "provider_f";
+  check_external_arm_matches_old "gemini";
   check_external_arm_matches_old "keeper-sangsu-agent";
   check_external_arm_matches_old "admin-board-keeper";
   (* Reserved-prefix edge: a tool-domain agent_name spelling "agent-…"

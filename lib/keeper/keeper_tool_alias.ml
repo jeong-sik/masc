@@ -60,6 +60,7 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit -> true
   | Tool_execute
@@ -68,7 +69,6 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_edit_file
   | Tool_write_file
   | Tool_time_now
-  | Tool_stay_silent
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status

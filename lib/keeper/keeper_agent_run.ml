@@ -87,7 +87,6 @@ let run_turn
       ~(runtime_id : string)
       ?world_observation
       ?(turn_affordances = [])
-      ?provider_filter
       ~(generation : int)
       ?(max_turns : int = Keeper_runtime_resolved.reactive_max_turns_per_call ())
       (* Per-call turn budget. Keeper resumes via checkpoint if exhausted. *)
@@ -240,10 +239,6 @@ let run_turn
   let receipt_started_at = ctx.receipt_started_at in
   let config_root = ctx.config_root in
   let runtime_config_path = ctx.runtime_config_path in
-  let gemini_mcp_disabled = ctx.gemini_mcp_disabled in
-  let approval_mode_effective = ctx.approval_mode_effective in
-  let approval_mode_derived = ctx.approval_mode_derived in
-  let _keeper_oas_context = ctx.keeper_oas_context in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let manifest_keeper_turn_id = meta.runtime.usage.total_turns + 1 in
   let turn_start = Mtime_clock.now () in
@@ -376,9 +371,6 @@ let run_turn
       ~turn_affordances
       ~config_root
       ~runtime_config_path
-      ~gemini_mcp_disabled
-      ~approval_mode_effective
-      ~approval_mode_derived
       ?max_cost_usd
       ~trajectory_acc
       ~tool_overlay
@@ -425,13 +417,6 @@ let run_turn
     in
     let priority =
       Option.value priority ~default:Llm_provider.Request_priority.Proactive
-    in
-    let admission_wait_timeout_sec =
-      if
-        Llm_provider.Request_priority.resolve priority
-        = Llm_provider.Request_priority.Proactive
-      then Some 180.0
-      else None
     in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
@@ -492,9 +477,7 @@ let run_turn
                    turn-budget admission. *)
                 Keeper_turn_driver.run_named
                   ~runtime_id:runtime_id_string
-                    ~base_path:config.base_path
                     ~keeper_name:meta.name
-                    ?provider_filter
                     ~goal:user_message
                     ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -520,12 +503,12 @@ let run_turn
               to re-emit. Runaway is bounded by max_idle_turns + token budget,
               not a retry count that halts the turn. *)
                     ~max_idle_turns
+                    ~max_turns
                     ?stream_idle_timeout_s
                     ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
                     ?max_cost_usd
-                    ?wait_timeout_sec:admission_wait_timeout_sec
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ~guardrails:keeper_oas_guardrails
@@ -627,7 +610,7 @@ let run_turn
                           ~acc
                           ~actual_keeper_tool_names
                           ~result ~checkpoint_persistence_error
-                          ~post_turn_t0 ?provider_filter ~runtime_id_string
+                          ~post_turn_t0 ~runtime_id_string
                           ~prompt_metrics ~ctx_composition ~usage
                           ~receipt_response_text_present_ref ~history_assistant_source
                           ~pre_dispatch_compacted:ctx.pre_dispatch_compacted

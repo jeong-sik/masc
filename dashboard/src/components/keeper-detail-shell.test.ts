@@ -3,9 +3,11 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import {
   KeeperDetailSection,
+  KeeperDetailHeaderInfo,
   KeeperDetailSectionRail,
   activeKeeperDetailSection,
 } from './keeper-detail-shell'
+import type { Keeper } from '../types'
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -154,5 +156,42 @@ describe('KeeperDetailSectionRail', () => {
     expect(activeKeeperDetailSection.value).toBe('keeper-runtime')
     expect(container.querySelector('[data-testid="comms-child"]')).toBeNull()
     expect(container.querySelector('[data-testid="runtime-child"]')).not.toBeNull()
+  })
+})
+
+describe('KeeperDetailHeaderInfo', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('uses the keeper badge when the live keeper has no emoji', () => {
+    const keeper = {
+      name: 'sangsu',
+      status: 'active',
+      phase: 'Running',
+      lifecycle_phase: 'Running',
+      model: 'claude-sonnet-4',
+    } as Keeper
+
+    render(
+      html`<${KeeperDetailHeaderInfo}
+        keeper=${keeper}
+        titleId="keeper-title"
+        phaseEnteredAtSec=${null}
+        onClose=${() => {}}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector('[aria-label="sangsu"]')).not.toBeNull()
+    expect(container.textContent).toContain('sangsu')
   })
 })

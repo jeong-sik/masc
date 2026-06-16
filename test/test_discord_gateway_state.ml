@@ -327,7 +327,8 @@ let test_heartbeat_tick_when_connected () =
 let message_create_payload
     ~id ~channel_id ~author_id ?guild_id ?username ?global_name
     ?message_reference_channel_id ?message_reference_message_id
-    ?referenced_message_author_id ~content ~mention_ids ()
+    ?referenced_message_author_id ?author_bot ?webhook_id
+    ~content ~mention_ids ()
     : Yojson.Safe.t =
   let mentions =
     `List
@@ -343,6 +344,9 @@ let message_create_payload
     @ (match global_name with
        | Some g -> [ ("global_name", `String g) ]
        | None -> [])
+    @ (match author_bot with
+       | Some b -> [ ("bot", `Bool b) ]
+       | None -> [])
   in
   let base_fields =
     [ ("id", `String id)
@@ -351,6 +355,9 @@ let message_create_payload
     ; ("content", `String content)
     ; ("mentions", mentions)
     ]
+    @ (match webhook_id with
+       | Some w -> [ ("webhook_id", `String w) ]
+       | None -> [])
   in
   let with_guild =
     match guild_id with
@@ -993,6 +1000,173 @@ let test_non_self_message_still_emitted_under_all () =
   check bool
     "non-self message still emits under All policy"
     true (has_emit_event effects)
+
+(* ---------------------------------------------------------------- *)
+(* F940 — bot/webhook suppression. Another bot or a webhook must not *)
+(* start a turn under the ambient policies (loop prevention), even   *)
+(* when it @mentions the bot or posts in a tracked thread. It is     *)
+(* still delivered as ambient (record-only). [User_only id] is an    *)
+(* explicit per-snowflake opt-in and is honored.                     *)
+(* ---------------------------------------------------------------- *)
+
+let track_thread m ~thread_id ~parent_id ~seq =
+  let frame : S.frame =
+    { op = S.Op_dispatch
+    ; s = Some seq
+    ; t = Some "THREAD_CREATE"
+    ; d =
+        `Assoc
+          [ ("id", `String thread_id)
+          ; ("parent_id", `String parent_id)
+          ; ("type", `Int 11)
+          ]
+    }
+  in
+  let m', _ = S.step m ~now_mono:2.5 (S.Frame_received frame) in
+  m'
+
+let test_decode_sets_author_is_bot_from_bot_flag () =
+  let payload =
+    message_create_payload
+      ~id:"B1" ~channel_id:"C1" ~author_id:"OTHERBOT" ~content:"hi"
+      ~mention_ids:[] ~author_bot:true ()
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"MESSAGE_CREATE" ~payload with
+  | Ok (S.Message_create { author_is_bot = true; _ }) -> ()
+  | Ok _ -> fail "author.bot=true should set author_is_bot=true"
+  | Error msg -> fail msg
+
+let test_decode_sets_author_is_bot_from_webhook_id () =
+  let payload =
+    message_create_payload
+      ~id:"W1" ~channel_id:"C1" ~author_id:"HOOK" ~content:"hi"
+      ~mention_ids:[] ~webhook_id:"123456" ()
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"MESSAGE_CREATE" ~payload with
+  | Ok (S.Message_create { author_is_bot = true; _ }) -> ()
+  | Ok _ -> fail "webhook_id present should set author_is_bot=true"
+  | Error msg -> fail msg
+
+let test_decode_human_author_is_not_bot () =
+  let payload =
+    message_create_payload
+      ~id:"H1" ~channel_id:"C1" ~author_id:"VINCENT" ~content:"hi"
+      ~mention_ids:[] ()
+  in
+  match S.decode_dispatch ~bot_user_id:None ~event_name:"MESSAGE_CREATE" ~payload with
+  | Ok (S.Message_create { author_is_bot = false; _ }) -> ()
+  | Ok _ -> fail "plain author should have author_is_bot=false"
+  | Error msg -> fail msg
+
+let test_bot_mention_suppressed_under_mention_only () =
+  (* The reply-loop scenario: another bot @mentions our bot. Without
+     suppression explicit_mentions_bot=true would start a turn. *)
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"BL1" ~channel_id:"C1" ~author_id:"OTHERBOT"
+      ~content:"<@BOT> are you there" ~mention_ids:[ "BOT" ]
+      ~author_bot:true ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:11))
+  in
+  check bool "bot mention does not start a turn" false (has_emit_event effects);
+  check bool "bot mention still recorded as ambient" true
+    (has_emit_ambient effects)
+
+let test_webhook_mention_suppressed_under_mention_only () =
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"WH1" ~channel_id:"C1" ~author_id:"HOOK"
+      ~content:"<@BOT> alert" ~mention_ids:[ "BOT" ]
+      ~webhook_id:"999" ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:12))
+  in
+  check bool "webhook mention does not start a turn" false
+    (has_emit_event effects);
+  check bool "webhook mention still recorded as ambient" true
+    (has_emit_ambient effects)
+
+let test_human_mention_still_passes_under_mention_only () =
+  (* Regression guard: bot suppression must not block real users. *)
+  let m = connected_with_policy ~policy:S.Mention_only ~bot_user_id:"BOT" in
+  let payload =
+    message_create_payload
+      ~id:"HM1" ~channel_id:"C1" ~author_id:"VINCENT"
+      ~content:"<@BOT> hello" ~mention_ids:[ "BOT" ] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:13))
+  in
+  check bool "human mention starts a turn" true (has_emit_event effects)
+
+let test_bot_in_thread_suppressed_under_mention_or_thread () =
+  (* The audit's specific case: a bot posts in a tracked thread under
+     Mention_or_thread. is_thread=true, but author_is_bot must veto. *)
+  let m =
+    connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT"
+  in
+  let m = track_thread m ~thread_id:"T1" ~parent_id:"C1" ~seq:4 in
+  let payload =
+    message_create_payload
+      ~id:"BT1" ~channel_id:"T1" ~author_id:"OTHERBOT"
+      ~content:"thread chatter" ~mention_ids:[] ~author_bot:true ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:14))
+  in
+  check bool "bot in thread does not start a turn" false
+    (has_emit_event effects);
+  check bool "bot in thread still recorded as ambient" true
+    (has_emit_ambient effects)
+
+let test_human_in_thread_still_passes_under_mention_or_thread () =
+  let m =
+    connected_with_policy ~policy:S.Mention_or_thread ~bot_user_id:"BOT"
+  in
+  let m = track_thread m ~thread_id:"T1" ~parent_id:"C1" ~seq:4 in
+  let payload =
+    message_create_payload
+      ~id:"HT1" ~channel_id:"T1" ~author_id:"VINCENT"
+      ~content:"thread question" ~mention_ids:[] ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:15))
+  in
+  check bool "human in thread starts a turn" true (has_emit_event effects)
+
+let test_bot_passes_when_user_only_targets_it () =
+  (* Explicit per-snowflake opt-in: operator points User_only at a
+     webhook/bot id on purpose. That intent is honored. *)
+  let m =
+    connected_with_policy ~policy:(S.User_only "OTHERBOT") ~bot_user_id:"BOT"
+  in
+  let payload =
+    message_create_payload
+      ~id:"UO1" ~channel_id:"C1" ~author_id:"OTHERBOT"
+      ~content:"alert" ~mention_ids:[] ~author_bot:true ()
+  in
+  let _, effects =
+    S.step m ~now_mono:3.0
+      (S.Frame_received
+         (dispatch_frame ~event_name:"MESSAGE_CREATE" ~payload ~seq:16))
+  in
+  check bool "explicit User_only opt-in honored for a bot author" true
+    (has_emit_event effects)
 
 (* ---------------------------------------------------------------- *)
 (* Phase 1.4 — reconnect / resume arms                              *)
@@ -1856,6 +2030,26 @@ let () =
             test_self_reaction_suppressed_under_all_policy
         ; test_case "non-self message still emits under All (regression)"
             `Quick test_non_self_message_still_emitted_under_all
+        ] )
+    ; ( "bot/webhook suppression (F940)"
+      , [ test_case "decode: author.bot=true => author_is_bot" `Quick
+            test_decode_sets_author_is_bot_from_bot_flag
+        ; test_case "decode: webhook_id present => author_is_bot" `Quick
+            test_decode_sets_author_is_bot_from_webhook_id
+        ; test_case "decode: plain author => not bot" `Quick
+            test_decode_human_author_is_not_bot
+        ; test_case "bot mention suppressed under Mention_only" `Quick
+            test_bot_mention_suppressed_under_mention_only
+        ; test_case "webhook mention suppressed under Mention_only" `Quick
+            test_webhook_mention_suppressed_under_mention_only
+        ; test_case "human mention still passes (regression)" `Quick
+            test_human_mention_still_passes_under_mention_only
+        ; test_case "bot in thread suppressed under Mention_or_thread" `Quick
+            test_bot_in_thread_suppressed_under_mention_or_thread
+        ; test_case "human in thread still passes (regression)" `Quick
+            test_human_in_thread_still_passes_under_mention_or_thread
+        ; test_case "User_only opt-in honored for bot author" `Quick
+            test_bot_passes_when_user_only_targets_it
         ] )
     ; ( "reconnect / resume"
       , [ test_case

@@ -2,6 +2,8 @@ import { signal } from '@preact/signals'
 import { formatKeeperVisibleReply } from './keeper-message'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
 import type {
+  KeeperConversationAttachment,
+  KeeperConversationAudioClip,
   KeeperConversationEntry,
   KeeperConversationRole,
   KeeperConversationSource,
@@ -112,6 +114,92 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
     && entry.source !== 'system'
 }
 
+// --- Audio helpers (RFC-0235 P1/P3) ---
+
+/** Canonicalize an audio clip from the wire into the dashboard type.
+ *  Accepts both snake_case (history rows) and camelCase (SSE payloads).
+ *  Falls back to `/api/v1/voice/audio/<token>` when the backend did not
+ *  emit a full URL, so every persisted clip is playable. */
+export function normalizeAudioClip(raw: unknown): KeeperConversationAudioClip | null {
+  if (!isRecord(raw)) return null
+  const token = asString(raw.token)
+  const mime = asString(raw.mime)
+  if (!token || !mime) return null
+  const explicitUrl = asString(raw.audio_url) ?? asString(raw.audioUrl)
+  const audioUrl = explicitUrl && explicitUrl.trim() !== ''
+    ? explicitUrl
+    : `/api/v1/voice/audio/${encodeURIComponent(token)}`
+  const duration = asNumber(raw.duration_sec) ?? asNumber(raw.durationSec)
+  const messageText = asString(raw.message_text) ?? asString(raw.messageText) ?? ''
+  const deviceId = asString(raw.device_id) ?? asString(raw.deviceId)
+  return {
+    token,
+    audioUrl,
+    mime,
+    durationSec: duration ?? null,
+    messageText,
+    deviceId: deviceId ?? null,
+  }
+}
+
+/** Normalize one persisted attachment row (keeper_chat_store snake_case
+ *  mime_type, open `type` string) into the camelCase KeeperConversationAttachment
+ *  the chat UI renders. Drops rows missing id/data — a card with no payload is
+ *  not renderable. `type` is narrowed to image/file (the renderer's union). */
+function normalizeAttachment(raw: unknown): KeeperConversationAttachment | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const data = asString(raw.data)
+  if (!id || !data) return null
+  return {
+    id,
+    type: asString(raw.type) === 'image' ? 'image' : 'file',
+    name: asString(raw.name) ?? '',
+    size: asNumber(raw.size) ?? 0,
+    mimeType: asString(raw.mime_type) ?? asString(raw.mimeType) ?? '',
+    data,
+  }
+}
+
+function normalizeAttachments(raw: unknown): KeeperConversationAttachment[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const atts = raw
+    .map(normalizeAttachment)
+    .filter((a): a is KeeperConversationAttachment => a !== null)
+  return atts.length > 0 ? atts : undefined
+}
+
+/** Try to attach an audio clip to the most recent assistant entry whose
+ *  rendered text matches the clip's message text. Returns true if a match
+ *  was found and updated. This handles the live SSE path: the assistant
+ *  bubble is already streaming when the synthesized audio event arrives. */
+export function attachKeeperAudioClip(name: string, rawAudio: unknown): boolean {
+  const clip = normalizeAudioClip(rawAudio)
+  if (!clip) return false
+  const targetText = formatKeeperVisibleReply(clip.messageText).trim()
+  const rawTarget = clip.messageText.trim()
+  const existing = keeperThreads.value[name] ?? []
+  let updated = false
+  const next = existing.map((entry) => {
+    if (updated) return entry
+    if (entry.role !== 'assistant') return entry
+    const entryText = entry.text.trim()
+    const entryRawText = (entry.rawText ?? entry.text).trim()
+    if (
+      (targetText && entryText === targetText)
+      || (rawTarget && entryRawText === rawTarget)
+    ) {
+      updated = true
+      return { ...entry, audio: clip }
+    }
+    return entry
+  })
+  if (updated) {
+    keeperThreads.value = { ...keeperThreads.value, [name]: next }
+  }
+  return updated
+}
+
 // --- Normalizers ---
 
 // Closed runtime mirrors of the 5 narrow string unions inside
@@ -216,9 +304,23 @@ export function normalizeKeeperRecoverResult(raw: unknown): KeeperRecoverResult 
 
 // --- Thread state management ---
 
+// Stable fallback id for a message whose backend predates R3 and so
+// carries no producer-assigned id. Derived from the content (not the merge
+// index) so it does not shift when history pages are merged.
+function fallbackHistoryEntryId(
+  role: string,
+  timestamp: string | null | undefined,
+  text: string,
+): string {
+  let hash = 5381
+  for (let i = 0; i < text.length; i += 1) {
+    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+  }
+  return `${role}-${timestamp ?? 'entry'}-${(hash >>> 0).toString(36)}`
+}
+
 function normalizeHistoryEntry(
   raw: unknown,
-  index: number,
   keeperName?: string,
   previousSource: KeeperConversationSource | null = null,
 ): KeeperConversationEntry | null {
@@ -232,18 +334,32 @@ function normalizeHistoryEntry(
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
+  const audio = normalizeAudioClip(raw.audio) ?? null
+  const attachments = normalizeAttachments(raw.attachments)
+  // keeper_chat_store mints kind=transport_failure (row content is the
+  // "Keeper request failed: ..." text) so a reload can tell a failed request
+  // apart from a real reply. Map it to the existing error delivery state so
+  // the bubble renders the error label/styling instead of a saved reply.
+  const delivery: KeeperConversationDelivery =
+    asString(raw.kind) === 'transport_failure' ? 'error' : 'history'
   return {
-    id: `${role}-${timestamp ?? 'entry'}-${index}`,
+    // R3: key off the producer-assigned server id when present so the
+    // render key is stable across history-page merges (the former
+    // `${role}-${ts}-${index}` shifted with the merge index and remounted
+    // bubbles). Pre-R3 rows fall back to a stable content-derived id.
+    id: asString(raw.id) ?? fallbackHistoryEntryId(role, timestamp, rawText),
     role,
     source,
     label,
     text,
     rawText,
     timestamp,
-    delivery: 'history',
+    delivery,
     streamState: null,
     details: null,
     surface,
+    audio,
+    attachments,
   }
 }
 
@@ -253,8 +369,8 @@ export function normalizeStatusDetail(name: string, text: string, rawStatus: unk
     ? (() => {
         let previousSource: KeeperConversationSource | null = null
         return parsed.history_tail
-          .map((entry, index) => {
-            const normalized = normalizeHistoryEntry(entry, index, name, previousSource)
+          .map((entry) => {
+            const normalized = normalizeHistoryEntry(entry, name, previousSource)
             previousSource = normalized?.source ?? previousSource
             return normalized
           })
@@ -276,6 +392,18 @@ export function appendThreadEntry(name: string, entry: KeeperConversationEntry):
   keeperThreads.value = {
     ...keeperThreads.value,
     [name]: [...existing, entry].slice(-THREAD_ENTRY_CAP),
+  }
+}
+
+export function removeThreadEntries(name: string, entryIds: readonly string[]): void {
+  if (entryIds.length === 0) return
+  const removeIds = new Set(entryIds)
+  const existing = keeperThreads.value[name] ?? []
+  const next = existing.filter(entry => !removeIds.has(entry.id))
+  if (next.length === existing.length) return
+  keeperThreads.value = {
+    ...keeperThreads.value,
+    [name]: next,
   }
 }
 
@@ -353,6 +481,14 @@ export function finalizeAssistantEntry(
 // produced duplicate bubbles on every history merge. Source is also
 // excluded — REST history has no source field, so the derived source
 // can differ from the local one for the same message.
+//
+// R3 made every history entry carry the producer-assigned server id, so
+// render keys are now stable; this optimistic-vs-server dedup still keys
+// on role+text because a locally-appended entry is created before the
+// server mints its id and so cannot match by id yet. Replacing it with id
+// equality needs a send-response id handshake (the POST returning the
+// minted id for the optimistic entry to adopt) — tracked as the R3
+// follow-up, deliberately out of this change's scope.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
@@ -391,6 +527,7 @@ export function mergeServerHistoryEntries(
 }
 
 interface RestChatHistoryMessage {
+  id?: string
   role: string
   content: string
   ts: number
@@ -398,6 +535,19 @@ interface RestChatHistoryMessage {
   tool_call_name?: string
   source?: string
   surface?: SurfaceRef
+  audio?: unknown
+  // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
+  // KeeperConversationAttachment at consume time so reload keeps the cards.
+  attachments?: ReadonlyArray<{
+    id: string
+    type: string
+    name: string
+    size: number
+    mime_type: string
+    data: string
+  }>
+  // Row kind; 'transport_failure' distinguishes a persisted failed request.
+  kind?: string
 }
 
 /** Convert a persisted tool-call row into the same entry shape the live
@@ -433,7 +583,7 @@ export function chatHistoryEntriesFromRest(
 ): KeeperConversationEntry[] {
   let previousSource: KeeperConversationSource | null = null
   const entries: KeeperConversationEntry[] = []
-  messages.forEach((message, index) => {
+  messages.forEach((message) => {
     if (message.role === 'tool') {
       // Tool rows do not participate in user/assistant source chaining.
       const toolEntry = toolHistoryEntry(message)
@@ -441,8 +591,15 @@ export function chatHistoryEntriesFromRest(
       return
     }
     const normalized = normalizeHistoryEntry(
-      { role: message.role, content: message.content, ts_unix: message.ts },
-      index,
+      {
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        ts_unix: message.ts,
+        audio: message.audio,
+        attachments: message.attachments,
+        kind: message.kind,
+      },
       keeperName,
       previousSource,
     )

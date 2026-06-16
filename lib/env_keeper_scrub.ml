@@ -30,9 +30,12 @@ let allow_exact : string list =
   ; "HTTP_PROXY"; "HTTPS_PROXY"; "NO_PROXY"
   ; "SSL_CERT_FILE"
 
-    (* GitHub token for gh CLI / API access — explicitly projected by
-       operator into keeper secret dir, not ambient host token. *)
-  ; "GITHUB_TOKEN"; "GH_TOKEN"
+    (* GitHub tokens (GITHUB_TOKEN / GH_TOKEN) are intentionally NOT listed
+       here. They end with the [_TOKEN] deny suffix, so even if listed they
+       would be denied — the operator's ambient host token must never cross
+       into a keeper. The keeper's own GitHub token is supplied out-of-band by
+       [Keeper_secret_projection] (Docker [--env-file] / Local overlay), which
+       bypasses this allowlist. See RFC-0236 §6 and RFC-0007. *)
 
     (* Git user identity — not credentials by themselves. *)
   ; "GIT_AUTHOR_NAME"; "GIT_AUTHOR_EMAIL"
@@ -118,3 +121,27 @@ let filter_environment existing =
   Array.to_list existing
   |> List.filter (fun e -> is_allowed (key_of_entry e))
   |> Array.of_list
+
+(* Force a deterministic system-message locale on top of the scrubbed
+   env. libc's [strerror] is translated by [LC_MESSAGES]; on a non-C host
+   locale the EINTR message that keeper matches as a retry marker
+   ("interrupted system call", see [Keeper_turn_sandbox_runtime]) would be
+   localised and the substring match would silently miss, disabling EINTR
+   retry. We pin messages to C and leave character encoding ([LC_CTYPE] /
+   [LANG]) to the host so UTF-8 tool output is unaffected. [LC_ALL] has
+   higher POSIX precedence than [LC_MESSAGES], so a host [LC_ALL] would
+   override our pin; we neutralise it to the empty string, which POSIX
+   treats as unset (not as the "C" locale), leaving the remaining
+   categories to [LANG] / [LC_CTYPE]. *)
+let lc_messages_pin = [ "LC_ALL="; "LC_MESSAGES=C" ]
+
+let filter_environment_c_messages existing =
+  let scrubbed =
+    filter_environment existing
+    |> Array.to_list
+    |> List.filter (fun e ->
+      match key_of_entry e with
+      | "LC_ALL" | "LC_MESSAGES" -> false
+      | _ -> true)
+  in
+  Array.of_list (scrubbed @ lc_messages_pin)

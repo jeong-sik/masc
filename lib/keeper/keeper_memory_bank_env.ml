@@ -1,7 +1,8 @@
 (** Env-var parsing helpers for the keeper memory bank.
 
-    Three primitives — [memory_env_opt] strips empty/whitespace,
+    Four primitives — [memory_env_opt] strips empty/whitespace,
     [memory_env_int_logged] adds int parsing with WARN-on-invalid,
+    [memory_env_float_logged] adds positive-float parsing, and
     [memory_env_bool_logged] adds bool parsing with the same shape —
     plus the two .mli-exposed consumers [memory_llm_summary_enabled]
     and [max_memory_text_length] that use them.
@@ -26,6 +27,18 @@ let memory_env_int_logged name ~default =
        | None ->
            Log.Keeper.warn
              "invalid %s=%S; using default %d"
+             name raw default;
+           default)
+
+let memory_env_float_logged name ~default =
+  match memory_env_opt name with
+  | None -> default
+  | Some raw ->
+      (match float_of_string_opt raw with
+       | Some n when n > 0.0 -> n
+       | _ ->
+           Log.Keeper.warn
+             "invalid %s=%S; using default %.3f"
              name raw default;
            default)
 

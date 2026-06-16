@@ -138,6 +138,44 @@ describe('Ops surface', () => {
     expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
   }, 120000)
 
+  it('wraps the ops view in the v2 command surface class', async () => {
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorWorkspaceDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = null
+    operatorDigestError.value = null
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+    operatorWorkspaceDigest.value = {
+      target_type: 'namespace',
+      attention_items: [],
+      recommended_actions: [],
+      recent_reviews: [],
+    } as unknown as OperatorDigest
+    operatorActionLog.value = []
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('.v2-command-surface')).not.toBeNull()
+  }, 60000)
+
   it('does not render its own keeper roster or fleet pointer (lives on Monitor → Keeper Fleet)', async () => {
     const {
       Ops,

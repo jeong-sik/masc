@@ -38,7 +38,7 @@ export function OperationsPanel() {
   const view = currentView()
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-command-surface flex flex-col gap-4">
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

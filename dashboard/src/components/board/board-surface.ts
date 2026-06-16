@@ -18,7 +18,7 @@ import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
 import { votePost } from '../../api/board'
-import { deleteBoardPost } from '../../api/actions'
+import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
 import { MessageWorkspaceTimeline } from './message-workspace-timeline'
@@ -204,14 +204,14 @@ function renderCategorySection(
   if (posts.length === 0 && hidden === 0) return null
   if (posts.length === 0 && hidden > 0) {
     return html`
-      <div class="mb-3 px-3 py-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
+      <div class="v2-workspace-panel mb-3 px-3 py-2 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
         ${label} — ${hidden}건 숨김
       </div>
     `
   }
 
   return html`
-    <${SectionCard} label=${`${label} (${total})`} class="mb-4">
+    <${SectionCard} label=${`${label} (${total})`} class="mb-4 v2-workspace-panel">
       <div class="flex flex-col gap-2">
         ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>
@@ -262,7 +262,7 @@ function NewPostForm() {
   if (!showNewPostForm.value) {
     return html`
       <button type="button"
-        class="w-full py-2.5 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-sm text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] transition-colors bg-transparent"
+        class="v2-workspace-action w-full py-2.5 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] text-sm text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] transition-colors bg-transparent"
         onClick=${() => {
           newPostHearth.value = boardHearthFilter.value
           showNewPostForm.value = true
@@ -295,7 +295,7 @@ function NewPostForm() {
     : flairSelectOptions
 
   return html`
-    <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] grid gap-3">
+    <div class="v2-workspace-panel p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] grid gap-3">
       <${TextInput}
         name="board_post_title"
         ariaLabel="새 글 제목"
@@ -342,7 +342,7 @@ function NewPostForm() {
       ` : null}
       <div class="flex gap-2 justify-end">
         <button type="button"
-          class="px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+          class="v2-workspace-action px-3 py-1.5 rounded-[var(--r-1)] text-sm border border-[var(--color-border-default)] bg-transparent text-[var(--color-fg-muted)] cursor-pointer hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
           disabled=${newPostSubmitting.value}
           onClick=${() => {
             showNewPostForm.value = false
@@ -353,7 +353,7 @@ function NewPostForm() {
           }}
         >취소</button>
         <button type="button"
-          class="px-4 py-1.5 rounded-[var(--r-1)] text-sm font-medium border border-[var(--info-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
+          class="v2-workspace-action px-4 py-1.5 rounded-[var(--r-1)] text-sm font-medium border border-[var(--info-border)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
           disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
           onClick=${() => { void submitNewPost() }}
         >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
@@ -401,7 +401,7 @@ function HearthFilterBar() {
         ` : null}
         <button
           type="button"
-          class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+          class="v2-workspace-action px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
           aria-label="hearth 목록 새로고침"
           disabled=${boardHearthsLoading.value}
           onClick=${() => { void refreshBoardHearths() }}
@@ -417,7 +417,7 @@ function HearthFilterBar() {
       <span class="text-2xs font-semibold text-[var(--color-fg-muted)]" aria-hidden="true">#</span>
       <button
         type="button"
-        class=${chipClass(active === '')}
+        class=${`v2-workspace-action ${chipClass(active === '')}`}
         aria-pressed=${active === ''}
         aria-label="전체 hearth"
         onClick=${() => setBoardHearthFilter('')}
@@ -426,7 +426,7 @@ function HearthFilterBar() {
         <button
           key=${hearth.name}
           type="button"
-          class=${chipClass(active === hearth.name)}
+          class=${`v2-workspace-action ${chipClass(active === hearth.name)}`}
           aria-pressed=${active === hearth.name}
           aria-label=${`hearth ${hearth.name} ${hearth.count} posts`}
           onClick=${() => setBoardHearthFilter(hearth.name)}
@@ -435,7 +435,7 @@ function HearthFilterBar() {
       ${active !== '' && !activeInList ? html`
         <button
           type="button"
-          class=${chipClass(true)}
+          class=${`v2-workspace-action ${chipClass(true)}`}
           aria-pressed="true"
           aria-label=${`hearth ${active}`}
           onClick=${() => setBoardHearthFilter(active)}
@@ -443,7 +443,7 @@ function HearthFilterBar() {
       ` : null}
       <button
         type="button"
-        class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
+        class="v2-workspace-action px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50"
         aria-label="hearth 목록 새로고침"
         disabled=${boardHearthsLoading.value}
         onClick=${() => { void refreshBoardHearths() }}
@@ -459,11 +459,11 @@ function SortBar() {
   const current = boardSortMode.value
   const grouped = splitVisiblePosts(boardPosts.value)
   return html`
-    <div class="flex flex-col gap-3 mb-4 p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+    <div class="v2-workspace-panel flex flex-col gap-3 mb-4 p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button type="button"
-            class="px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
+            class="v2-workspace-action px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
               ${current === mode.id
                 ? 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)]'
                 : 'bg-transparent text-[var(--color-fg-muted)] border-transparent hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
@@ -487,7 +487,7 @@ function SortBar() {
           const isHidden = boardHiddenCategories.value.has(g.category)
           return html`
             <button type="button"
-              class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
+              class="v2-workspace-action px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
                 ${isHidden
                   ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-18)] line-through opacity-60'
                   : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]'
@@ -504,7 +504,7 @@ function SortBar() {
           `
         })}
         <button type="button"
-          class="px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
+          class="v2-workspace-action px-2.5 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer
             ${boardExcludeAutomation.value
               ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-18)]'
               : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]'
@@ -547,7 +547,7 @@ function SortBar() {
             <${ActionButton}
               variant="danger"
               size="md"
-              class="!px-3"
+              class="v2-workspace-action !px-3"
               onClick=${bulkDeleteSelected}
               disabled=${bulkDeleting.value}
               ariaBusy=${bulkDeleting.value}
@@ -556,12 +556,12 @@ function SortBar() {
               ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
             <//>
             <button type="button"
-              class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]"
+              class="v2-workspace-action px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)]"
               onClick=${() => { selectedPostIds.value = new Set() }}
             >선택 해제</button>
           ` : null}
           <button type="button"
-            class="px-3 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="v2-workspace-action px-3 py-1 rounded-[var(--r-1)] text-2xs font-medium transition-colors duration-[var(--t-med)] border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
           >
@@ -597,7 +597,7 @@ function BoardSummary() {
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   const metrics = boardLatencyMetrics.value
   return html`
-    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
+    <div class="v2-workspace-panel flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
       <span class="font-semibold text-[var(--color-fg-secondary)] tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
@@ -615,7 +615,7 @@ function BoardSummary() {
       <${ActionButton}
         variant="ghost"
         size="sm"
-        class="${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
+        class="v2-workspace-action ${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
         onClick=${() => navigate('workspace', { section: 'board', focus: 'curation' })}
         ariaLabel="보드 큐레이션 열기"
       >
@@ -627,7 +627,7 @@ function BoardSummary() {
       <${ActionButton}
         variant="ghost"
         size="sm"
-        class="!px-2"
+        class="v2-workspace-action !px-2"
         onClick=${() => navigate('workspace', { section: 'board', focus: 'karma' })}
         ariaLabel="보드 카르마 열기"
       >
@@ -695,6 +695,19 @@ function PostCard({ post }: { post: BoardPost }) {
     }
   }
 
+  const handlePin = async (event: Event) => {
+    event.stopPropagation()
+    const next = !post.pinned
+    try {
+      await setBoardPostPinned(post.id, next)
+      showToast(next ? '게시글을 고정했습니다' : '고정을 해제했습니다', 'success')
+      refreshBoard()
+    } catch (err) {
+      console.warn(`[board] pin toggle failed (post=${post.id})`, err instanceof Error ? err.message : err)
+      showToast('고정 변경에 실패했습니다', 'error')
+    }
+  }
+
   const openPost = () => navigateToPost(post.id)
   const handlePostKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
@@ -707,7 +720,7 @@ function PostCard({ post }: { post: BoardPost }) {
       role="button"
       tabIndex=${0}
       aria-label=${`게시글 열기: ${stripInlineMarkdown(post.title)}`}
-      class=${`board-post group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-20)] transition-[background-color,border-color] duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
+      class=${`board-post v2-workspace-row group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-20)] transition-[background-color,border-color] duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
       onClick=${openPost}
       onKeyDown=${handlePostKeyDown}
     >
@@ -727,7 +740,7 @@ function PostCard({ post }: { post: BoardPost }) {
           aria-label="추천"
           aria-pressed=${upvoteActive ? 'true' : 'false'}
           disabled=${upvoteActive}
-          class=${`vote-btn upvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] cursor-pointer'}`}
+          class=${`vote-btn upvote v2-workspace-action w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] cursor-pointer'}`}
           onClick=${(event: Event) => handleVote('up', event)}
         ><span aria-hidden="true">▲</span></button>
         <span
@@ -741,7 +754,7 @@ function PostCard({ post }: { post: BoardPost }) {
           aria-label="비추천"
           aria-pressed=${downvoteActive ? 'true' : 'false'}
           disabled=${downvoteActive}
-          class=${`vote-btn downvote w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)] cursor-pointer'}`}
+          class=${`vote-btn downvote v2-workspace-action w-7 h-5 flex items-center justify-center rounded-[var(--r-1)] text-2xs transition-colors border-0 bg-transparent ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)] cursor-pointer'}`}
           onClick=${(event: Event) => handleVote('down', event)}
         ><span aria-hidden="true">▼</span></button>
       </div>
@@ -780,6 +793,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <span class="text-2xs text-[var(--color-fg-muted)]">댓글 ${post.comment_count}</span>
 
           <!-- Category badges -->
+          ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
           ${post.flair ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
           ${qualityPercent !== null ? html`
@@ -793,11 +807,21 @@ function PostCard({ post }: { post: BoardPost }) {
           ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
           <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
 
-          <!-- Delete button — reveal on row hover via opacity utilities -->
+          <!-- Pin toggle (owner-gated server-side) + delete — reveal on row hover -->
+          <${ActionButton}
+            variant="ghost"
+            size="sm"
+            class="v2-workspace-action ml-auto !py-0.5 opacity-0 group-hover:opacity-100"
+            onClick=${handlePin}
+            pressed=${post.pinned ?? false}
+            ariaLabel=${post.pinned ? `고정 해제: ${post.id}` : `고정: ${post.id}`}
+          >
+            ${post.pinned ? '고정 해제' : '고정'}
+          <//>
           <${ActionButton}
             variant="danger"
             size="sm"
-            class="ml-auto !py-0.5 opacity-0 group-hover:opacity-100"
+            class="v2-workspace-action !py-0.5 opacity-0 group-hover:opacity-100"
             onClick=${handleDelete}
             disabled=${isDeleting}
             ariaBusy=${isDeleting}
@@ -867,14 +891,16 @@ export function BoardSurface() {
   if (postId) {
     return post
       ? html`
-          <${BoardSummary} />
-          <${PostDetail} post=${post} />
+          <div class="v2-workspace-surface">
+            <${BoardSummary} />
+            <${PostDetail} post=${post} />
+          </div>
         `
       : html`
-          <div>
+          <div class="v2-workspace-surface">
             <${BoardSummary} />
             <button type="button"
-              class="mb-4 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer"
+              class="v2-workspace-action mb-4 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer"
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
@@ -886,7 +912,7 @@ export function BoardSurface() {
 
   if (focus === 'mention-inbox') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${MentionInbox} />
       </div>
@@ -895,7 +921,7 @@ export function BoardSurface() {
 
   if (focus === 'messages-workspace') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${MessageWorkspaceTimeline} />
       </div>
@@ -904,7 +930,7 @@ export function BoardSurface() {
 
   if (focus === 'state-block') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${StateBlockMessages} />
       </div>
@@ -913,7 +939,7 @@ export function BoardSurface() {
 
   if (focus === 'curation') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${BoardCurationPanel} />
       </div>
@@ -922,7 +948,7 @@ export function BoardSurface() {
 
   if (focus === 'karma') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${BoardKarmaPanel} />
       </div>
@@ -930,11 +956,11 @@ export function BoardSurface() {
   }
 
   return html`
-    <div>
+    <div class="v2-workspace-surface">
       <${BoardSummary} />
       <${SortBar} />
       ${hint ? html`
-        <div class="mb-4 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
+        <div class="v2-workspace-panel mb-4 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
           ${hint}
         </div>
       ` : null}

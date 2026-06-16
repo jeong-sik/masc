@@ -133,7 +133,10 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
               trace_history = Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
               generation = meta.runtime.generation + 1 } }
         in
-        (match Keeper_meta_store.write_meta ~force:true config updated_meta with
+        (match
+           Keeper_meta_store.write_meta_with_merge
+             ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
+         with
          | Ok () ->
              Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
              Ok
@@ -698,10 +701,23 @@ let keeper_msg_result_body ~(config : Workspace.config) args : tool_result =
     tool_result_error {|{"error":"request_id is required"}|}
   else
     match Keeper_msg_async.poll ~base_path:config.base_path request_id with
-    | None ->
+    | Keeper_msg_async.Absent ->
       tool_result_error
         (Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
-    | Some entry ->
+    | Keeper_msg_async.Unreadable reason ->
+      tool_result_error
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ ("error", `String "request_record_unreadable")
+              ; ( "message"
+                , `String
+                    (Printf.sprintf
+                       "request record unreadable: %s — request was accepted but its \
+                        result is lost"
+                       reason) )
+              ; ("request_id", `String request_id)
+              ]))
+    | Keeper_msg_async.Found entry ->
       tool_result_ok (Yojson.Safe.to_string (Keeper_msg_async.entry_to_json entry))
 
 let handle_keeper_msg_result ctx args : tool_result =

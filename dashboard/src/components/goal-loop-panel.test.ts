@@ -99,9 +99,10 @@ describe('GoalLoopPanel', () => {
   })
 
   it('renders phase table, audit, and next action', () => {
-    render(html`<${GoalLoopPanel} initialStatus=${blockedStatus()} />`)
+    const { container } = render(html`<${GoalLoopPanel} initialStatus=${blockedStatus()} />`)
 
     expect(screen.getByTestId('goal-loop-panel')).toBeTruthy()
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
     expect(screen.getByRole('grid', { name: /goal loop phases/i })).toBeTruthy()
     expect(screen.getByTestId('goal-loop-audit-catalog').textContent).toContain('INCOMPLETE')
     expect(screen.getByTestId('goal-loop-corpus-missing').textContent).toContain('187')

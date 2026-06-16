@@ -28,6 +28,7 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       ; mention_user_ids : string list
       ; mentions_bot : bool
       ; explicit_mentions_bot : bool
+      ; author_is_bot : bool
       ; message_reference_channel_id : string option
       ; message_reference_message_id : string option
       ; referenced_message_author_id : string option
@@ -128,6 +129,20 @@ let set_presence (status : Discord_gateway_state.presence_status) =
   | Some mb ->
     Eio.Stream.add mb (Discord_gateway_state.Status_change status)
 
+let reader_should_continue_after_input = function
+  | Discord_gateway_state.Wss_closed _ -> false
+  | Discord_gateway_state.Connect_requested
+  | Discord_gateway_state.Frame_received _
+  | Discord_gateway_state.Frame_parse_error _
+  | Discord_gateway_state.Heartbeat_tick
+  | Discord_gateway_state.Heartbeat_ack_timeout
+  | Discord_gateway_state.Backoff_elapsed
+  | Discord_gateway_state.Status_change _ -> true
+
+module For_testing = struct
+  let reader_should_continue_after_input = reader_should_continue_after_input
+end
+
 let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let config : Discord_gateway_state.config = {
     token; intents; bot_user_id = None; trigger_policy;
@@ -155,6 +170,23 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
      used for the last reconnect attempt. *)
   let has_connected_before = ref false in
   let last_reconnect_was_resume = ref false in
+
+  let connection_is_current conn =
+    match !conn_ref with
+    | Some current -> current == conn
+    | None -> false
+  in
+
+  let enqueue_if_current conn input =
+    if connection_is_current conn then begin
+      Eio.Stream.add input_mailbox input;
+      true
+    end else begin
+      Log.Discord.debug
+        "dropping Discord gateway input from inactive WSS connection";
+      false
+    end
+  in
 
   let clock = Eio.Stdenv.clock env in
   Eio.Fiber.fork ~sw (fun () ->
@@ -185,36 +217,46 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
 
   let reader_loop conn =
     let rec loop () =
-      match Discord_wss_connection.read conn with
+      if not (connection_is_current conn) then
+        Log.Discord.debug "stopping inactive Discord gateway reader"
+      else match Discord_wss_connection.read conn with
+      | exception Eio.Cancel.Cancelled _ -> ()
       | exception End_of_file ->
-        Eio.Stream.add input_mailbox
-          (Discord_gateway_state.Wss_closed { code = 1006; reason = "eof" })
+        let (_ : bool) =
+          enqueue_if_current conn
+            (Discord_gateway_state.Wss_closed { code = 1006; reason = "eof" })
+        in
+        ()
       | exception e ->
-        Eio.Stream.add input_mailbox
-          (Discord_gateway_state.Wss_closed
-             { code = 1011; reason = Printexc.to_string e })
+        let (_ : bool) =
+          enqueue_if_current conn
+            (Discord_gateway_state.Wss_closed
+               { code = 1011; reason = Printexc.to_string e })
+        in
+        ()
       | frame ->
         (match frame_to_input frame with
          | Some inp ->
-           (* Side-channel: track heartbeat ACK arrival for I/O-layer
-              liveness detection.  The [when] guard avoids a fragile
-              catch-all on the [input] type — the state machine still
-              receives every input unchanged. *)
-           (match inp with
-            | Discord_gateway_state.Frame_received f
-              when f.op = Discord_gateway_state.Op_heartbeat_ack ->
-              Atomic.set heartbeat_ack_ok true
-            | Discord_gateway_state.Frame_received _
-            | Discord_gateway_state.Connect_requested
-            | Discord_gateway_state.Frame_parse_error _
-            | Discord_gateway_state.Wss_closed _
-            | Discord_gateway_state.Heartbeat_tick
-            | Discord_gateway_state.Heartbeat_ack_timeout
-            | Discord_gateway_state.Backoff_elapsed
-            | Discord_gateway_state.Status_change _ -> ());
-           Eio.Stream.add input_mailbox inp
-         | None -> ());
-        loop ()
+           if enqueue_if_current conn inp then begin
+             (* Side-channel: track heartbeat ACK arrival for I/O-layer
+                liveness detection.  The [when] guard avoids a fragile
+                catch-all on the [input] type — the state machine still
+                receives every input unchanged. *)
+             (match inp with
+              | Discord_gateway_state.Frame_received f
+                when f.op = Discord_gateway_state.Op_heartbeat_ack ->
+                Atomic.set heartbeat_ack_ok true
+              | Discord_gateway_state.Frame_received _
+              | Discord_gateway_state.Connect_requested
+              | Discord_gateway_state.Frame_parse_error _
+              | Discord_gateway_state.Wss_closed _
+              | Discord_gateway_state.Heartbeat_tick
+              | Discord_gateway_state.Heartbeat_ack_timeout
+              | Discord_gateway_state.Backoff_elapsed
+              | Discord_gateway_state.Status_change _ -> ());
+             if reader_should_continue_after_input inp then loop ()
+           end
+         | None -> loop ())
     in
     loop ()
   in
@@ -249,9 +291,9 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
          resolves the inner session switch's close-signal promise,
          which lets that switch return, which cancels reader/writer
          fibers and releases the socket + TLS flow. The reader's
-         pending read raises Cancelled; our reader_loop exception
-         arm pushes a redundant Wss_closed input that the state
-         machine no-ops because it is already in Reconnect_pending. *)
+         pending read raises Cancelled; reader_loop treats cancellation
+         as terminal so a stale reader cannot enqueue a late Wss_closed
+         for the next connection. *)
       Discord_observability.record_gateway_close ~code;
       (match !conn_ref with
        | Some c -> Discord_wss_connection.close c

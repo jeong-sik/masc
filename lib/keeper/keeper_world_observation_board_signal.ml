@@ -14,64 +14,27 @@ type match_result =
 
 type comment_status = [ `Never | `No_new_external | `New_external of int * string * string ]
 
-let json_string_member name fields =
-  match List.assoc_opt name fields with
-  | Some (`String value) -> Some value
-  | _ -> None
-;;
-
-let json_string_null_member name fields =
-  match List.assoc_opt name fields with
-  | Some (`String value) -> Some value
-  | Some `Null | None -> None
-  | _ -> None
-;;
-
-let json_float_null_member name fields =
-  match List.assoc_opt name fields with
-  | Some (`Float value) -> Some value
-  | Some (`Int value) -> Some (float_of_int value)
-  | Some `Null | None -> None
-  | _ -> None
-;;
-
-let board_signal_kind_of_string = function
-  | "post_created" | "post" -> Some Board_dispatch.Board_post_created
-  | "comment_added" | "comment" -> Some Board_dispatch.Board_comment_added
-  | _ -> None
-;;
-
-let of_stimulus_payload payload =
-  try
-    match Yojson.Safe.from_string payload with
-    | `Assoc fields
-      when Option.equal
-             String.equal
-             (json_string_member "source" fields)
-             (Some "board_signal") ->
-      (match
-         ( json_string_member "kind" fields
-         , json_string_member "post_id" fields
-         , json_string_member "author" fields
-         , json_string_member "title" fields
-         , json_string_member "content" fields )
-       with
-       | Some kind, Some post_id, Some author, Some title, Some content ->
-         Option.map
-           (fun kind ->
-              { Board_dispatch.kind
-              ; post_id
-              ; author
-              ; title
-              ; content
-              ; hearth = json_string_null_member "hearth" fields
-              ; updated_at = json_float_null_member "updated_at_unix" fields
-              })
-           (board_signal_kind_of_string kind)
-       | _ -> None)
-    | _ -> None
-  with
-  | Yojson.Json_error _ -> None
+(* RFC-0020: board signals are carried as a typed [Keeper_event_queue.board_stimulus]
+   end-to-end. This total conversion rebuilds the [Board_dispatch.board_signal]
+   the downstream matchers expect from the typed payload, taking the board post
+   id from the enclosing stimulus. Replaces the prior JSON re-parse of a string
+   payload (which could fail and silently drop signals). *)
+let board_signal_of_board_stimulus
+      ~(post_id : string)
+      (bs : Keeper_event_queue.board_stimulus)
+  : Board_dispatch.board_signal
+  =
+  { Board_dispatch.kind =
+      (match bs.kind with
+       | Keeper_event_queue.Post_created -> Board_dispatch.Board_post_created
+       | Keeper_event_queue.Comment_added -> Board_dispatch.Board_comment_added)
+  ; post_id
+  ; author = bs.author
+  ; title = bs.title
+  ; content = bs.content
+  ; hearth = bs.hearth
+  ; updated_at = bs.updated_at
+  }
 ;;
 
 let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
@@ -208,25 +171,47 @@ let stigmergy_match ~(meta : keeper_meta) ~(signal : Board_dispatch.board_signal
   { overall_score = min score 50 }
 ;;
 
+(** Why a keeper woke for a board signal. Closed set replacing the prior
+    [string option] producer/consumer contract (RFC-0020): the matchers in
+    {!wake_reason} are the only producers, so a reason no matcher emits — e.g.
+    the previously dead ["board_activity"] generic bucket the consumer used to
+    match — is now unrepresentable rather than a string the consumer guesses
+    at. [None] stays an [option] at the call site: it means the relevance
+    pipeline examined the signal and found nothing for this keeper. *)
+type wake_reason =
+  | Explicit_mention
+      (** The signal mentions one of the keeper's identity targets. *)
+  | Stigmergy of { score : int }
+      (** The signal text overlaps the keeper's goal keywords; [score] is the
+          match strength from {!stigmergy_match}. *)
+  | Thread_reply_after_self_comment
+      (** A new external comment arrived on a post the keeper had commented on. *)
+
+let wake_reason_label = function
+  | Explicit_mention -> "explicit_mention"
+  | Stigmergy { score } -> "stigmergy: score=" ^ string_of_int score
+  | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
+;;
+
 let wake_reason
       ~continuity_summary
       ~(meta : keeper_meta)
       ~(signal : Board_dispatch.board_signal)
-  : string option
+  : wake_reason option
   =
   let matched = match_signal ~continuity_summary ~meta ~signal in
   if matched.explicit_mention
-  then Some "explicit_mention"
+  then Some Explicit_mention
   else (
     let stigmergy = stigmergy_match ~meta ~signal in
     if stigmergy.overall_score > 0
-    then Some ("stigmergy: score=" ^ string_of_int stigmergy.overall_score)
+    then Some (Stigmergy { score = stigmergy.overall_score })
     else (
       let self_ids = Message_scope.self_ids meta in
       match signal.kind with
       | Board_dispatch.Board_comment_added ->
         (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
-         | `New_external _ -> Some "thread_reply_after_self_comment"
+         | `New_external _ -> Some Thread_reply_after_self_comment
          | `Never | `No_new_external -> None)
       | Board_dispatch.Board_post_created -> None))
 ;;

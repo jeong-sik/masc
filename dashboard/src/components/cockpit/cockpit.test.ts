@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
 import { route } from '../../router'
+import { COCKPIT_ENTRYPOINTS } from '../../cockpit-entrypoints'
 import { Cockpit } from './cockpit'
 
 vi.mock('../world-visualizer', () => ({
@@ -31,6 +32,12 @@ describe('Cockpit command map', () => {
     expect(document.querySelectorAll('[data-cockpit-plane]')).toHaveLength(5)
     expect(document.querySelector('[data-cockpit-plane="work"]')).toHaveTextContent('2 covered')
     expect(document.querySelector('[data-cockpit-plane="ide"]')).toHaveTextContent('Source')
+
+    expect(document.querySelector('.v2-cockpit-surface')).not.toBeNull()
+    expect(document.querySelector('.v2-cockpit-header')).not.toBeNull()
+    expect(document.querySelector('.v2-cockpit-disclosure')).not.toBeNull()
+    expect(document.querySelectorAll('.v2-cockpit-plane')).toHaveLength(5)
+    expect(document.querySelectorAll('.v2-cockpit-route')).toHaveLength(COCKPIT_ENTRYPOINTS.length)
   })
 
   it('renders progressive disclosure levels over the route map', () => {

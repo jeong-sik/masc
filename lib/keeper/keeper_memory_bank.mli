@@ -255,20 +255,39 @@ val memory_candidates_from_snapshot :
 (** Lift snapshot fields into candidate triples and run the cap +
     selection pipeline. *)
 
-val memory_candidates_from_snapshot_source :
-  state_snapshot_source:string ->
+val memory_candidates_from_snapshot_gated :
+  is_synthetic:bool ->
   keeper_state_snapshot ->
   candidate_selection_result
-(** Source-aware variant used by post-turn persistence. Runtime-synthesized
-    snapshots are resume aids, not model-authored durable memory. *)
+(** Gated variant used by post-turn persistence. When [is_synthetic] (the
+    snapshot was fabricated from run metadata, not model-authored), no durable
+    memory candidates are produced — synthetic snapshots are resume aids only. *)
 
 (** {1 Bank wire format} *)
+
+type memory_row_source =
+  | Progress_consolidation
+  | Cross_trace_recurrence
+  | Tool_result
+  | Voice_output
+  | Other of string
+      (** Provenance of a memory-bank row. Parsed from the JSONL [source]
+          string on read; [Other] carries an out-of-band producer's literal so
+          the wire value round-trips (parse-don't-validate). *)
+
+val memory_row_source_of_string : string -> memory_row_source
+(** Total parse of a persisted [source] string. Unknown values become
+    [Other s]; never raises. *)
+
+val memory_row_source_to_string : memory_row_source -> string
+(** Inverse of {!memory_row_source_of_string} for the wire format.
+    [to_string (of_string s) = s] for every [s]. *)
 
 type keeper_memory_row_raw = {
   json : Yojson.Safe.t;
   kind : string;
   horizon : string;
-  source : string;
+  source : memory_row_source;
   generation : int;
   text : string;
   priority : int;
@@ -339,7 +358,7 @@ val append_memory_notes_from_reply :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   ?snapshot:keeper_state_snapshot ->
-  ?state_snapshot_source:string ->
+  ?state_snapshot_source:Keeper_memory_policy.state_snapshot_source ->
   turn:int -> reply:string -> unit -> int * string list
 (** Persist new memory rows derived from a turn's [reply] (and
     optional [snapshot]); returns [(rows_written, drop_reasons)]. *)

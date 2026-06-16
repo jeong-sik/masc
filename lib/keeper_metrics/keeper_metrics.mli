@@ -113,6 +113,7 @@ type t =
   | CycleExceptions
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
+  | PromptUnknownToolTokens
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
@@ -194,7 +195,7 @@ type t =
   | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
-  | StaySilentLoopDetected
+  | NoProgressLoopDetected
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures

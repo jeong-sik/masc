@@ -4,7 +4,7 @@
     subsystem-spawning functions into a focused module. *)
 
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
-  Governance_pipeline.install ~config:state.workspace_config ~governance_level
+  Governance_pipeline.install ~config:(Mcp_server.workspace_config state) ~governance_level
 ;;
 
 (* Stable djb2-style hash for the autoboot warmup jitter.
@@ -160,6 +160,10 @@ let trimmed_env_opt name =
 
 let discord_bot_token_opt () = trimmed_env_opt "DISCORD_BOT_TOKEN"
 
+let broadcast_mention_wakeup_action = function
+  | Some target when String.trim target <> "" -> `Wake_keeper target
+  | Some _ | None -> `Suppress_no_target
+
 module For_testing = struct
   type queued_chat_projection = {
     payload_channel : string;
@@ -171,6 +175,7 @@ module For_testing = struct
 
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
   let board_sse_event_params = board_sse_event_params
+  let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
 
   let queued_chat_projection queued_message : queued_chat_projection =
     let projection = queued_chat_projection queued_message in
@@ -342,8 +347,8 @@ let start_keeper_loops
   in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
-  Keeper_event_bridge.start ~sw ~clock ~config:state.workspace_config ~bus:event_bus;
-  Keeper_event_bridge.start ~sw ~clock ~config:state.workspace_config ~bus:masc_event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:masc_event_bus;
   (* Compaction audit: subscribe to ContextCompactStarted/ContextCompacted and
      persist paired rows to [base_path/data/harness-compact/YYYY-MM/DD.jsonl]
      with rolling 14-day retention (override via
@@ -357,7 +362,8 @@ let start_keeper_loops
     event_bus;
   (* Telemetry feedback loop: observe OAS per-turn signals without
      deserializing provider/model-bearing payloads. *)
-  Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;
+  Keeper_telemetry_consumer.spawn_subscriber
+    ~sw ~clock ~base_path:(Env_config.base_path ()) ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk_metrics_bridge.subscribe
       ~purpose:"lifecycle_listener"
@@ -436,7 +442,7 @@ let start_keeper_loops
   Keeper_keepalive.set_bus event_bus;
   Board_dispatch.set_board_signal_hook (fun signal ->
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
-      ~config:state.workspace_config
+      ~config:(Mcp_server.workspace_config state)
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
@@ -527,7 +533,7 @@ let start_keeper_loops
     try
       ignore
         (Activity_graph.emit
-           state.workspace_config
+           (Mcp_server.workspace_config state)
            ~actor:activity_actor
            ?subject:activity_subject
            ~kind:activity_kind
@@ -541,24 +547,25 @@ let start_keeper_loops
         "board: Activity_graph.emit kind=%s failed: %s"
         activity_kind
         (Printexc.to_string exn));
-  (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
-     can react to new tasks, mentions, or workspace activity immediately.
-     SSOT: Workspace_broadcast.on_broadcast_mention is the single ref wired here. *)
+  (* Wire broadcast -> keeper wakeup. Explicit mentions wake the target
+     keeper immediately; unmentioned broadcasts remain passive SSE/message
+     fanout so one broad announcement cannot create a fleet-wide turn storm.
+     Board signals have their own capped keeper wake path above. *)
   let broadcast_mention_handler =
     fun mention ->
-    match mention with
-    | Some target ->
-      Keeper_keepalive.wakeup_keeper ~base_path:state.workspace_config.base_path target;
+    match broadcast_mention_wakeup_action mention with
+    | `Wake_keeper target ->
+      Keeper_keepalive.wakeup_keeper ~base_path:(Mcp_server.workspace_config state).base_path target;
       Log.Keeper.info "broadcast mention → wakeup keeper %s" target
-    | None ->
-      Keeper_keepalive.wakeup_all_keepers ~base_path:state.workspace_config.base_path ();
-      Log.Keeper.info "broadcast → wakeup all keepers (reactive push)"
+    | `Suppress_no_target ->
+      Log.Keeper.info
+        "broadcast without mention -> keeper wakeup suppressed (passive fanout)"
   in
   Workspace_broadcast.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
      let cancel_orchestrator =
-       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.workspace_config
+       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr (Mcp_server.workspace_config state)
      in
      Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator
    with
@@ -587,7 +594,7 @@ let start_keeper_loops
   in
   let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t) : Tool_result.result =
     let start_time = Time_compat.now () in
-    let config = state.workspace_config in
+    let config = (Mcp_server.workspace_config state) in
     let agent_name = actor in
     let ctx_workspace : Tool_workspace.context = { config; agent_name } in
     let ctx_task : Task.Tool.context = { config; agent_name; sw = Some sw } in
@@ -632,7 +639,7 @@ let start_keeper_loops
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in
   fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =
-      { config = state.workspace_config
+      { config = (Mcp_server.workspace_config state)
       ; agent_name = "operator-judge"
       ; sw
       ; clock
@@ -645,7 +652,7 @@ let start_keeper_loops
       ~sw
       ~clock
       ~net
-      ~config:state.workspace_config
+      ~config:(Mcp_server.workspace_config state)
       ~masc_tools:judge_masc_tools
       ~dispatch:operator_judge_dispatch
       ~build_facts:(fun () ->
@@ -662,7 +669,7 @@ let start_keeper_loops
     let interval = Env_config_runtime.Verification.timeout_check_interval_seconds in
     let rec loop () =
       Eio.Time.sleep clock interval;
-      Verification_protocol.check_timeouts ~config:state.workspace_config;
+      Verification_protocol.check_timeouts ~config:(Mcp_server.workspace_config state);
       loop ()
     in
     loop ());
@@ -715,7 +722,7 @@ let start_keeper_loops
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
-      let config = state.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
       let all_names = Keeper_meta_store.keeper_names config in
@@ -900,7 +907,7 @@ let start_keeper_loops
          handle_turn wires process_single_turn for actual turn execution. *)
       (try
          Keeper_chat_consumer.start ~sw ~clock
-           ~base_path:state.Mcp_server.workspace_config.base_path
+           ~base_path:(Mcp_server.workspace_config state).base_path
            ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in
@@ -1002,7 +1009,7 @@ let start_keeper_loops
   (* Discord presence bridge — syncs keeper liveness to bot status. *)
   fork_subsystem "discord_presence" (fun () ->
     Discord_presence_bridge.start
-      ~sw ~clock ~workspace_config:state.workspace_config ());
+      ~sw ~clock ~workspace_config:(Mcp_server.workspace_config state) ());
   (* Phase 5: unified startup subsystem summary *)
   Log.Startup.info "subsystems: keeper loops started"
 ;;

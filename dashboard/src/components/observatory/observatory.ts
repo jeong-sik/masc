@@ -116,7 +116,7 @@ function RangeSelector() {
       ${TIME_RANGE_PRESETS.map((preset: TimeRangePreset) => html`
         <button
           type="button"
-          class="rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
+          class="v2-monitoring-action rounded-[var(--r-1)] px-2 py-0.5 font-medium transition-colors ${
             current === preset
               ? 'bg-[var(--accent-20)] text-accent-fg'
               : 'text-text-muted hover:text-text-strong hover:bg-[var(--color-bg-elevated)]'
@@ -207,7 +207,7 @@ export function Observatory() {
   const data = state.value
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="v2-monitoring-surface flex flex-col gap-5">
       <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="flex flex-col gap-0.5">
           <h3 class="text-sm font-semibold text-text-strong">Observatory</h3>
@@ -230,7 +230,7 @@ export function Observatory() {
         </div>
       ` : null}
 
-      <div class="flex flex-col gap-2 rounded-[var(--r-1)] border border-card-border bg-card/30 p-4">
+      <div class="v2-monitoring-panel flex flex-col gap-2 rounded-[var(--r-1)] border border-card-border bg-card/30 p-4">
         <${TimeAxis} windowStart=${data.windowStart} windowEnd=${data.windowEnd} />
         <${EventTrack}
           events=${data.events}

@@ -15,13 +15,13 @@ export function AgentJournalStream({ agentName }: { agentName: string }) {
     : '실시간 활동 스트림'
 
   return html`
-    <${CollapsibleSection} title=${title} mountWhenOpen=${true}>
+    <${CollapsibleSection} class="v2-monitoring-detail" title=${title} mountWhenOpen=${true}>
       ${entries.length === 0
         ? html`<${EmptyState} message="아직 활동 기록이 없습니다" compact />`
         : html`
             <div role="log" aria-label="에이전트 활동 로그" class="flex flex-col gap-0.5 max-h-70 overflow-y-auto">
               ${entries.map((entry: JournalEntry, idx: number) => html`
-                <div class="agent-journal-entry flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)]" key=${idx}>
+                <div class="agent-journal-entry v2-monitoring-row flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-[var(--t-fast)] rounded-[var(--r-1)] hover:bg-[var(--color-bg-elevated)]" key=${idx}>
                   <span class="agent-journal-kind">${journalKindIcon(entry)}</span>
                   <span class="agent-journal-type">${entry.eventType}</span>
                   <span class="agent-journal-text">${trimText(entry.text, 120) ?? ''}</span>

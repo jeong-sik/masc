@@ -12,9 +12,9 @@
 
 let entry_of ?(seq = 0) ?(ts = "2026-05-14T00:00:00Z") ?(level = Log.Info)
     ?(source = Log.Structured) ?(module_name = "Test") ?keeper_name ?turn_id
-    ?(message = "hello") ?(details = `Null) () : Log.Ring.entry =
+    ?(message = "hello") ?(details = `Null) ?(category = None) () : Log.Ring.entry =
   { Log.Ring.seq; ts; level; source; module_name; keeper_name; turn_id;
-    message; details }
+    message; details; category }
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -57,7 +57,7 @@ let test_wire_format_field_set () =
   let json = Log.Ring.entry_to_json e in
   let expected_keys =
     [ "seq"; "ts"; "level"; "source"; "module"; "keeper_name";
-      "turn_id"; "message"; "details" ]
+      "turn_id"; "message"; "details"; "category" ]
   in
   let absent_legacy_keys =
     [ "raw_level"; "normalized_level"; "legacy_classified" ]

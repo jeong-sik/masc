@@ -31,7 +31,7 @@ import {
 
 function StatCard({ value, label }: { value: number; label: string }) {
   return html`
-    <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] flex flex-col gap-1.5">
+    <div class="v2-lab-card p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] flex flex-col gap-1.5">
       <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${value}</span>
       <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">${label}</span>
     </div>
@@ -202,7 +202,7 @@ export function FullInventoryView({
     </div>
 
     <button type="button"
-      class=${`tool-back-to-top${showBackToTop.value ? ' visible' : ''}`}
+      class=${`v2-lab-action tool-back-to-top${showBackToTop.value ? ' visible' : ''}`}
       onClick=${scrollToTop}
       aria-label="목록 맨 위로 이동"
       title="맨 위로"

@@ -77,12 +77,14 @@ describe('BoardModerationSurface', () => {
   })
 
   it('renders queue entries with moderation state', async () => {
-    render(h(BoardModerationSurface, null))
+    const { container } = render(h(BoardModerationSurface, null))
 
     expect(await screen.findByText('post-1')).toBeTruthy()
     expect(screen.getByText('spam')).toBeTruthy()
     expect(screen.getByText('keeper-a')).toBeTruthy()
     expect(screen.getByText('open')).toBeTruthy()
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-workspace-panel')).not.toBeNull()
     expect(fetchQueueMock).toHaveBeenCalledWith(expect.objectContaining({
       resolved: false,
       signal: expect.any(AbortSignal),
@@ -144,19 +146,19 @@ describe('BoardModerationSurface', () => {
   })
 
   it('defaults the reporter to the current dashboard actor', async () => {
-    setCanonicalDashboardActor('agent-code')
+    setCanonicalDashboardActor('codex')
     fetchQueueMock.mockResolvedValueOnce({ count: 0, entries: [] })
     render(h(BoardModerationSurface, null))
 
     await waitFor(() => expect(fetchQueueMock).toHaveBeenCalledTimes(1))
-    expect(screen.getByTestId('moderation-reporter')).toHaveValue('agent-code')
+    expect(screen.getByTestId('moderation-reporter')).toHaveValue('codex')
     fireEvent.input(screen.getByTestId('moderation-target-id'), { target: { value: 'post-2' } })
     fireEvent.click(screen.getByTestId('moderation-flag-submit'))
 
     await waitFor(() => expect(flagTargetMock).toHaveBeenCalledWith({
       target_kind: 'post',
       target_id: 'post-2',
-      reporter: 'agent-code',
+      reporter: 'codex',
       reason: 'spam',
     }))
   })

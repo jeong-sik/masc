@@ -11,6 +11,8 @@ open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 
+module Board_wake = Keeper_world_observation_board_signal
+
 type grpc_heartbeat_starter_fn = {
   f : 'a. ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option;
 }
@@ -226,97 +228,123 @@ let wakeup_all_keepers ?base_path () =
 
 let board_reactive_debounce_sec = 60.0
 
-let board_reactive_generic_wakeup_limit =
-  Keeper_config.int_of_env_default
-    "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT"
-    ~default:3
-    ~min_v:0
-    ~max_v:20
-;;
-
 let board_reactive_wakeup_max =
   Keeper_config.int_of_env_default
     "MASC_KEEPER_BOARD_WAKEUP_MAX" ~default:4 ~min_v:1 ~max_v:64
 ;;
 
-let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
+(* RFC-0239 R4: collapse runs of whitespace and lowercase so trivial spacing
+   or case differences do not split a re-post into a fresh dedup key. *)
+let normalize_for_fingerprint s =
+  let b = Buffer.create (String.length s) in
+  let prev_space = ref true in
+  String.iter
+    (fun c ->
+      match Char.lowercase_ascii c with
+      | ' ' | '\t' | '\n' | '\r' ->
+        if not !prev_space then Buffer.add_char b ' ';
+        prev_space := true
+      | c ->
+        Buffer.add_char b c;
+        prev_space := false)
+    s;
+  let r = Buffer.contents b in
+  let n = String.length r in
+  if n > 0 && r.[n - 1] = ' ' then String.sub r 0 (n - 1) else r
+;;
+
+(* RFC-0239 R4: a keeper that re-posts the same conclusion mints a fresh
+   post_id every cycle, so the prior post_id-keyed debounce never matched
+   across re-posts. Key the debounce on a fingerprint of normalized
+   (author,title,content) so identical re-posts collapse into one peer wake per
+   window. Empty title+content falls back to post_id so content-less signals
+   keep their original per-post behaviour. *)
+let board_wakeup_dedup_key ~post_id ~author ~title ~content =
+  if String.trim (title ^ content) = "" then post_id
+  else (
+    let normalized = normalize_for_fingerprint (title ^ "\n" ^ content) in
+    "cfp:" ^ Digest.to_hex (Digest.string (author ^ "\x00" ^ normalized)))
+;;
+
+let board_reactive_wakeup_allowed
+      ~base_path
+      ~keeper_name
+      ~(signal : Board_dispatch.board_signal)
+  =
   Keeper_registry.board_wakeup_allowed
     ~base_path
     keeper_name
-    ~post_id
+    ~dedup_key:
+      (board_wakeup_dedup_key
+         ~post_id:signal.post_id
+         ~author:signal.author
+         ~title:signal.title
+         ~content:signal.content)
     ~debounce_sec:board_reactive_debounce_sec
 ;;
 
 let take = List.take
 
+(* RFC-0020: select which keepers wake for a board signal from typed
+   [Board_wake.wake_reason] candidates. Explicit mentions short-circuit and
+   wake unconditionally; every other reason competes for [total_limit] slots
+   in candidate order. [None] reasons are dropped (the relevance pipeline
+   found nothing for that keeper). The prior generic ["board_activity"]
+   throttle bucket is gone: the producer never emitted it, so it never fired —
+   typing the carrier made that dead branch unrepresentable. *)
 let select_board_wakeup_candidates
-    ?(generic_limit = board_reactive_generic_wakeup_limit)
     ?(total_limit = board_reactive_wakeup_max)
     candidates =
   let explicit =
     candidates
     |> List.filter_map (fun (item, reason) ->
       match reason with
-      | Some "explicit_mention" -> Some (item, "explicit_mention")
-      | _ -> None)
+      | Some Board_wake.Explicit_mention -> Some (item, Board_wake.Explicit_mention)
+      | Some (Board_wake.Stigmergy _ | Board_wake.Thread_reply_after_self_comment)
+      | None -> None)
   in
   match explicit with
   | _ :: _ -> explicit, 0
   | [] ->
-    let selected_by_reason, generic_dropped =
-      List.fold_left
-        (fun (selected, generic_seen, generic_dropped) (item, reason) ->
-          match reason with
-          | None -> selected, generic_seen, generic_dropped
-          | Some "board_activity" ->
-            let next_seen = generic_seen + 1 in
-            if generic_seen < generic_limit then
-              (item, "board_activity") :: selected, next_seen, generic_dropped
-            else
-              selected, next_seen, generic_dropped + 1
-          | Some reason -> (item, reason) :: selected, generic_seen, generic_dropped)
-        ([], 0, 0)
+    let non_explicit =
+      List.filter_map
+        (fun (item, reason) ->
+          match reason with None -> None | Some r -> Some (item, r))
         candidates
-      |> fun (selected_rev, _generic_seen, generic_dropped) ->
-      List.rev selected_rev, generic_dropped
     in
-    let prioritized =
-      let non_generic, generic =
-        List.partition (fun (_, reason) -> reason <> "board_activity")
-          selected_by_reason
-      in
-      non_generic @ generic
-    in
-    let selected = take total_limit prioritized in
-    let total_dropped = List.length prioritized - List.length selected in
-    selected, generic_dropped + total_dropped
+    let selected = take total_limit non_explicit in
+    let dropped = List.length non_explicit - List.length selected in
+    selected, dropped
 ;;
 
-let board_signal_kind_to_string = function
-  | Board_dispatch.Board_post_created -> "post_created"
-  | Board_dispatch.Board_comment_added -> "comment_added"
-;;
-
-let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.board_signal) =
-  let payload =
-    `Assoc
-      [ "source", `String "board_signal"
-      ; "kind", `String (board_signal_kind_to_string signal.kind)
-      ; "post_id", `String signal.post_id
-      ; "author", `String signal.author
-      ; "title", `String signal.title
-      ; "content", `String signal.content
-      ; "hearth", Json_util.string_opt_to_json signal.hearth
-      ; ( "updated_at_unix", Json_util.float_opt_to_json signal.updated_at )
-      ; "wake_reason", `String reason
-      ]
-    |> Yojson.Safe.to_string
+(* RFC-0020: enqueue the board signal as a typed [stimulus_payload] (PR-1).
+   [reason] is the typed {!Board_wake.wake_reason} that selected this keeper;
+   here it only picks urgency (explicit mentions are [Immediate]). It is not
+   carried in the payload — the next prompt re-derives board context from the
+   typed [Board_signal] payload, not from a wake-reason string. *)
+let board_signal_stimulus
+      ~(reason : Board_wake.wake_reason)
+      (signal : Board_dispatch.board_signal)
+  =
+  let payload : Keeper_event_queue.stimulus_payload =
+    Keeper_event_queue.Board_signal
+      { kind =
+          (match signal.kind with
+           | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
+           | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added)
+      ; author = signal.author
+      ; title = signal.title
+      ; content = signal.content
+      ; hearth = signal.hearth
+      ; updated_at = signal.updated_at
+      }
   in
   { Keeper_event_queue.post_id = signal.post_id
   ; urgency =
-      (if String.equal reason "explicit_mention"
-       then Keeper_event_queue.Immediate
-       else Keeper_event_queue.Normal)
+      (match reason with
+       | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
+       | Board_wake.Stigmergy _ | Board_wake.Thread_reply_after_self_comment ->
+         Keeper_event_queue.Normal)
   ; arrived_at = Time_compat.now ()
   ; payload
   }
@@ -326,6 +354,12 @@ let board_signal_entry_is_wakeup_candidate (entry : Keeper_registry.registry_ent
   match entry.phase with
   | Keeper_state_machine.Running | Keeper_state_machine.Paused -> true
   | _ -> false
+;;
+
+let paused_meta_allows_board_auto_resume (meta : keeper_meta) =
+  meta.paused
+  && Option.is_some
+       (Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta)
 ;;
 
 let board_signal_wake_paused_keeper
@@ -362,13 +396,16 @@ let board_signal_wake_paused_keeper
 
 let board_signal_wake_keeper
       ~(config : Workspace.config)
-      ~(reason : string)
+      ~(reason : Board_wake.wake_reason)
       ~(signal : Board_dispatch.board_signal)
       (meta : keeper_meta)
   =
   let stimulus = board_signal_stimulus ~reason signal in
   if meta.paused
-  then board_signal_wake_paused_keeper ~config ~stimulus meta
+  then
+    if paused_meta_allows_board_auto_resume meta
+    then board_signal_wake_paused_keeper ~config ~stimulus meta
+    else Ok ()
   else (
     wakeup_keeper ~base_path:config.base_path ~stimulus meta.name;
     Ok ())
@@ -420,7 +457,8 @@ let wakeup_relevant_keeper_for_board_signal
                ()
            | None, _ | Some _, _ -> ());
           (match entry.phase, wake_reason with
-           | Keeper_state_machine.Paused, Some "explicit_mention" ->
+           | Keeper_state_machine.Paused, Some Board_wake.Explicit_mention
+             when paused_meta_allows_board_auto_resume meta ->
              Some (meta, wake_reason)
            | Keeper_state_machine.Paused, _ -> None
            | Keeper_state_machine.Running, _ -> Some (meta, wake_reason)
@@ -435,21 +473,21 @@ let wakeup_relevant_keeper_for_board_signal
       board_reactive_wakeup_allowed
         ~base_path:config.base_path
         ~keeper_name:meta.name
-        ~post_id:signal.post_id
+        ~signal
     then (
       match board_signal_wake_keeper ~config ~reason ~signal meta with
       | Ok () ->
         Log.Keeper.info
           "board signal wakeup: keeper=%s reason=%s post=%s paused_auto_resume=%b"
           meta.name
-          reason
+          (Board_wake.wake_reason_label reason)
           signal.post_id
           meta.paused
       | Error err ->
         Log.Keeper.warn
           "board signal wakeup failed: keeper=%s reason=%s post=%s error=%s"
           meta.name
-          reason
+          (Board_wake.wake_reason_label reason)
           signal.post_id
           err)
   in
@@ -470,10 +508,9 @@ let wakeup_relevant_keeper_for_board_signal
       ();
     Log.Keeper.info
       "board signal wakeup capped by configured fanout: dropped=%d post=%s \
-       generic_limit=%d total_limit=%d"
+       total_limit=%d"
       dropped
       signal.post_id
-      board_reactive_generic_wakeup_limit
       board_reactive_wakeup_max
   end
 ;;

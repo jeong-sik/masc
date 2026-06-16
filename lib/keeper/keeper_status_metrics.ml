@@ -119,9 +119,6 @@ let empty_tool_audit_snapshot =
     tool_audit_at = None;
   }
 
-let is_scheduled_autonomous_channel =
-  Keeper_world_observation.is_autonomous_channel
-
 let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
   let interaction_points = s.turn_points + s.proactive_points in
   let intervention_share =
@@ -265,10 +262,20 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           Safe_ops.json_int ~default:default_generation "generation" j
         in
         let channel = Safe_ops.json_string ~default:"turn" "channel" j in
-        let is_turn = channel = "turn" in
-        let is_heartbeat = channel = "heartbeat" in
+        let parsed_channel = Keeper_world_observation.channel_of_string channel in
+        let is_turn =
+          match parsed_channel with
+          | Some Keeper_world_observation.Reactive -> true
+          | _ -> false
+        in
+        (* "heartbeat" is a status-tick marker outside the keeper_cycle_channel
+           taxonomy, so it is matched on the raw wire string, not the typed
+           parse (which returns None for it). *)
+        let is_heartbeat = String.equal channel "heartbeat" in
         let is_scheduled_autonomous =
-          is_scheduled_autonomous_channel channel
+          match parsed_channel with
+          | Some c -> Keeper_world_observation.is_autonomous c
+          | None -> false
         in
         let is_interaction = is_turn || is_scheduled_autonomous in
         let compacted = Safe_ops.json_bool ~default:false "compacted" j in

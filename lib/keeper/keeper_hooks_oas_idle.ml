@@ -14,9 +14,7 @@ let suggest_alternatives ~(allowed_tools : string list)
     List.fold_left (fun acc t -> SS.add t acc) SS.empty repeated_tools
   in
   allowed_tools
-  |> List.filter (fun t ->
-       not (SS.mem t repeated_set)
-       && t <> "keeper_stay_silent")
+  |> List.filter (fun t -> not (SS.mem t repeated_set))
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates
@@ -24,8 +22,40 @@ let suggest_alternatives ~(allowed_tools : string list)
 
 let includes_tool name tools = List.exists (String.equal name) tools
 
+let schema_visible_name name =
+  match Keeper_tool_visibility_projection.public_alias_for_internal name with
+  | Some public_name -> public_name
+  | None -> name
+
+let schema_visible_keep_order names =
+  names
+  |> List.map schema_visible_name
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+
+let allowed_visible_candidates candidates ~allowed_tools =
+  candidates
+  |> List.filter (fun name -> includes_tool name allowed_tools)
+  |> schema_visible_keep_order
+
 let recovery_hint ~allowed_tools ~tool_names =
-  if includes_tool "keeper_tools_list" tool_names then
+  if includes_tool "keeper_tool_search" tool_names then
+    Some
+      (let code_search =
+         allowed_visible_candidates
+           [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute" ]
+           ~allowed_tools
+       in
+       let next =
+         match code_search with
+         | [] -> "Use a visible file/content search tool if one is active."
+         | names ->
+           Printf.sprintf
+             "For source files, functions, types, or symbols, switch to %s."
+             (String.concat " then " names)
+       in
+       "keeper_tool_search discovers active tool schemas only; it does not search \
+        repository files, definitions, functions, types, or symbols. " ^ next)
+  else if includes_tool "keeper_tools_list" tool_names then
     Some
       (if includes_tool "keeper_surface_read" allowed_tools then
          "keeper_tools_list lists capabilities, not connected-surface or lane \
@@ -50,10 +80,13 @@ let recovery_hint ~allowed_tools ~tool_names =
       | [ one ] -> one
       | many -> String.concat " or " many
     in
+    (* The routable tool is keeper_board_post_get; "keeper_board_get" has no
+       dispatch route (models hallucinate it, which is why both names trigger
+       this hint above) — the nudge must name the tool that actually exists. *)
     Some
       (Printf.sprintf
-         "keeper_board_get requires post_id; if no post_id is visible, use %s first. \
-          Do not call keeper_board_get with {}."
+         "keeper_board_post_get requires post_id; if no post_id is visible, use %s first. \
+          Do not call keeper_board_post_get with {}."
          discovery)
   else
     None
@@ -64,7 +97,7 @@ let recovery_hint ~allowed_tools ~tool_names =
     [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:
     - For idle counts below [skip_at - 1]: gentle nudge suggesting alternatives
     - For idle counts at [skip_at - 1]: final warning (stronger nudge)
-      suggesting [stay_silent]
+      suggesting a different visible tool or a text/no-work completion
     - For idle counts at or above [skip_at]: Skip (end this turn, but the
       heartbeat loop will retry next cycle)
 
@@ -88,17 +121,25 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
       suggest_alternatives ~allowed_tools ~repeated_tools:tool_names
         ~max_suggestions:5
     in
-    if includes_tool "keeper_tools_list" tool_names
-       && includes_tool "keeper_surface_read" allowed_tools
-    then
-      Keeper_types_profile_toml_normalizers.dedupe_keep_order
-        ("keeper_surface_read" :: base)
-      |> List.filteri (fun i _ -> i < 5)
-    else
-      base
+    let preferred =
+      if includes_tool "keeper_tool_search" tool_names then
+        allowed_visible_candidates
+          [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute" ]
+          ~allowed_tools
+      else if includes_tool "keeper_tools_list" tool_names
+              && includes_tool "keeper_surface_read" allowed_tools
+      then
+        [ "keeper_surface_read" ]
+      else
+        []
+    in
+    Keeper_types_profile_toml_normalizers.dedupe_keep_order
+      (preferred @ base)
+    |> schema_visible_keep_order
+    |> List.filteri (fun i _ -> i < 5)
   in
   let alt_str = match alternatives with
-    | [] -> "keeper_tool_search or keeper_stay_silent"
+    | [] -> "a different visible tool, or finish with a direct no-work/status response"
     | alts -> String.concat ", " alts
   in
   let hint = recovery_hint ~allowed_tools ~tool_names in
@@ -114,7 +155,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
       (append_hint
          (Printf.sprintf
             "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
-             Use one of these instead: %s — or call keeper_stay_silent to do nothing."
+             Use one of these instead: %s."
             tools_str consecutive_idle_turns alt_str))
   else
     Agent_sdk.Hooks.Nudge

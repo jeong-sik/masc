@@ -321,7 +321,31 @@ let add_delete_action_routes router =
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
                  respond_error ~status:`Not_found ~request:req reqd
-                   (Board_types.show_board_error err)
+                   (Board_tool.board_error_to_string err)
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "post_id")
+         )
+       ) request reqd)
+
+  (* Pin is an operator-curated board mutation: same CanAdmin gate and auth
+     helper as board/delete, so it lives alongside it rather than as an
+     agent-facing MCP tool (which would let any keeper self-pin). *)
+  |> Http.Router.post "/api/v1/dashboard/board/pin" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match Safe_ops.json_string_opt "post_id" json with
+             | None ->
+                 respond_error ~request:req reqd (invalid_request "post_id")
+             | Some post_id ->
+             let pinned = Safe_ops.json_bool ~default:true "pinned" json in
+             match Board_dispatch.set_pinned ~post_id ~pinned with
+             | Ok () -> respond_ok ~request:req reqd
+             | Error err ->
+                 respond_error ~status:`Not_found ~request:req reqd
+                   (Board_tool.board_error_to_string err)
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "post_id")
          )
@@ -337,7 +361,7 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "task_id")
              | Some task_id ->
-             let config = state.Mcp_server.workspace_config in
+             let config = (Mcp_server.workspace_config state) in
              match Task.Dispatch.delete_task config ~task_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
@@ -359,7 +383,7 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "goal_id")
              | Some goal_id ->
-             let config = state.Mcp_server.workspace_config in
+             let config = (Mcp_server.workspace_config state) in
              match Goal_store.delete_goal config ~goal_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error msg ->
@@ -379,7 +403,7 @@ let add_delete_action_routes router =
              | None ->
                respond_error ~request:req reqd (invalid_request "agent_name")
              | Some requested_name ->
-               let config = state.Mcp_server.workspace_config in
+               let config = (Mcp_server.workspace_config state) in
                (match resolve_keeper_purge_target config requested_name with
                 | Some keeper_target ->
                   let toml_deleted = Option.is_some keeper_target.toml_path in
@@ -560,7 +584,7 @@ let add_delete_action_routes router =
                                      (match Board_dispatch.delete_post ~post_id:target_id with
                                       | Ok () -> None
                                       | Error e ->
-                                          Some (Board_types.show_board_error e))
+                                          Some (Board_tool.board_error_to_string e))
                                  | Board_moderation.Target_comment ->
                                      (* Comment removal not yet backed by dispatch; note only *)
                                      None)

@@ -10,9 +10,13 @@ let remote_confirm_ttl_seconds = 900.0
 
 let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
   let runtime_status =
-    match Keeper_status_runtime.agent_status_text agent_status_json with
-    | ("active" | "busy" | "listening" | "idle") as status -> Some status
-    | _ -> None
+    (* Mirror the keeper_status_runtime typed parse: the agent-status blob's
+       "status" field only ever holds active|busy|listening|inactive, so match
+       the closed ADT and drop the dead "idle" arm the compiler can now reject. *)
+    match Keeper_status_runtime.agent_runtime_status_opt agent_status_json with
+    | Some ((Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening) as s) ->
+        Some (Masc_domain.string_of_agent_status s)
+    | Some Masc_domain.Inactive | None -> None
   in
   let has_live_signal =
     Keeper_status_runtime.agent_runtime_has_live_signal agent_status_json
@@ -44,14 +48,16 @@ let align_keeper_runtime_status
   if not keepalive_running
   then surface_status
   else (
-    let normalized_surface = String.lowercase_ascii (String.trim surface_status) in
     let runtime_status =
       if health_state_allows_runtime_status_override diagnostic
       then runtime_status_from_live_signal agent_status_json
       else None
     in
-    match normalized_surface, runtime_status with
-    | ("inactive" | "offline"), Some status -> status
+    (* RFC-0089: override only when the surface status is inactive/offline.
+       Classify via the typed surface_status SSOT instead of string literals. *)
+    match Keeper_status_runtime.surface_status_of_string_opt surface_status, runtime_status with
+    | Some (Keeper_status_runtime.Surface_inactive | Keeper_status_runtime.Surface_offline), Some status ->
+      status
     | _ -> surface_status)
 ;;
 

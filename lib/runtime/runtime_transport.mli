@@ -5,9 +5,9 @@
     {!Runtime_agent}. *)
 
 (* RFC-0167: the client-named omission-dedup helpers
-   ([cli_tool_a_omission_fingerprint], [cli_tool_a_omission_fingerprint_seen],
-   [record_cli_tool_a_omission], [record_cli_tool_a_omission_for_agent],
-   [reset_cli_tool_a_omission_dedup_for_tests]) were removed in the
+   ([codex_cli_omission_fingerprint], [codex_cli_omission_fingerprint_seen],
+   [record_codex_cli_omission], [record_codex_cli_omission_for_agent],
+   [reset_codex_cli_omission_dedup_for_tests]) were removed in the
    big-bang sweep. Structural omission detection remains in the
    resolver below. *)
 
@@ -74,7 +74,7 @@ val public_mcp_tool_requires_bound_actor : string -> bool
     the [masc] HTTP server entry of [policy] when [agent_name] is non-empty.
     [x-masc-internal-token] is also injected by default when
     [MASC_INTERNAL_MCP_TOKEN] is available; pass
-    [~include_internal_token:false] for providers such as [cli_tool_a] that
+    [~include_internal_token:false] for providers such as [codex_cli] that
     cannot carry auth-bearing request headers.  Other servers are passed
     through. *)
 val runtime_mcp_policy_with_masc_agent_name :
@@ -83,13 +83,13 @@ val runtime_mcp_policy_with_masc_agent_name :
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy
 
-val cli_tool_a_can_auth_keeper_bound_runtime_mcp :
+val codex_cli_can_auth_keeper_bound_runtime_mcp :
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   bool
 (** [true] when [agent_name] maps to a keeper with a persisted raw bearer
     token and [policy] contains actor-bound runtime MCP tools.  The
-    cli_tool_a transport can carry that token via OAS [bearer_token_env_var]
+    codex_cli transport can carry that token via OAS [bearer_token_env_var]
     without placing it in argv. *)
 
 (** Provider-specific shaping of the runtime MCP policy.  For Cli_tool_a the

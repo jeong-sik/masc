@@ -859,6 +859,55 @@ let session_count () =
   with_sessions_rw (fun () ->
     Hashtbl.length sessions)
 
+let heartbeat_interval_s = 30.0
+
+let start_upgrade_heartbeat ?sw ?clock session_id session =
+  match sw, clock with
+  | Some sw, Some clock ->
+    Eio.Fiber.fork ~sw (fun () ->
+      let rec loop () =
+        Eio.Time.sleep clock heartbeat_interval_s;
+        if not session.closed && not (Httpun_ws.Wsd.is_closed session.wsd)
+        then (
+          let send_failed = ref false in
+          (try Httpun_ws.Wsd.send_ping session.wsd with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             send_failed := true;
+             (match Http_server_eio.Late_response.classify_write_failure exn with
+              | Some _ ->
+                Log.Server.debug
+                  "[ws-upgrade] session %s heartbeat skipped (writer closed during \
+                   cancel race)"
+                  session_id
+              | None ->
+                Log.Server.warn
+                  "[ws-upgrade] session %s heartbeat send_ping failed: %s"
+                  session_id
+                  (Printexc.to_string exn)));
+          if !send_failed then cleanup_session session_id else loop ())
+      in
+      loop ())
+  | _ ->
+    Log.Server.debug
+      "[ws-upgrade] session %s heartbeat disabled (missing switch or clock)"
+      session_id
+
+let send_upgrade_pong session_id wsd =
+  try Httpun_ws.Wsd.send_pong wsd with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    (match Http_server_eio.Late_response.classify_write_failure exn with
+     | Some _ ->
+       Log.Server.debug
+         "[ws-upgrade] session %s send_pong skipped (writer closed during cancel race)"
+         session_id
+     | None ->
+       Log.Server.warn
+         "[ws-upgrade] session %s send_pong failed: %s"
+         session_id
+         (Printexc.to_string exn))
+
 (** Handle an HTTP upgrade request to WebSocket.
 
     Call this from the httpun request handler when path = "/ws".
@@ -868,6 +917,8 @@ let session_count () =
     @param on_message Optional callback for incoming text messages.
       Default: log and ignore. *)
 let upgrade_connection
+    ?sw
+    ?clock
     ?(on_message = fun _session_id _text -> ())
     (reqd : Httpun.Reqd.t)
   : (unit, string) result =
@@ -893,9 +944,10 @@ let upgrade_connection
               then
                 cleanup_session session_id)
             ();
+          start_upgrade_heartbeat ?sw ?clock session_id session;
           (* #10875: see cleanup_session — per-session lifecycle is DEBUG
              to avoid logging amplification during WS storm (#10701). *)
-          Log.Server.debug "WebSocket session %s connected" session_id;
+          Log.Server.debug "WebSocket session %s connected (same-origin /ws)" session_id;
           { Httpun_ws.Websocket_connection.
             frame = (fun ~opcode ~is_fin ~len payload ->
               match opcode with
@@ -903,7 +955,7 @@ let upgrade_connection
                 read_inbound_message_frame session ~on_message ~is_fin ~len
                   payload
               | `Ping ->
-                Httpun_ws.Wsd.send_pong wsd;
+                send_upgrade_pong session_id wsd;
                 Httpun_ws.Payload.close payload
               | `Connection_close ->
                 cleanup_session session_id;
@@ -992,5 +1044,4 @@ let () =
     ~ping:(fun ~session_id () -> dashboard_ping ~session_id ());
   Mcp_server_eio_protocol.register_dashboard_ack dashboard_ack
 ;;
-
 

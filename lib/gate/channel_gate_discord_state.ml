@@ -153,26 +153,36 @@ let rec drop_left n xs =
 let thread_parent_table : (string, string) Hashtbl.t =
   Hashtbl.create 16
 
+let thread_parent_table_mu = Eio.Mutex.create ()
+
 let register_thread ~thread_id ~parent_channel_id =
   let tid = String.trim thread_id in
   let pid = String.trim parent_channel_id in
   if tid <> "" && pid <> "" then
-    Hashtbl.replace thread_parent_table tid pid
+    Eio.Mutex.use_rw ~protect:true thread_parent_table_mu
+    @@ fun () -> Hashtbl.replace thread_parent_table tid pid
 
 let parent_channel_of_thread ~channel_id : string option =
   let cid = String.trim channel_id in
   if cid = "" then None
-  else Hashtbl.find_opt thread_parent_table cid
+  else Eio.Mutex.use_ro thread_parent_table_mu
+    @@ fun () -> Hashtbl.find_opt thread_parent_table cid
 
 let is_known_thread ~channel_id =
   let cid = String.trim channel_id in
-  cid <> "" && Hashtbl.mem thread_parent_table cid
+  cid <> ""
+  && Eio.Mutex.use_ro thread_parent_table_mu
+    @@ fun () -> Hashtbl.mem thread_parent_table cid
 
-let registered_thread_count () = Hashtbl.length thread_parent_table
+let registered_thread_count () =
+  Eio.Mutex.use_ro thread_parent_table_mu
+  @@ fun () -> Hashtbl.length thread_parent_table
 
 let unregister_thread ~thread_id =
   let tid = String.trim thread_id in
-  if tid <> "" then Hashtbl.remove thread_parent_table tid
+  if tid <> "" then
+    Eio.Mutex.use_rw ~protect:true thread_parent_table_mu
+    @@ fun () -> Hashtbl.remove thread_parent_table tid
 
 (* ── Trigger policy registry ──────────────────────────────────────
    Set once at gateway startup by [set_trigger_policy]. Read by
@@ -711,12 +721,14 @@ let send_message ~channel_id ~content ?reply_to_message_id () =
        | Error e -> Error (Rest_error e))
     else
       let rec send_chunks first rest =
-        let rlen = String.length rest in
-        let chunk, remaining =
-          if rlen <= limit then rest, None
-          else
-            ( String.sub rest 0 limit
-            , Some (String.sub rest limit (rlen - limit)) )
+        (* Split on a codepoint boundary: the Discord limit is in Unicode
+           scalar values, and a mid-codepoint byte cut yields invalid
+           UTF-8 that Discord rejects with a 400. *)
+        let chunk, remaining_str =
+          Discord_rest_client.split_at_codepoint rest ~limit
+        in
+        let remaining =
+          if remaining_str = "" then None else Some remaining_str
         in
         let ref_id = if first then reply_to_message_id else None in
         match Discord_rest_client.send_message ~token ~channel_id ~content:chunk ?reply_to_message_id:ref_id () with

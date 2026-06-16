@@ -45,6 +45,7 @@ module Progress = Masc.Progress
 module Sse = Masc.Sse
 module Safe_ops = Safe_ops
 module Tool_board = Board_tool
+module Transport_metrics = Masc.Transport_metrics
 module Server_mcp_transport_http = Server_mcp_transport_http
 
 
@@ -215,12 +216,59 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
   end
   else false
 
+let header_contains_token headers name token =
+  match get_header_any_case headers name with
+  | None -> false
+  | Some value ->
+    value
+    |> String.split_on_char ','
+    |> List.exists (fun part ->
+         String.equal
+           (String.lowercase_ascii (String.trim part))
+           (String.lowercase_ascii token))
+
+let header_equals_token headers name token =
+  match get_header_any_case headers name with
+  | None -> false
+  | Some value ->
+    String.equal
+      (String.lowercase_ascii (String.trim value))
+      (String.lowercase_ascii token)
+
+let is_websocket_upgrade_request request =
+  let headers = request.Httpun.Request.headers in
+  header_contains_token headers "connection" "upgrade"
+  && header_equals_token headers "upgrade" "websocket"
+
+let respond_ws_upgrade_unavailable ?(message = "websocket transport disabled") reqd =
+  let body =
+    Yojson.Safe.to_string (`Assoc [ ("error", `String message) ])
+  in
+  let headers =
+    Httpun.Headers.of_list
+      [ ("content-type", "application/json")
+      ; ("content-length", string_of_int (String.length body))
+      ]
+  in
+  let response = Httpun.Response.create ~headers `Service_unavailable in
+  safe_reqd_respond reqd response body
+
+let handle_websocket_upgrade reqd =
+  if not (Transport_metrics.ws_enabled ())
+  then respond_ws_upgrade_unavailable reqd
+  else
+    respond_ws_upgrade_unavailable
+      ~message:"same-origin websocket upgrade is disabled; use /ws discovery ws_url"
+      reqd
+
 (** Method/path dispatcher for MCP-validated requests. Caller is
     responsible for rate limiting and origin/protocol-version checks
     before invoking this function. *)
 let dispatch_route ~router ~request ~path reqd =
   match request.Httpun.Request.meth, path with
   | `OPTIONS, _ -> options_handler request reqd
+  | `GET, "/ws" when is_websocket_upgrade_request request ->
+    handle_websocket_upgrade reqd
   | `GET, "/ws" ->
     let body =
       Server_routes_http_runtime.websocket_discovery_json request
@@ -392,7 +440,7 @@ let dispatch_route ~router ~request ~path reqd =
       let format = Option.value ~default:"nested" (query_param request "format") in
       let voter = board_voter_query request in
       let config =
-        Option.map (fun state -> state.Mcp_server.workspace_config) !server_state
+        Option.map (fun state -> (Mcp_server.workspace_config state)) !server_state
       in
       let (status, body) =
         board_post_detail_json ~include_moderation:false ~blind_votes:false
@@ -935,10 +983,28 @@ let init_cmd =
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
 
+let setup_gc () =
+  (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
+     main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
+     parsing and metric encoding, with many domains parked waiting for STW.
+     Bumping the per-domain minor heap reduces the frequency of those
+     parallel pauses.  We only override when the operator has not set
+     OCAMLRUNPARAM so existing tuning instructions remain authoritative. *)
+  match Sys.getenv_opt "OCAMLRUNPARAM" with
+  | Some _ -> ()
+  | None ->
+      let gc = Gc.get () in
+      let desired_minor_words = 4 * 1024 * 1024 in
+      (* 4M words ~= 32 MiB on 64-bit *)
+      if gc.minor_heap_size < desired_minor_words then
+        Gc.set { gc with minor_heap_size = desired_minor_words }
+
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
     info [ init_cmd; login_cmd ]
 
-let () = exit (Cmd.eval' cmd)
+let () =
+  setup_gc ();
+  exit (Cmd.eval' cmd)

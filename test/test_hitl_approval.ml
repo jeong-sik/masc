@@ -15,6 +15,7 @@ module AQ = Masc.Keeper_approval_queue
 module SDH = Server_dashboard_http
 module KT = Keeper_types
 module Mcp_eio = Masc.Mcp_server_eio
+module Mcp_server = Masc.Mcp_server
 
 let check = Alcotest.(check string)
 
@@ -149,7 +150,7 @@ let with_test_config f =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      f state.workspace_config)
+      f (Mcp_server.workspace_config state))
 
 let with_eio_base_path f =
   Eio_main.run @@ fun env ->
@@ -980,7 +981,7 @@ let test_callback_production_tool_edit_file_requires_approval () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let config = state.workspace_config in
+  let config = (Mcp_server.workspace_config state) in
   Eio.Fiber.fork ~sw (fun () ->
     let cb =
       GP.to_oas_approval_callback
@@ -1078,7 +1079,7 @@ let test_callback_production_worktree_prepare_requires_approval () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let config = state.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       Eio.Fiber.fork ~sw (fun () ->
         let cb =
           GP.to_oas_approval_callback
@@ -1228,7 +1229,7 @@ let test_callback_always_approve_respects_forbidden () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let config = state.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let meta =
         meta_from_json
           (`Assoc [

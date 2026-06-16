@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.19.44] - 2026-06-14
+
+### Changed
+- Bumped OAS `agent_sdk` pin to `v0.206.9` at
+  `8a619adbe2cb10025ceaac5338bef93791c9be9c` and raised the `agent_sdk`
+  dependency floor to `0.206.9`.
+
+### Removed
+- `runtime`: legacy cleanup — dead code, Boundary_redaction SSOT,
+  provider-letter purge (#21122).
+
+
 ## [0.19.43] - 2026-06-12
 
 ### Added
@@ -1026,7 +1038,7 @@ Keeper fleet reliability release: empty `active_goal_ids` now auto-repairs via p
 
 Aggregate of 17 commits since v0.18.6 (11 feat / 4 fix / 1 test / 1 chore). No breaking API changes.
 
-Operational keeper-contract correctness release: `require_tool_use` contract now accepts `keeper_stay_silent` as a satisfied turn (decisive no-op), eliminating a contract-vs-prompt mismatch that rejected ~40% of post-runtime-fix turns. Plus dashboard StatCard retirement (3-sweep migration into KpiStrip) and observability surface emissions for substrate visibility.
+Operational keeper-contract correctness release: `require_tool_use` contract accepted the retired keeper no-op sentinel as a satisfied turn, eliminating a contract-vs-prompt mismatch that rejected ~40% of post-runtime-fix turns. Plus dashboard StatCard retirement (3-sweep migration into KpiStrip) and observability surface emissions for substrate visibility.
 
 ### Added (observability + structural)
 - `#11125` observability — emit `[substrate:tool_surface]` log + SSE on TurnReady (per-turn tool surface visibility)
@@ -1045,7 +1057,7 @@ Operational keeper-contract correctness release: `require_tool_use` contract now
 - `#11131` design-system — add 4 raw tokens + migrate bonsai flame_*
 
 ### Fixed (keeper contract correctness)
-- `#11124` keeper — classify `keeper_stay_silent` as `Completion` to satisfy `require_tool_use` contract (decisive no-op recognition; abuse defence retained via `keeper_stay_silent_loop_detector`)
+- `#11124` keeper — classify the retired keeper no-op sentinel as `Completion` to satisfy `require_tool_use` contract (decisive no-op recognition; abuse defence retained via no-progress loop detection)
 - `#11132` server-auth — fail-closed on `Ok None` instead of silent dashboard rewrite (security hardening)
 - `#11117` scripts — resolve log path via lsof on running server, eliminate $HOME drift
 - `#11123` keeper — raise compact_ratio default 0.5 → 0.85 (#11111 follow-up, fewer premature compactions)
@@ -2090,17 +2102,14 @@ observation and fix — silent cost of the pre-fix contract shape.
   vars are now declarative. `config/keepers/<name>.toml` accepts a new
   `[keeper.oas_env]` table whose entries are applied via `Unix.putenv`
   at turn start, right before any OAS call. Keys must match
-  `^OAS_(CLAUDE|CODEX|GEMINI)_.+` — anything else is silently dropped
+  current OAS env naming — anything else is silently dropped
   to block ambient env injection (e.g. a `PATH=/evil/bin` entry in a
   TOML cannot reach the process). Bool / int TOML values coerce to
   strings (`true` → `"1"`, `false` → `"0"`) so the OAS transport
   build_args side reads them uniformly.
-  - Default applied to all four built-in keepers (`analyst`, `executor`,
-    `scholar`, `verifier`): `OAS_CLAUDE_STRICT_MCP=1` +
-    `OAS_GEMINI_NO_MCP=1` — keeper subprocess calls no longer pull in
-    ambient MCP servers from the operator's `~/.claude.json` /
-    `~/.gemini/settings.json`, keeping behaviour deterministic across
-    deployments.
+  - Built-in keepers no longer inject transport-specific OAS env defaults.
+    MCP / approval policy now lives at the OAS transport/config boundary,
+    keeping keeper behavior deterministic without stale provider aliases.
   - `merge_keeper_profile_defaults` merges `oas_env` key-by-key: a
     persona-level base survives where the keeper TOML overlay doesn't
     override.

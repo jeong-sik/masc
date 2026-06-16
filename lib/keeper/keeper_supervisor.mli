@@ -74,6 +74,20 @@ include module type of Keeper_supervisor_types
 val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 (** Map a structured failure_reason to a cohort key for self-preservation grouping. *)
 
+val assess_stale_run :
+     phase:Keeper_state_machine.phase
+  -> in_turn:'a option
+  -> last_turn_ts:float
+  -> now:float
+  -> threshold:float
+  -> Keeper_registry.failure_reason option
+(** RFC-0250: pure stale-run assessment for the no-turn-produced case. Returns
+    [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] — the
+    [Idle_turn] variant's first real producer — when [phase = Running], the
+    keeper is not in a turn ([in_turn = None]), has completed at least one
+    turn ([last_turn_ts > 0]), and [now] exceeds [last_turn_ts] by more than
+    [threshold]. [None] otherwise. Exposed for regression tests. *)
+
 val failure_reason_policy_decision_for_test :
   Keeper_registry.failure_reason option -> Keeper_failure_policy.decision option
 (** Pure supervisor-side bridge from registry failure reasons into the

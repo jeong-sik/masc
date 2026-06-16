@@ -1,15 +1,16 @@
-(** Keeper_runtime_config — load startup keeper env seeding from
+(** Keeper_runtime_config — load startup runtime env seeding from
     [<resolved config root>/runtime.toml].
 
-    Per-base-path config for keeper turn budgets, semaphore timeouts, and
-    other runtime parameters that previously lived only in environment
-    variables.  Closes the architectural gap where tools/personas/runtime
-    are per-base-path but keeper runtime tuning was global.
+    Per-base-path config for keeper turn budgets, semaphore timeouts, WebSearch
+    provider selection, and other startup-scoped runtime parameters that
+    previously lived only in environment variables. Closes the architectural gap
+    where tools/personas/runtime are per-base-path but selected runtime tuning
+    was global.
 
     Precedence (highest first):
       1. Process env var (caller override, e.g. CI/test)
       2. TOML value from [<resolved config root>/runtime.toml]
-      3. Hardcoded default in [Env_config_keeper.KeeperKeepalive].
+      3. Hardcoded default in the owning [Env_config_*] reader.
 
     The TOML loader runs at server startup, before any module that reads
     these env vars initializes. It stores boot defaults in a process-local
@@ -69,7 +70,6 @@ val resolve_overrides :
 
       [heartbeat]
       sleep_chunk_sec             = 1.5
-      board_generic_wakeup_limit  = 3
       board_wakeup_max            = 4
 
       [proactive]
@@ -79,6 +79,10 @@ val resolve_overrides :
       stream_idle_timeout_sec   = 120
       execution_idle_timeout_sec = 300
       llm_rerank                  = true
+
+      [web_search]
+      searxng_url                 = "http://localhost:8888"
+      provider                    = "auto"
     ]}
 
     Unknown keys are ignored (forward compatibility). *)

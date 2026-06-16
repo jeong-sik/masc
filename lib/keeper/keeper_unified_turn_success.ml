@@ -48,29 +48,47 @@ let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_block
   lifecycle
 ;;
 
-let apply_loop_detectors ~config updated_meta result =
-  let updated_meta =
-    match
-      Keeper_stay_silent_loop_detector.record_turn
-        ~keeper_name:updated_meta.Keeper_meta_contract.name
-        ~speech_act:updated_meta.runtime.last_speech_act
-    with
-    | Keeper_stay_silent_loop_detector.Normal -> updated_meta
-    | Keeper_stay_silent_loop_detector.Loop_detected { streak; threshold } ->
-      Keeper_unified_turn_stay_silent.mark_loop_detected
-        ~config
-        updated_meta
-        ~streak
-        ~threshold
-    | Keeper_stay_silent_loop_detector.Loop_reset { previous_streak; was_latched } ->
-      Keeper_unified_turn_stay_silent.clear_if_recovered
-        ~config
-        updated_meta
-        ~previous_streak
-        ~was_latched
+let apply_loop_detectors ~config ~social_state updated_meta result =
+  (* RFC-0239 §3 R3: feed the loop detector a semantic no-progress verdict
+     instead of the literal speech_act. A turn makes progress if it produced
+     durable evidence (substantive tool calls or validated output); a turn that
+     only posts to peers (board/comment/broadcast) or stays silent without such
+     evidence accrues the streak. The old speech_act="stay_silent" check reset
+     the streak whenever a keeper *posted* its "nothing to do" conclusion, so a
+     cluster that thrashed by re-posting never tripped the detector. *)
+  let strong_evidence =
+    KUM.has_substantive_tool_calls (Keeper_agent_result.tool_names result)
+    || Option.is_some (KUM.visible_run_validation result)
   in
-  ignore result.Keeper_agent_run.tool_calls;
-  updated_meta
+  let surface_requires_evidence =
+    match social_state.Social.delivery_surface with
+    | Social.Board_post | Social.Board_comment | Social.Broadcast_surface
+    | Social.Silent -> true
+    | Social.Visible_reply | Social.Task_claim_surface -> false
+  in
+  let made_progress =
+    Keeper_no_progress_loop_detector.turn_made_progress
+      ~strong_evidence
+      ~surface_requires_evidence
+  in
+  match
+    Keeper_no_progress_loop_detector.record_turn
+      ~keeper_name:updated_meta.Keeper_meta_contract.name
+      ~made_progress
+  with
+  | Keeper_no_progress_loop_detector.Normal -> updated_meta
+  | Keeper_no_progress_loop_detector.Loop_detected { streak; threshold } ->
+    Keeper_unified_turn_no_progress.mark_loop_detected
+      ~config
+      updated_meta
+      ~streak
+      ~threshold
+  | Keeper_no_progress_loop_detector.Loop_reset { previous_streak; was_latched } ->
+    Keeper_unified_turn_no_progress.clear_if_recovered
+      ~config
+      updated_meta
+      ~previous_streak
+      ~was_latched
 ;;
 
 let append_metrics_snapshot
@@ -84,16 +102,24 @@ let append_metrics_snapshot
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~last_provider_timeout_budget
   =
-  try
-    let any_pending =
-      observation.Keeper_world_observation.pending_mentions <> []
-      || observation.pending_board_events <> []
-      || observation.pending_scope_messages <> []
-    in
-    let channel = if any_pending then "turn" else "scheduled_autonomous" in
+  let any_pending =
+    observation.Keeper_world_observation.pending_mentions <> []
+    || observation.pending_board_events <> []
+    || observation.pending_scope_messages <> []
+  in
+  (* Single typed channel for the whole cycle: post helpers + the metrics
+     snapshot + the failure-path label all derive from one value, so the
+     reactive/autonomous decision can no longer drift between sites. *)
+  let channel =
     if any_pending
-    then Keeper_turn_helpers.post_assign_task ~any_pending ~channel
-    else Keeper_turn_helpers.post_empty_queue_sleep ~any_pending ~channel;
+    then Keeper_world_observation.Reactive
+    else Keeper_world_observation.Scheduled_autonomous
+  in
+  let channel_tag = Keeper_world_observation.channel_to_string channel in
+  try
+    if any_pending
+    then Keeper_turn_helpers.post_assign_task ~any_pending ~channel:channel_tag
+    else Keeper_turn_helpers.post_empty_queue_sleep ~any_pending ~channel:channel_tag;
     KUM.append_metrics_snapshot
       ~config
       ~meta:updated_meta
@@ -116,19 +142,11 @@ let append_metrics_snapshot
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    let channel =
-      if
-        observation.pending_mentions <> []
-        || observation.pending_board_events <> []
-        || observation.pending_scope_messages <> []
-      then "turn"
-      else "scheduled_autonomous"
-    in
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string MetricEmitDropped)
       ~labels:
         [ "keeper", updated_meta.name
-        ; "channel", channel
+        ; "channel", channel_tag
         ; "site", Keeper_metric_emit_dropped_site.(to_label Keeper_unified_turn)
         ]
       ();
@@ -459,7 +477,7 @@ let handle
       ~update_proactive_rt:true
       result
   in
-  let updated_meta = apply_loop_detectors ~config updated_meta result in
+  let updated_meta = apply_loop_detectors ~config ~social_state updated_meta result in
   append_metrics_snapshot
     ~config
     ~meta

@@ -68,7 +68,7 @@ describe('oasHealthSummary', () => {
     const evt = {
       type: 'action_executed',
       actor_kind: 'agent',
-      agent_name: 'dreamer',
+      agent_name: 'alice',
       timestamp: 1,
       action: 'ponder',
     } satisfies OasAgentEvent
@@ -82,7 +82,7 @@ describe('oasHealthSummary', () => {
     const evt = {
       type: 'action_executed',
       actor_kind: 'agent',
-      agent_name: 'dreamer',
+      agent_name: 'alice',
       timestamp: 1,
       event_key: 'same-event',
       action: 'ponder',
@@ -96,7 +96,7 @@ describe('oasHealthSummary', () => {
     pushOasAgentEvent({
       type: 'action_executed',
       actor_kind: 'agent',
-      agent_name: 'dreamer',
+      agent_name: 'alice',
       timestamp: 1,
       event_key: 'action',
       action: 'ponder',
@@ -104,7 +104,7 @@ describe('oasHealthSummary', () => {
     pushOasAgentEvent({
       type: 'keeper_lifecycle',
       actor_kind: 'keeper',
-      agent_name: 'dreamer',
+      agent_name: 'alice',
       timestamp: 1,
       event_key: 'lifecycle',
       phase: 'Running',

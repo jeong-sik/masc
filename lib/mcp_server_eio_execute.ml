@@ -67,7 +67,7 @@ let execute_tool_eio
   Eio_context.set_clock clock;
   (* Otel_metric_store: count every inbound tool call *)
   Otel_metric_store.record_request ();
-  let config = state.Mcp_server.workspace_config in
+  let config = (Mcp_server.workspace_config state) in
   let registry = state.Mcp_server.session_registry in
   (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls. *)
   let workspace_init_cached = Workspace.is_initialized config in
@@ -315,6 +315,11 @@ let execute_tool_eio
                      { Tool_agent_timeline.config; agent_name }
                      ~name
                      ~args:coerced_args
+                 | Mod_schedule ->
+                   Tool_schedule.dispatch
+                     { Tool_schedule.config; agent_name }
+                     ~name
+                     ~args:coerced_args
                  | Mod_misc ->
                    Tool_misc.dispatch
                      { Tool_misc.config; agent_name }
@@ -336,6 +341,15 @@ let execute_tool_eio
                      (make_keeper_tool_ctx ())
                      ~name
                      ~args:coerced_args
+                 | Mod_keeper_task ->
+                   Some
+                     (Tool_result.error
+                        ~failure_class:(Some Tool_result.Workflow_rejection)
+                        ~tool_name:name
+                        ~start_time
+                        (Printf.sprintf
+                           "tool '%s' is a keeper task tool; use the keeper in-process task handler"
+                           name))
                  (* Removed tool families are intentionally not dispatchable. *)
                  | Mod_shard ->
                    let ok, json = Tool_shard.execute name coerced_args in

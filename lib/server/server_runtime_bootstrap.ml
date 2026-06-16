@@ -174,12 +174,13 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   let config_resolution =
     startup_config_resolution ~base_path |> Config_dir_resolver.to_json
   in
+  let config = Mcp_server.workspace_config state in
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path
       ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-      ~effective_base_path:state.workspace_config.base_path
-      ~effective_masc_root:(Workspace.masc_root_dir state.workspace_config)
+      ~effective_base_path:config.base_path
+      ~effective_masc_root:(Workspace.masc_root_dir config)
       ()
     |> Server_base_path_diagnostics.to_yojson
   in
@@ -194,19 +195,20 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   state
 
 let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
   Server_base_path_diagnostics.detect
     ?input_base_path
     ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-    ~effective_base_path:state.workspace_config.base_path
-    ~effective_masc_root:(Workspace.masc_root_dir state.workspace_config)
+    ~effective_base_path:config.base_path
+    ~effective_masc_root:(Workspace.masc_root_dir config)
     ()
 
 let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
-    ~agents_path:(Workspace.agents_dir state.workspace_config)
+    ~agents_path:(Workspace.agents_dir (Mcp_server.workspace_config state))
 
 let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
-  Otel_metric_store.reconcile_active_agents_gauge (Workspace.masc_dir state.workspace_config)
+  Otel_metric_store.reconcile_active_agents_gauge (Workspace.masc_dir (Mcp_server.workspace_config state))
 
 
 (* Startup maintenance extracted to
@@ -222,7 +224,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      direct state constructors used by tests and execute contexts can leave a
      stale process-global config resolution in place. *)
   Config_dir_resolver.reset ();
-  let (_init_msg : string) = Workspace.init state.workspace_config ~agent_name:None in
+  let (_init_msg : string) = Workspace.init (Mcp_server.workspace_config state) ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
 
 
@@ -306,6 +308,7 @@ let sync_prompt_assets_from_binary () =
     sync.Prompt_defaults.failed
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
   (* Converge runtime prompt markdown onto the binary-embedded assets
@@ -315,8 +318,8 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime
-      ~workspace_path:state.workspace_config.workspace_path
-      ~base_path:state.workspace_config.base_path
+      ~workspace_path:config.workspace_path
+      ~base_path:config.base_path
   in
   let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
   if prompt_markdown_dir <> expected_prompt_dir then
@@ -345,7 +348,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
 let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
   (try
      let summary =
-       Telemetry_eio.summarize_tool_usage state.workspace_config
+       Telemetry_eio.summarize_tool_usage (Mcp_server.workspace_config state)
      in
      if summary.telemetry_available then
        (* PR-S3: project the persisted Telemetry_eio summary into the registry's
@@ -377,7 +380,7 @@ let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
 let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
   (try
      let n = Tool_metrics_persist.restore
-       ~base_path:state.workspace_config.base_path in
+       ~base_path:(Mcp_server.workspace_config state).base_path in
      if n > 0 then
        Log.Misc.info "tool metrics: restored %d records from disk" n
    with
@@ -462,8 +465,18 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     ~requested:requested_backend_mode_before_enforcement
     ~effective:initial_backend_mode;
 
-  (* 2. All init in background fiber — protected so failures don't kill HTTP *)
+  (* 2. All init in background fiber — isolated on its own switch so a
+     failure in any init-time subsystem (keepers, maintenance, dashboard
+     refresh, etc.) cancels only that subtree and leaves the HTTP accept
+     loop running on the parent switch.  This is P1-5 Hierarchical
+     Supervision Phase 1.
+
+     [create_server_state] still attaches to the parent switch because
+     the resulting [server_state] (and its switch reference) is used by
+     the HTTP request path; we only want background init/maintenance
+     fibers to live on the child switch. *)
   Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run @@ fun init_sw ->
     let governance_level = Env_config_core.governance_level () in
     let init_state_blocking () =
       let t0 = Eio.Time.now clock in
@@ -714,7 +727,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Log.Server.info "lazy_task_group: finished %s" group.group_name
       in
       Server_startup_state.activate_lazy
-        ~backend_mode:(Workspace.backend_name state.workspace_config)
+        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state))
         ~tasks:task_names;
       Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
     in
@@ -725,7 +738,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       in
       server_state := Some state;
       Server_startup_state.mark_state_ready
-        ~backend_mode:(Workspace.backend_name state.workspace_config);
+        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state));
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
@@ -772,7 +785,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             tool_name (String.length result_str);
         if success then Ok result_str else Error result_str
       in
-      Masc_grpc_server.start ~sw ~env ~workspace_config:state.workspace_config
+      Masc_grpc_server.start ~sw ~env ~workspace_config:(Mcp_server.workspace_config state)
         ~tool_dispatcher;
       (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
       (match Masc_grpc_transport.from_env () with
@@ -789,7 +802,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "shell" ->
             Some
               (Server_dashboard_http.dashboard_shell_payload_json ~light:true
-                 state.Mcp_server.workspace_config)
+                 (Mcp_server.workspace_config state))
         | "execution" ->
             Some (Server_dashboard_http.dashboard_execution_snapshot_json ())
         | "operator" ->
@@ -810,7 +823,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "composite" ->
             Some
               (Server_dashboard_http.dashboard_fleet_composite_json
-                 ~config:state.Mcp_server.workspace_config ())
+                 ~config:(Mcp_server.workspace_config state) ())
         | "board" ->
             Some
               (Server_dashboard_http.dashboard_board_json
@@ -819,11 +832,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "goals" ->
             Some
               (Server_dashboard_http.dashboard_goals_snapshot_json
-                 ~config:state.Mcp_server.workspace_config)
+                 ~config:(Mcp_server.workspace_config state))
         | "ide" ->
             Some
               (Server_dashboard_http.dashboard_ide_snapshot_json
-                 ~config:state.Mcp_server.workspace_config)
+                 ~config:(Mcp_server.workspace_config state))
         | _ ->
             None);
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)

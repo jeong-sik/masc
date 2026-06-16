@@ -10,6 +10,26 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_memory
 
+(* RFC-0247: typed provenance of a board observation. Classified once at the
+   world-observation boundary (see {!provenance_of}) from primitives that
+   already exist on every pending_board_event ([post_kind], [author],
+   [is_self_author]). The renderer uses {!should_quarantine} to route
+   fleet-authored narrative into the observational-data envelope so a keeper
+   cannot treat its own or a peer's board narrative as trusted instruction. *)
+type observation_provenance =
+  | Self_narrative
+      (* this keeper's own prior post — highest confabulation risk *)
+  | Peer_keeper
+      (* another keeper's post, by typed keeper identity *)
+  | Human_direct
+      (* a human's post ([Board.Human_post]) — operator-direction-adjacent *)
+  | Automation
+      (* non-keeper automation: harness/qa/probe/smoke authors *)
+  | Unknown
+      (* classification drift (e.g. [Human_post] but author parses as a keeper
+         id); defaults to the quarantine side — see {!should_quarantine} *)
+[@@deriving show, eq]
+
 type pending_board_event =
   { post_id : string
   ; author : string
@@ -24,6 +44,8 @@ type pending_board_event =
   ; new_external_since : int
   ; latest_external_author : string option
   ; latest_external_preview : string option
+  ; provenance : observation_provenance
+      (* RFC-0247: computed at construction; drives trusted-vs-observational split *)
   }
 
 type world_observation =
@@ -88,8 +110,8 @@ let turn_reason_to_string =
 let skip_reason_to_string =
   Keeper_world_observation_turn_types.skip_reason_to_string
 let channel_to_string = Keeper_world_observation_turn_types.channel_to_string
-let is_autonomous_channel =
-  Keeper_world_observation_turn_types.is_autonomous_channel
+let channel_of_string = Keeper_world_observation_turn_types.channel_of_string
+let is_autonomous = Keeper_world_observation_turn_types.is_autonomous
 let verdict_reasons_to_strings =
   Keeper_world_observation_turn_types.verdict_reasons_to_strings
 
@@ -118,6 +140,42 @@ module Inputs = Keeper_world_observation_inputs
 
 let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
+
+(* RFC-0247: classify a board event's provenance from primitives already present
+   at the boundary. Pure function of [post_kind] + [author] + the keeper's own
+   identity set ([self_ids]). No new data plumbing — every pending_board_event
+   already carries [post_kind] and [author]. *)
+let provenance_of ~self_ids (post_kind : Board.post_kind) ~author : observation_provenance
+  =
+  if is_self_author ~self_ids author then Self_narrative
+  else
+    match post_kind with
+    | Board.Human_post ->
+      (* Drift guard: a Human_post whose author is nevertheless a typed keeper
+         identity (e.g. a keeper posted via the dashboard where post_kind falls
+         back to Human_post) is classification drift, not human direction —
+         quarantine rather than trust. *)
+      (match Keeper_identity.canonical_keeper_name_from_agent_name author with
+       | Some _ -> Unknown
+       | None -> Human_direct)
+    | Board.Automation_post | Board.System_post ->
+      (* Board.post_kind has no Keeper variant, so a peer keeper's narrative and
+         a CI probe both land here as automation; the typed keeper-name check
+         separates them. *)
+      (match Keeper_identity.canonical_keeper_name_from_agent_name author with
+       | Some _ -> Peer_keeper
+       | None -> Automation)
+;;
+
+(* RFC-0247: trust tier. [Unknown] defaults to the quarantine side
+   (defense-in-depth: an unclassifiable event is treated as untrusted fleet
+   output, never as trusted operator direction). *)
+let should_quarantine (p : observation_provenance) : bool =
+  match p with
+  | Self_narrative | Peer_keeper | Automation | Unknown -> true
+  | Human_direct -> false
+;;
+
 let collect_message_scope = Message_scope.collect_message_scope
 let read_backlog_counts = Inputs.read_backlog_counts
 let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
@@ -190,6 +248,7 @@ let pending_board_event_of_board_signal
   ; new_external_since
   ; latest_external_author
   ; latest_external_preview
+  ; provenance = provenance_of ~self_ids post_kind ~author:signal.author
   }
 ;;
 
@@ -199,12 +258,15 @@ let pending_board_event_of_stimulus
   (stimulus : Keeper_event_queue.stimulus)
   : pending_board_event option
   =
-  Board_signal.of_stimulus_payload stimulus.payload
-  |> Option.map
-       (pending_board_event_of_board_signal
-          ~continuity_summary
-          ~meta
-          ~arrived_at:stimulus.arrived_at)
+  match stimulus.payload with
+  | Keeper_event_queue.Board_signal bs ->
+    Some
+      (pending_board_event_of_board_signal
+         ~continuity_summary
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
+  | Keeper_event_queue.Bootstrap | Keeper_event_queue.No_progress_recovery -> None
 ;;
 
 (** Collect recent board activity using cursor-based tracking.
@@ -306,6 +368,9 @@ let collect_board_events_with_cursor_policy
                 ; new_external_since = 0
                 ; latest_external_author = None
                 ; latest_external_preview = None
+                ; provenance =
+                    provenance_of ~self_ids p.post_kind
+                      ~author:(Board.Agent_id.to_string p.author)
                 }
                 :: acc)
                rest
@@ -338,6 +403,9 @@ let collect_board_events_with_cursor_policy
                 ; new_external_since = count
                 ; latest_external_author = Some ext_author
                 ; latest_external_preview = Some ext_preview
+                ; provenance =
+                    provenance_of ~self_ids p.post_kind
+                      ~author:(Board.Agent_id.to_string p.author)
                 }
                 :: acc)
                rest))

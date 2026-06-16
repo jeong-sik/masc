@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { TimeAgo } from './common/time-ago'
 import { formatDuration } from '../lib/format-time'
-import { keeperActivityDisplay } from '../lib/keeper-runtime-display'
+import { keeperActivityDisplay, keeperWorkPreview } from '../lib/keeper-runtime-display'
 import type { Keeper } from '../types'
 
 // SSOT: 활동 시간 표시는 raw `keeper.last_heartbeat`를 직접 읽지 않고
@@ -10,11 +10,12 @@ import type { Keeper } from '../types'
 // "26초 전 / 18시간 전 / 27일 전" 3중 표시 모순을 봉인한다.
 export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
   const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  const workPreview = keeperWorkPreview(keeper)
   const hasActivitySignal = activity.source !== 'none' && activity.source !== 'created'
   const hasActivity =
     hasActivitySignal ||
     keeper.last_speech_act ||
-    keeper.recent_output_preview ||
+    workPreview ||
     keeper.memory_recent_note ||
     (keeper.k2k_count ?? 0) > 0
 
@@ -51,9 +52,9 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
         ? html`<span class="text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] truncate max-w-90" title=${keeper.memory_recent_note}>${keeper.memory_recent_note}</span>`
         : null}
     </div>
-    ${keeper.recent_output_preview
+    ${workPreview
       ? html`<div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--accent-6)] border border-[var(--accent-12)] text-xs text-[var(--color-fg-primary)] leading-relaxed">
-          <div class="line-clamp-2">${keeper.recent_output_preview}</div>
+          <div class="line-clamp-2">${workPreview}</div>
         </div>`
       : null}
   `

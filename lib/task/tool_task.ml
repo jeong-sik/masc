@@ -173,6 +173,59 @@ and handle_transition ~tool_name ~start_time ctx args =
   in
   let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
+  let release_owner_mismatch_rejection =
+    match action, task_opt with
+    | Masc_domain.Release, Some task ->
+      (match Workspace.task_assignee_of_status task.task_status with
+       | Some assignee
+         when (not force)
+              && not (Workspace.same_task_actor ctx.config assignee ctx.agent_name) ->
+         let status = Masc_domain.task_status_to_string task.task_status in
+         let message =
+           Printf.sprintf
+             "Task %s is %s and owned by %s; %s cannot release it. Use \
+              keeper_board_post or masc_board_post to ask the current assignee \
+              for handoff/release, or claim different unowned work."
+             task_id
+             status
+             assignee
+             ctx.agent_name
+         in
+         Some
+           (Tool_result.error
+              ~failure_class:(Some Tool_result.Workflow_rejection)
+              ~tool_name
+              ~start_time
+              (workflow_rejection_payload_json
+                 ~rule_id:"task_release_requires_current_owner"
+                 ~tool_suggestion:"keeper_board_post"
+                 ~hint:
+                   "Do not retry masc_transition(action=release) for a task owned \
+                    by another keeper. Ask the current assignee for handoff/release \
+                    on the board, or inspect and claim different unowned work."
+                 ~scope_policy:"observe"
+                 ~alternatives:
+                   [ "keeper_board_post"; "masc_board_post"; "keeper_tasks_list"; "keeper_task_claim" ]
+                 ~extra_fields:
+                   [ "task_id", `String task_id
+                   ; "task_status", `String status
+                   ; "current_assignee", `String assignee
+                   ; "requested_agent", `String ctx.agent_name
+                   ]
+                 message))
+       | Some _ | None -> None)
+    | Masc_domain.Release, None -> None
+    | ( Masc_domain.Claim
+      | Masc_domain.Start
+      | Masc_domain.Done_action
+      | Masc_domain.Cancel
+      | Masc_domain.Submit_for_verification
+      | Masc_domain.Approve_verification
+      | Masc_domain.Reject_verification ), _ -> None
+  in
+  match release_owner_mismatch_rejection with
+  | Some result -> result
+  | None ->
   let terminal_verdict_noop =
     if transition_action_policy_applies transition_action_denylist
        && is_verdict_transition_action action
@@ -200,7 +253,52 @@ and handle_transition ~tool_name ~start_time ctx args =
   match completion_state_error with
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name err;
-    result_to_response ~tool_name ~start_time (Error err)
+    let message = Masc_domain.masc_error_to_string err in
+    let rule_id, tool_suggestion, hint, alternatives =
+      match err with
+      | Masc_domain.Task (Masc_domain.Task_error.NotClaimed _) ->
+        ( Some "task_done_requires_claimed_or_started"
+        , Some "masc_transition"
+        , Some
+            "The task is still todo. Use masc_transition with action=claim for \
+             this task_id, then action=start, and call keeper_task_done only \
+             after the deliverable is complete."
+        , [ "masc_transition"; "keeper_task_claim"; "keeper_tasks_list" ] )
+      | Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed _) ->
+        ( Some "task_done_requires_current_owner"
+        , Some "keeper_tasks_list"
+        , Some
+            "Another agent owns this task. Inspect the task list, ask for handoff, \
+             or claim different unowned work instead of retrying keeper_task_done."
+        , [ "keeper_tasks_list"; "keeper_board_post"; "keeper_task_claim" ] )
+      | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
+        ( Some "task_done_invalid_lifecycle_state"
+        , Some "keeper_tasks_list"
+        , Some
+            "The task lifecycle state does not accept keeper_task_done. Inspect \
+             task status and use the valid next lifecycle action."
+        , [ "keeper_tasks_list"; "masc_transition" ] )
+      | _ ->
+        ( Some "task_done_lifecycle_rejected"
+        , Some "keeper_tasks_list"
+        , Some "Inspect the task status before trying another lifecycle action."
+        , [ "keeper_tasks_list"; "masc_transition" ] )
+    in
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name
+      ~start_time
+      (workflow_rejection_payload_json
+         ?rule_id
+         ?tool_suggestion
+         ?hint
+         ?recoverable:
+           (match rule_id with
+            | Some "task_done_requires_claimed_or_started" -> Some true
+            | _ -> None)
+         ~scope_policy:"observe"
+         ~alternatives
+         message)
   | None ->
   match client_side_transition_gate_error ~task_opt ~action ~action_s with
   | Some err ->
@@ -449,7 +547,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       let ev = if attempt = 0 then expected_version else None in
       let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
                 ~task_id ~action ?expected_version:ev ~notes ~reason
-                ?handoff_context ?prepare_verification_request
+                ~force ?handoff_context ?prepare_verification_request
                 ?compensate_verification_request
                 ?prepare_verification_verdict () in
       if is_version_mismatch r && attempt < max_cas_retries then begin

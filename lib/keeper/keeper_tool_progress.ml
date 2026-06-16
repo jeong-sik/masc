@@ -57,23 +57,10 @@ let claim_context_tool_names : string list =
 ;;
 
 let completion_tool_names : string list =
-  (* Stay_silent is the explicit "no work for me this turn" decisive no-op.
-     LLM evaluates the situation via passive reads, then signals stay_silent to
-     terminate the turn intentionally. Classifying it as Completion lets the
-     contract accept the turn as satisfied; abuse is bounded separately by
-     keeper_stay_silent_loop_detector (consecutive-stay metric + circuit
-     breaker). Without this, 4+ events/day were rejected as passive_only even
-     though the LLM had decided no fit (sangsu/janitor/taskmaster on 2026-04-27
-     00:17-00:58 UTC, idle_seconds 28-40h, claimable_count 44-46). *)
   "masc_deliver"
   :: List.map
        Keeper_tool_name.to_string
-       Keeper_tool_name.
-         [ Stay_silent
-         ; Task_done
-         ; Task_force_done
-         ; Task_force_release
-         ]
+       Keeper_tool_name.[ Task_done; Task_force_done; Task_force_release ]
 ;;
 
 let is_claim_tool_name name =
@@ -89,13 +76,6 @@ let is_claim_context_tool_name name =
 let is_completion_tool_name name =
   let name = Keeper_tool_resolution.canonical_tool_name name in
   List.mem name completion_tool_names
-;;
-
-let is_stay_silent_tool_name name =
-  let name = Keeper_tool_resolution.canonical_tool_name name in
-  match Keeper_tool_name.of_string name with
-  | Some Stay_silent -> true
-  | _ -> false
 ;;
 
 let is_keeper_observation_alias name =
@@ -163,20 +143,17 @@ let classify_tool_progress_with_outcome name outcome =
 ;;
 
 let is_owned_task_progress_tool_name name =
-  if is_stay_silent_tool_name name
+  let name = Keeper_tool_resolution.canonical_tool_name name in
+  if is_claim_context_tool_name name
   then false
+  else if is_completion_tool_name name
+  then true
+  else if Keeper_tool_capability_axis.supports Board_activity name
+  then true
   else (
-    let name = Keeper_tool_resolution.canonical_tool_name name in
-    if is_claim_context_tool_name name
-    then false
-    else if is_completion_tool_name name
-    then true
-    else if Keeper_tool_capability_axis.supports Board_activity name
-    then true
-    else (
-      match effect_domain_for_tool_name name with
-      | Some (Tool_catalog.Playground_write | Tool_catalog.Host_repo_write) -> true
-      | Some Tool_catalog.Masc_workspace | Some Tool_catalog.Read_only | None -> false))
+    match effect_domain_for_tool_name name with
+    | Some (Tool_catalog.Playground_write | Tool_catalog.Host_repo_write) -> true
+    | Some Tool_catalog.Masc_workspace | Some Tool_catalog.Read_only | None -> false)
 ;;
 
 let is_passive_status_tool_name name =

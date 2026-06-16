@@ -66,7 +66,7 @@ let print_startup_banner
   if Server_ws_standalone.is_enabled ()
   then
     Printf.printf
-      "   GET  /ws → WebSocket discovery (standalone ws://127.0.0.1:%d/)\n%!"
+      "   GET  /ws → WebSocket upgrade or discovery (standalone fallback ws://127.0.0.1:%d/)\n%!"
       (Server_ws_standalone.configured_port ());
   if Server_webrtc_transport.is_enabled ()
   then Printf.printf "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"

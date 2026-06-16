@@ -155,7 +155,10 @@ let append_decision_record
         ("tool_surface", tool_surface_json result);
         ("pending_approval_count", `Int pending_approval_count);
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
-        ("channel", `String (decision_channel_of_observation observation));
+        ( "channel",
+          `String
+            (Keeper_world_observation.channel_to_string
+               (decision_channel_of_observation observation)) );
         ("outcome", `String outcome);
         ("degraded_retry_applied", `Bool degraded_retry_applied);
         ( "degraded_retry_runtime",
@@ -274,10 +277,6 @@ let append_decision_record
                   ("config_root", `String r.tool_surface.config_root);
                   ( "runtime_config_path",
                     Json_util.string_opt_to_json r.tool_surface.runtime_config_path );
-                  ("gemini_mcp_disabled", `Bool r.tool_surface.gemini_mcp_disabled);
-                  ( "approval_mode_effective",
-                    Json_util.string_opt_to_json r.tool_surface.approval_mode_effective );
-                  ("approval_mode_derived", `Bool r.tool_surface.approval_mode_derived);
                 ]
               in
                 let stop_reason_str =

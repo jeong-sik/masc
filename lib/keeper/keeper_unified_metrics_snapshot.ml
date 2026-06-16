@@ -15,7 +15,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)
     ~(turn_generation : int)
-    ~(channel : string)
+    ~(channel : Keeper_world_observation.keeper_cycle_channel)
     ~(snapshot_source : string)
     ~(context_ratio : float)
     ~(context_tokens : int)
@@ -40,7 +40,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~keeper:meta.name
     ~context_max;
   let scheduled_autonomous_outcome =
-    if is_scheduled_autonomous_channel channel then
+    if Keeper_world_observation.is_autonomous channel then
       Some (scheduled_autonomous_outcome_for_result result)
     else None
   in
@@ -89,7 +89,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
      timeout-budget burn attributable to the redacted runtime lane. *)
   record_turn_latency_by_model_bucket
     ~keeper:meta.name
-    ~channel
+    ~channel:(Keeper_world_observation.channel_to_string channel)
     ~runtime_profile
     ~latency_ms;
   Otel_metric_store.inc_counter
@@ -101,7 +101,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
       [
         ("ts", `String (now_iso ()));
         ("ts_unix", `Float now_ts);
-        ("channel", `String channel);
+        ("channel", `String (Keeper_world_observation.channel_to_string channel));
         ("name", `String meta.name);
         ("agent_name", `String meta.agent_name);
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));

@@ -170,18 +170,6 @@ type keeper_profile_defaults =
   unknown_toml_keys : string list;
 }
 val empty_keeper_profile_defaults : keeper_profile_defaults
-type keeper_oas_context =
-  Keeper_types_profile_defaults.keeper_oas_context = {
-  env_pairs : (string * string) list;
-  gemini_mcp_disabled : bool;
-  gemini_approval_mode : string option;
-  gemini_approval_mode_derived : bool;
-  gemini_allowed_mcp_derived : bool;
-  claude_mcp_config : string option;
-}
-val empty_keeper_oas_context : keeper_oas_context
-val keeper_oas_context_of_defaults :
-  keeper_profile_defaults -> keeper_oas_context
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option

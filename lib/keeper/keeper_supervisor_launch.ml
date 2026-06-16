@@ -84,7 +84,7 @@ let launch_supervised_fiber
       { post_id = "bootstrap"
       ; urgency = Keeper_event_queue.Normal
       ; arrived_at = Unix.gettimeofday ()
-      ; payload = "Keeper bootstrap signal"
+      ; payload = Keeper_event_queue.Bootstrap
       }
     in
     Keeper_registry_event_queue.enqueue ~base_path meta.name bootstrap_signal;

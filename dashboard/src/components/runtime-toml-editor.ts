@@ -180,6 +180,7 @@ export function RuntimeTomlEditor() {
 
   return html`
     <${SectionCard}
+      class="v2-monitoring-panel"
       label="runtime.toml"
       testId="runtime-toml-editor"
       right=${html`
@@ -192,7 +193,7 @@ export function RuntimeTomlEditor() {
       `}
     >
       <div class="flex flex-col gap-3">
-        <div class="sticky top-0 z-10 -mx-1 bg-[var(--color-bg-surface)]/95 px-1 py-2 backdrop-blur">
+        <div class="v2-monitoring-toolbar sticky top-0 z-10 -mx-1 bg-[var(--color-bg-surface)]/95 px-1 py-2 backdrop-blur">
           <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div class="min-w-0">
               <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">path</div>
@@ -295,7 +296,7 @@ export function RuntimeTomlEditor() {
               }}
             />
             <div
-              class="mt-4 grid min-h-[32rem] max-h-[72vh] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)]"
+              class="v2-monitoring-code-frame mt-4 grid min-h-[32rem] max-h-[72vh] grid-cols-[3.5rem_minmax(0,1fr)] overflow-hidden rounded-[var(--r-1)] border border-[var(--input-border)] bg-[var(--input-bg)]"
               data-testid="runtime-toml-code-frame"
             >
               <pre

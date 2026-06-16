@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { h } from 'preact'
+import { cleanup, render } from '@testing-library/preact'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   computeFunnelCounts,
   formatTargetRatio,
@@ -10,6 +12,7 @@ import {
   deriveTaskAlerts,
   deriveFleetTickerEvents,
   type FunnelCounts,
+  Overview,
 } from './overview'
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
@@ -498,5 +501,19 @@ describe('deriveTaskAlerts', () => {
   it('returns assignee in alert when present', () => {
     const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification', updated_at: STALE_UPDATED, assignee: 'agent-x' })]
     expect(deriveTaskAlerts(tasks, NOW)[0]!.assignee).toBe('agent-x')
+  })
+})
+
+describe('Overview v2 marker classes', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('applies v2 surface and panel marker classes on render', () => {
+    const { container } = render(h(Overview, null))
+
+    expect(container.querySelector('.v2-overview-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-funnel')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-keepers')).not.toBeNull()
   })
 })

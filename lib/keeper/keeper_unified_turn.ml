@@ -900,16 +900,6 @@ dominant source of the observed CAS race exhaustion after
                   Error err
                 | Ok result ->
                   let final_execution = !last_execution in
-                  Keeper_turn_fsm.emit_transition
-                    ~keeper_name:meta.name
-                    ~turn_id:keeper_turn_id
-                    ~prev:Keeper_turn_fsm.Streaming
-                    Keeper_turn_fsm.Completing;
-                  Keeper_turn_fsm.emit_transition
-                    ~keeper_name:meta.name
-                    ~turn_id:keeper_turn_id
-                    ~prev:Keeper_turn_fsm.Completing
-                    Keeper_turn_fsm.Done;
                   finalize_trajectory_acc
                     ~config
                     ~keeper_name:meta.name

@@ -143,12 +143,12 @@ let test_is_agent () =
   cleanup ();
   (* is_agent uses agent_lookup_hook — returns false when no hook installed *)
   Alcotest.(check bool) "no hook = not agent" false
-    (Board_tool.is_agent "dreamer");
-  (* Install a mock hook that recognises "dreamer" *)
-  Board_tool.set_agent_lookup (fun name -> name = "dreamer");
+    (Board_tool.is_agent "alice");
+  (* Install a mock hook that recognises "alice" *)
+  Board_tool.set_agent_lookup (fun name -> name = "alice");
   Fun.protect ~finally:Board_tool.set_agent_lookup_none (fun () ->
     Alcotest.(check bool) "registered agent" true
-      (Board_tool.is_agent "dreamer");
+      (Board_tool.is_agent "alice");
     Alcotest.(check bool) "unregistered agent" false
       (Board_tool.is_agent "unknown");
     Alcotest.(check bool) "empty = not agent" false
@@ -217,10 +217,10 @@ let test_board_actor_identity_keeps_non_keeper_agent () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let json = Server_utils.board_actor_identity_json "agent_code" in
+  let json = Server_utils.board_actor_identity_json "codex" in
   Alcotest.(check string) "kind" "agent" (json_member_string json "kind");
-  Alcotest.(check string) "id" "agent_code" (json_member_string json "id");
-  Alcotest.(check string) "key" "agent:agent_code" (json_member_string json "key");
+  Alcotest.(check string) "id" "codex" (json_member_string json "id");
+  Alcotest.(check string) "key" "agent:codex" (json_member_string json "key");
   Alcotest.(check string) "source" "raw_agent"
     (json_member_string json "source")
 
@@ -1124,7 +1124,7 @@ let test_board_curation_submit_roundtrips_to_read () =
 
 let mcp_runtime_board_dispatch ~sw ~clock name args =
   let state = Mcp_server.create_state ~base_path:_test_base_path in
-  Mcp_tool_runtime_board.dispatch ~config:state.Mcp_server.workspace_config
+  Mcp_tool_runtime_board.dispatch ~config:(Mcp_server.workspace_config state)
     ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~sw ~clock ~name
     ~start_time:(Unix.gettimeofday ())
 
@@ -1406,7 +1406,7 @@ let test_post_get_success () =
     |> Yojson.Safe.Util.to_string
   in
   Alcotest.(check bool) "post_id not empty" true (String.length post_id > 0);
-  let ok2, body2 = dispatch "masc_board_get"
+  let ok2, body2 = dispatch "masc_board_post_get"
     (make_args [("post_id", `String post_id)]) in
   Alcotest.(check bool) "get ok" true ok2;
   Alcotest.(check bool) "get has content" true (String.length body2 > 0)
@@ -1415,7 +1415,7 @@ let test_post_get_not_found () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let ok, body = dispatch "masc_board_get"
+  let ok, body = dispatch "masc_board_post_get"
     (make_args [("post_id", `String "nonexistent-id")]) in
   Alcotest.(check bool) "not found is idempotent success" true ok;
   Alcotest.(check bool) "body mentions gone" true
@@ -1981,7 +1981,7 @@ let () =
             Board_tool.set_agent_lookup_none ();
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
-              ("author", `String "agent_llm_a-agent")
+              ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
             Alcotest.(check string) "classified as direct" "direct"
@@ -1991,10 +1991,10 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Board_tool.set_agent_lookup (fun name -> name = "agent_llm_a-agent");
+            Board_tool.set_agent_lookup (fun name -> name = "claude-agent");
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
-              ("author", `String "agent_llm_a-agent")
+              ("author", `String "claude-agent")
             ]) in
             Alcotest.(check bool) "post created" true ok;
             Alcotest.(check string) "classified as automation" "automation"
@@ -2020,7 +2020,7 @@ let () =
             Board_tool.set_agent_lookup (fun _name -> true);
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
-              ("author", `String "agent_llm_a-agent");
+              ("author", `String "claude-agent");
               ("post_kind", `String "human")
             ]) in
             Alcotest.(check bool) "post rejected" false ok;

@@ -2,8 +2,8 @@
 
    Two pure cores are tested here:
    - the boundary mention parse + match (RFC-0232 P4: parse at append,
-     match persisted ids; the substring bug that made "@dreamerx" /
-     "email@dreamer.com" false-match "@dreamer" must not recur).
+     match persisted ids; the substring bug that made "@alicex" /
+     "email@alice.com" false-match "@alice" must not recur).
    - pending_mentions_of_messages: the lane-is-the-state watermark — a mention
      is pending iff it arrives after the keeper's own last line. *)
 
@@ -13,7 +13,7 @@ module MS = Masc.Keeper_world_observation_message_scope
 module Store = Masc.Keeper_chat_store
 module Lane = Masc.Keeper_lane_mentions
 
-let targets = [ "dreamer" ]
+let targets = [ "alice" ]
 
 (* Boundary-parse-then-match: the P4 equivalent of the deleted
    read-time [line_mentions]. *)
@@ -22,32 +22,34 @@ let lm content =
     ~target_ids:(Lane.target_ids_of targets)
     (Lane.mention_ids_of_content content)
 
-let test_plain_mention () = check bool "@dreamer by another" true (lm "hey @dreamer look")
+let test_plain_mention () = check bool "@alice by another" true (lm "hey @alice look")
 
-let test_dreamerx_not_matched () =
-  check bool "@dreamerx is a different token" false (lm "ping @dreamerx now")
+let test_alicex_not_matched () =
+  check bool "@alicex is a different token" false (lm "ping @alicex now")
 ;;
 
 let test_email_not_matched () =
-  check bool "email@dreamer.com is one token" false (lm "send to email@dreamer.com")
+  check bool "email@alice.com is one token" false (lm "send to email@alice.com")
 ;;
 
 let test_case_insensitive () = check bool "@DREAMER" true (lm "PING @DREAMER NOW")
-let test_trailing_punct () = check bool "@dreamer, comma" true (lm "ok @dreamer, thanks")
+let test_trailing_punct () = check bool "@alice, comma" true (lm "ok @alice, thanks")
 let test_no_mention () = check bool "no @target" false (lm "just chatting here")
 
 let test_empty_targets () =
   check bool "no targets to match" false
     (Lane.ids_match
        ~target_ids:(Lane.target_ids_of [])
-       (Lane.mention_ids_of_content "@dreamer"))
+       (Lane.mention_ids_of_content "@alice"))
 ;;
 
 let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
+    ?(audio = None)
     ?(kind = Store.Row_kind.Utterance) content
   : Store.chat_message
   =
-  { role
+  { id = "test-msg"
+  ; role
   ; content
   ; ts
   ; attachments = None
@@ -60,20 +62,21 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
   ; speaker
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
   ; kind
+  ; audio
   }
 ;;
 
 let contents pms = List.map snd pms
 
 let test_unanswered_mention_is_pending () =
-  let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@dreamer please look" ] in
-  check (list string) "no later own line -> pending" [ "@dreamer please look" ]
+  let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look" ] in
+  check (list string) "no later own line -> pending" [ "@alice please look" ]
     (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
 
 let test_answered_mention_is_cleared () =
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@dreamer please look"
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"
     ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) "on it"
     ]
   in
@@ -83,17 +86,17 @@ let test_answered_mention_is_cleared () =
 
 let test_rementioned_after_reply_is_pending () =
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@dreamer first"
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice first"
     ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) "done"
-    ; msg ~role:Store.Role.User ~ts:(Some 12.0) "@dreamer again"
+    ; msg ~role:Store.Role.User ~ts:(Some 12.0) "@alice again"
     ]
   in
-  check (list string) "new mention after reply -> pending" [ "@dreamer again" ]
+  check (list string) "new mention after reply -> pending" [ "@alice again" ]
     (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
 
 let test_assistant_self_mention_ignored () =
-  let messages = [ msg ~role:Store.Role.Assistant ~ts:(Some 10.0) "@dreamer note to self" ] in
+  let messages = [ msg ~role:Store.Role.Assistant ~ts:(Some 10.0) "@alice note to self" ] in
   check (list string) "own assistant line is never a pending mention" []
     (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
@@ -113,7 +116,7 @@ let test_owner_unmentioned_line_is_scope () =
 
 let test_owner_mention_is_not_scope () =
   (* an owner line that mentions is a mention, not a scope message (disjoint) *)
-  let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner "@dreamer check it" ] in
+  let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner "@alice check it" ] in
   check (list string) "owner mention excluded from scope" []
     (contents (MS.pending_scope_of_messages ~targets messages))
 ;;
@@ -142,7 +145,7 @@ let test_skewed_clock_cannot_unanswer () =
      writer). Lane order says answered; a ts-based watermark would say
      pending. Positional semantics must clear it. *)
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 100.0) "@dreamer please look"
+    [ msg ~role:Store.Role.User ~ts:(Some 100.0) "@alice please look"
     ; msg ~role:Store.Role.Assistant ~ts:(Some 5.0) "on it"
     ]
   in
@@ -154,12 +157,12 @@ let test_ts_fuzz_does_not_change_pending () =
   (* Same lane, three ts assignments (ordered, reversed, absent): the
      pending set depends on lane order alone. *)
   let lane ts_of =
-    [ msg ~role:Store.Role.User ~ts:(ts_of 0) "@dreamer first"
+    [ msg ~role:Store.Role.User ~ts:(ts_of 0) "@alice first"
     ; msg ~role:Store.Role.Assistant ~ts:(ts_of 1) "done"
-    ; msg ~role:Store.Role.User ~ts:(ts_of 2) "@dreamer again"
+    ; msg ~role:Store.Role.User ~ts:(ts_of 2) "@alice again"
     ]
   in
-  let expected = [ "@dreamer again" ] in
+  let expected = [ "@alice again" ] in
   List.iter
     (fun (label, ts_of) ->
       check (list string) label expected
@@ -174,7 +177,7 @@ let test_none_ts_assistant_still_clears () =
   (* A legacy assistant line without a timestamp is still the keeper
      speaking; it must advance the watermark. *)
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@dreamer please look"
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"
     ; msg ~role:Store.Role.Assistant ~ts:None "on it"
     ]
   in
@@ -183,7 +186,8 @@ let test_none_ts_assistant_still_clears () =
 ;;
 
 let tool_line : Store.chat_message =
-  { role = Store.Role.Tool
+  { id = "test-tool"
+  ; role = Store.Role.Tool
   ; content = "{}"
   ; ts = Some 10.5
   ; attachments = None
@@ -196,6 +200,7 @@ let tool_line : Store.chat_message =
   ; speaker = None
   ; mentions = []
   ; kind = Store.Row_kind.Utterance
+  ; audio = None
   }
 ;;
 
@@ -203,9 +208,9 @@ let test_tool_lines_do_not_clear () =
   (* Tool lines are the keeper *working*, not the keeper *answering*;
      they must not advance the watermark. *)
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@dreamer please look"; tool_line ]
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"; tool_line ]
   in
-  check (list string) "tool line is not an answer" [ "@dreamer please look" ]
+  check (list string) "tool line is not an answer" [ "@alice please look" ]
     (contents (MS.pending_mentions_of_messages ~targets messages))
 ;;
 
@@ -220,9 +225,9 @@ let test_transport_failure_does_not_clear () =
       "Keeper request failed: Idle detected"
   in
   let messages =
-    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@dreamer please look"; failure ]
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@alice please look"; failure ]
   in
-  check (list string) "failure marker is not an answer" [ "@dreamer please look" ]
+  check (list string) "failure marker is not an answer" [ "@alice please look" ]
     (contents (MS.pending_mentions_of_messages ~targets messages));
   let answered =
     messages @ [ msg ~role:Store.Role.Assistant ~ts:(Some 11.0) "done" ]
@@ -231,17 +236,47 @@ let test_transport_failure_does_not_clear () =
     (contents (MS.pending_mentions_of_messages ~targets answered))
 ;;
 
+let test_voice_audio_self_output_is_not_recent_context () =
+  let audio =
+    Some
+      { Store.token = "voice-token-1"
+      ; audio_url = None
+      ; mime = "audio/mpeg"
+      ; duration_sec = None
+      ; message_text = "saying this out loud"
+      ; device_id = None
+      }
+  in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "please say it out loud"
+    ; msg ~role:Store.Role.Assistant ~ts:(Some 11.0) ~audio
+        "saying this out loud"
+    ; msg ~role:Store.Role.Assistant ~ts:(Some 12.0) "text follow-up"
+    ]
+  in
+  let lines = MS.recent_direct_conversation_of_messages messages in
+  check (list string) "voice audio assistant row omitted from prompt context"
+    [ "user"; "assistant" ]
+    (List.map
+       (fun (line : MS.recent_direct_line) ->
+         MS.direct_line_role_to_label line.role)
+       lines);
+  check (list string) "spoken text is not quoted back"
+    [ "please say it out loud"; "text follow-up" ]
+    (List.map (fun (line : MS.recent_direct_line) -> line.content) lines)
+;;
+
 let test_assistant_append_empties_pending () =
   (* Appending the keeper's own line can only shrink pending — for any
      prefix of a lane, prefix @ [assistant] has no pending mentions or
      scope. Exhaustive over every prefix of a mixed sample lane. *)
   let sample =
-    [ msg ~role:Store.Role.User ~ts:(Some 1.0) "@dreamer a"
+    [ msg ~role:Store.Role.User ~ts:(Some 1.0) "@alice a"
     ; msg ~role:Store.Role.User ~ts:(Some 2.0) ~speaker:owner "status?"
     ; msg ~role:Store.Role.Assistant ~ts:(Some 3.0) "reply"
     ; msg ~role:Store.Role.User ~ts:(Some 4.0) ~speaker:external_ "chatter"
     ; tool_line
-    ; msg ~role:Store.Role.User ~ts:(Some 5.0) "@dreamer b"
+    ; msg ~role:Store.Role.User ~ts:(Some 5.0) "@alice b"
     ]
   in
   let self_reply = msg ~role:Store.Role.Assistant ~ts:(Some 99.0) "ack" in
@@ -263,7 +298,7 @@ let () =
   run "keeper_mention_scope"
     [ ( "boundary_mention_match"
       , [ test_case "plain" `Quick test_plain_mention
-        ; test_case "dreamerx_not_matched" `Quick test_dreamerx_not_matched
+        ; test_case "alicex_not_matched" `Quick test_alicex_not_matched
         ; test_case "email_not_matched" `Quick test_email_not_matched
         ; test_case "case_insensitive" `Quick test_case_insensitive
         ; test_case "trailing_punct" `Quick test_trailing_punct
@@ -289,6 +324,8 @@ let () =
         ; test_case "tool_lines_do_not_clear" `Quick test_tool_lines_do_not_clear
         ; test_case "transport_failure_does_not_clear" `Quick
             test_transport_failure_does_not_clear
+        ; test_case "voice_audio_self_output_not_recent_context" `Quick
+            test_voice_audio_self_output_is_not_recent_context
         ; test_case "assistant_append_empties_pending" `Quick
             test_assistant_append_empties_pending
         ] )

@@ -955,7 +955,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
     <div class="flex flex-col" style="margin-left:${indent}px">
       <button
         type="button"
-        class="${headerBase} ${hasContent ? 'cursor-pointer' : ''} ${ringFocusClasses()}"
+        class="v2-workspace-row ${headerBase} ${hasContent ? 'cursor-pointer' : ''} ${ringFocusClasses()}"
         onClick=${() => {
           selectGoal(node.id)
           if (hasContent) toggleNode(node.id)
@@ -1205,7 +1205,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div>샌드박스</div>
         <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
         <div>승인</div>
-        <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
+        <div class="text-right text-text-body">${trust?.approval_state?.summary ?? '-'}</div>
         <div>런타임</div>
         <div class="text-right text-text-body">${keeper.runtime_id ?? executionRuntimeOutcome ?? '-'}</div>
         <div>결과</div>
@@ -1222,7 +1222,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
           ` : null}
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
             ${trust?.approval_state?.state ? html`
-              <span>승인 상태 ${trust.approval_state.state}</span>
+              <span>승인 상태 ${trust.approval_state.state}${trust.approval_state.latest_event_at ? html` · <${TimeAgo} timestamp=${trust.approval_state.latest_event_at} />` : null}</span>
             ` : null}
             ${pendingApprovalId ? html`
               <span>승인 ID ${pendingApprovalId}</span>
@@ -1280,6 +1280,9 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ` : null}
             ${latestEvent.next_human_action ? html`
               <span>next ${latestEvent.next_human_action}</span>
+            ` : null}
+            ${latestEvent.trace_id ? html`
+              <span class="font-mono" title=${latestEvent.trace_id}>trace ${latestEvent.trace_id.slice(0, 8)}</span>
             ` : null}
           </div>
         </div>
@@ -1639,8 +1642,8 @@ export function GoalTree() {
   const isFiltering = query.trim() !== '' || activePhaseFilter !== 'all'
 
   return html`
-    <div class="flex flex-col gap-5">
-      <section class=${GOAL_PANEL} aria-label="목표 관리자">
+    <div class="v2-workspace-surface flex flex-col gap-5">
+      <section class="${GOAL_PANEL} v2-workspace-panel" aria-label="목표 관리자">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
             <h3 class="text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 관리자</h3>
@@ -1655,16 +1658,17 @@ export function GoalTree() {
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
                 class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent-fg"
               />
-              <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
+              <${ActionButton} variant="ghost" size="sm" class="v2-workspace-action" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기
               <//>
-              <${ActionButton} variant="ghost" size="sm" onClick=${collapseAll}>
+              <${ActionButton} variant="ghost" size="sm" class="v2-workspace-action" onClick=${collapseAll}>
                 모두 접기
               <//>
             ` : null}
             <${ActionButton}
               variant="ghost"
               size="md"
+              class="v2-workspace-action"
               disabled=${loading}
               onClick=${() => { void refreshTree() }}
             >

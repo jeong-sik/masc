@@ -190,6 +190,18 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText(/아직 게시글이 없습니다/)).toBeInTheDocument()
   })
 
+  it('wraps the board surface in the v2 workspace surface class', () => {
+    const { container } = render(h(BoardSurface, null))
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+  })
+
+  it('marks the sort bar and new-post form as v2 workspace panels', () => {
+    const { container } = render(h(BoardSurface, null))
+    const panels = container.querySelectorAll('.v2-workspace-panel')
+    expect(panels.length).toBeGreaterThanOrEqual(2)
+    expect(container.querySelector('.v2-workspace-action')).not.toBeNull()
+  })
+
   it('renders loading state when loading', () => {
     boardLoading.value = true
     render(h(BoardSurface, null))
@@ -207,6 +219,33 @@ describe('BoardSurface Component', () => {
     ]
     render(h(BoardSurface, null))
     expect(screen.getByText(/기술 탐색: test topic/)).toBeInTheDocument()
+  })
+
+  it('renders a 고정 badge for a pinned post', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-pinned',
+        title: '고정된 공지',
+        body: 'pinned content here',
+        author: 'ani1999',
+        pinned: true,
+      }),
+    ]
+    render(h(BoardSurface, null))
+    expect(screen.getByTitle('고정된 게시글')).toBeInTheDocument()
+  })
+
+  it('omits the 고정 badge for an unpinned post', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-plain',
+        title: '일반 글',
+        body: 'plain content here',
+        author: 'ani1999',
+      }),
+    ]
+    render(h(BoardSurface, null))
+    expect(screen.queryByTitle('고정된 게시글')).not.toBeInTheDocument()
   })
 
   it('renders post authors as keyboard-discoverable links', () => {

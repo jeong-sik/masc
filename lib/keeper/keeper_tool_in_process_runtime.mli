@@ -16,8 +16,6 @@ open Keeper_types_profile
 
 val handle_time_now : args:Yojson.Safe.t -> string
 
-val handle_stay_silent : args:Yojson.Safe.t -> string
-
 val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
 val handle_tool_search
@@ -190,6 +188,15 @@ val handle_masc_control
     Constructs a [Tool_agent_timeline.context] from [config + meta.name]
     and calls [Tool_agent_timeline.dispatch]. *)
 val handle_masc_agent_timeline
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0234 — [handle_masc_schedule] is the descriptor-projection
+    cluster handler for [masc_schedule_*] tools. *)
+val handle_masc_schedule
   :  config:Workspace.config
   -> meta:keeper_meta
   -> name:string

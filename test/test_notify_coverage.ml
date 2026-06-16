@@ -151,21 +151,21 @@ let test_escape_shell_special_chars () =
 
 let test_render_focus_template_target () =
   let payload : Notify.focus_payload = {
-    target_agent = Some "agent_llm_a";
+    target_agent = Some "claude";
     from_agent = None;
     task_id = None;
   } in
   let result = Notify.render_focus_template "focus {{target}}" payload in
-  check string "target" "focus agent_llm_a" result
+  check string "target" "focus claude" result
 
 let test_render_focus_template_from () =
   let payload : Notify.focus_payload = {
     target_agent = None;
-    from_agent = Some "provider_f";
+    from_agent = Some "gemini";
     task_id = None;
   } in
   let result = Notify.render_focus_template "from {{from}}" payload in
-  check string "from" "from provider_f" result
+  check string "from" "from gemini" result
 
 let test_render_focus_template_task () =
   let payload : Notify.focus_payload = {
@@ -178,12 +178,12 @@ let test_render_focus_template_task () =
 
 let test_render_focus_template_all () =
   let payload : Notify.focus_payload = {
-    target_agent = Some "agent_llm_a";
-    from_agent = Some "provider_f";
+    target_agent = Some "claude";
+    from_agent = Some "gemini";
     task_id = Some "task-001";
   } in
   let result = Notify.render_focus_template "{{target}} {{from}} {{task}}" payload in
-  check string "all" "agent_llm_a provider_f task-001" result
+  check string "all" "claude gemini task-001" result
 
 let test_render_focus_template_none () =
   let payload : Notify.focus_payload = {
@@ -196,7 +196,7 @@ let test_render_focus_template_none () =
 
 let test_render_focus_template_no_placeholders () =
   let payload : Notify.focus_payload = {
-    target_agent = Some "agent_llm_a";
+    target_agent = Some "claude";
     from_agent = None;
     task_id = None;
   } in
@@ -205,7 +205,7 @@ let test_render_focus_template_no_placeholders () =
 
 let test_render_focus_template_sanitizes () =
   let payload : Notify.focus_payload = {
-    target_agent = Some "agent_llm_a@test";
+    target_agent = Some "claude@test";
     from_agent = None;
     task_id = None;
   } in
@@ -239,13 +239,13 @@ let test_escape_applescript_mixed () =
    ============================================================ *)
 
 let test_agent_emoji_llm_a () =
-  check string "agent_llm_a" "🟣" (Notify.agent_emoji "agent_llm_a")
+  check string "claude" "🟣" (Notify.agent_emoji "claude")
 
 let test_agent_emoji_f () =
-  check string "provider_f" "🔵" (Notify.agent_emoji "provider_f")
+  check string "gemini" "🔵" (Notify.agent_emoji "gemini")
 
 let test_agent_emoji_a () =
-  check string "agent_code" "🟢" (Notify.agent_emoji "agent_code")
+  check string "codex" "🟢" (Notify.agent_emoji "codex")
 
 let test_agent_emoji_llama () =
   check string "llama" "🦙" (Notify.agent_emoji "llama")
@@ -265,30 +265,30 @@ let test_agent_emoji_empty () =
 
 let test_event_mention () =
   let e : Notify.event = Mention {
-    from_agent = "provider_f";
-    target_agent = Some "agent_llm_a";
+    from_agent = "gemini";
+    target_agent = Some "claude";
     message = "hello";
   } in
   match e with
   | Notify.Mention { from_agent; target_agent; message } ->
-    check string "from_agent" "provider_f" from_agent;
-    check (option string) "target_agent" (Some "agent_llm_a") target_agent;
+    check string "from_agent" "gemini" from_agent;
+    check (option string) "target_agent" (Some "claude") target_agent;
     check string "message" "hello" message
   | _ -> fail "expected Mention"
 
 let test_event_interrupt () =
-  let e : Notify.event = Interrupt { agent = "agent_llm_a"; action = "stop" } in
+  let e : Notify.event = Interrupt { agent = "claude"; action = "stop" } in
   match e with
   | Notify.Interrupt { agent; action } ->
-    check string "agent" "agent_llm_a" agent;
+    check string "agent" "claude" agent;
     check string "action" "stop" action
   | _ -> fail "expected Interrupt"
 
 let test_event_task_completed () =
-  let e : Notify.event = TaskCompleted { agent = "agent_llm_a"; task_id = "task-001" } in
+  let e : Notify.event = TaskCompleted { agent = "claude"; task_id = "task-001" } in
   match e with
   | Notify.TaskCompleted { agent; task_id } ->
-    check string "agent" "agent_llm_a" agent;
+    check string "agent" "claude" agent;
     check string "task_id" "task-001" task_id
   | _ -> fail "expected TaskCompleted"
 
@@ -311,12 +311,12 @@ let test_event_custom () =
 
 let test_focus_payload_all_some () =
   let p : Notify.focus_payload = {
-    target_agent = Some "agent_llm_a";
-    from_agent = Some "provider_f";
+    target_agent = Some "claude";
+    from_agent = Some "gemini";
     task_id = Some "task-001";
   } in
-  check (option string) "target" (Some "agent_llm_a") p.target_agent;
-  check (option string) "from" (Some "provider_f") p.from_agent;
+  check (option string) "target" (Some "claude") p.target_agent;
+  check (option string) "from" (Some "gemini") p.from_agent;
   check (option string) "task" (Some "task-001") p.task_id
 
 let test_focus_payload_all_none () =
@@ -402,9 +402,9 @@ let () =
       test_case "mixed" `Quick test_escape_applescript_mixed;
     ];
     "agent_emoji", [
-      test_case "agent_llm_a" `Quick test_agent_emoji_llm_a;
-      test_case "provider_f" `Quick test_agent_emoji_f;
-      test_case "agent_code" `Quick test_agent_emoji_a;
+      test_case "claude" `Quick test_agent_emoji_llm_a;
+      test_case "gemini" `Quick test_agent_emoji_f;
+      test_case "codex" `Quick test_agent_emoji_a;
       test_case "llama" `Quick test_agent_emoji_llama;
       test_case "system" `Quick test_agent_emoji_system;
       test_case "unknown" `Quick test_agent_emoji_unknown;

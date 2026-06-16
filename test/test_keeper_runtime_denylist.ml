@@ -113,7 +113,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_meta_store.write_meta ~force:true config initial_meta with
+  (match Keeper_meta_store.write_meta config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
   (* 3. Call ensure_keeper_meta — should overlay denylist from TOML *)
@@ -171,7 +171,7 @@ active_goal_ids = ["goal-runtime"]
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_meta_store.write_meta ~force:true config initial_meta with
+  (match Keeper_meta_store.write_meta config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
   (match Keeper_runtime.ensure_keeper_meta config keeper_name with

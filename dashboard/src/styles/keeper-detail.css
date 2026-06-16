@@ -14,3 +14,26 @@
   isolation: isolate;
 }
 
+.keeper-detail-v2-shell {
+  align-items: start;
+}
+
+.keeper-detail-roster-row[aria-current="page"] {
+  box-shadow:
+    inset 2px 0 0 var(--color-accent-fg),
+    inset 0 1px 0 rgb(255 255 255 / 0.025);
+}
+
+.keeper-detail-roster-row {
+  min-height: 72px;
+}
+
+.keeper-detail-context-rail {
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 1279px) {
+  .keeper-detail-roster-rail {
+    max-height: min(44svh, 28rem);
+  }
+}

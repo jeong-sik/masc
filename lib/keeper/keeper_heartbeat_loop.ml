@@ -44,7 +44,6 @@ let with_in_turn_liveness_pulse =
 module Stimulus_intake = Keeper_heartbeat_stimulus_intake
 
 let stimulus_urgency_to_string = Stimulus_intake.stimulus_urgency_to_string
-let stimulus_class_to_string = Stimulus_intake.stimulus_class_to_string
 let pending_board_event_of_stimulus = Stimulus_intake.pending_board_event_of_stimulus
 let record_recovery_stimulus_turn_started =
   Stimulus_intake.record_recovery_stimulus_turn_started
@@ -120,6 +119,55 @@ let provider_timeout_metric_outcome =
 (** Run keeper cycle with holder diagnostics. *)
 let run_keeper_cycle = Keeper_heartbeat_loop_cycle.run_keeper_cycle
 
+(* T6 audit: outcome of one keepalive cycle evaluation.
+
+   [cycle_crashed = true] means the catch-all in
+   [run_keepalive_unified_turn] swallowed an exception to keep the
+   keeper fiber alive. The failure has already been recorded via
+   [Keeper_registry.increment_turn_failures] (the same counter the
+   unified-turn failure path in [Keeper_unified_turn_failure] uses),
+   so the caller reads a non-zero [turn_fail_count] and dispatches
+   [Turn_failed] instead of [Turn_succeeded]. A crashed cycle must
+   also NOT refresh the work-as-heartbeat lease. *)
+type keepalive_turn_outcome = {
+  meta : keeper_meta;
+  cycle_crashed : bool;
+}
+
+(* T6 audit: record a swallowed cycle exception as a turn failure.
+
+   Catch-and-survive is intentional (the fiber must outlive the
+   crash); the bug being fixed is that the crash was invisible to the
+   scheduling/escalation layer. Incrementing the registry counter
+   routes the crash through the same channel other turn failures use:
+   the caller loop dispatches [Turn_failed] and raises
+   [Keeper_fiber_crash] at the same threshold, and
+   [Keeper_unified_turn_failure.record_failure_and_maybe_escalate]
+   reads the same counter for its escalation decision. *)
+let record_crashed_cycle_failure ~base_path ~keeper_name exn =
+  (* Capture the backtrace before any other call can clobber it. *)
+  let backtrace = Printexc.get_backtrace () in
+  Keeper_registry.increment_turn_failures ~base_path keeper_name;
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string CycleExceptions)
+    ~labels:[ "keeper", keeper_name ]
+    ();
+  Log.Keeper.error
+    "%s: keeper cycle exception (recorded as turn failure): %s%s"
+    keeper_name
+    (Printexc.to_string exn)
+    (if String.equal backtrace "" then "" else "\n" ^ backtrace)
+;;
+
+(* Pure: post-turn status event derived from the registry turn-failure
+   counter. Extracted from the loop body so the crashed-cycle ->
+   [Turn_failed] mapping is unit-testable. *)
+let turn_status_event ~turn_fail_count ~max_allowed : Keeper_state_machine.event =
+  if turn_fail_count > 0
+  then Keeper_state_machine.Turn_failed { consecutive = turn_fail_count; max_allowed }
+  else Keeper_state_machine.Turn_succeeded
+;;
+
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -128,10 +176,10 @@ let run_keepalive_unified_turn
       ~(proactive_warmup_elapsed : bool)
       ~(reactive_wake : bool)
       ~(shared_context : Agent_sdk.Context.t)
-  : keeper_meta
+  : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
-  then meta_after_triage
+  then { meta = meta_after_triage; cycle_crashed = false }
   else (
     try
       let event_intake =
@@ -294,71 +342,71 @@ let run_keepalive_unified_turn
         Keeper_decision_audit.flush_if_needed
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name);
-      if Atomic.get stop
-      then meta_after_triage
-      else if should_run_turn && Keeper_fd_pressure.active ()
-      then (
-        Log.Keeper.debug
-          "%s: skipping turn while fd-pressure circuit breaker is active (remaining=%.0fs)"
-          meta_after_triage.name
-          (Keeper_fd_pressure.remaining_sec ());
-        meta_after_triage)
-      else if should_run_turn && Keeper_disk_pressure.active ()
-      then (
-        Log.Keeper.debug
-          "%s: skipping turn while disk-pressure circuit breaker is active \
-           (remaining=%.0fs)"
-          meta_after_triage.name
-          (Keeper_disk_pressure.remaining_sec ());
-        meta_after_triage)
-      else if
-        should_run_turn
-        && not
-             (Keeper_fd_pressure.admit_turn
-                ~active_keepers:(Keeper_registry.count_running ())
-                ())
-      then (
-        Log.Keeper.debug
-          "%s: skipping turn because projected FD budget is exhausted before pressure"
-          meta_after_triage.name;
-        meta_after_triage)
-      else if
-        should_run_turn
-        && not
-             (Keeper_disk_pressure.admit_turn
-                ~masc_root:(Workspace.masc_root_dir ctx.config)
-                ())
-      then (
-        Log.Keeper.debug
-          "%s: skipping turn because disk free-space budget is below fleet floor"
-          meta_after_triage.name;
-        meta_after_triage)
-      else if should_run_turn
-      then (
-        run_keeper_cycle
-          ~ctx
-          ~meta_after_triage
-          ~stop
-          ~obs
-          ~turn_decision
-          ~shared_context
-          ())
-      else meta_after_triage
+      let meta_after_cycle =
+        if Atomic.get stop
+        then meta_after_triage
+        else if should_run_turn && Keeper_fd_pressure.active ()
+        then (
+          Log.Keeper.debug
+            "%s: skipping turn while fd-pressure circuit breaker is active (remaining=%.0fs)"
+            meta_after_triage.name
+            (Keeper_fd_pressure.remaining_sec ());
+          meta_after_triage)
+        else if should_run_turn && Keeper_disk_pressure.active ()
+        then (
+          Log.Keeper.debug
+            "%s: skipping turn while disk-pressure circuit breaker is active \
+             (remaining=%.0fs)"
+            meta_after_triage.name
+            (Keeper_disk_pressure.remaining_sec ());
+          meta_after_triage)
+        else if
+          should_run_turn
+          && not
+               (Keeper_fd_pressure.admit_turn
+                  ~active_keepers:(Keeper_registry.count_running ())
+                  ())
+        then (
+          Log.Keeper.debug
+            "%s: skipping turn because projected FD budget is exhausted before pressure"
+            meta_after_triage.name;
+          meta_after_triage)
+        else if
+          should_run_turn
+          && not
+               (Keeper_disk_pressure.admit_turn
+                  ~masc_root:(Workspace.masc_root_dir ctx.config)
+                  ())
+        then (
+          Log.Keeper.debug
+            "%s: skipping turn because disk free-space budget is below fleet floor"
+            meta_after_triage.name;
+          meta_after_triage)
+        else if should_run_turn
+        then (
+          run_keeper_cycle
+            ~ctx
+            ~meta_after_triage
+            ~stop
+            ~obs
+            ~turn_decision
+            ~shared_context
+            ())
+        else meta_after_triage
+      in
+      { meta = meta_after_cycle; cycle_crashed = false }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string CycleExceptions)
-        ~labels:[ "keeper", meta_after_triage.name ]
-        ();
-      let backtrace = Printexc.get_backtrace () in
-      Log.Keeper.error
-        "%s: keeper cycle exception: %s%s"
-        meta_after_triage.name
-        (Printexc.to_string exn)
-        (if String.equal backtrace "" then "" else "\n" ^ backtrace);
-      meta_after_triage)
+      (* T6 audit: keep the fiber alive, but surface the crash as a
+         turn failure so the caller does not dispatch
+         [Turn_succeeded] for a cycle that never completed. *)
+      record_crashed_cycle_failure
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name
+        exn;
+      { meta = meta_after_triage; cycle_crashed = true })
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
@@ -758,7 +806,7 @@ let run_heartbeat_loop
         in
         let t_board_end = Time_compat.now () in
         let t_turn_start = t_board_end in
-        let meta_after_proactive =
+        let turn_outcome =
           (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
              [turn_running] flag toggles around the dispatch and the
              pre/post guards mirror the spec's [turn_state] transition
@@ -788,26 +836,21 @@ let run_heartbeat_loop
           Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;
           r
         in
-        (* Turn failure threshold: registry tracks count (via unified_turn),
-                 keepalive raises to terminate the fiber for supervisor restart. *)
+        let meta_after_proactive = turn_outcome.meta in
+        (* Turn failure threshold: registry tracks count (via unified_turn,
+                 and via [record_crashed_cycle_failure] for swallowed cycle
+                 exceptions), keepalive raises to terminate the fiber for
+                 supervisor restart. *)
         let turn_fail_count =
           Keeper_registry.get_turn_failures ~base_path:ctx.config.base_path m.name
         in
         (* RFC-0002: dispatch turn status event *)
-        if turn_fail_count > 0
-        then
-          Keeper_keepalive_signal.dispatch_keepalive_event
-            ~ctx
-            ~keeper_name:m.name
-            (Keeper_state_machine.Turn_failed
-               { consecutive = turn_fail_count
-               ; max_allowed = Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()
-               })
-        else
-          Keeper_keepalive_signal.dispatch_keepalive_event
-            ~ctx
-            ~keeper_name:m.name
-            Keeper_state_machine.Turn_succeeded;
+        Keeper_keepalive_signal.dispatch_keepalive_event
+          ~ctx
+          ~keeper_name:m.name
+          (turn_status_event
+             ~turn_fail_count
+             ~max_allowed:(Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()));
         if turn_fail_count >= Keeper_heartbeat_snapshot.max_consecutive_turn_failures ()
         then (
           Keeper_registry.set_failure_reason
@@ -818,14 +861,22 @@ let run_heartbeat_loop
         (* Phase 1: work-as-heartbeat — renew point (b).
                  After turn, call Workspace.heartbeat to prove workspace I/O health.
                  On success: refresh freshness lease + reset consecutive_failures.
-                 On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
-        refresh_work_as_heartbeat
-          ~ctx
-          ~meta_after_proactive
-          ~proactive_warmup_elapsed
-          ~work_as_hb
-          ~last_successful_heartbeat_ts
-          ~consecutive_failures;
+                 On failure: leave timestamp unchanged → presence sync resumes next cycle.
+                 T6 audit: a crashed cycle proves nothing about health — do not
+                 refresh the lease or reset consecutive_failures for it. *)
+        if turn_outcome.cycle_crashed
+        then
+          Log.Keeper.info
+            "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
+            m.name
+        else
+          refresh_work_as_heartbeat
+            ~ctx
+            ~meta_after_proactive
+            ~proactive_warmup_elapsed
+            ~work_as_hb
+            ~last_successful_heartbeat_ts
+            ~consecutive_failures;
         let t_turn_end = Time_compat.now () in
         let t_recurring_start = t_turn_end in
         (* Recurring task dispatch (#3190) *)

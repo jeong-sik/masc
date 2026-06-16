@@ -65,7 +65,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = state.Mcp_server.workspace_config in
+    let config = (Mcp_server.workspace_config state) in
     let resolve_keeper_agent_name () =
       match Keeper_registry_lookup.find_by_name name with
       | Some entry -> Some entry.meta.agent_name

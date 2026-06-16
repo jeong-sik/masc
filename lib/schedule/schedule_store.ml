@@ -12,17 +12,64 @@ type store_error =
   | Schedule_not_found
   | Grant_already_recorded
   | Invalid_initial_status of string
+  | Invalid_status_transition of string
   | Grant_validation_failed of Schedule_domain.grant_error
+  | Corrupt_ledger of
+      { primary_err : string
+      ; recovery_err : string option
+      }
+
+(* RFC-0234: a parsed-or-absent ledger load. [Fresh] = the file is legitimately
+   absent (empty store, [default_state] is correct). [Corrupt] = the file is
+   present but neither it nor the [.last-good] recovery file parses; callers must
+   NOT collapse this to [default_state] and must NOT overwrite the on-disk file,
+   because the bytes may still hold operator pending-approval grants worth manual
+   recovery. *)
+type load_outcome =
+  | Loaded of state
+  | Fresh
+  | Corrupt of
+      { primary_err : string
+      ; recovery_err : string option
+      }
+
+(* Raised by the read-only accessors ([list_schedules]/[get_schedule]) on a
+   corrupt-but-present ledger. Read paths cannot silently return an empty list
+   (that would hide operator data) and they have no [result] channel, so they
+   fail loud. The mutating paths use [load] directly and refuse via
+   [Corrupt_ledger] instead of raising, so they never overwrite the file. *)
+exception
+  Corrupt_ledger_exn of
+    { primary_err : string
+    ; recovery_err : string option
+    }
 
 let ( let* ) = Result.bind
+
+let corrupt_message ~primary_err ~recovery_err =
+  match recovery_err with
+  | None ->
+    Printf.sprintf
+      "schedule ledger is present but unparseable (primary: %s); no .last-good \
+       recovery file exists"
+      primary_err
+  | Some recovery_err ->
+    Printf.sprintf
+      "schedule ledger is present but unparseable (primary: %s; .last-good \
+       recovery: %s)"
+      primary_err recovery_err
+;;
 
 let store_error_to_string = function
   | Schedule_already_exists -> "schedule already exists"
   | Schedule_not_found -> "schedule not found"
   | Grant_already_recorded -> "grant already recorded"
   | Invalid_initial_status reason -> "invalid initial schedule status: " ^ reason
+  | Invalid_status_transition reason -> "invalid schedule status transition: " ^ reason
   | Grant_validation_failed err ->
     "grant validation failed: " ^ Schedule_domain.grant_error_to_string err
+  | Corrupt_ledger { primary_err; recovery_err } ->
+    corrupt_message ~primary_err ~recovery_err
 ;;
 
 (* NDT-OK: store boundary timestamp for projection metadata; replay uses the
@@ -100,40 +147,73 @@ let state_of_yojson = function
   | json -> Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
 ;;
 
-let read_state config =
-  ensure_dirs config;
-  let path = schedules_path config in
-  if Workspace_utils.path_exists config path then
-    match Workspace_utils.read_json_result config path with
-    | Ok json ->
-      (match state_of_yojson json with
-       | Ok state -> state
-       | Error _ ->
-         let recovery = recovery_path config in
-         if Workspace_utils.path_exists config recovery then
-           match Workspace_utils.read_json_result config recovery with
-           | Ok recovery_json ->
-             (match state_of_yojson recovery_json with
-              | Ok state -> state
-              | Error _ -> default_state ())
-           | Error _ -> default_state ()
-         else
-           default_state ())
-    | Error _ ->
-      let recovery = recovery_path config in
-      if Workspace_utils.path_exists config recovery then
-        match Workspace_utils.read_json_result config recovery with
-        | Ok recovery_json ->
-          (match state_of_yojson recovery_json with
-           | Ok state -> state
-           | Error _ -> default_state ())
-        | Error _ -> default_state ()
-      else
-        default_state ()
+(* Parse the [.last-good] recovery file. Returns [Ok state] on a clean parse, or
+   [Error message] describing why recovery is unavailable (absent or unparseable). *)
+let load_recovery config =
+  let recovery = recovery_path config in
+  if Workspace_utils.path_exists config recovery then
+    match Workspace_utils.read_json_result config recovery with
+    | Ok recovery_json -> state_of_yojson recovery_json
+    | Error read_err -> Error read_err
   else
-    default_state ()
+    Error "no .last-good recovery file"
 ;;
 
+(* Total load that distinguishes a fresh (absent) ledger from a corrupt
+   (present-but-unparseable) one. [read_json_result] folds file-read failure and
+   parse failure into a single [Error message], so an existing-but-broken primary
+   surfaces here rather than being silently swallowed. *)
+let load config : load_outcome =
+  ensure_dirs config;
+  let path = schedules_path config in
+  if not (Workspace_utils.path_exists config path) then
+    Fresh
+  else (
+    let primary =
+      match Workspace_utils.read_json_result config path with
+      | Ok json -> state_of_yojson json
+      | Error read_err -> Error read_err
+    in
+    match primary with
+    | Ok state -> Loaded state
+    | Error primary_err ->
+      (match load_recovery config with
+       | Ok state -> Loaded state
+       | Error recovery_err ->
+         Corrupt { primary_err; recovery_err = Some recovery_err }))
+;;
+
+(* Read-only accessor used by [list_schedules]/[get_schedule]. [Fresh] yields the
+   empty default (correct for an uninitialised store); [Corrupt] raises rather
+   than returning an empty list, so a corrupt ledger is operator-visible instead
+   of masquerading as "no schedules". Does not write to disk. *)
+let read_state config =
+  match load config with
+  | Loaded state -> state
+  | Fresh -> default_state ()
+  | Corrupt { primary_err; recovery_err } ->
+    raise (Corrupt_ledger_exn { primary_err; recovery_err })
+;;
+
+(* Resolve the current state for a mutation. [Corrupt] is refused as a typed
+   [Corrupt_ledger] error so the mutating function aborts BEFORE calling
+   [write_state]; this is what prevents the corrupt-but-present ledger from being
+   overwritten with an empty default on the next write. *)
+let load_for_mutation config : (state, store_error) result =
+  match load config with
+  | Loaded state -> Ok state
+  | Fresh -> Ok (default_state ())
+  | Corrupt { primary_err; recovery_err } ->
+    Error (Corrupt_ledger { primary_err; recovery_err })
+;;
+
+(* Write the primary ledger, then mirror to [.last-good]. The [.last-good] file
+   is written only here, immediately after a fully-formed in-memory [state] is
+   serialised, so it can only ever hold a parseable snapshot. The previous
+   recovery path was useless because corruption arrived on disk out-of-band
+   (e.g. schema evolution / partial write of the primary), never through this
+   serialise step. Refusing to read a corrupt primary into [state] (above) means
+   we never round-trip corruption through here either. *)
 let write_state config state =
   ensure_dirs config;
   let json = state_to_yojson state in
@@ -205,7 +285,7 @@ let validate_initial_request (request : Schedule_domain.schedule_request) =
 
 let insert_request config (request : Schedule_domain.schedule_request) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let state = read_state config in
+    let* state = load_for_mutation config in
     match find_schedule state request.schedule_id with
     | Some _ -> Error Schedule_already_exists
     | None ->
@@ -218,7 +298,7 @@ let insert_request config (request : Schedule_domain.schedule_request) =
 
 let record_grant config (grant : Schedule_domain.execution_grant) =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let state = read_state config in
+    let* state = load_for_mutation config in
     if grant_exists state grant.grant_id then
       Error Grant_already_recorded
     else (
@@ -235,9 +315,30 @@ let record_grant config (grant : Schedule_domain.execution_grant) =
           Ok updated_request))
 ;;
 
+let cancel_request config ~schedule_id =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      if Schedule_domain.is_terminal request.status || request.status = Running
+      then
+        Error
+          (Invalid_status_transition
+             "only pending, scheduled, or due requests can be cancelled")
+      else
+        let updated_request =
+          { request with Schedule_domain.status = Schedule_domain.Cancelled }
+        in
+        let schedules = replace_schedule state.schedules updated_request in
+        let next_state = bump_state state ~schedules ~grants:state.grants in
+        write_state config next_state;
+        Ok updated_request)
+;;
+
 let refresh_due config ~now =
   Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let state = read_state config in
+    let* state = load_for_mutation config in
     let changed = ref 0 in
     let schedules =
       List.map

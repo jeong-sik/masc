@@ -31,7 +31,6 @@ type runtime_handler =
   | Tool_edit_file
   | Tool_write_file
   | Tool_time_now
-  | Tool_stay_silent
   | Tool_tools_list
   | Tool_tool_search
   | Tool_context_status
@@ -55,6 +54,7 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
 
@@ -120,7 +120,6 @@ let runtime_handler_to_string = function
   | Tool_edit_file -> "tool_edit_file"
   | Tool_write_file -> "tool_write_file"
   | Tool_time_now -> "tool_time_now"
-  | Tool_stay_silent -> "tool_stay_silent"
   | Tool_tools_list -> "tool_tools_list"
   | Tool_tool_search -> "tool_tool_search"
   | Tool_context_status -> "tool_context_status"
@@ -144,6 +143,7 @@ let runtime_handler_to_string = function
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
+  | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
 ;;
@@ -511,7 +511,7 @@ let public_descriptors =
   ; descriptor_with_public_aliases
       ~id:"agent.search_files"
       ~public_name:"Grep"
-      ~public_aliases:[ "Search" ]
+      ~public_aliases:[ "Search"; "search_files" ]
       ~internal_name:"tool_search_files"
       ~description:
         "Search file contents with ripgrep: provide a regex `pattern` (and \
@@ -992,6 +992,21 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~maintenance_only:false
 ;;
 
+let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  { (cluster_descriptor
+       ~id:("masc.schedule." ^ definition.id)
+       ~name:schema.name
+       ~description:schema.description
+       ~handler:Tool_masc_schedule_dispatch
+       ~readonly:definition.read_only
+       ~inline_safe:false
+       ~maintenance_only:false)
+    with
+    input_schema = schema.input_schema
+  }
+;;
+
 let masc_keeper_descriptor id name description ~readonly =
   cluster_descriptor
     ~id:("masc.keeper." ^ id)
@@ -1004,7 +1019,7 @@ let masc_keeper_descriptor id name description ~readonly =
 ;;
 
 let internal_descriptors : t list =
-  [ (* ── time / silence / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
+  [ (* ── time / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
     in_process_descriptor
       ~id:"keeper.time.now"
       ~name:"keeper_time_now"
@@ -1014,15 +1029,6 @@ let internal_descriptors : t list =
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_time_now
-  ; in_process_descriptor
-      ~id:"keeper.stay_silent"
-      ~name:"keeper_stay_silent"
-      ~description:
-        "Signal that the keeper will not emit further output this turn. \
-         Returns {status:\"silent\"}."
-      ~input_schema:empty_object_schema
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_stay_silent
   ; (in_process_descriptor
        ~id:"keeper.tools_list"
        ~name:"keeper_tools_list"
@@ -1348,11 +1354,15 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
   ; masc_agent_timeline_descriptor "masc_agent_timeline"
       "Read agent timeline events." ~readonly:true
+  (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
+  ]
+  @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
+  @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster (1 entry today) ──── *)
   (* Other masc_keeper_ tools (status, msg, clear, compact, repair,
      sandbox lifecycle) use the keeper Eio context and are gated on
      Phase 5 Eio plumbing scope. *)
-  ; masc_keeper_descriptor "list" "masc_keeper_list"
+    masc_keeper_descriptor "list" "masc_keeper_list"
       "List configured keepers with optional detailed metadata." ~readonly:true
   ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
       "Poll an async keeper_msg dispatch by request_id." ~readonly:true

@@ -41,20 +41,30 @@ let runtime_catalog_error_to_sdk_error detail =
 (** Resolve runtime provider configs via MASC Runtime_config.
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
-let resolve_runtime_providers
-      ?provider_filter:_
-      ?runtime_mcp_policy:_
-      ~runtime_id:_
-      ()
-  =
-  (* RFC-0206 single-binding: runtime catalog resolution removed. The providers
-     are the default runtime's single provider_config. [provider_filter] is
-     moot with one provider; runtime tool surface compatibility is handled by
-     runtime MCP policy resolution. *)
-  match Runtime.get_default_runtime () with
-  | None -> Error "no default runtime configured"
-  | Some rt ->
-    Ok [ rt.Runtime.provider_config ]
+let resolve_runtime_providers ~runtime_id () =
+  (* Audit F8: honor the *requested* runtime id (RFC-0207 catalog lookup).
+     The previous RFC-0206 single-binding stub discarded [runtime_id] and
+     always returned the default runtime, silently substituting an
+     operator-overridable id (e.g. MASC_KEEPER_LLM_RERANK_RUNTIME) — an
+     Unknown→Permissive fallback. An empty id means the default runtime; a
+     non-empty id that is not a configured runtime is an [Error] (no silent
+     substitution — RFC-0206 §2.1). The former [?provider_filter] /
+     [?runtime_mcp_policy] parameters were ignored here and are deleted;
+     each resolved runtime carries exactly one provider_config. *)
+  let runtime_id = String.trim runtime_id in
+  if String.equal runtime_id "" then
+    match Runtime.get_default_runtime () with
+    | None -> Error "no default runtime configured"
+    | Some rt -> Ok [ rt.Runtime.provider_config ]
+  else
+    match Runtime.get_runtime_by_id runtime_id with
+    | Some rt -> Ok [ rt.Runtime.provider_config ]
+    | None ->
+      Error
+        (Printf.sprintf
+           "requested runtime %S not found among configured runtimes \
+            (no silent fallback to default — RFC-0206 §2.1)"
+           runtime_id)
 
 (* Injected keeper name translators (dependency inversion of the
    runtime -> keeper-domain Keeper_identity edge). The runtime no longer
@@ -118,7 +128,7 @@ let runtime_mcp_policy_for_provider
   let agent_name = keeper_agent_name_opt keeper_name |> Option.value ~default:"" in
   Runtime_agent.runtime_mcp_policy_for_provider ~provider_cfg ~agent_name policy_opt
 
-let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
+let codex_cli_cannot_carry_keeper_bound_runtime_mcp
       ~(keeper_name : string)
       ~(provider_cfg : Llm_provider.Provider_config.t)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
@@ -136,7 +146,7 @@ let cli_tool_a_cannot_carry_keeper_bound_runtime_mcp
       when Option.is_some
              ((require_keeper_name_xlat ()).keeper_name_from_agent_name agent_name) ->
       (not
-         (Runtime_agent.cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
+         (Runtime_agent.codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
       && List.exists
            Runtime_agent.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names

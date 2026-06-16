@@ -249,6 +249,35 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
   result
 ;;
 
+(** Run multiple independent tool calls concurrently.
+
+    Each element of [calls] goes through {!guarded_dispatch}, preserving the
+    same telemetry/hook/observer lifecycle. Results are returned in input
+    order. A positive [max_concurrency] bounds parallel fan-out with an
+    [Eio.Semaphore]; otherwise concurrency is limited only by the parent
+    switch. *)
+let dispatch_many ?max_concurrency ~sw calls =
+  let _ = sw in
+  let sem =
+    match max_concurrency with
+    | Some n when n > 0 -> Some (Eio.Semaphore.make n)
+    | _ -> None
+  in
+  let run_one (token, args) =
+    let result =
+      match sem with
+      | None -> guarded_dispatch ~token ~args ()
+      | Some sem ->
+        Eio.Semaphore.acquire sem;
+        Eio_guard.protect
+          ~finally:(fun () -> Eio.Semaphore.release sem)
+          (fun () -> guarded_dispatch ~token ~args ())
+    in
+    (token, result)
+  in
+  Eio.Fiber.List.map run_one calls
+;;
+
 (** Number of registered tool names. *)
 let registered_count () = Hashtbl.length registry
 
@@ -269,10 +298,11 @@ type module_tag = Tool_tag_types.module_tag =
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
-  | Mod_control | Mod_agent_timeline | Mod_misc
+  | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_misc
   | Mod_library | Mod_external
   | Mod_inline
   | Mod_shard
+  | Mod_keeper_task
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = Atomic.make false
@@ -317,6 +347,9 @@ let mint_token ~name =
     errors (#9784). Handler-only registrations are intentionally invisible. *)
 let all_registered_names () =
   with_dispatch_ro (fun () -> Hashtbl.fold (fun n _ a -> n :: a) tag_registry [])
+
+let all_schema_names () =
+  with_dispatch_ro (fun () -> Hashtbl.fold (fun n _ a -> n :: a) schema_registry [])
 
 (* #9784: Unknown tool errors must include closest-name suggestions so the
    LLM can self-correct on the next turn. Jaccard works well for snake_case

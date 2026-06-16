@@ -1,7 +1,7 @@
-(** Keeper_runtime_config — load startup keeper env seeding from
+(** Keeper_runtime_config — load startup runtime env seeding from
     [<resolved config root>/runtime.toml].  See [.mli] for design. *)
 
-(* TOML key → env var name. Every keeper runtime knob maps here so
+(* TOML key → env var name. Startup-scoped runtime knobs map here so
    that TOML is the SSOT and env vars become CI/test overrides.
    Unknown TOML keys are silently ignored (forward compat). *)
 let key_to_env =
@@ -27,7 +27,6 @@ let key_to_env =
     "heartbeat.smart_heartbeat",        "MASC_KEEPER_SMART_HEARTBEAT";
     "heartbeat.jitter_factor",          "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR";
     "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
-    "heartbeat.board_generic_wakeup_limit", "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT";
     "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
     (* [proactive] *)
     "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";
@@ -89,6 +88,15 @@ let key_to_env =
     "alert.github_repo",                "MASC_KEEPER_ALERT_GITHUB_REPO";
     "alert.github_label",               "MASC_KEEPER_ALERT_GITHUB_LABEL";
     "alert.github_min_score",           "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE";
+    (* [web_search] *)
+    "web_search.searxng_url",           "MASC_SEARXNG_URL";
+    "web_search.provider",              "MASC_WEB_SEARCH_PROVIDER";
+    "web_search.provider_order",        "MASC_WEB_SEARCH_PROVIDER_ORDER";
+    "web_search.fallbacks",             "MASC_WEB_SEARCH_FALLBACKS";
+    "web_search.timeout_sec",           "MASC_WEB_SEARCH_TIMEOUT_SEC";
+    "web_search.cache_ttl_sec",         "MASC_WEB_SEARCH_CACHE_TTL_SEC";
+    "web_search.rate_limit_window_sec", "MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC";
+    "web_search.rate_limit_max_calls",  "MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS";
     (* [debug] *)
     "debug.enabled",                    "MASC_KEEPER_DEBUG";
   ]

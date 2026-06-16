@@ -9,6 +9,23 @@ let run_voice_status = Voice_bridge_transport.run_voice_status
 let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_file
 let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
 
+let audio_url_of_file audio_file =
+  match Filename.chop_suffix_opt ~suffix:".mp3" (Filename.basename audio_file) with
+  | Some token when token <> "" ->
+    Some (Printf.sprintf "/api/v1/voice/audio/%s" token)
+  | _ -> None
+;;
+
+let audio_payload_fields ~audio_file ~audio_device =
+  (match audio_url_of_file audio_file with
+   | Some url -> [ "audio_url", `String url ]
+   | None -> [])
+  @
+  match audio_device with
+  | Some id when id <> "" -> [ "audio_device", `String id ]
+  | _ -> []
+;;
+
 let available_stt_endpoints () =
   match load_voice_config () with
   | Error _ -> []
@@ -360,12 +377,13 @@ let attempt_tts_endpoint
       ~voice
       ~model
       ~priority
+      ?audio_device
       endpoint
   =
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
   match adapter.transport with
   | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct ->
-    let audio_file = make_audio_file ~agent_id in
+    let audio_file = make_audio_file () in
     (match
        speak_via_http_tts_to_file
          endpoint
@@ -398,54 +416,55 @@ let attempt_tts_endpoint
           Ok
             (append_provider_metadata
                (`Assoc
-                   [ "status", `String "spoken"
-                   ; "agent_id", `String agent_id
-                   ; "voice", `String voice
-                   ; "audio_file", `String audio_file
-                   ; "audio_size", `Int file_size
-                   ; ( "message_preview"
-                     , `String
-                         (String.sub message 0 (min 50 (String.length message))) )
-                   ; "local_playback_status", `String local_playback_status
-                   ; "local_playback_reason", `String reason
-                   ])
+                   ([ "status", `String "spoken"
+                    ; "agent_id", `String agent_id
+                    ; "voice", `String voice
+                    ; "audio_file", `String audio_file
+                    ; "audio_size", `Int file_size
+                    ; ( "message_preview"
+                      , `String
+                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "local_playback_status", `String local_playback_status
+                    ; "local_playback_reason", `String reason
+                    ]
+                    @ audio_payload_fields ~audio_file ~audio_device))
                endpoint)
         | `Opened handoff_seconds ->
           Ok
             (append_provider_metadata
                (`Assoc
-                   [ "status", `String "spoken"
-                   ; "agent_id", `String agent_id
-                   ; "voice", `String voice
-                   ; "audio_file", `String audio_file
-                   ; "audio_size", `Int file_size
-                   ; ( "message_preview"
-                     , `String
-                         (String.sub message 0 (min 50 (String.length message))) )
-                   ; "local_playback_status", `String "opened"
-                   ; "local_playback_reason"
-                     , `String
-                         "blocking local players failed; handed audio file to macOS open"
-                   ; "open_handoff_seconds", `Float handoff_seconds
-                   ])
+                   ([ "status", `String "spoken"
+                    ; "agent_id", `String agent_id
+                    ; "voice", `String voice
+                    ; "audio_file", `String audio_file
+                    ; "audio_size", `Int file_size
+                    ; ( "message_preview"
+                      , `String
+                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "local_playback_status", `String "opened"
+                    ; "local_playback_reason"
+                      , `String
+                          "blocking local players failed; handed audio file to macOS open"
+                    ; "open_handoff_seconds", `Float handoff_seconds
+                    ]
+                    @ audio_payload_fields ~audio_file ~audio_device))
                endpoint)
         | `Played played_seconds ->
           Ok
             (append_provider_metadata
                (`Assoc
-                   (List.concat
-                      [ [ "status", `String "spoken"
-                        ; "agent_id", `String agent_id
-                        ; "voice", `String voice
-                        ; "audio_file", `String audio_file
-                        ; "audio_size", `Int file_size
-                        ; ( "message_preview"
-                          , `String
-                              (String.sub message 0 (min 50 (String.length message))) )
-                        ; "local_playback_status", `String "played"
-                        ; "played_seconds", `Float played_seconds
-                        ]
-                      ]))
+                   ([ "status", `String "spoken"
+                    ; "agent_id", `String agent_id
+                    ; "voice", `String voice
+                    ; "audio_file", `String audio_file
+                    ; "audio_size", `Int file_size
+                    ; ( "message_preview"
+                      , `String
+                          (String.sub message 0 (min 50 (String.length message))) )
+                    ; "local_playback_status", `String "played"
+                    ; "played_seconds", `Float played_seconds
+                    ]
+                    @ audio_payload_fields ~audio_file ~audio_device))
                endpoint))
      | Error error ->
        (try Sys.remove audio_file with
@@ -482,14 +501,18 @@ let attempt_tts_endpoint
 
 (** Check if Voice MCP server is available (non-blocking, cached)
     Circuit Breaker pattern - shorter cache on failure for faster recovery *)
-let voice_server_available = ref None
+type health_cache = {
+  available : bool option;
+  check_time : float;
+  health_target : string option;
+}
 
-let voice_server_check_time = ref 0.0
-let voice_server_health_target = ref None
+let health_cache : health_cache Atomic.t =
+  Atomic.make { available = None; check_time = 0.0; health_target = None }
 
 (** Cache duration: 30s on success, 5s on failure (Circuit Breaker) *)
-let cache_duration () =
-  match !voice_server_available with
+let cache_duration cache =
+  match cache.available with
   | Some true -> 30.0 (* Success: cache longer *)
   | Some false -> 5.0 (* Failure: retry sooner *)
   | None -> 0.0 (* No cache: check immediately *)
@@ -504,7 +527,7 @@ let session_endpoint_result () =
 let is_voice_server_available ~sw:_ ~clock ~net =
   match session_endpoint_result () with
   | Error _ ->
-    voice_server_available := Some false;
+    Atomic.set health_cache { (Atomic.get health_cache) with available = Some false };
     false
   | Ok endpoint ->
     let health_target =
@@ -512,16 +535,19 @@ let is_voice_server_available ~sw:_ ~clock ~net =
       | Ok url -> url
       | Error _ -> Uri.to_string (voice_health_uri ())
     in
-    if !voice_server_health_target <> Some health_target
-    then (
-      voice_server_health_target := Some health_target;
-      voice_server_available := None;
-      voice_server_check_time := 0.0);
+    let cache = Atomic.get health_cache in
+    if cache.health_target <> Some health_target
+    then
+      Atomic.set health_cache
+        { available = None; check_time = 0.0; health_target = Some health_target };
     let now = Time_compat.now () in
-    if now -. !voice_server_check_time < cache_duration ()
-    then Option.value !voice_server_available ~default:false
+    let cache = Atomic.get health_cache in
+    if now -. cache.check_time < cache_duration cache
+    then
+      (* NDT-OK: [available] is None only before the first probe; defaulting to
+         false means "treat as unavailable" until a probe completes. *)
+      Option.value cache.available ~default:false
     else (
-      voice_server_check_time := now;
       let check () =
         let uri =
           match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
@@ -533,7 +559,6 @@ let is_voice_server_available ~sw:_ ~clock ~net =
         with
         | Ok (code, _) ->
           let available = code >= 200 && code < 300 in
-          voice_server_available := Some available;
           Ok available
         | Error msg ->
           (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding
@@ -542,15 +567,16 @@ let is_voice_server_available ~sw:_ ~clock ~net =
              the availability probe would mask cancellation as Ok false. *)
           Eio.Fiber.check ();
           Log.Transport.warn "voice server check failed: %s" msg;
-          voice_server_available := Some false;
           Ok false
       in
-      with_timeout ~clock ~timeout:2.0 check
-      |> function
-      | Ok available -> available
-      | Error _ ->
-        voice_server_available := Some false;
-        false)
+      let available =
+        match with_timeout ~clock ~timeout:2.0 check with
+        | Ok available -> available
+        | Error _ -> false
+      in
+      Atomic.set health_cache
+        { (Atomic.get health_cache) with available = Some available; check_time = now };
+      available)
 ;;
 
 let call_session_tool ~sw ~clock ~net ~tool_name ~arguments =
@@ -615,7 +641,7 @@ let end_voice_session ~sw ~clock ~net ~agent_id =
 (** Request speaking turn.
     Ordered endpoint chain from voice_config.json. Fails explicitly when no
     real backend accepts the request. *)
-let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) () =
+let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) ?audio_device () =
   if is_dedup_hit ~agent_id ~message
   then (
     log_info
@@ -662,6 +688,7 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) () 
              ~voice
              ~model
              ~priority
+             ?audio_device
              endpoint
          with
          | Ok result -> Ok result

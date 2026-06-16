@@ -41,5 +41,12 @@ type turn_verdict =
 val turn_reason_to_string : turn_reason -> string
 val skip_reason_to_string : skip_reason -> string
 val channel_to_string : keeper_cycle_channel -> string
-val is_autonomous_channel : string -> bool
+
+(** Strict inverse of {!channel_to_string}. Returns [None] for any string
+    outside the canonical set ("turn", "scheduled_autonomous") — including
+    the legacy "reactive"/"proactive" aliases and the "heartbeat"
+    status-tick marker. *)
+val channel_of_string : string -> keeper_cycle_channel option
+
+val is_autonomous : keeper_cycle_channel -> bool
 val verdict_reasons_to_strings : turn_verdict -> string list

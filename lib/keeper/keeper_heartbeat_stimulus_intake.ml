@@ -22,13 +22,6 @@ let stimulus_urgency_to_string = function
   | Keeper_event_queue.Low -> "low"
 ;;
 
-let stimulus_class_to_string = function
-  | Keeper_event_queue.Board_signal -> "board_signal"
-  | Bootstrap -> "bootstrap"
-  | Stay_silent_recovery -> "stay_silent_recovery"
-  | Unsupported _ -> "unsupported"
-;;
-
 let pending_board_event_of_stimulus ~meta_after_triage stim =
   Keeper_world_observation.pending_board_event_of_stimulus
     ~continuity_summary:meta_after_triage.continuity_summary
@@ -68,30 +61,28 @@ let consume_single_heartbeat_stimulus
       ~meta_after_triage
       (stim : Keeper_event_queue.stimulus)
   =
-  let stimulus_class = Keeper_event_queue.classify stim in
-  let class_str = stimulus_class_to_string stimulus_class in
+  let class_str = Keeper_event_queue.payload_kind_label stim.payload in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string StimulusConsumed)
     ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
     ();
   Log.Keeper.info
-    "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s \
-     payload_len=%d (keeper=%s)"
+    "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=%s (keeper=%s)"
     stim.post_id
     (stimulus_urgency_to_string stim.urgency)
     class_str
-    (String.length stim.payload)
     meta_after_triage.name;
-  match stimulus_class with
-  | Board_signal -> pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
-  | Bootstrap ->
+  match stim.payload with
+  | Keeper_event_queue.Board_signal _ ->
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Bootstrap ->
     Log.Keeper.info
       "turn entry: bootstrap stimulus consumed (keeper=%s)"
       meta_after_triage.name;
     []
-  | Stay_silent_recovery ->
+  | Keeper_event_queue.No_progress_recovery ->
     Log.Keeper.info
-      "turn entry: stay-silent recovery stimulus consumed post_id=%s \
+      "turn entry: no-progress recovery stimulus consumed post_id=%s \
        (keeper=%s)"
       stim.post_id
       meta_after_triage.name;
@@ -99,18 +90,6 @@ let consume_single_heartbeat_stimulus
       ~ctx
       ~keeper_name:meta_after_triage.name
       stim;
-    []
-  | Unsupported prefix ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string UnsupportedStimulus)
-      ~labels:[ "keeper", meta_after_triage.name ]
-      ();
-    Log.Keeper.warn
-      "turn entry: unsupported stimulus consumed prefix=%S post_id=%s \
-       (keeper=%s) — wake→no_signal gap #12684"
-      prefix
-      stim.post_id
-      meta_after_triage.name;
     []
 ;;
 
@@ -129,10 +108,9 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
          ();
        Log.Keeper.info
          "turn entry: consumed stimulus stimulus_id=%s urgency=%s class=board_signal \
-          payload_len=%d (keeper=%s)"
+          (keeper=%s)"
          stim.post_id
          (stimulus_urgency_to_string stim.urgency)
-         (String.length stim.payload)
          meta_after_triage.name;
        pending_board_event_of_stimulus ~meta_after_triage stim)
     batch

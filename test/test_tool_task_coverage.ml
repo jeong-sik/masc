@@ -689,9 +689,71 @@ let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
         ])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Invalid transition");
-  assert (str_contains (Tool_result.message result) "Remediation");
+  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  assert (str_contains (Tool_result.message result) "Task task-001 is claimed");
+  assert (str_contains (Tool_result.message result) "owner-agent");
   assert (str_contains (Tool_result.message result) "masc_board_post")
+  ;
+  let data = Tool_result.data result in
+  assert (Json_util.get_string data "task_id" = Some "task-001");
+  assert (Json_util.get_string data "current_assignee" = Some "owner-agent");
+  assert (
+    match Json_util.assoc_member_opt "diagnosis" data with
+    | Some diagnosis ->
+      Json_util.get_string diagnosis "rule_id"
+      = Some "task_release_requires_current_owner"
+      && Json_util.get_string diagnosis "tool_suggestion"
+         = Some "keeper_board_post"
+    | None -> false)
+)
+
+let () = test "handle_transition_force_release_by_admin_bypasses_nonowner_redirect"
+    (fun () ->
+  let ctx_owner = make_test_ctx_with_agent "owner-agent" in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
+      (`Assoc [ ("title", `String "Force-release owned task") ])
+  in
+  let _ =
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  let ctx_admin =
+    { ctx_owner with Task.Tool.agent_name = "admin-agent" }
+  in
+  let previous_is_admin = Atomic.get Workspace_hooks.is_admin_agent_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.is_admin_agent_fn previous_is_admin)
+    (fun () ->
+       Atomic.set Workspace_hooks.is_admin_agent_fn
+         (fun ~base_path:_ ~agent_name ->
+            String.equal agent_name "admin-agent");
+       let result =
+         Task.Tool.handle_transition
+           ~tool_name:"test_tool"
+           ~start_time:0.0
+           ctx_admin
+           (`Assoc
+              [
+                ("task_id", `String "task-001");
+                ("action", `String "release");
+                ("force", `Bool true);
+              ])
+       in
+       assert (Tool_result.is_success result);
+       match
+         Workspace.get_tasks_raw ctx_owner.Task.Tool.config
+         |> List.find_opt (fun (task : Masc_domain.task) ->
+              String.equal task.id "task-001")
+       with
+       | Some { task_status = Masc_domain.Todo; _ } -> ()
+       | Some task ->
+         failwith
+           (Printf.sprintf
+              "expected forced release to return task-001 to todo, got %s"
+              (Masc_domain.task_status_to_string task.task_status))
+       | None -> failwith "missing task-001 after forced release")
 )
 
 let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun () ->
@@ -1058,7 +1120,7 @@ let () = test "handle_claim_sets_planning_current_task" (fun () ->
 )
 
 let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1095,7 +1157,7 @@ let () = test "keeper_claim_does_not_clobber_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1132,7 +1194,7 @@ let () = test "keeper_alias_claim_does_not_clobber_planning_current_task" (fun (
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1172,7 +1234,7 @@ let () = test "keeper_generated_alias_claim_does_not_clobber_planning_current_ta
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1212,7 +1274,7 @@ let () = test "keeper_separator_alias_claim_does_not_clobber_planning_current_ta
   assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 
 let () = test "keeper_shaped_non_keeper_claim_updates_planning_current_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   let _ =
     Task.Tool.handle_add_task
       ~tool_name:"test_tool"
@@ -1355,6 +1417,21 @@ let () = test "handle_claim_next_returns_claim_observation" (fun () ->
           = ctx.agent_name)
 )
 
+(* scope_widened is threaded from Claim_next_claimed through
+   build_claim_observation_payload into the todo_claim fragment. Assert both
+   boolean values so a regression that drops the field (or hardcodes it) is
+   caught. *)
+let () = test "claim_observation_payload_carries_scope_widened" (fun () ->
+  let open Yojson.Safe.Util in
+  let scope_widened_of b =
+    Task.Tool.build_claim_observation_payload ~now:0.0 ~agent_name:"agent-x"
+      ~task_id:"task-001" ~scope_widened:b
+    |> member "todo_claim" |> member "scope_widened" |> to_bool
+  in
+  assert (scope_widened_of true = true);
+  assert (scope_widened_of false = false)
+)
+
 let () =
   test "handle_claim_next_reports_internal_errors_as_tool_failure" (fun () ->
     let ctx = make_test_ctx () in
@@ -1400,7 +1477,7 @@ let () = test "handle_claim_next_ignores_keeper_tool_access_for_open_claims" (fu
     | Ok meta -> meta
     | Error e -> failwith ("meta_of_json failed: " ^ e)
   in
-  (match Keeper_meta_store.write_meta ~force:true ctx.config initial_meta with
+  (match Keeper_meta_store.write_meta ctx.config initial_meta with
   | Ok () -> ()
   | Error e -> failwith ("write_meta failed: " ^ e));
   (* Workspace.update_agent_r setup removed (2026-06-09): the agent-status
@@ -1448,7 +1525,7 @@ let task_submit_evidence_notes =
 
 let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     add_priority_task ctx ~title:"No action alias";
     let result =
       Task.Tool.handle_transition
@@ -1469,7 +1546,7 @@ let () = test "transition_submit_for_verification_todo_rejects_instead_of_alias"
 
 let () = test "transition_submit_pr_evidence_is_retired" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     add_priority_task ctx ~title:"CLI approval follow-up";
     let result =
       Task.Tool.handle_transition
@@ -1488,7 +1565,7 @@ let () = test "transition_submit_pr_evidence_is_retired" (fun () ->
 )
 
 let () = test "transition_pr_url_top_level_is_retired" (fun () ->
-  let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
   add_priority_task ctx ~title:"No transport pr_url alias";
   let result =
     Task.Tool.handle_transition
@@ -1517,7 +1594,7 @@ let () = test "transition_pr_url_top_level_is_retired" (fun () ->
 
 let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1537,13 +1614,13 @@ let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun 
           ])
     in
     if not (Tool_result.is_success claim_result) then failwith (Tool_result.message claim_result);
-    assert_task_claimed_by ctx "agent_code-mcp-client";
+    assert_task_claimed_by ctx "codex-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
 let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1590,13 +1667,13 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
           ])
     in
     if not (Tool_result.is_success reclaim_result) then failwith (Tool_result.message reclaim_result);
-    assert_task_claimed_by ctx "agent_code-mcp-client";
+    assert_task_claimed_by ctx "codex-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
 let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
-    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let ctx = make_test_ctx_with_agent "codex-mcp-client" in
     let result =
       Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1765,7 +1842,24 @@ let () = test "handle_done_todo_guidance" (fun () ->
     Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Claim/start it first")
+  assert (str_contains (Tool_result.message result) "Claim/start it first");
+  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  let data = Tool_result.data result in
+  assert (Json_util.get_bool data "recoverable" = Some true);
+  assert (
+    match Json_util.assoc_member_opt "diagnosis" data with
+    | Some diagnosis ->
+      Json_util.get_string diagnosis "rule_id"
+      = Some "task_done_requires_claimed_or_started"
+      && Json_util.get_string diagnosis "tool_suggestion"
+         = Some "masc_transition"
+    | None -> false);
+  assert (
+    match Json_util.assoc_member_opt "alternatives" data with
+    | Some (`List alternatives) ->
+      List.exists (( = ) (`String "masc_transition")) alternatives
+      && List.exists (( = ) (`String "keeper_task_claim")) alternatives
+    | _ -> false)
 )
 
 (* Test handle_done reports already-done guidance instead of generic not-claimed *)
@@ -1933,7 +2027,7 @@ let make_review_request () : Task.Anti_rationalization.review_request =
   { task_title = "Fix login bug";
     task_description = "desc";
     completion_notes = "notes";
-    agent_name = "dreamer";
+    agent_name = "alice";
     task_id = "test-task-1" }
 
 let make_review_result

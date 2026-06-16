@@ -794,6 +794,24 @@ let test_bundled_keeper_profiles_resolve_prompt_self_model () =
              require_nonempty_option path "needs" defaults.needs;
              require_nonempty_option path "desires" defaults.desires))
 
+let test_bundled_issue_king_uses_local_sandbox () =
+  let repo = repo_root () in
+  Fun.protect
+    ~finally:(fun () -> Config_dir_resolver.reset ())
+    (fun () ->
+      with_env_restore [ "MASC_CONFIG_DIR"; "MASC_PERSONAS_DIR" ] (fun () ->
+          Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
+          Unix.putenv "MASC_PERSONAS_DIR"
+            (Filename.concat (Filename.concat repo "config") "personas");
+          Config_dir_resolver.reset ();
+          match KTP.load_keeper_profile_defaults_result "issue_king" with
+          | Error e -> fail (Printf.sprintf "issue_king failed to resolve: %s" e)
+          | Ok defaults ->
+            check (option string) "issue_king sandbox" (Some "local")
+              (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
+            check (option string) "issue_king network" (Some "inherit")
+              (Option.map KTP.network_mode_to_string defaults.network_mode)))
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -1372,9 +1390,8 @@ let test_oas_env_parses_allowed_keys () =
 [keeper]
 persona_name = "analyst"
 [keeper.oas_env]
-OAS_CLAUDE_STRICT_MCP = "1"
-OAS_GEMINI_NO_MCP = "1"
-OAS_CLAUDE_MCP_CONFIG = "mcp_servers={}"
+OAS_DEFAULT_MODEL = "provider-a/fast"
+OAS_MAX_TOKENS_DEFAULT = 16384
 MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 |} in
   match TL.parse_toml input with
@@ -1383,13 +1400,11 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "oas_env count" 4 (List.length d.oas_env);
-      check string "strict_mcp value"
-        "1" (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
-      check string "no_mcp value"
-        "1" (List.assoc "OAS_GEMINI_NO_MCP" d.oas_env);
-      check string "claude_mcp_config value"
-        "mcp_servers={}" (List.assoc "OAS_CLAUDE_MCP_CONFIG" d.oas_env);
+      check int "oas_env count" 3 (List.length d.oas_env);
+      check string "default model value"
+        "provider-a/fast" (List.assoc "OAS_DEFAULT_MODEL" d.oas_env);
+      check string "max tokens default value"
+        "16384" (List.assoc "OAS_MAX_TOKENS_DEFAULT" d.oas_env);
       check string "unified max tokens value"
         "8192" (List.assoc "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS" d.oas_env);
       check (option int) "unified max tokens override"
@@ -1416,34 +1431,6 @@ MASC_KEEPER_UNIFIED_MAX_TOKENS = 4096
         None
         (KTP.unified_max_tokens_override_of_oas_env d.oas_env)
 
-let test_keeper_oas_context_demotes_gemini_no_mcp_to_plan () =
-  let defaults =
-    { KTP.empty_keeper_profile_defaults with
-      oas_env = [ "OAS_GEMINI_NO_MCP", "1" ];
-    }
-  in
-  let ctx = KTP.keeper_oas_context_of_defaults defaults in
-  check bool "no_mcp derived" true ctx.gemini_mcp_disabled;
-  check (option string) "approval mode derived" (Some "plan")
-    ctx.gemini_approval_mode;
-  check bool "approval marked derived" true ctx.gemini_approval_mode_derived
-
-let test_keeper_oas_context_preserves_explicit_gemini_approval_mode () =
-  let defaults =
-    { KTP.empty_keeper_profile_defaults with
-      oas_env =
-        [
-          "OAS_GEMINI_NO_MCP", "1";
-          "OAS_GEMINI_APPROVAL_MODE", "yolo";
-        ];
-    }
-  in
-  let ctx = KTP.keeper_oas_context_of_defaults defaults in
-  check (option string) "explicit mode preserved" (Some "yolo")
-    ctx.gemini_approval_mode;
-  check bool "explicit mode not marked derived" false
-    ctx.gemini_approval_mode_derived
-
 let test_oas_env_drops_non_oas_prefix () =
   (* Guards against ambient env injection via keeper TOML: arbitrary keys
      outside the audited allowlist are silently dropped. *)
@@ -1453,7 +1440,7 @@ persona_name = "analyst"
 [keeper.oas_env]
 PATH = "/evil/bin:/usr/bin"
 LD_PRELOAD = "/tmp/hack.so"
-OAS_CLAUDE_STRICT_MCP = "1"
+OAS_DEFAULT_MODEL = "provider-a/fast"
 MASC_KEEPER_AUTONOMOUS_MAX_TOKENS = "9999"
 RANDOM_VAR = "nope"
 |} in
@@ -1463,7 +1450,9 @@ RANDOM_VAR = "nope"
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "only OAS_* survives" 1 (List.length d.oas_env);
+      check int "only allowed OAS_* survives" 1 (List.length d.oas_env);
+      check string "allowed OAS key survives"
+        "provider-a/fast" (List.assoc "OAS_DEFAULT_MODEL" d.oas_env);
       check bool "PATH dropped" false (List.mem_assoc "PATH" d.oas_env);
       check bool "LD_PRELOAD dropped" false (List.mem_assoc "LD_PRELOAD" d.oas_env);
       check bool "unlisted keeper key dropped" false
@@ -1488,7 +1477,7 @@ let test_oas_env_not_flagged_as_unknown () =
 [keeper]
 persona_name = "analyst"
 [keeper.oas_env]
-OAS_CLAUDE_STRICT_MCP = "1"
+OAS_DEFAULT_MODEL = "provider-a/fast"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1497,13 +1486,13 @@ OAS_CLAUDE_STRICT_MCP = "1"
     check int "oas_env keys whitelisted" 0 (List.length unknown)
 
 let test_oas_env_coerces_bool_to_string () =
-  (* Bools in TOML become "1"/"0" string so OAS_*_STRICT_MCP = true works. *)
+  (* Bools in TOML become "1"/"0" strings for active OAS boolean env knobs. *)
   let input = {|
 [keeper]
 persona_name = "analyst"
 [keeper.oas_env]
-OAS_CLAUDE_STRICT_MCP = true
-OAS_GEMINI_NO_MCP = false
+OAS_ALLOW_TEST_PROVIDERS = true
+OAS_DELTA_CHECKPOINT = false
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1512,9 +1501,9 @@ OAS_GEMINI_NO_MCP = false
     | Error e -> fail e
     | Ok d ->
       check string "true → 1" "1"
-        (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
+        (List.assoc "OAS_ALLOW_TEST_PROVIDERS" d.oas_env);
       check string "false → 0" "0"
-        (List.assoc "OAS_GEMINI_NO_MCP" d.oas_env)
+        (List.assoc "OAS_DELTA_CHECKPOINT" d.oas_env)
 
 let test_load_keeper_toml_captures_unknown_keys_on_profile () =
   let tmp = Filename.temp_file "keeper_unknown" ".toml" in
@@ -1838,10 +1827,6 @@ let () =
             test_oas_env_parses_allowed_keys;
           test_case "rejects legacy unified max tokens alias" `Quick
             test_oas_env_rejects_legacy_unified_max_tokens_alias;
-          test_case "demotes Provider_f no-MCP runs to plan approval mode" `Quick
-            test_keeper_oas_context_demotes_gemini_no_mcp_to_plan;
-          test_case "preserves explicit Provider_f approval mode" `Quick
-            test_keeper_oas_context_preserves_explicit_gemini_approval_mode;
           test_case "drops non-OAS_* keys (ambient injection guard)" `Quick
             test_oas_env_drops_non_oas_prefix;
           test_case "empty when table absent" `Quick
@@ -1865,6 +1850,8 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "bundled keeper profiles resolve prompt self-model" `Quick
             test_bundled_keeper_profiles_resolve_prompt_self_model;
+          test_case "bundled issue_king uses local sandbox" `Quick
+            test_bundled_issue_king_uses_local_sandbox;
           test_case "persona resolver omits unspecified tool_access" `Quick
             test_persona_resolver_omits_unspecified_tool_access;
           test_case "persona defaults load self-model fields" `Quick

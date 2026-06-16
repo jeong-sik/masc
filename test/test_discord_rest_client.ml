@@ -320,6 +320,71 @@ let test_build_edit_embed_request_embeds_and_content () =
   | _ -> fail "expected Assoc"
 
 (* ---------------------------------------------------------------- *)
+(* split_at_codepoint / chunk_by_codepoint / truncate_to_limit       *)
+(* ---------------------------------------------------------------- *)
+
+(* Count Unicode scalar values in a UTF-8 string by stepping the
+   stdlib decoder. Invalid sequences advance one byte (utf_decode_length
+   is >= 1), so this terminates on any input. *)
+let count_codepoints s =
+  let n = String.length s in
+  let rec go i acc =
+    if i >= n then acc
+    else
+      let d = String.get_utf_8_uchar s i in
+      go (i + Uchar.utf_decode_length d) (acc + 1)
+  in
+  go 0 0
+
+(* "가" U+AC00 — a 3-byte UTF-8 char. byte 2000 lands mid-codepoint
+   (2000 / 3 = 666.7), so a byte cut would split it. *)
+let hangul = "\xea\xb0\x80"
+
+let repeat_hangul n =
+  let b = Buffer.create (n * 3) in
+  for _ = 1 to n do Buffer.add_string b hangul done;
+  Buffer.contents b
+
+let test_split_at_codepoint_korean_head_valid_utf8 () =
+  let s = repeat_hangul 2500 in
+  let head, tail = R.split_at_codepoint s ~limit:2000 in
+  check bool "head is valid UTF-8" true (String.is_valid_utf_8 head);
+  check bool "tail is valid UTF-8" true (String.is_valid_utf_8 tail);
+  check int "head is exactly 2000 codepoints" 2000 (count_codepoints head);
+  check int "tail is the remaining 500 codepoints" 500 (count_codepoints tail);
+  check string "head ^ tail reconstructs the original" s (head ^ tail)
+
+let test_split_at_codepoint_short_fits () =
+  let s = "hello" in
+  let head, tail = R.split_at_codepoint s ~limit:2000 in
+  check string "short head is the whole string" "hello" head;
+  check string "short tail is empty" "" tail
+
+let test_chunk_by_codepoint_korean () =
+  let s = repeat_hangul 2500 in
+  let chunks = R.chunk_by_codepoint s ~limit:2000 in
+  check int "2500 codepoints split into 2 chunks" 2 (List.length chunks);
+  List.iter
+    (fun c ->
+      check bool "each chunk valid UTF-8" true (String.is_valid_utf_8 c);
+      check bool "each chunk <= 2000 codepoints" true
+        (count_codepoints c <= 2000))
+    chunks;
+  check string "concat of chunks reconstructs the original" s
+    (String.concat "" chunks)
+
+let test_chunk_by_codepoint_empty () =
+  check int "empty input yields no chunks" 0
+    (List.length (R.chunk_by_codepoint "" ~limit:2000))
+
+let test_truncate_to_limit_korean_valid_utf8 () =
+  let s = repeat_hangul 2500 in
+  let t = R.truncate_to_limit s in
+  check bool "truncated is valid UTF-8" true (String.is_valid_utf_8 t);
+  check int "truncated to message_content_limit codepoints"
+    R.message_content_limit (count_codepoints t)
+
+(* ---------------------------------------------------------------- *)
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
 
@@ -370,6 +435,18 @@ let () =
             test_build_edit_embed_request_url_targets_message
         ; test_case "embeds and content both present" `Quick
             test_build_edit_embed_request_embeds_and_content
+        ] )
+    ; ( "codepoint_chunking"
+      , [ test_case "Korean split head/tail valid UTF-8 on boundary" `Quick
+            test_split_at_codepoint_korean_head_valid_utf8
+        ; test_case "short string fits without splitting" `Quick
+            test_split_at_codepoint_short_fits
+        ; test_case "Korean chunk_by_codepoint: 2 valid chunks" `Quick
+            test_chunk_by_codepoint_korean
+        ; test_case "empty input => no chunks" `Quick
+            test_chunk_by_codepoint_empty
+        ; test_case "truncate_to_limit keeps valid UTF-8" `Quick
+            test_truncate_to_limit_korean_valid_utf8
         ] )
     ; ( "parse_response"
       , [ test_case "2xx with id => Ok id" `Quick

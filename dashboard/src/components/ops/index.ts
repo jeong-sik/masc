@@ -208,7 +208,7 @@ export function Ops() {
   ])
 
   return html`
-    <section class="flex flex-col gap-4" aria-label="Operations panel">
+    <section class="v2-command-surface flex flex-col gap-4" aria-label="Operations panel">
       ${operatorError.value ? html`<section class="ops-banner rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner rounded-[var(--r-1)] py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorDigestError.value}</section>` : null}
 
@@ -235,7 +235,7 @@ export function Ops() {
           <${ComposerV2} workspaceId="ops" />
         </div>
 
-        <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1" aria-label="Recent operator activity">
+        <section class="${CARD_STANDARD} v2-command-panel grid gap-3 order-2 max-[1200px]:order-1" aria-label="Recent operator activity">
           <div>
             <h2 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Recent Activity</h2>
             <p class="mt-1 text-xs text-[var(--color-fg-muted)]">Interventions and review outcomes, newest first. Governance queues stay in the governance view.</p>

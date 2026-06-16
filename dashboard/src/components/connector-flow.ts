@@ -90,7 +90,7 @@ export function ConnectorFlowSection({ connector, gate }: {
 
   return html`
     <${SurfaceCard}
-      class="mt-3 !bg-[var(--color-bg-elevated)] !px-3 !py-2.5 text-2xs"
+      class="mt-3 !bg-[var(--color-bg-elevated)] !px-3 !py-2.5 text-2xs v2-connector-flow"
       data-connector-flow=${connector?.connector_id ?? ''}
     >
       <div class="mb-1.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-disabled)]">

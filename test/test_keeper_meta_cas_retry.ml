@@ -95,7 +95,7 @@ let test_retry_succeeds_after_concurrent_bump () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"beta" in
-    (match Keeper_meta_store.write_meta ~force:true config m0 with
+    (match Keeper_meta_store.write_meta config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let caller_view = match Keeper_meta_store.read_meta config "beta" with
@@ -157,7 +157,7 @@ let test_monotonic_usage_counters_on_cas_retry () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"gamma" in
-    (match Keeper_meta_store.write_meta ~force:true config m0 with
+    (match Keeper_meta_store.write_meta config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let caller_view = match Keeper_meta_store.read_meta config "gamma" with
@@ -199,6 +199,117 @@ let test_monotonic_usage_counters_on_cas_retry () =
     check int "last_* observation stays with the caller" 777
       final.runtime.usage.last_latency_ms)
 
+let test_operator_pause_survives_stale_heartbeat_retry () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let m0 = make_meta ~name:"operator-pause-cas" in
+    (match Keeper_meta_store.write_meta config m0 with
+     | Ok () -> ()
+     | Error e -> fail ("seed write failed: " ^ e));
+    let stale_turn_view = match Keeper_meta_store.read_meta config "operator-pause-cas" with
+      | Ok (Some m) -> m
+      | _ -> fail "seed read failed"
+    in
+    let operator_pause =
+      { stale_turn_view with
+        paused = true;
+        auto_resume_after_sec = None;
+        runtime = { stale_turn_view.runtime with last_blocker = None };
+        updated_at = Keeper_meta_contract.now_iso ();
+      }
+    in
+    (match Keeper_meta_store.write_meta config operator_pause with
+     | Ok () -> ()
+     | Error e -> fail ("operator pause write failed: " ^ e));
+    let stale_completion =
+      { stale_turn_view with
+        paused = false;
+        runtime =
+          { stale_turn_view.runtime with
+            usage =
+              { stale_turn_view.runtime.usage with
+                total_turns = stale_turn_view.runtime.usage.total_turns + 1;
+              };
+          };
+        updated_at = Keeper_meta_contract.now_iso ();
+      }
+    in
+    (match
+       Keeper_meta_store.write_meta_with_merge
+         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk config stale_completion
+     with
+     | Ok () -> ()
+     | Error e -> fail ("stale retry write failed: " ^ e));
+    let final = match Keeper_meta_store.read_meta config "operator-pause-cas" with
+      | Ok (Some m) -> m
+      | _ -> fail "final read failed"
+    in
+    check bool "operator pause survives stale retry" true final.paused;
+    check bool "auto resume stays disabled" true
+      (Option.is_none final.auto_resume_after_sec);
+    check bool "stale blocker stays cleared" true
+      (Option.is_none final.runtime.last_blocker))
+
+(* RFC-0237: the [write_meta ~force:true] escape hatch is removed, so the
+   counter-rewind path the four keeper-internal sites carried
+   (keeper_tool_surface / keeper_tool_surface_ops / keeper_keepalive /
+   keeper_heartbeat_loop_presence) is unrepresentable. A stale-snapshot
+   plain write that would have rewound a concurrent turn's counters is now
+   rejected by CAS; callers must route through [write_meta_with_merge]
+   (proven monotonic by [test_monotonic_usage_counters_on_cas_retry]). This
+   test pins that the bypass no longer exists: the stale write conflicts and
+   the advanced disk counter survives. *)
+let test_stale_write_conflicts_without_force () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let m0 = make_meta ~name:"delta" in
+    (match Keeper_meta_store.write_meta config m0 with
+     | Ok () -> ()
+     | Error e -> fail ("seed write failed: " ^ e));
+    let caller_view = match Keeper_meta_store.read_meta config "delta" with
+      | Ok (Some m) -> m
+      | _ -> fail "seed read failed"
+    in
+    let with_usage (m : Keeper_meta_contract.keeper_meta) usage =
+      { m with runtime = { m.runtime with usage } }
+    in
+    (* Concurrent turn advances counters on disk, bumping the version. *)
+    let racing =
+      with_usage caller_view
+        { caller_view.runtime.usage with total_turns = 42 }
+    in
+    (match Keeper_meta_store.write_meta config racing with
+     | Ok () -> ()
+     | Error e -> fail ("racing write failed: " ^ e));
+    (* A stale snapshot write (the shape the old force path clobbered with)
+       now hits CAS: its version no longer matches the advanced disk, so the
+       write is rejected instead of rewinding the counter. *)
+    let stale =
+      with_usage caller_view
+        { caller_view.runtime.usage with total_turns = 5 }
+    in
+    (match Keeper_meta_store.write_meta config stale with
+     | Ok () -> fail "stale write unexpectedly succeeded (CAS bypass present?)"
+     | Error msg ->
+       check bool "stale write is rejected as a version conflict" true
+         (Keeper_meta_store.is_version_conflict_error msg));
+    let final = match Keeper_meta_store.read_meta config "delta" with
+      | Ok (Some m) -> m
+      | _ -> fail "final read failed"
+    in
+    check int "advanced disk counter survives (no rewind without force)"
+      42 final.runtime.usage.total_turns)
+
 let test_is_version_conflict_error_classifies () =
   let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in
   let other_msg = "failed to write meta /tmp/x: Permission denied" in
@@ -218,6 +329,10 @@ let () =
             test_retry_succeeds_after_concurrent_bump;
           test_case "usage counters stay monotonic on stale retry (RFC-0225 §3.2)"
             `Quick test_monotonic_usage_counters_on_cas_retry;
+          test_case "operator pause survives stale heartbeat retry"
+            `Quick test_operator_pause_survives_stale_heartbeat_retry;
+          test_case "stale write conflicts without force (RFC-0237 escape hatch closed)"
+            `Quick test_stale_write_conflicts_without_force;
         ] );
       ( "is_version_conflict_error",
         [

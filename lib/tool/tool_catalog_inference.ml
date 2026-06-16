@@ -20,4 +20,8 @@ let effect_domain_to_string = function
   | Playground_write -> "playground_write"
   | Host_repo_write -> "host_repo_write"
 
-let inferred_effect_domain _name = None
+let inferred_effect_domain name =
+  match name with
+  | "tool_read_file" -> Some Read_only
+  | _ -> None
+;;

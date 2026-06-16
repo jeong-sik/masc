@@ -43,7 +43,7 @@ let normalize_provider_id provider_id =
 let default_headers_for_kind (kind : Llm_provider.Provider_config.provider_kind) =
   let base = [ ("Content-Type", "application/json") ] in
   match kind with
-  | Anthropic -> ("provider_a-version", "2023-06-01") :: base
+  | Anthropic -> ("anthropic-version", "2023-06-01") :: base
   | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope -> base
 ;;
 
@@ -248,9 +248,9 @@ let effective_max_tokens_for_model spec requested =
    v1 drops the [Provider_tool_support.runtime_capabilities_override] that the
    deleted adapter carried alongside the config (it was paired with the
    now-removed alias layer); [binding_to_provider_config] never consumed it. *)
-let provider_config_from_declared_provider (provider : Runtime_schema.provider)
-    (spec : Runtime_schema.model_spec) ~(max_tokens : int option)
-    : Llm_provider.Provider_config.t option =
+let provider_config_from_declared_provider ?keep_alive ?num_ctx
+    (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
+    ~(max_tokens : int option) : Llm_provider.Provider_config.t option =
   let registry_entry = find_registry_entry provider.id in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
   let max_tokens = effective_max_tokens_for_model spec max_tokens in
@@ -291,6 +291,8 @@ let provider_config_from_declared_provider (provider : Runtime_schema.provider)
             ~max_context:spec.max_context
             ?supports_tool_choice_override
             ?max_tokens
+            ?keep_alive
+            ?num_ctx
             ())
      | None -> None)
   | Cli _ ->
@@ -306,6 +308,8 @@ let provider_config_from_declared_provider (provider : Runtime_schema.provider)
             ~max_context:spec.max_context
             ?supports_tool_choice_override
             ?max_tokens
+            ?keep_alive
+            ?num_ctx
             ())
      | None -> None)
 ;;
@@ -328,7 +332,14 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
-       (match provider_config_from_declared_provider provider spec ~max_tokens with
+       (match
+          provider_config_from_declared_provider
+            ?keep_alive:binding.keep_alive
+            ?num_ctx:binding.num_ctx
+            provider
+            spec
+            ~max_tokens
+        with
         | None ->
           Error
             (Printf.sprintf

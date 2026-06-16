@@ -4,7 +4,7 @@ let test_resolve_bind_state_skips_read_only_lookup () =
     Masc.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:false
-      ~agent_name:"agent_code"
+      ~agent_name:"codex"
       ~check_join:(fun _candidate ->
         called := true;
         true)
@@ -18,7 +18,7 @@ let test_resolve_bind_state_checks_bind_gated_tools () =
     Masc.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
-      ~agent_name:"agent_code"
+      ~agent_name:"codex"
       ~check_join:(fun _candidate ->
         called := true;
         true)
@@ -46,16 +46,16 @@ let test_resolve_bind_state_alias_does_not_probe_canonical () =
     Masc.Mcp_server_eio_execute.resolve_bind_state
       ~workspace_initialized:true
       ~bind_required:true
-      ~agent_name:"agent_code-rotated"
+      ~agent_name:"codex-rotated"
       ~check_join:(fun candidate ->
         candidates := candidate :: !candidates;
-        candidate = "keeper-agent_code-agent")
+        candidate = "keeper-codex-agent")
   in
   Alcotest.(check bool) "canonical alias not recovered" false bound;
   let recorded = List.rev !candidates in
   Alcotest.(check (list string))
     "only raw agent checked"
-    [ "agent_code-rotated" ]
+    [ "codex-rotated" ]
     recorded
 
 let test_resolve_bind_state_unknown_alias_stays_false () =

@@ -79,7 +79,10 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
             }
         }
       in
-      (match write_meta ~force:true ctx.config repaired with
+      (match
+         write_meta_with_merge
+           ~merge:Keeper_meta_merge.monotonic_usage_counters ctx.config repaired
+       with
        | Ok () ->
          Log.Keeper.warn
            "keepalive repaired identity drift for %s: %s -> %s"

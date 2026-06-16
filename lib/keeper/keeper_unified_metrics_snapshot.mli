@@ -8,7 +8,7 @@ val append_metrics_snapshot :
   latency_ms:int ->
   turn_cost:float ->
   turn_generation:int ->
-  channel:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
   snapshot_source:string ->
   context_ratio:float ->
   context_tokens:int ->

@@ -45,6 +45,7 @@ let get_net_opt () = Eio_context.get_net_opt ()
 let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   match tag with
   | Mod_external -> "external"
+  | Mod_keeper_task -> "keeper_task"
   | Mod_library -> "library"
   | Mod_task -> "task"
   | Mod_shard -> "shard"
@@ -55,6 +56,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_state -> "state"
   | Mod_control -> "control"
   | Mod_agent_timeline -> "agent_timeline"
+  | Mod_schedule -> "schedule"
   | Mod_misc -> "misc"
   | Mod_inline -> "inline"
   | Mod_operator -> "operator"
@@ -126,6 +128,8 @@ let dispatch
                 name))
     | Mod_agent_timeline ->
       Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name } ~name ~args
+    | Mod_schedule ->
+      Tool_schedule.dispatch { Tool_schedule.config; agent_name } ~name ~args
     | Mod_misc -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args
     | Mod_library -> Tool_library.dispatch { Tool_library.agent_name } ~name ~args
     (* ── Tier A special: Tool_shard returns Yojson.Safe.t ──────── *)
@@ -149,6 +153,12 @@ let dispatch
       Some
         (workflow_err
            (Printf.sprintf "tool '%s' is a keeper management tool (use MCP client)" name))
+    | Mod_keeper_task ->
+      Some
+        (workflow_err
+           (Printf.sprintf
+              "tool '%s' is a keeper task tool; use the keeper in-process task handler"
+              name))
     | Mod_operator ->
       Some
         (workflow_err

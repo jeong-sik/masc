@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute } from './dashboard-shell'
+import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
@@ -847,5 +847,74 @@ describe('dashboardHealthChips', () => {
     })
     expect(cdal?.detail).toContain('stale=3')
     expect(cdal?.detail).toContain('current_missing_task_scope=5')
+  })
+})
+
+describe('SideRail v2 chrome', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    route.value = {
+      tab: 'monitoring',
+      params: { section: 'agents' },
+      postId: null,
+    }
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders v2 structural classes and highlights the active surface', () => {
+    render(h(SideRail, { collapsed: false, onToggle: () => {} }), container)
+
+    expect(container.querySelector('.nav-brand')).not.toBeNull()
+    expect(container.querySelector('.nav-sec')).not.toBeNull()
+    expect(container.querySelector('.nav-link.active')).not.toBeNull()
+    expect(container.querySelector('.nav-link.active')?.textContent).toContain('Monitor')
+
+    const sublist = container.querySelector('.nav-sublist')
+    expect(sublist).not.toBeNull()
+    const activeSublink = sublist?.querySelector('.nav-sublink.active')
+    expect(activeSublink).not.toBeNull()
+    expect(activeSublink?.textContent).toContain('Keeper Fleet')
+  })
+
+  it('renders collapsed icon-only links with v2 classes', () => {
+    render(h(SideRail, { collapsed: true, onToggle: () => {} }), container)
+
+    const links = container.querySelectorAll('.nav-link-collapsed')
+    expect(links.length).toBeGreaterThan(0)
+    expect(container.querySelector('.nav-link-collapsed.active')).not.toBeNull()
+  })
+})
+
+describe('DashboardHealthStrip v2 chrome', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(new Response('{}'))),
+    )
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.unstubAllGlobals()
+  })
+
+  it('renders with the v2-health-strip marker class', () => {
+    render(h(DashboardHealthStrip, {}), container)
+
+    const strip = container.querySelector('[data-testid="dashboard-health-strip"]')
+    expect(strip).not.toBeNull()
+    expect(strip?.classList.contains('v2-health-strip')).toBe(true)
   })
 })

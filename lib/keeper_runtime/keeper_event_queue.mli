@@ -31,11 +31,40 @@ type post_id = string
     target id, or the operator directive token. The queue does
     not interpret the value beyond equality. *)
 
+type board_stimulus_kind =
+  | Post_created
+  | Comment_added
+
+type board_stimulus = {
+  kind : board_stimulus_kind;
+  author : string;
+  title : string;
+  content : string;
+  hearth : string option;
+  updated_at : float option;
+}
+(** Typed board-signal payload carried end-to-end (RFC-0020).
+
+    This is a [keeper_runtime]-owned boundary DTO. The queue is a low-level
+    data module and must not depend on the [board] domain library, so the
+    keeper layer converts to/from [Board_dispatch.board_signal] at the
+    enqueue and drain boundaries. The board post id is not duplicated here:
+    it is the enclosing [stimulus.post_id]. *)
+
+type stimulus_payload =
+  | Board_signal of board_stimulus
+  | Bootstrap
+  | No_progress_recovery
+(** Closed set of stimulus kinds. Replaces the prior [payload : string] +
+    [classify] JSON-prefix round-trip: producers hold the typed value and
+    consumers match it exhaustively, so an unrecognised stimulus is
+    unrepresentable rather than silently downgraded to [Unsupported]. *)
+
 type stimulus = {
   post_id : post_id;
   urgency : urgency;
   arrived_at : float;  (** Unix timestamp, monotonic clock preferred. *)
-  payload : string;
+  payload : stimulus_payload;
 }
 
 type t
@@ -67,17 +96,12 @@ val sort_by_urgency : t -> t
 val summary : t -> string
 (** Short human-readable description for log lines. *)
 
-type stimulus_class =
-  | Board_signal   (** JSON payload with {"source":"board_signal", ...} *)
-  | Bootstrap      (** Plain string "Keeper bootstrap signal" *)
-  | Stay_silent_recovery
-      (** JSON payload with {"source":"stay_silent_recovery", ...} *)
-  | Unsupported of string  (** Unrecognized: payload prefix (max 40 chars) for audit *)
+val payload_kind_label : stimulus_payload -> string
+(** Stable short label for logs/metrics: ["board_signal"], ["bootstrap"],
+    or ["no_progress_recovery"]. *)
 
-val classify : stimulus -> stimulus_class
-(** [classify s] discriminates the stimulus by inspecting its payload.
-    No Yojson dependency — uses lightweight prefix matching so the Event
-    Layer data module stays self-contained. *)
+val is_board_signal : stimulus_payload -> bool
+(** [true] iff the payload is a [Board_signal]. *)
 
 val drain_board_window : ?window_sec:float -> t -> stimulus list * t
 (** [drain_board_window q] separates board-signal stimuli that arrived

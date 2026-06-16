@@ -98,7 +98,7 @@ val provider_name_of_config :
 val model_label_of_config :
   Llm_provider.Provider_config.t -> string
 (** Canonical [provider:model] label (e.g.
-    ["provider_a:model-a-opus"]).  Compatibility helper for legacy
+    ["anthropic:claude-opus"]).  Compatibility helper for legacy
     tests and callers; current public attempt/fallback projections use
     runtime-lane labels instead. *)
 

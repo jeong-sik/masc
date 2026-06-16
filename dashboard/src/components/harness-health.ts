@@ -276,7 +276,7 @@ export function HarnessHealth() {
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
+                class="v2-lab-action rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
                 onClick=${() => { void loadHarnessHealth() }}
               >새로고침</button>
             </div>
@@ -318,12 +318,12 @@ export function HarnessHealth() {
   }
 
   return html`
-    <div class="space-y-4">
-      <${SectionCard} label="안전 감시" class="section">
+    <div class="v2-lab-surface flex flex-col gap-4">
+      <${SectionCard} label="안전 감시" class="section v2-lab-panel">
         ${overviewContent}
       <//>
 
-      <${SectionCard} label="감시 흐름도" class="section">
+      <${SectionCard} label="감시 흐름도" class="section v2-lab-panel">
         ${!data || !flowSource ? html`
           <${EmptySignal} text="감시 흐름 데이터가 없습니다." />
         ` : html`

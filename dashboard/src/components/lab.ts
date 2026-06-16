@@ -17,7 +17,7 @@ export function Lab() {
   const section = currentSection()
 
   return html`
-    <div class="space-y-6">
+    <div class="v2-lab-surface flex flex-col gap-6">
       ${section === 'tools' ? html`
         <${Tools} />
       ` : null}

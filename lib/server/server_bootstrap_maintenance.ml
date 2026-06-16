@@ -83,15 +83,25 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      disabled the shared store simply stops being refreshed (recall still reads
      whatever is there).
 
-     P2-1: enabled by default.  The #21241 librarian taxonomy fix already
-     typed [default_promote_categories] so [Unknown] and other non-objective
-     labels are default-denied; remaining ephemeral [Fact] mis-labels are a
-     librarian prompt issue and are gated below by requiring >=2 distinct
-     keepers.  Operators can still disable via MASC_KEEPER_MEMORY_OS_CONSOLIDATION=0. *)
+     Default-dark.  Enabling it by default (#21265) was premature: the
+     comment it replaced admits the producer still mis-labels ephemeral
+     events as [Fact] ("a librarian prompt issue"), and the live dry-run it
+     bundled (#21244, 15 keepers / 6017 facts) found the only
+     >=2-keeper-corroborated claims ARE that ephemeral boilerplate -- so the
+     ">=2 distinct keepers" gate below does not filter the noise it was meant
+     to.  Running the fiber on that basis pollutes shared recall in
+     production.  Until a fresh dry-run *with* the P0a typed-[Ephemeral]
+     categorisation shows the consolidated set is noise-free, this stays off
+     by default.
+
+     The flag is temporary scaffolding, not a permanent operator knob: once a
+     dry-run proves consolidation safe, make it always-on and delete the flag;
+     if it cannot be made safe, delete the fiber.  Operators can opt in to
+     validate via MASC_KEEPER_MEMORY_OS_CONSOLIDATION=1. *)
   if
     Keeper_memory_bank_env.memory_env_bool_logged
       "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-      ~default:true
+      ~default:false
   then
     fork_logged_fiber
       ~sw

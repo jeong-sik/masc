@@ -52,7 +52,7 @@ interface SubBoardRowProps {
 
 function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
   return html`
-    <${SurfaceCard} variant="compact" testId=${`sub-board-row-${board.slug}`}>
+    <${SurfaceCard} variant="compact" class="v2-workspace-row" testId=${`sub-board-row-${board.slug}`}>
       <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0 space-y-2">
           <div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -86,6 +86,7 @@ function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
             <${ActionButton}
               variant="ghost"
               size="sm"
+              class="v2-workspace-action"
               onClick=${() => onEdit(board)}
               ariaLabel="Edit sub-board"
             >
@@ -94,6 +95,7 @@ function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
             <${ActionButton}
               variant="ghost"
               size="sm"
+              class="v2-workspace-action"
               onClick=${() => onDelete(board)}
               disabled=${deleting}
               ariaLabel="Delete sub-board"
@@ -234,7 +236,7 @@ export function SubBoardSurface() {
   }
 
   return html`
-    <section class="flex min-w-0 flex-col gap-4" aria-label="Sub-boards">
+    <section class="v2-workspace-surface flex min-w-0 flex-col gap-4" aria-label="Sub-boards">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
           <h2 class="text-base font-semibold text-[var(--color-fg-primary)]">Sub-Boards</h2>
@@ -243,6 +245,7 @@ export function SubBoardSurface() {
         <${ActionButton}
           variant="ghost"
           size="sm"
+          class="v2-workspace-action"
           onClick=${() => { void load() }}
           disabled=${loading}
           ariaLabel="Refresh sub-boards"
@@ -255,7 +258,7 @@ export function SubBoardSurface() {
       </div>
 
       ${!editingBoard ? html`
-        <form class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submit}>
+        <form class="v2-workspace-panel grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submit}>
           <div class="grid gap-3 lg:grid-cols-[1fr_0.8fr_0.8fr]">
             <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
               Name
@@ -319,6 +322,7 @@ export function SubBoardSurface() {
               type="submit"
               variant="primary"
               size="md"
+              class="v2-workspace-action"
               disabled=${!canSubmit}
               ariaBusy=${submitting}
               testId="sub-board-create"
@@ -331,10 +335,10 @@ export function SubBoardSurface() {
           </div>
         </form>
       ` : html`
-        <form class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submitEdit}>
+        <form class="v2-workspace-panel grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submitEdit}>
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Edit /${editingBoard.slug}</h3>
-            <${ActionButton} variant="ghost" size="sm" onClick=${cancelEdit} ariaLabel="Cancel edit">Cancel<//>
+            <${ActionButton} variant="ghost" size="sm" class="v2-workspace-action" onClick=${cancelEdit} ariaLabel="Cancel edit">Cancel<//>
           </div>
           <div class="grid gap-3 lg:grid-cols-[1fr_0.8fr]">
             <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
@@ -382,6 +386,7 @@ export function SubBoardSurface() {
               type="submit"
               variant="primary"
               size="md"
+              class="v2-workspace-action"
               disabled=${editSubmitting}
               ariaBusy=${editSubmitting}
             >
@@ -399,7 +404,7 @@ export function SubBoardSurface() {
         ? html`<${LoadingState}>Loading sub-boards...<//>`
         : boards.length === 0
           ? html`
-            <div class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
+            <div class="v2-workspace-panel rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
               <${EmptyState} message="No sub-boards yet. Create one above when a board category needs owner, member, or access policy. Plain board categories stay as hearth tags until a Sub-board is explicitly created." compact />
             </div>
           `

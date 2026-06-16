@@ -190,6 +190,11 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText(/아직 게시글이 없습니다/)).toBeInTheDocument()
   })
 
+  it('wraps the board surface in the v2 workspace surface class', () => {
+    const { container } = render(h(BoardSurface, null))
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+  })
+
   it('renders loading state when loading', () => {
     boardLoading.value = true
     render(h(BoardSurface, null))

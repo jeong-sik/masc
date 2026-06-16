@@ -211,7 +211,7 @@ function renderCategorySection(
   }
 
   return html`
-    <${SectionCard} label=${`${label} (${total})`} class="mb-4">
+    <${SectionCard} label=${`${label} (${total})`} class="mb-4 v2-workspace-panel">
       <div class="flex flex-col gap-2">
         ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>
@@ -547,7 +547,7 @@ function SortBar() {
             <${ActionButton}
               variant="danger"
               size="md"
-              class="!px-3"
+              class="v2-workspace-action !px-3"
               onClick=${bulkDeleteSelected}
               disabled=${bulkDeleting.value}
               ariaBusy=${bulkDeleting.value}
@@ -597,7 +597,7 @@ function BoardSummary() {
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   const metrics = boardLatencyMetrics.value
   return html`
-    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
+    <div class="v2-workspace-panel flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
       <span class="font-semibold text-[var(--color-fg-secondary)] tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
@@ -615,7 +615,7 @@ function BoardSummary() {
       <${ActionButton}
         variant="ghost"
         size="sm"
-        class="${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
+        class="v2-workspace-action ${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
         onClick=${() => navigate('workspace', { section: 'board', focus: 'curation' })}
         ariaLabel="보드 큐레이션 열기"
       >
@@ -627,7 +627,7 @@ function BoardSummary() {
       <${ActionButton}
         variant="ghost"
         size="sm"
-        class="!px-2"
+        class="v2-workspace-action !px-2"
         onClick=${() => navigate('workspace', { section: 'board', focus: 'karma' })}
         ariaLabel="보드 카르마 열기"
       >
@@ -720,7 +720,7 @@ function PostCard({ post }: { post: BoardPost }) {
       role="button"
       tabIndex=${0}
       aria-label=${`게시글 열기: ${stripInlineMarkdown(post.title)}`}
-      class=${`board-post group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-20)] transition-[background-color,border-color] duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
+      class=${`board-post v2-workspace-row group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-20)] transition-[background-color,border-color] duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
       onClick=${openPost}
       onKeyDown=${handlePostKeyDown}
     >
@@ -811,7 +811,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <${ActionButton}
             variant="ghost"
             size="sm"
-            class="ml-auto !py-0.5 opacity-0 group-hover:opacity-100"
+            class="v2-workspace-action ml-auto !py-0.5 opacity-0 group-hover:opacity-100"
             onClick=${handlePin}
             pressed=${post.pinned ?? false}
             ariaLabel=${post.pinned ? `고정 해제: ${post.id}` : `고정: ${post.id}`}
@@ -821,7 +821,7 @@ function PostCard({ post }: { post: BoardPost }) {
           <${ActionButton}
             variant="danger"
             size="sm"
-            class="!py-0.5 opacity-0 group-hover:opacity-100"
+            class="v2-workspace-action !py-0.5 opacity-0 group-hover:opacity-100"
             onClick=${handleDelete}
             disabled=${isDeleting}
             ariaBusy=${isDeleting}
@@ -891,11 +891,13 @@ export function BoardSurface() {
   if (postId) {
     return post
       ? html`
-          <${BoardSummary} />
-          <${PostDetail} post=${post} />
+          <div class="v2-workspace-surface">
+            <${BoardSummary} />
+            <${PostDetail} post=${post} />
+          </div>
         `
       : html`
-          <div>
+          <div class="v2-workspace-surface">
             <${BoardSummary} />
             <button type="button"
               class="mb-4 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer"
@@ -910,7 +912,7 @@ export function BoardSurface() {
 
   if (focus === 'mention-inbox') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${MentionInbox} />
       </div>
@@ -919,7 +921,7 @@ export function BoardSurface() {
 
   if (focus === 'messages-workspace') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${MessageWorkspaceTimeline} />
       </div>
@@ -928,7 +930,7 @@ export function BoardSurface() {
 
   if (focus === 'state-block') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${StateBlockMessages} />
       </div>
@@ -937,7 +939,7 @@ export function BoardSurface() {
 
   if (focus === 'curation') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${BoardCurationPanel} />
       </div>
@@ -946,7 +948,7 @@ export function BoardSurface() {
 
   if (focus === 'karma') {
     return html`
-      <div>
+      <div class="v2-workspace-surface">
         <${BoardSummary} />
         <${BoardKarmaPanel} />
       </div>
@@ -954,7 +956,7 @@ export function BoardSurface() {
   }
 
   return html`
-    <div>
+    <div class="v2-workspace-surface">
       <${BoardSummary} />
       <${SortBar} />
       ${hint ? html`

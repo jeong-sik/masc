@@ -234,7 +234,7 @@ export function BoardModerationSurface() {
   }
 
   return html`
-    <section class="flex min-w-0 flex-col gap-4" aria-label="Board moderation">
+    <section class="v2-workspace-surface flex min-w-0 flex-col gap-4" aria-label="Board moderation">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
           <h2 class="text-base font-semibold text-[var(--color-fg-primary)]">Board Moderation</h2>
@@ -253,6 +253,7 @@ export function BoardModerationSurface() {
           <${ActionButton}
             variant="ghost"
             size="sm"
+            class="v2-workspace-action"
             onClick=${() => { void load() }}
             disabled=${queueControlsDisabled}
             ariaLabel="Refresh moderation queue"
@@ -265,7 +266,7 @@ export function BoardModerationSurface() {
         </div>
       </div>
 
-      <form class="grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submitFlag}>
+      <form class="v2-workspace-panel grid gap-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" onSubmit=${submitFlag}>
         <div class="grid gap-3 lg:grid-cols-[0.7fr_1fr_0.8fr_0.8fr_auto] lg:items-end">
           <label class="grid gap-1 text-2xs font-medium uppercase text-[var(--color-fg-muted)]">
             Target
@@ -316,6 +317,7 @@ export function BoardModerationSurface() {
             type="submit"
             variant="primary"
             size="md"
+            class="v2-workspace-action"
             disabled=${!canSubmit}
             ariaBusy=${submitting}
             testId="moderation-flag-submit"

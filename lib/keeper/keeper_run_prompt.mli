@@ -26,8 +26,8 @@ val safe_memory_fragment : string -> string option
 (** Return the memory-recall fragment unchanged if it does not contain
     any known prompt-injection or role-jailbreak prefix. Otherwise return
     [None] so the caller can drop the whole fragment instead of trying to
-    strip an open-ended prefix list. This is a defensive allow-list style
-    guard: only fragments with no dangerous leading tokens are admitted. *)
+    strip an open-ended prefix list. This is a defensive deny-list style
+    guard: fragments containing dangerous leading tokens are denied. *)
 
 val render_recent_failure_context :
   Keeper_failure_circuit_breaker.failure_signature list -> string

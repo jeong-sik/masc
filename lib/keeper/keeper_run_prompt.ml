@@ -49,13 +49,10 @@ let strip_prompt_injection_prefix line =
         (String.sub trimmed prefix_len (String.length trimmed - prefix_len)
          |> String.trim)
 
-let rec strip_prompt_injection_prefixes ?(remaining = 8) line =
-  if remaining <= 0 then line
-  else
-    match strip_prompt_injection_prefix line with
-    | None -> line
-    | Some stripped ->
-        strip_prompt_injection_prefixes ~remaining:(remaining - 1) stripped
+let rec strip_prompt_injection_prefixes line =
+  match strip_prompt_injection_prefix line with
+  | None -> line
+  | Some stripped -> strip_prompt_injection_prefixes stripped
 
 let safe_memory_fragment s =
   let sanitized = Inference_utils.sanitize_text_utf8 s in

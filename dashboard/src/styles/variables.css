@@ -313,6 +313,35 @@
   --k-10-glow: var(--color-k-10-glow);
   --k-11-glow: var(--color-k-11-glow);
   --k-12-glow: var(--color-k-12-glow);
+
+  /* Keeper-v2 palette bridge — primitives.jsx uses --kp1..--kp12 to tint
+     sigils and identity chips. Map them onto the dashboard's generated
+     12-slot keeper palette so ported components resolve without edits. */
+  --kp1: var(--color-keeper-1);
+  --kp2: var(--color-keeper-2);
+  --kp3: var(--color-keeper-3);
+  --kp4: var(--color-keeper-4);
+  --kp5: var(--color-keeper-5);
+  --kp6: var(--color-keeper-6);
+  --kp7: var(--color-keeper-7);
+  --kp8: var(--color-keeper-8);
+  --kp9: var(--color-keeper-9);
+  --kp10: var(--color-keeper-10);
+  --kp11: var(--color-keeper-11);
+  --kp12: var(--color-keeper-12);
+  --kp1-glow: var(--color-keeper-1-glow);
+  --kp2-glow: var(--color-keeper-2-glow);
+  --kp3-glow: var(--color-keeper-3-glow);
+  --kp4-glow: var(--color-keeper-4-glow);
+  --kp5-glow: var(--color-keeper-5-glow);
+  --kp6-glow: var(--color-keeper-6-glow);
+  --kp7-glow: var(--color-keeper-7-glow);
+  --kp8-glow: var(--color-keeper-8-glow);
+  --kp9-glow: var(--color-keeper-9-glow);
+  --kp10-glow: var(--color-keeper-10-glow);
+  --kp11-glow: var(--color-keeper-11-glow);
+  --kp12-glow: var(--color-keeper-12-glow);
+
   --card: var(--bg-panel);
   --card-border: color-mix(in srgb, var(--color-brass-3) 26%, var(--border-base));
   --white-2: var(--white-3);

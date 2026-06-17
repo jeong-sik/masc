@@ -146,7 +146,6 @@ let metric_telemetry_unified_source_read_failures = "masc_telemetry_unified_sour
 let metric_tool_assignment_telemetry_failures = "masc_tool_assignment_telemetry_failures_total"
 let metric_tool_bind_required_guard = "masc_tool_bind_required_guard_total"
 let metric_tool_input_validation = "masc_tool_input_validation_total"
-let metric_workspace_claim_post_provision_failures = "masc_workspace_claim_post_provision_failures_total"
 let metric_workspace_route_failures = "masc_workspace_route_failures_total"
 let metric_workspace_telemetry_drop = "masc_workspace_telemetry_drop_total"
 let metric_write_meta_cas_retry_total = "masc_write_meta_cas_retry_total"

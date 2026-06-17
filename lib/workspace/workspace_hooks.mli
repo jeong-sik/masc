@@ -84,25 +84,6 @@ val mention_dedup_decision_fn :
 val cache_desync_cleared_fn :
   (Workspace_utils_backend_setup.config ->
    module_name:string -> task_id:string -> status:string -> unit) Atomic.t
-val claim_post_provision_fn : (Workspace_utils_backend_setup.config ->
-            agent_name:string ->
-            task_id:string -> unit)
-           Atomic.t
-val claim_post_provision_failed_fn :
-  (site:string ->
-   agent_name:string ->
-   task_id:string ->
-   error:string ->
-   unit) Atomic.t
-val observe_claim_post_provision_failure :
-  site:string -> agent_name:string -> task_id:string -> exn -> unit
-val run_claim_post_provision_best_effort :
-  Workspace_utils_backend_setup.config ->
-  site:string ->
-  agent_name:string ->
-  task_id:string ->
-  unit
-
 val workspace_telemetry_drop_fn : (Workspace_telemetry_drop_event.t -> unit) Atomic.t
 val active_agents_change_fn : ([ `Inc | `Dec ] -> unit) Atomic.t
 val telemetry_observe_failure_fn : (string -> unit) Atomic.t

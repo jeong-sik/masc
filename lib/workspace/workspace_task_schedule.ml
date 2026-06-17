@@ -618,16 +618,7 @@ let claim_next_r
     | e -> Claim_next_error (Printexc.to_string e), None
   in
   match with_file_lock_r config backlog_path claim_under_lock with
-  | Ok (result, post_provision_task_id) ->
-    (match post_provision_task_id with
-     | Some task_id ->
-       Workspace_hooks.run_claim_post_provision_best_effort
-         config
-         ~site:"claim_next"
-         ~agent_name
-         ~task_id
-     | None -> ());
-    result
+  | Ok (result, _) -> result
   | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 ;;
 

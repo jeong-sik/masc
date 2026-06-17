@@ -285,13 +285,7 @@ let claim_task_r config ~agent_name ~task_id ()
        | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
   in
   match claim_result with
-  | Ok (`New_claim outcome) ->
-    Workspace_hooks.run_claim_post_provision_best_effort
-      config
-      ~site:"claim_task"
-      ~agent_name
-      ~task_id;
-    Ok outcome
+  | Ok (`New_claim outcome) -> Ok outcome
   | Ok (`Existing_claim outcome) -> Ok outcome
   | Error _ as err -> err
 ;;

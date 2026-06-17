@@ -27,6 +27,12 @@ val cadence_step : cadence:int -> counter:int -> int * bool
     always due with the counter pinned at 0. Exposed for testing the cadence
     logic without the per-keeper counter table. *)
 
+val cadence_due : keeper_id:string -> bool
+(** Advance [keeper_id]'s persistent cadence counter by one turn and report
+    whether extraction is due now. This is what [run_best_effort] gates on.
+    First call for an unseen [keeper_id] starts from counter 0, so tests can
+    drive the per-keeper state machine with a fresh id and no reset hook. *)
+
 val max_messages : unit -> int
 (** Maximum recent checkpoint messages sent to the librarian prompt. *)
 

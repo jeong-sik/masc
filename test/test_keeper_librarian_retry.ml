@@ -127,6 +127,37 @@ let test_cadence_resets_after_due () =
     (2, false)
     (R.cadence_step ~cadence:3 ~counter:1)
 
+(* [cadence_due] drives the real per-keeper counter table (the gate
+   [run_best_effort] uses). A fresh keeper_id starts at 0, so these exercise the
+   stateful wrapper without a reset hook. Asserted as period-invariants so they
+   hold for any configured cadence (default 3, or an env override in CI). *)
+let test_cadence_due_periodic () =
+  let kid = "test-cadence-due-periodic" in
+  let cadence = R.cadence_turns () in
+  let periods = 4 in
+  let dues =
+    List.init (cadence * periods) (fun _ ->
+      if R.cadence_due ~keeper_id:kid then 1 else 0)
+    |> List.fold_left ( + ) 0
+  in
+  check int "exactly one extraction per cadence period" periods dues
+
+let test_cadence_due_independent_keepers () =
+  let cadence = R.cadence_turns () in
+  if cadence <= 1
+  then () (* cadence 1: both due every turn, independence is trivial *)
+  else (
+    let ka = "test-cadence-due-ind-a"
+    and kb = "test-cadence-due-ind-b" in
+    (* Advance ka to one turn before its due turn; kb is untouched. *)
+    List.iter
+      (fun _ -> ignore (R.cadence_due ~keeper_id:ka))
+      (List.init (cadence - 1) (fun _ -> ()));
+    check bool "kb on its own counter, not due on ka's schedule" false
+      (R.cadence_due ~keeper_id:kb);
+    check bool "ka due on its own schedule" true
+      (R.cadence_due ~keeper_id:ka))
+
 let () =
   run "keeper_librarian_retry"
     [
@@ -143,5 +174,7 @@ let () =
           test_case "fires every third turn" `Quick test_cadence_three_fires_every_third;
           test_case "cadence 1 always due" `Quick test_cadence_one_always_due;
           test_case "resets after due" `Quick test_cadence_resets_after_due;
+          test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
+          test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
         ] );
     ]

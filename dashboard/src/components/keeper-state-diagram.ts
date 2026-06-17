@@ -194,7 +194,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
 
   if (loading) {
     return html`
-      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--color-fg-disabled)]" role="status">
+      <div class="flex items-center justify-center gap-2 py-6 text-2xs text-[var(--color-fg-disabled)] v2-monitoring-panel" role="status">
         <${InlineSpinner} />
         composite lifecycle 로딩중
       </div>
@@ -206,8 +206,8 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
   }
 
   return html`
-    <div class="flex flex-col gap-3">
-      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
+    <div class="flex flex-col gap-3 v2-monitoring-panel">
+      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)] v2-monitoring-toolbar">
         <${PhaseBadge} accent>composite ${displayState(snapshot.phase)}<//>
         <${PhaseBadge}>KTC ${displayState(snapshot.turn_phase)}<//>
         <${PhaseBadge}>KDP ${displayState(snapshot.decision.stage)}<//>
@@ -220,7 +220,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
       </div>
 
       <div>
-        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2 v2-monitoring-toolbar">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
             통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC · KCB)
           </div>
@@ -269,11 +269,11 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
         <${PhaseConditionsPanel} diagnosis=${phaseDiagnosis} />
       ` : null}
 
-      <div class="grid gap-2 md:grid-cols-2">
+      <div class="grid gap-2 md:grid-cols-2 v2-monitoring-row">
         ${(Object.entries(INVARIANT_LABELS) as Array<[keyof KeeperCompositeInvariants, string]>).map(([key, label]) => {
           const ok = snapshot.invariants[key]
           return html`
-            <div class=${`rounded-[var(--r-1)] border px-3 py-2 text-2xs leading-normal ${badgeTone(ok)}`}>
+            <div class=${`rounded-[var(--r-1)] border px-3 py-2 text-2xs leading-normal ${badgeTone(ok)} v2-monitoring-card`}>
               <div class="font-semibold">${label}</div>
               <div class="mt-1 font-mono">${ok ? 'ok' : 'violated'}</div>
             </div>
@@ -282,10 +282,10 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
       </div>
 
       ${transitions.length > 0 ? html`
-        <div class="grid gap-2" role="log" aria-live="polite" aria-label="관측된 전이">
+        <div class="grid gap-2 v2-monitoring-row" role="log" aria-live="polite" aria-label="관측된 전이">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">관측된 전이</div>
           ${transitions.map(transition => html`
-            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)] v2-monitoring-row">
               <div class="flex flex-wrap items-center gap-2">
                 <span class="font-mono text-[var(--color-fg-secondary)]">${toKeeperPhase(transition.prev_phase) ?? transition.prev_phase}</span>
                 <span class="text-[var(--color-fg-disabled)]">→</span>

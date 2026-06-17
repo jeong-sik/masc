@@ -38,7 +38,7 @@ interface MobileBottomBarProps {
 export function MobileBottomBar({ currentTab, onMenuToggle }: MobileBottomBarProps) {
   return html`
     <nav
-      class="hidden max-[768px]:flex fixed inset-x-0 bottom-0 z-40 items-stretch border-t border-[var(--color-border-strong)] bg-[var(--shell-header-bg)] backdrop-blur-xl"
+      class="v2-shell-surface hidden max-[768px]:flex fixed inset-x-0 bottom-0 z-40 items-stretch border-t border-[var(--color-border-strong)] bg-[var(--shell-header-bg)] backdrop-blur-xl"
       style=${{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       aria-label="Primary mobile navigation"
     >
@@ -64,7 +64,7 @@ export function MobileBottomBar({ currentTab, onMenuToggle }: MobileBottomBarPro
       <button
         type="button"
         'aria-label'="Open full navigation"
-        class=${`flex min-h-[44px] flex-col items-center justify-center gap-0.5 px-3 text-[var(--color-fg-muted)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+        class=${`v2-shell-action flex min-h-[44px] flex-col items-center justify-center gap-0.5 px-3 text-[var(--color-fg-muted)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         onClick=${onMenuToggle}
       >
         <${Menu} size=${20} />

@@ -327,14 +327,14 @@ export function KeeperDiagnosticSummary({
   }
 
   return html`
-    <div class="py-3 px-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+    <div class="py-3 px-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-panel">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">명시적 상태 조회</div>
         <${GhostButton} disabled=${busy} onClick=${() => { void refreshStatus() }}>
           ${busy ? '불러오는 중...' : (detail ? '상태 새로고침' : '상태 불러오기')}
         <//>
       </div>
-      <div class="flex flex-wrap gap-1.5 mb-2">
+      <div class="flex flex-wrap gap-1.5 mb-2 v2-monitoring-row">
         ${continuityStateLabel(diagnostic?.continuity_state)
           ? html`<${DiagChip} label=${continuityStateLabel(diagnostic?.continuity_state)} />`
           : null}
@@ -354,7 +354,7 @@ export function KeeperDiagnosticSummary({
             ${diagnostic.continuity_summary ?? diagnostic.summary}
           </div>`
         : null}
-      <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed mt-1">
+      <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed mt-1 v2-monitoring-row">
         응답: ${diagnostic?.last_reply_status ?? '미조회'}
         ${diagnostic?.last_reply_at ? html` -- ${formatTime(diagnostic.last_reply_at)}` : null}
         ${diagnostic?.next_eligible_at_s ? html` -- 다음 응답 가능 ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
@@ -366,7 +366,7 @@ export function KeeperDiagnosticSummary({
           />`
         : null}
       ${showRawStatus
-        ? html`<div class="mt-3 max-h-60 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
+        ? html`<div class="mt-3 max-h-60 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar v2-monitoring-panel"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
     </div>
   `
@@ -547,11 +547,11 @@ export function KeeperConversationPanel({
     // unchanged — only the chrome differs. Spacing comes from keeper-workspace.css.
     return html`
       <div
-        class="flex min-h-0 flex-1 flex-col"
+        class="flex min-h-0 flex-1 flex-col v2-monitoring-surface"
         data-keeper-chat-layout="workspace"
         onPaste=${handlePaste}
       >
-        <div class="kw-chat-toolbar">
+        <div class="kw-chat-toolbar v2-monitoring-toolbar">
           <${TextInput}
             class="max-w-50"
             name="keeper_chat_search"
@@ -562,7 +562,7 @@ export function KeeperConversationPanel({
             onInput=${(e: Event) => { setSearchQuery((e.target as HTMLInputElement).value) }}
           />
           ${hasQuery
-            ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]" data-chat-search-count>
+            ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)] v2-monitoring-row" data-chat-search-count>
                 ${transcriptEntries.length} / ${visibleThread.length}
               </span>`
             : null}
@@ -592,14 +592,14 @@ export function KeeperConversationPanel({
 
         ${chatAccess.message
           ? html`
-              <div class="mx-10 mt-3 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+              <div class="mx-10 mt-3 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)] v2-monitoring-panel">
                 ${chatAccess.message}
               </div>
             `
           : null}
 
-        <div class="kw-thread">
-          <div class="kw-thread-inner">
+        <div class="kw-thread v2-monitoring-panel">
+          <div class="kw-thread-inner v2-monitoring-panel">
             <${ChatTranscript}
               entries=${transcriptEntries}
               emptyText=${transcriptEmptyText}
@@ -612,17 +612,17 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-10 mb-2 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="mx-10 mb-2 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지"로 볼 수 있습니다.
               </div>
             `
           : null}
 
-        <div class="kw-composer-wrap">
-          <div class="kw-composer-inner">
+        <div class="kw-composer-wrap v2-monitoring-panel">
+          <div class="kw-composer-inner v2-monitoring-panel">
             ${queueCount > 0
               ? html`
-                  <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-chat-queue-row>
+                  <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
                     <span>${queueCount}개 메시지 대기 중</span>
                     <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                   </div>
@@ -652,7 +652,7 @@ export function KeeperConversationPanel({
                 />
               </div>
             </div>
-            ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+            ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
           </div>
         </div>
       </div>
@@ -662,11 +662,11 @@ export function KeeperConversationPanel({
   if (layout === 'primary') {
     return html`
       <div
-        class="flex h-[clamp(30rem,calc(100svh-13rem),52rem)] min-h-0 flex-col gap-4 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-none"
+        class="flex h-[clamp(30rem,calc(100svh-13rem),52rem)] min-h-0 flex-col gap-4 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-none v2-monitoring-surface"
         data-keeper-chat-layout="primary"
         onPaste=${handlePaste}
       >
-        <div class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-3">
+        <div class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-3 v2-monitoring-toolbar">
           <div class="min-w-0">
             <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
             <div class="mt-1.5 flex flex-wrap items-center gap-2">
@@ -717,7 +717,7 @@ export function KeeperConversationPanel({
 
         ${chatAccess.message
           ? html`
-              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)] v2-monitoring-panel">
                 ${chatAccess.message}
               </div>
             `
@@ -733,16 +733,16 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
           : null}
 
-        <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none">
+        <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none v2-monitoring-panel">
           ${queueCount > 0
             ? html`
-                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-chat-queue-row>
+                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
                   <span>${queueCount}개 메시지 대기 중</span>
                   <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                 </div>
@@ -774,15 +774,15 @@ export function KeeperConversationPanel({
           </div>
         </div>
 
-        ${error ? html`<div class="shrink-0 text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+        ${error ? html`<div class="shrink-0 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
       </div>
     `
   }
 
   return html`
-    <div class="flex flex-col gap-3" onPaste=${handlePaste}>
-      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]">
-        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-4">
+    <div class="flex flex-col gap-3 v2-monitoring-surface" onPaste=${handlePaste}>
+      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] v2-monitoring-panel">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-4 v2-monitoring-toolbar">
           <div class="min-w-55 flex-1">
             <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
@@ -834,7 +834,7 @@ export function KeeperConversationPanel({
         <div class="px-4 py-4">
           ${chatAccess.message
             ? html`
-                <div class="mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+                <div class="mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)] v2-monitoring-panel">
                   ${chatAccess.message}
                 </div>
               `
@@ -850,16 +850,16 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-4 mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="mx-4 mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
           : null}
 
-        <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4">
+        <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 v2-monitoring-panel">
           ${queueCount > 0
             ? html`
-                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-chat-queue-row>
+                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
                   <span>${queueCount}개 메시지 대기 중</span>
                   <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                 </div>
@@ -891,7 +891,7 @@ export function KeeperConversationPanel({
         </div>
       </div>
 
-      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
     </div>
   `
 }
@@ -921,7 +921,7 @@ export function KeeperRuntimeActions({
   const activeSecondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]`
 
   return html`
-    <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap gap-2 v2-monitoring-toolbar">
       <button type="button"
         class=${recommended === 'probe' ? activeGhostBtn : ghostBtn}
         onClick=${() => {

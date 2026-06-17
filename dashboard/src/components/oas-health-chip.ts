@@ -141,7 +141,7 @@ export function OasHealthChip() {
 
   return html`
     <${SectionCard} label="OAS 런타임">
-      <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+      <div class="v2-shell-panel grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         <${StatTile}
           label="총 이벤트"
           value=${String(summary.value.replayTotalMatchingEvents)}
@@ -183,7 +183,7 @@ export function OasHealthChip() {
         />
       </div>
       ${recentEvents.value.length > 0 || recentKeepers.value.length > 0 ? html`
-        <div class="mt-3 pt-3 border-t border-[var(--color-border-default)] grid md:grid-cols-2 gap-4">
+        <div class="v2-shell-detail mt-3 pt-3 border-t border-[var(--color-border-default)] grid md:grid-cols-2 gap-4">
           ${recentEvents.value.length > 0 ? html`
             <div>
               <div class="text-3xs text-[var(--color-fg-muted)] tracking-wider uppercase font-medium mb-2">
@@ -191,7 +191,7 @@ export function OasHealthChip() {
               </div>
               <ul class="space-y-1">
                 ${recentEvents.value.map(evt => html`
-                  <li class="flex items-baseline justify-between gap-2 text-2xs">
+                  <li class="v2-shell-row flex items-baseline justify-between gap-2 text-2xs">
                     <span class="text-[var(--color-fg-primary)] truncate">
                       <span class="font-mono text-[var(--color-fg-disabled)]">${evt.agent_name}</span>
                       <span class="text-[var(--color-fg-muted)]"> · </span>
@@ -205,7 +205,7 @@ export function OasHealthChip() {
               </ul>
               ${summary.value.hasMore ? html`
                 <button
-                  class="mt-2 text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline disabled:opacity-50"
+                  class="v2-shell-action mt-2 text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline disabled:opacity-50"
                   onClick=${handleLoadMore}
                   disabled=${isLoadingMore.value}
                 >
@@ -221,7 +221,7 @@ export function OasHealthChip() {
               </div>
               <ul class="space-y-1">
                 ${recentKeepers.value.map(snap => html`
-                  <li class="flex items-baseline justify-between gap-2 text-2xs">
+                  <li class="v2-shell-row flex items-baseline justify-between gap-2 text-2xs">
                     <span class="text-[var(--color-fg-primary)] truncate">
                       <span class="font-mono text-[var(--color-fg-disabled)]">${snap.keeper_name}</span>
                       <span class="text-[var(--color-fg-muted)]"> · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%</span>
@@ -241,7 +241,7 @@ export function OasHealthChip() {
           href="http://127.0.0.1:16686"
           target="_blank"
           rel="noopener noreferrer"
-          class="text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline"
+          class="v2-shell-action text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline"
         >
           OpenTelemetry에서 보기 →
         </a>

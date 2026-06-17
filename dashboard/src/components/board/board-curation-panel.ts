@@ -68,7 +68,7 @@ function CurationSnapshot({ snapshot }: { snapshot: BoardCurationSnapshot }) {
           <h3 class="mb-2 text-xs font-bold uppercase text-[var(--color-fg-secondary)]">Tag suggestions</h3>
           <div class="grid gap-2">
             ${snapshot.tag_suggestions.map(item => html`
-              <div key=${item.post_id} class="grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
+              <div key=${item.post_id} class="grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0 v2-workspace-row">
                 <div class="font-mono text-2xs text-[var(--color-fg-secondary)]">${item.post_id}</div>
                 <div class="flex flex-wrap gap-1">${item.tags.map(tag => html`<span key=${tag} class="rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-2xs text-[var(--color-fg-primary)]">${tag}</span>`)}</div>
                 ${item.rationale ? html`<p class="text-xs text-[var(--color-fg-secondary)]">${item.rationale}</p>` : null}
@@ -83,7 +83,7 @@ function CurationSnapshot({ snapshot }: { snapshot: BoardCurationSnapshot }) {
           <h3 class="mb-2 text-xs font-bold uppercase text-[var(--color-fg-secondary)]">Answer matches</h3>
           <div class="grid gap-2">
             ${snapshot.answer_matches.map(item => html`
-              <div key=${`${item.question_post_id}:${item.answer_post_id}`} class="grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
+              <div key=${`${item.question_post_id}:${item.answer_post_id}`} class="grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0 v2-workspace-row">
                 <div class="flex flex-wrap items-center gap-2 font-mono text-2xs text-[var(--color-fg-secondary)]">
                   <span>${item.question_post_id}</span>
                   <span aria-hidden="true">-></span>
@@ -102,7 +102,7 @@ function CurationSnapshot({ snapshot }: { snapshot: BoardCurationSnapshot }) {
           <h3 class="mb-2 text-xs font-bold uppercase text-[var(--color-fg-secondary)]">Health components</h3>
           <div class="grid gap-2">
             ${snapshot.health_components.map(item => html`
-              <div key=${item.name} class="grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
+              <div key=${item.name} class="v2-workspace-row grid gap-1 border-b border-[var(--color-border-subtle)] pb-2 last:border-b-0 last:pb-0">
                 <div class="flex items-center justify-between gap-2 text-xs">
                   <span class="font-bold text-[var(--color-fg-primary)]">${item.name}</span>
                   <span class="font-mono tabular-nums text-[var(--color-fg-secondary)]">${percent(item.score)} / weight ${item.weight}</span>
@@ -139,7 +139,7 @@ export function BoardCurationPanel() {
   }, [load])
 
   return html`
-    <section class="grid gap-4" aria-labelledby="board-curation-heading">
+    <section class="v2-workspace-surface grid gap-4" aria-labelledby="board-curation-heading">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
           <div class="flex items-center gap-2 text-2xs uppercase text-[var(--color-fg-secondary)]">

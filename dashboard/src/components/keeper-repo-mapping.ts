@@ -293,12 +293,12 @@ export function KeeperRepoMapping() {
   }
 
   return html`
-    <div class="flex flex-col gap-4">
-      <div class="flex items-center justify-between">
+    <div class="flex flex-col gap-4 v2-monitoring-surface">
+      <div class="flex items-center justify-between v2-monitoring-toolbar">
         <h2 class="text-sm font-bold text-text-strong">키퍼 저장소 매핑</h2>
         <button
           type="button"
-          class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-text-body"
+          class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-text-body v2-monitoring-action"
           onClick=${() => loadKeeperRepoMappings({ force: true })}
         >
           새로고침
@@ -306,17 +306,17 @@ export function KeeperRepoMapping() {
       </div>
 
       ${saveError.value ? html`
-        <div class="rounded-[var(--r-1)] border border-[var(--color-status-err)]/30 bg-[var(--color-status-err)]/10 px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">
+        <div class="rounded-[var(--r-1)] border border-[var(--color-status-err)]/30 bg-[var(--color-status-err)]/10 px-3 py-2 text-xs text-[var(--color-status-err)] v2-monitoring-panel" role="alert">
           ${saveError.value}
         </div>
       ` : null}
 
       ${keepers.length === 0 ? html`
-        <div class="py-8 text-center text-2xs text-text-muted rounded-[var(--r-1)] border border-card-border/30 bg-card/10">
+        <div class="py-8 text-center text-2xs text-text-muted rounded-[var(--r-1)] border border-card-border/30 bg-card/10 v2-monitoring-panel">
           등록된 키퍼가 없습니다.
         </div>
       ` : html`
-        <div class="flex flex-col gap-3">
+        <div class="flex flex-col gap-3 v2-monitoring-row">
           ${keepers.map(keeper => {
             const keeperId = keeper.keeper_id ?? keeper.name
             const keeperName = keeper.name
@@ -330,9 +330,9 @@ export function KeeperRepoMapping() {
             return html`
               <div
                 key=${keeperId}
-                class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-[var(--shadow-1)]"
+                class="rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm overflow-hidden shadow-[var(--shadow-1)] v2-monitoring-panel"
               >
-                <div class="px-3 py-2.5 border-b border-card-border/30 bg-card/40 flex items-center justify-between gap-3">
+                <div class="px-3 py-2.5 border-b border-card-border/30 bg-card/40 flex items-center justify-between gap-3 v2-monitoring-toolbar">
                   <div class="flex items-center gap-2 min-w-0">
                     <span class="text-xs font-semibold text-text-strong truncate">${keeperName}</span>
                     ${keeper.agent_name ? html`
@@ -345,7 +345,7 @@ export function KeeperRepoMapping() {
                     ` : null}
                     <button
                       type="button"
-                      class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] py-1 px-3 text-2xs"
+                      class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] py-1 px-3 text-2xs v2-monitoring-action"
                       onClick=${() => handleSave(keeperId)}
                       disabled=${isSaving || !changed}
                     >
@@ -355,7 +355,7 @@ export function KeeperRepoMapping() {
                 </div>
 
                 <div class="p-3">
-                  <label class="flex items-center gap-2 mb-3 cursor-pointer select-none">
+                  <label class="flex items-center gap-2 mb-3 cursor-pointer select-none v2-monitoring-row">
                     <input
                       type="checkbox"
                       checked=${allowAll}
@@ -366,15 +366,15 @@ export function KeeperRepoMapping() {
                   </label>
 
                   ${repos.length === 0 ? html`
-                    <div class="text-2xs text-text-muted py-2">사용 가능한 저장소가 없습니다.</div>
+                    <div class="text-2xs text-text-muted py-2 v2-monitoring-row">사용 가능한 저장소가 없습니다.</div>
                   ` : html`
-                    <div class="grid gap-1.5 ${repos.length > 6 ? 'grid-cols-2' : 'grid-cols-1'}">
+                    <div class="grid gap-1.5 ${repos.length > 6 ? 'grid-cols-2' : 'grid-cols-1'} v2-monitoring-row">
                       ${repos.map(repo => {
                         const selected = isRepoSelected(keeperId, repo.id, draft)
                         return html`
                           <label
                             key="${keeperId}-${repo.id}"
-                            class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--color-bg-elevated)] transition-colors"
+                            class="flex items-center gap-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs text-text-body cursor-pointer select-none hover:bg-[var(--color-bg-elevated)] transition-colors v2-monitoring-row"
                           >
                             <input
                               type="checkbox"
@@ -394,7 +394,7 @@ export function KeeperRepoMapping() {
                   `}
 
                   ${!allowAll && draft !== '*' && (draft as Set<string>).size > 0 ? html`
-                    <div class="mt-2 flex flex-wrap gap-1">
+                    <div class="mt-2 flex flex-wrap gap-1 v2-monitoring-row">
                       ${Array.from(draft as Set<string>).map(repoId => {
                         const repo = repos.find(r => r.id === repoId)
                         return html`<${RepoBadge} name=${repo?.name ?? repoId} />`

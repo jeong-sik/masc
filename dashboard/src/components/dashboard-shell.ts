@@ -55,7 +55,7 @@ const shellRuntimeProviderProbeError = signal<string | null>(null)
 
 function BuildInfoRow({ label, children }: { label: string; children: unknown }) {
   return html`
-    <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
+    <div class="v2-shell-row flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
       <span>${label}</span>
       ${children}
     </div>
@@ -142,7 +142,7 @@ export function ConnectionStatus() {
 
   return html`
     <div
-      class="flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}"
+      class="v2-shell-panel flex items-center gap-1.5 whitespace-nowrap text-xs ${isConnected ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}"
       title=${titleAttr || undefined}
     >
       <span class="inline-block size-[8px] rounded-[var(--r-0)] ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
@@ -745,10 +745,10 @@ export function ErrorCounterBadge() {
     : 'No dashboard errors'
 
   return html`
-    <div class="relative" role="status">
+    <div class="v2-shell-panel relative" role="status">
       <button
         type="button"
-        class="flex items-center gap-1.5 cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 transition-colors hover:bg-[var(--color-bg-elevated)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
+        class="v2-shell-action flex items-center gap-1.5 cursor-pointer rounded-[var(--r-1)] px-1 py-0.5 transition-colors hover:bg-[var(--color-bg-elevated)] ${count > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-fg-muted)]'}"
         title=${label}
         aria-label=${label}
         onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}
@@ -846,9 +846,9 @@ export function BuildIdentityBadge() {
   const hoverTitle = composeBuildBadgeTitle(build, status?.version)
 
   return html`
-    <div class="relative">
+    <div class="v2-shell-panel relative">
       <button type="button"
-        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-[5px] text-2xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+        class=${`v2-shell-action cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-[5px] text-2xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`Server build ${label}`}
         title=${hoverTitle}
@@ -860,7 +860,7 @@ export function BuildIdentityBadge() {
       </button>
       ${buildIdentityOpen.value
         ? html`
-            <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[var(--shadow-panel)] grid gap-1.5">
+            <div class="v2-shell-panel absolute top-[calc(100%+8px)] right-0 min-w-70 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[var(--shadow-panel)] grid gap-1.5">
               <${BuildInfoRow} label="Release">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               <//>
@@ -1000,11 +1000,11 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   const dot = html`<span class="block size-2 shrink-0 rounded-[var(--r-0)] ${dotClass} shadow-1"></span>`
 
   if (collapsed) {
-    return html`<div class="flex justify-center" title=${titleText} role="img" aria-label=${label}>${dot}</div>`
+    return html`<div class="v2-shell-panel flex justify-center" title=${titleText} role="img" aria-label=${label}>${dot}</div>`
   }
 
   return html`
-    <div class="flex items-center gap-2 px-1" role="status" aria-label=${label} title=${titleText}>
+    <div class="v2-shell-panel flex items-center gap-2 px-1" role="status" aria-label=${label} title=${titleText}>
       ${dot}
       <span class="text-[var(--color-fg-muted)] truncate">${label}</span>
     </div>
@@ -1017,8 +1017,8 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
   const visibleSurfaces = DASHBOARD_SURFACES.filter(surface => surface.hidden !== true)
 
   return html`
-    <nav class="flex flex-col h-full" aria-label="Dashboard navigation">
-      <div class="nav-brand flex items-center ${collapsed ? 'justify-center' : 'justify-between'} border-b border-[var(--color-border-default)] px-2 pt-2 pb-2">
+    <nav class="v2-shell-surface flex flex-col h-full" aria-label="Dashboard navigation">
+      <div class="nav-brand v2-shell-toolbar flex items-center ${collapsed ? 'justify-center' : 'justify-between'} border-b border-[var(--color-border-default)] px-2 pt-2 pb-2">
         ${!collapsed ? html`
           <div class="px-1 leading-none">
             <div class="nb-title font-mono text-[var(--fs-9)] font-bold uppercase tracking-[var(--track-brand)] text-[var(--color-fg-disabled)]">MASC</div>
@@ -1026,7 +1026,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
           </div>
         ` : null}
         <button type="button"
-          class=${`nav-collapse flex size-6 items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+          class=${`v2-shell-action nav-collapse flex size-6 items-center justify-center rounded-[var(--r-0)] border border-transparent text-[var(--color-fg-muted)] cursor-pointer transition-[background-color,border-color,color] duration-[var(--t-med)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
           aria-label=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           onClick=${onToggle}
           title=${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -1049,7 +1049,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="nav-link-collapsed flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
+                  class="v2-shell-row nav-link-collapsed flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
                   title=${surface.label}
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
@@ -1061,11 +1061,11 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
             }
 
             return html`
-              <div class="nav-group flex flex-col gap-0.5 border-t border-[var(--color-border-divider)] pt-1 first:border-t-0 first:pt-0">
+              <div class="nav-group v2-shell-panel flex flex-col gap-0.5 border-t border-[var(--color-border-divider)] pt-1 first:border-t-0 first:pt-0">
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="nav-link flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
+                  class="v2-shell-row nav-link flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSurfaceActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}"
                   ariaCurrent=${isSurfaceActive && sections.length === 0 ? 'page' : undefined}
                 >
                   <span class="nav-icon flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] ${isSurfaceActive ? 'bg-[var(--select-10)] text-[var(--select)]' : 'bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
@@ -1077,7 +1077,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <//>
 
                 ${sections.length > 1 ? html`
-                  <div class="nav-sublist ml-2.5 flex flex-col gap-px border-l border-[var(--color-border-divider)] pl-2.5" role="list">
+                  <div class="nav-sublist v2-shell-detail ml-2.5 flex flex-col gap-px border-l border-[var(--color-border-divider)] pl-2.5" role="list">
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
@@ -1085,7 +1085,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           <${RouteLink}
                             tab=${surface.id}
                             params=${item.params}
-                            class="nav-sublink block w-full rounded-[var(--r-0)] border px-2 py-0.5 text-left font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[var(--track-sub)] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-primary)]'}"
+                            class="v2-shell-row nav-sublink block w-full rounded-[var(--r-0)] border px-2 py-0.5 text-left font-mono text-[var(--fs-10)] uppercase leading-5 tracking-[var(--track-sub)] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-primary)]'}"
                             ariaCurrent=${isSectionActive ? 'page' : undefined}
                           >
                             <div class="truncate">${item.label}</div>
@@ -1101,7 +1101,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
         </div>
       </div>
 
-      <div class="nav-footer shrink-0 border-t border-[var(--color-border-default)] px-2 py-2">
+      <div class="nav-footer v2-shell-panel shrink-0 border-t border-[var(--color-border-default)] px-2 py-2">
         <${HealthIndicator} collapsed=${collapsed} />
       </div>
     </nav>
@@ -1314,7 +1314,7 @@ function SurfaceLead() {
     : []
 
   return html`
-    <div class="mb-3 flex flex-col gap-1.5">
+    <div class="v2-shell-panel mb-3 flex flex-col gap-1.5">
       ${trail.length > 0
         ? html`<${Breadcrumb}
             items=${breadcrumbItemsForTrail(trail)}
@@ -1339,7 +1339,7 @@ function SurfaceLead() {
           href=${soloUrl}
           target="_blank"
           rel="noopener noreferrer"
-          class=${`inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+          class=${`v2-shell-action inline-flex size-7 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
           title="Open this surface in a solo view"
           aria-label="Open this surface in a solo view"
           data-testid="dashboard-widget-solo-link"
@@ -1364,9 +1364,9 @@ export function DashboardMain() {
   const immersiveSurface = route.value.tab === 'code'
   const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`
-    <div class=${immersiveSurface
+    <div class=${`v2-shell-panel ${immersiveSurface
       ? 'shrink-0 border-b border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'
-      : 'mb-3 shrink-0 rounded-[var(--r-2)] border border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'}>
+      : 'mb-3 shrink-0 rounded-[var(--r-2)] border border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'}`}>
       Server data warming; this view will refresh automatically.
     </div>
   ` : null
@@ -1377,7 +1377,7 @@ export function DashboardMain() {
       : 'min-h-0 flex-1 overflow-y-auto p-3 max-[520px]:p-2'
 
     return html`
-      <div class="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] bg-[var(--color-bg-page)]">
+      <div class="v2-shell-surface grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] bg-[var(--color-bg-page)]">
         <${WidgetSoloBar} routeState=${route.value} />
         <${ObservatoryFilterBar} />
         <div class=${soloBodyClass}>
@@ -1394,7 +1394,7 @@ export function DashboardMain() {
 
   if (immersiveSurface || keeperDetailRoute) {
     return html`
-      <div class=${`animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both h-full min-h-0 overflow-hidden ${namespaceTruthInitializing.value ? 'grid grid-rows-[auto_minmax(0,1fr)]' : ''}`}>
+      <div class=${`v2-shell-surface animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both h-full min-h-0 overflow-hidden ${namespaceTruthInitializing.value ? 'grid grid-rows-[auto_minmax(0,1fr)]' : ''}`}>
         ${warmingBanner}
         <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
           <div class="h-full min-h-0 overflow-hidden">

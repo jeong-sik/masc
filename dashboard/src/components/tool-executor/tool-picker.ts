@@ -38,7 +38,7 @@ export function ToolPicker() {
   const tools = filteredTools.value
   const selected = selectedTool.value
   return html`
-    <div class="flex flex-col gap-2 h-full">
+    <div class="v2-lab-panel flex flex-col gap-2 h-full">
       <${TextInput} value=${searchQuery.value} placeholder="도구 검색..."
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }} />
       <div class="flex gap-1">

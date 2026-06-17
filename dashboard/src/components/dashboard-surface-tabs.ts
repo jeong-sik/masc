@@ -40,7 +40,7 @@ export function DashboardSurfaceTabs({ items, currentTab }: DashboardSurfaceTabs
       <div
         role="tablist"
         aria-label="Dashboard surfaces"
-        class="inline-flex min-w-max items-center gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-0.5"
+        class="v2-shell-toolbar inline-flex min-w-max items-center gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-0.5"
       >
         ${items.map((item, index) => {
           const active = item.id === currentTab
@@ -57,7 +57,7 @@ export function DashboardSurfaceTabs({ items, currentTab }: DashboardSurfaceTabs
               ariaSelected=${active ? 'true' : 'false'}
               title=${item.description}
               onKeyDown=${handleSurfaceTabKeyDown}
-              class=${`inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-sm)] border px-2 font-mono text-3xs uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
+              class=${`v2-shell-row inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-sm)] border px-2 font-mono text-3xs uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
                 active
                   ? 'border-[var(--brass-3)] bg-[var(--accent-22)] text-[var(--brass-1)] shadow-[inset_0_-1px_0_var(--brass-3)]'
                   : 'border-transparent text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)]'

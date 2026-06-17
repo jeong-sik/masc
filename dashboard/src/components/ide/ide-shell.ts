@@ -641,7 +641,7 @@ export function IdeShell() {
 
   return html`
     <section
-      class="ide-plane-shell ide-v2-surface v2-ide-surface"
+      class="ide-plane-shell ide-v2-surface v2-ide-surface ss-surface bg-surface-page"
       role="region"
       aria-label="Code IDE shell"
       data-terminal-open=${terminalOpen ? 'true' : 'false'}

@@ -59,17 +59,23 @@ function FpsBadge() {
 
   const tone = fps >= 55 ? 'ok' : fps >= 30 ? 'warn' : 'bad'
   const toneClass = {
-    ok: 'text-[var(--color-status-ok)] border-[var(--ok-20)] bg-[var(--ok-10)]',
-    warn: 'text-[var(--color-status-warn)] border-[var(--warn-20)] bg-[var(--warn-10)]',
-    bad: 'text-[var(--color-status-err)] border-[var(--err-border)] bg-[var(--bad-soft)]',
+    ok: 'text-success border-success/20 bg-success/10',
+    warn: 'text-warning border-warning/20 bg-warning/10',
+    bad: 'text-destructive border-destructive/20 bg-destructive/10',
+  }[tone]
+
+  const dotClass = {
+    ok: 'bg-success',
+    warn: 'bg-warning',
+    bad: 'bg-destructive',
   }[tone]
 
   return html`
     <span
-      class=${`inline-flex items-center gap-2 rounded-[var(--r-0)] border px-2.5 py-1 text-2xs font-semibold ${toneClass}`}
+      class=${`inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-[11px] font-semibold ${toneClass}`}
       data-testid="lab-perf-fps"
     >
-      <span class="size-2 rounded-full ${tone === 'ok' ? 'bg-[var(--color-status-ok)]' : tone === 'warn' ? 'bg-[var(--color-status-warn)]' : 'bg-[var(--color-status-err)]'}" aria-hidden="true"></span>
+      <span class="size-2 rounded-full ${dotClass}" aria-hidden="true"></span>
       <span>${fps} fps</span>
     </span>
   `
@@ -77,17 +83,17 @@ function FpsBadge() {
 
 function LogRow({ row }: { row: PerfLogRow }) {
   const levelClass = {
-    info: 'text-[var(--color-fg-muted)]',
-    warn: 'text-[var(--color-status-warn)]',
-    error: 'text-[var(--color-status-err)]',
+    info: 'text-text-tertiary',
+    warn: 'text-warning',
+    error: 'text-destructive',
   }[row.level]
 
   return html`
-    <div class="flex items-center gap-3 px-3 py-2 text-xs font-mono border-b border-[var(--color-border-muted)] last:border-b-0">
-      <span class="w-14 shrink-0 text-[var(--color-fg-disabled)]">${row.t}</span>
-      <span class=${`w-11 shrink-0 uppercase text-2xs tracking-wider ${levelClass}`}>${row.level}</span>
-      <span class="w-24 shrink-0 truncate text-[var(--color-fg-secondary)]">${row.keeper}</span>
-      <span class="min-w-0 flex-1 truncate text-[var(--color-fg-primary)]">${row.msg}</span>
+    <div class="flex items-center gap-3 px-3 py-2 text-[14px] font-mono border-b border-border last:border-b-0">
+      <span class="w-14 shrink-0 text-text-disabled">${row.t}</span>
+      <span class=${`w-11 shrink-0 uppercase text-[11px] tracking-wider ${levelClass}`}>${row.level}</span>
+      <span class="w-24 shrink-0 truncate text-text-secondary">${row.keeper}</span>
+      <span class="min-w-0 flex-1 truncate text-text-primary">${row.msg}</span>
     </div>
   `
 }
@@ -96,23 +102,23 @@ export function LabPerf() {
   const rows = useMemo(() => generateRows(2000), [])
 
   return html`
-    <div class="v2-lab-surface flex flex-col gap-6" data-testid="lab-perf-surface">
+    <div class="v2-lab-surface ss-surface bg-surface-page flex flex-col gap-6 px-6 py-6" data-testid="lab-perf-surface">
       <div class="flex items-center justify-between gap-4 v2-monitoring-toolbar">
         <div>
-          <h2 class="text-base font-semibold text-[var(--color-fg-primary)]">Performance</h2>
-          <p class="text-2xs text-[var(--color-fg-muted)]">FPS meter + VirtualList windowing demo</p>
+          <h2 class="text-[18px] font-bold text-text-primary">Performance</h2>
+          <p class="text-[13px] text-text-tertiary">FPS meter + VirtualList windowing demo</p>
         </div>
         <${FpsBadge} />
       </div>
 
-      <div class="v2-monitoring-panel rounded-[var(--r-2)] border border-[var(--color-border-default)] p-4">
+      <div class="ss-card v2-monitoring-panel rounded-2xl border border-border p-6">
         <div class="mb-3 flex items-center justify-between gap-3">
-          <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">
+          <div class="text-[12px] font-semibold uppercase tracking-[0.05em] text-text-secondary">
             VirtualList · ${rows.length.toLocaleString()} rows
           </div>
-          <span class="text-2xs text-[var(--color-fg-disabled)]">fixed 36 px rows</span>
+          <span class="text-[11px] text-text-disabled">fixed 36 px rows</span>
         </div>
-        <div class="h-80 overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
+        <div class="h-80 overflow-hidden rounded-xl border border-border bg-surface-page">
           <${VirtualList}
             items=${rows}
             itemHeight=${36}
@@ -121,8 +127,8 @@ export function LabPerf() {
             className="h-full"
           />
         </div>
-        <p class="mt-3 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-          동일한 <code class="rounded bg-[var(--color-bg-muted)] px-1 py-0.5">LogRow</code> 컴포넌트를
+        <p class="mt-3 text-[13px] leading-relaxed text-text-tertiary">
+          동일한 <code class="rounded bg-surface-subtle px-1 py-0.5 text-text-primary">LogRow</code> 컴포넌트를
           VirtualList로 윈도잉하면 보이는 슬라이스(+overscan)만 렌더링됩니다.
         </p>
       </div>

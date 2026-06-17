@@ -170,7 +170,7 @@ export function SurfaceCard({
     testId,
     children,
   })
-  const cls = surfaceCardClassName({ variant, tone, className: cx })
+  const cls = surfaceCardClassName({ variant, tone, className: ['ss-card', cx].filter(Boolean).join(' ') })
   return html`<div
     class=${cls}
     style=${style}
@@ -309,7 +309,7 @@ export function SectionCard({
   const rootClass = surfaceCardClassName({
     variant,
     tone,
-    className: ['flex flex-col !p-0 overflow-hidden', cx].filter(Boolean).join(' '),
+    className: ['ss-card flex flex-col !p-0 overflow-hidden', cx].filter(Boolean).join(' '),
   })
   return html`
     <div

@@ -275,19 +275,18 @@ judge_timeout_s = 120.0
 
 ## 11. 하네스 (Phase 0, 비협상) — "4× 비용이 정말 좋아지나"
 
-CLAUDE.md §Harness First: 측정 없이 AI 에이전트 코드 진행 금지. fusion의 전 존재 이유가 "단일 모델보다 낫다"이므로 이를 **결정론적으로 측정**하는 게 최우선.
+CLAUDE.md §Harness First: 측정 없이 AI 에이전트 코드 진행 금지. fusion의 전 존재 이유가 "cost-matched 대안보다 낫다"이므로 이를 **재현 가능하게 측정·판정**하는 게 최우선. 측정(출력·토큰 비용)은 결정론, 우열 판정은 판단이다 — 정답을 string-match로 채점해 정답률 delta를 자동 게이트로 쓰는 건 표현 변이를 못 잡고 심의를 단답 정답률로 환원하는 어거지다.
 
 `test/fusion/fusion_harness.ml`:
 
 | 구성 | 내용 |
 |---|---|
-| 입력 | 고정 eval 셋: `(question, rubric_or_reference)` N개 (`test/fusion/cases/*.json`) |
+| 입력 | 고정 eval 셋: `question` N개 (+ 선택적 참고 컨텍스트) (`test/fusion/cases/*.json`). 재현성을 위해 질문만 고정하고, string-match 채점용 정답은 두지 않는다(우열은 판단). |
 | 비교군 | 같은 질문 · **같은 토큰 예산**에서 4-way: (A) single 1×, (B) self-consistency(같은 모델 N회 샘플 + 다수결) ~N×, (C) Self-MoA(최강 모델 1개를 N회 샘플 → judge 종합) ~N×, (D) fusion(다른 모델 panel → judge) ~N× |
-| 채점 | 결정론 metric(정답 매칭) 또는 루브릭 기반 judge 점수(고정 seed/temperature 0) |
-| 산출 | 각 비교군 `score` + `cost_ratio` + `latency_ratio`, **핵심 delta = `fusion_score − max(self_consistency_score, self_moa_score)`** |
-| 게이트 | fusion이 **cost-matched 대안(B/C)을 이기는가?** single(A) 대비 우위는 "더 많은 컴퓨트"로 자명하므로 정당화 근거가 못 된다. fusion의 고유 기여는 *모델 다양성 + judge 종합*이고, 그게 같은 비용의 self-consistency/Self-MoA보다 나아야 4×를 정당화한다. |
+| 산출 | 각 전략의 **출력 전문** + **토큰 비용 실측**(panel + judge 합산) + (self-consistency) **다수결 집계**. 자동 정답률·delta 수치는 내지 않는다 — 정답을 string-match로 채점하는 건 표현 변이("42" vs "The answer is 42")를 못 잡고 심의 가치를 단답 정답률로 환원하는 어거지다. 채점·우열은 판단 몫. |
+| 게이트 | fusion이 **cost-matched 대안(B/C)보다 나은가를 판단**한다 — 리뷰어(사람), 또는 별도 evaluator judge(후속). 비용이 실제로 비슷한지는 토큰 실측으로 확인. single(A) 대비 우위는 "더 많은 컴퓨트"로 자명해 정당화 근거가 못 된다. fusion의 고유 기여(모델 다양성 + judge 종합)가 같은 비용의 self-consistency/Self-MoA보다 나아야 4×를 정당화한다. |
 
-이 하네스가 **fusion 머지의 정당화 근거**다. 핵심 delta(fusion − cost-matched 대안)가 음수/미미하면 preset 구성 또는 트리거를 재설계한다(코드를 머지하지 않는다).
+이 하네스가 **fusion 머지의 정당화 근거**다. 판단 결과 fusion이 cost-matched 대안보다 낫지 않으면 preset 구성 또는 트리거를 재설계한다(코드를 머지하지 않는다). "낫다"는 자동 수치가 아니라 출력·비용을 본 판단이다.
 
 > **왜 비교군이 single이 아니라 cost-matched 4-way인가** — MAD 연구(Smit et al., "Should we be going MAD?", ICML 2024)는 multi-agent debate가 self-consistency를 안정적으로 이기지 못한다고 보고했고, Self-MoA(arXiv:2502.00674, 2025)는 "모델 다양성" 가정을 반박하며 *최강 모델 단일을 N회 샘플*하는 쪽이 이종 모델 혼합보다 나을 수 있다고 했다. fusion의 전제(이종 panel + judge)는 이 두 결과에 직접 노출된다. 따라서 하네스는 single 대비가 아니라 **같은 비용을 다르게 쓴 대안 대비**로 fusion의 존재 가치를 측정해야 한다. (인용 수치는 각 논문 abstract 기준 — 자체 eval 셋 재현으로 검증.)
 
@@ -308,7 +307,7 @@ lib/fusion/                          # 단일 masc 라이브러리에 자동 포
   fusion_orchestrator.ml(i)          # §4 gate->panel->judge->sink 루프 (Eio.Switch)
   fusion_tool.ml(i)                  # masc_fusion 키퍼 도구 (dispatch table 등록)
 test/fusion/
-  fusion_harness.ml                  # §11 single vs fusion 측정 (필수)
+  fusion_harness.ml                  # §11 전략별 출력+비용 수집 (판정 입력, 필수)
   test_fusion_policy.ml              # 게이트 전 분기 + deny 사유 (alcotest)
   test_fusion_depth.ml               # descend Top->Nested->None (qcheck)
   test_fusion_judge_schema.ml        # judge_synthesis parse round-trip + 악성 입력
@@ -326,11 +325,11 @@ test/fusion/
 
 | Phase | 산출물 | 완료 기준 |
 |---|---|---|
-| **0** | `fusion_types` + `fusion_harness` + mock provider | 하네스가 single vs fusion delta를 출력(실제 모델 1셋) |
+| **0** | `fusion_types` + `fusion_harness` + mock provider | 하네스가 전략별 출력+토큰 비용을 나란히 산출(실제 모델 1셋), 판정 입력 제공 |
 | **1** | `fusion_config` + `fusion_policy` + 단위 테스트 | 게이트 전 분기 green, unknown preset fail-fast |
 | **2** | `fusion_panel` + `fusion_judge` | 실모델 패널 3 + 심판 1 round-trip, judge_synthesis 닫힌 타입 파싱 |
 | **3** | `fusion_sink` + `fusion_orchestrator` + `fusion_tool` | chat lane + board에 심의 가시(대시보드 확인), out-of-band 비차단 |
-| **4** | 실 keeper 통합(게이트 wire) + `enabled` 토글 | `enabled=true` 카나리 1 키퍼, 하네스 delta 양수 확인 후 |
+| **4** | 실 keeper 통합(게이트 wire) + `enabled` 토글 | `enabled=true` 카나리 1 키퍼, 판단상 fusion 우위 확인 후 |
 
 각 Phase는 독립 Draft PR. `enabled=false` 기본이라 main에 들어가도 다크.
 
@@ -338,7 +337,7 @@ test/fusion/
 
 ## 14. 리스크 · 오픈 퀘스천
 
-1. **ROI 미검증**: 자체 eval 셋에서 delta가 미미할 수 있음 → Phase 0 하네스가 게이트. 음수면 머지 안 함.
+1. **ROI 미검증**: 자체 eval 셋에서 fusion 우위가 불명확할 수 있음 → Phase 0 하네스가 출력·비용을 제시하고 판단으로 게이트. 우위 없으면 머지 안 함.
 2. **지연/비용**: 7× 지연. out-of-band가 키퍼 루프는 보호하나 board 결과 도착이 느림 → 고위험 결정에만.
 3. **대시보드 meta 뷰어 부재**: v1은 meta_json raw 도달. PostDetail 뷰어는 후속.
 4. **chat lane author 필드**: v1 content-prefix. 구조화 author는 코어 스키마 변경(코덱 마이그레이션 필요) → v2.

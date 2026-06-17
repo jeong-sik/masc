@@ -137,7 +137,7 @@
 @keyframes kw-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* ════ CONVERSATION (center) ════════════════════════════════════ */
-.kw-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-bg-page); }
+.kw-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--color-bg-page); }
 
 /* Single-row header (identity + status + actions). Slimmer than the old
  * two-row variant — the runtime/model/throughput sub-row moved to the rail —
@@ -177,11 +177,12 @@
  * Provide the spacious rhythm + centered max-width column here. */
 .kw-thread {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
+  overflow: hidden;
   padding: 0;
 }
 .kw-thread-inner {
   width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto;
-  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  height: 100%; min-height: 0; display: flex; flex-direction: column;
 }
 /* Overrides for the reused ChatTranscript (chat/primitives.ts).
  * Two-class specificity beats its single-class Tailwind gap/padding.

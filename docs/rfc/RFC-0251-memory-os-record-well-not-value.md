@@ -7,8 +7,8 @@ updated: 2026-06-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0243", "0244", "0247"]
-implementation_prs: []
+related: ["0243", "0244", "0247", "0247-purge"]
+implementation_prs: ["21372"]
 ---
 
 # RFC-0251 — Memory OS: record well, do not value
@@ -122,9 +122,15 @@ decide between them; the implementing PR must pick one and say why.**
 3. **Producer recording quality** — librarian prompt skips boilerplate /
    derivable at write time.
 4. **Consolidator** — remove `noisy_or` / confidence-threshold promotion; resolve
-   §3.
+   §3. **Not in this PR; separate PR required.**
 5. **Delete dead valuation code** — `stale_factor`, score terms, EMA, the
-   `_shared` count path.
+   `_shared` count path. The dark/inert organs removed first in PR #21372:
+   - GC / decay forgetting (`Keeper_memory_os_gc`, `run_gc` fiber):
+     default-off env gate + `valid_until` always `None` meant the TTL pass
+     never fired.
+   - Edges / spreading-activation recall (`Keeper_memory_os_edges`):
+     activation alpha was `0` by default and phase-2 de-scoring left no base
+     score to lift, so the machinery had no consumer.
 
 ## §5 Verification — honest about what cannot be measured
 
@@ -147,3 +153,21 @@ Verification is therefore:
   path (that line must stay non-empty; RFC-0232 / #20870 watermark-stall).
 - Re-introducing decay/TTL forgetting as a *scored* mechanism. Forgetting, if
   added, is judgment (a contradiction deletes the superseded claim), not decay.
+
+## §7 Post-removal forgetter coverage (cross-PR sequencing)
+
+PR #21372 removes the only active decay/TTL forgetter path. After it lands,
+memory-os has **no automated forgetting** until PR #21319 (RFC-0247 purge
+redesign / LLM-judgment contradiction-delete + structural keep-newest cap)
+lands. That is intentional per §6 (forgetting is judgment, not decay), but it
+is a sequencing dependency:
+
+- **Merge order**: do not merge this PR before #21319's structural cap is
+  committed and green, unless an explicit interim cap or store-size guard is
+  added. Otherwise keepers accumulate facts without bound.
+- **TODO**: verify #21319 covers (a) contradiction-delete tombstones for
+  superseded claims, and (b) a hard per-keeper / per-store size or generation
+  cap that triggers before unbounded growth becomes an OOM risk.
+- **Same-file conflict caution**: `lib/keeper/keeper_librarian_runtime.ml` is
+  also edited by PR #21376 and PR #21408 (librarian provider slot per-keeper).
+  Rebase/merge order must be coordinated to avoid losing either change.

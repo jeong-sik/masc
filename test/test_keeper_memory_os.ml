@@ -438,11 +438,10 @@ let test_librarian_generation_override () =
   | _ -> Alcotest.fail "expected librarian output to parse"
 ;;
 
-(* RFC-0247 §2.3 producer end-to-end: a claim the librarian labels "ephemeral" is
-   born with a finite TTL and a fast decay rate, while a durable "fact" carries
-   neither — so the forgetting machinery (GC TTL pass, per-fact truth decay) is
-   driven by the typed category at write time, not left inert. *)
-let test_librarian_ephemeral_fact_has_ttl () =
+(* RFC-0251 producer end-to-end: a claim the librarian labels "ephemeral" is
+   born with no hard TTL. A durable "fact" also carries no hard TTL; category
+   still controls promotability, not timed decay. *)
+let test_librarian_ephemeral_fact_has_no_ttl () =
   let now = 1_000_000.0 in
   let output =
     `Assoc
@@ -479,10 +478,9 @@ let test_librarian_ephemeral_fact_has_ttl () =
     let eph = find Types.Ephemeral in
     let durable = find Types.Fact in
     Alcotest.(check (option (float 0.001)))
-      "ephemeral fact TTL matches the category producer"
-      (Types.category_valid_until ~now Types.Ephemeral)
+      "ephemeral fact has no hard TTL"
+      None
       eph.Types.valid_until;
-    Alcotest.(check bool) "ephemeral TTL is finite" true (Option.is_some eph.Types.valid_until);
     Alcotest.(check (option (float 0.001)))
       "durable fact never hard-expires"
       None
@@ -1323,6 +1321,41 @@ let test_recall_filters_expired_episodes () =
         (contains "active episode should render" ctx)))
 ;;
 
+(* RFC-0251: [fact_is_current] is the read-side guard that drops facts whose
+   [valid_until] has passed. The GC TTL pass was removed, but legacy rows may
+   still carry a timestamp and recall must filter them. *)
+let test_recall_filters_expired_facts () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "fact-ttl-keeper" in
+      let now = 1_000_000.0 in
+      let expired_fact =
+        { (fact_fixture ~now ()) with
+          Types.claim = "expired fact should not render"
+        ; Types.valid_until = Some (now -. 1.0)
+        }
+      in
+      let active_fact =
+        { (fact_fixture ~now ()) with
+          Types.claim = "active fact should render"
+        ; Types.valid_until = Some (now +. 1.0)
+        }
+      in
+      Memory_io.append_fact ~keeper_id expired_fact;
+      Memory_io.append_fact ~keeper_id active_fact;
+      let ctx =
+        Recall.render_context ~keeper_id ~now ~max_facts:4 ~max_episodes:0 ()
+      in
+      Alcotest.(check bool)
+        "expired fact is omitted"
+        false
+        (contains "expired fact should not render" ctx);
+      Alcotest.(check bool)
+        "active fact remains"
+        true
+        (contains "active fact should render" ctx)))
+;;
+
 let test_recall_renders_terminal_episode_marker () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -1864,16 +1897,15 @@ let test_is_promotable_durable_kinds () =
     blocked
 ;;
 
-(* RFC-0247 §2.3: retention is category-driven. Only Ephemeral gets a finite TTL;
-   every durable arm returns None (never hard-expires). Exhaustive so a new
-   category must be classified here. The companion lifetime-cycles (truth-decay
-   rate) was deleted with the score, so only the TTL is asserted. *)
+(* RFC-0251: retention is category-driven. The hard TTL pass was removed, so no
+   category gets a finite [valid_until]. Exhaustive so a new category must be
+   classified here. *)
 let test_category_retention_by_category () =
   let now = 1_000_000.0 in
-  Alcotest.(check bool)
-    "ephemeral gets a finite TTL"
-    true
-    (Option.is_some (Types.category_valid_until ~now Types.Ephemeral));
+  Alcotest.(check (option (float 0.001)))
+    "ephemeral has no hard TTL"
+    None
+    (Types.category_valid_until ~now Types.Ephemeral);
   List.iter
     (fun c ->
        Alcotest.(check (option (float 0.001)))
@@ -2073,9 +2105,9 @@ let () =
             `Quick
             test_librarian_generation_override
         ; Alcotest.test_case
-            "librarian-born ephemeral fact has TTL (RFC-0247 §2.3)"
+            "librarian-born ephemeral fact has no TTL (RFC-0251)"
             `Quick
-            test_librarian_ephemeral_fact_has_ttl
+            test_librarian_ephemeral_fact_has_no_ttl
         ; Alcotest.test_case
             "librarian accepts wrapped json output"
             `Quick
@@ -2187,6 +2219,10 @@ let () =
             `Quick
             test_recall_filters_expired_episodes
         ; Alcotest.test_case
+            "expired facts are omitted (fact_is_current)"
+            `Quick
+            test_recall_filters_expired_facts
+        ; Alcotest.test_case
             "terminal episode marker is rendered"
             `Quick
             test_recall_renders_terminal_episode_marker
@@ -2243,7 +2279,7 @@ let () =
             `Quick
             test_is_promotable_durable_kinds
         ; Alcotest.test_case
-            "retention TTL/lifetime is category-driven (RFC-0247 §2.3)"
+            "retention lifetime is category-driven; TTL removed (RFC-0251)"
             `Quick
             test_category_retention_by_category
         ; Alcotest.test_case

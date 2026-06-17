@@ -64,14 +64,11 @@ val category_of_string : string -> category
     compile time. *)
 val is_promotable : category -> bool
 
-(** RFC-0247 §2.3 (forgetting): the hard-expiry timestamp a newly written fact of
-    this category should carry, given [now]. Exhaustive over {!category}. Only
-    [Ephemeral] (coordination boilerplate) gets a finite TTL — the brain's
-    episodic memory that fades; durable knowledge ([Fact]/[Constraint]/…) and
-    [Unknown] (conservative: we do not aggressively expire what we do not
-    understand) return [None] and never hard-expire. This is the write-side
-    producer that makes the previously-inert [valid_until] field (and the GC TTL
-    pass) reachable. *)
+(** RFC-0251: the hard-TTL GC pass was removed, so this function now returns
+    [None] for every category. It is kept so existing callers and legacy rows
+    carrying [valid_until] continue to type-check/decode; new facts are born
+    without a hard expiry. Forgetting, if added later, is a judgment layer, not
+    a timed decay. *)
 val category_valid_until : now:float -> category -> float option
 
 (** A single semantic claim extracted from conversation history.

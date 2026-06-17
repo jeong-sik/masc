@@ -64,8 +64,9 @@ let episode_is_current ~now (episode : episode) =
 ;;
 
 (* Staleness horizon: a fact whose truth anchor is older than this is annotated
-   so the reader re-verifies before asserting it as live. One day mirrors the
-   ephemeral TTL horizon in [Keeper_memory_os_types]. *)
+   so the reader re-verifies before asserting it as live. One day is a coarse
+   "last session" threshold; it is not tied to a hard TTL because RFC-0251
+   removed the GC TTL pass. *)
 let staleness_note_seconds = 86_400.0
 
 (* Coarse natural-language age. The prior recall line printed [stale=%.2f] from

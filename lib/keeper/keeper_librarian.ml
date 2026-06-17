@@ -168,9 +168,10 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
       (* Parse-once at the producer boundary: the LLM's free-text category becomes
          a typed [category] here, so no surface string reaches the store or the
          consolidator (RFC-0244 §2.3 / #21241; RFC-0247 §2.5). The category drives
-         retention (RFC-0247 §2.3) — an [Ephemeral] coordination claim is born
-         with a short TTL, durable knowledge with none. RFC-0247 also stopped
-         parsing the LLM's [confidence] number: the score it fed is gone. *)
+         promotability (RFC-0244 Tier 2): an [Ephemeral] coordination claim is
+         structurally non-promotable, durable knowledge may promote. RFC-0247
+         also stopped parsing the LLM's [confidence] number: the score it fed is
+         gone. *)
       let category = category_of_string category_str in
       Some
         { claim

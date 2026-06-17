@@ -116,17 +116,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* RFC-0247 §2.3: memory-os forgetting sweep. Off the keeper hot path — every
-     [interval]s it runs the deterministic per-keeper GC ([run_gc]: hard-expire
-     facts whose [valid_until] has passed, drop fully-decayed facts by retention
-     verdict, dedup by the [normalize_claim] SSOT) and rewrites each keeper's
-     Tier-1 store atomically. This is [run_gc]'s first production caller; without
-     it the TTL/lifetime machinery (now produced per-category at librarian write
-     time) is unreachable. The shared store is skipped — the consolidator
-     reconstructs it wholesale each sweep, so GC-ing it would just be undone.
-     Default OFF (mirrors the consolidation gate): enable via the env once a live
-     dry-run confirms what it would prune. Per-keeper failures are caught so one
-     corrupt store cannot cancel siblings. *)
+  (* RFC-0251: memory-os structural cleanup. Off the keeper hot path — every
+     [interval]s it runs deterministic per-keeper GC ([run_gc]): expire legacy
+     rows whose persisted [valid_until] has passed and dedup by the
+     [normalize_claim] SSOT. New rows no longer produce hard TTLs and no
+     score/decay verdict decides survival. The shared store is skipped — the
+     consolidator reconstructs it wholesale each sweep, so GC-ing it would just
+     be undone. Default OFF (mirrors the consolidation gate): enable via the env
+     once a live dry-run confirms what it would prune. Per-keeper failures are
+     caught so one corrupt store cannot cancel siblings. *)
   if
     Keeper_memory_bank_env.memory_env_bool_logged
       "MASC_KEEPER_MEMORY_OS_GC"

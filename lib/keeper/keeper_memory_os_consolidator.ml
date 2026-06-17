@@ -6,7 +6,8 @@
     writes them into a single shared Tier-2 store
     (keepers/_shared.facts.jsonl) with [observed_by] = the contributing keeper
     set. It never mutates a keeper's own store, so it is additive and safe to
-    wire ahead of the destructive per-keeper [run_gc].
+    run independently of any per-keeper maintenance (the GC TTL pass was
+    removed in RFC-0251).
 
     Determinism (the memory-os offline/reproducible tenet): the output is a pure
     function of the input facts, emitted in normalized-claim order, so a test can

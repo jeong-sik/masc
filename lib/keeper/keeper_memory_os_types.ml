@@ -87,19 +87,13 @@ let is_promotable = function
   | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
 ;;
 
-(* RFC-0247 §2.3 (forgetting): retention is a property of the category. A
-   coordination event ("checkpoint saved") is stale within a day and worthless in
-   a later session, so it gets a short hard TTL; durable knowledge never
-   hard-expires. [category_valid_until] is the write-side producer that makes
-   [valid_until] reachable. The companion [category_lifetime_cycles] (truth-decay
-   rate) was deleted with the score it fed. *)
+(* RFC-0251: the hard-TTL GC pass was removed, so [valid_until] stays inert at
+   write time for every category. The function is retained for backward
+   compatibility with existing callers/tests and so legacy rows that already
+   carry a [valid_until] can still be decoded; it always returns [None]. *)
 
-(* A coordination/lifecycle fact is stale within a day. Named, not magic. *)
-let ephemeral_ttl_seconds = 86_400.0
-
-let category_valid_until ~now = function
-  | Ephemeral -> Some (now +. ephemeral_ttl_seconds)
-  | Fact | Constraint | Preference | Blocker | Goal | Code_change
+let category_valid_until ~now:_ = function
+  | Ephemeral | Fact | Constraint | Preference | Blocker | Goal | Code_change
   | Validated_approach | Lesson | Unknown _ -> None
 ;;
 

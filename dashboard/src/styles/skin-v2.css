@@ -26,6 +26,7 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --bg-card:        #1b1c25;
   --bg-card-hover:  #23242f;
   --bg-sunken:      #0a0b0f;
+  --bg-well:        #06070a;   /* deepest: code/shell/tool wells inside cards */
 
   /* Borders — crisper, cooler */
   --border-main:      #282a36;
@@ -69,6 +70,7 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --volt-ink:    #1a1405;
   --volt-glow:   rgba(224,176,87,0.22);
   --volt-wash:   rgba(224,176,87,0.10);
+  --volt-rgb:    224 176 87;
 
   /* Radius scale — engraved, tiny corners (brand: 2/4/6/…). One ladder;
      literals below recovered into these tokens. */
@@ -114,12 +116,78 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
 html[data-skin="v2"][data-volt="blood"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --volt: var(--accent-blood); --volt-strong: #ff6a4d; --volt-dim: var(--accent-blood-dim);
   --volt-ink: #ffffff; --volt-glow: rgba(232,71,47,0.26); --volt-wash: rgba(232,71,47,0.10);
+  --volt-rgb: 232 71 47;
 }
 html[data-skin="v2"][data-volt="ice"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --volt: var(--accent-ice); --volt-strong: #7ad8f6; --volt-dim: var(--accent-ice-dim);
   --volt-ink: #04121a; --volt-glow: rgba(70,198,240,0.24); --volt-wash: rgba(70,198,240,0.09);
+  --volt-rgb: 70 198 240;
   /* primary is now cyan → shift the info accent to violet to stay distinct */
   --info: #8a6cf0; --info-dim: #4a3aa0;
+}
+
+/* ════════════════════════════════════════════════════════════
+   PAPER — light reading theme. The same v2 semantic spine and
+   voltage system, surfaces flipped to warm paper-white so long
+   conversations read like a printed document (high contrast,
+   airy). Toggled via html[data-theme="paper"].
+   Source: keeper-v2/styles/v2.css lines 121-173.
+   ════════════════════════════════════════════════════════════ */
+html[data-skin="v2"][data-theme="paper"] {
+  color-scheme: light;
+  --bg-deep:        #f1f2f5;
+  --bg-panel:       #fafbfc;
+  --bg-panel-alt:   #ffffff;
+  --bg-card:        #ffffff;
+  --bg-card-hover:  #eef0f3;
+  --bg-sunken:      #f3f4f7;
+  --bg-well:        #eef0f3;
+
+  --border-main:      rgba(22,24,29,0.12);
+  --border-soft:      rgba(22,24,29,0.07);
+  --border-highlight: rgba(22,24,29,0.22);
+
+  --text-bright:  #16181d;
+  --text-primary: #2f3137;
+  --text-mid:     #565962;
+  --text-dim:     #797d86;
+
+  /* status — darkened for legibility on white */
+  --status-ok:    #17803d;
+  --status-warn:  #b45309;
+  --status-bad:   #b42318;
+  --status-idle:  #9298a2;
+  --status-busy:  #1e6fa8;
+
+  --info:     #2d6cdf;
+  --info-dim: #1e54bc;
+
+  /* soft ink shadows instead of black drop shadows */
+  --shadow-card:   0 1px 2px rgba(22,24,29,0.07);
+  --shadow-panel:  0 4px 18px rgba(22,24,29,0.10);
+  --shadow-pop:    0 12px 32px rgba(22,24,29,0.16), 0 0 0 1px var(--border-main);
+  --shadow-glow:   0 0 0 1px var(--volt-dim);
+
+  /* default voltage (brass) deepened so gold reads on white */
+  --volt:        #b07d1a;
+  --volt-strong: #8c5e0f;
+  --volt-dim:    #e2c987;
+  --volt-ink:    #ffffff;
+  --volt-glow:   rgba(176,125,26,0.16);
+  --volt-wash:   rgba(176,125,26,0.10);
+  --volt-rgb:    176 125 26;
+  --accent-glow: var(--volt-glow);
+}
+html[data-skin="v2"][data-theme="paper"][data-volt="blood"] {
+  --volt: #b42318; --volt-strong: #8f1b12; --volt-dim: #f0b4ad;
+  --volt-ink: #ffffff; --volt-glow: rgba(180,35,24,0.16); --volt-wash: rgba(180,35,24,0.09);
+  --volt-rgb: 180 35 24;
+}
+html[data-skin="v2"][data-theme="paper"][data-volt="ice"] {
+  --volt: #1e6fa8; --volt-strong: #155888; --volt-dim: #a8d4ea;
+  --volt-ink: #ffffff; --volt-glow: rgba(30,111,168,0.16); --volt-wash: rgba(30,111,168,0.09);
+  --volt-rgb: 30 111 168;
+  --info: #7a4fd0; --info-dim: #5a37a0;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -215,6 +283,100 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --info-glow: 70 198 240; --color-info-glow: 70 198 240;
 
   /* Fonts — clean grotesque, no Cinzel */
+  --font-sans: var(--font-ui);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BRIDGE — PAPER variant
+   Re-point the dashboard's consumed tokens at the v2 paper spine
+   so existing components render correctly under data-theme="paper"
+   when data-skin="v2". Loaded after paper-theme.css, so it wins for
+   v2-branded paper surfaces.
+   ══════════════════════════════════════════════════════════════ */
+html[data-skin="v2"][data-theme="paper"] {
+  /* Surfaces */
+  --color-bg-0: var(--bg-deep);   --bg-0: var(--bg-deep);
+  --color-bg-1: var(--bg-panel);  --bg-1: var(--bg-panel);
+  --color-bg-2: var(--bg-panel-alt); --bg-2: var(--bg-panel-alt);
+  --color-bg-3: var(--bg-card);   --bg-3: var(--bg-card);
+  --color-bg-4: var(--bg-card-hover); --bg-4: var(--bg-card-hover);
+  --color-bg-page: var(--bg-deep);
+  --color-bg-surface: var(--bg-panel);
+  --color-bg-panel-alt: var(--bg-panel-alt);
+  --color-bg-elevated: var(--bg-card);
+  --color-bg-hover: var(--bg-card-hover);
+  --bg-root: var(--bg-deep);
+  --bg-deepest: var(--bg-sunken);
+  --panel-dark: var(--bg-panel-alt);
+  --bg-panel-hover: var(--bg-card-hover);
+  --shell-header-bg: var(--bg-panel);
+  --shell-rail-bg: var(--bg-panel);
+  --shell-main-bg: var(--bg-deep);
+  --card: var(--bg-card);
+  --color-card: var(--bg-card);
+  --surface-inset: var(--bg-sunken);
+  --bg-subtle: var(--bg-card);
+  --input-bg: var(--bg-sunken);
+
+  /* Borders */
+  --color-line-1: var(--border-main);   --line-1: var(--border-main);
+  --color-line-2: var(--border-highlight); --line-2: var(--border-highlight);
+  --color-line-3: var(--border-soft);   --line-3: var(--border-soft);
+  --color-border-default: var(--border-main);
+  --color-border-strong: var(--border-highlight);
+  --color-border-divider: var(--border-soft);
+  --color-border-subtle: var(--border-soft);
+  --border-base: var(--border-main);
+  --border-subtle: var(--border-soft);
+  --border-strong: var(--border-highlight);
+  --card-border: var(--border-main);
+  --input-border: var(--border-highlight);
+
+  /* Text */
+  --color-fg-1: var(--text-bright);  --fg-1: var(--text-bright);
+  --color-fg-2: var(--text-primary); --fg-2: var(--text-primary);
+  --color-fg-3: var(--text-mid);     --fg-3: var(--text-mid);
+  --color-fg-4: var(--text-dim);     --fg-4: var(--text-dim);
+  --color-fg-primary: var(--text-bright);
+  --color-fg-secondary: var(--text-primary);
+  --color-fg-muted: var(--text-mid);
+  --color-fg-disabled: var(--text-dim);
+  --text-strong: var(--text-bright);
+  --text-body: var(--text-primary);
+  --text-muted: var(--text-mid);
+  --text: var(--text-primary);
+
+  /* Accent = voltage */
+  --color-accent-fg: var(--volt);
+  --color-accent-fg-dim: var(--volt-dim);
+  --color-accent: var(--volt);
+  --color-accent-soft: var(--volt-wash);
+  --color-accent-glow: var(--volt-rgb);
+  --accent: var(--volt);
+  --accent-soft: var(--volt-wash);
+  --accent-glow: var(--volt-glow);
+  --brass-1: var(--volt);  --color-brass-1: var(--volt);
+  --brass-2: var(--volt-strong); --color-brass-2: var(--volt-strong);
+  --brass-3: var(--volt-dim);    --color-brass-3: var(--volt-dim);
+  --brass-fg: var(--volt); --color-brass-fg: var(--volt);
+  --brass-soft: var(--volt-wash); --color-brass-soft: var(--volt-wash);
+  --brass-glow: var(--volt-rgb);  --color-brass-glow: var(--volt-rgb);
+  --select: var(--volt);
+  --select-10: var(--volt-wash);
+  --select-20: var(--volt-glow);
+
+  /* Status */
+  --ok: var(--status-ok);   --color-ok: var(--status-ok);   --color-status-ok: var(--status-ok);
+  --warn: var(--status-warn); --color-warn: var(--status-warn); --color-status-warn: var(--status-warn);
+  --err: var(--status-bad); --bad: var(--status-bad); --color-err: var(--status-bad); --color-status-err: var(--status-bad);
+  --color-info: var(--info); --color-status-info: var(--info);
+  --idle: var(--status-idle); --color-idle: var(--status-idle); --color-status-idle: var(--status-idle);
+  --ok-glow: 23 128 61;    --color-ok-glow: 23 128 61;
+  --warn-glow: 180 83 9;   --color-warn-glow: 180 83 9;
+  --err-glow: 180 35 24;   --color-err-glow: 180 35 24;
+  --info-glow: 45 109 223; --color-info-glow: 45 109 223;
+
+  /* Fonts */
   --font-sans: var(--font-ui);
 }
 

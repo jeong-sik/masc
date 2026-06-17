@@ -203,13 +203,18 @@
   transition: gap var(--v2-shell-transition);
 }
 
-.v2-app .v2-body {
+/* The card treatment is only for the standard shell. Compact chrome
+   (widget-solo/focus-mode) omits the card utilities in app.ts, so the
+   base rule must be gated by the same data attributes. */
+.v2-app:not([data-widget-solo="true"]):not([data-focus-mode="true"]) .v2-body {
   /* White card stage with rounded-2xl and soft shadow. */
   background: var(--ss-card);
   border: 1px solid var(--ss-border);
   border-radius: var(--ss-radius-card);
   box-shadow: var(--ss-shadow-card);
+}
 
+.v2-app .v2-body {
   /* Smooth transitions for the main surface as rails collapse/expand or the
      viewport changes. */
   transition:
@@ -248,12 +253,13 @@
   }
 }
 
-/* Bubble style variants (data-bubble mirrors v2 tweak panel). */
-.v2-app[data-bubble="card"] .v2-body {
+/* Bubble style variants (data-bubble mirrors v2 tweak panel).
+   Only affect the standard shell; compact chrome ignores the tweak. */
+.v2-app:not([data-widget-solo="true"]):not([data-focus-mode="true"])[data-bubble="card"] .v2-body {
   box-shadow: var(--ss-shadow-card);
 }
 
-.v2-app[data-bubble="flat"] .v2-body {
+.v2-app:not([data-widget-solo="true"]):not([data-focus-mode="true"])[data-bubble="flat"] .v2-body {
   box-shadow: none;
   border-color: var(--ss-border);
 }

@@ -68,6 +68,26 @@ describe('App v2 header chrome', () => {
     expect(cls).toContain('border-[var(--ss-border)]')
   })
 
+  it('does not apply card styling to the main stage in widget-solo compact chrome', async () => {
+    window.innerWidth = 1280
+    window.location.hash = '#monitoring?solo=1'
+    renderApp()
+
+    await waitFor(() => {
+      expect(container.querySelector('.v2-app')?.getAttribute('data-widget-solo')).toBe('true')
+    })
+
+    const main = container.querySelector('#main-content') as HTMLElement | null
+    expect(main).not.toBeNull()
+    expect(main?.classList.contains('v2-body')).toBe(true)
+
+    const cls = main?.className ?? ''
+    expect(cls).not.toContain('bg-[var(--ss-card)]')
+    expect(cls).not.toContain('rounded-[var(--ss-radius-card)]')
+    expect(cls).not.toContain('shadow-[var(--ss-shadow-card)]')
+    expect(cls).not.toContain('border-[var(--ss-border)]')
+  })
+
   it('renders health chips with the shared chip class', () => {
     renderApp()
     const chip = container.querySelector('.dashboard-health-chip')

@@ -67,19 +67,19 @@
 
 /* ── Component-level density tweaks from v2 source ────────────── */
 /* Chat console */
-.v2-app[data-density="spacious"] .chat-head    { padding: 18px 28px 16px; gap: 16px; }
-.v2-app[data-density="spacious"] .thread       { padding: 34px 0 14px; }
-.v2-app[data-density="spacious"] .thread-inner { gap: 30px; padding: 0 40px; }
-.v2-app[data-density="spacious"] .msg          { gap: 15px; }
-.v2-app[data-density="spacious"] .bubble       { padding: 17px 21px; line-height: 1.7; }
-.v2-app[data-density="spacious"] .composer     { padding: 16px 30px 22px; }
-.v2-app[data-density="spacious"] .ctx-scroll   { padding: 20px; gap: 22px; }
-.v2-app[data-density="spacious"] .ctx-card,
-.v2-app[data-density="spacious"] .tps-card      { padding: 14px 15px; }
-.v2-app[data-density="spacious"] .roster-head  { padding: 15px 14px; }
-.v2-app[data-density="spacious"] .roster-list  { padding: 9px 8px; }
-.v2-app[data-density="spacious"] .kp-row       { padding: 11px 11px; }
-.v2-app[data-density="spacious"] .roster-filters { padding: 12px 14px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .chat-head    { padding: 18px 28px 16px; gap: 16px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .thread       { padding: 34px 0 14px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .thread-inner { gap: 30px; padding: 0 40px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .msg          { gap: 15px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .bubble       { padding: 17px 21px; line-height: 1.7; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .composer     { padding: 16px 30px 22px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .ctx-scroll   { padding: 20px; gap: 22px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .ctx-card,
+.v2-app[data-density="spacious"] .v2-keeper-chat .tps-card      { padding: 14px 15px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .roster-head  { padding: 15px 14px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .roster-list  { padding: 9px 8px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .kp-row       { padding: 11px 11px; }
+.v2-app[data-density="spacious"] .v2-keeper-chat .roster-filters { padding: 12px 14px; }
 
 /* Board */
 .v2-app[data-density="spacious"] .bd-feed-head     { padding: 15px 24px; }
@@ -96,11 +96,11 @@
 .v2-app[data-density="spacious"] .set-nav-item  { padding: 11px 13px; }
 
 /* Compact overrides */
-.v2-app[data-density="compact"] .thread        { padding: 14px 0 6px; }
-.v2-app[data-density="compact"] .thread-inner  { gap: 14px; padding: 0 22px; }
-.v2-app[data-density="compact"] .chat-head     { padding: 10px 16px 9px; }
-.v2-app[data-density="compact"] .composer      { padding: 9px 18px 12px; }
-.v2-app[data-density="compact"] .ctx-scroll    { padding: 11px; gap: 12px; }
+.v2-app[data-density="compact"] .v2-keeper-chat .thread        { padding: 14px 0 6px; }
+.v2-app[data-density="compact"] .v2-keeper-chat .thread-inner  { gap: 14px; padding: 0 22px; }
+.v2-app[data-density="compact"] .v2-keeper-chat .chat-head     { padding: 10px 16px 9px; }
+.v2-app[data-density="compact"] .v2-keeper-chat .composer      { padding: 9px 18px 12px; }
+.v2-app[data-density="compact"] .v2-keeper-chat .ctx-scroll    { padding: 11px; gap: 12px; }
 .v2-app[data-density="compact"] .bd-list       { padding: 11px 14px; gap: 8px; }
 .v2-app[data-density="compact"] .set-row       { padding: 10px 0; }
 
@@ -222,7 +222,7 @@
 @media (prefers-reduced-motion: reduce) {
   .v2-app *, .v2-app *::before, .v2-app *::after {
     transition-duration: 0.001ms !important;
-    animation-duration: 0.001ms !important;
+    animation: none !important;
   }
 }
 
@@ -236,7 +236,11 @@
   border-radius: var(--radius-sm);
 }
 .v2-app textarea:focus-visible,
-.v2-app input:focus-visible { outline: none; }
+.v2-app input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-deep), 0 0 0 4px var(--volt-dim);
+  border-radius: var(--radius-sm);
+}
 
 /* ── Bubble style ─────────────────────────────────────────────── */
 .v2-app[data-bubble="flat"] .bubble {

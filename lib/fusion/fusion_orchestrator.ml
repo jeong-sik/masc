@@ -39,7 +39,7 @@ let run ~sw ~net ~base_dir ~budget ~hour_bucket ~policy ~request () : outcome =
               ~prompt:req.Fusion_types.prompt ~web_tools ~max_tool_calls_per_panel:max_tool_calls
               ()
           in
-          let judge =
+          let judge_full =
             Fusion_judge.run ~sw ~net
               ~timeout_s:preset.Fusion_policy.judge_timeout_s
               ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
@@ -47,10 +47,18 @@ let run ~sw ~net ~base_dir ~budget ~hour_bucket ~policy ~request () : outcome =
               ~question:req.Fusion_types.prompt ~panel ~web_tools
               ~max_tool_calls ()
           in
+          (* 심판 종합과 토큰 usage를 분리: outcome.judge는 synthesis만(소비자 호환),
+             usage는 sink 비용 회계로(RFC §10 패널N+심판1). 실패한 심판은 0(패널 Failed와 대칭). *)
+          let judge = Result.map fst judge_full in
+          let judge_usage =
+            match judge_full with
+            | Ok (_, u) -> u
+            | Error _ -> Fusion_types.zero_usage
+          in
           (match
              Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper
                ~run_id:req.Fusion_types.run_id ~question:req.Fusion_types.prompt
-               ~panel ~judge
+               ~panel ~judge ~judge_usage
            with
            | Ok () -> Completed { panel; judge }
            | Error msg -> Sink_failed msg)))

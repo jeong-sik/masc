@@ -35,8 +35,8 @@ let compose_prompt ~question ~panel =
     (escape_xml question) answers Fusion_judge_parse.expected_json_doc
 
 let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
-    ~web_tools ~max_tool_calls () : (Fusion_types.judge_synthesis, string) result
-  =
+    ~web_tools ~max_tool_calls () :
+    (Fusion_types.judge_synthesis * Fusion_types.usage, string) result =
   let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
   match
     Fusion_oas.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
@@ -57,6 +57,10 @@ let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
      | Ok ((_name, Ok resp) :: _) ->
        let text = Fusion_oas.answer_text resp in
        if String.length (String.trim text) = 0 then Error "judge: empty response"
-       else Fusion_judge_parse.of_string text
+       else
+         (* 성공 종합에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
+         Result.map
+           (fun synthesis -> (synthesis, Fusion_oas.usage_of resp))
+           (Fusion_judge_parse.of_string text)
      | Ok ((_name, Error e) :: _) ->
        Error ("judge provider error: " ^ Agent_sdk.Error.to_string e))

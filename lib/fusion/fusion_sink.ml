@@ -110,7 +110,8 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
       ]
   | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
 
-let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) result =
+let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
+    (unit, string) result =
   try
     (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
        상세 트랜스크립트(패널 답변 N개)는 아래 board post 증거로만 남기고, 키퍼 chat
@@ -128,9 +129,10 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) resu
          ();
        Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
      | Error _ -> ());
-    (* 비용 관측(제약 아님) — 패널 실측 토큰 합산. board 증거에만 남긴다 (cost cap은
-       v1 제외, 측정값만 — 괴상한 제약 제거 원칙). *)
-    let total_usage =
+    (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
+       남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
+       완성이 없어 0(usage_of가 완성 응답에서만 토큰을 뽑음). *)
+    let panel_usage =
       List.fold_left
         (fun acc (o : Fusion_types.panel_outcome) ->
           match o with
@@ -138,6 +140,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) resu
           | Fusion_types.Failed _ -> acc)
         Fusion_types.zero_usage panel
     in
+    let total_usage = Fusion_types.add_usage panel_usage judge_usage in
     (* board post — 패널 답변 전체 + 심판 종합을 쿼리 가능한 구조화 증거(meta_json)로.
        사용자는 대시보드 board에서 상세를 본다. chat lane *서사*를 board로 옮긴 것이
        RFC §8.1 대비 변경점(키퍼 observation 도배 방지). 실패는 [Error]로 orchestrator에. *)

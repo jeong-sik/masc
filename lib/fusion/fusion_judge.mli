@@ -18,7 +18,8 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
     구성해 실행하고, 응답 텍스트를 {!Fusion_judge_parse.of_string}으로 파싱한다.
     [web_tools=true]면 심판 에이전트에 web_search/web_fetch를 주입한다.
     [max_tool_calls]: 0이면 무제한, 양수면 심판의 [max_turns]로 근approximate.
-    빌드/실행/빈응답/파싱 실패는 [Error msg]. 전체는 [Masc_oas_bridge.run_safe]로 감싼다. *)
+    빌드/실행/빈응답/파싱 실패는 [Error msg]. 전체는 [Masc_oas_bridge.run_safe]로 감싼다.
+    성공 시 종합과 함께 심판이 소비한 토큰 [usage]를 반환한다(panel과 대칭, 비용 회계 RFC §10). *)
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -30,4 +31,4 @@ val run
   -> web_tools:bool
   -> max_tool_calls:int
   -> unit
-  -> (Fusion_types.judge_synthesis, string) result
+  -> (Fusion_types.judge_synthesis * Fusion_types.usage, string) result

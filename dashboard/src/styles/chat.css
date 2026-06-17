@@ -13,20 +13,24 @@
 }
 
 @utility chat-bubble {
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--color-border-default);
   box-shadow: var(--elev-4-shadow);
   &.user {
     align-self: flex-end;
     background: linear-gradient(180deg, rgb(var(--color-accent-glow) / .12), var(--color-bg-elevated));
-    border-color: var(--color-border-strong);
+    border-color: var(--color-accent-fg-dim);
   }
   &.assistant {
     align-self: flex-start;
     background: linear-gradient(180deg, rgb(var(--color-accent-glow) / .08), var(--color-bg-panel-alt));
-    border-color: var(--color-status-info);
+    border-color: var(--color-accent-fg-dim);
   }
   &.system,
   &.error {
     align-self: flex-start;
+    border-color: var(--color-border-default);
   }
   &.error {
     border-color: var(--color-status-err);
@@ -35,13 +39,16 @@
 }
 
 @utility chat-avatar {
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--color-border-default);
   &.user {
     border-color: var(--color-accent-fg-dim);
     background: var(--color-accent-soft);
     color: var(--chat-user-avatar);
   }
   &.assistant {
-    border-color: var(--color-status-info);
+    border-color: var(--color-accent-fg-dim);
     background: rgb(var(--color-accent-glow) / .18);
     color: var(--chat-assistant-avatar);
   }
@@ -53,13 +60,16 @@
 }
 
 @utility chat-role-chip {
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--color-border-default);
   &.user {
     border-color: var(--color-accent-fg-dim);
     color: var(--chat-user-chip);
     background: rgb(var(--color-accent-glow) / .14);
   }
   &.assistant {
-    border-color: var(--color-status-info);
+    border-color: var(--color-accent-fg-dim);
     color: var(--chat-assistant-chip);
     background: rgb(var(--color-accent-glow) / .10);
   }

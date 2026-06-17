@@ -282,12 +282,14 @@ CLAUDE.md §Harness First: 측정 없이 AI 에이전트 코드 진행 금지. f
 | 구성 | 내용 |
 |---|---|
 | 입력 | 고정 eval 셋: `(question, rubric_or_reference)` N개 (`test/fusion/cases/*.json`) |
-| 비교군 | (A) 단일 모델(default), (B) fusion(preset) — 같은 질문 |
+| 비교군 | 같은 질문 · **같은 토큰 예산**에서 4-way: (A) single 1×, (B) self-consistency(같은 모델 N회 샘플 + 다수결) ~N×, (C) Self-MoA(최강 모델 1개를 N회 샘플 → judge 종합) ~N×, (D) fusion(다른 모델 panel → judge) ~N× |
 | 채점 | 결정론 metric(정답 매칭) 또는 루브릭 기반 judge 점수(고정 seed/temperature 0) |
-| 산출 | `single_score`, `fusion_score`, `delta`, `cost_ratio`, `latency_ratio` |
-| 게이트 | `delta`가 비용 배수를 정당화하는가? 리포트로 출력, OpenRouter 65.3→69.0을 자체 셋으로 재현 시도 |
+| 산출 | 각 비교군 `score` + `cost_ratio` + `latency_ratio`, **핵심 delta = `fusion_score − max(self_consistency_score, self_moa_score)`** |
+| 게이트 | fusion이 **cost-matched 대안(B/C)을 이기는가?** single(A) 대비 우위는 "더 많은 컴퓨트"로 자명하므로 정당화 근거가 못 된다. fusion의 고유 기여는 *모델 다양성 + judge 종합*이고, 그게 같은 비용의 self-consistency/Self-MoA보다 나아야 4×를 정당화한다. |
 
-이 하네스가 **fusion 머지의 정당화 근거**다. delta가 음수/미미하면 preset 구성 또는 트리거를 재설계한다(코드를 머지하지 않는다).
+이 하네스가 **fusion 머지의 정당화 근거**다. 핵심 delta(fusion − cost-matched 대안)가 음수/미미하면 preset 구성 또는 트리거를 재설계한다(코드를 머지하지 않는다).
+
+> **왜 비교군이 single이 아니라 cost-matched 4-way인가** — MAD 연구(Smit et al., "Should we be going MAD?", ICML 2024)는 multi-agent debate가 self-consistency를 안정적으로 이기지 못한다고 보고했고, Self-MoA(arXiv:2502.00674, 2025)는 "모델 다양성" 가정을 반박하며 *최강 모델 단일을 N회 샘플*하는 쪽이 이종 모델 혼합보다 나을 수 있다고 했다. fusion의 전제(이종 panel + judge)는 이 두 결과에 직접 노출된다. 따라서 하네스는 single 대비가 아니라 **같은 비용을 다르게 쓴 대안 대비**로 fusion의 존재 가치를 측정해야 한다. (인용 수치는 각 논문 abstract 기준 — 자체 eval 셋 재현으로 검증.)
 
 추가: TLA+ 모델(선택) — 패널 실패 격리 불변식, depth guard("Nested는 절대 패널을 못 띄움")를 `Fusion_depth` action + invariant로 검증(CLAUDE.md §TLA+ Bug Model).
 

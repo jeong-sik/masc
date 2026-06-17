@@ -371,3 +371,13 @@ module Shell_ir_approval_gate : sig
       operations require explicit approval. Default: [true] (the autonomous
       policy is a strict safety improvement over the no-gate path). *)
 end
+
+module Shell_ir_path_jail : sig
+  val enabled : unit -> bool
+  (** [enabled ()] is true when [MASC_SHELL_IR_PATH_JAIL_ENABLED] is set.
+      Applies the workspace path jail [Exec_policy.validate_shell_ir_paths]
+      to keeper Execute commands. Default: [true]. Kill-switch (RFC-0255
+      section 4.6): set false to disable [path_reject] without a rebuild;
+      this also removes the only positional write-escape guard on the Host
+      profile, so it is a short-lived valve, not a steady state. *)
+end

@@ -171,7 +171,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
          ~ttl_hours:board_post_ttl_hours ()
      with
-     | Ok () -> Ok ()
+     | Ok _post -> Ok ()
      | Error e -> Error (Board.show_board_error e))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

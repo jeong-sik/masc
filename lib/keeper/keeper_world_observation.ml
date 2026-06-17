@@ -864,7 +864,15 @@ let keeper_cycle_decision
           if
             Option.is_some provider_cooldown_remaining_sec
             && Option.is_none provider_cooldown_fail_open
-          then
+          then (
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string ProviderCooldownSkip)
+              ~labels:
+                [ ("keeper", meta.name)
+                ; ("from_runtime", runtime_id)
+                ; ("to_runtime", "skipped")
+                ]
+              ();
             Skip
               { reasons =
                   ( Provider_cooldown_pending
@@ -872,7 +880,7 @@ let keeper_cycle_decision
                           Option.value ~default:0 provider_cooldown_remaining_sec
                       }
                   , [] )
-              }
+              })
           else if should_run
           then (
             let run_reasons =

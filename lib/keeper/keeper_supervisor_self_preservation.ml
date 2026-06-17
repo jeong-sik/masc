@@ -47,16 +47,19 @@ let dominant_cohort cohorts =
 ;;
 
 let update_suppression_streak dominant_key =
-  let current = Atomic.get escape_state in
-  if String.equal current.last_dominant_cohort dominant_key
-  then
-    Atomic.set escape_state
-      { current with
-        consecutive_suppressions = current.consecutive_suppressions + 1
-      }
-  else
-    Atomic.set escape_state
-      { last_dominant_cohort = dominant_key; consecutive_suppressions = 1 }
+  let rec loop () =
+    let current = Atomic.get escape_state in
+    let next =
+      if String.equal current.last_dominant_cohort dominant_key
+      then
+        { current with
+          consecutive_suppressions = current.consecutive_suppressions + 1
+        }
+      else { last_dominant_cohort = dominant_key; consecutive_suppressions = 1 }
+    in
+    if not (Atomic.compare_and_set escape_state current next) then loop ()
+  in
+  loop ()
 ;;
 
 let publish_suppression
@@ -184,15 +187,21 @@ let apply ~keepers_dir ~publish_lifecycle ~total_keepers to_restart =
         let suppressed_count = List.length suppressed_names in
         (match probe_entry with
          | Some probe_name ->
+           let streak_at_probe = (Atomic.get escape_state).consecutive_suppressions in
            Log.Keeper.warn
              "self-preservation probe: allowing %s through after %d consecutive \
               same-cohort suppressions (ratio=%.2f, cohort=%s)"
              probe_name
-             (Atomic.get escape_state).consecutive_suppressions
+             streak_at_probe
              ratio
              dominant_key;
-           Atomic.set escape_state
-             { (Atomic.get escape_state) with consecutive_suppressions = 0 }
+           let rec reset_loop () =
+             let current = Atomic.get escape_state in
+             let next = { current with consecutive_suppressions = 0 } in
+             if not (Atomic.compare_and_set escape_state current next)
+             then reset_loop ()
+           in
+           reset_loop ()
          | None -> log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count);
         publish_suppression
           ~publish_lifecycle

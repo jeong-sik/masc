@@ -25,7 +25,7 @@
     - recommend:    [{ "kind": "recommend", "action": "...", "rationale": "..." }]
     - insufficient: [{ "kind": "insufficient", "missing": ["..."] }]
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §7.2 *)
 
 (** 심판 프롬프트에 임베드할, 기대 JSON 형태 설명 (LLM 지시용). *)
 val expected_json_doc : string
@@ -34,6 +34,7 @@ val expected_json_doc : string
 
     - 리스트 필드(consensus/contradictions/partial_coverage/unique_insights/blind_spots)는
       누락 시 [[]] 허용. 리스트 원소 중 필수 하위필드가 없는 것은 건너뛴다(advisory).
+      걸러뛴 개수는 [judge_synthesis.dropped_malformed]에 누적해 telemetry로 노출.
     - [resolved_answer]와 [decision]은 필수. 누락/형태 오류는 [Error msg].
     - [decision.kind]가 알 수 없는 값이면 [Error] (silent default 없음). *)
 val of_json : Yojson.Safe.t -> (Fusion_types.judge_synthesis, string) result

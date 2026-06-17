@@ -1,11 +1,11 @@
-(* Fusion — out-of-band 심의 오케스트레이터 (구현).
-   계약/문서: fusion_orchestrator.mli, docs/rfc/RFC-0252 §4 *)
+(* Fusion — out-of-band panel+judge gate 오케스트레이터 (구현).
+   계약/문서: fusion_orchestrator.mli, docs/rfc/RFC-0255 §4 *)
 
 type outcome =
   | Denied of Fusion_types.deny_reason
   | Completed of
       { panel : Fusion_types.panel_outcome list
-      ; judge : (Fusion_types.judge_synthesis, string) result
+      ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_error) result
       }
 
 let run ~sw ~net ~base_dir ~policy ~request () : outcome =
@@ -19,8 +19,9 @@ let run ~sw ~net ~base_dir ~policy ~request () : outcome =
        (* 게이트가 preset 존재를 이미 검증했으므로 도달 불가. 방어적으로 Denied. *)
        Denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
      | Some preset ->
-       (* 프롬프트·타임아웃은 preset(=config)에서. 코드 default 없음 — config 로드
-          시 Missing_prompt로 fail-fast 검증됨. *)
+       (* 프롬프트·타임아웃은 preset(=config)에서. 프롬프트는 config 로드 시
+          Missing_prompt로 fail-fast 검증되고, 타임아웃은 preset 생략 시
+          Fusion_policy.default_timeout_s(120s)로 falls back한다. *)
        let panel =
          Fusion_panel.run ~sw ~net ~max_fibers:policy.Fusion_policy.max_concurrent_panels
            ~timeout_s:preset.Fusion_policy.panel_timeout_s

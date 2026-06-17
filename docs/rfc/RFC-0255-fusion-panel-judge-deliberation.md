@@ -1,10 +1,10 @@
-# RFC-0252 — Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장)
+# RFC-0255 — Fusion: 패널+심판(panel+judge) 단발 게이트 (MASC 내장)
 
 - Status: Draft
 - Author: Vincent (yousleepwhen) + Claude
 - Created: 2026-06-16
 - Scope: `lib/fusion/` (신규), `lib/runtime/` (config 확장), `.masc/config/runtime.toml` (`[fusion]` 테이블)
-- Boundary: OAS(`~/me/workspace/yousleepwhen/oas`)는 **0줄 변경**. 본 루프는 OAS의 범용 프리미티브만 소비한다.
+- Boundary: OAS(`~/me/workspace/yousleepwhen/oas`)는 **0줄 변경**. 본 gate는 OAS의 범용 프리미티브만 소비한다.
 - 참조: OpenRouter Fusion API — [plugin](https://openrouter.ai/docs/guides/features/plugins/fusion), [router](https://openrouter.ai/docs/guides/routing/routers/fusion-router)
 
 ---
@@ -20,7 +20,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
 +3.7pp를 4× 비용·7× 지연에 사는 거래는 **모든 턴에 쓰면 손해**다. 키퍼는 턴을 연속으로 도는데 한 턴을 7× 지연으로 막으면 그 키퍼가 멈춘다. 따라서 본 설계의 두 축은:
 
 1. **선택적 발동** — 결정론적 게이트가 "이 턴은 심의 가치가 있다"를 판정할 때만(§6).
-2. **루프 비차단** — 키퍼 턴을 동기 치환하지 않고 **out-of-band 심의 잡**으로 분리, 결과는 비동기로 키퍼 chat lane + board에 도착(§4, §8).
+2. **gate 비차단** — 키퍼 턴을 동기 치환하지 않고 **out-of-band panel+judge gate 잡**으로 분리, 결과는 비동기로 키퍼 chat lane + board에 도착(§4, §8).
 
 이 두 축이 없으면 fusion은 신앙으로 토큰 4배를 태우는 안티패턴이다. 그래서 **측정 하네스(§11)가 Phase 0, 비협상**이다.
 
@@ -29,7 +29,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
 ## 2. Non-goals / 경계
 
 - **OAS 변경 금지.** OAS는 single-provider completion + 범용 fan-out(`Async_agent.all`) + 구조화 출력(`Structured.extract`)만 제공한다. 멀티모델 오케스트레이션·심판 프롬프트·게이트·가시성은 전부 MASC.
-- **죽은 합의 코드에 의존 금지.** MAGI 삼두정치·walph·cascade·board curation은 작동/사용된 적 없음(사용자 확인). 본 루프는 그 위에 쌓지 않고 새로 만든다. (죽은 3종의 *삭제*는 본 RFC 범위 밖, 별도 정리.)
+- **죽은 합의 코드에 의존 금지.** MAGI 삼두정치·walph·cascade·board curation은 작동/사용된 적 없음(사용자 확인). 본 gate는 그 위에 쌓지 않고 새로 만든다. (죽은 3종의 *삭제*는 본 RFC 범위 밖, 별도 정리.)
 - **v1은 advisory만.** 패널/심판은 분석·종합을 산출하는 read-only. tool-call을 패널이 제안하고 심판이 골라 *실행*하는 action 모드는 side-effect atomicity가 필요 → v2(§14).
 - **재귀 금지.** 패널·심판은 fusion을 다시 못 부른다(§10). OpenRouter의 `x-openrouter-fusion-depth`에 대응하는 타입드 depth guard.
 
@@ -48,7 +48,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
 
 ---
 
-## 4. 아키텍처 — out-of-band 심의 잡
+## 4. 아키텍처 — out-of-band panel+judge gate 잡
 
 ```
 키퍼 턴 ──▶ masc_fusion(request) ──▶ (키퍼는 즉시 계속 진행)
@@ -70,6 +70,8 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
                   │
           키퍼가 다음 턴에 observation으로 resolved_answer 수령
 ```
+
+v1은 **단발(single-shot) map-reduce**: 패널 N개를 1회 fan-out하고, 그 결과를 심판 1회로 종합한다. 라운드/수렴 판정/panel↔judge 왕복은 없다. "심의 루프"가 아니라 "panel+judge gate"다. 향후 다라운드 심의가 필요하면 별도 RFC로 추가한다.
 
 키퍼 턴 루프는 단일 모델로 유지(응답성) — fusion은 그 옆에서 도는 가시적 미니 라운드테이블.
 
@@ -193,7 +195,8 @@ val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
        -> (string * (Types.api_response, Error.sdk_error) Result.t) list
 ```
 - per-agent 에러 격리(한 패널 실패가 나머지 안 죽임), 부모 switch 취소 전파.
-- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → `Async_agent.all ~max_fibers:policy.max_concurrent_panels` → 결과를 `panel_outcome list`로 매핑. 각 호출은 `Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s`로 감싼다.
+- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → `Async_agent.all ~max_fibers:policy.max_concurrent_panels` → 결과를 `panel_outcome list`로 매핑. 전체 호출은 `Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s`로 감싼다.
+- **batch 단위 타임아웃**: `run_safe`가 `Async_agent.all` 전체를 감싸므로, 한 모델이 hang해 전체 타임아웃이 발생하면 이미 응답한 모델의 부분 결과도 폐기된다. v1은 `Async_agent.all`의 per-agent 격리에 의존해 개별 모델 에러는 보존하지만, 구조적 타임아웃은 batch-level이다. per-model 타임아웃으로 부분 결과를 보존하려면 Phase 2b에서 개별 에이전트 호출로 재구성한다.
 
 ### 7.2 심판 — `Structured.extract`
 
@@ -251,7 +254,7 @@ default_preset = "budget"
 max_concurrent_panels = 2             # provider max-concurrent 존중 (qwen36=2)
 
 [fusion.gate]
-low_confidence_threshold = 0.55
+low_confidence_threshold = 0.55       # 생략 시 기본 0.5; 0.0은 저신뢰 게이트를 완전히 비활성화
 high_stakes_task_kinds = ["goal_decision", "architecture"]
 per_hour_budget = 20                  # 시간당 발동 상한 (유일한 비-disabled deny 노브)
 

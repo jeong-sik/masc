@@ -1,5 +1,5 @@
 (* Fusion — 심판 LLM-facing JSON → judge_synthesis (구현).
-   계약/문서: fusion_judge_parse.mli, docs/rfc/RFC-0252 §7.2 *)
+   계약/문서: fusion_judge_parse.mli, docs/rfc/RFC-0255 §7.2 *)
 
 let ( let* ) = Result.bind
 
@@ -49,7 +49,21 @@ let opt_list kvs k =
   | Some (`List xs) -> xs
   | _ -> []
 
-(* --- tolerant element parsers (malformed element -> None, skipped) --- *)
+(* --- tolerant element parsers (malformed element -> None, skipped & counted) --- *)
+
+let parse_string : Yojson.Safe.t -> string option = function
+  | `String s -> Some s
+  | _ -> None
+
+let parse_items parse xs =
+  List.fold_left
+    (fun (oks, drops) x ->
+      match parse x with
+      | Some v -> (v :: oks, drops)
+      | None -> (oks, drops + 1))
+    ([], 0)
+    xs
+  |> fun (oks, drops) -> (List.rev oks, drops)
 
 let parse_claim : Yojson.Safe.t -> Fusion_types.claim option = function
   | `Assoc kvs ->
@@ -121,14 +135,35 @@ let of_json (j : Yojson.Safe.t) : (Fusion_types.judge_synthesis, string) result 
     | Some d -> parse_decision d
     | None -> Error "missing field: decision"
   in
+  let consensus, dropped_consensus = parse_items parse_claim (opt_list kvs "consensus") in
+  let contradictions, dropped_contradictions =
+    parse_items parse_contradiction (opt_list kvs "contradictions")
+  in
+  let partial_coverage, dropped_coverage =
+    parse_items parse_coverage (opt_list kvs "partial_coverage")
+  in
+  let unique_insights, dropped_insights =
+    parse_items parse_insight (opt_list kvs "unique_insights")
+  in
+  let blind_spots, dropped_blind_spots =
+    parse_items parse_string (opt_list kvs "blind_spots")
+  in
+  let dropped_malformed =
+    dropped_consensus
+    + dropped_contradictions
+    + dropped_coverage
+    + dropped_insights
+    + dropped_blind_spots
+  in
   Ok
-    { Fusion_types.consensus = List.filter_map parse_claim (opt_list kvs "consensus")
-    ; contradictions = List.filter_map parse_contradiction (opt_list kvs "contradictions")
-    ; partial_coverage = List.filter_map parse_coverage (opt_list kvs "partial_coverage")
-    ; unique_insights = List.filter_map parse_insight (opt_list kvs "unique_insights")
-    ; blind_spots = opt_string_list kvs "blind_spots"
+    { Fusion_types.consensus
+    ; contradictions
+    ; partial_coverage
+    ; unique_insights
+    ; blind_spots
     ; resolved_answer
     ; decision
+    ; dropped_malformed
     }
 
 (* 코드펜스 구분자 — 마커와 그 길이를 한 곳에 묶어 drift를 막는다. *)

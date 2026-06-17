@@ -9,7 +9,7 @@
     [runtime_toml_filename])를 재사용한다 — 경로 리터럴을 복제하지 않는다
     ([Keeper_runtime_config]의 내부 패턴과 동일).
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §9 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §9 *)
 
 (** [load ~base_path]: workspace base path 기준으로 runtime.toml의 [fusion]을 로드.
 

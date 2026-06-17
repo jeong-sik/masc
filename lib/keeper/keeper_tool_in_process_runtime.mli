@@ -203,7 +203,7 @@ val handle_masc_schedule
   -> args:Yojson.Safe.t
   -> string
 
-(** RFC-0252 — [handle_masc_fusion] is the in-process handler for the
+(** RFC-0255 — [handle_masc_fusion] is the in-process handler for the
     [masc_fusion] out-of-band panel+judge deliberation tool.  It loads the
     [fusion] policy from runtime.toml, mints a fresh run_id, and delegates the
     gate -> fiber fork -> orchestrator logic to {!Fusion_tool.handle}.

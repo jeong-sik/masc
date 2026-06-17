@@ -4,7 +4,7 @@
     MASC의 기존 runtime→agent 빌더([Runtime_oas_runner] → [Runtime_agent])만
     감싼다; "fusion" 개념은 OAS에 노출하지 않는다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §7 *)
 
 (** runtime_id("provider.model")로 OAS 에이전트를 빌드한다. v1: 도구 없음([tools=[]]),
     read-only 분석/심판용. 미존재 runtime·빌드 실패는 [panel_failure]로. *)

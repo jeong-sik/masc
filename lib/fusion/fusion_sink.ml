@@ -1,5 +1,5 @@
 (* Fusion — 심의 결과 가시화 (구현).
-   계약/문서: fusion_sink.mli, docs/rfc/RFC-0252 §8 *)
+   계약/문서: fusion_sink.mli, docs/rfc/RFC-0255 §8 *)
 
 let render_decision (d : Fusion_types.judge_decision) : string =
   match d with
@@ -12,9 +12,16 @@ let render_decision (d : Fusion_types.judge_decision) : string =
 let render_judge (j : Fusion_types.judge_synthesis) : string =
   (* 명시적 구조분해 — judge_synthesis에 필드가 추가되면 이 패턴이 컴파일 에러를
      내어 렌더 누락을 강제 감지한다(레코드 dot-access는 미사용 필드를 경고하지
-     않으므로, 7필드 전부 소비됨을 타입으로 보장). *)
-  let { Fusion_types.consensus; contradictions; partial_coverage; unique_insights
-      ; blind_spots; resolved_answer; decision } = j
+     않으므로, 8필드 전부 소비됨을 타입으로 보장). *)
+  let { Fusion_types.consensus
+      ; contradictions
+      ; partial_coverage
+      ; unique_insights
+      ; blind_spots
+      ; resolved_answer
+      ; decision
+      ; dropped_malformed
+      } = j
   in
   let buf = Buffer.create 512 in
   let add = Buffer.add_string buf in
@@ -69,6 +76,10 @@ let render_judge (j : Fusion_types.judge_synthesis) : string =
   end;
   add (Printf.sprintf "**Resolved answer**\n%s\n\n" resolved_answer);
   add (Printf.sprintf "**Decision**: %s\n" (render_decision decision));
+  if dropped_malformed > 0 then
+    add
+      (Printf.sprintf "*(parse warning: %d malformed element(s) dropped)*\n"
+         dropped_malformed);
   Buffer.contents buf
 
 let render_panel (o : Fusion_types.panel_outcome) : string =
@@ -100,7 +111,9 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ]
 
 (* 심판 결과를 board meta_json 원소로. *)
-let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.Safe.t =
+let judge_meta (judge : (Fusion_types.judge_synthesis, Fusion_types.judge_error) result)
+  : Yojson.Safe.t
+  =
   (* status는 형제 panel_meta와 같은 동사형(판이 무엇을 했는가): 종합 산출이면
      "synthesized", 실패면 "failed". tool-result ok-봉투("ok")가 아니라 board
      증거의 judge 서술 필드다 (no-inline-ok-envelope 가드 대상과 별개 개념). *)
@@ -109,10 +122,23 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
     `Assoc
       [ ("status", `String "synthesized")
       ; ("decision", `String (render_decision j.Fusion_types.decision))
+      ; ("dropped_malformed", `Int j.Fusion_types.dropped_malformed)
       ]
-  | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
+  | Error e ->
+    `Assoc
+      [ ("status", `String "failed")
+      ; ("error", `String (Fusion_types.show_judge_error e))
+      ]
 
-let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : unit =
+let emit
+  ~base_dir
+  ~keeper
+  ~run_id
+  ~question
+  ~panel
+  ~judge
+  : unit
+  =
   let conversation_id = "fusion/" ^ run_id in
   let append content =
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content
@@ -137,12 +163,15 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : unit =
        total_usage.Fusion_types.input_tokens total_usage.Fusion_types.output_tokens);
   (match judge with
    | Ok j -> append (render_judge j)
-   | Error e -> append (Printf.sprintf "**[judge]** _(failed: %s)_" e));
+   | Error e ->
+     append
+       (Printf.sprintf "**[judge]** _(failed: %s)_"
+          (Fusion_types.show_judge_error e)));
   (* 모든 append 후 한 번 브로드캐스트 — 대시보드가 키퍼 chat을 재조회해 전체 표시. *)
   Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion";
   (* board post — 구조화 증거(meta_json). chat lane은 사람이 읽는 *서사*,
      board는 run_id로 묶인 쿼리 가능한 *증거*다. 사용자 가시성 요구는 두 surface
-     모두(RFC-0252 §3/§8.2). 실패는 심의를 죽이지 않되 기록한다. *)
+     모두(RFC-0255 §3/§8.2). 실패는 심의를 죽이지 않되 기록한다. *)
   let board_headline =
     match judge with
     | Ok j ->

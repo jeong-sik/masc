@@ -5,11 +5,11 @@
     [run_id]를 [conversation_id]([fusion/<run_id>])로 써서 한 심의의 모든 voice를
     하나의 서브스레드로 묶어 증명한다. 패널 참가자는 모델이므로 [model]: 접두로 귀속한다.
 
-    두 surface(사용자 가시성 요구, RFC-0252 §3): (1) keeper chat lane = 사람이 읽는
+    두 surface(사용자 가시성 요구, RFC-0255 §3): (1) keeper chat lane = 사람이 읽는
     *서사*, (2) board post([Board.System_post] + [meta_json] 구조화 증거) = run_id로
     묶인 쿼리 가능한 *증거*. 둘 다 대시보드에 도달한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §8 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §8 *)
 
 (** 심의 트랜스크립트를 키퍼 chat lane에 기록하고 board에 구조화 증거를 post한다.
 
@@ -23,5 +23,5 @@ val emit
   -> run_id:string
   -> question:string
   -> panel:Fusion_types.panel_outcome list
-  -> judge:(Fusion_types.judge_synthesis, string) result
+  -> judge:(Fusion_types.judge_synthesis, Fusion_types.judge_error) result
   -> unit

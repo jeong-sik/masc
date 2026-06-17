@@ -8,15 +8,17 @@
     keeper 컨텍스트(Workspace.config + keeper_meta) 결합이 필요해 Phase 2b로 미룬다.
     도구가 없으므로 재귀 가드(masc_fusion 도구 배제)는 자동 충족된다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.1 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §7.1 *)
 
 (** 패널을 병렬 실행해 각 모델의 결과를 [panel_outcome]으로 반환한다.
 
     - [models]: runtime_id("provider.model") 목록. 각자 에이전트로 빌드된다.
     - 빌드 실패(미존재 runtime 등)·실행 실패·빈 응답은 [Failed]로 격리되어 다른
       패널을 죽이지 않는다([Async_agent.all]의 per-agent 격리 + 본 매핑).
-    - 전체 호출은 [Masc_oas_bridge.run_safe]로 감싸 구조적 타임아웃을 강제한다;
-      타임아웃 시 빌드된 모델들은 [Failed Timeout]이 된다.
+    - 전체 호출은 [Masc_oas_bridge.run_safe]로 감싸 구조적 타임아웃을 강제한다.
+      run_safe 실패(타임아웃·브리지 에러 등) 시 빌드된 모델들은 [Failed
+      (Provider_error _)]가 된다. 이 타임아웃은 [Async_agent.all] 전체를 감싸는
+      batch 단위이므로 한 모델이 지연되면 이미 응답한 모델의 부분 결과도 폐기된다.
     - 반환 순서: 빌드 실패분 먼저, 그 다음 실행 결과(입력 모델 순). *)
 val run
   :  sw:Eio.Switch.t

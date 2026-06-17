@@ -1,5 +1,5 @@
 (* Fusion — runtime.toml [fusion] 파싱 (구현).
-   계약/문서: fusion_config.mli, docs/rfc/RFC-0252 §9 *)
+   계약/문서: fusion_config.mli, docs/rfc/RFC-0255 §9 *)
 
 type config_error =
   | Empty_presets
@@ -62,8 +62,9 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   let max_concurrent_panels =
     Otoml.find_or ~default:1 toml Otoml.get_integer [ "fusion"; "max_concurrent_panels" ]
   in
+  (* 저신뢰 게이트 임계값. 생략 시 0.5(=보수적); 0.0은 게이트를 완전히 비활성화한다. *)
   let low_confidence_threshold =
-    Otoml.find_or ~default:0.0 toml Otoml.get_float
+    Otoml.find_or ~default:0.5 toml Otoml.get_float
       [ "fusion"; "gate"; "low_confidence_threshold" ]
   in
   let high_stakes_task_kinds =

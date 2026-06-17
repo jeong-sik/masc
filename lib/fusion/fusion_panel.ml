@@ -1,5 +1,5 @@
 (* Fusion — 패널 fan-out (구현).
-   계약/문서: fusion_panel.mli, docs/rfc/RFC-0252 §7.1
+   계약/문서: fusion_panel.mli, docs/rfc/RFC-0255 §7.1
 
    OAS 범용 함수만 소비: Fusion_oas.build_agent → Async_agent.all(병렬).
    fusion 개념은 OAS에 노출하지 않는다. *)
@@ -49,11 +49,16 @@ let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt ()
     with
     | Ok run_results ->
       List.map (fun (name, res) -> outcome_of_result name res) run_results
-    | Error _ ->
-      (* 구조적 타임아웃/취소: 빌드된 모델 전부 Timeout 처리. *)
+    | Error e ->
+      (* run_safe 실패(타임아웃·취소·브리지 에러 등): 빌드된 모델 전부 실패로 처리.
+         이 타임아웃은 Async_agent.all 전체를 감싸는 batch 단위이므로, 한 모델 지연
+         시 이미 응답한 모델의 부분 결과도 폐기된다(§7.1 문서화). *)
       List.map
         (fun (_agent, model) ->
-          Fusion_types.Failed { failed_model = model; reason = Fusion_types.Timeout })
+          Fusion_types.Failed
+            { failed_model = model
+            ; reason = Fusion_types.Provider_error (Agent_sdk.Error.to_string e)
+            })
         built
   in
   build_failures @ answered

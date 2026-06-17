@@ -1,4 +1,4 @@
-(* Standalone alcotest for the pure fusion core (RFC-0252 §6/§9/§10).
+(* Standalone alcotest for the pure fusion core (RFC-0255 §6/§9/§10).
    Proves: deterministic gate branches, TOML config validation, depth guard. *)
 
 open Fusion_types
@@ -32,7 +32,7 @@ let req ?(preset = "budget") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_to
 let decide ?(policy = base_policy) r =
   Fusion_policy.decide ~policy r
 
-(* --- gate branches (RFC-0252 §6) --- *)
+(* --- gate branches (RFC-0255 §6) --- *)
 
 let test_disabled () =
   let policy = { base_policy with Fusion_policy.enabled = false } in
@@ -70,7 +70,7 @@ let test_allow () =
   let r = req () in
   Alcotest.check gate "all pass -> allow" (Allow r) (decide r)
 
-(* --- config (RFC-0252 §9) --- *)
+(* --- config (RFC-0255 §9) --- *)
 
 let parse s = Otoml.Parser.from_string s
 
@@ -294,7 +294,7 @@ let test_config_disabled_with_preset () =
     Alcotest.failf "seed [fusion] must parse, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
 
-(* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
+(* --- judge LLM-facing JSON parse (RFC-0255 §7.2) --- *)
 
 let jdecision = Alcotest.testable pp_judge_decision equal_judge_decision
 
@@ -318,6 +318,7 @@ let test_judge_valid () =
     Alcotest.(check int) "positions" 2
       (List.length (List.hd js.contradictions).positions);
     Alcotest.(check int) "blind_spots" 1 (List.length js.blind_spots);
+    Alcotest.(check int) "dropped_malformed" 0 js.dropped_malformed;
     Alcotest.check jdecision "decision" (Answer "the answer") js.decision
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
@@ -375,10 +376,12 @@ let test_judge_tolerant_skip () =
     {|{ "consensus": [ {"text":"ok"}, {"supporting_models":["a"]} ], "resolved_answer": "r", "decision": {"kind":"answer","answer":"a"} }|}
   in
   match Fusion_judge_parse.of_string s with
-  | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
+  | Ok js ->
+    Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus);
+    Alcotest.(check int) "dropped_malformed" 1 js.dropped_malformed
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
-(* --- budget counter (RFC-0252 §6/§10) --- *)
+(* --- budget counter (RFC-0255 §6/§10) --- *)
 
 let ok_or_fail = function Ok n -> n | Error () -> Alcotest.fail "expected Ok"
 
@@ -403,6 +406,14 @@ let test_budget_window_reset () =
   ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10) : int);
   Alcotest.(check int) "new window resets to 1" 1
     (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H2" ~limit:10))
+
+(* limit <= 0 이면 새 bucket에서도 첫 호출을 거부 — 1 call/hour 누수 방지. *)
+let test_budget_nonpositive_limit () =
+  let b = Fusion_budget.create () in
+  Alcotest.(check bool) "limit=0 -> Error" true
+    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:0 = Error ());
+  Alcotest.(check bool) "limit=-1 -> Error" true
+    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:(-1) = Error ())
 
 let () =
   Alcotest.run "fusion_core"
@@ -443,5 +454,6 @@ let () =
       , [ Alcotest.test_case "basic" `Quick test_budget_basic
         ; Alcotest.test_case "limit" `Quick test_budget_limit
         ; Alcotest.test_case "window_reset" `Quick test_budget_window_reset
+        ; Alcotest.test_case "nonpositive_limit" `Quick test_budget_nonpositive_limit
         ] )
     ]

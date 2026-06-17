@@ -1,4 +1,4 @@
-(** Fusion — 패널+심판(panel+judge) 심의 루프의 타입드 계약.
+(** Fusion — 패널+심판(panel+judge) gate의 타입드 계약.
 
     OpenRouter Fusion 스타일 심의를 MASC 안에서 구현하기 위한 닫힌 합(closed-sum)
     데이터 모델. 모든 분기는 catch-all(`_`) 없이 명시되어, 새 변형 추가 시
@@ -7,14 +7,14 @@
     이 모듈은 순수 데이터 타입만 담는다: OAS·키퍼·보드 의존 0, 독립 컴파일 가능.
     fan-out(패널), 구조화 출력(심판), 게이트, 가시성은 별도 모듈이 이 타입을 소비한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md
 
     @stability Evolving *)
 
 (** {1 토큰 사용량} *)
 
 (** 단일 완성의 토큰 사용량. fusion은 패널 N + 심판 1 완성을 합산해 비용을
-    회계한다 (RFC-0252 §10). 외부 usage 타입에 결합하지 않도록 자체 정의한다. *)
+    회계한다 (RFC-0255 §10). 외부 usage 타입에 결합하지 않도록 자체 정의한다. *)
 type usage =
   { input_tokens : int
   ; output_tokens : int
@@ -30,7 +30,7 @@ val add_usage : usage -> usage -> usage
 (** {1 재귀 가드} *)
 
 (** 심의 깊이. OpenRouter의 [x-openrouter-fusion-depth] 헤더에 대응하는 타입드
-    가드. 패널/심판은 fusion을 다시 못 부른다 — 1단계로 제한 (RFC-0252 §10). *)
+    가드. 패널/심판은 fusion을 다시 못 부른다 — 1단계로 제한 (RFC-0255 §10). *)
 module Fusion_depth : sig
   type t =
     | Top  (** 키퍼/오퍼레이터가 시작한 최상위 심의 *)
@@ -128,7 +128,9 @@ type judge_decision =
   | Insufficient of insufficiency  (** 심의 무효 *)
 [@@deriving yojson, show, eq]
 
-(** 심판의 구조화 종합 — OpenRouter Fusion의 5필드 + resolved + decision. *)
+(** 심판의 구조화 종합 — OpenRouter Fusion의 5필드 + resolved + decision.
+    [dropped_malformed]는 파서가 스키마를 어긴 하위요소를 몇 개 걸러냈는지
+    telemetry로 노출한다(silent drop 회피). *)
 type judge_synthesis =
   { consensus : claim list
   ; contradictions : contradiction list
@@ -137,7 +139,17 @@ type judge_synthesis =
   ; blind_spots : string list
   ; resolved_answer : string
   ; decision : judge_decision
+  ; dropped_malformed : int
   }
+[@@deriving yojson, show, eq]
+
+(** 심판 실패 사유 — panel_failure처럼 닫힌 합. stringly-typed 에러 채널 회피. *)
+type judge_error =
+  | Judge_build_failed of panel_failure
+  | Judge_run_failed of string
+  | Judge_empty
+  | Judge_provider_error of string
+  | Judge_parse_failed of string
 [@@deriving yojson, show, eq]
 
 (** {1 트리거} *)
@@ -150,7 +162,7 @@ type low_confidence =
 [@@deriving yojson, show, eq]
 
 (** fusion 발동 사유 — 게이트 입력. catch-all 없음.
-    결정론적 게이트가 각 변형을 config 상한과 대조한다 (RFC-0252 §6). *)
+    결정론적 게이트가 각 변형을 config 상한과 대조한다 (RFC-0255 §6). *)
 type fusion_trigger =
   | Explicit_tool_call  (** 키퍼가 masc_fusion을 직접 호출 *)
   | Low_confidence of low_confidence  (** 단일 모델 확신도가 임계 미만 *)

@@ -1,12 +1,12 @@
-(** Fusion — 결정론적 발동 게이트 (RFC-0252 §6).
+(** Fusion — 결정론적 발동 게이트 (RFC-0255 §6).
 
     비용 4×를 예측·테스트 가능하게 통제하는 순수 함수. config 상한과 트리거
     적격성을 대조해 [Allow]/[Deny]를 낸다. 모델 판단(키퍼의 masc_fusion 호출)도
     이 게이트의 예산 상한에 종속된다 — 즉 모델 판단은 보조, 결정론 상한이 주.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md *)
 
-(** 패널 preset — 명명된 N개 모델 + 심판 (RFC-0252 §9).
+(** 패널 preset — 명명된 N개 모델 + 심판 (RFC-0255 §9).
     [panel]/[judge]는 runtime.toml bindings와 동일한 opaque "provider.model" 문자열. *)
 type preset =
   { name : string
@@ -55,7 +55,7 @@ val find_preset : t -> string -> preset option
 
 (** 결정론적 게이트 (순수, side-effect 없음).
 
-    판정 순서 (RFC-0252 §6):
+    판정 순서 (RFC-0255 §6):
     + [enabled = false] → [Deny Disabled]
     + preset 없음/크기 위반 → [Deny (Preset_unknown _)]
     + [depth = Nested] → [Deny Depth_exceeded]

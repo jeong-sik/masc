@@ -1,5 +1,5 @@
-(* Fusion — 패널+심판 심의 루프의 타입드 계약 (구현).
-   계약/문서: fusion_types.mli, docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md *)
+(* Fusion — 패널+심판 gate의 타입드 계약 (구현).
+   계약/문서: fusion_types.mli, docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md *)
 
 type usage =
   { input_tokens : int
@@ -100,7 +100,17 @@ type judge_synthesis =
   ; blind_spots : string list
   ; resolved_answer : string
   ; decision : judge_decision
+  ; dropped_malformed : int
+      (** 파서가 걸러낸 비정상 하위요소 개수. 0이면 LLM 출력이 스키마를 완전히 준수한 것. *)
   }
+[@@deriving yojson, show, eq]
+
+type judge_error =
+  | Judge_build_failed of panel_failure
+  | Judge_run_failed of string
+  | Judge_empty
+  | Judge_provider_error of string
+  | Judge_parse_failed of string
 [@@deriving yojson, show, eq]
 
 type low_confidence =

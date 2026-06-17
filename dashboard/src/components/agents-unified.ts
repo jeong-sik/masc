@@ -3,7 +3,7 @@
 // operator-first board. Cognition stays available through keeper detail links.
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useMemo, useState } from 'preact/hooks'
 import { computed } from '@preact/signals'
 import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
@@ -56,7 +56,14 @@ export function AgentsUnified() {
 
   const currentView = activeView.value
 
-  const liveRuntimeCounts = countRuntimeKinds(agents.value, keepers.value)
+  // countRuntimeKinds is an O(N) scan over agents+keepers. Memoized so an
+  // execution_snapshot that only touches unrelated signals (or a re-render from
+  // activeView/namespaceTruth/shellCounts) skips the rescan when agents/keepers
+  // themselves are unchanged.
+  const liveRuntimeCounts = useMemo(
+    () => countRuntimeKinds(agents.value, keepers.value),
+    [agents.value, keepers.value],
+  )
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,

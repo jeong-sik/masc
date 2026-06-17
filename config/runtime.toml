@@ -179,7 +179,7 @@ nick0cave = "ollama.gemma4-26b-a4b-qat"
 [discord]
 trigger_policy = "mention_or_thread"
 
-# ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
+# ── Fusion 패널+심판 심의 (RFC-0255) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 기본 OFF (opt-in).
 # [fusion] 섹션이 없거나 enabled=false면 masc_fusion 호출은 게이트에서
 # Deny로 즉시 반환되고 모델을 호출하지 않는다.

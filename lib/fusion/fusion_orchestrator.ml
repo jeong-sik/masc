@@ -1,5 +1,5 @@
 (* Fusion — out-of-band 심의 오케스트레이터 (구현).
-   계약/문서: fusion_orchestrator.mli, docs/rfc/RFC-0252 §4 *)
+   계약/문서: fusion_orchestrator.mli, docs/rfc/RFC-0255 §4 *)
 
 type outcome =
   | Denied of Fusion_types.deny_reason

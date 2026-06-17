@@ -1,5 +1,5 @@
 (* Fusion — 심의 결과 가시화 (구현).
-   계약/문서: fusion_sink.mli, docs/rfc/RFC-0252 §8 *)
+   계약/문서: fusion_sink.mli, docs/rfc/RFC-0255 §8 *)
 
 let render_decision (d : Fusion_types.judge_decision) : string =
   match d with
@@ -88,7 +88,7 @@ let usage_meta (u : Fusion_types.usage) : Yojson.Safe.t =
     ; ("output_tokens", `Int u.Fusion_types.output_tokens)
     ]
 
-(* 패널 결과를 board meta_json 원소로. RFC-0252 §8.2 shape:
+(* 패널 결과를 board meta_json 원소로. RFC-0255 §8.2 shape:
    { "model": "...", "answer": "...", "confidence": 0.0, "usage": {...} } *)
 let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
   match o with
@@ -151,7 +151,7 @@ let decision_meta (d : Fusion_types.judge_decision) : Yojson.Safe.t =
       ; ("missing", `List (List.map (fun s -> `String s) missing_for_decision))
       ]
 
-(* 심판 결과를 board meta_json 원소로. RFC-0252 §8.2 judge shape. *)
+(* 심판 결과를 board meta_json 원소로. RFC-0255 §8.2 judge shape. *)
 let judge_meta ~(judge_model : string)
     (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.Safe.t =
   match judge with
@@ -204,7 +204,7 @@ let emit ~base_dir ~keeper ~run_id ~preset ~trigger ~question ~panel ~judge
     Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion";
     (* board post — 구조화 증거(meta_json). chat lane은 사람이 읽는 *서사*,
        board는 run_id로 묶인 쿼리 가능한 *증거*다. 사용자 가시성 요구는 두 surface
-       모두(RFC-0252 §3/§8.2). 실패는 [Error]로 상위(orchestrator)에 전달한다. *)
+       모두(RFC-0255 §3/§8.2). 실패는 [Error]로 상위(orchestrator)에 전달한다. *)
     let board_headline =
       match judge with
       | Ok j ->
@@ -236,7 +236,8 @@ let emit ~base_dir ~keeper ~run_id ~preset ~trigger ~question ~panel ~judge
          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
          ~ttl_hours:board_post_ttl_hours ()
      with
-     | Ok () -> Ok ()
+     | Ok _post ->
+       Ok () (* [Board_dispatch.create_post] returns [Board.post], not unit. *)
      | Error e -> Error (Board.show_board_error e))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

@@ -1,7 +1,22 @@
 (* Fusion — 심판 LLM-facing JSON → judge_synthesis (구현).
-   계약/문서: fusion_judge_parse.mli, docs/rfc/RFC-0252 §7.2 *)
+   계약/문서: fusion_judge_parse.mli, docs/rfc/RFC-0255 §7.2 *)
 
 let ( let* ) = Result.bind
+
+(* 패널 답변은 신뢰 불가(모델/사용자 생성). judge 프롬프트에 임베드하기 전
+   XML 메타문자를 escape해, 답변 속 가짜 태그/지시/JSON이 프롬프트 구조를
+   탈취(prompt injection)하거나 XML을 깨뜨리는 것을 방어한다.
+   escape 순서: '&'를 먼저 — 그래야 뒤이은 "&lt;" 등이 이중 이스케이프되지 않는다.
+   XML 5개 미리 정의된 엔티티('&', '<', '>', '"', '\'')를 모두 처리한다.
+   이 함수는 순수 stdlib 의존이므로 fusion_core에서 단위 테스트한다.
+   사용처: lib/fusion/fusion_judge.ml compose_prompt. *)
+let escape_xml (s : string) : string =
+  s
+  |> String.split_on_char '&' |> String.concat "&amp;"
+  |> String.split_on_char '<' |> String.concat "&lt;"
+  |> String.split_on_char '>' |> String.concat "&gt;"
+  |> String.split_on_char '"' |> String.concat "&quot;"
+  |> String.split_on_char '\'' |> String.concat "&apos;"
 
 let expected_json_doc =
   {|Return ONLY a JSON object with this shape (no prose, no code fences):

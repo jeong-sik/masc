@@ -25,7 +25,13 @@
     - recommend:    [{ "kind": "recommend", "action": "...", "rationale": "..." }]
     - insufficient: [{ "kind": "insufficient", "missing": ["..."] }]
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §7.2 *)
+
+(** 신뢰 불가한 패널 답변/질문을 judge 프롬프트에 임베드하기 전 XML-escape.
+    XML 5개 미리 정의된 엔티티('&', '<', '>', '"', ''')를 처리하고,
+    '&'를 먼저 처리해 이중 이스케이프를 방지한다. 사용처:
+    [lib/fusion/fusion_judge.ml] compose_prompt. *)
+val escape_xml : string -> string
 
 (** 심판 프롬프트에 임베드할, 기대 JSON 형태 설명 (LLM 지시용). *)
 val expected_json_doc : string

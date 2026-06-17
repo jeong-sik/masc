@@ -189,6 +189,7 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
+  keeper_memory_os_gc
   keeper_memory_os_io
   keeper_memory_os_recall)
  (libraries

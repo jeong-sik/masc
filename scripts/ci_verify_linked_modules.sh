@@ -30,6 +30,7 @@ REQUIRED_MODULES=(
   keeper_memory_os_io
   keeper_memory_os_consolidator
   keeper_memory_os_recall
+  keeper_memory_os_gc
 )
 
 MISSING=()

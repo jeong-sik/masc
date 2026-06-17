@@ -37,11 +37,9 @@ let verified_at fact =
   | None -> fact.first_seen
 ;;
 
-(* RFC-0247 (purge): the dedup winner is structural — the most-recently-verified
-   row for a claim (else first-seen), tie-broken by file order. The prior GC
-   chose the higher [score_fact]; that composite score is gone, so "which
-   duplicate to keep" reduces to the same truth-anchor recency that orders
-   recall and the retention cap. No relevance number decides survival. *)
+(* RFC-0247/RFC-0251: the dedup winner is structural — the
+   most-recently-verified row for a claim (else first-seen), tie-broken by file
+   order. A relevance/retention score never decides survival. *)
 let more_recent candidate existing =
   match Float.compare (verified_at candidate.fact) (verified_at existing.fact) with
   | cmp when cmp > 0 -> true
@@ -67,21 +65,28 @@ let dedup_by_claim items =
   List.filter (fun item -> Int_set.mem item.index winner_indexes) items
 ;;
 
-(* RFC-0247 (purge): GC is now two structural passes only — hard-expire facts
-   past their Ephemeral TTL ([valid_until], a typed category decision), then
-   dedup duplicate claims keeping the most-recently-verified. The score-threshold
-   discard ([decide_retention] on [score_fact <= 0.02]) was removed: a fact's
-   value is not a number GC can threshold. Forgetting is the librarian's
-   delete-on-contradiction judgment plus this structural TTL, not a low score. *)
+let read_all_strict ~keeper_id =
+  match Io.read_facts_all_strict ~keeper_id with
+  | Ok facts -> facts
+  | Error msg -> invalid_arg ("Keeper_memory_os_gc.run_gc: " ^ msg)
+;;
+
+(* RFC-0251: GC is structural only. It removes legacy rows whose persisted
+   [valid_until] has passed, dedups duplicate claims, and leaves every remaining
+   row untouched. New facts no longer produce hard TTLs, and no score/decay
+   verdict can discard a fact. *)
 let run_gc ?(dry_run = false) ~keeper_id ~now () =
-  let facts = Io.read_facts_all ~keeper_id in
+  let facts = read_all_strict ~keeper_id in
   let indexed = List.mapi (fun index fact -> { index; fact }) facts in
   let live, expired =
     List.partition (fun item -> not (ttl_expired ~now item.fact)) indexed
   in
   let deduped = dedup_by_claim live in
   let survivors = List.map (fun item -> item.fact) deduped in
-  if not dry_run then Io.rewrite_facts_atomically ~keeper_id survivors;
+  let changed =
+    (not (List.is_empty expired)) || List.length live <> List.length deduped
+  in
+  if (not dry_run) && changed then Io.rewrite_facts_atomically ~keeper_id survivors;
   { total_input = List.length facts
   ; ttl_expired = List.length expired
   ; dedup_removed = List.length live - List.length deduped

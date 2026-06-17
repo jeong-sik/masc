@@ -147,6 +147,8 @@
 
 /* ════ CONVERSATION (center) ════════════════════════════════════ */
 .kw-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--color-bg-page); }
+.kw-chat-body { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.kw-chat-body > *:first-child { flex: 1; min-width: 0; }
 
 /* Single-row header (identity + status + actions). Slimmer than the old
  * two-row variant — the runtime/model/throughput sub-row moved to the rail —

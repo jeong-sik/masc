@@ -762,12 +762,12 @@ export type ChatCalloutBlock = { t: 'callout'; severity?: ChatCalloutSeverity; h
 export type ChatTableCellValue = string | { v: string; num?: boolean; muted?: boolean }
 export type ChatTableBlock = { t: 'table'; head: ChatTableCellValue[]; rows: ChatTableCellValue[][] }
 
-export type ChatCodeBlock = { t: 'code'; cap?: string; html: string }
+export type ChatCodeBlock = { t: 'code'; cap?: string; html: string; source?: string }
 
 export type ChatShellLine = { t?: 'cmd' | 'out' | 'err'; v: string }
 export type ChatShellBlock = { t: 'shell'; title?: string; lines: ChatShellLine[]; exit?: number; dur?: string }
 
-export type ChatArtifactBlock = { t: 'artifact'; kind?: string; name: string; size?: string; note?: string }
+export type ChatArtifactBlock = { t: 'artifact'; kind?: string; name: string; size?: string; note?: string; data?: string; mimeType?: string }
 
 export type ChatAttachBlock = {
   t: 'attach'
@@ -790,6 +790,7 @@ export type ChatVoiceBlock = { t: 'voice'; secs?: number; wave?: number[]; via?:
 
 export type ChatImageBlock = { t: 'image'; src?: string; ph?: string; cap?: string }
 export type ChatSvgBlock = { t: 'svg'; svg: string; cap?: string }
+export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string }
 
 export type ChatTraceThinkStep = { kind: 'think'; text: string }
 export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string }
@@ -816,6 +817,7 @@ export type ChatBlock =
   | ChatVoiceBlock
   | ChatImageBlock
   | ChatSvgBlock
+  | ChatMermaidBlock
   | ChatTraceBlock
   | ChatLinkBlock
   | ChatBroadcastBlock

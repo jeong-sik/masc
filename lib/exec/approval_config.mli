@@ -28,7 +28,8 @@ type agent_overlay = {
 
   privileged_trust : trust_level;
   (** Trust level for [Privileged] bins ([rm], [sudo]).
-      Also governs destructive git ops. *)
+      Destructive git ops are handled by the trust-independent catastrophic
+      floor, not by this trust level — RFC-0254 §5.3. *)
 }
 (** Per-agent knobs.  Each risk class has an independent trust level,
     allowing fine-grained escalation without all-or-nothing overrides. *)

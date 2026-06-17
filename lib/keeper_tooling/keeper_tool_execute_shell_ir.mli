@@ -89,9 +89,10 @@ val dispatch_classified_with_approval :
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
 (** Same pipeline as {!dispatch_classified}, but runs the capability-based
     approval policy gate {i before} the typed gate and path validation.
-    [Ask] produces [Approval_required] (binary and risk class in the summary);
-    [Deny] produces [Policy_denied] carrying the rendered typed
-    [Verdict.deny_reason].  [Allow] and [Suggest_confirm] proceed to dispatch.
+    [Ask] produces [Approval_required] carrying the blocked binary (the
+    summary notes the audited/privileged risk class); [Deny] produces
+    [Policy_denied] carrying the rendered typed [Verdict.deny_reason].
+    [Allow] and [Suggest_confirm] proceed to dispatch.
     A nested pipeline whose last stage is itself a pipeline yields
     [Too_complex], matching {!dispatch_classified}. *)
 

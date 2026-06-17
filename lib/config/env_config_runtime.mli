@@ -368,5 +368,6 @@ module Shell_ir_approval_gate : sig
   (** [enabled ()] is true when [MASC_SHELL_IR_APPROVAL_GATE_ENABLED] is set.
       Routes Execute tool calls through the capability-based approval policy
       gate so safe commands can be auto-allowed while audited/privileged
-      operations require explicit approval. Default: [false]. *)
+      operations require explicit approval. Default: [true] (the autonomous
+      policy is a strict safety improvement over the no-gate path). *)
 end

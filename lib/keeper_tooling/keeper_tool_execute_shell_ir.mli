@@ -87,10 +87,13 @@ val dispatch_classified_with_approval :
   approval_config:Masc_exec.Approval_config.t ->
   Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir ->
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
-(** Same pipeline as {!dispatch_classified}, but inserts the capability-based
-    approval policy gate between the typed gate and path validation.
-    [Ask] produces [Approval_required]; [Deny] produces [Policy_denied].
-    [Allow] and [Suggest_confirm] proceed to dispatch with telemetry. *)
+(** Same pipeline as {!dispatch_classified}, but runs the capability-based
+    approval policy gate {i before} the typed gate and path validation.
+    [Ask] produces [Approval_required] (binary and risk class in the summary);
+    [Deny] produces [Policy_denied] carrying the rendered typed
+    [Verdict.deny_reason].  [Allow] and [Suggest_confirm] proceed to dispatch.
+    A nested pipeline whose last stage is itself a pipeline yields
+    [Too_complex], matching {!dispatch_classified}. *)
 
 val dispatch :
   ?allow_pipes:bool ->

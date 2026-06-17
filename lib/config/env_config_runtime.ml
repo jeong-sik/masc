@@ -938,4 +938,19 @@ module Workspace_git = struct
       (get_float ~default:30.0 "MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC")
 end
 
+(** {1 Shell IR Approval Gate (RFC v5)}
+
+    Capability-based approval policy gate for Execute tool calls.
+    When enabled, the keeper runtime routes Shell IR dispatches through
+    [Keeper_tool_execute_shell_ir.dispatch_classified_with_approval]
+    so risk-class trust levels can auto-allow safe commands while
+    requiring explicit approval for audited/privileged operations. *)
+module Shell_ir_approval_gate = struct
+  (** Enable the Shell IR approval policy gate. Default: false.
+      Re-readable within the process; set MASC_SHELL_IR_APPROVAL_GATE_ENABLED=true
+      to enable policy checks without recompilation. *)
+  let enabled () =
+    Feature_flag_registry.get_bool "MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
+end
+
 (** {1 Internal Safety Configuration} *)

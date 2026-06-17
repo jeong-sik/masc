@@ -23,16 +23,22 @@ val decide :
   caps:Capability.t list ->
   simple:Shell_ir.simple ->
   Verdict.t
-(** Pure policy decision.  The rule runtime (checked top to bottom):
+(** Pure policy decision, evaluated in two stages:
 
-    - [Destructive] git op anywhere in the cap list:
-      [Enforced] → [Deny Destructive_git].
-      [Auto_safe]/[Observe] → [Allow].
-      [Suggest] → [Suggest_confirm].
-    - [Write_path] whose scope is [Outside_workspace] or
-      [Absolute_unknown] → [Deny Path_escape] (always, regardless of
-      trust level).
-    - [Exec_program] on a [Privileged]/[Audited]/[Safe] [Exec_program.t] →
-      dispatch to the corresponding [overlay.*_trust] level:
-      [Enforced] → [Ask], [Auto_safe]/[Observe] → [Allow],
-      [Suggest] → [Suggest_confirm]. *)
+    1. Trust-independent catastrophic floor (checked first, denied
+       regardless of [overlay] — RFC-0254 §5.3):
+       - any [Destructive] git op → [Deny Destructive_git];
+       - a redirect [Write_path] whose scope is [Outside_workspace] or
+         [Absolute_unknown] → [Deny Path_escape];
+       - a catastrophic-by-identity binary ([mkfs]) → [Deny
+         Catastrophic_program].
+    2. Otherwise the highest program risk class is graded by the matching
+       [overlay.*_trust] level:
+       [Enforced] → [Ask], [Auto_safe]/[Observe] → [Allow],
+       [Suggest] → [Suggest_confirm].
+
+    Destructive git is no longer graded by [privileged_trust]: it lives in
+    the floor, so loosening any trust level can never re-enable
+    [git push --force].  Path-bearing destructive programs ([rm], [dd], …)
+    are graded in stage 2; their target paths are jailed to the workspace by
+    [Exec_policy.validate_shell_ir_paths] downstream of this decision. *)

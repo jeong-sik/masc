@@ -25,9 +25,11 @@ val adapter_loop :
   token:string ->
   channel_id:string ->
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+  ?base_url:string ->
+  unit ->
   unit
-(** [adapter_loop ~token ~channel_id ~events] subscribes to the event
-    stream and delivers text to Discord in real time:
+(** [adapter_loop ~token ~channel_id ~events ?base_url ()] subscribes to the
+    event stream and delivers text to Discord in real time:
     - [Text_delta] (first stable segment): POST creates the message,
       stores its id.
     - [Text_delta] (subsequent): PATCH edits the message content, at most
@@ -35,6 +37,13 @@ val adapter_loop :
     - [Text_message_end]: force PATCH if content changed since last edit.
     - [Run_finished]: force final PATCH with complete text.
     - [Event_error]: sends error text as a new message.
+    - [Link_block], [Image_block], [Audio_block]: send rich block embeds
+      or messages.
+    - [Tool_context_block]: enriches the matching tool embed with argument
+      and result summaries on [Tool_call_end].
+
+    [base_url] is used to build public voice-audio URLs; when omitted the
+    configured {!Env_config_core.masc_http_base_url} is used.
 
     Falls back to a single POST if no deltas arrive before [Run_finished].
 
@@ -49,4 +58,8 @@ module For_testing : sig
   val final_head_and_overflow : string -> string * string option
   (** Redacted final content split into the first Discord message body and
       optional overflow for follow-up chunked delivery. *)
+
+  val public_voice_audio_url : ?base_url:string -> string -> string
+  (** [public_voice_audio_url ?base_url token] returns the public URL for
+      an audio clip. Exposed for testing. *)
 end

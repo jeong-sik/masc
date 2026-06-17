@@ -965,7 +965,7 @@ let start_keeper_loops
                              keeper_name (Printexc.to_string exn))
                          (fun () ->
                            Keeper_chat_discord.adapter_loop ~token
-                             ~channel_id ~events)
+                             ~channel_id ~events ())
                    | None ->
                        Log.Keeper.warn
                          "keeper_chat_consumer: \
@@ -990,7 +990,7 @@ let start_keeper_loops
                              keeper_name (Printexc.to_string exn))
                          (fun () ->
                            Keeper_chat_slack.adapter_loop ~token
-                             ~channel ~events)
+                             ~channel ~events ())
                    | None ->
                        Log.Keeper.warn
                          "keeper_chat_consumer: \

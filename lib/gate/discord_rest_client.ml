@@ -193,7 +193,9 @@ let trigger_typing ~token ~channel_id () =
 type embed =
   { title : string
   ; description : string option
+  ; url : string option
   ; color : int  (* Decimal RGB: 0xRRGGBB *)
+  ; image : string option
   ; fields : (string * string * bool) list
     (* (name, value, inline) tuples. Max 25. *)
   }
@@ -208,6 +210,16 @@ let embed_to_json (e : embed) : Yojson.Safe.t =
     match e.description with
     | None -> base
     | Some d -> ("description", `String d) :: base
+  in
+  let base =
+    match e.url with
+    | None -> base
+    | Some u -> ("url", `String u) :: base
+  in
+  let base =
+    match e.image with
+    | None -> base
+    | Some i -> ("image", `Assoc [ ("url", `String i) ]) :: base
   in
   let base =
     match e.fields with
@@ -230,6 +242,31 @@ let embed_to_json (e : embed) : Yojson.Safe.t =
 let color_blue = 0x3498DB    (* Running / in progress *)
 let color_green = 0x2ECC71   (* Success *)
 let color_red = 0xE74C3C     (* Error *)
+
+(* Discord embed field value limit is 1024 characters. *)
+let embed_field_value_limit = 1024
+
+let truncate_to ~max_len s =
+  if String.length s <= max_len then s
+  else String.sub s 0 (max_len - 1) ^ "…"
+
+let link_embed ~url ~title ~description ~image =
+  { title
+  ; description
+  ; url = Some url
+  ; color = color_blue
+  ; image
+  ; fields = []
+  }
+
+let image_embed ~url ~caption =
+  { title = "Image"
+  ; description = caption
+  ; url = None
+  ; color = color_green
+  ; image = Some url
+  ; fields = []
+  }
 
 let build_embed_request ~token ~channel_id ~content ?embeds () =
   let url =

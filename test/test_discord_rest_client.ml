@@ -219,7 +219,13 @@ let test_parse_empty_response_discord_error_envelope () =
 
 let test_embed_to_json_minimal () =
   let embed : R.embed =
-    { title = "Tool"; description = None; color = 0x3498DB; fields = [] }
+    { title = "Tool"
+    ; description = None
+    ; url = None
+    ; color = 0x3498DB
+    ; image = None
+    ; fields = []
+    }
   in
   let json = R.embed_to_json embed in
   match json with
@@ -227,6 +233,8 @@ let test_embed_to_json_minimal () =
       check bool "has title" true (List.mem_assoc "title" fields);
       check bool "has color" true (List.mem_assoc "color" fields);
       check bool "no description" false (List.mem_assoc "description" fields);
+      check bool "no url" false (List.mem_assoc "url" fields);
+      check bool "no image" false (List.mem_assoc "image" fields);
       check bool "no fields" false (List.mem_assoc "fields" fields)
   | _ -> fail "embed_to_json: expected Assoc"
 
@@ -234,13 +242,21 @@ let test_embed_to_json_full () =
   let embed : R.embed =
     { title = "My Tool"
     ; description = Some "Running..."
+    ; url = Some "https://example.com"
     ; color = 0x2ECC71
+    ; image = Some "https://example.com/img.png"
     ; fields = [ ("key", "val", true) ]
     }
   in
   let json = R.embed_to_json embed in
   match json with
   | `Assoc fields ->
+      check bool "has url" true (List.mem_assoc "url" fields);
+      check bool "has image" true (List.mem_assoc "image" fields);
+      (match List.assoc_opt "image" fields with
+       | Some (`Assoc img_items) ->
+           check bool "image has url" true (List.mem_assoc "url" img_items)
+       | _ -> fail "image shape wrong");
       (match List.assoc_opt "fields" fields with
        | Some (`List [ `Assoc field_items ]) ->
            check bool "field has name" true
@@ -250,6 +266,33 @@ let test_embed_to_json_full () =
            check bool "field has inline" true
              (List.mem_assoc "inline" field_items)
        | _ -> fail "fields shape wrong")
+  | _ -> fail "embed_to_json: expected Assoc"
+
+let test_link_embed_to_json () =
+  let embed = R.link_embed ~url:"https://example.com"
+    ~title:"Example" ~description:(Some "desc")
+    ~image:(Some "https://example.com/i.png")
+  in
+  let json = R.embed_to_json embed in
+  match json with
+  | `Assoc fields ->
+      check string "title" "Example"
+        (match List.assoc_opt "title" fields with
+         | Some (`String s) -> s
+         | _ -> fail "title shape wrong");
+      check bool "has url" true (List.mem_assoc "url" fields);
+      check bool "has image" true (List.mem_assoc "image" fields)
+  | _ -> fail "embed_to_json: expected Assoc"
+
+let test_image_embed_to_json () =
+  let embed = R.image_embed ~url:"https://example.com/pic.png"
+    ~caption:(Some "a caption")
+  in
+  let json = R.embed_to_json embed in
+  match json with
+  | `Assoc fields ->
+      check bool "has image" true (List.mem_assoc "image" fields);
+      check bool "has description" true (List.mem_assoc "description" fields)
   | _ -> fail "embed_to_json: expected Assoc"
 
 (* ---------------------------------------------------------------- *)
@@ -276,7 +319,7 @@ let test_build_embed_request_empty_content_omits_field () =
 
 let test_build_embed_request_embeds_included () =
   let embed : R.embed =
-    { title = "T"; description = None; color = 1; fields = [] }
+    { title = "T"; description = None; url = None; color = 1; image = None; fields = [] }
   in
   let _, _, body =
     R.build_embed_request ~token:"t" ~channel_id:"c"
@@ -305,8 +348,8 @@ let test_build_edit_embed_request_url_targets_message () =
 
 let test_build_edit_embed_request_embeds_and_content () =
   let embed : R.embed =
-    { title = "Done"; description = Some "Done"; color = 0x2ECC71
-    ; fields = [] }
+    { title = "Done"; description = Some "Done"; url = None; color = 0x2ECC71
+    ; image = None; fields = [] }
   in
   let _, _, body =
     R.build_edit_embed_request ~token:"t" ~channel_id:"c"
@@ -421,6 +464,10 @@ let () =
             test_embed_to_json_minimal
         ; test_case "full embed (description + fields)" `Quick
             test_embed_to_json_full
+        ; test_case "link embed builder" `Quick
+            test_link_embed_to_json
+        ; test_case "image embed builder" `Quick
+            test_image_embed_to_json
         ] )
     ; ( "build_embed_request"
       , [ test_case "URL targets channel" `Quick

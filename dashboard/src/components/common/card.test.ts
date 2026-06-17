@@ -273,7 +273,7 @@ describe('SectionCard', () => {
     )
     expect(container.textContent).toContain('Transport')
     expect(container.textContent).toContain('degraded')
-    expect(container.innerHTML).toContain('bg-[var(--color-status-warn)]')
+    expect(container.innerHTML).toContain('bg-warning')
     const el = container.querySelector('[data-section-card]')
     expect(el?.getAttribute('data-section-card-status')).toBe('warn')
     expect(el?.getAttribute('data-section-card-status-dot-tone')).toBe('warn')
@@ -293,7 +293,7 @@ describe('SectionCard', () => {
       ),
       container,
     )
-    expect(container.innerHTML).toContain('bg-[var(--color-status-warn)]')
+    expect(container.innerHTML).toContain('bg-warning')
     const el = container.querySelector('[data-section-card]')
     expect(el?.getAttribute('data-section-card-status')).toBe('watch')
     expect(el?.getAttribute('data-section-card-status-length')).toBe('5')
@@ -309,6 +309,6 @@ describe('SectionCard', () => {
       ),
       container,
     )
-    expect(container.innerHTML).toContain('bg-[var(--color-status-idle)]')
+    expect(container.innerHTML).toContain('bg-text-disabled')
   })
 })

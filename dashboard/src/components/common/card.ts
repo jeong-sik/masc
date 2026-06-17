@@ -235,7 +235,7 @@ export function summarizeSectionCard({
 
   return {
     variant,
-    bodyPadding: variant === 'compact' ? 'p-3.5' : 'p-4',
+    bodyPadding: variant === 'compact' ? 'p-3.5' : 'p-6',
     labelSource,
     labelState: contentState(sectionLabel),
     labelTextLength: textLength(sectionLabel),
@@ -298,7 +298,7 @@ export function SectionCard({
   const tail = right ?? (
     eyebrow != null || summary.hasStatus
       ? html`
-          <span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
+          <span class="inline-flex items-center gap-1.5 text-[11px] text-text-tertiary">
             ${summary.hasStatus ? html`<span class="h-1.5 w-1.5 rounded-full ${statusDotClass(status)}" />` : null}
             ${eyebrow != null ? html`<span>${eyebrow}</span>` : null}
           </span>

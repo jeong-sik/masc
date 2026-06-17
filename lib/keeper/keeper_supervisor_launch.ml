@@ -125,7 +125,7 @@ let launch_supervised_fiber
       Eio.Fiber.fork ~sw body
     in
     fork_body (fun () ->
-      let resolved = ref false in
+      let resolved = Atomic.make false in
       (* Issue #18901 follow-up: distinguish parent-cancellation from
          genuine missed-resolution in the finally branch. The body's
          try/with re-raises [Eio.Cancel.Cancelled] (line 281 area)
@@ -136,9 +136,9 @@ let launch_supervised_fiber
          missed-resolution bug — both collapsed into [Unexpected].
          Setting the flag from the cancel handler keeps the typed
          [fiber_drop_cause] payload accurate. *)
-      let cancelled_by_parent = ref false in
+      let cancelled_by_parent = Atomic.make false in
       let resolve_done ~source value =
-        if not !resolved then
+        if not (Atomic.get resolved) then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
              may have already resolved done_p via record_keeper_stopped.
              When the Promise is already resolved, suppress finally cleanup,
@@ -148,7 +148,7 @@ let launch_supervised_fiber
             Keeper_registry.resolve_done reg ~source value
             |> done_signal_of_registry_result
           in
-          resolved := true;
+          Atomic.set resolved true;
           signal
         else
           Done_signal_already_seen
@@ -308,7 +308,7 @@ let launch_supervised_fiber
                    ())
            with
            | Eio.Cancel.Cancelled _ ->
-             cancelled_by_parent := true;
+             Atomic.set cancelled_by_parent true;
              (* Do NOT re-raise Cancelled in a forked fiber, as it cancels the parent switch. *)
              ()
            | exn ->
@@ -395,7 +395,7 @@ let launch_supervised_fiber
                previous lifetime would silently demote the new
                keeper's First block to DEBUG. *)
             Keeper_livelock_state.reset_for_keeper ~keeper:meta.name;
-            if not !resolved
+            if not (Atomic.get resolved)
             then
               if Shutdown.is_shutting_down_global ()
               then (
@@ -419,7 +419,7 @@ let launch_supervised_fiber
                   (resolve_done
                      ~source:"supervisor_shutdown_cleanup"
                      (`Crashed "shutdown")))
-              else if !cancelled_by_parent
+              else if Atomic.get cancelled_by_parent
               then (
                 (* Issue #18901 follow-up: parent-cancel branch. The
                    body's try/with caught [Eio.Cancel.Cancelled] and set

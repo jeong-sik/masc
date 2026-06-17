@@ -181,8 +181,8 @@ let default_config
   }
 ;;
 
-let oas_tracer_ref = ref Agent_sdk.Tracing.null
-let set_oas_tracer tracer = oas_tracer_ref := tracer
+let oas_tracer_ref = Atomic.make Agent_sdk.Tracing.null
+let set_oas_tracer tracer = Atomic.set oas_tracer_ref tracer
 
 let guardrails_of_config (config : config) =
   let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) config.tools in
@@ -370,7 +370,7 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    Agent_sdk.Builder.with_tracer !oas_tracer_ref builder
+    Agent_sdk.Builder.with_tracer (Atomic.get oas_tracer_ref) builder
   in
   match transport with
   | Some transport -> Agent_sdk.Builder.with_transport transport builder

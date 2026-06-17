@@ -13,7 +13,7 @@
 // assets/dashboard/ tree; run after `vite build` (which empties that dir).
 import { transformWithEsbuild } from 'vite'
 import { readFile, writeFile, mkdir, copyFile, readdir, rm } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const scriptDir = dirname(fileURLToPath(import.meta.url))
@@ -37,7 +37,7 @@ const portraitSrc = join(dashboardDir, 'public', 'assets', 'keepers', 'portraits
 // so anchoring on line-start `const`/`let` rewrites exactly the global bindings
 // while leaving every nested (indented) const/let and every `for (let …)` head
 // untouched — block scoping inside functions/loops is preserved.
-function topLevelConstToVar(code) {
+export function topLevelConstToVar(code) {
   return code.replace(/^(?:const|let)\b/gm, 'var')
 }
 
@@ -86,7 +86,11 @@ async function main() {
   console.log(`build-v2: ${SCRIPTS.length} scripts, ${styles.length} styles, ${portraits.length} portraits -> ${outDir}`)
 }
 
-main().catch((err) => {
-  console.error('build-v2 failed:', err)
-  process.exit(1)
-})
+// Only run the build when invoked directly (node scripts/build-v2.mjs), not when
+// imported by the unit test for topLevelConstToVar.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error('build-v2 failed:', err)
+    process.exit(1)
+  })
+}

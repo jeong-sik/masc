@@ -155,6 +155,15 @@ let run_keeper_cycle
     =
       let _ = phase_opt in
       let effective_runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+      let source =
+        match Runtime.runtime_id_for_keeper meta.name with
+        | Some id when String.trim id <> "" -> "assigned"
+        | _ -> "default"
+      in
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string RuntimeSelected)
+        ~labels:[("keeper", meta.name); ("runtime_id", effective_runtime_id); ("source", source)]
+        ();
       let turn_state =
         append_manifest turn_state
           ~site:"runtime_routed"
@@ -245,6 +254,7 @@ let run_keeper_cycle
             let turn_id = keeper_turn_id in
             (match
                Keeper_turn_livelock.guard_and_record_turn_start
+                 ~base_path:registry_base_path
                  ~keeper:meta.name
                  ~turn_id
                  ~max_attempts:(turn_livelock_max_attempts ())
@@ -297,7 +307,6 @@ let run_keeper_cycle
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                    ~generation:meta.runtime.generation ()
                in
-               let max_cost_usd = None in
                (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records
                   below read the same cell, so a concurrent run of this keeper
@@ -337,12 +346,18 @@ let run_keeper_cycle
 
          Uses the OAS Event_bus (ToolCalled + ToolCompleted) rather than
          MASC-side observers. The per-turn subscription is scoped by
-         [filter_agent meta.name], so no cross-keeper contamination. *)
+         [filter_agent meta.name], so no cross-keeper contamination.
+         The same events now drive Streaming⇄Awaiting_tool_result FSM
+         transitions unconditionally (see
+         [Keeper_unified_turn_event_bus.record_fsm_tool_transitions]). *)
                let turn_state =
                  { turn_state with last_execution = Some initial_execution }
                in
                let turn_event_bus_state =
-                 Keeper_unified_turn_event_bus.create ~keeper_name:meta.name ()
+                 Keeper_unified_turn_event_bus.create
+                   ~keeper_name:meta.name
+                   ~turn_id:keeper_turn_id
+                   ()
                in
                (* PR-J: [?site] labels the call-site so metric queries can attribute
          drain pressure to background polling vs unsubscribe vs the
@@ -476,7 +491,6 @@ let run_keeper_cycle
                            ; event_bus_integrity_error_snapshot
                            ; generation
                            ; keeper_turn_id
-                           ; max_cost_usd
                            ; meta
                            ; turn_ctx_cell
                            ; observation
@@ -901,6 +915,10 @@ dominant source of the observed CAS race exhaustion after
                     ~keeper_name:meta.name
                     trajectory_acc
                     Trajectory.Completed;
+                  (* SSOT: success-path terminal FSM transitions
+                     (Streaming -> Completing -> Done) are emitted once inside
+                     [Keeper_unified_turn_success.handle]. Do not duplicate them
+                     here; this is the sole caller of that function. *)
                   let updated_meta =
                     Keeper_unified_turn_success.handle
                       ~config

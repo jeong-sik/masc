@@ -68,13 +68,13 @@ function StoredBlobView({
   // formatting and copy-button behavior stays consistent.
   if (fullText.value !== null && expanded.value) {
     return html`
-      <div class="flex flex-col gap-2 mt-3">
+      <div class="v2-lab-panel flex flex-col gap-2 mt-3">
         <div class="flex items-center gap-2">
           <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
           <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
           <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
         </div>
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
+        <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
             <${ActionButton} variant="subtle" size="sm" class="text-3xs"
               onClick=${() => { expanded.value = false }}>
@@ -98,13 +98,13 @@ function StoredBlobView({
 
   // Default: show preview + metadata + Load button. Bytes only fetched on demand.
   return html`
-    <div class="flex flex-col gap-2 mt-3" data-testid="tool-blob-marker">
+    <div class="v2-lab-panel flex flex-col gap-2 mt-3" data-testid="tool-blob-marker">
       <div class="flex items-center gap-2">
         <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
         <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
         <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
       </div>
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
+      <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
           <span class="text-3xs text-[var(--color-fg-muted)]">
             저장된 출력 · ${marker.bytes.toLocaleString()}B · sha ${marker.sha256.slice(0, 12)}\u2026
@@ -147,13 +147,13 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
   const timeStr = formatTimeAgo(timestamp)
   const lines = text.split('\n').length
   return html`
-    <div class="flex flex-col gap-2 mt-3">
+    <div class="v2-lab-panel flex flex-col gap-2 mt-3">
       <div class="flex items-center gap-2">
         <${CountBadge} tone=${success ? 'ok' : 'bad'}>${success ? 'OK' : 'ERR'}<//>
         <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
         <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
       </div>
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
+      <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
           <${ActionButton} variant="subtle" size="sm" class="text-3xs"
             onClick=${() => { expanded.value = !expanded.value }}>

@@ -1,0 +1,357 @@
+/* MASC Dashboard — StyleSeed app shell layout
+ *
+ * Ports the dashboard chrome to the StyleSeed design system:
+ *   - Light page background (#FAFAFA) with white cards
+ *   - Semantic tokens only (no hardcoded hex in shell components)
+ *   - Cards: rounded-2xl, shadow-card (<= 8% opacity)
+ *   - Spacing: space-y-6 between sections, mx-6 for single cards, px-6 for grids
+ *   - Touch targets >= 44x44; CJK word-break: keep-all
+ *   - Preserves mobile drawer behavior and focus-mode chrome.
+ */
+
+/* ═══════════════════════════════════════════════════════════════
+   STYLESEED SEMANTIC TOKENS (shell scope)
+   Defined at :root so v2-shell.css and shell components can share them.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Surfaces */
+  --ss-page: #FAFAFA;
+  --ss-card: #FFFFFF;
+  --ss-surface: #F5F5F5;
+  --ss-surface-subtle: #FAFAFA;
+  --ss-surface-muted: #E8E8E8;
+
+  /* Text hierarchy (darkest is #2A2A2A, never pure black) */
+  --ss-text-primary: #2A2A2A;
+  --ss-text-secondary: #6A6A6A;
+  --ss-text-tertiary: #7A7A7A;
+  --ss-text-disabled: #9B9B9B;
+
+  /* Hairlines */
+  --ss-border: rgba(0, 0, 0, 0.08);
+  --ss-border-subtle: rgba(0, 0, 0, 0.05);
+  --ss-border-strong: rgba(0, 0, 0, 0.12);
+
+  /* Single accent (--brand) */
+  --ss-brand: #721FE5;
+  --ss-brand-tint: rgba(114, 31, 229, 0.10);
+  --ss-brand-dim: rgba(114, 31, 229, 0.06);
+  --ss-brand-glow: 114 31 229;
+
+  /* Status */
+  --ss-success: #6B9B7A;
+  --ss-warning: #D97706;
+  --ss-destructive: #d4183d;
+
+  /* Shadows (<= 8% opacity) */
+  --ss-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --ss-shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --ss-shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --ss-shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  /* Shape */
+  --ss-radius-card: 1rem;       /* 16px = rounded-2xl */
+  --ss-radius-input: 0.375rem;  /* 6px */
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   APP WRAPPER
+   ═══════════════════════════════════════════════════════════════ */
+
+.v2-app {
+  /* Bridge to StyleSeed tokens. */
+  --v2-app-bg: var(--ss-page);
+  --v2-app-fg: var(--ss-text-primary);
+  --v2-app-font: var(--font-sans);
+
+  /* Density scale defaults (mirrors v2 TWEAK_DEFAULTS). */
+  --v2-density: spacious;
+  --v2-motion: subtle;
+  --v2-bubble: card;
+
+  /* Layout timing — used by rail/stage transitions. */
+  --v2-shell-transition: var(--t-slow) var(--ease);
+
+  background-color: var(--ss-page);
+  color: var(--ss-text-primary);
+  word-break: keep-all;
+}
+
+.v2-app,
+.v2-app * {
+  box-sizing: border-box;
+}
+
+/* Subtle page depth — StyleSeed uses very light, barely visible gradients. */
+.v2-app::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(114, 31, 229, 0.025), transparent 60%),
+    radial-gradient(900px 500px at -5% 110%, rgba(0, 0, 0, 0.02), transparent 60%);
+}
+
+/* Ensure shell children render above the decorative background. */
+.v2-app > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Density variants (data-density mirrors v2 tweak panel). */
+.v2-app[data-density="spacious"] {
+  --v2-app-padding: 24px;
+  --v2-app-gap: 16px;
+}
+
+.v2-app[data-density="regular"] {
+  --v2-app-padding: 16px;
+  --v2-app-gap: 12px;
+}
+
+.v2-app[data-density="compact"] {
+  --v2-app-padding: 12px;
+  --v2-app-gap: 8px;
+}
+
+/* Motion variants — gate transitions/animations (a11y.css handles
+   prefers-reduced-motion globally, this is the v2 tweak bridge). */
+.v2-app[data-motion="off"] {
+  --v2-shell-transition: 0s linear;
+}
+
+.v2-app[data-motion="subtle"] {
+  --v2-shell-transition: 160ms var(--ease);
+}
+
+.v2-app[data-motion="lively"] {
+  --v2-shell-transition: 220ms var(--ease);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HEADER — StyleSeed TopBar
+   ═══════════════════════════════════════════════════════════════ */
+
+.v2-app .v2-shell-header {
+  /* TopBar is a single horizontal band on a white card. */
+  background: var(--ss-card);
+  border-bottom: 1px solid var(--ss-border);
+  box-shadow: var(--ss-shadow-card);
+}
+
+/* Crumb treatment from StyleSeed: uppercase, wide tracking, muted. */
+.v2-app .v2-header-crumb {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.v2-app .v2-header-crumb > span:first-child {
+  color: var(--ss-text-tertiary);
+}
+
+.v2-app .v2-header-crumb > span:not(:first-child) {
+  color: var(--ss-brand);
+}
+
+/* StyleSeed status chips in the header actions area. */
+.v2-app .v2-header-actions .v2-statchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border: 1px solid var(--ss-border);
+  border-radius: 9999px;
+  background: var(--ss-surface-subtle);
+  color: var(--ss-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.v2-app .v2-header-actions .v2-statchip b {
+  color: var(--ss-text-primary);
+  font-weight: 600;
+}
+
+.v2-app .v2-header-actions .v2-statchip.live {
+  color: var(--ss-success);
+  border-color: color-mix(in oklab, var(--ss-success) 35%, transparent);
+  background: color-mix(in oklab, var(--ss-success) 8%, transparent);
+}
+
+.v2-app .v2-header-actions .v2-statchip.warn {
+  color: var(--ss-warning);
+  border-color: color-mix(in oklab, var(--ss-warning) 35%, transparent);
+  background: color-mix(in oklab, var(--ss-warning) 8%, transparent);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   STAGE / BODY — StyleSeed card-based surface
+   ═══════════════════════════════════════════════════════════════ */
+
+.v2-app .v2-stage {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: var(--v2-app-gap, 12px);
+  transition: gap var(--v2-shell-transition);
+}
+
+.v2-app .v2-body {
+  /* White card stage with rounded-2xl and soft shadow. */
+  background: var(--ss-card);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius-card);
+  box-shadow: var(--ss-shadow-card);
+
+  /* Smooth transitions for the main surface as rails collapse/expand or the
+     viewport changes. */
+  transition:
+    border-radius var(--v2-shell-transition),
+    flex var(--v2-shell-transition),
+    opacity var(--v2-shell-transition),
+    transform var(--v2-shell-transition);
+}
+
+/* Surface enter animation — applied to the keyed surface wrapper so each
+   surface cross-fades/slides in when the route changes. */
+@keyframes v2-surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.v2-app .v2-surface {
+  animation: v2-surface-enter 160ms var(--ease) both;
+}
+
+/* Respect the v2 motion tweak. */
+.v2-app[data-motion="off"] .v2-surface {
+  animation: none;
+}
+
+/* Respect reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  .v2-app .v2-surface {
+    animation: none;
+  }
+}
+
+/* Bubble style variants (data-bubble mirrors v2 tweak panel). */
+.v2-app[data-bubble="card"] .v2-body {
+  box-shadow: var(--ss-shadow-card);
+}
+
+.v2-app[data-bubble="flat"] .v2-body {
+  box-shadow: none;
+  border-color: var(--ss-border);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FOCUS MODE CHROME
+   ═══════════════════════════════════════════════════════════════ */
+
+.v2-app[data-focus-mode="true"] {
+  --v2-shell-transition: 220ms var(--ease);
+}
+
+.v2-app[data-focus-mode="true"] .v2-stage {
+  gap: 0;
+}
+
+.v2-app[data-focus-mode="true"] .v2-body {
+  position: relative;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--ss-brand) 18%, transparent),
+    inset 0 0 24px rgb(var(--ss-brand-glow) / .04);
+}
+
+/* A subdued brand indicator along the top edge so focus mode is still
+   legible when the header is hidden. */
+.v2-app[data-focus-mode="true"] .v2-body::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ss-brand), transparent);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* When focus mode is active, the focus-mode toggle is the only persistent
+   chrome; make it more prominent. */
+.v2-app[data-focus-mode="true"] .dashboard-focus-mode-toggle {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--ss-brand) 30%, transparent),
+    0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SHELL LAYOUT — rail + main content scroll contracts
+   ═══════════════════════════════════════════════════════════════ */
+
+.v2-app .v2-shell-stage {
+  /* Row layout by default: fixed-width rail + flex main content. */
+  flex-direction: row;
+}
+
+.v2-app .v2-stage {
+  /* Ensure the stage itself can shrink below its content size so the
+     inner scroll container receives a definite height. */
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Main content is a scrollport: outer <main> clips, inner div scrolls.
+   The outer overflow-hidden keeps the rounded border/box-shadow intact;
+   the inner .dashboard-main-scroll owns the scrollbar. */
+.v2-app .v2-body {
+  overflow: hidden;
+}
+
+.v2-app .dashboard-main-scroll {
+  /* Defensive: ensure the scroll container actually has a scrollable
+     overflow axis. The app.ts template already adds overflow-y-auto,
+     but this guarantees it even if utility classes are stripped. */
+  overflow-y: auto;
+  /* Keep long unbroken content from blowing out the flex item. */
+  min-width: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1100px) {
+  .v2-app .v2-shell-stage {
+    flex-direction: column;
+  }
+
+  /* Keep the rail collapsed to a compact top strip on tablet so the main
+     content still has room. The rail becomes a horizontal band with its
+     own internal vertical scroll if the nav list is tall. */
+  .v2-app #dashboard-side-rail.v2-shell-rail {
+    width: auto;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .v2-app .v2-header-actions .v2-statchip {
+    display: none;
+  }
+}

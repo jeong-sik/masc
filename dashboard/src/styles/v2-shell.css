@@ -1,36 +1,48 @@
-/* MASC v2 — chrome overrides for the left side rail and bottom-right status tray.
- * Scoped to .v2-shell-rail and .v2-status-tray so the rest of the dashboard
- * keeps the legacy token ladder until it is migrated surface-by-surface.
+/* MASC v2 — StyleSeed chrome for the left side rail, header, health strip
+ * and bottom-right status tray.
  *
- * Source: /Users/dancer/Downloads/v2/_ds/masc-design-system-a925c77f-042a-40f5-ac15-0675a4a58d3f/ui_kits/dashboard/styles/nav.css
- *         /Users/dancer/Downloads/v2/_ds/masc-design-system-a925c77f-042a-40f5-ac15-0675a4a58d3f/ui_kits/dashboard/styles/topbar.css
+ * Scoped to .v2-shell-rail, .v2-status-tray, .v2-shell-header and
+ * .v2-health-strip so the rest of the dashboard keeps its own theme
+ * until migrated surface-by-surface.
+ *
+ * Light default: page #FAFAFA, cards #FFFFFF, single accent --ss-brand,
+ * no pure black. Semantic tokens only; no hardcoded hex in shell chrome.
  */
 
 .v2-shell-rail,
 .v2-status-tray,
 .v2-shell-header,
 .v2-health-strip {
-  /* v5 Observatory dark-fantasy palette, calibrated against the v2
-     colors_and_type.css "Dark Fantasy" theme. */
-  --v2-ink:         #0a0e18;
-  --v2-velvet:      #0f1524;
-  --v2-card:        #131a2a;
-  --v2-card-soft:   #161d30;
-  --v2-raised:      #1a2238;
-  --v2-border-soft: rgba(120, 140, 180, 0.09);
-  --v2-border:      rgba(120, 140, 180, 0.13);
-  --v2-border-strong: rgba(140, 160, 200, 0.18);
-  --v2-text:        #b8c4dc;
-  --v2-text-bright: #e8eef8;
-  --v2-text-dim:    #5a6a88;
-  --v2-text-faint:  #4a5a78;
-  --v2-accent-brass: #8a6a28;
-  --v2-accent-brass-dim: #5a4618;
-  --v2-ok:          #5a7a3a;
-  --v2-warn:        #a06a1a;
-  --v2-bad:         #a01818;
+  /* Shell palette — aliased to the global dark-fantasy tokens (owned by
+     v2-theme.css) so the shell chrome stays in lockstep with the rest of
+     the dashboard, while keeping the StyleSeed variable vocabulary. */
+  --v2-page:          var(--color-bg-page);
+  --v2-card:          var(--color-bg-surface);
+  --v2-surface:       var(--color-bg-panel-alt);
+  --v2-surface-subtle: var(--color-bg-elevated);
+  --v2-surface-muted: var(--color-bg-hover);
 
-  /* Re-use the generated type stacks (Cinzel display, Noto Sans KR UI). */
+  --v2-border-subtle: var(--color-border-divider);
+  --v2-border:        var(--color-border-default);
+  --v2-border-strong: var(--color-border-strong);
+
+  --v2-text:          var(--color-fg-secondary);
+  --v2-text-bright:   var(--color-fg-primary);
+  --v2-text-dim:      var(--color-fg-muted);
+  --v2-text-faint:    var(--color-fg-disabled);
+
+  --v2-accent-brand:  var(--color-accent-fg);
+  --v2-accent-brand-dim: var(--color-accent-fg-dim);
+  --v2-ok:            var(--color-status-ok);
+  --v2-warn:          var(--color-status-warn);
+  --v2-bad:           var(--color-status-err);
+
+  /* Active/selection accent used by shell components. */
+  --select:           var(--ss-brand);
+  --select-10:        var(--ss-brand-tint);
+  --select-20:        color-mix(in srgb, var(--ss-brand) 20%, transparent);
+
+  /* Re-use the generated type stacks (Pretendard UI, neutral display). */
   --v2-font-display: var(--font-display);
   --v2-font-ui:      var(--font-ui);
   --v2-font-mono:    var(--font-mono);
@@ -41,11 +53,10 @@
    ═══════════════════════════════════════════════════════════════ */
 
 #dashboard-side-rail.v2-shell-rail {
-  background:
-    linear-gradient(180deg, #18110c 0%, #0e0806 100%);
-  border-right: 1px solid var(--v2-border-soft);
+  background: var(--v2-card);
+  border-right: 1px solid var(--v2-border);
   color: var(--v2-text);
-  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.35);
+  box-shadow: var(--ss-shadow-card);
 }
 
 #dashboard-side-rail.v2-shell-rail nav {
@@ -58,7 +69,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px 10px;
-  border-bottom: 1px solid var(--v2-border-soft);
+  border-bottom: 1px solid var(--v2-border-subtle);
   margin-bottom: 8px;
 }
 
@@ -84,10 +95,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--v2-border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
   color: var(--v2-text-dim);
   cursor: pointer;
@@ -95,9 +106,9 @@
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-brand .nav-collapse:hover {
-  border-color: var(--v2-accent-brass-dim);
-  color: var(--v2-accent-brass);
-  background: rgba(138, 106, 40, 0.06);
+  border-color: var(--v2-accent-brand);
+  color: var(--v2-accent-brand);
+  background: var(--ss-brand-tint);
 }
 
 /* Section label (e.g. "Surfaces") */
@@ -123,7 +134,7 @@
 
 /* Surface groups */
 #dashboard-side-rail.v2-shell-rail .nav-group {
-  border-top: 1px solid var(--v2-border-soft);
+  border-top: 1px solid var(--v2-border-subtle);
   padding-top: 4px;
   margin-top: 4px;
 }
@@ -140,8 +151,8 @@
   align-items: center;
   gap: 9px;
   margin: 0 8px;
-  padding: 7px 10px;
-  border-radius: 5px;
+  padding: 9px 10px;
+  border-radius: 8px;
   border: 1px solid transparent;
   color: var(--v2-text);
   font-family: var(--v2-font-ui);
@@ -151,41 +162,42 @@
   text-decoration: none;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  min-height: 40px;
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link:hover {
-  background: rgba(255, 255, 255, 0.025);
-  color: var(--v2-accent-brass);
+  background: var(--v2-surface-subtle);
+  color: var(--v2-accent-brand);
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link:hover .nav-icon {
-  color: var(--v2-accent-brass);
+  color: var(--v2-accent-brand);
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link.active {
-  background: rgba(90, 122, 58, 0.10);
+  background: var(--ss-brand-tint);
   color: var(--v2-text-bright);
-  box-shadow: inset 3px 0 0 var(--v2-ok);
+  box-shadow: inset 3px 0 0 var(--v2-accent-brand);
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link.active .nav-icon {
-  color: var(--v2-text-bright);
+  color: var(--v2-accent-brand);
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link .nav-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
   color: var(--v2-text-dim);
   transition: color 120ms ease;
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link .nav-icon > svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link .nav-label {
@@ -200,7 +212,7 @@
 #dashboard-side-rail.v2-shell-rail .nav-sublist {
   margin: 2px 8px 4px 20px;
   padding-left: 8px;
-  border-left: 1px solid var(--v2-border-soft);
+  border-left: 1px solid var(--v2-border-subtle);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -209,8 +221,8 @@
 #dashboard-side-rail.v2-shell-rail .nav-sublink {
   display: block;
   width: 100%;
-  padding: 4px 10px;
-  border-radius: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
   border: 1px solid transparent;
   color: var(--v2-text-dim);
   font-family: var(--v2-font-ui);
@@ -220,17 +232,18 @@
   text-align: left;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
+  min-height: 32px;
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-sublink:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--v2-surface-subtle);
   color: var(--v2-text);
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-sublink.active {
-  background: rgba(90, 122, 58, 0.08);
+  background: var(--ss-brand-tint);
   color: var(--v2-text-bright);
-  box-shadow: inset 2px 0 0 var(--v2-ok);
+  box-shadow: inset 2px 0 0 var(--v2-accent-brand);
 }
 
 /* Collapsed rail: icon-only surface buttons */
@@ -238,10 +251,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   margin: 2px auto;
-  border-radius: 5px;
+  border-radius: 10px;
   border: 1px solid transparent;
   color: var(--v2-text-dim);
   cursor: pointer;
@@ -249,25 +262,25 @@
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link-collapsed:hover {
-  background: rgba(255, 255, 255, 0.025);
-  color: var(--v2-accent-brass);
+  background: var(--v2-surface-subtle);
+  color: var(--v2-accent-brand);
   border-color: var(--v2-border);
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link-collapsed.active {
-  background: rgba(90, 122, 58, 0.10);
+  background: var(--ss-brand-tint);
   color: var(--v2-text-bright);
-  border-color: var(--v2-ok);
+  border-color: var(--v2-accent-brand);
 }
 
 #dashboard-side-rail.v2-shell-rail .nav-link-collapsed .nav-icon > svg {
-  width: 15px;
-  height: 15px;
+  width: 18px;
+  height: 18px;
 }
 
 /* Health indicator footer */
 #dashboard-side-rail.v2-shell-rail .nav-footer {
-  border-top: 1px solid var(--v2-border-soft);
+  border-top: 1px solid var(--v2-border-subtle);
   padding: 8px 12px;
   color: var(--v2-text-dim);
   font-family: var(--v2-font-mono);
@@ -284,9 +297,9 @@ aside.v2-status-tray .v2-tray-bar {
   gap: 4px;
   padding: 4px;
   border: 1px solid var(--v2-border);
-  border-radius: 6px;
-  background: var(--v2-ink);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  background: var(--v2-card);
+  box-shadow: var(--ss-shadow-elevated);
   backdrop-filter: blur(12px);
 }
 
@@ -294,10 +307,10 @@ aside.v2-status-tray .tray-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding: 0 8px;
+  height: 36px;
+  padding: 0 10px;
   border: 1px solid var(--v2-border);
-  border-radius: 4px;
+  border-radius: 8px;
   background: transparent;
   color: var(--v2-text-dim);
   font-family: var(--v2-font-ui);
@@ -308,12 +321,12 @@ aside.v2-status-tray .tray-button {
 }
 
 aside.v2-status-tray .tray-button:hover {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--v2-surface-subtle);
 }
 
 aside.v2-status-tray .tray-button:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--v2-accent-brass), 0 0 0 3px rgba(138, 106, 40, 0.22);
+  box-shadow: 0 0 0 1px var(--v2-accent-brand), 0 0 0 3px var(--ss-brand-tint);
 }
 
 aside.v2-status-tray .tray-button .tray-button-label {
@@ -336,14 +349,14 @@ aside.v2-status-tray .tray-button .tray-button-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
 aside.v2-status-tray .tray-button .tray-button-icon > svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 /* Tone variants */
@@ -377,11 +390,11 @@ aside.v2-status-tray .tray-button.active {
 
 /* Tray popover */
 aside.v2-status-tray .tray-popover {
-  background: var(--v2-ink);
+  background: var(--v2-card);
   border: 1px solid var(--v2-border-strong);
-  border-radius: 6px;
+  border-radius: 12px;
   color: var(--v2-text);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--ss-shadow-modal);
 }
 
 aside.v2-status-tray .tray-popover.tone-ok   { border-color: color-mix(in oklab, var(--v2-ok)   45%, var(--v2-border-strong)); }
@@ -415,10 +428,10 @@ aside.v2-status-tray .tray-popover .tray-popover-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--v2-border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
   color: var(--v2-text-dim);
   cursor: pointer;
@@ -426,15 +439,15 @@ aside.v2-status-tray .tray-popover .tray-popover-close {
 }
 
 aside.v2-status-tray .tray-popover .tray-popover-close:hover {
-  border-color: var(--v2-accent-brass-dim);
-  color: var(--v2-accent-brass);
+  border-color: var(--v2-accent-brand);
+  color: var(--v2-accent-brand);
 }
 
 /* Stat cells used inside the popover */
 aside.v2-status-tray .tray-stat {
   border: 1px solid var(--v2-border);
-  border-radius: 4px;
-  background: var(--v2-card);
+  border-radius: 8px;
+  background: var(--v2-surface-subtle);
   padding: 8px 10px;
 }
 
@@ -466,8 +479,8 @@ aside.v2-status-tray .tray-stat.tone-err .tray-stat-value {
 /* Journal list inside the activity popover */
 aside.v2-status-tray .tray-journal-item {
   border: 1px solid var(--v2-border);
-  border-radius: 4px;
-  background: var(--v2-card-soft);
+  border-radius: 8px;
+  background: var(--v2-surface);
   padding: 8px 10px;
 }
 
@@ -502,8 +515,8 @@ aside.v2-status-tray .tray-action-link {
   gap: 4px;
   padding: 5px 10px;
   border: 1px solid var(--v2-border);
-  border-radius: 4px;
-  background: var(--v2-card);
+  border-radius: 6px;
+  background: var(--v2-surface-subtle);
   color: var(--v2-text);
   font-family: var(--v2-font-ui);
   font-size: 11px;
@@ -513,122 +526,131 @@ aside.v2-status-tray .tray-action-link {
 }
 
 aside.v2-status-tray .tray-action-link:hover {
-  border-color: var(--v2-accent-brass-dim);
-  color: var(--v2-accent-brass);
+  border-color: var(--v2-accent-brand);
+  color: var(--v2-accent-brand);
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   HEADER + HEALTH STRIP — v2 token bridge
-   Re-sets the dashboard legacy token ladder to the v2 navy/brass
+   HEADER + HEALTH STRIP — StyleSeed token bridge
+   Re-sets the dashboard legacy token ladder to the StyleSeed light
    palette for these two chrome surfaces only.
    ═══════════════════════════════════════════════════════════════ */
 
 :is(.v2-shell-header, .v2-health-strip) {
   /* Surfaces */
-  --bg-0: var(--v2-ink);
-  --bg-1: var(--v2-velvet);
-  --bg-2: var(--v2-card);
-  --bg-3: var(--v2-card-soft);
-  --bg-4: var(--v2-raised);
+  --bg-0: var(--ss-page);
+  --bg-1: var(--ss-card);
+  --bg-2: var(--ss-surface);
+  --bg-3: var(--ss-surface-subtle);
+  --bg-4: var(--ss-surface-muted);
 
-  --color-bg-0: var(--v2-ink);
-  --color-bg-1: var(--v2-velvet);
-  --color-bg-2: var(--v2-card);
-  --color-bg-3: var(--v2-card-soft);
-  --color-bg-4: var(--v2-raised);
-  --color-bg-page: var(--v2-ink);
-  --color-bg-surface: var(--v2-velvet);
-  --color-bg-panel-alt: var(--v2-card);
-  --color-bg-elevated: var(--v2-card-soft);
-  --color-bg-hover: var(--v2-raised);
+  --color-bg-0: var(--ss-page);
+  --color-bg-1: var(--ss-card);
+  --color-bg-2: var(--ss-surface);
+  --color-bg-3: var(--ss-surface-subtle);
+  --color-bg-4: var(--ss-surface-muted);
+  --color-bg-page: var(--ss-page);
+  --color-bg-surface: var(--ss-surface);
+  --color-bg-panel-alt: var(--ss-card);
+  --color-bg-elevated: var(--ss-surface-subtle);
+  --color-bg-hover: var(--ss-surface-muted);
 
   /* Hairlines */
-  --line-1: var(--v2-border);
-  --line-2: var(--v2-border-strong);
-  --line-3: var(--v2-border-soft);
+  --line-1: var(--ss-border);
+  --line-2: var(--ss-border-strong);
+  --line-3: var(--ss-border-subtle);
 
-  --color-line-1: var(--v2-border);
-  --color-line-2: var(--v2-border-strong);
-  --color-line-3: var(--v2-border-soft);
-  --color-border-default: var(--v2-border);
-  --color-border-strong: var(--v2-border-strong);
-  --color-border-divider: var(--v2-border-soft);
+  --color-line-1: var(--ss-border);
+  --color-line-2: var(--ss-border-strong);
+  --color-line-3: var(--ss-border-subtle);
+  --color-border-default: var(--ss-border);
+  --color-border-strong: var(--ss-border-strong);
+  --color-border-divider: var(--ss-border-subtle);
 
   /* Text */
-  --fg-1: var(--v2-text-bright);
-  --fg-2: var(--v2-text);
-  --fg-3: var(--v2-text-dim);
-  --fg-4: var(--v2-text-faint);
+  --fg-1: var(--ss-text-primary);
+  --fg-2: var(--ss-text-secondary);
+  --fg-3: var(--ss-text-tertiary);
+  --fg-4: var(--ss-text-disabled);
 
-  --color-fg-1: var(--v2-text-bright);
-  --color-fg-2: var(--v2-text);
-  --color-fg-3: var(--v2-text-dim);
-  --color-fg-4: var(--v2-text-faint);
-  --color-fg-primary: var(--v2-text-bright);
-  --color-fg-secondary: var(--v2-text);
-  --color-fg-muted: var(--v2-text-dim);
-  --color-fg-disabled: var(--v2-text-faint);
+  --color-fg-1: var(--ss-text-primary);
+  --color-fg-2: var(--ss-text-secondary);
+  --color-fg-3: var(--ss-text-tertiary);
+  --color-fg-4: var(--ss-text-disabled);
+  --color-fg-primary: var(--ss-text-primary);
+  --color-fg-secondary: var(--ss-text-secondary);
+  --color-fg-muted: var(--ss-text-tertiary);
+  --color-fg-disabled: var(--ss-text-disabled);
 
-  /* Brass accent */
-  --brass-1: #c4a265;
-  --brass-2: #a08040;
-  --brass-3: var(--v2-accent-brass-dim);
-  --brass-glow: 196 162 101;
-  --brass-soft: rgb(196 162 101 / .10);
-  --brass-fg: var(--brass-1);
+  /* Brand accent */
+  --brass-1: var(--ss-brand);
+  --brass-2: color-mix(in srgb, var(--ss-brand) 80%, black);
+  --brass-3: color-mix(in srgb, var(--ss-brand) 60%, black);
+  --brass-glow: var(--ss-brand-glow);
+  --brass-soft: var(--ss-brand-tint);
+  --brass-fg: var(--ss-brand);
 
-  --color-brass-1: var(--brass-1);
-  --color-brass-2: var(--brass-2);
-  --color-brass-3: var(--brass-3);
-  --color-brass-glow: var(--brass-glow);
-  --color-brass-soft: var(--brass-soft);
-  --color-brass-fg: var(--brass-fg);
-  --color-accent-fg: var(--brass-1);
-  --color-accent-fg-dim: var(--brass-3);
-  --color-accent-glow: var(--brass-glow);
-  --accent-12: rgb(var(--brass-glow) / .12);
-  --accent-22: rgb(var(--brass-glow) / .22);
+  --color-brass-1: var(--ss-brand);
+  --color-brass-2: color-mix(in srgb, var(--ss-brand) 80%, black);
+  --color-brass-3: color-mix(in srgb, var(--ss-brand) 60%, black);
+  --color-brass-glow: var(--ss-brand-glow);
+  --color-brass-soft: var(--ss-brand-tint);
+  --color-brass-fg: var(--ss-brand);
+  --color-accent-fg: var(--ss-brand);
+  --color-accent-fg-dim: color-mix(in srgb, var(--ss-brand) 70%, black);
+  --color-accent-glow: var(--ss-brand-glow);
+  --accent-6:  rgb(var(--ss-brand-glow) / .06);
+  --accent-8:  rgb(var(--ss-brand-glow) / .08);
+  --accent-10: rgb(var(--ss-brand-glow) / .10);
+  --accent-12: rgb(var(--ss-brand-glow) / .12);
+  --accent-22: rgb(var(--ss-brand-glow) / .22);
+  --accent-15: rgb(var(--ss-brand-glow) / .15);
+
+  /* Selection (active nav, tabs) */
+  --select: var(--ss-brand);
+  --select-10: var(--ss-brand-tint);
+  --select-20: color-mix(in srgb, var(--ss-brand) 20%, transparent);
 
   /* Status */
-  --ok: var(--v2-ok);
-  --warn: var(--v2-warn);
-  --err: var(--v2-bad);
-  --ok-glow: 90 122 58;
-  --warn-glow: 160 106 26;
-  --err-glow: 160 24 24;
+  --ok: var(--ss-success);
+  --warn: var(--ss-warning);
+  --err: var(--ss-destructive);
+  --ok-glow: 107 158 107;
+  --warn-glow: 217 119 6;
+  --err-glow: 212 24 61;
 
-  --color-ok: var(--v2-ok);
-  --color-warn: var(--v2-warn);
-  --color-err: var(--v2-bad);
-  --color-status-ok: var(--v2-ok);
-  --color-status-warn: var(--v2-warn);
-  --color-status-err: var(--v2-bad);
+  --color-ok: var(--ss-success);
+  --color-warn: var(--ss-warning);
+  --color-err: var(--ss-destructive);
+  --color-status-ok: var(--ss-success);
+  --color-status-warn: var(--ss-warning);
+  --color-status-err: var(--ss-destructive);
   --color-ok-glow: var(--ok-glow);
   --color-warn-glow: var(--warn-glow);
   --color-err-glow: var(--err-glow);
 
   /* Status soft/alpha slots used by chips and badges */
-  --ok-soft: rgb(90 122 58 / .10);
-  --ok-10: rgb(90 122 58 / .10);
-  --ok-30: rgb(90 122 58 / .30);
-  --ok-fg: #9abc7a;
-  --ok-border: rgb(90 122 58 / .35);
+  --ok-soft: rgb(107 158 107 / .10);
+  --ok-10: rgb(107 158 107 / .10);
+  --ok-30: rgb(107 158 107 / .30);
+  --ok-fg: color-mix(in srgb, var(--ss-success) 85%, black);
+  --ok-border: rgb(107 158 107 / .35);
 
-  --warn-soft: rgb(160 106 26 / .12);
-  --warn-10: rgb(160 106 26 / .10);
-  --warn-12: rgb(160 106 26 / .12);
-  --warn-20: rgb(160 106 26 / .20);
-  --warn-fg: #d49a3a;
-  --warn-bright: #e0a040;
-  --warn-border: rgb(160 106 26 / .35);
+  --warn-soft: rgb(217 119 6 / .12);
+  --warn-10: rgb(217 119 6 / .10);
+  --warn-12: rgb(217 119 6 / .12);
+  --warn-20: rgb(217 119 6 / .20);
+  --warn-fg: color-mix(in srgb, var(--ss-warning) 85%, black);
+  --warn-bright: color-mix(in srgb, var(--ss-warning) 90%, black);
+  --warn-border: rgb(217 119 6 / .35);
 
-  --err-soft: rgb(160 24 24 / .12);
-  --bad-soft: rgb(160 24 24 / .15);
-  --bad-10: rgb(160 24 24 / .10);
-  --bad-30: rgb(160 24 24 / .30);
-  --err-fg: #d06060;
-  --bad-light: #e07070;
-  --err-border: rgb(160 24 24 / .40);
+  --err-soft: rgb(212 24 61 / .12);
+  --bad-soft: rgb(212 24 61 / .15);
+  --bad-10: rgb(212 24 61 / .10);
+  --bad-30: rgb(212 24 61 / .30);
+  --err-fg: color-mix(in srgb, var(--ss-destructive) 85%, black);
+  --bad-light: color-mix(in srgb, var(--ss-destructive) 90%, black);
+  --err-border: rgb(212 24 61 / .40);
 
   --color-ok-soft: var(--ok-soft);
   --color-warn-soft: var(--warn-soft);
@@ -637,37 +659,37 @@ aside.v2-status-tray .tray-action-link:hover {
 
 /* ── Header chrome ── */
 .v2-shell-header {
-  /* Subtle brass hairline at the bottom edge (matches v2 topbar). */
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.4), inset 0 -1px 0 rgba(138, 106, 40, 0.12);
+  /* Subtle brand hairline at the bottom edge. */
+  box-shadow: 0 1px 0 var(--ss-border-subtle);
 }
 
 .v2-shell-header .v2-header-brand {
-  border-color: var(--v2-border-strong);
-  background: var(--v2-card-soft);
+  border-color: var(--ss-border);
+  background: var(--ss-surface-subtle);
 }
 
 .v2-shell-header .v2-header-mark {
-  border-color: var(--v2-border);
-  background: rgba(138, 106, 40, 0.12);
-  color: var(--brass-1);
+  border-color: var(--ss-border);
+  background: var(--ss-brand-tint);
+  color: var(--ss-brand);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.12em;
 }
 
 .v2-shell-header .v2-header-crumb {
-  color: var(--v2-text-dim);
+  color: var(--ss-text-tertiary);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.05em;
 }
 
 .v2-shell-header .v2-header-crumb .text-\[var\(--color-warn\)\] {
-  color: var(--brass-1);
+  color: var(--ss-brand);
 }
 
 .v2-shell-header .v2-header-title {
-  color: var(--v2-text-bright);
+  color: var(--ss-text-primary);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -675,41 +697,41 @@ aside.v2-status-tray .tray-action-link:hover {
 
 /* Surface tabs inside the header */
 .v2-shell-tabs [role="tablist"] {
-  border-color: var(--v2-border);
-  background: var(--v2-card);
+  border-color: var(--ss-border);
+  background: var(--ss-surface-subtle);
 }
 
 .v2-shell-tabs [role="tab"] {
   border-color: transparent;
-  color: var(--v2-text-dim);
+  color: var(--ss-text-tertiary);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.04em;
 }
 
 .v2-shell-tabs [role="tab"]:hover {
-  border-color: var(--v2-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--v2-text);
+  border-color: var(--ss-border);
+  background: var(--ss-surface);
+  color: var(--ss-text-secondary);
 }
 
 .v2-shell-tabs [role="tab"][aria-selected="true"] {
-  border-color: var(--v2-accent-brass-dim);
-  background: rgba(196, 162, 101, 0.14);
-  color: var(--brass-1);
+  border-color: var(--ss-brand);
+  background: var(--ss-brand-tint);
+  color: var(--ss-brand);
   font-weight: 600;
-  box-shadow: inset 0 -1px 0 var(--v2-accent-brass-dim);
+  box-shadow: inset 0 -1px 0 var(--ss-brand);
 }
 
 /* Header action area (emergency stop, auth, connection, theme, build) */
 .v2-shell-header .v2-header-actions {
-  color: var(--v2-text);
+  color: var(--ss-text-secondary);
 }
 
 /* ── Health strip chrome ── */
 .v2-health-strip {
-  border-color: var(--v2-border-soft);
-  background: var(--v2-ink);
+  border-color: var(--ss-border-subtle);
+  background: var(--ss-page);
 }
 
 .v2-health-strip .dashboard-health-chip {

@@ -403,14 +403,43 @@ let handle_tool_execute_typed
                   (Printexc.to_string exn))
           in
           let dispatch_result =
-            Keeper_tool_execute_shell_ir.dispatch_classified
-              ~keeper_id:meta.name
-              ~base_path:root
-              ~workdir:cwd
-              ~sandbox:dispatch_sandbox
-              ?base_host_env
-              ~on_output_chunk
-              envelope
+            if Env_config_runtime.Shell_ir_approval_gate.enabled ()
+            then (
+              let agent_id = Masc_exec.Agent_id.of_string meta.name in
+              (* RFC-0254 §5.2/§5.5: the keeper lane is autonomous — no human or
+                 resolver can answer an [Ask], so the overlay is [autonomous]
+                 (all [Observe] => non-catastrophic [Allow] + telemetry).  This
+                 unblocks the toolchain (defect §2.2.2) while the
+                 trust-independent catastrophic floor in [Approval_policy.decide]
+                 (destructive git, redirect write-escape, [mkfs]) still denies.
+                 The floor is applied identically on Host and inside Docker
+                 (RFC §13 Q2: defense-in-depth — a destructive git push reaches
+                 the real remote even from a container), so no sandbox-conditional
+                 branch is needed: both profiles use the same overlay. *)
+              let approval_config =
+                { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.autonomous
+                ; per_agent = []
+                }
+              in
+              Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
+                ~agent_id
+                ~approval_config
+                ~keeper_id:meta.name
+                ~base_path:root
+                ~workdir:cwd
+                ~sandbox:dispatch_sandbox
+                ?base_host_env
+                ~on_output_chunk
+                envelope)
+            else
+              Keeper_tool_execute_shell_ir.dispatch_classified
+                ~keeper_id:meta.name
+                ~base_path:root
+                ~workdir:cwd
+                ~sandbox:dispatch_sandbox
+                ?base_host_env
+                ~on_output_chunk
+                envelope
           in
           match dispatch_result with
           | Error (Keeper_tool_execute_shell_ir.Gate_reject diagnostic) ->

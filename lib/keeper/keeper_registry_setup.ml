@@ -135,6 +135,7 @@ let register_with_state
     ; last_error = None
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
+    ; livelock_state = Atomic.make None
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
@@ -217,6 +218,7 @@ let register_restarting ~base_path name meta
     ; last_error = None
     ; last_failure_reason = None
     ; turn_consecutive_failures = 0
+    ; livelock_state = Atomic.make None
     ; board_wakeups = StringMap.empty
     ; board_cursor_ts = 0.0
     ; board_cursor_post_id = None
@@ -496,6 +498,42 @@ let set_turn_phase_direct ~base_path name ~event_kind (turn_phase : packed_turn_
                ~where:event_kind
                ~from:obs.turn_phase
                ~to_:turn_phase
+               ~violation);
+        obs));
+  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+;;
+
+let set_turn_phase_with ~base_path name ~event_kind ~target ~update_obs =
+  (* RFC-0072 Phase 4b + Phase 5 variant: resolve the turn_phase transition
+     and let the caller apply additional observation mutations atomically in
+     the same CAS.  This keeps multi-field setters (gate rejection,
+     compaction retry) on the same resolver / guard / broadcast pathway as
+     [set_turn_phase] instead of calling the legacy
+     [validate_turn_phase_transition] directly.  Idempotent self-loops are
+     no-ops and do not emit a broadcast, matching [set_turn_phase].  The
+     [event_kind] label is forwarded to [raise_turn_phase_transition_violation]
+     via [wrap_unit] so guard metrics name the actual caller. *)
+  let changed = ref false in
+  let now = Time_compat.now () in
+  update_entry_if_registered ~base_path name (fun e ->
+    update_current_turn e (fun obs ->
+      match resolve_turn_phase_transition ~from:obs.turn_phase ~target with
+      | Resolved_turn_idempotent -> obs
+      | Resolved_turn_transition _ ->
+        changed := true;
+        let obs' =
+          { (stamp_turn_progress ~now ~event_kind obs) with turn_phase = target }
+        in
+        update_obs obs'
+      | Resolved_turn_violation violation ->
+        Keeper_fsm_guard_runtime.wrap_unit
+          ~action:"turn_phase_transition"
+          ~stage:"guard"
+          (fun () ->
+             raise_turn_phase_transition_violation
+               ~where:event_kind
+               ~from:obs.turn_phase
+               ~to_:target
                ~violation);
         obs));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now

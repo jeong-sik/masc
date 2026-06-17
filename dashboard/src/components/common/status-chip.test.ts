@@ -66,29 +66,29 @@ describe('statusChipClasses (pure)', () => {
     expect(cls).toContain('border')
     expect(cls).toContain('px-2')
     expect(cls).toContain('py-0.5')
-    expect(cls).toContain('text-3xs')
+    expect(cls).toContain('text-[11px]')
     expect(cls).toContain('uppercase')
-    expect(cls).toContain('tracking-wider')
+    expect(cls).toContain('tracking-[0.05em]')
     // neutral fallback
-    expect(cls).toContain('text-[var(--color-fg-muted)]')
+    expect(cls).toContain('text-text-tertiary')
   })
 
   it("semantic 'ok' maps to ok CSS-var palette", () => {
     const cls = statusChipClasses('ok')
-    expect(cls).toContain('text-[var(--color-status-ok)]')
-    expect(cls).toContain('bg-[var(--ok-10)]')
+    expect(cls).toContain('text-success')
+    expect(cls).toContain('bg-success/10')
   })
 
-  it("semantic 'bad' maps to bad palette (text-[var(--bad-light)])", () => {
+  it("semantic 'bad' maps to bad palette (text-destructive)", () => {
     const cls = statusChipClasses('bad')
-    expect(cls).toContain('text-[var(--bad-light)]')
+    expect(cls).toContain('text-destructive')
   })
 
   it('raw Tailwind class string passes through verbatim', () => {
     const cls = statusChipClasses('bg-[var(--color-status-ok)]')
     // Raw tone gets appended; no semantic-palette leakage.
     expect(cls).toContain('bg-[var(--color-status-ok)]')
-    expect(cls).not.toContain('text-[var(--color-status-ok)]') // not expanded
+    expect(cls).not.toContain('text-success') // not expanded
   })
 
   it('extra class appended (caller composition)', () => {
@@ -103,7 +103,7 @@ describe('statusChipClasses (pure)', () => {
   it('base shape tokens present for every tone (regression guard, uppercase=true default)', () => {
     for (const tone of ['ok', 'warn', 'bad', 'info', 'neutral', '', 'bg-[var(--color-status-ok)]']) {
       const cls = statusChipClasses(tone)
-      for (const token of ['rounded-[var(--r-0)]', 'text-3xs', 'uppercase', 'tracking-wider']) {
+      for (const token of ['rounded-[var(--r-0)]', 'text-[11px]', 'uppercase', 'tracking-[0.05em]']) {
         expect(cls).toContain(token)
       }
     }
@@ -111,14 +111,14 @@ describe('statusChipClasses (pure)', () => {
 })
 
 describe('statusChipClasses uppercase flag', () => {
-  it('uppercase=false drops uppercase + tracking-wider (plain pill)', () => {
+  it('uppercase=false drops uppercase + tracking-[0.05em] (plain pill)', () => {
     const cls = statusChipClasses('neutral', undefined, false)
     expect(cls).not.toContain('uppercase')
-    expect(cls).not.toContain('tracking-wider')
+    expect(cls).not.toContain('tracking-[0.05em]')
     // shape + tone still present
     expect(cls).toContain('rounded-[var(--r-0)]')
-    expect(cls).toContain('text-3xs')
-    expect(cls).toContain('text-[var(--color-fg-muted)]')
+    expect(cls).toContain('text-[11px]')
+    expect(cls).toContain('text-text-tertiary')
   })
 
   it('uppercase=true (explicit) matches the default', () => {
@@ -128,7 +128,7 @@ describe('statusChipClasses uppercase flag', () => {
   it('shape tokens always present regardless of uppercase flag', () => {
     for (const uppercase of [true, false]) {
       const cls = statusChipClasses('warn', undefined, uppercase)
-      for (const token of ['inline-flex', 'rounded-[var(--r-0)]', 'border', 'px-2', 'py-0.5', 'text-3xs']) {
+      for (const token of ['inline-flex', 'rounded-[var(--r-0)]', 'border', 'px-2', 'py-0.5', 'text-[11px]']) {
         expect(cls).toContain(token)
       }
     }

@@ -1,0 +1,40 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 — stylesheet index
+   Cascade order matters: base → shell → chrome → sections → overlays.
+   v5 refinements are merged into each component file.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* foundations */
+@import url("base.css");
+@import url("shell.css");
+@import url("primitives.css");
+
+/* chrome */
+@import url("topbar.css");
+@import url("nav.css");
+@import url("hud.css");
+@import url("alert.css");
+
+/* main region */
+@import url("main.css");
+@import url("goals.css");
+@import url("swim.css");
+@import url("swim-vertical.css");
+@import url("pressure.css");
+@import url("a2a.css");
+
+/* right rail */
+@import url("aside.css");
+@import url("approvals.css");
+@import url("focus.css");
+@import url("systems.css");
+@import url("chronicle.css");
+
+/* overlays */
+@import url("drawer.css");
+@import url("palette.css");
+@import url("cmdk.css");
+@import url("tweaks.css");
+
+/* modifiers */
+@import url("density.css");

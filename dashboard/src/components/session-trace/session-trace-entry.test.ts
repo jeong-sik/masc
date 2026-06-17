@@ -72,6 +72,12 @@ describe('SessionTraceEntry', () => {
     expect(resultText).toContain('"ok":true')
   })
 
+  it('applies v2 monitoring marker classes to trace row and detail', () => {
+    const { container } = render(h(SessionTraceEntry, { event: sampleToolCallEvent() }))
+    expect(container.querySelector('.v2-monitoring-trace-row')).not.toBeNull()
+    expect(container.querySelector('.v2-monitoring-trace-detail')).not.toBeNull()
+  })
+
   it('links safe tool-call file args back to the Code IDE route', () => {
     const { container } = render(h(SessionTraceEntry, {
       event: sampleToolCallEvent({

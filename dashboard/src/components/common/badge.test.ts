@@ -18,8 +18,8 @@ describe('countBadgeClasses (pure)', () => {
   it('combines base, tone, and custom classes without trailing whitespace', () => {
     const cls = countBadgeClasses('warn', 'ml-2')
     expect(cls).toContain('inline-flex')
-    expect(cls).toContain('bg-[var(--warn-12)]')
-    expect(cls).toContain('text-[var(--color-status-warn)]')
+    expect(cls).toContain('bg-warning/10')
+    expect(cls).toContain('text-warning')
     expect(cls).toContain('ml-2')
     expect(countBadgeClasses('default')).not.toMatch(/\s$/)
   })
@@ -55,8 +55,8 @@ describe('CountBadge', () => {
     const container = renderCountBadge(null, '1')
     const el = container.querySelector('[data-count-badge]')
     expect(el).not.toBeNull()
-    expect(el?.classList.contains('bg-[var(--color-bg-hover)]')).toBe(true)
-    expect(el?.classList.contains('text-[var(--color-fg-muted)]')).toBe(true)
+    expect(el?.classList.contains('bg-surface-muted')).toBe(true)
+    expect(el?.classList.contains('text-text-secondary')).toBe(true)
     expect(el?.getAttribute('data-count-badge-tone')).toBe('default')
     expect(el?.getAttribute('data-count-badge-has-custom-class')).toBe('false')
     expect(el?.getAttribute('data-count-badge-custom-class-length')).toBe('0')
@@ -65,15 +65,15 @@ describe('CountBadge', () => {
   it('applies warn tone', () => {
     const container = renderCountBadge({ tone: 'warn' }, '!')
     const el = container.querySelector('[data-count-badge]')
-    expect(el?.classList.contains('bg-[var(--warn-12)]')).toBe(true)
-    expect(el?.classList.contains('text-[var(--color-status-warn)]')).toBe(true)
+    expect(el?.classList.contains('bg-warning/10')).toBe(true)
+    expect(el?.classList.contains('text-warning')).toBe(true)
     expect(el?.getAttribute('data-count-badge-tone')).toBe('warn')
   })
 
   it('applies ok tone', () => {
     const container = renderCountBadge({ tone: 'ok' }, 'OK')
     const el = container.querySelector('span')
-    expect(el?.classList.contains('bg-[var(--ok-10)]')).toBe(true)
+    expect(el?.classList.contains('bg-success/10')).toBe(true)
   })
 
   it('applies custom class', () => {

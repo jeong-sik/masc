@@ -60,12 +60,12 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
   const unattributedTokens = latestComposition.segments.unattributed?.estimated_tokens ?? 0
 
   return html`
-    <div class="mb-5">
+    <div class="mb-5 v2-monitoring-panel">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">CTX Composition</span>
         <${MutedSpan}>${points.length} snapshots</${MutedSpan}>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 v2-monitoring-row">
         <${DetailCard} class="md:col-span-2">
           <div class="flex items-center justify-between mb-2 gap-3">
             <${Eyebrow}>latest turn input</${Eyebrow}>
@@ -103,7 +103,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         <//>
       </div>
 
-      <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 v2-monitoring-row">
         <${DetailCard} class="md:col-span-2">
           <${DetailRow}>
             <${Eyebrow}>stacked history</${Eyebrow}>
@@ -151,11 +151,11 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
               필터 결과 없음 (${latestEntries.length} items)
             </div>
           ` : null}
-          <div class="flex flex-col gap-1.5">
+          <div class="flex flex-col gap-1.5 v2-monitoring-row">
             ${visibleCtxEntries.map(([key, segment]) => {
               const pct = latestTotal > 0 ? (segment.estimated_tokens / latestTotal) * 100 : 0
               return html`
-                <div class="flex items-center justify-between gap-2 text-2xs">
+                <div class="flex items-center justify-between gap-2 text-2xs v2-monitoring-row">
                   <span class="inline-flex items-center gap-2 min-w-0">
                     <span class="inline-block w-2.5 h-2.5 rounded-full shrink-0" style=${`background:${ctxSegmentColor(key)};`}></span>
                     <span class="truncate text-[var(--color-fg-primary)]">${ctxSegmentLabel(key)}</span>

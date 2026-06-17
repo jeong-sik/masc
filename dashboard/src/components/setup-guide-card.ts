@@ -76,7 +76,7 @@ function ExternalLinkChip({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noopener noreferrer"
-      class="inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+      class="v2-shell-action inline-flex items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
     >
       ${label}
       <${ExternalLink} size=${10} />
@@ -111,12 +111,12 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
 
   return html`
     <div
-      class="mt-2 overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      class="v2-shell-card mt-2 overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-setup-guide-tone=${tone}
     >
       <button
         type="button"
-        class="flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
+        class="v2-shell-action flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-elevated)]"
         aria-expanded=${isOpen}
         aria-controls=${`setup-guide-${connectorId}`}
         onClick=${toggle}
@@ -167,7 +167,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
 
       ${isOpen
         ? html`
-            <div id=${`setup-guide-${connectorId}`} class="border-t border-[var(--color-border-default)] px-3 py-2.5 text-2xs text-[var(--color-fg-primary)]">
+            <div id=${`setup-guide-${connectorId}`} class="v2-shell-detail border-t border-[var(--color-border-default)] px-3 py-2.5 text-2xs text-[var(--color-fg-primary)]">
               <p class="mb-2 text-[var(--color-fg-disabled)]">${guide.intro}</p>
               <ol class="list-none space-y-2" data-setup-step-list>
                 ${guide.steps.map((step, idx) => {
@@ -181,7 +181,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                     ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
                     : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
                   return html`
-                    <li class="flex items-start gap-2.5" data-setup-step-item=${idx}>
+                    <li class="v2-shell-row flex items-start gap-2.5" data-setup-step-item=${idx}>
                       <span
                         class=${`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border text-3xs font-semibold tabular-nums transition-colors ${circleToneClass}`}
                         aria-hidden="true"

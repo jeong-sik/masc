@@ -933,5 +933,79 @@ let () =
   assert (result.stdout = "");
   assert (String.length result.stderr > 0)
 
+(* --- Keeper_tool_execute_shell_ir.dispatch_classified_with_approval --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("safe", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  let agent_id = Masc_exec.Agent_id.of_string "test-keeper" in
+  let approval_config =
+    { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.permissive_default
+    ; per_agent = []
+    }
+  in
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
+      ~agent_id
+      ~approval_config
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok result ->
+    assert (result.status = Unix.WEXITED 0);
+    assert (String.trim result.stdout = "safe")
+  | Error _ -> assert false
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "rm" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("-rf", default_meta); Lit ("/tmp/__nonexistent_rm_test", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  let agent_id = Masc_exec.Agent_id.of_string "test-keeper" in
+  let approval_config =
+    { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.permissive_default
+    ; per_agent = []
+    }
+  in
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
+      ~agent_id
+      ~approval_config
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok _ -> assert false
+  (* rm is Privileged; permissive_default sets privileged_trust = Enforced,
+     so the policy yields Verdict.Ask -> Approval_required deterministically.
+     A flip to Policy_denied (e.g. risk-class regression) must fail the test. *)
+  | Error (Keeper_tool_execute_shell_ir.Approval_required _) -> ()
+  | Error _ -> assert false
+
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

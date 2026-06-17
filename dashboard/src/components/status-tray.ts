@@ -299,7 +299,7 @@ function TrayButton({
   return html`
     <button
       type="button"
-      class=${`tray-button tone-${item.tone} ${active ? 'active' : ''} inline-flex h-9 shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-solid px-2.5 text-left shadow-[var(--shadow-1)] transition-colors hover:bg-[var(--color-bg-hover)] max-[520px]:gap-1.5 max-[520px]:px-2 ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
+      class=${`v2-shell-action tray-button tone-${item.tone} ${active ? 'active' : ''} inline-flex h-9 shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-solid px-2.5 text-left shadow-[var(--shadow-1)] transition-colors hover:bg-[var(--color-bg-hover)] max-[520px]:gap-1.5 max-[520px]:px-2 ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
       title=${`${meta.title}: ${item.detail}`}
       aria-label=${`${meta.title}: ${item.value}. ${item.detail}`}
       aria-haspopup="dialog"
@@ -326,7 +326,7 @@ function JournalPreviewList({ entries }: { entries: readonly JournalEntry[] }) {
   return html`
     <ul class="m-0 grid list-none gap-1 p-0">
       ${entries.map(entry => html`
-        <li class="tray-journal-item min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+        <li class="v2-shell-row tray-journal-item min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
           <div class="tray-journal-meta flex min-w-0 items-center gap-2">
             <span class="tray-journal-agent min-w-0 truncate text-xs font-medium text-[var(--color-fg-secondary)]">${entry.agent || entry.author || 'system'}</span>
             <span class="shrink-0 font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${entry.kind ?? 'system'}</span>
@@ -355,11 +355,11 @@ function PopoverContent({
           <div class="tray-popover-detail mt-0.5 text-sm font-semibold text-[var(--color-fg-secondary)]">${item.detail}</div>
         </div>
         <div class="grid grid-cols-2 gap-2">
-          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+          <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Reconnects</div>
             <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.reconnectCount}</div>
           </div>
-          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+          <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">WS deltas</div>
             <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.wsEventCount60s}/60s</div>
           </div>
@@ -371,20 +371,20 @@ function PopoverContent({
     return html`
       <div class="grid gap-3">
         <div class="grid grid-cols-3 gap-2">
-          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+          <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Fresh</div>
             <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.freshKeepers}/${summary.counts.totalKeepers}</div>
           </div>
-          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+          <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Stale</div>
             <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.staleKeepers}</div>
           </div>
-          <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+          <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Attention</div>
             <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.keeperAttention}</div>
           </div>
         </div>
-        <${RouteLink} tab="monitoring" class="tray-action-link inline-flex w-fit items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]">
+        <${RouteLink} tab="monitoring" class="v2-shell-action tray-action-link inline-flex w-fit items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]">
           Open monitoring
         <//>
       </div>
@@ -394,7 +394,7 @@ function PopoverContent({
     return html`
       <div class="grid gap-3">
         <${JournalPreviewList} entries=${summary.latestJournalEntries} />
-        <${RouteLink} tab="logs" class="tray-action-link inline-flex w-fit items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]">
+        <${RouteLink} tab="logs" class="v2-shell-action tray-action-link inline-flex w-fit items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]">
           Open logs
         <//>
       </div>
@@ -403,15 +403,15 @@ function PopoverContent({
   return html`
     <div class="grid gap-3">
       <div class="grid grid-cols-3 gap-2">
-        <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+        <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
           <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Errors</div>
           <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.unacknowledgedErrors}</div>
         </div>
-        <div class="tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
+        <div class="v2-shell-card tray-stat rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
           <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keepers</div>
           <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.keeperAttention}</div>
         </div>
-        <div class="tray-stat ${summary.counts.pendingVerificationTasks >= 3 ? 'tone-warn' : ''} rounded-[var(--r-1)] border ${summary.counts.pendingVerificationTasks >= 3 ? 'border-[var(--warn-20)] bg-[var(--warn-10)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'} px-2 py-1.5">
+        <div class="v2-shell-card tray-stat ${summary.counts.pendingVerificationTasks >= 3 ? 'tone-warn' : ''} rounded-[var(--r-1)] border ${summary.counts.pendingVerificationTasks >= 3 ? 'border-[var(--warn-20)] bg-[var(--warn-10)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'} px-2 py-1.5">
           <div class="tray-stat-label font-mono text-3xs uppercase tracking-[var(--track-caps)] ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : 'text-[var(--color-fg-muted)]'}">Verify</div>
           <div class="tray-stat-value mt-0.5 text-sm font-semibold tabular-nums ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : ''}">${summary.counts.pendingVerificationTasks}</div>
         </div>
@@ -491,16 +491,16 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
           data-testid="dashboard-status-tray-popover"
           role="dialog"
           aria-label=${`${activeItem.label} details`}
-          class=${`tray-popover tone-${activeItem.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl max-[520px]:w-full`}
+          class=${`v2-shell-panel tray-popover tone-${activeItem.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl max-[520px]:w-full`}
         >
-          <div class="tray-popover-head mb-3 flex min-w-0 items-start justify-between gap-3">
+          <div class="v2-shell-toolbar tray-popover-head mb-3 flex min-w-0 items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="tray-popover-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${activeItem.label}</div>
               <div class="tray-popover-detail mt-0.5 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${activeItem.detail}</div>
             </div>
             <button
               type="button"
-              class=${`tray-popover-close inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
+              class=${`v2-shell-action tray-popover-close inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
               aria-label="Close status tray details"
               onClick=${() => { setActiveKey(null) }}
             >

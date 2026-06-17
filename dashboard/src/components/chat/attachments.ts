@@ -73,6 +73,22 @@ export interface CollectAttachmentsResult {
  *  per-file rules plus the total-payload and count budgets relative to
  *  [existing]. Validation failures are collected, not thrown, so the
  *  caller can surface each as a toast. */
+function readImageDimensions(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve(`${img.naturalWidth}×${img.naturalHeight}`)
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve(null)
+    }
+    img.src = url
+  })
+}
+
 export async function collectAttachments(
   files: FileList,
   existing: KeeperConversationAttachment[],
@@ -92,6 +108,7 @@ export async function collectAttachments(
       errors.push('총 첨부 크기가 10MB를 초과합니다.')
       break
     }
+    const dims = resized.type.startsWith('image/') ? await readImageDimensions(resized) : null
     attachments.push({
       id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       type: resized.type.startsWith('image/') ? 'image' : 'file',
@@ -99,6 +116,7 @@ export async function collectAttachments(
       size: base64Size,
       mimeType: resized.type,
       data: dataUrl,
+      dims: dims ?? undefined,
     })
   }
   return { attachments, errors }

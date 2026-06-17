@@ -1,0 +1,67 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 · shell
+   Fixed grid shell — nav | main | aside
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Shell ────────────────────────────────────────────── */
+.shell {
+  position: fixed; inset: 0; z-index: 1;
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr var(--aside-w);
+  grid-template-rows: var(--head-h) var(--alert-h) var(--hud-h) 1fr;
+}
+
+/* ═══ v5 overrides — insert page header row ═══ */
+/* ─── Shell grid — insert page header above alert-strip ──── */
+.shell {
+  grid-template-rows: auto auto auto auto 1fr !important;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "nav    page   page"
+    "nav    alert  alert"
+    "nav    hud    aside"
+    "nav    main   aside" !important;
+}
+.page-header {
+  grid-area: page;
+  padding: 14px 22px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-velvet);
+}
+.page-header .ph-crumb {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.page-header .ph-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--text-bright);
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+  display: flex; align-items: baseline; gap: 10px;
+}
+.page-header .ph-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-dim);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(255,255,255,0.02);
+}
+.page-header .ph-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 0;
+  max-width: 920px;
+  text-wrap: pretty;
+}
+.page-header .ph-sub b { color: var(--text); font-weight: 500; }

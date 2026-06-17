@@ -264,12 +264,12 @@ let search_files_schema =
 let search_web_schema =
   object_schema
     ~required:[ "query" ]
-    [ property "query" "string" "Search query text for current public web information."
-    ; property "limit" "integer" "Maximum number of results to return."
+    [ property "query" "string" "Plain-text search query. Example: \"OCaml 5.2 release date\"."
+    ; property "limit" "integer" "Maximum number of results to return (1-10, default 5)."
     ; property
         "includeContent"
         "boolean"
-        "When true, best-effort fetch raw page_content for each result and add a keeper-readable content_text summary."
+        "When true, also fetch each result page and add raw page_content plus a human-readable content_text summary. Recommended for research."
     ; ( "contentMaxChars",
         `Assoc
           [ "type", `String "integer"
@@ -295,7 +295,7 @@ let fetch_web_schema =
     [ "type", `String "object"
     ; ( "properties",
         `Assoc
-          [ property "url" "string" "URL to fetch."
+          [ property "url" "string" "Full URL to fetch. Example: \"https://ocaml.org/news\"."
           ; ( "timeout",
               `Assoc
                 [ "type", `String "integer"
@@ -310,7 +310,7 @@ let fetch_web_schema =
                 ; "enum", `List [ `String "markdown"; `String "text" ]
                 ; "description",
                   `String
-                    "Output extraction mode. markdown preserves headings/lists/links; \
+                    "Output extraction mode. markdown (default) preserves headings/lists/links; \
                      text returns flattened plain text."
                 ; "default", `String "markdown"
                 ] )
@@ -595,8 +595,11 @@ let public_descriptors =
       ~public_name:"WebSearch"
       ~internal_name:"masc_web_search"
       ~description:
-        "Search the public web for current information using the MASC-owned \
-         tool-list alias, not a generic snake_case web tool id."
+        "Search the public web. Use exact tool name WebSearch. Example input: \
+         {\"query\":\"OCaml 5.2 release date\",\"limit\":5,\"includeContent\":true}. \
+         Returns result.results with title, url, snippet. With includeContent:true \
+         each result also has page_content and the response has a human-readable \
+         content_text summary. Do not use snake_case names like web_search."
       ~input_schema:search_web_schema
       ~policy:
         (policy
@@ -615,8 +618,11 @@ let public_descriptors =
       ~public_name:"WebFetch"
       ~internal_name:"masc_web_fetch"
       ~description:
-        "Fetch a selected web page for source-backed reading using the \
-         MASC-owned tool-list alias, not a generic snake_case web tool id."
+        "Fetch one web page for deeper reading. Use exact tool name WebFetch. \
+         Example input: {\"url\":\"https://ocaml.org/news\",\"extractMode\":\"markdown\",\"maxChars\":5000}. \
+         Returns text, title, final_url, http_status, truncated. Use after WebSearch \
+         when you need a citation or full article text. Do not use snake_case names \
+         like web_fetch."
       ~input_schema:fetch_web_schema
       ~policy:
         (policy

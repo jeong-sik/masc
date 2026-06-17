@@ -374,7 +374,7 @@ export function IdeContextLens({
 
   return html`
     <section
-      class="ide-context-lens"
+      class="ide-context-lens v2-ide-panel"
       data-testid="ide-context-lens"
       data-visible-anchors=${model.anchors.length}
       data-total-anchors=${model.anchorTotalCount}
@@ -397,7 +397,7 @@ export function IdeContextLens({
       </div>
       <ol class="ide-context-anchor-list" aria-label="Current file anchors">
         ${model.anchors.length === 0
-          ? html`<li class="ide-context-anchor-empty">no linked anchors on this file yet</li>`
+          ? html`<li class="ide-context-anchor-empty v2-ide-row">no linked anchors on this file yet</li>`
           : model.anchors.map(anchor => ContextAnchorRow(anchor, activateAnchor, activateRouteLink))}
       </ol>
     </section>
@@ -421,7 +421,7 @@ function ContextSurfaceChip(
   return html`
     <span
       role="listitem"
-      class="ide-context-surface"
+      class="ide-context-surface v2-ide-row"
       data-status=${surface.status}
       data-actionable=${actionable ? 'true' : 'false'}
       title=${title}
@@ -430,7 +430,7 @@ function ContextSurfaceChip(
         ? html`
           <button
             type="button"
-            class="ide-context-surface-action"
+            class="ide-context-surface-action v2-ide-action"
             aria-label=${`Open ${title}`}
             onClick=${activate}
           >
@@ -452,12 +452,12 @@ function ContextAnchorRow(
   onRouteLinkActivate: (link: IdeContextRouteLink) => void,
 ) {
   return html`
-    <li class="ide-context-anchor-row">
+    <li class="ide-context-anchor-row v2-ide-row">
       <span class="ide-context-anchor-surface">${anchor.surface}</span>
       <div class="ide-context-anchor-content">
         <button
           type="button"
-          class="ide-context-anchor-main ide-context-anchor-action"
+          class="ide-context-anchor-main ide-context-anchor-action v2-ide-action"
           aria-label=${contextAnchorAriaLabel(anchor)}
           title=${contextAnchorTitle(anchor)}
           onClick=${() => onAnchorActivate(anchor)}
@@ -475,7 +475,7 @@ function ContextAnchorRow(
               <button
                 key=${link.id}
                 type="button"
-                class="ide-context-route-link"
+                class="ide-context-route-link v2-ide-action"
                 title=${link.evidence}
                 aria-label=${`Open ${link.evidence}`}
                 onClick=${() => onRouteLinkActivate(link)}

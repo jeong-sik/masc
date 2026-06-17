@@ -43,7 +43,6 @@ type ctx =
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
   ; generation : int
   ; keeper_turn_id : int
-  ; max_cost_usd : float option
   ; meta : keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
   ; observation : Keeper_world_observation.world_observation
@@ -84,7 +83,6 @@ let run (ctx : ctx)
       ; base_dir
       ; build_turn_prompt
       ; turn_affordances
-      ; max_cost_usd
       ; trajectory_acc
       ; profile_defaults
       ; prompt_timeout_estimate_tokens
@@ -188,7 +186,6 @@ let run (ctx : ctx)
                  ~max_tokens:execution.max_tokens
                  ~oas_timeout_s
                  ~oas_timeout_is_explicit:false
-                 ?max_cost_usd
                  ~trajectory_acc
                  ~is_retry
                  ?shared_context
@@ -433,15 +430,36 @@ let run (ctx : ctx)
             err
         with
         | Degraded_retry_allowed degraded_retry ->
+          let fallback_reason =
+            EC.degraded_retry_reason_to_string degraded_retry.fallback_reason
+          in
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
             ~decision:Degraded_retry_allowed
-            ~reason:(EC.degraded_retry_reason_to_string degraded_retry.fallback_reason)
+            ~reason:fallback_reason
             ~next_runtime:(Some degraded_retry.next_runtime)
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string RuntimeSelected)
+            ~labels:
+              [ ("keeper", meta.name)
+              ; ("runtime_id", degraded_retry.next_runtime)
+              ; ("source", "fallback")
+              ; ("fallback_reason", fallback_reason)
+              ]
+            ();
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string RuntimeRotation)
+            ~labels:
+              [ ("keeper", meta.name)
+              ; ("from_runtime", execution.runtime_id)
+              ; ("to_runtime", degraded_retry.next_runtime)
+              ; ("reason", fallback_reason)
+              ]
+            ();
           (match
              Keeper_unified_turn_pre_dispatch
              .build_runtime_execution

@@ -244,6 +244,7 @@ export function IdePresenceStrip() {
 
   return html`
     <div
+      class="ide-presence-strip v2-ide-panel"
       role="status"
       aria-label="Live workspace keeper presence"
       style=${{
@@ -355,6 +356,7 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
 
   return html`
     <li
+      class="ide-presence-chip v2-ide-row"
       title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}${prBadge ? ` · ${prBadge}` : ''}${originUrl ? ` · ${originUrl}` : ''}${dirtyCount > 0 ? ` · ${dirtyCount} dirty` : ''}`}
       aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}${focusLabel ? ` editing ${focusLabel}` : ''}`}
       role=${canNavigate ? 'button' : undefined}

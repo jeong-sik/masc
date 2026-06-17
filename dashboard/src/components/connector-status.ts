@@ -20,7 +20,7 @@ import {
   type GateKeeperInfo,
   type GateStatusData,
 } from '../api/gate'
-import { formatElapsedCompact, formatTimeAgoEn } from '../lib/format-time'
+import { formatTimeAgoEn } from '../lib/format-time'
 import { ErrorState } from './common/feedback-state'
 import { ConnectorOverviewSkeleton } from './connector-overview-skeleton'
 import { lastEvent } from '../sse'
@@ -171,6 +171,9 @@ function emptyConnectorUiState(): ConnectorUiState {
 
 const connectorUiState = signal<Record<string, ConnectorUiState>>({})
 const selectedConnectorId = signal<KnownConnectorId | null>(null)
+const connectorSearchQuery = signal('')
+const configDrawerConnectorId = signal<KnownConnectorId | null>(null)
+const configDrawerTab = signal<'connection' | 'config' | 'events'>('connection')
 
 function getConnectorUiState(connectorId: string): ConnectorUiState {
   return connectorUiState.value[connectorId] ?? emptyConnectorUiState()
@@ -290,8 +293,6 @@ const CHANNEL_ICONS: Record<string, string> = {
 export function channelIcon(ch: string): string {
   return CHANNEL_ICONS[ch] ?? '\u{1F517}'
 }
-
-const formatUptime = formatElapsedCompact
 
 const timeAgo = formatTimeAgoEn
 
@@ -1614,6 +1615,261 @@ function GateAnalyticsSection({
   `
 }
 
+function formatConnectorTimestamp(iso: string | null | undefined): string {
+  if (!iso) return '-'
+  const ts = Date.parse(iso)
+  return Number.isNaN(ts) ? iso : new Date(ts).toLocaleString()
+}
+
+function ConnectorsSurfaceHeader({
+  filterId,
+  connectorCount,
+  activeCount,
+  onRefresh,
+}: {
+  filterId: KnownConnectorId | null
+  connectorCount: number
+  activeCount: number
+  onRefresh: () => void
+}) {
+  return html`
+    <header class="cn-surf-head">
+      <div>
+        <div class="eyebrow">Gate</div>
+        <h1>${filterId ? CONNECTOR_DISPLAY_NAMES[filterId] ?? '커넥터' : '커넥터'}</h1>
+        <div class="cn-surf-sub">
+          외부 게이트 ${connectorCount}개 · <b>${activeCount} active</b> ·
+          <span class="mono">GET /api/v1/gate/connectors</span>
+        </div>
+      </div>
+      <div class="cn-surf-actions">
+        <button
+          type="button"
+          class="cn-act"
+          aria-label="게이트 새로고침"
+          onClick=${onRefresh}
+        >게이트 새로고침 ↻</button>
+        <button
+          type="button"
+          class="cn-act primary"
+          aria-label="커넥터 추가"
+          onClick=${() => { showToast('Add connector: keeper-v2 connector catalog coming soon', 'warning') }}
+        >＋ Add connector</button>
+      </div>
+    </header>
+  `
+}
+
+function ConnectorsToolbar({
+  query,
+  onQuery,
+}: {
+  query: string
+  onQuery: (value: string) => void
+}) {
+  return html`
+    <div class="cn-toolbar">
+      <${TextInput}
+        type="search"
+        value=${query}
+        placeholder="Filter connectors by name, channel, or status"
+        ariaLabel="커넥터 필터"
+        testId="connector-search-input"
+        class="cn-search"
+        onInput=${(e: Event) => { onQuery((e.target as HTMLInputElement).value) }}
+      />
+      <${ActionButton}
+        variant="primary"
+        size="sm"
+        testId="connector-add-button"
+        onClick=${() => { showToast('Add connector: keeper-v2 connector catalog coming soon', 'warning') }}
+      >＋ Add connector<//>
+    </div>
+  `
+}
+
+function GateStatusStrip({
+  gate,
+  connectors,
+}: {
+  gate: GateStatusData | null
+  connectors: GateConnectorInfo[]
+}) {
+  const healthy = gate !== null && connectors.some(c => c.gate_healthy === true)
+  function statusClass(): string {
+    if (healthy) return 'run'
+    if (gate === null) return 'off'
+    return 'pause'
+  }
+  function statusLabel(): string {
+    if (healthy) return 'healthy'
+    if (gate === null) return 'unknown'
+    return 'degraded'
+  }
+  function resolveGeneratedAt(): string {
+    if (connectors[0]?.updated_at) return formatConnectorTimestamp(connectors[0].updated_at)
+    if (gate?.recent_events?.[0]?.timestamp) return formatConnectorTimestamp(gate.recent_events[0].timestamp)
+    return '-'
+  }
+  const generatedAt = resolveGeneratedAt()
+
+  return html`
+    <div class="cn-gate-strip" data-testid="connector-gate-strip">
+      <span>
+        <span class=${`status-dot ${statusClass()}`}></span>
+        gate <b>${statusLabel()}</b>
+      </span>
+      <span class="sep"></span>
+      <span class="mono">base ${connectors[0]?.gate_base_url || DEFAULT_MASC_ORIGIN}</span>
+      <span class="sep"></span>
+      <span>
+        health check <b class="mono">${gate?.recent_events?.[0]?.timestamp
+          ? timeAgo(gate.recent_events[0].timestamp)
+          : 'pending'}</b>
+      </span>
+      <span class="sep"></span>
+      <span>binding source <b>${connectors[0]?.binding_source || 'store + runtime'}</b></span>
+      <span style=${{ marginLeft: 'auto' }} class="mono">generated_at ${generatedAt}</span>
+    </div>
+  `
+}
+
+function ConnectorDetailDrawer({
+  connectorId,
+  connector,
+  onClose,
+}: {
+  connectorId: KnownConnectorId
+  connector: GateConnectorInfo | null
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  useEffect(() => {
+    openConnectorConfig(connectorId)
+  }, [connectorId])
+
+  const displayName = CONNECTOR_DISPLAY_NAMES[connectorId] ?? connectorId
+  const tab = configDrawerTab.value
+  const auditRows = connector?.recent_audit ?? []
+
+  return html`
+    <div class="cn-drawer-overlay" onClick=${onClose} data-testid="connector-detail-drawer">
+      <div class="cn-drawer" onClick=${(e: Event) => { e.stopPropagation() }}>
+        <div class="cn-drawer-hd">
+          <div>
+            <h3>${channelIcon(connector?.channel ?? connectorId)} ${displayName} 설정</h3>
+            <span class="id">${connectorId}</span>
+          </div>
+          <button
+            type="button"
+            class="cn-drawer-close"
+            aria-label="닫기 (Esc)"
+            onClick=${onClose}
+          >✕</button>
+        </div>
+        <div class="cn-drawer-tabs">
+          ${(['connection', 'config', 'events'] as const).map(t => html`
+            <button
+              type="button"
+              class=${`cn-drawer-tab ${tab === t ? 'on' : ''}`}
+              onClick=${() => { configDrawerTab.value = t }}
+            >${t}</button>
+          `)}
+        </div>
+        <div class="cn-drawer-body">
+          ${tab === 'connection' && html`
+            <div class="cn-drawer-section">
+              <h4>연결 상태</h4>
+              <div class="text-2xs text-[var(--color-fg-secondary)]">
+                status <span class="font-mono text-[var(--color-fg-primary)]">${connectorStateLabel(connector)}</span>
+                ${connector?.gate_healthy !== null
+                  ? html` · gate <span class="font-mono text-[var(--color-fg-primary)]">${connector?.gate_healthy ? 'healthy' : 'unhealthy'}</span>`
+                  : null}
+                ${connector?.updated_at ? html` · heartbeat <span class="font-mono text-[var(--color-fg-primary)]">${timeAgo(connector.updated_at)}</span>` : null}
+              </div>
+              ${connector?.error
+                ? html`
+                    <div class="mt-2 rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)]">
+                      ⚠ ${connector.error}
+                    </div>
+                  `
+                : null}
+            </div>
+            <div class="cn-drawer-section">
+              <h4>Bindings</h4>
+              ${connector?.configured_bindings?.length
+                ? html`
+                    <div class="space-y-1">
+                      ${connector.configured_bindings.map(b => html`
+                        <div class="flex items-center gap-2 text-2xs" data-drawer-binding=${b.channel_id}>
+                          <span class="font-mono text-[var(--color-fg-primary)]">${b.channel_id}</span>
+                          <span class="text-[var(--color-fg-disabled)]">→</span>
+                          <span class="font-mono text-[var(--color-fg-primary)]">${b.keeper_name}</span>
+                        </div>
+                      `)}
+                    </div>
+                  `
+                : html`<div class="text-2xs text-[var(--color-fg-disabled)]">바인딩 없음 — 알림 전용 게이트</div>`}
+            </div>
+          `}
+          ${tab === 'config' && html`
+            <div class="cn-drawer-section">
+              <div class="mb-2 flex items-center justify-between">
+                <h4>Config</h4>
+                <button
+                  type="button"
+                  class="cn-test-btn"
+                  onClick=${() => { showToast(`${displayName} connection test placeholder`, 'warning') }}
+                >Test connection</button>
+              </div>
+              <${ConnectorConfigForm} connectorId=${connectorId} />
+            </div>
+          `}
+          ${tab === 'events' && html`
+            <div class="cn-drawer-section">
+              <h4>Event log</h4>
+              ${auditRows.length
+                ? html`
+                    <table class="w-full border-collapse text-2xs">
+                      <thead>
+                        <tr class="text-left text-[var(--color-fg-disabled)]">
+                          <th class="pb-1">시각</th>
+                          <th class="pb-1">액션</th>
+                          <th class="pb-1">Keeper</th>
+                          <th class="pb-1">Actor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${auditRows.map(a => html`
+                          <tr class="border-t border-[var(--color-border-default)]">
+                            <td class="py-1 font-mono text-[var(--color-fg-secondary)]">${formatConnectorTimestamp(a.timestamp)}</td>
+                            <td class="py-1 text-[var(--color-fg-primary)]">${a.action}</td>
+                            <td class="py-1 font-mono text-[var(--color-fg-secondary)]">${a.keeper_name}</td>
+                            <td class="py-1 text-[var(--color-fg-secondary)]">${a.actor_name}</td>
+                          </tr>
+                        `)}
+                      </tbody>
+                    </table>
+                  `
+                : html`<div class="text-2xs text-[var(--color-fg-disabled)]">최근 감사 로그 없음</div>`}
+            </div>
+          `}
+        </div>
+      </div>
+    </div>
+  `
+}
+
 export function ConnectorStatusPanel() {
   useEffect(() => {
     void refresh()
@@ -1678,19 +1934,27 @@ export function ConnectorStatusPanel() {
     ? visibleConnectors[0] ?? placeholderConnector(focusedConnectorId)
     : findKnownConnector(allConnectors, focusedConnectorId) ?? placeholderConnector(focusedConnectorId)
 
+  const connectorCount = allConnectors.length
+  const activeCount = allConnectors.filter(c => connectorStateLabel(c) === 'connected').length
+
   return html`
-    <div class="contain-content v2-connector-status">
-      <div class="mb-3 flex items-center justify-between gap-3">
-        <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>
-        ${filterId
-          ? html`
-              <div class="text-right text-3xs uppercase tracking-5 text-[var(--color-fg-disabled)]">
-                <div>${d ? `success ${d.success_rate_pct}%` : `${visibleConnectors.length} connector${visibleConnectors.length !== 1 ? 's' : ''}`}</div>
-                <div>${d ? `uptime ${formatUptime(d.uptime_seconds)}` : '게이트 메트릭 없음'}</div>
-              </div>
-            `
-          : null}
-      </div>
+    <div class="contain-content v2-connector-status v2-connectors-surface ss-surface bg-surface-page">
+      <${ConnectorsSurfaceHeader}
+        filterId=${filterId as KnownConnectorId | null}
+        connectorCount=${connectorCount}
+        activeCount=${activeCount}
+        onRefresh=${() => { void refresh() }}
+      />
+
+      ${!filterId
+        ? html`
+            <${ConnectorsToolbar}
+              query=${connectorSearchQuery.value}
+              onQuery=${(value: string) => { connectorSearchQuery.value = value }}
+            />
+            <${GateStatusStrip} gate=${d} connectors=${allConnectors} />
+          `
+        : null}
 
       ${!filterId
         ? html`
@@ -1700,7 +1964,12 @@ export function ConnectorStatusPanel() {
               discordTriggerPolicy=${snapshot.connectors?.discord_trigger_policy}
               selectedConnectorId=${focusedConnectorId}
               onSelectConnector=${(connectorId: KnownConnectorId) => { selectedConnectorId.value = connectorId }}
+              onOpenConfig=${(connectorId: KnownConnectorId) => {
+                configDrawerConnectorId.value = connectorId
+                configDrawerTab.value = 'connection'
+              }}
               detailTargetId="connector-detail-panel"
+              filterQuery=${connectorSearchQuery.value}
             />
           `
         : null}
@@ -1757,6 +2026,16 @@ export function ConnectorStatusPanel() {
         : null}
 
       <${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />
+
+      ${configDrawerConnectorId.value
+        ? html`
+            <${ConnectorDetailDrawer}
+              connectorId=${configDrawerConnectorId.value}
+              connector=${findKnownConnector(allConnectors, configDrawerConnectorId.value)}
+              onClose=${() => { configDrawerConnectorId.value = null }}
+            />
+          `
+        : null}
     </div>
   `
 }
@@ -1765,4 +2044,7 @@ export function resetConnectorStatusState() {
   connectorStatusResource.reset(EMPTY_SNAPSHOT)
   connectorUiState.value = {}
   selectedConnectorId.value = null
+  connectorSearchQuery.value = ''
+  configDrawerConnectorId.value = null
+  configDrawerTab.value = 'connection'
 }

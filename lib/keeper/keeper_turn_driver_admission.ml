@@ -18,7 +18,7 @@ let provider_config_identity_key (cfg : Llm_provider.Provider_config.t) =
       cfg.model_id,
       cfg.base_url,
       cfg.request_path,
-      cfg.api_key,
+      Llm_provider.Secret.header_value cfg.api_key,
       cfg.headers,
       cfg.supports_tool_choice_override )
 

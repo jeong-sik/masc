@@ -407,6 +407,12 @@ val raise_compaction_transition_violation
   -> violation:compaction_transition_spec_violation
   -> 'a
 
+type livelock_attempt_state = {
+  turn_id : int;
+  attempts : int;
+  first_started_at : float;
+}
+
 type turn_measurement = {
   tm_captured_at : float;
   tm_auto_rules : Keeper_state_machine.auto_rule_summary;
@@ -445,6 +451,9 @@ type registry_entry = {
   last_error : string option;
   last_failure_reason : failure_reason option;
   turn_consecutive_failures : int;
+  livelock_state : livelock_attempt_state option Atomic.t;
+      (** Per-keeper turn-livelock retry history, updated via CAS on this
+          per-entry atomic so it is part of the keeper SSOT. *)
   board_wakeups : float StringMap.t;
   board_cursor_ts : float;
   board_cursor_post_id : string option;

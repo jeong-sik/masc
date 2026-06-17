@@ -66,7 +66,7 @@ let test_tool_called_carries_tool_use_id () =
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
             { agent_name = "oas-r1"; tool_name = "Read"; tool_use_id = "tu-3"
-            ; input = `Null }))
+            ; input = `Null; turn = 0 }))
     |> Option.get
   in
   check (option string) "payload tool_use_id" (Some "tu-3")
@@ -84,7 +84,7 @@ let test_tool_completed_stamps_execution_id () =
       (mk_event ~caused_by:"run-called-1"
          (Agent_sdk.Event_bus.ToolCompleted
             { agent_name = "keeper-x-agent"; tool_name = "Read"
-            ; tool_use_id = "tu-4"; output = Ok { content = "ok" } }))
+            ; tool_use_id = "tu-4"; output = Ok { content = "ok" }; turn = 1 }))
     |> Option.get
   in
   check (option string) "payload execution_id" (Some "exec-2-0001")
@@ -104,7 +104,7 @@ let test_tool_completed_without_entry_omits_execution_id () =
       (mk_event
          (Agent_sdk.Event_bus.ToolCompleted
             { agent_name = "oas-worker"; tool_name = "Execute"
-            ; tool_use_id = "tu-5"; output = Ok { content = "ok" } }))
+            ; tool_use_id = "tu-5"; output = Ok { content = "ok" }; turn = 2 }))
     |> Option.get
   in
   check bool "no execution_id field for non-keeper execution" true
@@ -119,7 +119,7 @@ let test_empty_tool_use_id_omitted_from_payload () =
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
             { agent_name = "oas-r1"; tool_name = "Read"; tool_use_id = ""
-            ; input = `Null }))
+            ; input = `Null; turn = 0 }))
     |> Option.get
   in
   check bool "empty provider id is omitted" true

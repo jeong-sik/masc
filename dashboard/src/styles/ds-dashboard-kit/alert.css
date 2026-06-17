@@ -1,0 +1,53 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 · alert
+   Top alert strip — chip cluster
+   ═══════════════════════════════════════════════════════════════ */
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ADVANCED — alert strip, drawer, command palette, A2A thread
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── ALERT STRIP ─────────────────────────────────────── */
+.alert-strip {
+  grid-column: 2 / 4; grid-row: 2 / 3;
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px; overflow: hidden;
+  background:
+    repeating-linear-gradient(90deg, rgba(138,106,40,0.02) 0 18px, transparent 18px 22px),
+    linear-gradient(180deg, #181108, #110b07);
+  border-bottom: 1px solid var(--border-main);
+  box-shadow: inset 0 -1px 0 rgba(138,106,40,0.1);
+  position: relative; z-index: 2;
+}
+.alert-strip::before {
+  content: "ATTENTION"; font-family: var(--font-display); font-size: 8.5px;
+  letter-spacing: 0.36em; font-weight: 700; color: var(--accent-brass);
+  padding: 3px 8px; border: 1px solid var(--hair-brass);
+  margin-right: 4px; flex-shrink: 0;
+  background: rgba(138,106,40,0.06);
+}
+.alert-chip {
+  display: flex; align-items: center; gap: 7px;
+  padding: 4px 10px 4px 8px; border: 1px solid var(--hair);
+  background: rgba(14,10,8,0.55); flex-shrink: 0; cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+  max-width: 340px;
+}
+.alert-chip:hover { border-color: var(--accent-brass-dim); background: rgba(26,18,12,0.8); }
+.alert-chip svg { width: 11px; height: 11px; color: var(--text-dim); flex-shrink: 0; }
+.alert-chip .k { font-size: 8.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+.alert-chip .t { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.alert-chip .m { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.alert-chip .sep { width: 1px; height: 12px; background: var(--border-main); }
+.alert-chip.bad   { border-color: color-mix(in oklab, var(--bad) 45%, transparent); background: linear-gradient(180deg, rgba(60,12,12,0.4), rgba(20,8,6,0.6)); }
+.alert-chip.bad svg  { color: var(--bad); }
+.alert-chip.bad .k   { color: var(--bad); }
+.alert-chip.warn { border-color: color-mix(in oklab, var(--warn) 40%, transparent); }
+.alert-chip.warn svg { color: var(--warn); }
+.alert-chip.warn .k  { color: var(--warn); }
+.alert-chip.info svg { color: var(--accent-brass); }
+.alert-chip.info .k  { color: var(--accent-brass); }
+.alert-scroll-wrap { flex: 1; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 8px; }
+.alert-strip .r { margin-left: auto; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); letter-spacing: 0.1em; white-space: nowrap; }
+.alert-strip .r b { color: var(--accent-brass); font-weight: 500; }

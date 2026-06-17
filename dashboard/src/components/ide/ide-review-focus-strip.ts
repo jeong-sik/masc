@@ -9,7 +9,7 @@ export function IdeReviewFocusStrip({ activeLayers }: { readonly activeLayers: R
   return html`
     <div
       data-testid="ide-review-focus"
-      class="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
+      class="ide-review-focus v2-ide-toolbar flex flex-wrap items-center gap-2 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
     >
       <span class="font-mono uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">review focus</span>
       <span class="font-mono">UNIFIED</span>

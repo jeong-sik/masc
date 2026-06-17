@@ -1,0 +1,157 @@
+/* MASC Cockpit — Dark Brass tokens
+   Color discipline: bg is almost-black with 2-3% warm tint.
+   Brass accent used ONLY for active/running state. Status colors
+   reserved for data, never chrome. Everything else is grayscale. */
+
+:root {
+  /* Surface stack — 4 steps from bg to floating */
+  --bg-0: #0c0b08;         /* page bg */
+  --bg-1: #141210;         /* topbar / composer */
+  --bg-2: #1a1815;         /* panel surface */
+  --bg-3: #211e1a;         /* elevated card */
+  --bg-4: #2a2621;         /* hover / active row */
+
+  /* Hairlines — warm neutral, barely visible */
+  --line-1: #2a2520;       /* default border */
+  --line-2: #3a332c;       /* emphasized border */
+  --line-3: #4a4137;       /* divider between zones */
+
+  /* Text — 4 steps, never pure white */
+  --fg-1: #f0e9dc;         /* primary */
+  --fg-2: #b8ad9a;         /* secondary */
+  --fg-3: #7a7065;         /* tertiary / labels */
+  --fg-4: #4a453e;         /* disabled / placeholder */
+
+  /* Brass — the ONE accent. Used for: running state, focused row,
+     active tab underline, primary button. Nothing else. */
+  --brass-1: #d4a14a;
+  --brass-2: #b8843a;
+  --brass-3: #8a5f28;
+  --brass-glow: 212 161 74;  /* rgb triplet for alpha */
+
+  /* Status — muted, desaturated. Never neon. */
+  --ok:     #6b9e6b;       /* done, success */
+  --warn:   #c9a24a;       /* at-risk, degraded */
+  --err:    #c46a5a;       /* failed, blocker */
+  --info:   #6a8eb0;       /* pending, queued */
+  --idle:   #6a6a6a;       /* silent, noop */
+  --stalled:#8a6aa0;       /* stalled, drift */
+
+  /* Type scale — tabular, compact */
+  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --fs-11: 11px;           /* micro labels, badges */
+  --fs-12: 12px;           /* table body, metadata */
+  --fs-13: 13px;           /* default body */
+  --fs-14: 14px;           /* card titles */
+  --fs-16: 16px;           /* KPI medium */
+  --fs-20: 20px;           /* KPI large */
+  --fs-28: 28px;           /* hero number */
+
+  --lh-tight: 1.2;
+  --lh-body: 1.45;
+
+  /* Spacing — 4px base */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* Radius — small only; this is an ops tool */
+  --r-1: 3px;
+  --r-2: 5px;
+  --r-3: 8px;
+
+  /* Elevation */
+  --shadow-1: 0 1px 0 rgb(0 0 0 / .4), 0 0 0 1px var(--line-1);
+  --shadow-2: 0 2px 8px rgb(0 0 0 / .5), 0 0 0 1px var(--line-2);
+
+  /* Zone heights */
+  --h-topbar: 36px;
+  --h-ticker: 32px;
+  --h-kpi: 56px;
+  --h-lifeline: 28px;
+  --h-composer: 48px;
+
+  /* Grid widths */
+  --w-sidebar: 168px;
+  --w-rail: 300px;
+
+  /* Motion */
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --t-fast: 120ms;
+  --t-med: 200ms;
+}
+
+/* Reset / base */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font: var(--fs-13)/var(--lh-body) var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv08", "ss01";
+}
+code, kbd, samp, pre, .mono { font-family: var(--font-mono); }
+
+/* Utilities */
+.tnum { font-variant-numeric: tabular-nums; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.muted { color: var(--fg-3); }
+.dim { color: var(--fg-2); }
+
+/* Status dot — 6px solid, used in rows & KPI */
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; vertical-align: middle; }
+.dot-ok { background: var(--ok); }
+.dot-warn { background: var(--warn); }
+.dot-err { background: var(--err); }
+.dot-info { background: var(--info); }
+.dot-idle { background: var(--idle); }
+.dot-stalled { background: var(--stalled); }
+.dot-running { background: var(--brass-1); box-shadow: 0 0 6px rgb(var(--brass-glow) / .6); }
+
+/* Label — small-caps lock-up used on every panel title */
+.label {
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* Scrollbar — thin, warm */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--line-3); }
+
+/* Focus */
+:focus-visible {
+  outline: 1px solid var(--brass-1);
+  outline-offset: 1px;
+}
+
+/* Buttons — minimal chrome */
+button, .btn {
+  font: inherit;
+  background: transparent;
+  color: var(--fg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+button:hover, .btn:hover { background: var(--bg-3); color: var(--fg-1); }
+button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1); border-color: var(--brass-3); }

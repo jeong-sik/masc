@@ -1,4 +1,9 @@
-(** Success-path post-processing for [Keeper_unified_turn]. *)
+(** Success-path post-processing for [Keeper_unified_turn].
+
+    Emits the terminal FSM transitions [Streaming -> Completing -> Done];
+    this function is the single source of truth for those transitions on the
+    success path and must be called at most once per turn.
+    [Keeper_unified_turn.run_keeper_cycle] is the expected caller. *)
 
 val handle
   :  config:Workspace.config

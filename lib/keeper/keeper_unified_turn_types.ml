@@ -390,7 +390,9 @@ let record_streaming_cancelled_observation
          only legacy watchdog/provider_timeout receipts clear the counter, and
          only for the affected keeper. Current runtime code must not emit this
          reason from a MASC-created wall-clock timeout around tool execution. *)
-      Keeper_turn_livelock.reset_keeper_livelock ~keeper:run_meta.name;
+      Keeper_turn_livelock.reset_keeper_livelock
+        ~base_path:config.base_path
+        ~keeper:run_meta.name;
       Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_provider_timeout
     | _ ->
       (* supervisor_stop, external_cancel, or any future reason *)

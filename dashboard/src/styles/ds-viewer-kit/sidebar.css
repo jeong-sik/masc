@@ -1,0 +1,84 @@
+/* ─── Viewer sidebar (left rail · keeper switcher) ─────────── */
+
+.v-sidebar {
+  border-right: 1px solid var(--line);
+  background: var(--surf-rail);
+  overflow-y: auto;
+  padding: var(--sp-3) var(--sp-2) var(--sp-5);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.v-sb-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
+}
+.v-sb-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.v-sb-count {
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--text-bright);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.v-sb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* Keeper row — density packed for 8+ keepers at once */
+.v-sidebar .p-keeperchip {
+  padding: var(--sp-2) var(--sp-2);
+  border-radius: var(--r-2);
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
+}
+.v-sidebar .p-keeperchip:hover {
+  background: var(--surf-hover);
+  border-color: var(--line);
+  border-left-color: var(--line-strong);
+}
+.v-sidebar .p-keeperchip.selected {
+  border-left-color: var(--accent-brass);
+  background: var(--surf-selected);
+  border-color: var(--line-accent);
+}
+
+.v-sb-sep {
+  height: 1px;
+  background: var(--line);
+  margin: var(--sp-3) var(--sp-1);
+}
+
+.v-sb-back {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-2);
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  color: var(--text-dim);
+  text-decoration: none;
+  border-radius: var(--r-2);
+  transition: color 0.12s, background 0.12s;
+  margin-top: auto;
+}
+.v-sb-back:hover {
+  color: var(--accent-brass);
+  background: var(--surf-hover);
+}
+.v-sb-back svg { width: 13px; height: 13px; flex: 0 0 auto; }

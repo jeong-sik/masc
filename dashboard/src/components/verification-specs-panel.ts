@@ -79,9 +79,9 @@ function shortMtime(iso: string): string {
 function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-xs tabular-nums" aria-label="TLA+ 스펙 목록">
+      <table class="v2-monitoring-table w-full text-xs tabular-nums" aria-label="TLA+ 스펙 목록">
         <thead class="text-left text-[var(--color-fg-muted)]">
-          <tr>
+          <tr class="v2-monitoring-row">
             <th scope="col" class="py-1 pr-4">사양</th>
             <th scope="col" class="py-1 pr-4">분류</th>
             <th scope="col" class="py-1 pr-4">Cfg</th>
@@ -93,7 +93,7 @@ function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
           ${entries.map((entry: TlaSpecEntry) => {
             const cov = cfgCoverage(entry)
             return html`
-              <tr class="border-t border-[var(--color-border-default)]">
+              <tr class="v2-monitoring-row border-t border-[var(--color-border-default)]">
                 <td class="py-1 pr-4 font-medium text-[var(--color-fg-primary)]">${entry.name}</td>
                 <td class="py-1 pr-4">
                   <${StatusChip} tone=${categoryTone(entry.category)}>${categoryLabel(entry.category)}<//>
@@ -140,7 +140,7 @@ export function VerificationSpecsPanel() {
   const otherCount = allEntries.filter((e: TlaSpecEntry) => e.category === 'other').length
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <${Btn} onClick=${() => void loadSpecs(resource)}>
           새로고침

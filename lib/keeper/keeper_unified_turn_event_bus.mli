@@ -6,7 +6,7 @@
 
 type t
 
-val create : keeper_name:string -> unit -> t
+val create : keeper_name:string -> turn_id:int -> unit -> t
 
 val drain
   :  ?site:string

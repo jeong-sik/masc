@@ -30,7 +30,7 @@ interface TelemetryState extends TelemetryFreshnessMetadata {
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   const gap = coverageGapDisplay(data)
   return html`
-    <div class="text-3xs text-[var(--color-fg-disabled)]">
+    <div class="text-3xs text-[var(--color-fg-disabled)] v2-monitoring-row">
       <span class="font-mono">${data.source ?? '(unknown source)'}</span>
       <span class="mx-1" aria-hidden="true">·</span>
       <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
@@ -118,7 +118,7 @@ function HourlyBarChart({ buckets, height = 32 }: { buckets: HourlyBucket[]; hei
   })
 
   return html`
-    <svg width=${width} height=${height + 14} class="overflow-visible" role="img" aria-label="시간대별 도구 호출 차트">
+    <svg width=${width} height=${height + 14} class="overflow-visible v2-monitoring-chart" role="img" aria-label="시간대별 도구 호출 차트">
       ${bars}
       ${labels}
     </svg>
@@ -140,7 +140,7 @@ function SuccessRateBar({ stat }: { stat: ToolStat }) {
   }
 
   return html`
-    <div class="flex items-center gap-2 w-full">
+    <div class="flex items-center gap-2 w-full v2-monitoring-row">
       <${ProgressBar} pct=${successPct} size="sm" class=${fillClass} trackClass="flex-1" />
       <span class="text-3xs font-mono w-10 text-right" style="color: ${labelColor}">
         ${successPct === 100 ? '100%' : `${successPct.toFixed(0)}%`}
@@ -219,12 +219,12 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   // operators can distinguish no calls from a broken trajectory lane.
   if (asyncState.loading) return null
   if (asyncState.error) {
-    return html`<div class="text-xs text-[var(--color-status-err)] py-2 px-3" role="alert">텔레메트리 로드 실패: ${asyncState.error}</div>`
+    return html`<div class="text-xs text-[var(--color-status-err)] py-2 px-3 v2-monitoring-panel" role="alert">텔레메트리 로드 실패: ${asyncState.error}</div>`
   }
 
   if (s.tools.length === 0) {
     return html`
-      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-card/30">
+      <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-card/30 v2-monitoring-panel">
         <div class="text-xs text-[var(--color-fg-muted)]">도구 텔레메트리 데이터 없음</div>
         <${FreshnessLine} data=${s} />
       </div>
@@ -244,10 +244,10 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
   return html`
     <${PanelCard} title="도구 텔레메트리">
-      <div class="flex flex-col gap-4">
+      <div class="flex flex-col gap-4 v2-monitoring-surface">
 
       ${'' /* Summary row */}
-      <div class="flex gap-3 flex-wrap text-2xs">
+      <div class="flex gap-3 flex-wrap text-2xs v2-monitoring-row">
         <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1">
           <span class="font-mono font-medium text-[var(--color-fg-secondary)]">${s.tools.length}</span> 도구
         <//>
@@ -267,7 +267,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
       ${'' /* Hourly timeline sparkline */}
       ${s.timeline.length > 1 ? html`
-        <div class="flex flex-col gap-1">
+        <div class="flex flex-col gap-1 v2-monitoring-panel">
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">시간대별 활동<//>
           <div class="overflow-x-auto py-1">
             <${HourlyBarChart} buckets=${s.timeline} height=${28} />
@@ -276,8 +276,8 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
       ` : null}
 
       ${'' /* Per-tool bar chart */}
-      <div class="flex flex-col gap-1">
-        <div class="flex items-center justify-between gap-2 mb-1">
+      <div class="flex flex-col gap-1 v2-monitoring-panel">
+        <div class="flex items-center justify-between gap-2 mb-1 v2-monitoring-toolbar">
           <${SectionCap} tone="dim" weight="semibold">호출 빈도<//>
           <div class="flex items-center gap-2">
             <${TextInput}
@@ -296,14 +296,14 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           </div>
         </div>
         ${visibleTools.length === 0 ? html`
-          <div class="text-2xs text-[var(--color-fg-muted)] py-2 px-2">
+          <div class="text-2xs text-[var(--color-fg-muted)] py-2 px-2 v2-monitoring-row">
             필터 결과 없음 (${s.tools.length} items)
           </div>
         ` : visibleTools.slice(0, 15).map(stat => {
           const cat = toolCategory(stat.name)
           const barWidth = (stat.call_count / maxCount) * 100
           return html`
-            <div class="flex items-center gap-2 py-1 group">
+            <div class="flex items-center gap-2 py-1 group v2-monitoring-row">
               <div class="size-5 rounded-[var(--r-1)] flex-shrink-0 bg-[var(--color-bg-elevated)] flex items-center justify-center text-3xs font-mono font-bold ${cat.color}">
                 ${cat.icon}
               </div>
@@ -326,10 +326,10 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
       ${'' /* Success rate table */}
       ${s.tools.some(st => st.failure_count > 0) ? html`
-        <div class="flex flex-col gap-1.5">
+        <div class="flex flex-col gap-1.5 v2-monitoring-panel">
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">성공률<//>
           ${s.tools.filter(st => st.failure_count > 0).map(stat => html`
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 v2-monitoring-row">
               <span class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--color-fg-muted)] truncate">
                 ${stat.name.replace(/^(keeper_|masc_)/, '')}
               </span>
@@ -342,10 +342,10 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
       ${'' /* P95 latency (slowest tools) */}
       ${slowest.length > 0 && slowest[0]!.p95_duration_ms > 500 ? html`
-        <div class="flex flex-col gap-1.5">
+        <div class="flex flex-col gap-1.5 v2-monitoring-panel">
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">P95 지연 시간<//>
           ${slowest.map(stat => html`
-            <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
+            <div class="flex items-center justify-between py-1 px-2 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] v2-monitoring-row">
               <span class="text-2xs font-mono text-[var(--color-fg-muted)]">${normalizeToolName(stat.name)}</span>
               <div class="flex items-center gap-3">
                 <span class="text-3xs text-[var(--color-fg-disabled)]">avg ${formatMsCompact(stat.avg_duration_ms)}</span>

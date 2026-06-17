@@ -39,15 +39,27 @@ let url_credential_re =
 
 (** Common secret-bearing value patterns. Specific prefixes are listed before
     the generic high-entropy matcher so short, well-known tokens are not missed
-    when they are embedded inside larger strings. *)
+    when they are embedded inside larger strings.
+
+    Each prefix literal is anchored at a word boundary ([Re.bow]) so a
+    word-internal substring is not mistaken for a key. Without the anchor, the
+    [sk-] pattern matched the substring [sk-1234] inside the task id
+    [task-1234] and redacted it to [ta\[REDACTED\]], destroying diagnostic
+    identifiers in error previews (and any other observability field carrying a
+    [task-XXXX] reference). [bow] rejects that match because [sk-] is preceded
+    by the identifier char 'a'. [Re.bow]/[eow] are zero-width assertions, so
+    [Re.replace_string] preserves the boundary character (=, space, quote)
+    automatically. The [sk-] body allows [-] so modern [sk-proj-...] keys are
+    matched in one shot instead of leaving a [-abc...] tail. [AKIA] is anchored
+    at both ends so a 17-char run is not truncated to its first 16 chars. *)
 let secret_res ?(min_len = default_min_secret_len) () =
   let open Re in
   [ url_credential_re
   ; compile (seq [str "Bearer "; rep1 (compl [set " \t\r\n"])])
-  ; compile (seq [str "ghp_"; rep1 alnum])
-  ; compile (seq [str "github_pat_"; rep1 (alt [alnum; char '_'])])
-  ; compile (seq [str "sk-"; rep1 alnum])
-  ; compile (seq [str "AKIA"; repn alnum 16 (Some 16)])
+  ; compile (seq [bow; str "ghp_"; rep1 alnum])
+  ; compile (seq [bow; str "github_pat_"; rep1 (alt [alnum; char '_'])])
+  ; compile (seq [bow; str "sk-"; rep1 (alt [alnum; char '-'])])
+  ; compile (seq [bow; str "AKIA"; repn alnum 16 (Some 16); eow])
   ; generic_secret_re min_len
   ]
 

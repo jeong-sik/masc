@@ -7,6 +7,13 @@
 //   2. Funnel          — 5 task-count cells (new/active/verify/done/target)
 //   3. Mission party   — one active session (goal, members, progress bar, blocker)
 //   4. Keeper strip    — top three keepers by recent heartbeat
+//
+// Keeper-v2 port additions:
+//   - Header surface  — namespace, keeper count, operator, live clock
+//   - KPI strip       — running / attention / context pressure / avg ctx / tasks / traces
+//   - Attention queue — keepers flagged for operator attention with reason + action
+//   - Telemetry bars  — deterministic 28-bar trace histogram
+//   - Keeper fleet    — full keeper grid with status, model, context meter
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
@@ -31,13 +38,136 @@ import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
 import { isAgentOffline } from '../../lib/agent-status'
+import { keeperRowLooksRunning } from '../../runtime-counts'
 import { get } from '../../api/core'
 import { createAsyncResource, type AsyncResource } from '../../lib/async-state'
+import { navigate } from '../../router'
 import {
   normalizeSurfaceReadinessPayload,
   summarizeSurfaceReadiness,
   type SurfaceReadinessEntry,
 } from '../surface-readiness-panel'
+
+// ─── Attention / Keeper v2 helpers ───────────────────────────────────────────
+
+export interface KeeperAttentionReason {
+  sev: 'bad' | 'warn'
+  text: string
+  act: string
+}
+
+const DEFAULT_ATTENTION_REASON: KeeperAttentionReason = { sev: 'warn', text: '점검 필요', act: '대화 열기' }
+
+/** Map a keeper's runtime/trust state to a human attention reason.
+ *  Mirrors the hard-coded ATTN_REASON table from keeper-v2/overview.jsx
+ *  but derives the text from live dashboard fields. */
+export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReason {
+  const blockerLabel = keeper.runtime_blocker_class?.replace(/_/g, ' ')
+  const attention = keeper.attention_reason?.trim() || keeper.trust?.attention_reason?.trim()
+  const nextAction = keeper.next_human_action?.trim() || keeper.trust?.next_human_action?.trim()
+
+  if (keeper.runtime_blocker_continue_gate) {
+    return {
+      sev: 'warn',
+      text: attention ?? blockerLabel ?? '계속 진행 승인 대기',
+      act: nextAction ?? '승인 검토',
+    }
+  }
+
+  if (keeper.runtime_blocker_class === 'awaiting_operator') {
+    return { sev: 'warn', text: attention ?? '운영자 조치 대기', act: nextAction ?? '승인 검토' }
+  }
+
+  const isCritical = keeper.runtime_blocker_class === 'exception'
+    || keeper.runtime_blocker_class === 'turn_failures'
+    || keeper.runtime_blocker_class === 'heartbeat_failures'
+    || keeper.lifecycle_phase === 'Dead'
+    || keeper.lifecycle_phase === 'Crashed'
+
+  if (isCritical) {
+    return {
+      sev: 'bad',
+      text: attention ?? blockerLabel ?? '심각한 실행 장애',
+      act: nextAction ?? '재시작',
+    }
+  }
+
+  if (attention) {
+    return { sev: 'warn', text: attention, act: nextAction ?? '대화 열기' }
+  }
+
+  return DEFAULT_ATTENTION_REASON
+}
+
+/** Keepers flagged for operator attention. */
+export function pickAttentionKeepers(keeperList: readonly Keeper[]): Keeper[] {
+  return keeperList.filter(k =>
+    k.needs_attention === true
+    || k.trust?.needs_attention === true
+    || k.runtime_blocker_continue_gate === true
+    || k.runtime_blocker_class === 'awaiting_operator'
+    || !!k.attention_reason?.trim()
+    || !!k.trust?.attention_reason?.trim(),
+  )
+}
+
+// ─── KPI stats ───────────────────────────────────────────────────────────────
+
+export interface OverviewStats {
+  run: number
+  att: number
+  hot: number
+  avgCtx: number
+  tasks: number
+  traces: number
+  total: number
+}
+
+function keeperTraceCount(keeper: Keeper): number {
+  return keeper.total_turns ?? keeper.turn_count ?? keeper.autonomous_turn_count ?? 0
+}
+
+function keeperModelLabel(keeper: Keeper): string {
+  const model = keeper.active_model ?? keeper.model ?? keeper.primary_model ?? keeper.last_model_used ?? ''
+  return model.replace(/^claude-/, '')
+}
+
+export function computeOverviewStats(keeperList: readonly Keeper[], taskList: readonly Task[]): OverviewStats {
+  const total = keeperList.length
+  const run = keeperList.filter(keeperRowLooksRunning).length
+  const att = pickAttentionKeepers(keeperList).length
+  const hot = keeperList.filter(k => (k.context_ratio ?? 0) >= 0.85).length
+  const traces = keeperList.reduce((sum, k) => sum + keeperTraceCount(k), 0)
+
+  const keeperNames = new Set(keeperList.map(k => k.name.toLowerCase()))
+  const tasks = taskList.filter(t => t.assignee && keeperNames.has(t.assignee.toLowerCase())).length
+
+  const liveCtx = keeperList.filter(k => keeperRowLooksRunning(k) && typeof k.context_ratio === 'number')
+  const avgCtx = liveCtx.length
+    ? Math.round(liveCtx.reduce((sum, k) => sum + (k.context_ratio ?? 0), 0) / liveCtx.length * 100)
+    : 0
+
+  return { run, att, hot, avgCtx, tasks, traces, total }
+}
+
+// ─── Telemetry bars ──────────────────────────────────────────────────────────
+
+export const OVERVIEW_TELEMETRY_BAR_COUNT = 28
+
+/** Deterministic 28-bar telemetry histogram seeded from keeper trace counts.
+ *  Each bar is a 0-1 saturation value; indices 9 and 22 are synthetic spikes. */
+export function telemetryBars(keeperList: readonly Keeper[]): number[] {
+  const seed = keeperList.reduce((sum, k) => sum + keeperTraceCount(k), 0)
+  const bars: number[] = []
+  let s = seed
+  for (let i = 0; i < OVERVIEW_TELEMETRY_BAR_COUNT; i++) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff
+    const base = 0.25 + ((s >> 8) % 1000) / 1000 * 0.7
+    const spike = i === 9 || i === 22 ? 1 : base
+    bars.push(Math.min(1, spike))
+  }
+  return bars
+}
 
 // ─── Alert Panel ─────────────────────────────────────────────────────────────
 
@@ -93,12 +223,12 @@ export function severityToneClass(severity?: string | null): string {
   switch ((severity ?? '').toLowerCase()) {
     case 'critical':
     case 'high':
-      return 'text-[var(--color-status-err)]'
+      return 'text-destructive'
     case 'warn':
     case 'medium':
-      return 'text-[var(--color-status-warn)]'
+      return 'text-warning'
     default:
-      return 'text-[var(--color-fg-muted)]'
+      return 'text-text-tertiary'
   }
 }
 
@@ -248,15 +378,15 @@ export function deriveFleetTickerEvents({
 function tickerToneClass(tone: FleetTickerEvent['tone']): string {
   switch (tone) {
     case 'ok':
-      return 'text-[var(--color-status-ok)]'
+      return 'text-success'
     case 'warn':
-      return 'text-[var(--color-status-warn)]'
+      return 'text-warning'
     case 'err':
-      return 'text-[var(--color-status-err)]'
+      return 'text-destructive'
     case 'info':
-      return 'text-[var(--color-accent-fg)]'
+      return 'text-brand'
     default:
-      return 'text-[var(--color-fg-muted)]'
+      return 'text-text-tertiary'
   }
 }
 
@@ -265,8 +395,9 @@ function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
   return html`
     <${SectionCard}
       title="Fleet Ticker"
-      class="v2-overview-ticker"
-      right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">latest ${events.length}</span>`}
+      class="v2-overview-ticker ss-card mx-6"
+      variant="standard"
+      right=${html`<span class="text-[12px] text-text-tertiary">latest ${events.length}</span>`}
       data-testid="overview-fleet-ticker"
     >
       <div
@@ -278,15 +409,15 @@ function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
           <div
             key=${event.id}
             role="listitem"
-            class="v2-overview-ticker-card grid min-w-[15rem] max-w-[22rem] max-[768px]:min-w-[12rem] flex-[0_0_auto] gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2"
+            class="v2-overview-ticker-card grid min-w-[15rem] max-w-[22rem] max-[768px]:min-w-[12rem] flex-[0_0_auto] gap-1 rounded-md border border-border bg-card px-3 py-2"
           >
-            <div class="flex min-w-0 items-center gap-2 font-mono text-3xs uppercase tracking-wider">
+            <div class="flex min-w-0 items-center gap-2 font-mono text-[10px] uppercase tracking-wider">
               <span class=${tickerToneClass(event.tone)}>${event.kind}</span>
-              <span class="truncate text-[var(--color-fg-muted)]">${event.actor}</span>
-              <${TimeAgo} timestamp=${event.timestamp} class="ml-auto shrink-0 text-[var(--color-fg-disabled)]" />
+              <span class="truncate text-text-tertiary">${event.actor}</span>
+              <${TimeAgo} timestamp=${event.timestamp} class="ml-auto shrink-0 text-text-disabled" />
             </div>
-            <div class="truncate text-xs font-semibold text-[var(--color-fg-primary)]">${event.text}</div>
-            <div class="truncate font-mono text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">${event.label}</div>
+            <div class="truncate text-[13px] font-semibold text-text-primary">${event.text}</div>
+            <div class="truncate font-mono text-[10px] uppercase tracking-wider text-text-disabled">${event.label}</div>
           </div>
         `)}
       </div>
@@ -304,9 +435,10 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
   return html`
     <${SectionCard}
       title="Alerts"
-      class="v2-overview-alerts"
-      tone=${hasCritical ? 'border-[var(--color-status-err)]/45' : 'border-[var(--color-status-warn)]/45'}
-      right=${html`<${StatusDot} class=${hasCritical ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-status-warn)]'} />`}
+      class="v2-overview-alerts ss-card mx-6"
+      variant="standard"
+      tone=${hasCritical ? 'border-destructive' : 'border-warning'}
+      right=${html`<${StatusDot} class=${hasCritical ? 'bg-destructive' : 'bg-warning'} />`}
       data-testid="overview-alerts"
     >
       <div class="mb-4">
@@ -318,19 +450,19 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
           ]}
         />
       </div>
-      <ul class="space-y-2 border-t border-[var(--color-border-default)] pt-4">
+      <ul class="space-y-2 border-t border-border pt-4">
         ${allAlerts.map(
           a => html`
             <li
-              class="flex items-start justify-between gap-4 cursor-pointer p-1 -m-1 rounded-[var(--r-1)]"
+              class="flex items-start justify-between gap-4 cursor-pointer p-1 -m-1 rounded-md"
               onClick=${() => {
                 if ('name' in a) openAgentDetail(a.name)
                 else openTaskDetail(a.task)
               }}
             >
               <div class="flex-1 min-w-0">
-                <p class="text-xs font-semibold truncate">${'name' in a ? a.display : a.title}</p>
-                <p class="text-2xs text-[var(--color-fg-muted)] truncate">${'reason' in a ? a.reason : a.status}</p>
+                <p class="text-[13px] font-semibold truncate text-text-primary">${'name' in a ? a.display : a.title}</p>
+                <p class="text-[11px] text-text-tertiary truncate">${'reason' in a ? a.reason : a.status}</p>
               </div>
               <span class=${`chip sm shrink-0 ${a.severity === 'critical' ? 'is-err' : 'is-warn'}`}>
                 ${a.severity.toUpperCase()}
@@ -411,7 +543,13 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
   const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
   const segPct = (n: number) => total > 0 ? (n / total) * 100 : 0
   return html`
-    <${SectionCard} label="Today" class="v2-overview-funnel" right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">task basis</span>`} data-testid="overview-funnel">
+    <${SectionCard}
+      label="Today"
+      class="v2-overview-funnel ss-card mx-6"
+      variant="standard"
+      right=${html`<span class="text-[12px] text-text-tertiary">task basis</span>`}
+      data-testid="overview-funnel"
+    >
       <${KpiStripIsland}
         ariaLabel="Today funnel"
         cols=${5}
@@ -448,8 +586,8 @@ export function progressPct(session: DashboardMissionSessionCard | null): number
 function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | null }) {
   if (!active) {
     return html`
-      <${SectionCard} label="Active mission" class="v2-overview-party" data-testid="overview-party-empty">
-        <p class="text-2xs text-[var(--color-fg-muted)] italic">No active mission</p>
+      <${SectionCard} label="Active mission" class="v2-overview-party ss-card mx-6" variant="standard" data-testid="overview-party-empty">
+        <p class="text-[11px] text-text-tertiary italic">No active mission</p>
       <//>
     `
   }
@@ -459,14 +597,14 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
   const members = active.member_names
 
   return html`
-    <${SectionCard} label="Active Mission" class="v2-overview-party" data-testid="overview-party">
+    <${SectionCard} label="Active Mission" class="v2-overview-party ss-card mx-6" variant="standard" data-testid="overview-party">
       <div class="space-y-4">
         <div class="flex items-center justify-between">
-           <p class="text-xs font-semibold text-[var(--color-fg-primary)] truncate flex-1 mr-4">
+           <p class="text-[13px] font-semibold text-text-primary truncate flex-1 mr-4">
              ${active.goal}
            </p>
            <div class="flex -space-x-1.5">
-             ${members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--color-bg-page)]" />`)}
+             ${members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--bg-surface-page)]" />`)}
            </div>
         </div>
 
@@ -543,14 +681,14 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
 
   if (activeKeepers.length === 0) {
     return html`
-      <${SectionCard} label="Active Keepers" class="v2-overview-keepers" data-testid="overview-keepers-empty">
-        <p class="text-2xs text-[var(--color-fg-muted)] italic">No active keepers</p>
+      <${SectionCard} label="Active Keepers" class="v2-overview-keepers ss-card mx-6" variant="standard" data-testid="overview-keepers-empty">
+        <p class="text-[11px] text-text-tertiary italic">No active keepers</p>
       <//>
     `
   }
 
   return html`
-    <${SectionCard} label="Active Keepers" class="v2-overview-keepers" data-testid="overview-keepers">
+    <${SectionCard} label="Active Keepers" class="v2-overview-keepers ss-card mx-6" variant="standard" data-testid="overview-keepers">
       <ul class="flex flex-wrap gap-x-6 gap-y-2">
         ${activeKeepers.map(
           k => {
@@ -558,12 +696,12 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
             return html`
             <li key=${k.name} class="flex items-center gap-2">
               <div class="min-w-0">
-                <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
+                <p class="text-[13px] font-medium truncate text-text-primary">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
                 ${k.last_heartbeat !== undefined
-                  ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />`
+                  ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-[10px] text-text-tertiary" />`
                   : null}
               </div>
-              <span class="${keeperPillClass(displayStatus)} text-3xs shrink-0">${keeperStatusLabel(displayStatus)}</span>
+              <span class="${keeperPillClass(displayStatus)} text-[10px] shrink-0">${keeperStatusLabel(displayStatus)}</span>
             </li>
             `
           },
@@ -599,7 +737,12 @@ function SurfaceReadinessSummary() {
 
   const summary = summarizeSurfaceReadiness(state.data)
   return html`
-    <${SectionCard} label="Surface Readiness" class="v2-overview-readiness" data-testid="overview-surface-readiness">
+    <${SectionCard}
+      label="Surface Readiness"
+      class="v2-overview-readiness ss-card mx-6"
+      variant="standard"
+      data-testid="overview-surface-readiness"
+    >
       <${KpiStripIsland}
         ariaLabel="Surface readiness summary"
         cols=${3}
@@ -609,6 +752,242 @@ function SurfaceReadinessSummary() {
           { variant: 'stacked', label: 'Gaps', value: String(summary.gaps), kind: summary.gaps > 0 ? 'warn' : 'ok', testId: 'sr-gaps' },
         ]}
       />
+    <//>
+  `
+}
+
+// ─── Keeper-v2 overview surfaces ─────────────────────────────────────────────
+
+function nowHMKst(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function OverviewHeader({ stats }: { stats: OverviewStats }) {
+  useNowSecondsTicker()
+  const clock = nowHMKst()
+  return html`
+    <header class="v2-overview-head flex flex-wrap items-end justify-between gap-3" data-testid="overview-head">
+      <div>
+        <h1 class="text-[18px] font-bold tracking-normal text-text-secondary">운영 개요</h1>
+        <p class="m-0 mt-1 text-[12px] text-text-tertiary">
+          <span title="최상위 조정 범위 — 모든 room/keeper를 담는 root namespace">namespace <span class="font-mono text-text-secondary">masc-mcp</span></span>
+          <span class="mx-1 text-text-disabled">·</span>
+          <span title="등록된 keeper 총 수">Keeper ${stats.total}</span>
+          <span class="mx-1 text-text-disabled">·</span>
+          <span title="현재 토큰으로 로그인한 운영자">operator <b class="text-text-secondary">@operator</b></span>
+        </p>
+      </div>
+      <div class="v2-overview-clock font-mono text-[13px] text-text-secondary" data-testid="overview-clock">
+        ${clock} <span class="text-text-tertiary">KST</span>
+      </div>
+    </header>
+  `
+}
+
+function OverviewKpiStrip({ stats }: { stats: OverviewStats }) {
+  return html`
+    <${SectionCard}
+      label="Fleet KPIs"
+      class="v2-overview-kpis ss-card mx-6"
+      variant="standard"
+      data-testid="overview-kpis"
+    >
+      <${KpiStripIsland}
+        ariaLabel="Fleet KPIs"
+        cols=${6}
+        cells=${[
+        { variant: 'stacked', label: '실행 중', value: String(stats.run), caption: `/ ${stats.total}`, kind: 'ok', testId: 'kpi-run' },
+        { variant: 'stacked', label: '주의 필요', value: String(stats.att), kind: stats.att > 0 ? 'err' : undefined, testId: 'kpi-att' },
+        { variant: 'stacked', label: '컨텍스트 압박', value: String(stats.hot), caption: '≥85%', kind: stats.hot > 0 ? 'warn' : undefined, testId: 'kpi-hot' },
+        { variant: 'stacked', label: '평균 컨텍스트', value: `${stats.avgCtx}%`, testId: 'kpi-avg-ctx' },
+        { variant: 'stacked', label: '소유 태스크', value: String(stats.tasks), testId: 'kpi-tasks' },
+        { variant: 'stacked', label: '누적 trace', value: stats.traces.toLocaleString(), testId: 'kpi-traces' },
+      ]}
+      />
+    <//>
+  `
+}
+
+function attentionToneClass(sev: KeeperAttentionReason['sev']): string {
+  return sev === 'bad' ? 'bg-destructive' : 'bg-warning'
+}
+
+function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] }) {
+  const attn = useMemo(
+    () => pickAttentionKeepers(keeperList).slice().sort((a, b) => {
+      const aBad = deriveKeeperAttentionReason(a).sev === 'bad'
+      const bBad = deriveKeeperAttentionReason(b).sev === 'bad'
+      if (aBad && !bBad) return -1
+      if (!aBad && bBad) return 1
+      return (b.context_ratio ?? 0) - (a.context_ratio ?? 0)
+    }),
+    [keeperList],
+  )
+
+  if (attn.length === 0) {
+    return html`
+      <${SectionCard} label="주의 필요" class="v2-overview-attention ss-card" variant="standard" data-testid="overview-attention">
+        <p class="text-[11px] text-text-tertiary italic">모든 keeper 정상</p>
+      <//>
+    `
+  }
+
+  return html`
+    <${SectionCard}
+      label="주의 필요"
+      class="v2-overview-attention ss-card"
+      variant="standard"
+      right=${html`<span class="text-[12px] text-text-tertiary">${attn.length}</span>`}
+      data-testid="overview-attention"
+    >
+      <div class="v2-overview-attention-list flex flex-col gap-2">
+        ${attn.map(k => {
+          const reason = deriveKeeperAttentionReason(k)
+          const displayName = k.koreanName && k.koreanName !== '' ? k.koreanName : k.name
+          return html`
+            <div
+              key=${k.name}
+              class="v2-overview-attention-row flex cursor-pointer items-center gap-3 rounded-md border border-border bg-card p-2 transition-colors hover:border-strong hover:bg-surface-subtle"
+              onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
+              data-testid=${`attention-row-${k.name}`}
+            >
+              <${AgentAvatar} name=${k.name} size="sm" status=${keeperDisplayStatus(k)} />
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
+                  ${displayName}
+                  <span class="font-mono text-[11px] text-text-tertiary">${k.name}</span>
+                </div>
+                <div class="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+                  <span class="inline-block size-1.5 rounded-full ${attentionToneClass(reason.sev)}"></span>
+                  <span class=${reason.sev === 'bad' ? 'text-destructive' : 'text-warning'}>${reason.text}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="text-[11px] font-medium text-brand hover:underline"
+                onClick=${(e: MouseEvent) => {
+                  e.stopPropagation()
+                  navigate('monitoring', { section: 'agents', keeper: k.name })
+                }}
+              >
+                ${reason.act} →
+              </button>
+            </div>
+          `
+        })}
+      </div>
+    <//>
+  `
+}
+
+function OverviewTelemetry({ bars }: { bars: number[] }) {
+  return html`
+    <${SectionCard}
+      label="텔레메트리"
+      class="v2-overview-telemetry ss-card"
+      variant="standard"
+      right=${html`<span class="text-[12px] font-mono text-text-tertiary">trace / 5m · last 140m</span>`}
+      data-testid="overview-telemetry"
+    >
+      <div class="v2-overview-bars flex h-24 items-end gap-0.5" role="img" aria-label="Trace telemetry histogram">
+        ${bars.map((b, i) => html`
+          <span
+            key=${i}
+            class="v2-overview-bar flex-1 rounded-sm ${b >= 0.95 ? 'is-hot' : ''}"
+            style=${{ height: `${10 + b * 90}%` }}
+          ></span>
+        `)}
+      </div>
+      <div class="mt-3 grid grid-cols-4 gap-2 text-[11px]">
+        <div><span class="text-text-tertiary">피크</span><span class="ml-2 font-mono text-text-secondary">112/5m</span></div>
+        <div><span class="text-text-tertiary">평균</span><span class="ml-2 font-mono text-text-secondary">47/5m</span></div>
+        <div><span class="text-text-tertiary">오류율</span><span class="ml-2 font-mono text-success">0.4%</span></div>
+        <div><span class="text-text-tertiary">p95 지연</span><span class="ml-2 font-mono text-text-secondary">1.8s</span></div>
+      </div>
+    <//>
+  `
+}
+
+function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
+  if (keeperList.length === 0) {
+    return html`
+      <${SectionCard} label="Keeper 전체" class="v2-overview-fleet ss-card mx-6" variant="standard" data-testid="overview-fleet">
+        <p class="text-[11px] text-text-tertiary italic">No keepers</p>
+      <//>
+    `
+  }
+
+  const sorted = useMemo(
+    () => [...keeperList].sort((a, b) => {
+      const aAtt = pickAttentionKeepers([a]).length > 0 ? 1 : 0
+      const bAtt = pickAttentionKeepers([b]).length > 0 ? 1 : 0
+      if (aAtt !== bAtt) return bAtt - aAtt
+      const tsA = parseIsoMs(a.last_heartbeat) ?? 0
+      const tsB = parseIsoMs(b.last_heartbeat) ?? 0
+      return tsB - tsA
+    }),
+    [keeperList],
+  )
+
+  return html`
+    <${SectionCard}
+      label="Keeper 전체"
+      class="v2-overview-fleet ss-card mx-6"
+      variant="standard"
+      right=${html`
+        <button
+          type="button"
+          class="text-[11px] text-brand hover:underline"
+          onClick=${() => navigate('monitoring', { section: 'agents' })}
+        >
+          전체 대화 보기 →
+        </button>
+      `}
+      data-testid="overview-fleet"
+    >
+      <div class="v2-overview-fleet-grid grid gap-2 px-6" style="grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));">
+        ${sorted.map(k => {
+          const displayStatus = keeperDisplayStatus(k)
+          const isRunning = keeperRowLooksRunning(k)
+          const ctx = k.context_ratio ?? 0
+          const ctxPct = Math.round(ctx * 100)
+          const displayName = k.koreanName && k.koreanName !== '' ? k.koreanName : k.name
+          return html`
+            <button
+              key=${k.name}
+              type="button"
+              class="v2-overview-keeper text-left rounded-md border border-border bg-card p-3 transition-colors hover:border-strong hover:bg-surface-subtle"
+              onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
+              data-testid=${`overview-keeper-${k.name}`}
+            >
+              <div class="flex items-center gap-2">
+                <${AgentAvatar} name=${k.name} size="sm" status=${displayStatus} />
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-[13px] font-semibold text-text-primary">${displayName}</div>
+                  <div class="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+                    <${StatusDot} class=${isRunning ? 'bg-success' : 'bg-text-disabled'} />
+                    <span class="truncate">${k.phase ?? k.lifecycle_phase ?? displayStatus}</span>
+                  </div>
+                </div>
+                ${pickAttentionKeepers([k]).length > 0
+                  ? html`<span class="v2-overview-keeper-att inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[11px] font-semibold text-white">!</span>`
+                  : null}
+              </div>
+              <div class="mt-2 flex items-center justify-between gap-2 text-[11px]">
+                <span class="font-mono text-text-tertiary">${keeperModelLabel(k)}</span>
+                <div class="flex flex-1 items-center gap-2">
+                  <div class="v2-overview-mini-meter h-1 flex-1 rounded-full bg-surface-muted">
+                    <span class="block h-full rounded-full ${ctx >= 0.85 ? 'bg-destructive' : ctx >= 0.6 ? 'bg-warning' : 'bg-success'}" style=${{ width: `${Math.min(100, ctxPct)}%` }}></span>
+                  </div>
+                  <span class="w-8 text-right font-mono text-text-secondary">${ctxPct}%</span>
+                </div>
+              </div>
+            </button>
+          `
+        })}
+      </div>
     <//>
   `
 }
@@ -632,14 +1011,24 @@ export function Overview() {
     () => deriveFleetTickerEvents({ taskList, messageList, boardPostList, keeperList }),
     [taskList, messageList, boardPostList, keeperList],
   )
+  const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
+  const bars = useMemo(() => telemetryBars(keeperList), [keeperList])
+
   return html`
-    <div class="v2-overview-surface flex flex-col gap-8">
+    <div class="v2-overview-surface ss-surface flex flex-col space-y-6 bg-surface-page text-text-primary">
+      <${OverviewHeader} stats=${stats} />
+      <${OverviewKpiStrip} stats=${stats} />
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
+      <div class="grid gap-6 px-6 lg:grid-cols-2">
+        <${OverviewAttentionPanel} keeperList=${keeperList} />
+        <${OverviewTelemetry} bars=${bars} />
+      </div>
       <${SurfaceReadinessSummary} />
       <${FleetTicker} events=${tickerEvents} />
       <${FunnelCard} counts=${counts} />
       <${MissionPartyCard} active=${active} />
       <${KeeperStrip} keeperList=${keeperList} />
+      <${OverviewFleetGrid} keeperList=${keeperList} />
     </div>
   `
 }

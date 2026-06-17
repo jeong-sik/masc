@@ -108,7 +108,21 @@ let init () =
   reg "mcp.client.session.duration"
     [ 0.1; 0.5; 1.0; 5.0; 10.0; 60.0; 300.0; 600.0 ];
   reg "mcp.server.session.duration"
-    [ 0.1; 0.5; 1.0; 5.0; 10.0; 60.0; 300.0; 600.0 ]
+    [ 0.1; 0.5; 1.0; 5.0; 10.0; 60.0; 300.0; 600.0 ];
+  reg "gen_ai.client.operation.duration"
+    [ 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ];
+  reg "gen_ai.client.operation.time_to_first_chunk"
+    [ 0.01; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0 ];
+  reg "gen_ai.client.operation.time_per_output_chunk"
+    [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0 ];
+  reg "masc_llm_provider_request_latency_seconds"
+    [ 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ];
+  reg "masc_llm_provider_streaming_first_chunk_seconds"
+    [ 0.01; 0.05; 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0 ];
+  reg "masc_inference_queue_wait_seconds"
+    [ 0.1; 0.25; 0.5; 1.0; 2.5; 5.0; 10.0; 30.0; 60.0 ];
+  reg "masc_sse_broadcast_duration_seconds"
+    [ 0.001; 0.005; 0.01; 0.05; 0.1; 0.5; 1.0; 5.0; 10.0 ]
 ;;
 
 let () = init ()

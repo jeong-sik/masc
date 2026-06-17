@@ -1,0 +1,9 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 · density
+   data-density="comfy" overrides
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Density — tight vs comfy */
+[data-density="comfy"] .main { gap: 16px; }
+[data-density="comfy"] .sec-body > div { padding: 14px; }
+[data-density="comfy"] .page-header { padding: 18px 26px 14px; }

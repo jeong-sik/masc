@@ -93,23 +93,27 @@ vi.mock('shiki', () => {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
   }
+  const codeToHtml = vi.fn((code: string) => `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`)
   return {
     createHighlighter: vi.fn().mockResolvedValue({
       getLoadedLanguages: vi.fn().mockReturnValue([]),
       loadLanguage: vi.fn().mockResolvedValue(undefined),
-      codeToHtml: vi.fn((code: string) => `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`)
-    })
+      codeToHtml,
+    }),
+    codeToHtml,
   }
 })
 
 // Mock Mermaid to avoid heavyweight parsing/rendering during happy-dom tests.
+const mermaidMock = {
+  initialize: vi.fn(),
+  render: vi.fn(async (_id: string, source: string) => ({
+    svg: `<svg><text>${source}</text></svg>`,
+  })),
+}
 vi.mock('mermaid', () => ({
-  default: {
-    initialize: vi.fn(),
-    render: vi.fn(async (_id: string, source: string) => ({
-      svg: `<svg><text>${source}</text></svg>`,
-    })),
-  },
+  default: mermaidMock,
+  ...mermaidMock,
 }))
 
 // Block real network requests in tests. Tests that intentionally need

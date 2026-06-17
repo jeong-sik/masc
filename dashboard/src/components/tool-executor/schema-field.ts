@@ -26,7 +26,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
 
   if (schema.type === 'string' && schema.enum) {
     return html`
-      <div class="flex flex-col gap-1">
+      <div class="v2-lab-row flex flex-col gap-1">
         <label class="text-2xs text-[var(--color-fg-muted)] font-medium">${name}${requiredMark}</label>
         ${hint}
         <${Select} value=${(value as string) ?? ''} options=${schema.enum} placeholder="-- 선택 --"
@@ -39,7 +39,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
     const isLong = LONG_TEXT_PATTERN.test(name)
     if (isLong) {
       return html`
-        <div class="flex flex-col gap-1">
+        <div class="v2-lab-row flex flex-col gap-1">
           <label class="text-2xs text-[var(--color-fg-muted)] font-medium">${name}${requiredMark}</label>
           ${hint}
           <${TextArea} value=${(value as string) ?? (schema.default as string) ?? ''} placeholder=${name} rows=${3}
@@ -48,7 +48,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
       `
     }
     return html`
-      <div class="flex flex-col gap-1">
+      <div class="v2-lab-row flex flex-col gap-1">
         <label class="text-2xs text-[var(--color-fg-muted)] font-medium">${name}${requiredMark}</label>
         ${hint}
         <${TextInput} value=${(value as string) ?? (schema.default as string) ?? ''} placeholder=${name}
@@ -59,7 +59,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
 
   if (schema.type === 'integer' || schema.type === 'number') {
     return html`
-      <div class="flex flex-col gap-1">
+      <div class="v2-lab-row flex flex-col gap-1">
         <label class="text-2xs text-[var(--color-fg-muted)] font-medium">${name}${requiredMark}</label>
         ${hint}
         <${NumberInput} value=${(value as number) ?? (schema.default as number) ?? ''} placeholder=${name}
@@ -70,7 +70,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
 
   if (schema.type === 'boolean') {
     return html`
-      <div class="flex items-center gap-2 py-1">
+      <div class="v2-lab-row flex items-center gap-2 py-1">
         <${Checkbox} checked=${(value as boolean) ?? (schema.default as boolean) ?? false}
           onChange=${(v: boolean) => onChange(name, v)} />
         <label class="text-xs text-[var(--color-fg-primary)]">${name}${requiredMark}</label>
@@ -82,7 +82,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
   if (schema.type === 'array' && schema.items?.type === 'string') {
     const strValue = Array.isArray(value) ? (value as string[]).join('\n') : ''
     return html`
-      <div class="flex flex-col gap-1">
+      <div class="v2-lab-row flex flex-col gap-1">
         <label class="text-2xs text-[var(--color-fg-muted)] font-medium">${name}${requiredMark}
           <span class="font-normal"> (줄바꿈으로 구분)</span></label>
         ${hint}
@@ -98,7 +98,7 @@ export function SchemaField({ name, schema, value, required, onChange }: SchemaF
   const rawValue = value === undefined || value === null ? ''
     : typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   return html`
-    <div class="flex flex-col gap-1">
+    <div class="v2-lab-row flex flex-col gap-1">
       <label class="text-2xs text-[var(--color-fg-muted)] font-medium">${name}${requiredMark}
         <span class="font-normal"> (JSON)</span></label>
       ${hint}

@@ -201,6 +201,15 @@ describe('HarnessHealth', () => {
     expect(mermaidSource(container)).toContain('판정 기록')
     expect(mermaidSource(container)).toContain('debounced reload')
 
+    // Dark-fantasy palette regression: mermaid classDefs (which cannot use
+    // CSS vars) carry the _ds Dark-Fantasy literals, not the retired
+    // navy/cyan/green set.
+    expect(mermaidSource(container)).toContain('#5a7a3a') // healthy stroke — status-ok (bile)
+    expect(mermaidSource(container)).toContain('#c4a265') // hub / active — brass accent
+    expect(mermaidSource(container)).not.toContain('#38bdf8') // retired cyan
+    expect(mermaidSource(container)).not.toContain('#0f172a') // retired navy
+    expect(mermaidSource(container)).not.toContain('#4ade80') // retired bright green
+
     const markup = container.innerHTML
     // Shared theme tokens reach the markup. KpiCell (post-StatCard swap)
     // emits `--color-fg-primary` via inline style; the rest of the

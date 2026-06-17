@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [0.19.45] - 2026-06-17
+
+### Changed
+- `shell-ir`: graduated the capability-based Shell IR approval gate to
+  default-on (RFC-0254). `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` now defaults to
+  `true` (was `false`) and is `Active` (was `Experimental`); the env var is kept
+  as a kill-switch (set `=false` to disable without a rebuild). The autonomous
+  keeper lane allows the toolchain with telemetry and denies a trust-independent
+  catastrophic floor (destructive git, redirect write-escape, `mkfs`). Gate
+  decisions are observable in `.masc/logs/system_log_*.jsonl`
+  (`shell_ir policy_denied` / `shell_ir dispatch`).
+
+
 ## [0.19.44] - 2026-06-14
 
 ### Changed

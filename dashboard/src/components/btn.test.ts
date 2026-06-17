@@ -30,7 +30,7 @@ describe("Btn", () => {
     render(h(Btn, { variant: "primary" }, "Save"), container)
     const btn = container.querySelector("button")
     expect(btn!.getAttribute("data-variant")).toBe("primary")
-    expect(btn!.style.background).toContain("var(--color-accent-fg-dim)")
+    expect(btn!.style.background).toContain("var(--color-brand)")
   })
 
   it("applies size data attribute and geometry", () => {
@@ -95,7 +95,7 @@ describe("Btn", () => {
     await new Promise((r) => setTimeout(r, 0))
     const hoverBg = container.querySelector("button")!.style.background
     expect(hoverBg).not.toBe(idleBg)
-    expect(hoverBg).toContain("var(--color-accent-fg)")
+    expect(hoverBg).toContain("var(--color-brand-hover)")
   })
 
   it("forwards testId, ariaLabel, title, class", () => {

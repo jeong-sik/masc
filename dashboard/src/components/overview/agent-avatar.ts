@@ -108,7 +108,7 @@ export function AgentAvatar({
 
   const avatar = html`
     <div
-      class="pixel-avatar rounded-[var(--r-1)] ${sizeClass} ${blockerClass} ${ringClass}"
+      class="v2-overview-avatar pixel-avatar rounded-[var(--r-1)] ${sizeClass} ${blockerClass} ${ringClass}"
       data-status=${statusAttr}
       title=${name}
       onClick=${onClick}
@@ -137,7 +137,7 @@ export function AgentAvatar({
     : 'pixel-avatar-name'
 
   return html`
-    <div class="pixel-avatar rounded-wrap">
+    <div class="v2-overview-avatar pixel-avatar rounded-wrap">
       ${avatar}
       <span class=${nameClass}>${name}</span>
     </div>

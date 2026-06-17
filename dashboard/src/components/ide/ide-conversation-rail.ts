@@ -201,12 +201,12 @@ export function IdeConversationRail() {
 
   return html`
     <div
-      class="ide-rail-panel ide-conversation-panel"
+      class="ide-rail-panel ide-conversation-panel v2-ide-panel"
       role="region"
       aria-label="REACTION THREAD"
     >
       <div
-        class="ide-rail-head"
+        class="ide-rail-head v2-ide-toolbar"
       >
         <span>REACTION THREAD</span>
         <span>
@@ -214,11 +214,11 @@ export function IdeConversationRail() {
           ${visibleCounts.decision}/${decisions.length} decisions
         </span>
       </div>
-      <div class="ide-rail-scope" aria-label="Keeper workspace scope">
+      <div class="ide-rail-scope v2-ide-row" aria-label="Keeper workspace scope">
         <span>${keeperName ? `@${keeperName}` : 'all keepers'}</span>
         <span title=${activeFile}>${activeFile}</span>
       </div>
-      <div class="ide-rail-context-row" aria-label="Conversation context anchors">
+      <div class="ide-rail-context-row v2-ide-row" aria-label="Conversation context anchors">
         <span>${threadStore.visibleThreads().length} file threads</span>
         <span>${lineAnchoredThreads.length} line anchors</span>
       </div>
@@ -231,7 +231,7 @@ export function IdeConversationRail() {
         class="ide-rail-list"
       >
         ${visibleItems.length === 0
-          ? html`<li class="ide-rail-empty">no conversation activity</li>`
+          ? html`<li class="ide-rail-empty v2-ide-row">no conversation activity</li>`
           : visibleItems.map(item => ReplayRailCard(
               item,
               focusedId,
@@ -388,9 +388,9 @@ function PostCard(
   const contextSummary = conversationContextSummary(routeLinks)
 
   return html`
-    <li class="ide-rail-item">
+    <li class="ide-rail-item v2-ide-row">
       <button
-        class="ide-conversation-card"
+        class="ide-conversation-card v2-ide-card"
         type="button"
         aria-current=${focused ? 'true' : undefined}
         onClick=${() => {
@@ -464,7 +464,7 @@ function PostCard(
         </div>
       </button>
       ${routeLinks.length > 0 ? html`
-        <div class="ide-conversation-route-links" aria-label="Conversation operational links">
+        <div class="ide-conversation-route-links v2-ide-detail" aria-label="Conversation operational links">
           ${routeLinks.map(link => ConversationRouteLink(link))}
         </div>
       ` : null}
@@ -510,7 +510,7 @@ function ConversationRouteLink(link: IdeContextRouteLink) {
     <button
       key=${link.id}
       type="button"
-      class="ide-conversation-route-link"
+      class="ide-conversation-route-link v2-ide-action"
       title=${link.evidence}
       aria-label=${`Open ${link.evidence}`}
       onClick=${() => openIdeContextRouteLink(link)}
@@ -568,8 +568,9 @@ function DecisionCard(
   )
   const contextSummary = conversationContextSummary(routeLinks)
   return html`
-    <li style=${{ display: 'block' }}>
+    <li class="v2-ide-row" style=${{ display: 'block' }}>
       <div
+        class="v2-ide-card"
         data-replay-source="decision"
         style=${{
           display: 'grid',
@@ -625,7 +626,7 @@ function DecisionCard(
           >↗ ${focusFile}:${cursor.line}</span>
         ` : null}
         ${routeLinks.length > 0 ? html`
-          <div class="ide-conversation-route-links" aria-label="Decision operational links">
+          <div class="ide-conversation-route-links v2-ide-detail" aria-label="Decision operational links">
             ${routeLinks.map(link => ConversationRouteLink(link))}
           </div>
         ` : null}

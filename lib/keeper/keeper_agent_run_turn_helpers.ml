@@ -9,35 +9,60 @@
    ceiling. Losing the oldest entry only forces one extra link call,
    which costs one backlog write but never breaks correctness. *)
 
+module Link_task_cache_key = struct
+  type t = string * string * string
+  let compare = compare
+end
+
+module Link_task_cache_map = Map.Make (Link_task_cache_key)
+
+type link_task_cache_state =
+  { entries : unit Link_task_cache_map.t
+  ; order : Link_task_cache_key.t list
+  ; size : int
+  }
+
 let link_task_cache_max_entries = 4096
 
-let link_task_cache : (string * string * string, unit) Hashtbl.t =
-  Hashtbl.create link_task_cache_max_entries
+let link_task_cache_state =
+  Atomic.make
+    { entries = Link_task_cache_map.empty; order = []; size = 0 }
 
-(* FIFO order so we know which entry to evict when the table is full. *)
-let link_task_cache_order : (string * string * string) Queue.t = Queue.create ()
-let link_task_cache_mutex = Stdlib.Mutex.create ()
+let evict_oldest state =
+  match List.rev state.order with
+  | [] -> state
+  | oldest :: rest ->
+    { entries = Link_task_cache_map.remove oldest state.entries
+    ; order = List.rev rest
+    ; size = state.size - 1
+    }
 
-let evict_oldest_locked () =
-  match Queue.take_opt link_task_cache_order with
-  | None -> ()
-  | Some key -> Hashtbl.remove link_task_cache key
-
-let mark_task_link ~keeper ~task_id ~trace_id =
+let rec mark_task_link ~keeper ~task_id ~trace_id =
   let key = (keeper, task_id, trace_id) in
-  Stdlib.Mutex.protect link_task_cache_mutex (fun () ->
-    if Hashtbl.mem link_task_cache key then
+  let rec loop () =
+    let state = Atomic.get link_task_cache_state in
+    if Link_task_cache_map.mem key state.entries then
       ()
-    else (
-      while Hashtbl.length link_task_cache >= link_task_cache_max_entries do
-        evict_oldest_locked ()
-      done;
-      Hashtbl.add link_task_cache key ();
-      Queue.add key link_task_cache_order))
+    else
+      let state =
+        if state.size >= link_task_cache_max_entries
+        then evict_oldest state
+        else state
+      in
+      let new_state =
+        { entries = Link_task_cache_map.add key () state.entries
+        ; order = key :: state.order
+        ; size = state.size + 1
+        }
+      in
+      if not (Atomic.compare_and_set link_task_cache_state state new_state)
+      then loop ()
+  in
+  loop ()
 
 let task_link_already_recorded ~keeper ~task_id ~trace_id =
-  Stdlib.Mutex.protect link_task_cache_mutex (fun () ->
-    Hashtbl.mem link_task_cache (keeper, task_id, trace_id))
+  let key = (keeper, task_id, trace_id) in
+  Link_task_cache_map.mem key (Atomic.get link_task_cache_state).entries
 
 let per_provider_timeout_for_turn
     ?oas_timeout_s
@@ -251,15 +276,15 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
       ~event_kind
   in
   let yield_on_tool = Env_config.Slot.yield_enabled () in
+  (* SSOT-DRIFT-REMEDIATION: Streaming⇄Awaiting_tool_result FSM transitions
+     are now emitted from the turn-scoped OAS Event_bus observation in
+     [Keeper_unified_turn_event_bus], so they appear unconditionally even
+     when [yield_on_tool=false]. The yield/resume hooks below only handle
+     the optional slot-yield behaviour and its registry progress events. *)
   let on_yield =
     if yield_on_tool then
       Some
         (fun () ->
-          Keeper_turn_fsm.emit_transition
-            ~keeper_name
-            ~turn_id
-            ~prev:Keeper_turn_fsm.Streaming
-            Keeper_turn_fsm.Awaiting_tool_result;
           record_turn_progress "slot_yield";
           Log.Misc.debug "keeper %s: slot yielded (tool execution)" keeper_name)
     else None
@@ -268,11 +293,6 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
     if yield_on_tool then
       Some
         (fun () ->
-          Keeper_turn_fsm.emit_transition
-            ~keeper_name
-            ~turn_id
-            ~prev:Keeper_turn_fsm.Awaiting_tool_result
-            Keeper_turn_fsm.Streaming;
           record_turn_progress "slot_resume";
           Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" keeper_name)
     else None

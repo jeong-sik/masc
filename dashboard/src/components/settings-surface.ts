@@ -215,6 +215,34 @@ function RolePill({ children }: { children: ComponentChildren }) {
   return html`<span class="set-rolepill">${children}</span>`
 }
 
+function LogFilter({
+  filter,
+  active,
+  onClick,
+}: {
+  filter: LogFilter
+  active: boolean
+  onClick: () => void
+}) {
+  const label =
+    filter === 'all' ? 'All'
+    : filter === 'tool' ? 'Tool'
+    : filter === 'success' ? 'Success'
+    : 'Failure'
+
+  return html`
+    <button
+      type="button"
+      class=${`log-f ${active ? 'on' : ''}`}
+      data-filter=${filter}
+      data-active=${active ? 'true' : 'false'}
+      onClick=${onClick}
+    >
+      ${label}
+    </button>
+  `
+}
+
 function LogViewer() {
   const [filter, setFilter] = useState<LogFilter>('all')
   const rows = SYS_LOG.filter(r => {
@@ -231,16 +259,12 @@ function LogViewer() {
     <div class="log-view" data-testid="log-viewer">
       <div class="log-filters">
         ${filters.map(f => html`
-          <button
-            type="button"
+          <${LogFilter}
             key=${f}
-            class=${`log-f ${filter === f ? 'on' : ''}`}
-            data-filter=${f}
-            data-active=${filter === f ? 'true' : 'false'}
+            filter=${f}
+            active=${filter === f}
             onClick=${() => setFilter(f)}
-          >
-            ${f === 'all' ? 'All' : f === 'tool' ? 'Tool' : f === 'success' ? 'Success' : 'Failure'}
-          </button>
+          />
         `)}
         <span class="log-live"><span class="tps-dot"></span>tail -f</span>
       </div>
@@ -365,7 +389,7 @@ export function SettingsSurface() {
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
 
   return html`
-    <main class="settings-surf" data-screen-label="설정" data-testid="settings-surface">
+    <main class="v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary" data-screen-label="설정" data-testid="settings-surface">
       <div class="set-shell">
         <nav class="set-nav" aria-label="Settings categories">
           <div class="set-nav-h">
@@ -404,7 +428,7 @@ export function SettingsSurface() {
             <button type="button" class="act">Save changes</button>
           </header>
 
-          <div class="set-card-b">
+          <div class="set-card-b ss-card mx-6 my-6">
             ${sec === 'account' && html`
               <${SetRow} label="Operator" hint="Currently logged-in operator">
                 <span class="mono" style=${{ color: 'var(--text-bright)' }}>@operator</span>

@@ -1,0 +1,51 @@
+/* ─── Viewer shell layout ────────────────────────────────── */
+/* 4-zone grid: topbar · sidebar · main · inspector
+   rail / panel / sink 로 배경 대비를 벌려 zone 구분을 시각화. */
+
+.v-shell {
+  display: grid;
+  grid-template-columns: 232px 1fr 360px;
+  grid-template-rows: 48px 1fr;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "sidebar main inspector";
+  height: 100vh;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text-bright);
+  overflow: hidden;
+}
+
+/* Split mode — inspector 자리에 second keeper 스택 */
+.v-shell[data-split="1"] {
+  grid-template-columns: 232px 1fr 1fr;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "sidebar main main-2";
+}
+
+.v-topbar    { grid-area: topbar; z-index: 2; }
+.v-sidebar   { grid-area: sidebar; }
+.v-main      {
+  grid-area: main;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  min-height: 0;
+  min-width: 0;
+  background: var(--surf-panel);
+}
+.v-inspector { grid-area: inspector; }
+.v-main-2    { grid-area: main-2; display: none; }
+.v-shell[data-split="1"] .v-main-2 { display: grid; }
+.v-shell[data-split="1"] .v-inspector { display: none; }
+
+/* narrower viewports — collapse inspector into tab */
+@media (max-width: 1320px) {
+  .v-shell {
+    grid-template-columns: 208px 1fr;
+    grid-template-areas:
+      "topbar topbar"
+      "sidebar main";
+  }
+  .v-inspector { display: none; }
+}

@@ -315,7 +315,7 @@ export function WorldVisualizer() {
 
   return html`
     <div
-      class="relative rounded-[var(--r-2)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-0)] overflow-hidden"
+      class="v2-shell-panel relative rounded-[var(--r-2)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-0)] overflow-hidden"
       style="padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-5);"
     >
       <div class="flex items-center justify-between ${fleetSize > 0 ? 'mb-3' : ''}">

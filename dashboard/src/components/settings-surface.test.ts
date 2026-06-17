@@ -36,10 +36,18 @@ describe('SettingsSurface', () => {
   it('renders the surface and category navigation', () => {
     render(html`<${SettingsSurface} />`, container)
 
+    expect(container.querySelector('.v2-shell-surface')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-surface"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-account"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-runtime"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-logs"]')).not.toBeNull()
+  })
+
+  it('applies StyleSeed surface and card classes', () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    expect(container.querySelector('.v2-shell-surface.ss-surface.bg-surface-page.text-text-primary')).not.toBeNull()
+    expect(container.querySelector('.set-card-b.ss-card')).not.toBeNull()
   })
 
   it('switches sections when category navigation is clicked', async () => {

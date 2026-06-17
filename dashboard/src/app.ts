@@ -14,7 +14,7 @@ import {
 } from './sse'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
-import { refreshShell } from './store'
+import { refreshShell, serverStatus, shellCounts } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
@@ -52,6 +52,7 @@ import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
 import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
+import { useIsMobile } from './hooks/use-is-mobile'
 import { isWidgetSoloRoute } from './components/widget-solo'
 import {
   CopilotDock,
@@ -60,6 +61,14 @@ import {
   useCopilotDock,
   useCopilotDockShortcuts,
 } from './components/copilot-dock'
+import {
+  TweaksPanel,
+  TweaksPanelToggle,
+  tweaksDensity,
+  tweaksFontScale,
+  tweaksMotion,
+  tweaksBubble,
+} from './components/tweaks-panel'
 
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
@@ -111,13 +120,11 @@ function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
 export function shouldUseCompactDashboardChrome({
   widgetSoloMode,
   focusMode,
-  keeperDetailMode,
 }: {
   widgetSoloMode: boolean
   focusMode: boolean
-  keeperDetailMode: boolean
 }): boolean {
-  return widgetSoloMode || focusMode || keeperDetailMode
+  return widgetSoloMode || focusMode
 }
 
 export function App() {
@@ -243,6 +250,8 @@ export function App() {
   const dock = useCopilotDock()
   useCopilotDockShortcuts(dock)
 
+  const isMobile = useIsMobile()
+
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
@@ -253,24 +262,31 @@ export function App() {
   const compactChromeMode = shouldUseCompactDashboardChrome({
     widgetSoloMode,
     focusMode,
-    keeperDetailMode,
   })
 
   return html`
     <div
-      class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
+      class="v2-app flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
+      data-theme="styleseed"
       data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
       data-focus-mode=${focusMode ? 'true' : 'false'}
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
+      data-mobile=${isMobile ? 'true' : 'false'}
+      data-density=${tweaksDensity.value}
+      data-motion=${tweaksMotion.value}
+      data-bubble=${tweaksBubble.value}
+      data-font-scale=${tweaksFontScale.value}
+      data-surface=${currentTab}
+      style=${{ '--twk-font-scale': String(tweaksFontScale.value) }}
     >
       <${SkipLink} />
-      <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5">
+      <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 px-4 py-2">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[1080px]:flex-col max-[1080px]:items-stretch">
           <div class="flex min-w-0 flex-1 items-center gap-3 max-[860px]:flex-wrap">
             <div class="flex min-w-0 shrink-0 items-center gap-2.5 max-[520px]:w-full">
               <button type="button"
-                class=${`hidden max-[768px]:flex size-8 items-center justify-center rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+                class=${`hidden max-[768px]:flex size-11 items-center justify-center rounded-md border border-[var(--ss-border)] bg-[var(--ss-card)] text-[var(--ss-text-primary)] cursor-pointer transition-colors hover:bg-[var(--ss-surface-subtle)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? 'Close navigation' : 'Open navigation'}
                 aria-controls="dashboard-side-rail"
@@ -303,6 +319,15 @@ export function App() {
           </div>
 
           <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
+            <div class="v2-app-header-status hidden items-center gap-2 max-[900px]:hidden" aria-label="Dashboard summary">
+              <span class="v2-statchip live" title="Live keepers reported by the shell snapshot">
+                <span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]"></span>
+                ${shellCounts.value?.keepers ?? 0} running
+              </span>
+              <span class="v2-statchip" title="Scheduler health inferred from server status">
+                scheduler <b>${serverStatus.value ? 'healthy' : '—'}</b>
+              </span>
+            </div>
             <${EmergencyStopControl} />
             <${CopilotDockTopBarButton} dock=${dock} />
             <${Suspense} fallback=${authStatusFallback()}>
@@ -312,6 +337,7 @@ export function App() {
             <${ErrorCounterBadge} />
             <div class="max-[768px]:hidden"><${TransportBeacon} /></div>
             <div class="max-[768px]:hidden"><${ThemeSwitch} /></div>
+            <div class="max-[768px]:hidden"><${TweaksPanelToggle} /></div>
             <div class="max-[768px]:hidden"><${BuildIdentityBadge} /></div>
           </div>
         </div>
@@ -320,7 +346,7 @@ export function App() {
       ${widgetSoloMode
         ? html`
           <div
-            class="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5"
+            class="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-[var(--ss-border)] bg-[var(--ss-card)] px-3 py-1.5"
             data-testid="dashboard-widget-solo-auth-strip"
             aria-label="Solo view auth and runtime status"
           >
@@ -339,28 +365,30 @@ export function App() {
         <${DashboardHealthStrip} />
       `}
 
-      <div class=${compactChromeMode ? 'flex flex-1 overflow-hidden p-0' : 'flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col'}>
+      <div class=${compactChromeMode ? 'v2-shell-stage flex flex-1 overflow-hidden p-0' : 'v2-shell-stage flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col'}>
         ${compactChromeMode
           ? null
           : html`
             ${mobileMenuOpen.value ? html`
               <button type="button" aria-label="Close navigation" tabindex=${-1} class="hidden max-[768px]:block fixed inset-0 z-40 cursor-pointer bg-black/50" onClick=${() => { mobileMenuOpen.value = false }}></button>
             ` : null}
-            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="v2-shell-rail ${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 max-[768px]:fixed max-[768px]:inset-y-0 max-[768px]:left-0 max-[768px]:z-50 max-[768px]:m-0 max-[768px]:w-72 max-[768px]:max-h-none max-[768px]:rounded-none max-[768px]:border-r ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="v2-shell-rail ${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:hidden max-[768px]:fixed max-[768px]:inset-y-0 max-[768px]:left-0 max-[768px]:z-50 max-[768px]:m-0 max-[768px]:w-72 max-[768px]:max-h-none max-[768px]:rounded-none max-[768px]:border-r ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
               <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
             </aside>
           `}
 
-        <div class="v2-stage">
-          <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0'}>
-            <div class=${isCodeSurface || widgetSoloMode || keeperDetailMode ? 'h-full overflow-hidden p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
-              <${DashboardMain} />
+        <div class="v2-stage min-h-0 flex-1">
+          <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--ss-radius-card)] border border-[var(--ss-border)] bg-[var(--ss-card)] shadow-[var(--ss-shadow-card)]'}>
+            <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
+              <div class="v2-surface" key=${currentTab}>
+                <${DashboardMain} />
+              </div>
             </div>
           </main>
           ${dock.state.value.open ? html`<${CopilotDock} dock=${dock} />` : null}
         </div>
       </div>
-      ${!compactChromeMode ? html`<${MobileBottomBar} currentTab=${currentTab} onMenuToggle=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }} />` : null}
+      ${!compactChromeMode && !mobileMenuOpen.value && !keeperDetailMode ? html`<${MobileBottomBar} currentTab=${currentTab} onMenuToggle=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }} />` : null}
       ${!dock.state.value.open && !compactChromeMode ? html`<${CopilotDockFab} dock=${dock} />` : null}
 
       ${selectedAgentName.value
@@ -376,9 +404,15 @@ export function App() {
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
       <${BundleStalenessBanner} />
+      <${TweaksPanel} />
       <${Suspense} fallback=${null}>
         <${LazyCommandPalette} />
       <//>
     </div>
   `
 }
+
+// Re-export the keeper-v2 v8 config panel + state surfaces from the app root
+// so downstream consumers have a single import surface.
+export { KeeperConfigPanel } from './components/keeper-config-panel-v2'
+export { EmptyState, ErrorState, LoadingState } from './components/state-surfaces'

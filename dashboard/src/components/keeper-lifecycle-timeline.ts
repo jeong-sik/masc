@@ -102,7 +102,7 @@ function LifecycleEventRow({ ev }: { ev: KeeperLifecycleEvent }) {
 
   return html`
     <div
-      class="flex items-start gap-3 py-1.5 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)]"
+      class="flex items-start gap-3 py-1.5 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] v2-monitoring-row"
       role="listitem"
     >
       <div
@@ -142,18 +142,18 @@ function KeeperLifecycleRow({
 
   return html`
     <div
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden v2-monitoring-panel"
       role="group"
       aria-label="${name} 생명주기 이벤트"
     >
-      <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+      <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-toolbar">
         <span class="text-xs font-semibold text-[var(--color-fg-secondary)] truncate">${name}</span>
         <span class="text-3xs text-[var(--color-fg-disabled)] tabular-nums shrink-0 ml-2">${events.length}건</span>
       </div>
       ${events.length === 0
-        ? html`<div class="px-3 py-2 text-2xs text-[var(--color-fg-muted)]">이벤트 없음</div>`
+        ? html`<div class="px-3 py-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row">이벤트 없음</div>`
         : html`
-          <div class="flex flex-col gap-1 p-2" role="list">
+          <div class="flex flex-col gap-1 p-2 v2-monitoring-row" role="list">
             ${events.map((ev, i) => html`<${LifecycleEventRow} ev=${ev} key=${i} />`)}
           </div>
         `}
@@ -175,18 +175,18 @@ export function KeeperLifecycleTimeline() {
   }
 
   if (keeperList.length === 0) {
-    return html`<div class="text-xs text-[var(--color-fg-muted)] py-4 text-center">등록된 키퍼 없음</div>`
+    return html`<div class="text-xs text-[var(--color-fg-muted)] py-4 text-center v2-monitoring-panel">등록된 키퍼 없음</div>`
   }
 
   return html`
-    <div class="flex flex-col gap-3" role="list" aria-label="키퍼 생명주기 타임라인">
-      <div class="flex items-center justify-between">
+    <div class="flex flex-col gap-3 v2-monitoring-surface" role="list" aria-label="키퍼 생명주기 타임라인">
+      <div class="flex items-center justify-between v2-monitoring-toolbar">
         <div class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">
           생명주기 이벤트 (최근 30건)
         </div>
         <button
           type="button"
-          class="text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] transition-colors"
+          class="text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] transition-colors v2-monitoring-action"
           onClick=${() => { void refreshKeeperLifecycleTimeline() }}
         >새로고침</button>
       </div>
@@ -196,7 +196,7 @@ export function KeeperLifecycleTimeline() {
           ? html`<${KeeperLifecycleRow} name=${k.name} data=${d} key=${k.name} />`
           : html`
             <div
-              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2"
+              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 v2-monitoring-row"
               key=${k.name}
             >
               <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${k.name}</span>

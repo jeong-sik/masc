@@ -313,6 +313,35 @@
   --k-10-glow: var(--color-k-10-glow);
   --k-11-glow: var(--color-k-11-glow);
   --k-12-glow: var(--color-k-12-glow);
+
+  /* Keeper-v2 palette bridge — primitives.jsx uses --kp1..--kp12 to tint
+     sigils and identity chips. Map them onto the dashboard's generated
+     12-slot keeper palette so ported components resolve without edits. */
+  --kp1: var(--color-keeper-1);
+  --kp2: var(--color-keeper-2);
+  --kp3: var(--color-keeper-3);
+  --kp4: var(--color-keeper-4);
+  --kp5: var(--color-keeper-5);
+  --kp6: var(--color-keeper-6);
+  --kp7: var(--color-keeper-7);
+  --kp8: var(--color-keeper-8);
+  --kp9: var(--color-keeper-9);
+  --kp10: var(--color-keeper-10);
+  --kp11: var(--color-keeper-11);
+  --kp12: var(--color-keeper-12);
+  --kp1-glow: var(--color-keeper-1-glow);
+  --kp2-glow: var(--color-keeper-2-glow);
+  --kp3-glow: var(--color-keeper-3-glow);
+  --kp4-glow: var(--color-keeper-4-glow);
+  --kp5-glow: var(--color-keeper-5-glow);
+  --kp6-glow: var(--color-keeper-6-glow);
+  --kp7-glow: var(--color-keeper-7-glow);
+  --kp8-glow: var(--color-keeper-8-glow);
+  --kp9-glow: var(--color-keeper-9-glow);
+  --kp10-glow: var(--color-keeper-10-glow);
+  --kp11-glow: var(--color-keeper-11-glow);
+  --kp12-glow: var(--color-keeper-12-glow);
+
   --card: var(--bg-panel);
   --card-border: color-mix(in srgb, var(--color-brass-3) 26%, var(--border-base));
   --white-2: var(--white-3);
@@ -488,7 +517,6 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
-
   /* Keeper v2 token bridge — aliases for importing v2 stylesheets.
      Maps the v2 surface vocabulary to the existing dashboard semantic
      token ladder. Tokens that already exist in tokens.generated.css /
@@ -519,6 +547,50 @@
   --sp-10: var(--space-6);
   --radius-2xs: var(--radius-xs);
   --shadow-pop: var(--shadow-cmd-palette);
+
+  /* ── StyleSeed semantic token bridge ───────────────────────────
+     Default to dashboard dark tokens so surfaces can use StyleSeed
+     utilities (bg-card, text-text-primary, border-border) without
+     breaking when data-theme="styleseed" is not active. The styleseed
+     theme block in ds-theme-tokens.css overrides these values. */
+  --bg-surface-page:   var(--color-bg-page);
+  --bg-surface-subtle: var(--color-bg-panel-alt);
+  --bg-surface-muted:  var(--color-border-divider);
+  --bg-brand-tint:     var(--color-accent-soft);
+  --text-secondary:    var(--color-fg-secondary);
+  --text-tertiary:     var(--color-fg-muted);
+  --text-disabled:     var(--color-fg-disabled);
+  --text-brand:        var(--color-accent-fg);
+  --text-success:      var(--color-status-ok);
+  --text-warning:      var(--color-status-warn);
+  --text-destructive:  var(--color-status-err);
+  --text-info:         var(--color-status-info);
+  --icon-default:      var(--color-fg-secondary);
+  --border-border:     var(--color-border-default);
+  --border-strong:     var(--color-border-strong);
+  --bg-alert-badge:    var(--color-err-soft);
+
+  /* Tailwind v4 utility bridge */
+  --color-card:           var(--bg-card);
+  --color-surface-page:   var(--bg-surface-page);
+  --color-surface-subtle: var(--bg-surface-subtle);
+  --color-surface-muted:  var(--bg-surface-muted);
+  --color-brand-tint:     var(--bg-brand-tint);
+  --color-text-primary:   var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary:  var(--text-tertiary);
+  --color-text-disabled:  var(--text-disabled);
+  --color-brand:          var(--text-brand);
+  --color-success:        var(--text-success);
+  --color-warning:        var(--text-warning);
+  --color-destructive:    var(--text-destructive);
+  --color-info:           var(--text-info);
+  --color-icon-default:   var(--icon-default);
+  --color-border:         var(--border-border);
+  --color-alert-badge:    var(--bg-alert-badge);
+  --shadow-card:          0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-elevated:      0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal:         0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 /* Readability lift for the v2 dark-fantasy muted tone: the mapped
@@ -550,9 +622,10 @@ html:not([data-theme="paper"]) {
   --text-primary: var(--fg-2);
   --text-mid: var(--fg-3);
 
-  --font-display: var(--font-sans);
-  --font-ui: var(--font-sans);
-  --font-body: var(--font-sans);
+  /* Font bridge removed (dark-fantasy migration): these previously forced
+     --font-display/ui/body to plain --font-sans, erasing the brand voice.
+     The real stacks now resolve from ds-theme-tokens.css / tokens.generated.css:
+     display = Cinzel, body = EB Garamond, ui = Noto Sans KR. */
 
   --pad-surface: 22px 26px 40px;
   --pad-card: 12px 14px;
@@ -573,4 +646,53 @@ html:not([data-theme="paper"]) {
   --status-bad: var(--err);
 
   --accent-bone: var(--color-accent-fg);
+}
+
+/* Keeper-v2 memory surface token bridge.
+   Scoped to memory boards so the memory graph surfaces keep their
+   warn/ice semantics without overriding the dashboard keeper-v2
+   brass token bridges above. */
+.mg-board,
+.gd-board {
+  --font-display: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --radius-xs: 2px;
+  --radius-pill: 9999px;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.35);
+
+  --volt: var(--color-status-warn);
+  --volt-strong: var(--color-status-warn);
+  --volt-wash: color-mix(in srgb, var(--color-status-warn) 14%, transparent);
+  --accent-ice: var(--color-info);
+  --status-ok: var(--color-status-ok);
+  --status-bad: var(--color-status-err);
+  --status-warn: var(--color-status-warn);
+
+  --bg-deep: var(--color-bg-page);
+  --bg-card: var(--color-bg-surface);
+  --bg-card-hover: var(--color-bg-elevated);
+  --bg-panel-alt: var(--color-bg-panel-alt);
+  --bg-sunken: var(--color-bg-page);
+  --border-main: var(--color-border-default);
+  --border-soft: var(--color-border-divider);
+  --text-primary: var(--color-fg-primary);
+  --text-mid: var(--color-fg-secondary);
+  --text-dim: var(--color-fg-muted);
+  --text-bright: var(--color-fg-primary);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DARK FANTASY type restore (foundation sweep, 2026-06)
+
+   The surface/text/accent palette is owned by v2-theme.css (the last-loading
+   theme bridge); this block only restores the engraved display / warm book
+   body type stacks that the v5 "Pretendard neutral sans" default (tokens.css)
+   and a keeper-v2 font bridge had erased. Chrome/UI stays sans (--font-sans,
+   --font-ui) for data density; headings/KPIs opt into --font-display (Cinzel),
+   narrative into --font-body (EB Garamond). Placed last so it wins over
+   tokens.css's --font-display: var(--font-sans).
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  --font-display: "Cinzel", "Noto Sans KR", "EB Garamond", serif;
+  --font-body: "EB Garamond", "Noto Sans KR", Georgia, serif;
 }

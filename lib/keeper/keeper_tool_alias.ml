@@ -142,6 +142,7 @@ let record_route_outcome ~tool ~routed_to ~result =
       [ "tool", safe_tool_label tool
       ; "routed_to", safe_routed_to_label routed_to
       ; "result", result
+      ; "tool_type", Tool_telemetry.tool_type_of_name tool
       ]
     ();
   (* Instruction monitoring: track per-tool invocation completeness.

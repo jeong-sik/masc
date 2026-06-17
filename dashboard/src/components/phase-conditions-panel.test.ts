@@ -123,4 +123,27 @@ describe('PhaseConditionsPanel', () => {
     ]))
     expect(chips.every(chip => chip.getAttribute('data-status-chip-uppercase') === 'false')).toBe(true)
   })
+
+  it('applies v2 monitoring surface marker classes', () => {
+    const diagnosis = normalizePhaseDiagnosis({
+      current_phase: 'Running',
+      derived_phase: 'Running',
+      can_execute_turn: true,
+      determining_condition: 'running_fiber_alive',
+      rows: [
+        {
+          key: 'running_fiber_alive',
+          label: 'Running: fiber alive',
+          priority: 14,
+          value: true,
+          phase: 'Running',
+        },
+      ],
+    })
+
+    render(html`<${PhaseConditionsPanel} diagnosis=${diagnosis} />`, container)
+
+    expect(container.querySelector('.v2-monitoring-panel')).toBeInstanceOf(HTMLElement)
+    expect(container.querySelectorAll('.v2-monitoring-row').length).toBeGreaterThan(0)
+  })
 })

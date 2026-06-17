@@ -1,0 +1,21 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 · pressure
+   Stacked pressure chart — context · cpu · mem · msg/s
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Pressure chart ── */
+.pressure { border: 1px solid var(--hair); background: rgba(14,10,8,0.42); }
+.pressure-row {
+  display: grid; grid-template-columns: 228px 1fr;
+  border-bottom: 1px solid var(--hair);
+  background: linear-gradient(180deg, rgba(20,14,10,0.5), rgba(8,5,4,0.4));
+}
+.pressure-row:last-child { border-bottom: 0; }
+.pressure-row .p-lbl {
+  border-right: 1px solid var(--hair); padding: 10px 12px;
+  display: flex; align-items: center; gap: 9px;
+}
+.pressure-row .p-lbl .pt { font-family: var(--font-display); font-size: 11px; letter-spacing: 0.18em; color: var(--accent-brass); text-transform: uppercase; }
+.pressure-row .p-lbl .pm { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); margin-left: auto; font-variant-numeric: tabular-nums; }
+.pressure-row .p-svg { height: 56px; }
+.pressure-row svg { display: block; width: 100%; height: 100%; }

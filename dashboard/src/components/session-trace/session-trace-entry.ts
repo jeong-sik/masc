@@ -245,7 +245,7 @@ function TraceContextLinks({
   if (links.length === 0) return null
   return html`
     <div
-      class="flex flex-wrap items-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2"
+      class="v2-monitoring-trace-context flex flex-wrap items-center gap-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2"
       aria-label="Trace operational context links"
     >
       ${links.map(link => html`
@@ -253,7 +253,7 @@ function TraceContextLinks({
           key=${link.id}
           type="button"
           data-testid="session-trace-context-link"
-          class="inline-flex max-w-44 items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-mono text-[var(--color-fg-muted)] hover:border-[var(--color-accent-border)] hover:text-[var(--color-accent-fg)]"
+          class="v2-monitoring-trace-action inline-flex max-w-44 items-center gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-mono text-[var(--color-fg-muted)] hover:border-[var(--color-accent-border)] hover:text-[var(--color-accent-fg)]"
           title=${link.evidence}
           aria-label=${`Open ${link.evidence}`}
           onClick=${() => openIdeContextRouteLink(link)}
@@ -463,7 +463,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
         ${needsCollapse ? html`
           <button
             type="button"
-            class="w-full py-1.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-elevated)] transition-colors cursor-pointer border-t border-[var(--color-border-default)] bg-transparent"
+            class="v2-monitoring-trace-action w-full py-1.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-elevated)] transition-colors cursor-pointer border-t border-[var(--color-border-default)] bg-transparent"
             onClick=${() => { expanded.value = !expanded.value }}
           >
             ${expanded.value ? '접기' : `전체 보기 (${text.split('\n').length}줄)`}
@@ -494,7 +494,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
           <button
             type="button"
             data-testid="session-trace-code-link"
-            class="shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)]"
+            class="v2-monitoring-trace-action shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)]"
             title=${codeRouteLink.evidence}
             aria-label=${`Open ${codeRouteLink.evidence}`}
             onClick=${() => openIdeContextRouteLink(codeRouteLink)}
@@ -758,7 +758,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
     || contextLinks.length > 0
 
   const row = html`
-    <div class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] ${gateRejected ? 'opacity-50' : ''}">
+    <div class="v2-monitoring-trace-row flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] ${gateRejected ? 'opacity-50' : ''}">
       ${'' /* Icon */}
       <div class="flex-shrink-0 mt-0.5 size-7 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] flex items-center justify-center text-2xs font-mono font-bold ${style.color}">
         ${style.icon}
@@ -812,7 +812,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
   if (!hasDetail) return row
 
   return html`
-    <details class="rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors group">
+    <details class="v2-monitoring-trace-detail rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors group">
       <summary class="list-none cursor-pointer relative pr-8">
         ${row}
         <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 group-hover:opacity-100 transition-opacity">

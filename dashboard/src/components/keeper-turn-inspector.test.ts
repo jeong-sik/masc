@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-import { cleanup, render, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchKeeperTurnRecords, type TurnRecordsResponse } from '../api/dashboard'
-import { KeeperMemoryOsRecallPanel } from './keeper-turn-inspector'
+import { KeeperMemoryOsRecallPanel, KeeperTurnInspector } from './keeper-turn-inspector'
 
 vi.mock('../api/dashboard', () => {
   return {
@@ -91,6 +91,8 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           absolute_turn: 42,
           ts: 1_781_587_560,
           runtime_profile: 'local',
+          input_tokens: 2400,
+          output_tokens: 280,
           blocks: [
             { block: 'system', bytes: 1200, digest: '1111222233334444' },
             { block: 'memory_os_recall', bytes: 3392, digest: 'aabbccddeeff00112233' },
@@ -157,6 +159,167 @@ describe('KeeperMemoryOsRecallPanel', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('Memory OS recall source 없음')
+    })
+  })
+})
+
+describe('KeeperTurnInspector v2 drawer', () => {
+  beforeEach(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+      writable: true,
+      configurable: true,
+    })
+  })
+
+  it('renders the detail drawer when a turn row is clicked', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    const summary = container.querySelector('.kti-turn-summary')
+    expect(summary).toBeTruthy()
+    fireEvent.click(summary!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    const drawerText = container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent ?? ''
+    expect(drawerText).toContain('턴 상세')
+    expect(drawerText).toContain('trace-active_0042')
+    expect(drawerText).toContain('local')
+  })
+
+  it('switches tabs inside the drawer', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-tab-messages"]')).toBeTruthy()
+    })
+
+    expect(container.querySelector('[data-testid="turn-tab-timeline"]')?.classList.contains('on')).toBe(true)
+    expect(container.textContent).toContain('턴 워터폴')
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-tab-messages"]')?.classList.contains('on')).toBe(true)
+    })
+
+    expect(container.textContent).toContain('모델에 전달된 시퀀스')
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-meta"]')!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('실행 메타데이터')
+    })
+  })
+
+  it('displays summary stats in the stat strip', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-summary-stats"]')).toBeTruthy()
+    })
+
+    const stats = container.querySelector('[data-testid="turn-summary-stats"]')?.textContent ?? ''
+    expect(stats).toContain('소요')
+    expect(stats).toContain('입력')
+    expect(stats).toContain('2.4k')
+    expect(stats).toContain('출력')
+    expect(stats).toContain('280')
+    expect(stats).toContain('도구')
+    expect(stats).toContain('1')
+    expect(stats).toContain('추정비용')
+  })
+
+  it('displays the token-economics stacked bar', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-token-bar"]')).toBeTruthy()
+    })
+
+    const barText = container.querySelector('[data-testid="turn-token-bar"]')?.textContent ?? ''
+    expect(barText).toContain('토큰 경제')
+    expect(barText).toContain('입력 2,400')
+    expect(barText).toContain('출력 280')
+  })
+
+  it('copies the trace id when the copy button is clicked', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('.kti-copy')).toBeTruthy()
+    })
+
+    const copyButtons = container.querySelectorAll('.kti-copy')
+    // First copy button is the trace-id copy in the header.
+    fireEvent.click(copyButtons[0]!)
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('trace-active_0042')
+    })
+  })
+
+  it('closes the drawer on escape key', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeFalsy()
     })
   })
 })

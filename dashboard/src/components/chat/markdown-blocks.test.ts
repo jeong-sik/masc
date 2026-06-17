@@ -1,0 +1,149 @@
+import { describe, expect, it } from 'vitest'
+import { parseMarkdownToBlocks } from './markdown-blocks'
+import type { ChatBlock } from '../../types'
+
+describe('parseMarkdownToBlocks', () => {
+  it('returns an empty array for empty/whitespace input', () => {
+    expect(parseMarkdownToBlocks('')).toEqual([])
+    expect(parseMarkdownToBlocks('   \n  ')).toEqual([])
+  })
+
+  it('parses paragraphs with inline formatting and links', () => {
+    const blocks = parseMarkdownToBlocks('Hello **world**. Visit http://example.com')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const html = (blocks[0] as Extract<ChatBlock, { t: 'p' }>).html
+    expect(html).toContain('Hello')
+    expect(html).toContain('<strong>world</strong>')
+    expect(html).toContain('<a')
+    expect(html).toContain('http://example.com')
+  })
+
+  it('parses headings as h4 blocks', () => {
+    const blocks = parseMarkdownToBlocks('# Title\n\n## Subtitle')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toMatchObject({ t: 'h4' })
+    expect(blocks[1]).toMatchObject({ t: 'h4' })
+    expect((blocks[0] as Extract<ChatBlock, { t: 'h4' }>).html).toContain('Title')
+  })
+
+  it('parses unordered lists', () => {
+    const blocks = parseMarkdownToBlocks('- first\n- **second**\n- [third](http://x.com)')
+    expect(blocks).toHaveLength(1)
+    const list = blocks[0] as Extract<ChatBlock, { t: 'ul' }>
+    expect(list.t).toBe('ul')
+    expect(list.items).toHaveLength(3)
+    expect(list.items[0]).toContain('first')
+    expect(list.items[1]).toContain('<strong>second</strong>')
+    expect(list.items[2]).toContain('<a')
+  })
+
+  it('parses ordered lists', () => {
+    const blocks = parseMarkdownToBlocks('1. first\n2. second')
+    const list = blocks[0] as Extract<ChatBlock, { t: 'ul' }>
+    expect(list.t).toBe('ul')
+    expect(list.items).toHaveLength(2)
+  })
+
+  it('parses code fences with language caption', () => {
+    const blocks = parseMarkdownToBlocks('```typescript\nconst x = 1 < 2\n```')
+    expect(blocks).toHaveLength(1)
+    const code = blocks[0] as Extract<ChatBlock, { t: 'code' }>
+    expect(code.t).toBe('code')
+    expect(code.cap).toBe('typescript')
+    expect(code.html).toContain('const x = 1')
+    expect(code.html).toContain('&lt;') // escaped, not raw
+  })
+
+  it('parses mermaid fences into mermaid blocks', () => {
+    const blocks = parseMarkdownToBlocks('```mermaid\ngraph TD\n  A --> B\n```')
+    expect(blocks).toHaveLength(1)
+    const mermaid = blocks[0] as Extract<ChatBlock, { t: 'mermaid' }>
+    expect(mermaid.t).toBe('mermaid')
+    expect(mermaid.source).toContain('graph TD')
+  })
+
+  it('parses GitHub-style callouts', () => {
+    const cases: Array<{ input: string; severity: string; label: string }> = [
+      { input: '> [!NOTE]\n> note body', severity: 'info', label: 'NOTE' },
+      { input: '> [!TIP]\n> tip body', severity: 'info', label: 'TIP' },
+      { input: '> [!WARNING]\n> warning body', severity: 'warn', label: 'WARNING' },
+      { input: '> [!CAUTION]\n> caution body', severity: 'bad', label: 'CAUTION' },
+      { input: '> [!DANGER]\n> danger body', severity: 'bad', label: 'DANGER' },
+    ]
+
+    for (const { input, severity, label } of cases) {
+      const blocks = parseMarkdownToBlocks(input)
+      expect(blocks).toHaveLength(1)
+      const callout = blocks[0] as Extract<ChatBlock, { t: 'callout' }>
+      expect(callout.t).toBe('callout')
+      expect(callout.severity).toBe(severity)
+      expect(callout.html).toContain(`${label.toLowerCase()} body`)
+      expect(callout.html).not.toContain('[!')
+    }
+  })
+
+  it('turns plain blockquotes into info callouts', () => {
+    const blocks = parseMarkdownToBlocks('> plain quote')
+    const callout = blocks[0] as Extract<ChatBlock, { t: 'callout' }>
+    expect(callout.t).toBe('callout')
+    expect(callout.severity).toBe('info')
+    expect(callout.html).toContain('plain quote')
+  })
+
+  it('parses tables and detects numeric/muted cells', () => {
+    const blocks = parseMarkdownToBlocks('|name|count|\n|---|---|\n|a|42|\n|b|n/a|\n')
+    expect(blocks).toHaveLength(1)
+    const table = blocks[0] as Extract<ChatBlock, { t: 'table' }>
+    expect(table.t).toBe('table')
+    expect(table.head).toHaveLength(2)
+    expect(table.rows).toHaveLength(2)
+    expect(table.rows[0]![1]).toMatchObject({ v: '42', num: true })
+    expect(table.rows[1]![1]).toMatchObject({ v: 'n/a', muted: true })
+  })
+
+  it('promotes image-only paragraphs to image blocks', () => {
+    const blocks = parseMarkdownToBlocks('![alt text](http://x.com/img.png)')
+    expect(blocks).toHaveLength(1)
+    const image = blocks[0] as Extract<ChatBlock, { t: 'image' }>
+    expect(image.t).toBe('image')
+    expect(image.src).toBe('http://x.com/img.png')
+    expect(image.cap).toBe('alt text')
+  })
+
+  it('keeps inline images inside paragraphs', () => {
+    const blocks = parseMarkdownToBlocks('See ![icon](http://x.com/icon.png) here')
+    expect(blocks).toHaveLength(1)
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('<img')
+    expect(p.html).toContain('icon')
+  })
+
+  it('parses top-level SVG html into svg blocks', () => {
+    const blocks = parseMarkdownToBlocks('<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="5"/></svg>')
+    expect(blocks).toHaveLength(1)
+    const svg = blocks[0] as Extract<ChatBlock, { t: 'svg' }>
+    expect(svg.t).toBe('svg')
+    expect(svg.svg).toContain('<svg')
+  })
+
+  it('ignores horizontal rules', () => {
+    const blocks = parseMarkdownToBlocks('before\n\n---\n\nafter')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    expect(blocks[1]).toMatchObject({ t: 'p' })
+  })
+
+  it('does not throw on malformed input so callers can fall back', () => {
+    // Passing an extremely malformed string should not throw.
+    expect(() => parseMarkdownToBlocks('\0')).not.toThrow()
+    expect(Array.isArray(parseMarkdownToBlocks('\0'))).toBe(true)
+  })
+
+  it('preserves HTML escaping in inline code', () => {
+    const blocks = parseMarkdownToBlocks('Use `<script>`')
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('<code>')
+    expect(p.html).not.toContain('<script>')
+  })
+})

@@ -94,7 +94,7 @@ let handle_masc_tool
                  propagation now 3/3 = 100% per RFC-0084 §2.1 North Star. *)
                let tag_dispatch_with_telemetry () =
                  let result, _outcome =
-                   Tool_telemetry.with_span ~force_new_trace_id:true ~tool_name:name (fun _trace_id_thunk ->
+                   Tool_telemetry.with_span ~force_new_trace_id:true ~surface:"keeper" ~tool_name:name (fun _trace_id_thunk ->
                      let r =
                        !Keeper_tool_shared_runtime.tag_dispatch_fn
                          ~config

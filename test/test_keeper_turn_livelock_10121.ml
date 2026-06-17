@@ -36,11 +36,27 @@ let () =
 
 module L = Masc.Keeper_turn_livelock
 module Metrics = Masc.Otel_metric_store
+module KR = Masc.Keeper_registry
+module KMC = Masc.Keeper_meta_contract
 
-(* Keeper_turn_livelock now uses Eio.Mutex (was Stdlib.Mutex; the latter
-   raised EDEADLK whenever two Eio fibers contended). Every public entry
-   needs an Eio fiber context, so wrap each Alcotest test body in
-   Eio_main.run. *)
+(* Keeper_turn_livelock state now lives in the keeper registry entry and is
+   updated through the registry CAS loop. Tests therefore register a minimal
+   keeper entry before exercising the public functions. *)
+let base_path () = Sys.getenv "MASC_BASE_PATH"
+
+let register_keeper keeper =
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ ("name", `String keeper); ("agent_name", `String keeper) ])
+    with
+    | Ok meta -> meta
+    | Error e -> failwith (Printf.sprintf "register_keeper %s: %s" keeper e)
+  in
+  ignore (KR.register ~base_path:(base_path ()) keeper meta : KR.registry_entry)
+
+(* Keeper_turn_livelock public entry points need an Eio fiber context, so
+   wrap each Alcotest test body in Eio_main.run. *)
 let with_eio f () = Eio_main.run @@ fun _env -> f ()
 
 let starts_for ~keeper =
@@ -68,10 +84,12 @@ let blocks_for ~keeper ~reason =
 let test_fresh_first_start () =
   L.reset_for_tests ();
   let keeper = "test-keeper-fresh-10121" in
+  register_keeper keeper;
+  let base = base_path () in
   let before_starts = starts_for ~keeper in
   let before_scheduled = scheduled_for ~keeper in
   let before_reattempts = reattempts_for ~keeper in
-  let outcome = L.record_turn_start ~keeper ~turn_id:1 in
+  let outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:1 in
   Alcotest.(check bool) "outcome is Fresh" true (outcome = L.Fresh);
   Alcotest.(check (float 0.0001))
     "starts +1"
@@ -88,9 +106,11 @@ let test_fresh_first_start () =
 let test_same_turn_classifies_as_reattempt () =
   L.reset_for_tests ();
   let keeper = "test-keeper-reattempt-10121" in
+  register_keeper keeper;
+  let base = base_path () in
   let before_reattempts = reattempts_for ~keeper in
-  let _ : L.start_outcome = L.record_turn_start ~keeper ~turn_id:91 in
-  let outcome = L.record_turn_start ~keeper ~turn_id:91 in
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:91 in
+  let outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:91 in
   (match outcome with
    | L.Reattempt { previous_attempts; _ } ->
      Alcotest.(check int) "previous_attempts is 1" 1 previous_attempts
@@ -105,9 +125,11 @@ let test_same_turn_classifies_as_reattempt () =
 let test_reattempt_count_grows_monotonically () =
   L.reset_for_tests ();
   let keeper = "test-keeper-12x-10121" in
-  let _ : L.start_outcome = L.record_turn_start ~keeper ~turn_id:91 in
+  register_keeper keeper;
+  let base = base_path () in
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:91 in
   let counts = List.init 11 (fun _ ->
-    match L.record_turn_start ~keeper ~turn_id:91 with
+    match L.record_turn_start ~base_path:base ~keeper ~turn_id:91 with
     | L.Reattempt { previous_attempts; _ } -> previous_attempts
     | _ -> -1
   ) in
@@ -121,17 +143,19 @@ let test_reattempt_count_grows_monotonically () =
 let test_forward_advance_resets () =
   L.reset_for_tests ();
   let keeper = "test-keeper-advance-10121" in
-  let _ : L.start_outcome = L.record_turn_start ~keeper ~turn_id:5 in
-  let _ : L.start_outcome = L.record_turn_start ~keeper ~turn_id:5 in
+  register_keeper keeper;
+  let base = base_path () in
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:5 in
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:5 in
   let before_reattempts = reattempts_for ~keeper in
-  let outcome = L.record_turn_start ~keeper ~turn_id:6 in
+  let outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:6 in
   Alcotest.(check bool) "advance is Fresh" true (outcome = L.Fresh);
   Alcotest.(check (float 0.0001))
     "advance does not increment reattempts"
     before_reattempts (reattempts_for ~keeper);
   (* And the next start at the new id classifies as Reattempt
      against the NEW id, not the old one. *)
-  let outcome2 = L.record_turn_start ~keeper ~turn_id:6 in
+  let outcome2 = L.record_turn_start ~base_path:base ~keeper ~turn_id:6 in
   match outcome2 with
   | L.Reattempt { previous_attempts; _ } ->
     Alcotest.(check int)
@@ -143,9 +167,11 @@ let test_forward_advance_resets () =
 let test_backward_turn_classifies_as_regression () =
   L.reset_for_tests ();
   let keeper = "test-keeper-regression-10121" in
-  let _ : L.start_outcome = L.record_turn_start ~keeper ~turn_id:91 in
+  register_keeper keeper;
+  let base = base_path () in
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:91 in
   let before_regressions = regressions_for ~keeper in
-  let outcome = L.record_turn_start ~keeper ~turn_id:90 in
+  let outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:90 in
   (match outcome with
    | L.Regression { previous_turn_id } ->
      Alcotest.(check int) "previous_turn_id is 91" 91 previous_turn_id
@@ -159,9 +185,12 @@ let test_keeper_isolation () =
   L.reset_for_tests ();
   let a = "test-keeper-iso-A-10121" in
   let b = "test-keeper-iso-B-10121" in
+  register_keeper a;
+  register_keeper b;
+  let base = base_path () in
   let before_b = reattempts_for ~keeper:b in
-  let _ : L.start_outcome = L.record_turn_start ~keeper:a ~turn_id:1 in
-  let _ : L.start_outcome = L.record_turn_start ~keeper:a ~turn_id:1 in
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper:a ~turn_id:1 in
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper:a ~turn_id:1 in
   Alcotest.(check (float 0.0001))
     "keeper B unaffected by keeper A reattempts"
     before_b (reattempts_for ~keeper:b)
@@ -172,10 +201,12 @@ let test_keeper_isolation () =
 let test_seconds_since_first_attempt () =
   L.reset_for_tests ();
   let keeper = "test-keeper-stuck-time-10121" in
-  let _ : L.start_outcome = L.record_turn_start ~keeper ~turn_id:1 in
+  register_keeper keeper;
+  let base = base_path () in
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:1 in
   Unix.sleepf 0.05;
-  let _ : L.start_outcome = L.record_turn_start ~keeper ~turn_id:1 in
-  match L.seconds_since_first_attempt ~keeper with
+  let _ : L.start_outcome = L.record_turn_start ~base_path:base ~keeper ~turn_id:1 in
+  match L.seconds_since_first_attempt ~base_path:base ~keeper with
   | None -> Alcotest.fail "expected Some elapsed seconds"
   | Some t ->
     Alcotest.(check bool)
@@ -185,10 +216,13 @@ let test_seconds_since_first_attempt () =
 let test_guard_blocks_after_max_attempts () =
   L.reset_for_tests ();
   let keeper = "test-keeper-guard-max-10121" in
+  register_keeper keeper;
+  let base = base_path () in
   let now = ref 1000.0 in
   let call () =
     L.guard_and_record_turn_start
       ~now:(fun () -> !now)
+      ~base_path:base
       ~keeper
       ~turn_id:91
       ~max_attempts:3
@@ -224,10 +258,13 @@ let test_guard_blocks_after_max_attempts () =
 let test_guard_blocks_on_stuck_age () =
   L.reset_for_tests ();
   let keeper = "test-keeper-guard-age-10121" in
+  register_keeper keeper;
+  let base = base_path () in
   let now = ref 10.0 in
   let call () =
     L.guard_and_record_turn_start
       ~now:(fun () -> !now)
+      ~base_path:base
       ~keeper
       ~turn_id:24
       ~max_attempts:10
@@ -252,9 +289,12 @@ let test_guard_blocks_on_stuck_age () =
 let test_guard_forward_advance_resets () =
   L.reset_for_tests ();
   let keeper = "test-keeper-guard-advance-10121" in
+  register_keeper keeper;
+  let base = base_path () in
   let call turn_id =
     L.guard_and_record_turn_start
       ~now:(fun () -> 100.0)
+      ~base_path:base
       ~keeper
       ~turn_id
       ~max_attempts:2
@@ -282,10 +322,13 @@ let test_guard_forward_advance_resets () =
 let test_reset_clears_stuck_age_for_provider_timeout () =
   L.reset_for_tests ();
   let keeper = "test-keeper-reset-stuck-age-10121" in
+  register_keeper keeper;
+  let base = base_path () in
   let now = ref 10.0 in
   let call () =
     L.guard_and_record_turn_start
       ~now:(fun () -> !now)
+      ~base_path:base
       ~keeper
       ~turn_id:24
       ~max_attempts:10
@@ -298,7 +341,7 @@ let test_reset_clears_stuck_age_for_provider_timeout () =
   (* Age now far exceeds the threshold; without the reset this is the exact
      scenario [test_guard_blocks_on_stuck_age] proves blocks. *)
   now := 1810.0;
-  L.reset_keeper_livelock ~keeper;
+  L.reset_keeper_livelock ~base_path:base ~keeper;
   (match call () with
    | L.Started L.Fresh -> ()
    | L.Blocked (L.Stuck_age_exceeded _) ->

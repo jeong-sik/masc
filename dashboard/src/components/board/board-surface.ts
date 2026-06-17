@@ -6,8 +6,7 @@ import { SectionCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
-import { EmptyState } from '../common/feedback-state'
-import { LoadingState } from '../common/feedback-state'
+import { EmptyState, LoadingState } from '../state-surfaces'
 import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
@@ -587,7 +586,7 @@ function BdThreadDetail({ post, onClose }: { post: BoardPost; onClose: () => voi
           </div>
         </div>
         ${detailLoading.value
-          ? html`<${LoadingState}>댓글 불러오는 중...<//>`
+          ? html`<${LoadingState} title="댓글 불러오는 중…" />`
           : html`<${CommentThread} comments=${detailComments.value} postId=${post.id} />`}
         <${CommentForm} postId=${post.id} />
       </div>
@@ -768,9 +767,9 @@ function BdFeed({ posts }: { posts: BoardPost[] }) {
         ${isFiltering && filteredByMode.length === 0 && posts.length > 0
           ? html`<div class="bd-empty">필터 결과 없음 (${posts.length} items)</div>`
           : filteredByMode.length === 0 && boardLoading.value
-            ? html`<${LoadingState}>게시판 불러오는 중...<//>`
+            ? html`<${LoadingState} title="게시판 불러오는 중…" />`
             : filteredByMode.length === 0
-              ? html`<${EmptyState} message="아직 게시글이 없습니다. 에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
+              ? html`<${EmptyState} title="아직 게시글이 없습니다" hint="에이전트가 활동하면 소통과 지식 공유 글이 여기에 나타납니다." compact />`
               : modeFilteredGroups.map(g =>
                   g.posts.length > 0
                     ? html`<${CategorySection} key=${g.category} group=${{ category: g.category, posts: g.posts, total: g.total, hidden: g.hidden }} />`
@@ -822,8 +821,8 @@ export function BoardSurface() {
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
-              ? html`<${LoadingState}>글 불러오는 중...<//>`
-              : html`<${EmptyState} message="글을 찾지 못했습니다" compact />`}
+              ? html`<${LoadingState} title="글 불러오는 중…" />`
+              : html`<${EmptyState} title="글을 찾지 못했습니다" compact />`}
           </div>
         `
   }

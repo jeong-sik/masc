@@ -50,6 +50,7 @@ import './styles/design-canvas.css'
 import './styles/connectors-v2.css'
 import './styles/telemetry-v2.css'
 import './styles/craft-v2.css'
+import './styles/states.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

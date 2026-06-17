@@ -270,25 +270,15 @@ let cache_desync_cleared_fn
      module_name:string -> task_id:string -> status:string -> unit) Atomic.t
   = Atomic.make (fun _config ~module_name:_ ~task_id:_ ~status:_ -> ())
 
-(** task-103: Auto-provision a sandbox worktree on successful task claim.
+(** Post-claim provisioning hook.
 
-    [Workspace_task.claim_task_r] flips a task to [Claimed] but does not create
-    the per-task git worktree the keeper subprocess will need (the LLM is
-    expected to create repo-local worktrees explicitly, but in practice
-    keepers often skip that step and immediately try to [cd] into the
-    worktree path inside docker, which fails with [fatal: not a git
-    repository: .../keeper-<agent>-<task>]).
-
-    This hook is called best-effort right after a successful claim. The
-    consumer (lib/keeper) decides whether to actually provision based on
-    keeper [sandbox_profile] (only [Docker] keepers benefit; local-host
-    keepers operate on the project root directly). Failures are logged but
-    do not block the claim — claim semantics stay independent of sandbox
+    Called best-effort right after a successful task claim. The consumer
+    decides whether to perform any keeper-specific setup; failures are logged
+    but do not block the claim — claim semantics stay independent of sandbox
     state.
 
-    Wired in [lib/workspace_metric_hooks.ml] at startup via
-    [Playground_repo_readiness.provision_task_worktree]; the default no-op
-    keeps [masc_workspace] free of a direct dependency on [masc]. *)
+    The default no-op keeps [masc_workspace] free of a direct dependency on
+    [masc]. *)
 let claim_post_provision_fn
   : (Workspace_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit) Atomic.t
   = Atomic.make (fun _ ~agent_name:_ ~task_id:_ -> ())

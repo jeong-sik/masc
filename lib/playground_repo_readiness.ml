@@ -1,9 +1,8 @@
 (** Playground repository readiness.
 
-    This module owns repository clone/worktree readiness for playground repo
-    lanes. Keeper callers may ask whether a cwd-backed repo/worktree is usable,
-    but clone/fetch/worktree provisioning policy lives here instead of in
-    keeper execution code. *)
+    This module owns repository clone readiness for playground repo lanes.
+    Keeper callers may ask whether a cwd-backed repo is usable, but clone/fetch
+    provisioning policy lives here instead of keeper execution code. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -436,54 +435,6 @@ let ensure_ready ~(config : Workspace.config) ~(meta : keeper_meta) ~repo_name (
         (Printf.sprintf
            "repo %s is in state %s; auto-repair not applicable"
            repo_name other)
-
-(* ── Sandbox task worktree provisioning ──────────────────────────── *)
-
-(** Best-effort per-task worktree provisioning for Docker-profile keepers.
-    Called via [Workspace_hooks.claim_post_provision_fn] after a successful
-    task claim. For each repository assigned to the keeper (or all repos when
-    the assignment list is empty), ensure the sandbox clone exists and add a
-    git worktree at [<clone>/.worktrees/<task-id>] checked out to
-    [origin/<default_branch>]. Failures are swallowed: claim semantics must
-    not depend on sandbox I/O. *)
-let provision_task_worktree ~(config : Workspace.config) ~agent_name ~task_id () =
-  match Keeper_meta_store.read_meta config agent_name with
-  | Ok (Some meta) -> (
-      match Keeper_sandbox.backend_of_profile meta.sandbox_profile with
-      | Keeper_sandbox.Local -> ()
-      | Keeper_sandbox.Docker -> (
-          match Repo_store.load_all ~base_path:config.base_path with
-          | Error _ -> ()
-          | Ok repos ->
-              let assigned =
-                List.filter
-                  (fun (r : Repo_manager_types.repository) ->
-                     List.mem agent_name r.keepers || r.keepers = [])
-                  repos
-              in
-              let provision_repo (repo : Repo_manager_types.repository) =
-                let repo_name = repo.id in
-                if safe_repo_component repo_name
-                then
-                  match ensure_ready ~config ~meta ~repo_name () with
-                  | Error _ -> ()
-                  | Ok () ->
-                      let cpath = clone_path ~config ~meta ~repo_name in
-                      let worktree_path =
-                        Filename.concat cpath (".worktrees/" ^ task_id)
-                      in
-                      let worktree_repo = { repo with local_path = cpath } in
-                      let ref_ = "origin/" ^ repo.default_branch in
-                      ignore
-                        (Repo_git.add_worktree
-                           ~repository:worktree_repo
-                           ~worktree_path
-                           ~ref_
-                           ())
-              in
-              List.iter provision_repo assigned))
-  | _ -> ()
-;;
 
 (* ── Sandbox repo currency (fetch + work-preserving fast-forward) ──── *)
 

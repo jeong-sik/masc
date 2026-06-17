@@ -26,10 +26,3 @@ val get_recent_commits :
   repository:repository -> branch:string -> limit:int -> (string list, string) result
 (** [get_recent_commits ~repository ~branch ~limit] returns the most recent
     [limit] commits on [branch] as ["HASH subject"] lines. *)
-
-val add_worktree :
-  repository:repository -> worktree_path:string -> ref_:string -> unit -> (unit, string) result
-(** [add_worktree ~repository ~worktree_path ~ref_ ()] adds a git worktree at
-    [worktree_path] checked out to [ref_]. The parent directory is created if
-    needed. If the path already exists as a directory the call is idempotent.
-    Best-effort: failures are returned as [Error msg]. *)

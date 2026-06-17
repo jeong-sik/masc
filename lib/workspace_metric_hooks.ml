@@ -456,10 +456,6 @@ let install () =
   Atomic.set Process_eio.process_timeout_observer_fn record_process_timeout;
   Atomic.set Workspace_hooks.distributed_lock_acquire_failed_fn record_distributed_lock_acquire_failed;
   Atomic.set Workspace_hooks.claim_post_provision_failed_fn record_claim_post_provision_failed;
-  Atomic.set Workspace_hooks.claim_post_provision_fn
-    (fun config ~agent_name ~task_id ->
-       Playground_repo_readiness.provision_task_worktree
-         ~config ~agent_name ~task_id ());
   Atomic.set Workspace_hooks.active_agents_change_fn record_active_agents_change;
   Atomic.set Workspace_hooks.workspace_telemetry_drop_fn record_workspace_telemetry_drop;
   Atomic.set Workspace_hooks.telemetry_observe_failure_fn record_telemetry_observe_failure;

@@ -36,12 +36,6 @@ module Fusion_depth : sig
     | Top  (** 키퍼/오퍼레이터가 시작한 최상위 심의 *)
     | Nested  (** 패널·심판 내부 — 더 내려갈 수 없음 *)
   [@@deriving yojson, show, eq]
-
-  (** [descend Top = Some Nested]; [descend Nested = None].
-      [None]은 "2단계 진입 거부"를 뜻한다. 게이트가 이를 [Depth_exceeded]로 변환. *)
-  val descend : t -> t option
-
-  val to_string : t -> string
 end
 
 (** {1 패널 결과} *)
@@ -53,7 +47,6 @@ type panel_failure =
   | Timeout  (** 구조적 타임아웃 (Masc_oas_bridge) *)
   | Provider_error of string  (** provider/transport 에러, 메시지 보존 *)
   | Empty_response  (** 모델이 빈 응답 (keeper_librarian 빈응답 전례) *)
-  | Budget_exhausted  (** per-panel tool-call 예산 소진 *)
 [@@deriving yojson, show, eq]
 
 (** 성공한 패널 한 명의 답. (variant inline record는 ppx_deriving_yojson 비호환이라

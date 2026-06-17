@@ -81,14 +81,6 @@ let test_explicit_still_budget_bound () =
   Alcotest.check gate "operator request still budget-bound"
     (Deny Over_hourly_budget) (decide ~hourly_count:99 r)
 
-(* --- depth guard (RFC-0252 §10) --- *)
-
-let test_depth_descend () =
-  Alcotest.(check bool) "Top descends to Nested" true
-    (Fusion_depth.descend Fusion_depth.Top = Some Fusion_depth.Nested);
-  Alcotest.(check bool) "Nested is the floor" true
-    (Fusion_depth.descend Fusion_depth.Nested = None)
-
 (* --- config (RFC-0252 §9) --- *)
 
 let parse s = Otoml.Parser.from_string s
@@ -428,7 +420,6 @@ let () =
         ; Alcotest.test_case "allow" `Quick test_allow
         ; Alcotest.test_case "explicit_budget_bound" `Quick test_explicit_still_budget_bound
         ] )
-    ; ("depth", [ Alcotest.test_case "descend" `Quick test_depth_descend ])
     ; ( "config"
       , [ Alcotest.test_case "absent" `Quick test_config_absent
         ; Alcotest.test_case "valid" `Quick test_config_valid

@@ -19,23 +19,12 @@ module Fusion_depth = struct
     | Top
     | Nested
   [@@deriving yojson, show, eq]
-
-  (* Top -> Some Nested ; Nested -> None.
-     None은 2단계 진입 거부 — 게이트가 Depth_exceeded로 변환. *)
-  let descend = function
-    | Top -> Some Nested
-    | Nested -> None
-
-  let to_string = function
-    | Top -> "top"
-    | Nested -> "nested"
 end
 
 type panel_failure =
   | Timeout
   | Provider_error of string
   | Empty_response
-  | Budget_exhausted
 [@@deriving yojson, show, eq]
 
 type panel_answer =

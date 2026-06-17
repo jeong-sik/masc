@@ -61,7 +61,11 @@ let trigger_eligible ~(policy : t) (trigger : Fusion_types.fusion_trigger) =
   | Fusion_types.High_stakes task_kind ->
     List.mem task_kind policy.high_stakes_task_kinds
 
-let decide ~(policy : t) ~hourly_count
+(* 시간당 예산은 여기서 검사하지 않는다 — 검사·소모를 한 연산으로 묶어야 TOCTOU가
+   없으므로 [Fusion_budget.try_incr_if_under]가 게이트 통과 후 원자적으로 강제한다
+   (실패 시 호출자가 [Over_hourly_budget]로 Deny). decide는 enabled/preset/depth/
+   trigger의 순수 판정만 담당한다. *)
+let decide ~(policy : t)
     (req : Fusion_types.fusion_request) : Fusion_types.gate_decision =
   if not policy.enabled then Fusion_types.Deny Fusion_types.Disabled
   else
@@ -77,7 +81,5 @@ let decide ~(policy : t) ~hourly_count
         | Fusion_types.Fusion_depth.Top ->
           if not (trigger_eligible ~policy req.trigger) then
             Fusion_types.Deny Fusion_types.Not_warranted
-          else if hourly_count >= policy.per_hour_budget then
-            Fusion_types.Deny Fusion_types.Over_hourly_budget
           else Fusion_types.Allow req
       end

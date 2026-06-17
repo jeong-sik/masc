@@ -8,8 +8,10 @@ type outcome =
       ; judge : (Fusion_types.judge_synthesis, string) result
       }
 
-let run ~sw ~net ~base_dir ~policy ~hourly_count ~request () : outcome =
-  match Fusion_policy.decide ~policy ~hourly_count request with
+let run ~sw ~net ~base_dir ~policy ~request () : outcome =
+  (* 방어적 재판정 — 예산은 호출자(fusion_tool)가 이미 try_incr_if_under로 원자
+     소모했으므로 여기서 다시 검사하지 않는다(decide는 budget-free). *)
+  match Fusion_policy.decide ~policy request with
   | Fusion_types.Deny reason -> Denied reason
   | Fusion_types.Allow req ->
     (match Fusion_policy.find_preset policy req.Fusion_types.preset with

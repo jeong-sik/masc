@@ -29,8 +29,8 @@ let req ?(preset = "budget") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_to
   : fusion_request =
   { run_id = "r1"; keeper = "k"; prompt = "p"; preset; depth; trigger }
 
-let decide ?(policy = base_policy) ?(hourly_count = 0) r =
-  Fusion_policy.decide ~policy ~hourly_count r
+let decide ?(policy = base_policy) r =
+  Fusion_policy.decide ~policy r
 
 (* --- gate branches (RFC-0252 §6) --- *)
 
@@ -66,20 +66,9 @@ let test_high_stakes_unlisted () =
   Alcotest.check gate "high-stakes unlisted -> not warranted"
     (Deny Not_warranted) (decide r)
 
-let test_over_hourly () =
-  let r = req () in
-  Alcotest.check gate "hourly budget exceeded"
-    (Deny Over_hourly_budget) (decide ~hourly_count:20 r)
-
 let test_allow () =
   let r = req () in
   Alcotest.check gate "all pass -> allow" (Allow r) (decide r)
-
-(* budget gate applies even to explicit/operator triggers *)
-let test_explicit_still_budget_bound () =
-  let r = req ~trigger:Operator_requested () in
-  Alcotest.check gate "operator request still budget-bound"
-    (Deny Over_hourly_budget) (decide ~hourly_count:99 r)
 
 (* --- config (RFC-0252 §9) --- *)
 
@@ -391,20 +380,29 @@ let test_judge_tolerant_skip () =
 
 (* --- budget counter (RFC-0252 §6/§10) --- *)
 
+let ok_or_fail = function Ok n -> n | Error () -> Alcotest.fail "expected Ok"
+
 let test_budget_basic () =
   let b = Fusion_budget.create () in
-  Alcotest.(check int) "first" 1 (Fusion_budget.incr_and_count b ~hour_bucket:"H1");
-  Alcotest.(check int) "second" 2 (Fusion_budget.incr_and_count b ~hour_bucket:"H1");
-  Alcotest.(check int) "current" 2 (Fusion_budget.current_count b ~hour_bucket:"H1")
+  Alcotest.(check int) "first" 1
+    (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10));
+  Alcotest.(check int) "second" 2
+    (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10))
+
+(* 검사+증가가 원자적: limit에 도달하면 Error로 거부하고 카운트를 늘리지 않는다. *)
+let test_budget_limit () =
+  let b = Fusion_budget.create () in
+  ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2) : int);
+  ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2) : int);
+  Alcotest.(check bool) "at limit -> Error" true
+    (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:2 = Error ())
 
 let test_budget_window_reset () =
   let b = Fusion_budget.create () in
-  ignore (Fusion_budget.incr_and_count b ~hour_bucket:"H1" : int);
-  ignore (Fusion_budget.incr_and_count b ~hour_bucket:"H1" : int);
+  ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10) : int);
+  ignore (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:10) : int);
   Alcotest.(check int) "new window resets to 1" 1
-    (Fusion_budget.incr_and_count b ~hour_bucket:"H2");
-  Alcotest.(check int) "old window now 0" 0
-    (Fusion_budget.current_count b ~hour_bucket:"H1")
+    (ok_or_fail (Fusion_budget.try_incr_if_under b ~hour_bucket:"H2" ~limit:10))
 
 let () =
   Alcotest.run "fusion_core"
@@ -416,9 +414,7 @@ let () =
         ; Alcotest.test_case "low_conf_above" `Quick test_low_conf_above
         ; Alcotest.test_case "high_stakes_listed" `Quick test_high_stakes_listed
         ; Alcotest.test_case "high_stakes_unlisted" `Quick test_high_stakes_unlisted
-        ; Alcotest.test_case "over_hourly" `Quick test_over_hourly
         ; Alcotest.test_case "allow" `Quick test_allow
-        ; Alcotest.test_case "explicit_budget_bound" `Quick test_explicit_still_budget_bound
         ] )
     ; ( "config"
       , [ Alcotest.test_case "absent" `Quick test_config_absent
@@ -445,6 +441,7 @@ let () =
         ] )
     ; ( "budget"
       , [ Alcotest.test_case "basic" `Quick test_budget_basic
+        ; Alcotest.test_case "limit" `Quick test_budget_limit
         ; Alcotest.test_case "window_reset" `Quick test_budget_window_reset
         ] )
     ]

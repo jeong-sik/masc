@@ -18,9 +18,6 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
     status_json ~ok:false [ ("error", `String "prompt is required") ]
   else begin
     let hour_bucket = hour_bucket_of_unix now_unix in
-    (* deny가 예산을 소모하지 않도록 먼저 peek. 단일 도메인 협력 스케줄링에서
-       peek→incr 사이 yield가 없어 원자적(추가 동기화 불필요). *)
-    let hourly_count = Fusion_budget.current_count budget ~hour_bucket in
     let request : Fusion_types.fusion_request =
       { run_id
       ; keeper
@@ -30,15 +27,24 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
       ; trigger = Fusion_types.Explicit_tool_call
       }
     in
-    match Fusion_policy.decide ~policy ~hourly_count request with
-    | Fusion_types.Deny reason ->
+    let denied reason =
       status_json ~ok:false
         [ ("status", `String "denied")
         ; ("reason", `String (Fusion_types.deny_reason_label reason))
         ]
+    in
+    match Fusion_policy.decide ~policy request with
+    | Fusion_types.Deny reason -> denied reason
     | Fusion_types.Allow allowed ->
-      (* Allow일 때만 예산 소모. *)
-      let _ : int = Fusion_budget.incr_and_count budget ~hour_bucket in
+      (* 게이트 통과 후 예산을 원자적으로 소모(검사+증가가 단일 CAS라 deny는 예산을
+         쓰지 않고, 멀티 도메인 동시 발동에도 per_hour_budget 초과 없음). 동기 호출
+         이라 키퍼가 즉시 Over_hourly_budget를 통보받는다(fork 후 거부 아님). *)
+      (match
+         Fusion_budget.try_incr_if_under budget ~hour_bucket
+           ~limit:policy.Fusion_policy.per_hour_budget
+       with
+       | Error () -> denied Fusion_types.Over_hourly_budget
+       | Ok (_ : int) ->
       (* out-of-band: daemon fiber → 키퍼 턴은 즉시 진행, 결과는 sink가 chat lane에.
          호출자는 이 fiber가 키퍼 턴보다 오래 살도록 root switch를 sw로 넘긴다
          (turn switch면 턴 종료 시 심의가 취소됨).
@@ -50,7 +56,7 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
          포함 모든 예외를 흡수하고 `Stop_daemon으로 정상 종료한다. Cancelled 재전파
          (Eio 일반 규약)는 advisory 배경 작업에선 불필요하고, 공유 root에선 유해. *)
       Eio.Fiber.fork_daemon ~sw (fun () ->
-        (match Fusion_orchestrator.run ~sw ~net ~base_dir ~policy ~hourly_count ~request:allowed () with
+        (match Fusion_orchestrator.run ~sw ~net ~base_dir ~policy ~request:allowed () with
          | Fusion_orchestrator.Completed _ | Fusion_orchestrator.Denied _ -> ()
          | exception Eio.Cancel.Cancelled _ ->
            (* 서버 teardown 신호. 재전파하면 fork_daemon이 root를 Switch.fail. *)
@@ -62,5 +68,5 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
              (Printexc.to_string exn));
         `Stop_daemon);
       status_json ~ok:true
-        [ ("status", `String "fusion_started"); ("run_id", `String run_id) ]
+        [ ("status", `String "fusion_started"); ("run_id", `String run_id) ])
   end

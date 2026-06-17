@@ -23,13 +23,13 @@ type outcome =
     + [Fusion_sink.emit]으로 트랜스크립트를 키퍼 chat lane에 기록.
     + [Completed]로 패널/심판 결과 반환.
 
-    @param hourly_count 현재 1시간 윈도우 fusion 수 (호출자 집계). *)
+    시간당 예산은 호출자([Fusion_tool])가 [Fusion_budget.try_incr_if_under]로 이미
+    원자 소모했으므로 여기서 재검사하지 않는다. *)
 val run
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> base_dir:string
   -> policy:Fusion_policy.t
-  -> hourly_count:int
   -> request:Fusion_types.fusion_request
   -> unit
   -> outcome

@@ -691,10 +691,20 @@ function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string
   `
 }
 
+function isSafeUrl(url: string): boolean {
+  try {
+    const u = new URL(url, typeof window !== 'undefined' ? window.location.href : 'http://localhost')
+    return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'data:'
+  } catch {
+    return false
+  }
+}
+
 function ChatVoiceBlock(b: ChatVoiceBlock) {
   const secs = b.secs ?? 14
   const [playing, setPlaying] = useState(false)
   const [prog, setProg] = useState(0)
+  const safeSrc = b.src && isSafeUrl(b.src) ? b.src : null
 
   useEffect(() => {
     if (!playing) return
@@ -725,12 +735,12 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
   return html`
     <div class="chat-block-voice" data-chat-block="voice">
       <div class="chat-block-voice-row">
-        ${b.src
+        ${safeSrc
           ? html`
               <audio
                 controls
                 preload="none"
-                src=${b.src}
+                src=${safeSrc}
                 class="h-8 max-w-[16rem]"
                 aria-label=${b.transcript || '음성 메시지'}
               />
@@ -773,19 +783,20 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
   const [open, setOpen] = useState(false)
+  const safeSrc = src && isSafeUrl(src) ? src : null
   return html`
     <figure class="chat-block-media" data-chat-block="image">
-      <div class="chat-block-media-frame ${src ? 'cursor-zoom-in' : ''}" onClick=${() => src && setOpen(true)}>
-        ${src
-          ? html`<img src=${src} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
-          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}</div>`}
+      <div class="chat-block-media-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
+        ${safeSrc
+          ? html`<img src=${safeSrc} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
+          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}${src ? ' (unsafe URL)' : ''}</div>`}
       </div>
       ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
-      ${open && src
+      ${open && safeSrc
         ? html`
             <${ChatPreviewModal} title=${cap || '이미지'} onClose=${() => setOpen(false)}>
               <img
-                src=${src}
+                src=${safeSrc}
                 alt=${cap || ''}
                 class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
               />
@@ -969,19 +980,22 @@ function ChatLinkBlock(b: ChatLinkBlock) {
   } catch {
     host = b.meta
   }
+  const safeUrl = isSafeUrl(b.url) ? b.url : '#'
+  const unsafe = safeUrl === '#'
   return html`
     <a
-      class="chat-block-linkcard ${b.kind || ''}"
-      href=${b.url}
+      class="chat-block-linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
+      href=${safeUrl}
       target="_blank"
-      rel="noopener noreferrer"
+      rel=${unsafe ? undefined : 'noopener noreferrer'}
       data-chat-block="link"
+      onClick=${unsafe ? (e: MouseEvent) => { e.preventDefault() } : undefined}
     >
       <span class="chat-block-linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
       <span class="chat-block-linkcard-body">
         <span class="chat-block-linkcard-title">${b.title}</span>
         ${b.desc ? html`<span class="chat-block-linkcard-desc">${b.desc}</span>` : null}
-        <span class="chat-block-linkcard-meta">${b.meta || host}</span>
+        <span class="chat-block-linkcard-meta">${unsafe ? 'unsafe URL' : (b.meta || host)}</span>
       </span>
       <span class="chat-block-linkcard-go">↗</span>
     </a>

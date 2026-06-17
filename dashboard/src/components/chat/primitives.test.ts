@@ -1102,3 +1102,66 @@ describe('ChatComposer multimodal', () => {
     expect(sendBtn.disabled).toBe(true)
   })
 })
+
+describe('rich block URL safety', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders safe image block src', () => {
+    const blocks: ChatBlock[] = [{ t: 'image', src: 'https://example.com/x.png' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const img = container.querySelector('img')
+    expect(img?.getAttribute('src')).toBe('https://example.com/x.png')
+  })
+
+  it('blocks javascript: image src and shows placeholder', () => {
+    const blocks: ChatBlock[] = [{ t: 'image', src: 'javascript:alert(1)' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toContain('unsafe URL')
+  })
+
+  it('renders safe link block href', () => {
+    const blocks: ChatBlock[] = [{ t: 'link', url: 'https://example.com', title: 'Example' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const a = container.querySelector('a')
+    expect(a?.getAttribute('href')).toBe('https://example.com')
+  })
+
+  it('blocks javascript: link href', () => {
+    const blocks: ChatBlock[] = [{ t: 'link', url: 'javascript:alert(1)', title: 'Bad' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const a = container.querySelector('a')
+    expect(a?.getAttribute('href')).toBe('#')
+    expect(container.textContent).toContain('unsafe URL')
+  })
+})

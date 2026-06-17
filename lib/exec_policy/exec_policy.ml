@@ -362,6 +362,29 @@ let git_revisionish_token ?workdir token =
   not (Sys.file_exists resolved)
 ;;
 
+(* [gh] positional args are issue/PR numbers, refs, repo specs, and REST or
+   GraphQL API endpoints (e.g. [gh api /repos/owner/repo/check-runs]) — not
+   filesystem paths.  The descriptor intentionally excludes [gh] from
+   [command_materializes_path_arg], but the [looks_like_path_token] fallback
+   still flagged a leading-[/] endpoint as an absolute path and jailed it,
+   blocking legitimate [gh api /repos/...] calls.
+
+   A token is endpoint-ish when it contains [/], has no [..] traversal
+   segment, and does NOT resolve to an existing file.  This mirrors
+   [git_revisionish_token] but permits the explicit leading-[/] form that gh
+   api endpoints use.  The not-existing-file clause keeps real file arguments
+   jailed: [gh release upload v1 /etc/passwd] resolves to an existing file, so
+   it stays subject to the whitelist, and any [..] traversal is rejected. *)
+let gh_endpointish_token ?workdir token =
+  let token = String.trim token in
+  token <> ""
+  && String.contains token '/'
+  && not (token_has_parent_dir_segment token)
+  &&
+  let resolved = resolve_path ?base_dir:workdir token in
+  not (Sys.file_exists resolved)
+;;
+
 let token_value_is_redirect_to_dev_null value =
   String.equal value ">/dev/null"
   || String.equal value "2>/dev/null"
@@ -658,6 +681,10 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
             | None
               when String.equal command_name "git"
                    && git_revisionish_token ?workdir value ->
+              validate_path_values ~command_name false rest
+            | None
+              when String.equal command_name "gh"
+                   && gh_endpointish_token ?workdir value ->
               validate_path_values ~command_name false rest
             | None when looks_like_path_token value ->
               (match validate_path_value ~requires_existing_dir:false value with

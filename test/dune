@@ -1432,6 +1432,8 @@
 
 (include stanzas/test_exec_policy_path_arg_descriptor.inc)
 
+(include stanzas/test_exec_policy_gh_endpoint_jail.inc)
+
 (include stanzas/test_export_symbol_graph.inc)
 
 (include stanzas/test_feature_flag_registry.inc)

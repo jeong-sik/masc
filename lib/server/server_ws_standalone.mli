@@ -52,6 +52,20 @@ module For_testing : sig
 
   val plan_ws_close_payload_chunk :
     offset:int -> declared_len:int -> chunk_len:int -> ws_close_payload_chunk_plan
+
+  val heartbeat_interval_s : float
+
+  val pong_timeout_intervals : int
+
+  val missed_pong_threshold : unit -> int
+  (** Configurable missed-pong threshold (default: {!pong_timeout_intervals}).
+      Reads [MASC_WS_MISSED_PONG_THRESHOLD] once; clamps negative values to 0. *)
+
+  val accept_backoff_cap_s : float
+
+  val next_accept_backoff : float -> float
+  (** Deterministic base for the next accept-error backoff.  The production
+      loop adds jitter on top of this value. *)
 end
 
 val start :
@@ -95,6 +109,14 @@ val start :
     factor 1.5, capped at 2.0s) so a tight error loop does not
     saturate the CPU.  Cancellation is propagated through the
     backoff sleep.
+
+    {2 Heartbeat + pong timeout}
+
+    Each connection forks a protocol-level ping fiber on its own
+    switch.  The server tracks [last_pong_at] and resets the
+    missed-pong counter on every client [Pong].  After
+    [pong_timeout_intervals] consecutive unanswered pings, the
+    session is closed so dead peers do not accumulate.
 
     {2 [on_message]}
 

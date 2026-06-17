@@ -32,7 +32,19 @@ type dashboard_auth_state =
 type ws_session = {
   id: string;
   wsd: Httpun_ws.Wsd.t;
-  mutable closed: bool;
+  closed: bool Atomic.t;
+  (** All writes to [wsd] (text frames, pings, pongs, close) are serialized
+      through [write_mutex] so fibers sharing one connection cannot interleave
+      frames or race with a concurrent close. *)
+  write_mutex: Eio.Mutex.t;
+  (** Last time a WebSocket pong frame was received from the client.  Used by
+      the standalone heartbeat to detect dead peers after a configurable number
+      of missed pongs. *)
+  last_pong_at: float Atomic.t;
+  (** Number of consecutive protocol pings sent without receiving a pong.
+      Reset to zero on every pong; the standalone heartbeat closes the session
+      once this reaches [pong_timeout_intervals]. *)
+  missed_pongs: int Atomic.t;
   dashboard_auth: dashboard_auth_state Atomic.t;
   mutable dashboard_route: string option;
   dashboard_slices: (string, unit) Hashtbl.t;
@@ -152,7 +164,10 @@ let new_session ~id ~wsd =
   {
     id;
     wsd;
-    closed = false;
+    closed = Atomic.make false;
+    write_mutex = Eio.Mutex.create ();
+    last_pong_at = Atomic.make (Unix.gettimeofday ()); (* NDT-OK: wall-clock used only for liveness, not deterministic output. *)
+    missed_pongs = Atomic.make 0;
     dashboard_auth = Atomic.make Unauthenticated;
     dashboard_route = None;
     dashboard_slices = Hashtbl.create 8;
@@ -161,6 +176,24 @@ let new_session ~id ~wsd =
     dashboard_last_buffered_amount = 0;
     inbound_partial_text = None;
   }
+
+(** Test-only: build a session with a placeholder [Wsd.t].  The placeholder is
+    never written to by well-behaved tests; it exists only so white-box tests
+    can exercise session lifecycle state without a live HTTP upgrade. *)
+let __test_new_session ~id =
+  new_session ~id ~wsd:(Obj.magic ())
+
+(** [true] when the session has been closed locally or the httpun-ws writer has
+    shut down.  Reads the atomic [closed] flag and the WSD state; safe from any
+    fiber. *)
+let is_session_closed session =
+  Atomic.get session.closed || Httpun_ws.Wsd.is_closed session.wsd
+
+(** Record a client pong: refresh [last_pong_at] and reset the missed-pong
+    counter.  Called from the WS frame handler on every [Pong] frame. *)
+let record_pong session =
+  Atomic.set session.last_pong_at (Unix.gettimeofday ()); (* NDT-OK: wall-clock used only for liveness, not deterministic output. *)
+  Atomic.set session.missed_pongs 0
 
 (** Send a pre-allocated frame to a WebSocket client.
 
@@ -171,23 +204,27 @@ let new_session ~id ~wsd =
     buffer synchronously, so the same [bytes] value can safely be passed
     to multiple sessions in one broadcast without re-allocation. *)
 let send_frame_bytes session bytes ~len =
-  if session.closed || Httpun_ws.Wsd.is_closed session.wsd then begin
-    session.closed <- true;
+  if is_session_closed session then begin
+    Atomic.set session.closed true;
     false
   end else begin
-    try
-      Httpun_ws.Wsd.send_bytes session.wsd
-        ~kind:`Text bytes ~off:0 ~len;
-      Transport_metrics.inc_ws_bytes_sent ~bytes:len;
-      Transport_metrics.observe_ws_message_bytes_sent len;
-      true
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Transport.warn "WS text send failed for session=%s: %s" session.id
-        (Printexc.to_string exn);
-      session.closed <- true;
-      false
+    Eio_guard.with_mutex session.write_mutex (fun () ->
+      if is_session_closed session then false
+      else begin
+        try
+          Httpun_ws.Wsd.send_bytes session.wsd
+            ~kind:`Text bytes ~off:0 ~len;
+          Transport_metrics.inc_ws_bytes_sent ~bytes:len;
+          Transport_metrics.observe_ws_message_bytes_sent len;
+          true
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Transport.warn "WS text send failed for session=%s: %s" session.id
+            (Printexc.to_string exn);
+          Atomic.set session.closed true;
+          false
+      end)
   end
 
 (** WebSocket text frames must contain valid UTF-8.  Raw SSE broadcasts can
@@ -838,8 +875,10 @@ let cleanup_session session_id =
         match Hashtbl.find_opt sessions session_id with
         | None -> false
         | Some session ->
-            session.closed <- true;
-            (try Httpun_ws.Wsd.close session.wsd
+            Atomic.set session.closed true;
+            (try
+               Eio_guard.with_mutex session.write_mutex (fun () ->
+                 Httpun_ws.Wsd.close session.wsd)
              with Eio.Cancel.Cancelled _ as e -> raise e
                 | exn -> Log.Server.warn "WS close failed for %s: %s" session_id (Printexc.to_string exn));
             Hashtbl.remove sessions session_id;
@@ -861,51 +900,90 @@ let session_count () =
 
 let heartbeat_interval_s = 30.0
 
+(** Configurable missed-pong threshold for the /ws upgrade heartbeat.
+
+    A value of [0] disables the pong-timeout guard.  Negative values are
+    clamped to [0] so they cannot force immediate closure.  The threshold is
+    read once per session at creation time; changes to the environment variable
+    affect only new sessions. *)
+let missed_pong_threshold () =
+  max 0 (Env_config_core.get_int ~default:3 "MASC_WS_MISSED_PONG_THRESHOLD")
+
+let __test_missed_pong_threshold = missed_pong_threshold
+
 let start_upgrade_heartbeat ?sw ?clock session_id session =
   match sw, clock with
-  | Some sw, Some clock ->
-    Eio.Fiber.fork ~sw (fun () ->
-      let rec loop () =
-        Eio.Time.sleep clock heartbeat_interval_s;
-        if not session.closed && not (Httpun_ws.Wsd.is_closed session.wsd)
-        then (
-          let send_failed = ref false in
-          (try Httpun_ws.Wsd.send_ping session.wsd with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             send_failed := true;
-             (match Http_server_eio.Late_response.classify_write_failure exn with
-              | Some _ ->
-                Log.Server.debug
-                  "[ws-upgrade] session %s heartbeat skipped (writer closed during \
-                   cancel race)"
-                  session_id
-              | None ->
-                Log.Server.warn
-                  "[ws-upgrade] session %s heartbeat send_ping failed: %s"
-                  session_id
-                  (Printexc.to_string exn)));
-          if !send_failed then cleanup_session session_id else loop ())
-      in
-      loop ())
+  | Some server_sw, Some clock ->
+    let threshold = missed_pong_threshold () in
+    Eio.Fiber.fork ~sw:server_sw (fun () ->
+      (* Per-connection switch: the heartbeat fiber must not be anchored to the
+         server-wide switch.  When the connection closes the loop exits and this
+         switch cleans up with it. *)
+      Eio.Switch.run (fun _conn_sw ->
+        let rec loop () =
+          Eio.Time.sleep clock heartbeat_interval_s;
+          if is_session_closed session
+          then ()
+          else if threshold > 0 && Atomic.get session.missed_pongs >= threshold
+          then begin
+            Log.Server.debug
+              "[ws-upgrade] session %s missed %d pongs; closing"
+              session_id
+              (Atomic.get session.missed_pongs);
+            cleanup_session session_id
+          end
+          else begin
+            let send_failed = ref false in
+            (try
+               Eio_guard.with_mutex session.write_mutex (fun () ->
+                 if not (is_session_closed session) then
+                   Httpun_ws.Wsd.send_ping session.wsd)
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               send_failed := true;
+               (match Http_server_eio.Late_response.classify_write_failure exn with
+                | Some _ ->
+                  Log.Server.debug
+                    "[ws-upgrade] session %s heartbeat skipped (writer closed during \
+                     cancel race)"
+                    session_id
+                | None ->
+                  Log.Server.warn
+                    "[ws-upgrade] session %s heartbeat send_ping failed: %s"
+                    session_id
+                    (Printexc.to_string exn)));
+            if !send_failed
+            then cleanup_session session_id
+            else begin
+              Atomic.set session.missed_pongs (Atomic.get session.missed_pongs + 1);
+              loop ()
+            end
+          end
+        in
+        loop ()))
   | _ ->
     Log.Server.debug
       "[ws-upgrade] session %s heartbeat disabled (missing switch or clock)"
       session_id
 
-let send_upgrade_pong session_id wsd =
-  try Httpun_ws.Wsd.send_pong wsd with
+let send_upgrade_pong session =
+  try
+    Eio_guard.with_mutex session.write_mutex (fun () ->
+      if not (is_session_closed session) then
+        Httpun_ws.Wsd.send_pong session.wsd)
+  with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     (match Http_server_eio.Late_response.classify_write_failure exn with
      | Some _ ->
        Log.Server.debug
          "[ws-upgrade] session %s send_pong skipped (writer closed during cancel race)"
-         session_id
+         session.id
      | None ->
        Log.Server.warn
          "[ws-upgrade] session %s send_pong failed: %s"
-         session_id
+         session.id
          (Printexc.to_string exn))
 
 (** Handle an HTTP upgrade request to WebSocket.
@@ -936,10 +1014,9 @@ let upgrade_connection
             (with_sessions_rw (fun () -> Hashtbl.length sessions));
           (* Register as SSE external subscriber for broadcast events *)
           Sse.subscribe_external ~id:session_id
-            ~is_alive:(fun () ->
-              not session.closed && not (Httpun_ws.Wsd.is_closed session.wsd))
+            ~is_alive:(fun () -> not (is_session_closed session))
             ~callback:(fun sse_event ->
-              if not session.closed
+              if not (is_session_closed session)
                  && not (send_dashboard_or_raw_sse session sse_event)
               then
                 cleanup_session session_id)
@@ -955,12 +1032,15 @@ let upgrade_connection
                 read_inbound_message_frame session ~on_message ~is_fin ~len
                   payload
               | `Ping ->
-                send_upgrade_pong session_id wsd;
+                send_upgrade_pong session;
+                Httpun_ws.Payload.close payload
+              | `Pong ->
+                record_pong session;
                 Httpun_ws.Payload.close payload
               | `Connection_close ->
                 cleanup_session session_id;
                 Httpun_ws.Payload.close payload
-              | `Pong | `Other _ ->
+              | `Other _ ->
                 Httpun_ws.Payload.close payload
             );
             eof = (fun ?error:_ () ->

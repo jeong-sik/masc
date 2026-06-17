@@ -26,6 +26,8 @@ export interface TransportFactory {
 export interface TransportOptions {
   readonly retryBaseMs?: number
   readonly retryMaxMs?: number
+  readonly retryMaxAttempts?: number
+  readonly retryJitterMs?: number
   readonly heartbeatIntervalMs?: number
   readonly headers?: Record<string, string>
 }

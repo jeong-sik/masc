@@ -18,7 +18,9 @@ import {
 import { parseWebSocketSseFrames } from './dashboard-ws-parse'
 import { clearStoredToken, setStoredToken } from './api/core'
 import {
+  DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES,
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_HEARTBEAT_RPC_TIMEOUT_MS,
   DASHBOARD_WS_RPC_TIMEOUT_MS,
 } from './config/constants'
 import { DASHBOARD_PUSH_SLICES } from './dashboard-slices'
@@ -425,7 +427,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets[0]!.url).toBe('ws://localhost:3000/ws')
   })
 
-  it('invalidates cached discovery when the cached socket closes before it is ready', async () => {
+  it('invalidates cached discovery after repeated failures before it is ready', async () => {
     vi.useFakeTimers()
     mockSockets.length = 0
     vi.stubGlobal('WebSocket', MockWebSocket)
@@ -439,13 +441,90 @@ describe('dashboard websocket route subscriptions', () => {
     expect(staleSocket.url).toBe('ws://localhost:3000/ws?stale')
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    staleSocket.close({ code: 1006, reason: 'connect failed', wasClean: false })
+    // The cache is only invalidated after a threshold of consecutive failures,
+    // so the first reconnects still reuse the cached stale URL.
+    for (let i = 0; i < DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES - 1; i += 1) {
+      mockSockets[mockSockets.length - 1]!.close({ code: 1006, reason: 'connect failed', wasClean: false })
+      await vi.advanceTimersByTimeAsync(60_000)
+      await flushPromises()
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    }
+
+    // The threshold failure clears the cache and falls back to /ws discovery.
+    mockSockets[mockSockets.length - 1]!.close({ code: 1006, reason: 'connect failed', wasClean: false })
     await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(mockSockets).toHaveLength(2)
-    expect(mockSockets[1]!.url).toBe('ws://localhost:3000/ws?fresh')
+    expect(mockSockets).toHaveLength(1 + DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES)
+    expect(mockSockets[DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES]!.url).toBe('ws://localhost:3000/ws?fresh')
+  })
+
+  it('stops reconnecting after a fatal policy violation close', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    socket.close({ code: 1008, reason: 'policy violation', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(1)
+  })
+
+  it('stops reconnecting after a fatal server error close', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, result: {} })
+    const subscribe = parseRpc(socket, 1)
+    socket.receive({ jsonrpc: '2.0', id: subscribe.id, result: { snapshot: { seq: 1, slices: {} } } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(true)
+
+    socket.close({ code: 1011, reason: 'server error', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(1)
+  })
+
+  it('stops reconnecting after an abnormal close after hello is rejected', async () => {
+    vi.useFakeTimers()
+    installWebSocketMocks()
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    const socket = mockSockets[0]!
+    socket.open()
+    const hello = parseRpc(socket, 0)
+    socket.receive({ jsonrpc: '2.0', id: hello.id, error: { message: 'auth rejected' } })
+    await flushPromises()
+    expect(dashboardWsReady.value).toBe(false)
+
+    socket.close({ code: 1006, reason: 'abnormal', wasClean: false })
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(dashboardWsConnected.value).toBe(false)
+    expect(dashboardWsReady.value).toBe(false)
+    expect(mockSockets).toHaveLength(1)
   })
 
   it('subscribes the latest route captured while hello is still in flight', async () => {
@@ -576,7 +655,7 @@ describe('dashboard websocket route subscriptions', () => {
     const ping = parseRpc(socket, 2)
     expect(ping.method).toBe('dashboard/ping')
 
-    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_RPC_TIMEOUT_MS)
+    await vi.advanceTimersByTimeAsync(DASHBOARD_WS_HEARTBEAT_RPC_TIMEOUT_MS)
     await flushPromises()
 
     expect(socket.readyState).toBe(MockWebSocket.CLOSED)

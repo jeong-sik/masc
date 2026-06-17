@@ -24,12 +24,20 @@ export const MCP_INIT_COOLDOWN_MS = 2_000
 // a reconnect by the client side.
 export const DASHBOARD_WS_RPC_TIMEOUT_MS = 30_000
 export const DASHBOARD_WS_HEARTBEAT_INTERVAL_MS = 30_000
+// Heartbeat RPCs should resolve quickly; a shorter timeout than the generic
+// RPC budget lets the client detect a half-open socket before the next beat.
+export const DASHBOARD_WS_HEARTBEAT_RPC_TIMEOUT_MS = 10_000
+// Number of consecutive failed connection attempts using a cached discovery
+// URL before the cache is invalidated and the client falls back to /ws.
+export const DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES = 3
 
 // --- Transport retry defaults (shared by all transport implementations) ---
 // Exponential backoff for transport-level reconnection.  Distinct from
 // RECONNECT_* (which caps at 60s for SSE/dashboard-WS reconnect storms).
 export const TRANSPORT_RETRY_BASE_MS = 1_000
 export const TRANSPORT_RETRY_MAX_MS = 30_000
+export const TRANSPORT_RETRY_JITTER_MS = 1_000
+export const TRANSPORT_RETRY_MAX_ATTEMPTS = 10
 
 // --- Reconnect backoff (shared by SSE and dashboard WS) ---
 // Cap at 60s with plus/minus 1s jitter to break reconnect storms when the server is

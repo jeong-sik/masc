@@ -1,5 +1,10 @@
 import type { Transport, TransportEvent, TransportOptions } from './transport'
-import { TRANSPORT_RETRY_BASE_MS, TRANSPORT_RETRY_MAX_MS } from '../config/constants'
+import {
+  TRANSPORT_RETRY_BASE_MS,
+  TRANSPORT_RETRY_JITTER_MS,
+  TRANSPORT_RETRY_MAX_ATTEMPTS,
+  TRANSPORT_RETRY_MAX_MS,
+} from '../config/constants'
 
 export function createSseTransport(url: string, opts: TransportOptions = {}): Transport {
   let source: EventSource | null = null
@@ -7,9 +12,25 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
   let retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let connected = false
+  let reconnectAttempts = 0
+  const retryMaxAttempts = opts.retryMaxAttempts ?? TRANSPORT_RETRY_MAX_ATTEMPTS
+  const retryJitterMs = opts.retryJitterMs ?? TRANSPORT_RETRY_JITTER_MS
 
   const notify = (event: TransportEvent) => {
     listeners.forEach((l) => l(event))
+  }
+
+  const scheduleReconnect = () => {
+    if (reconnectAttempts >= retryMaxAttempts) {
+      notify({ type: 'close' })
+      return
+    }
+    reconnectAttempts += 1
+    const maxMs = opts.retryMaxMs ?? TRANSPORT_RETRY_MAX_MS
+    const backoff = Math.min(retryMs, maxMs)
+    const jitter = Math.random() * retryJitterMs
+    reconnectTimer = setTimeout(connect, backoff + jitter)
+    retryMs = Math.min(retryMs * 2, maxMs)
   }
 
   const connect = () => {
@@ -19,6 +40,7 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
       source.onopen = () => {
         connected = true
         retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
+        reconnectAttempts = 0
         notify({ type: 'open' })
       }
       source.onmessage = (ev) => {
@@ -34,9 +56,7 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
         notify({ type: 'error', error: new Error('SSE transport error') })
         source?.close()
         source = null
-        const maxMs = opts.retryMaxMs ?? TRANSPORT_RETRY_MAX_MS
-        reconnectTimer = setTimeout(connect, Math.min(retryMs, maxMs))
-        retryMs = Math.min(retryMs * 2, maxMs)
+        scheduleReconnect()
       }
     } catch (err) {
       notify({ type: 'error', error: err instanceof Error ? err : new Error(String(err)) })
@@ -49,6 +69,8 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
       reconnectTimer = null
     }
     connected = false
+    retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
+    reconnectAttempts = 0
     source?.close()
     source = null
     notify({ type: 'close' })

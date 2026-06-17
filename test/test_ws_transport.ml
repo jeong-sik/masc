@@ -650,6 +650,40 @@ let test_dashboard_auth_authenticated_tokenless () =
   Alcotest.(check (option string)) "tokenless carries no agent"
     None (Ws.dashboard_auth_agent st)
 
+(* ====== Cross-fiber scalar state (Atomic.t) ====== *)
+
+let test_new_session_initializes_pong_state () =
+  let session = Ws.__test_new_session ~id:"pong-state-init" in
+  Alcotest.(check bool) "closed starts false" false (Atomic.get session.closed);
+  Alcotest.(check int) "missed_pongs starts at 0" 0 (Atomic.get session.missed_pongs);
+  Alcotest.(check bool) "last_pong_at is in the recent past"
+    true
+    (Atomic.get session.last_pong_at <= Unix.gettimeofday ())
+
+let test_record_pong_resets_missed_pongs () =
+  let session = Ws.__test_new_session ~id:"pong-reset" in
+  Atomic.set session.missed_pongs 5;
+  let before = Atomic.get session.last_pong_at in
+  Unix.sleepf 0.005;
+  Ws.record_pong session;
+  Alcotest.(check int) "missed_pongs reset to 0" 0 (Atomic.get session.missed_pongs);
+  Alcotest.(check bool) "last_pong_at advanced"
+    true
+    (Atomic.get session.last_pong_at > before)
+
+let test_missed_pong_threshold_default () =
+  (* Clear any inherited value so the default (3) is exercised. *)
+  Unix.putenv "MASC_WS_MISSED_PONG_THRESHOLD" "";
+  Alcotest.(check int) "default threshold is 3" 3 (Ws.__test_missed_pong_threshold ())
+
+let test_missed_pong_threshold_reads_env () =
+  with_env_var "MASC_WS_MISSED_PONG_THRESHOLD" "5" (fun () ->
+    Alcotest.(check int) "env=5 → threshold 5" 5 (Ws.__test_missed_pong_threshold ()));
+  with_env_var "MASC_WS_MISSED_PONG_THRESHOLD" "0" (fun () ->
+    Alcotest.(check int) "env=0 disables threshold" 0 (Ws.__test_missed_pong_threshold ()));
+  with_env_var "MASC_WS_MISSED_PONG_THRESHOLD" "-2" (fun () ->
+    Alcotest.(check int) "negative values clamp to 0" 0 (Ws.__test_missed_pong_threshold ()))
+
 let () =
   Alcotest.run "WebSocket Transport" [
     ("session_registry", [
@@ -754,5 +788,17 @@ let () =
         test_dashboard_auth_authenticated_with_agent;
       Alcotest.test_case "tokenless Authenticated has no agent" `Quick
         test_dashboard_auth_authenticated_tokenless;
+    ]);
+    ("pong_state", [
+      Alcotest.test_case "new session initializes pong atomics" `Quick
+        test_new_session_initializes_pong_state;
+      Alcotest.test_case "record_pong resets missed_pongs" `Quick
+        test_record_pong_resets_missed_pongs;
+    ]);
+    ("pong_threshold", [
+      Alcotest.test_case "default missed-pong threshold is 3" `Quick
+        test_missed_pong_threshold_default;
+      Alcotest.test_case "threshold reads env and clamps negatives" `Quick
+        test_missed_pong_threshold_reads_env;
     ]);
   ]

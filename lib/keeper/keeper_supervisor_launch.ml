@@ -121,6 +121,8 @@ let launch_supervised_fiber
           "keeper supervise domain pool ignored: keepalive body requires the owning \
            Eio domain (first_keeper=%s)"
           meta.name;
+      (* determinism-contract: allow — ctx.sw fallback is the same deterministic
+         default used before the ref -> Atomic conversion. *)
       let sw = Option.value (Atomic.get global_switch) ~default:ctx.sw in
       Eio.Fiber.fork ~sw body
     in

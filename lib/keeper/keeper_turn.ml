@@ -495,13 +495,24 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                   | Ok [] -> ""
                   | Ok items ->
                       let safe_items =
-                        List.map
+                        List.filter_map
                           (fun s ->
-                             Keeper_run_prompt.strip_prompt_injection_prefixes
-                               (String.trim s))
+                             match
+                               Keeper_run_prompt.safe_memory_fragment
+                                 (String.trim s)
+                             with
+                             | Some frag -> Some frag
+                             | None ->
+                                 Log.Keeper.warn
+                                   "dropped long-term memory fragment containing \
+                                    prompt-injection pattern";
+                                 None)
                           items
                       in
-                      "Long-term memory:\n- " ^ String.concat "\n- " safe_items
+                      if safe_items = []
+                      then ""
+                      else
+                        "Long-term memory:\n- " ^ String.concat "\n- " safe_items
                   | Error exn_class ->
                       Printf.sprintf
                         "Long-term memory: [unavailable: %s]"

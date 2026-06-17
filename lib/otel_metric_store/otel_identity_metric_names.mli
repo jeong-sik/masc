@@ -7,12 +7,6 @@ val metric_auth_bearer_token_mismatch : string
 val metric_auth_strict_unknown_tool_denials : string
 val metric_auth_credential_token_duplicate : string
 val metric_auth_credential_token_rotated : string
-val metric_config_credential_archived_starvation : string
-val metric_auth_bare_alias : string
-val metric_auth_archive_epochs : string
-val metric_auth_archive_pruned_total : string
-val metric_auth_bare_alias_outcome_total : string
-val metric_auth_bare_alias_audit_ticks_total : string
 val metric_auth_credential_ambiguous_lookup : string
 val metric_auth_credential_index_cache_hits : string
 val metric_auth_credential_index_cache_misses : string

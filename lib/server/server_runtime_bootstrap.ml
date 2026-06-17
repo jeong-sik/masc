@@ -264,11 +264,7 @@ let lazy_startup_plan () =
       {
         group_name = "cleanup";
         execution = Serial;
-        task_names =
-          [
-            "jsonl_prune";
-            "auth_archive_prune";
-          ];
+        task_names = [ "jsonl_prune" ];
       };
     ]
   in
@@ -696,7 +692,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "tool_metrics_restore" -> fun () ->
             restore_tool_metrics_from_disk state
         | "jsonl_prune" -> fun () -> startup_prune_jsonl state
-        | "auth_archive_prune" -> fun () -> startup_prune_auth_archive state
         | task_name ->
             raise
               (Invalid_argument

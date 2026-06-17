@@ -5,8 +5,7 @@
     - {!capabilities}: per-provider boolean record (inline / runtime-MCP).
     - {!provider_supports_runtime_mcp_policy}: policy-level gate.
 
-    Internal helpers ({!normalize_cli_caps_when},
-    {!supports_runtime_mcp_http_headers}) stay private. *)
+    Internal helper {!supports_runtime_mcp_http_headers} stays private. *)
 
 (** {1 Capability record} *)
 
@@ -40,15 +39,10 @@ type runtime_capabilities_override =
 
 (** [oas_capabilities_of_config cfg] returns OAS-resolved
     {!Llm_provider.Capabilities.capabilities} plus MASC's local
-    tool-delivery projection.  Resolution order:
-
-    + Provider/model/catalog capability truth via OAS
-      [Provider_runtime_binding].
-    + CLI-agent normalisation: adapters with
-      [runtime_kind = Cli_agent] (Anthropic CLI) force
-      [supports_tools = false], [supports_tool_choice = false],
-      [supports_runtime_mcp_tools = true], and
-      [supports_runtime_tool_events = true]. *)
+    tool-delivery projection.  Provider/model/catalog capability truth
+    comes from OAS [Provider_runtime_binding]; if the declarative
+    runtime.toml tool policy declares a runtime-MCP lane, the two
+    runtime-MCP capability flags are merged to [true]. *)
 val oas_capabilities_of_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Capabilities.capabilities

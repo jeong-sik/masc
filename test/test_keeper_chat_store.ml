@@ -960,6 +960,71 @@ let test_audio_clip_expired_persists_roundtrip () =
       | messages ->
           Alcotest.failf "expected 1 row, got %d" (List.length messages))
 
+let test_audio_url_and_device_id_persist () =
+  let base_dir = temp_base_path "keeper-chat-store-audio-url" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-audio-url" in
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:"voice line"
+        ~audio:
+          { K.token = "voice-token-url"
+          ; audio_url = Some "https://example.com/audio.mp3"
+          ; mime = "audio/mpeg"
+          ; duration_sec = Some 1.5
+          ; message_text = "voice line"
+          ; device_id = Some "device-42"
+          ; expired = false
+          }
+        ();
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "audio_url persisted"
+        true
+        (contains_substring raw "\"audio_url\":\"https://example.com/audio.mp3\"");
+      Alcotest.(check bool) "device_id persisted"
+        true
+        (contains_substring raw "\"device_id\":\"device-42\"");
+      let messages = K.load ~base_dir ~keeper_name in
+      match K.to_json_array messages with
+      | `List [ `Assoc fields ] -> (
+          match List.assoc_opt "audio" fields with
+          | Some (`Assoc audio_fields) ->
+              Alcotest.(check (option string)) "audio_url round-trips"
+                (Some "https://example.com/audio.mp3")
+                (Option.bind (List.assoc_opt "audio_url" audio_fields) (function
+                   | `String s -> Some s | _ -> None));
+              Alcotest.(check (option string)) "device_id round-trips"
+                (Some "device-42")
+                (Option.bind (List.assoc_opt "device_id" audio_fields) (function
+                   | `String s -> Some s | _ -> None))
+          | _ -> Alcotest.fail "audio field missing or malformed")
+      | _ -> Alcotest.fail "expected one json row")
+
+let test_invalid_audio_token_treated_as_expired () =
+  let base_dir = temp_base_path "keeper-chat-store-audio-token" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-audio-token" in
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:"voice line"
+        ~audio:
+          { K.token = "../../../etc/passwd"
+          ; audio_url = None
+          ; mime = "audio/mpeg"
+          ; duration_sec = None
+          ; message_text = "voice line"
+          ; device_id = None
+          ; expired = false
+          }
+        ();
+      let messages = K.load ~base_dir ~keeper_name in
+      let rows = Yojson.Safe.Util.to_list (K.to_json_array ~base_dir messages) in
+      Alcotest.(check int) "one json row" 1 (List.length rows);
+      Alcotest.(check bool) "invalid token marks clip expired" true
+        (json_audio_expired (List.hd rows)))
+
 (* RFC-0235 P3: backend-driven rich chat blocks. *)
 
 let json_blocks = function
@@ -1060,6 +1125,10 @@ let () =
             test_audio_clip_marked_expired_when_file_missing;
           Alcotest.test_case "expired flag round-trips" `Quick
             test_audio_clip_expired_persists_roundtrip;
+          Alcotest.test_case "audio_url and device_id persist" `Quick
+            test_audio_url_and_device_id_persist;
+          Alcotest.test_case "invalid audio token treated as expired" `Quick
+            test_invalid_audio_token_treated_as_expired;
         ] );
       ( "backend_blocks (RFC-0235 P3)",
         [

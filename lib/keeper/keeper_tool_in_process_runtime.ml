@@ -225,21 +225,28 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
             Keeper_surface_post.error_json
               "MASC_SLACK_BOT_TOKEN is unset or empty"
         | Some token ->
-            Keeper_chat_slack.send_message_with_blocks ~token
-              ~channel:channel_id ~content:safe_content ~blocks:slack_blocks;
-            Keeper_chat_store.append_assistant_message
-              ~base_dir:config.Workspace.base_path
-              ~keeper_name:meta.name
-              ~content:safe_content
-              ~surface:
-                (Surface_ref.Slack
-                   { team_id = None; channel_id; thread_ts = None })
-              ();
-            Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
-              ~source:"slack"
-              ~content:safe_content
-              ();
-            Keeper_surface_post.ok_json ~surface ())
+            match
+              Keeper_chat_slack.send_message_with_blocks ~token
+                ~channel:channel_id ~content:safe_content ~blocks:slack_blocks
+            with
+            | Error err ->
+                Keeper_surface_post.error_json
+                  (Format.asprintf "slack send failed: %a"
+                     Keeper_chat_slack.pp_error err)
+            | Ok () ->
+                Keeper_chat_store.append_assistant_message
+                  ~base_dir:config.Workspace.base_path
+                  ~keeper_name:meta.name
+                  ~content:safe_content
+                  ~surface:
+                    (Surface_ref.Slack
+                       { team_id = None; channel_id; thread_ts = None })
+                  ();
+                Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+                  ~source:"slack"
+                  ~content:safe_content
+                  ();
+                Keeper_surface_post.ok_json ~surface ())
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =

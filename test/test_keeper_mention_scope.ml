@@ -60,9 +60,10 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
   ; conversation_id = None
   ; external_message_id = None
   ; speaker
+  ; audio
+  ; blocks = None
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
   ; kind
-  ; audio
   }
 ;;
 
@@ -198,9 +199,10 @@ let tool_line : Store.chat_message =
   ; conversation_id = None
   ; external_message_id = None
   ; speaker = None
+  ; audio = None
+  ; blocks = None
   ; mentions = []
   ; kind = Store.Row_kind.Utterance
-  ; audio = None
   }
 ;;
 
@@ -245,6 +247,7 @@ let test_voice_audio_self_output_is_not_recent_context () =
       ; duration_sec = None
       ; message_text = "saying this out loud"
       ; device_id = None
+      ; expired = false
       }
   in
   let messages =

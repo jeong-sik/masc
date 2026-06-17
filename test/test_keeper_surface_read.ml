@@ -24,9 +24,10 @@ let msg ?ts ?source ?speaker ~role content : Store.chat_message =
     conversation_id = None;
     external_message_id = None;
     speaker;
+    audio = None;
+    blocks = None;
     mentions = [];
     kind = Store.Row_kind.Utterance;
-    audio = None;
   }
 
 let external_speaker ?name id : Store.speaker =

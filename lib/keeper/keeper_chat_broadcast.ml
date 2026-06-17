@@ -22,7 +22,7 @@ let audio_clip_to_json (clip : audio_clip) =
   let base =
     [ ("token", `String clip.token)
     ; ("mime", `String clip.mime)
-    ; ("message_text", `String clip.message_text)
+    ; ("message_text", `String (Observability_redact.redact_text clip.message_text))
     ]
   in
   let with_optional fields =
@@ -70,6 +70,7 @@ let do_broadcast ~keeper_name ~source ~audio ?content () =
       match content with
       | None -> None
       | Some text ->
+        let text = Observability_redact.redact_text text in
         let parsed = Keeper_chat_blocks.parse_text_to_blocks text in
         if parsed = [] then None else Some parsed
     in

@@ -15,15 +15,16 @@ type error =
 val pp_error : Format.formatter -> error -> unit
 
 val send_message :
-  token:string -> channel:string -> content:string -> unit
+  token:string -> channel:string -> content:string -> (unit, error) result
 (** [send_message ~token ~channel ~content] posts to
-    [chat.postMessage]. Logs errors via [Log.Keeper.warn]. *)
+    [chat.postMessage]. Logs errors via [Log.Keeper.warn] and returns the
+    outcome. *)
 
 val send_message_with_blocks :
-  token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> unit
+  token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> (unit, error) result
 (** [send_message_with_blocks ~token ~channel ~content ~blocks] posts to
     [chat.postMessage] with the given Block Kit [blocks]. Logs errors via
-    [Log.Keeper.warn]. *)
+    [Log.Keeper.warn] and returns the outcome. *)
 
 val content_blocks_of_text : string -> Yojson.Safe.t list
 (** [content_blocks_of_text text] extracts rich Slack blocks from plain text:

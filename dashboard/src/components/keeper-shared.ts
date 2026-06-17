@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
@@ -457,15 +457,29 @@ export function KeeperConversationPanel({
   }, [keeperName])
 
   const rawThread = keeperThreads.value[keeperName] ?? []
-  const thread = showInternal ? rawThread : rawThread.filter(isVisibleDirectConversationEntry)
+  // thread / visibleThread / transcriptEntries form a derivation chain over
+  // rawThread + UI state (showInternal toggle, sending flag, searchQuery
+  // keystrokes). The parent re-renders on every search keystroke and other
+  // unrelated signals; memoizing each stage on its stable upstream skips the
+  // refilter when rawThread and the relevant UI flag are unchanged.
+  const thread = useMemo(
+    () => showInternal ? rawThread : rawThread.filter(isVisibleDirectConversationEntry),
+    [rawThread, showInternal],
+  )
   const hiddenCount = rawThread.length - thread.length
   const sending = keeperSending.value[keeperName] ?? false
-  const visibleThread =
-    sending && !thread.some(isActiveAssistantEntry)
-      ? [...thread, liveAssistantPlaceholder(keeperName)]
-      : thread
+  const visibleThread = useMemo(
+    () =>
+      sending && !thread.some(isActiveAssistantEntry)
+        ? [...thread, liveAssistantPlaceholder(keeperName)]
+        : thread,
+    [thread, sending, keeperName],
+  )
   const hasQuery = searchQuery.trim().length > 0
-  const transcriptEntries = filterConversationEntries(visibleThread, searchQuery)
+  const transcriptEntries = useMemo(
+    () => filterConversationEntries(visibleThread, searchQuery),
+    [visibleThread, searchQuery],
+  )
   const transcriptEmptyText =
     hasQuery && visibleThread.length > 0
       ? '검색어와 일치하는 메시지가 없습니다.'

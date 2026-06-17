@@ -208,7 +208,7 @@ export function RepoDetailPanel() {
   const branchesLoading = branchState.status === 'loading'
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-workspace-surface flex flex-col gap-4">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <h2 class="text-lg font-semibold text-[var(--color-fg-secondary)]">${repo.name}</h2>

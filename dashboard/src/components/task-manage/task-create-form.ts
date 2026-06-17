@@ -24,7 +24,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
   const linkedGoalTitle = props.goalTitle?.trim() || null
   if (!showTaskCreate.value) {
     return html`
-      <div class="flex flex-col gap-3">
+      <div class="v2-workspace-surface flex flex-col gap-3">
         <div class="text-xs leading-relaxed text-text-muted">
           ${linkedGoalId
             ? html`
@@ -48,7 +48,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-4">
+    <div class="v2-workspace-surface rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-4">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 class="text-base font-semibold text-text-strong">새 태스크</h3>

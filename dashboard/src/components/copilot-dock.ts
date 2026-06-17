@@ -470,7 +470,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
   return html`
     <aside
       ref=${rootRef}
-      class=${`dock ${docked ? 'docked' : 'float'}`}
+      class=${`v2-shell-surface dock ${docked ? 'docked' : 'float'}`}
       style=${floatStyle}
       data-screen-label="Copilot 도크"
       data-testid="copilot-dock"
@@ -621,7 +621,7 @@ export function CopilotDockFab({ dock }: { dock: CopilotDockApi }) {
   return html`
     <button
       type="button"
-      class="dock-fab"
+      class="v2-shell-action dock-fab"
       onClick=${dock.open}
       data-testid="copilot-dock-fab"
       aria-label="Open Copilot Dock"
@@ -638,7 +638,7 @@ export function CopilotDockTopBarButton({ dock }: { dock: CopilotDockApi }) {
   return html`
     <button
       type="button"
-      class=${`topbar-copilot ${on ? 'on' : ''}`}
+      class=${`v2-shell-action topbar-copilot ${on ? 'on' : ''}`}
       onClick=${dock.toggle}
       data-testid="copilot-dock-topbar-button"
       aria-label="Toggle Copilot Dock"

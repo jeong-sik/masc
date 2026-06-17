@@ -54,6 +54,7 @@ describe('CopilotDock', () => {
     expect(dock.state.value.open).toBe(false)
     const btn = container.querySelector('[data-testid="copilot-dock-topbar-button"]')
     expect(btn).not.toBeNull()
+    expect(btn?.classList.contains('v2-shell-action')).toBe(true)
     ;(btn as HTMLButtonElement).click()
     expect(dock.state.value.open).toBe(true)
   })
@@ -72,6 +73,8 @@ describe('CopilotDock', () => {
     const dock = renderDock()
     dock.open()
     await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock"]')).not.toBeNull())
+
+    expect(container.querySelector('.v2-shell-surface')).not.toBeNull()
 
     const closeBtn = container.querySelector('[title="닫기 (Esc)"]')
     expect(closeBtn).not.toBeNull()

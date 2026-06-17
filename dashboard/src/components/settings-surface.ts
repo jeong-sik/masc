@@ -365,7 +365,7 @@ export function SettingsSurface() {
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
 
   return html`
-    <main class="settings-surf" data-screen-label="설정" data-testid="settings-surface">
+    <main class="v2-shell-surface settings-surf" data-screen-label="설정" data-testid="settings-surface">
       <div class="set-shell">
         <nav class="set-nav" aria-label="Settings categories">
           <div class="set-nav-h">

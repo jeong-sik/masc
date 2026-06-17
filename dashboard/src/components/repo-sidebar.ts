@@ -136,7 +136,7 @@ export function RepoSidebar() {
 
   if (state.status === 'loading') {
     return html`
-      <div class="flex flex-col h-full">
+      <div class="v2-workspace-surface flex flex-col h-full">
         <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-default)]">
           <span class="text-sm font-bold text-[var(--color-fg-secondary)]">저장소</span>
         </div>
@@ -147,7 +147,7 @@ export function RepoSidebar() {
 
   if (state.status === 'error') {
     return html`
-      <div class="flex flex-col h-full">
+      <div class="v2-workspace-surface flex flex-col h-full">
         <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-default)]">
           <span class="text-sm font-bold text-[var(--color-fg-secondary)]">저장소</span>
           <button
@@ -169,7 +169,7 @@ export function RepoSidebar() {
   const selected = selectedRepoId.value
 
   return html`
-    <div class="flex flex-col h-full">
+    <div class="v2-workspace-surface flex flex-col h-full">
       <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-default)]">
         <span class="text-sm font-bold text-[var(--color-fg-secondary)]">
           저장소 <span class="text-[var(--color-fg-secondary)] font-normal">(${repos.length})</span>

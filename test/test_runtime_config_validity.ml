@@ -276,7 +276,7 @@ let test_runtime_toml_rejects_non_positive_max_concurrent () =
            |> String.concat "\n"
          in
          check bool (Printf.sprintf "error mentions max-concurrent for %d" n) true
-           (String.contains rendered "max-concurrent"))
+           (String_util.contains_substring rendered "max-concurrent"))
     [ 0; -1 ]
 
 let with_temp_runtime_toml content f =

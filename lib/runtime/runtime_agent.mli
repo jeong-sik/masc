@@ -58,8 +58,6 @@ type config = Runtime_agent_context.config = {
   max_execution_time_s : float option;
   body_timeout_s : float option;
   max_tokens : int;
-  max_input_tokens : int option;
-  max_cost_usd : float option;
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
   context_reducer : Agent_sdk.Context_reducer.t option;

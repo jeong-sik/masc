@@ -290,8 +290,7 @@ let make_test_checkpoint ?(working_context = None) ~response_text () =
     response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
-    max_input_tokens = None;
-    max_total_tokens = None;
+
     context = Agent_sdk.Context.create ();
     mcp_sessions = [];
     working_context;

@@ -172,18 +172,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* Bare-alias audit fiber (PR #15112 surface refresh): re-run the
-     classifier every minute so the [masc_auth_bare_alias] gauges
-     reflect mid-run regressions, not only the boot snapshot. The
-     keeper roster is re-queried per tick via the closure so a
-     runtime add/remove is picked up without restarting the fiber. *)
-  Auth.start_bare_alias_audit_fiber
-    ~sw
-    ~clock
-    ~base_path:(Mcp_server.workspace_config state).base_path
-    ~canonical_names_fn:(fun () ->
-      Keeper_runtime.bootable_keeper_names (Mcp_server.workspace_config state)
-      |> List.map Keeper_identity.keeper_agent_name);
   (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
      write-only — strengthen/weaken populated synapses but decay +
      pruning never ran (zero production callers of [consolidate]).

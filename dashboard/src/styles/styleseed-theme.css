@@ -1,0 +1,242 @@
+/* ════════════════════════════════════════════════════════════════
+   StyleSeed light theme foundation
+   Opt-in only: set data-theme="styleseed" on <html>.
+   Does NOT override existing dark-fantasy / v2 tokens unless active.
+   ════════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+[data-theme="styleseed"] {
+  color-scheme: light;
+
+  /* Brand accent — single key color; everything else grayscale */
+  --brand: #721FE5;
+  --brand-dim: #5543C7;
+  --brand-wash: rgba(107, 92, 231, 0.10);
+
+  /* Background & surfaces */
+  --background: #FAFAFA;
+  --surface-page: #FAFAFA;
+  --card: #FFFFFF;
+  --surface-subtle: #FAFAF9;
+  --surface-muted: #E8E6E1;
+
+  /* StyleSeed palette aliases */
+  --ss-page: #FAFAFA;
+  --ss-card: #FFFFFF;
+  --ss-card-raised: #FFFFFF;
+  --ss-card-hover: #F5F5F5;
+  --ss-surface: #F5F5F5;
+  --ss-sunken: #EFEFEF;
+
+  /* Text hierarchy — no pure black */
+  --text-primary: #3C3C3C;
+  --text-secondary: #6B6B6B;
+  --text-tertiary: #9B9B9B;
+  --text-disabled: #BDBDBD;
+  --icon-default: #6B6B6B;
+
+  --ss-text-strong: #2A2A2A;
+  --ss-text-primary: #3C3C3C;
+  --ss-text-secondary: #6A6A6A;
+  --ss-text-tertiary: #7A7A7A;
+  --ss-text-disabled: #9B9B9B;
+
+  /* Borders */
+  --border: #E8E6E1;
+  --card-border: none;
+
+  --ss-border-1: rgba(0, 0, 0, 0.06);
+  --ss-border-2: rgba(0, 0, 0, 0.08);
+  --ss-border-3: rgba(0, 0, 0, 0.12);
+
+  /* Brand tint for selected rows / active surfaces */
+  --brand-tint: #F0E8FF;
+
+  /* Alert badge */
+  --alert-badge: #FF4444;
+
+  /* Status / UI colors */
+  --success: #6B9B7A;
+  --destructive: #D4183D;
+  --warning: #D97706;
+  --info: #3B82F6;
+
+  /* Shadows — low opacity, barely visible */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-button: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-panel: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-raised: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-glow: none;
+
+  /* Shape */
+  --radius: 0.625rem;
+
+  /* Type stack — Inter for Latin, Pretendard for CJK */
+  --font-sans:
+    'Inter', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* v2 token ladder aliases */
+  --color-bg-0: var(--ss-page);
+  --color-bg-1: var(--ss-surface);
+  --color-bg-2: var(--ss-card);
+  --color-bg-3: var(--ss-card-raised);
+  --color-bg-4: var(--ss-card-hover);
+
+  --color-bg-page: var(--ss-page);
+  --color-bg-surface: var(--ss-surface);
+  --color-bg-panel-alt: var(--ss-card);
+  --color-bg-elevated: var(--ss-card-raised);
+  --color-bg-hover: var(--ss-card-hover);
+
+  --color-fg-1: var(--ss-text-strong);
+  --color-fg-2: var(--ss-text-primary);
+  --color-fg-3: var(--ss-text-secondary);
+  --color-fg-4: var(--ss-text-disabled);
+
+  --color-fg-primary: var(--ss-text-strong);
+  --color-fg-secondary: var(--ss-text-primary);
+  --color-fg-muted: var(--ss-text-secondary);
+  --color-fg-disabled: var(--ss-text-disabled);
+
+  --color-line-1: var(--ss-border-2);
+  --color-line-2: var(--ss-border-3);
+  --color-line-3: var(--ss-border-1);
+
+  --color-border-default: var(--ss-border-2);
+  --color-border-strong: var(--ss-border-3);
+  --color-border-divider: var(--ss-border-1);
+
+  /* Brass aliases → brand accent */
+  --color-brass-1: var(--brand);
+  --color-brass-2: color-mix(in srgb, var(--brand) 80%, black);
+  --color-brass-3: var(--brand-dim);
+  --color-brass-soft: var(--brand-wash);
+  --color-brass-glow: 107 92 231;
+  --color-brass-fg: var(--brand);
+
+  --color-accent: var(--brand);
+  --color-accent-soft: var(--brand-wash);
+  --color-accent-fg: var(--brand);
+  --color-accent-fg-dim: var(--brand-dim);
+  --color-accent-glow: 107 92 231;
+
+  /* Status ladder */
+  --color-ok: var(--success);
+  --color-warn: var(--warning);
+  --color-err: var(--destructive);
+  --color-info: var(--info);
+
+  --color-status-ok: var(--success);
+  --color-status-warn: var(--warning);
+  --color-status-err: var(--destructive);
+  --color-status-info: var(--info);
+
+  --color-ok-glow: 107 155 122;
+  --color-warn-glow: 217 119 6;
+  --color-err-glow: 212 24 61;
+  --color-info-glow: 59 130 246;
+
+  --color-ok-soft: rgba(107, 155, 122, 0.10);
+  --color-warn-soft: rgba(217, 119, 6, 0.12);
+  --color-err-soft: rgba(212, 24, 61, 0.12);
+  --color-info-soft: rgba(59, 130, 246, 0.12);
+
+  /* Legacy aliases */
+  --ok: var(--success);
+  --warn: var(--warning);
+  --bad: var(--destructive);
+  --err: var(--destructive);
+
+  --ok-10: rgba(107, 155, 122, 0.10);
+  --ok-20: rgba(107, 155, 122, 0.20);
+  --warn-10: rgba(217, 119, 6, 0.10);
+  --warn-20: rgba(217, 119, 6, 0.20);
+  --bad-10: rgba(212, 24, 61, 0.10);
+  --bad-20: rgba(212, 24, 61, 0.20);
+  --bad-soft: rgba(212, 24, 61, 0.12);
+
+  --accent: var(--brand);
+  --accent-10: var(--brand-wash);
+  --accent-15: rgba(114, 31, 229, 0.15);
+  --accent-20: rgba(107, 92, 231, 0.20);
+  --accent-soft: var(--brand-wash);
+
+  --color-card: var(--ss-card);
+  --color-card-border: var(--ss-border-2);
+}
+
+/* ── Dark mode mapping ───────────────────────────────────────────
+   Card must be brighter than the page background.
+   Shadows are invisible in dark mode, so they are removed and card
+   edges rely on a subtle border instead. */
+[data-theme="styleseed"].dark,
+.dark [data-theme="styleseed"] {
+  /* Background levels */
+  --background: #121212;
+  --surface-page: #121212;
+  --card: #1E1E1E;
+  --surface-subtle: #252525;
+  --surface-muted: rgba(255, 255, 255, 0.08);
+
+  /* Text hierarchy — inverted */
+  --text-primary: #E0E0E0;
+  --text-secondary: #A0A0A0;
+  --text-tertiary: #808080;
+  --text-disabled: #555555;
+  --icon-default: #909090;
+
+  /* Brand & status — brightened */
+  --brand: #9B5FFF;
+  --success: #8FBF9A;
+  --destructive: #FF5C5C;
+  --warning: #FFB347;
+  --info: #64B5F6;
+
+  /* Border — subtle for dark card edges */
+  --border: rgba(255, 255, 255, 0.08);
+  --card-border: 1px solid rgba(255, 255, 255, 0.06);
+
+  /* Brand tint */
+  --brand-tint: rgba(155, 95, 255, 0.15);
+
+  /* Alert badge */
+  --alert-badge: #FF5C5C;
+
+  /* Shadows removed in dark mode */
+  --shadow-card: none;
+  --shadow-card-hover: none;
+  --shadow-elevated: none;
+  --shadow-modal: none;
+  --shadow-button: none;
+}
+
+/* v2 shell chrome overrides — v2-shell.css pins hardcoded dark-fantasy
+   tokens on these selectors, so we re-map them to the StyleSeed light
+   palette when the theme is active. */
+[data-theme="styleseed"] .v2-shell-rail,
+[data-theme="styleseed"] .v2-status-tray,
+[data-theme="styleseed"] .v2-shell-header,
+[data-theme="styleseed"] .v2-health-strip {
+  --v2-ink:         var(--ss-page);
+  --v2-velvet:      var(--ss-surface);
+  --v2-card:        var(--ss-card);
+  --v2-card-soft:   var(--ss-card-raised);
+  --v2-raised:      var(--ss-card-hover);
+  --v2-border-soft: var(--ss-border-1);
+  --v2-border:      var(--ss-border-2);
+  --v2-border-strong:var(--ss-border-3);
+  --v2-text:        var(--ss-text-secondary);
+  --v2-text-bright: var(--ss-text-primary);
+  --v2-text-dim:    var(--ss-text-tertiary);
+  --v2-text-faint:  var(--ss-text-disabled);
+  --v2-accent-brass:var(--brand);
+  --v2-accent-brass-dim: var(--brand-dim);
+  --v2-ok:          var(--success);
+  --v2-warn:        var(--warning);
+  --v2-bad:         var(--destructive);
+}

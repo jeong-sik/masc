@@ -61,10 +61,10 @@ function InspectorTabButton({
     <button
       type="button"
       class=${[
-        'v2-command-action rounded-[var(--r-0)] border px-3 py-1.5 text-2xs font-semibold transition-colors',
+        'v2-command-action rounded-md border px-3 py-1.5 text-[12px] font-semibold transition-colors min-h-11 min-w-11',
         active
-          ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
-          : 'border-card-border bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)]',
+          ? 'border-brand/30 bg-brand/10 text-brand'
+          : 'border-border bg-surface-subtle text-text-secondary hover:text-text-primary hover:bg-surface-muted',
       ].join(' ')}
       aria-pressed=${active ? 'true' : 'false'}
       onClick=${() => {
@@ -81,18 +81,18 @@ function InspectorOverview() {
     <div class="grid gap-4">
       <${SectionCard} label="대시보드 포커스" class="section">
         <div class="grid gap-3">
-          <div class="v2-command-panel rounded-[var(--r-1)] border border-card-border/35 bg-[var(--color-bg-elevated)]/10 px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
-            이제 대시보드는 <strong class="text-[var(--color-fg-secondary)]">핵심 운영 화면</strong>에 더 집중합니다.
+          <div class="v2-command-panel rounded-xl border border-border/35 bg-surface-subtle px-4 py-3 text-[14px] leading-relaxed text-text-primary">
+            이제 대시보드는 <strong class="text-text-secondary">핵심 운영 화면</strong>에 더 집중합니다.
             낮은 활용도의 화면은 줄이고, 진짜 자주 보는 상태/개입/근거 화면으로 빠르게 이동할 수 있게 정리했습니다.
           </div>
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
             ${FOCUS_SURFACES.map(surface => html`
-              <div class="v2-command-card rounded-[var(--r-1)] border border-card-border/35 bg-[var(--color-bg-elevated)]/10 px-4 py-3">
-                <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">${surface.title}</div>
-                <div class="mt-2 text-2xs leading-loose text-[var(--color-fg-muted)]">${surface.description}</div>
+              <div class="v2-command-card rounded-xl border border-border/35 bg-surface-subtle px-4 py-3">
+                <div class="text-[14px] font-bold text-text-secondary">${surface.title}</div>
+                <div class="mt-2 text-[13px] leading-loose text-text-tertiary">${surface.description}</div>
                 <button
                   type="button"
-                  class="v2-command-action mt-3 rounded-[var(--r-1)] border border-[var(--accent-25)] bg-[var(--accent-10)] px-2.5 py-1.5 text-2xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--accent-20)]"
+                  class="v2-command-action mt-3 rounded-md border border-brand/25 bg-brand/10 px-2.5 py-1.5 text-[12px] font-semibold text-brand transition-colors hover:bg-brand/20"
                   onClick=${() => navigate(surface.tab, surface.params)}
                 >
                   ${surface.action}
@@ -110,7 +110,7 @@ export function LabInspector() {
   const current = inspectorSection.value
 
   return html`
-    <div class="v2-command-surface flex flex-col gap-4">
+    <div class="v2-command-surface ss-surface bg-surface-page flex flex-col gap-4 px-6 py-6">
       <${SectionCard} label="운영 인스펙터" class="section v2-command-panel">
         <div class="flex flex-col gap-3">
           <div class="flex flex-wrap gap-2">

@@ -76,7 +76,9 @@ describe('TaskWall', () => {
 
     render(h(TaskWall, {}))
 
-    expect(screen.getByRole('region', { name: '키퍼별 태스크 월' })).toBeInTheDocument()
+    const region = screen.getByRole('region', { name: '키퍼별 태스크 월' })
+    expect(region).toBeInTheDocument()
+    expect(region).toHaveClass('v2-workspace-panel')
     expect(screen.getByText('2 키퍼 · 진행 중 3 건')).toBeInTheDocument()
     expect(screen.getByLabelText('keeper-alpha 태스크 2건')).toBeInTheDocument()
     expect(screen.getByLabelText('미할당 태스크 1건')).toBeInTheDocument()

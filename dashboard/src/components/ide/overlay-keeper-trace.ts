@@ -246,6 +246,7 @@ export function OverlayKeeperTrace({ active, keeperFilter }: OverlayKeeperTraceP
 
   return html`
     <div
+      class="ide-keeper-trace-overlay v2-ide-panel"
       role="region"
       aria-label="Keeper trace overlay"
       data-overlay="keeper-trace"
@@ -270,6 +271,7 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
 
   return html`
     <div
+      class="ide-trace-bucket v2-ide-row"
       role="group"
       data-keeper=${bucket.keeperName}
       data-file=${bucket.filePath ?? 'no-file'}
@@ -290,7 +292,7 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
           >
             <button
               type="button"
-              class="ide-trace-chip"
+              class="ide-trace-chip v2-ide-action"
               data-source=${event.source}
               data-count=${event.count}
               data-event-id=${event.id}
@@ -320,7 +322,7 @@ function BucketRow({ bucket }: { readonly bucket: TraceBucket }) {
             <button
               key=${link.id}
               type="button"
-              class="ide-trace-route-link"
+              class="ide-trace-route-link v2-ide-action"
               title=${link.evidence}
               aria-label=${`Open ${link.evidence}`}
               onClick=${() => openIdeContextRouteLink(link)}

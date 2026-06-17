@@ -5,6 +5,13 @@ direction was superseded by later work. They are preserved for history —
 removed from the active RFC index, but their git blame and contextual
 content remain accessible.
 
+> **2026-06-17 cleanup**: withdrawn RFCs with zero live document references
+> were deleted from disk (git history retains full content per the policy
+> below). Only RFC-0017, RFC-0018, and RFC-0048 remain on disk — kept because
+> live documents (`TRACK1-MULTIAGENT-IDE-MVP.md`, `RFC-0042`,
+> `observability/dashboard-surface-metrics.md`) still link them. The batch
+> tables below remain as the historical withdrawal log, not a disk inventory.
+
 ## Why archive instead of delete
 
 - **Authoring trail preserved** — git mv keeps full history without renames cluttering `docs/rfc/` index.

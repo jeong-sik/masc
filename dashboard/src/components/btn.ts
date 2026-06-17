@@ -80,41 +80,44 @@ interface VariantStyle {
 // Hover state is read off the same SPEC `:hover` rules.
 const VARIANT_STYLE: Record<ResolvedVariant, VariantStyle> = {
   default: {
-    color: 'var(--color-fg-secondary)',
-    borderColor: 'var(--color-border-default)',
+    color: 'var(--color-text-secondary)',
+    borderColor: 'var(--color-border)',
     background: 'transparent',
+    fontWeight: 500,
     hover: {
-      color: 'var(--color-fg-primary)',
-      background: 'var(--color-bg-elevated)',
+      color: 'var(--color-text-primary)',
+      background: 'var(--color-surface-muted)',
     },
   },
   primary: {
-    color: 'var(--color-bg-page)',
-    borderColor: 'var(--color-accent-fg-dim)',
-    background: 'var(--color-accent-fg-dim)',
+    color: '#ffffff',
+    borderColor: 'var(--color-brand)',
+    background: 'var(--color-brand)',
     fontWeight: 600,
     hover: {
-      color: 'var(--color-bg-page)',
-      background: 'var(--color-accent-fg)',
-      borderColor: 'var(--color-accent-fg)',
+      color: '#ffffff',
+      background: 'var(--color-brand-hover)',
+      borderColor: 'var(--color-brand-hover)',
     },
   },
   danger: {
-    color: 'var(--color-status-err)',
-    borderColor: 'rgb(var(--color-status-err-glow) / 0.4)',
+    color: 'var(--color-destructive)',
+    borderColor: 'color-mix(in srgb, var(--color-destructive) 40%, transparent)',
     background: 'transparent',
+    fontWeight: 500,
     hover: {
-      color: 'var(--color-status-err)',
-      background: 'rgb(var(--color-status-err-glow) / 0.1)',
+      color: 'var(--color-destructive)',
+      background: 'color-mix(in srgb, var(--color-destructive) 10%, transparent)',
     },
   },
   ghost: {
-    color: 'var(--color-fg-muted)',
+    color: 'var(--color-text-tertiary)',
     borderColor: 'transparent',
     background: 'transparent',
+    fontWeight: 500,
     hover: {
-      color: 'var(--color-fg-primary)',
-      background: 'var(--color-bg-panel-alt)',
+      color: 'var(--color-text-primary)',
+      background: 'var(--color-surface-subtle)',
     },
   },
 }
@@ -132,10 +135,10 @@ interface SizeStyle {
 // with the 28px geometry inferred from the xs(18)→sm(20)→default(24)→
 // lg(28) +2px progression that primitives.html demos).
 const SIZE_STYLE: Record<BtnSize, SizeStyle> = {
-  xs: { height: '18px', padding: '0 6px', fontSize: '9px', letterSpacing: '0.06em' },
-  sm: { height: '20px', padding: '0 8px', fontSize: '10px' },
-  default: { height: '24px', padding: '0 10px', fontSize: '11px' },
-  lg: { height: '28px', padding: '0 14px', fontSize: '12px' },
+  xs: { height: '18px', padding: '0 6px', fontSize: '10px', letterSpacing: '0.04em' },
+  sm: { height: '20px', padding: '0 8px', fontSize: '11px', letterSpacing: '0.02em' },
+  default: { height: '24px', padding: '0 10px', fontSize: '12px', letterSpacing: '0.01em' },
+  lg: { height: '28px', padding: '0 14px', fontSize: '14px' },
 }
 
 const TRANSITION =
@@ -181,7 +184,7 @@ export function Btn(props: BtnProps): VNode {
     color,
     background,
     border: `1px solid ${borderColor}`,
-    borderRadius: '3px',
+    borderRadius: '6px',
     cursor: props.disabled ? 'not-allowed' : 'pointer',
     opacity: props.disabled ? 0.5 : 1,
     transition: TRANSITION,

@@ -1,0 +1,203 @@
+/* ─── Tape view — turn-by-turn message log ─────────────────────
+   Hierarchy:
+     · timestamp gutter  (mono, dim, tabular)         → "when"
+     · rail + node       (phase color)                → "what kind"
+     · body              (sans for reading, mono for tool I/O only)
+   Rhythm: 4px baseline. Content is the star — UI chrome fades.
+   ─────────────────────────────────────────────────────────── */
+
+.tape {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.tape-empty { margin-top: var(--sp-6); }
+
+/* ─ Turn row ─ */
+.tape-turn {
+  display: grid;
+  grid-template-columns: 68px 16px 1fr;
+  gap: var(--sp-3);
+  align-items: start;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.tape-turn:hover {
+  background: var(--surf-hover);
+  border-color: var(--line);
+}
+.tape-turn.selected {
+  background: var(--surf-selected);
+  border-color: var(--line-accent);
+  box-shadow: inset 2px 0 0 var(--accent-brass);
+}
+
+/* ─ Timestamp gutter ─ */
+.tape-ts {
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  padding-top: 3px;
+  line-height: var(--lh-tight);
+}
+.tape-ts .n {
+  display: block;
+  color: var(--accent-brass);
+  font-size: var(--fs-1);
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+/* ─ Rail + node ─ */
+.tape-rail {
+  position: relative;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  padding-top: 7px;
+}
+.tape-rail::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: calc(-1 * var(--sp-3));
+  width: 1px;
+  background: var(--line);
+  transform: translateX(-0.5px);
+}
+.tape-turn:last-child .tape-rail::before { display: none; }
+.tape-node {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-dim);
+  background: var(--bg);
+  position: relative;
+  z-index: 1;
+}
+
+/* Phase → node color */
+.tape-turn.think .tape-node    { border-color: var(--ph-think); }
+.tape-turn.tool  .tape-node    { border-color: var(--ph-tool);  background: var(--ph-tool); }
+.tape-turn.judge .tape-node    { border-color: var(--ph-judge); background: var(--ph-judge); }
+.tape-turn.judge.fail .tape-node { border-color: var(--ph-fail); background: var(--ph-fail); }
+.tape-turn.hilt  .tape-node    { border-color: var(--ph-hilt);  background: var(--ph-hilt); }
+.tape-turn.overflow .tape-node { border-color: var(--ph-hilt);  background: transparent; }
+.tape-turn.compact  .tape-node { border-color: var(--ph-think); background: transparent; }
+.tape-turn.fail  .tape-node    { border-color: var(--ph-fail);  background: var(--ph-fail); }
+
+/* ─ Body ─ */
+.tape-body { min-width: 0; }
+.tape-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-1);
+}
+.tape-phase {
+  display: inline-block;
+  padding: 1px var(--sp-2);
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  border-radius: var(--r-1);
+  border: 1px solid var(--line);
+  background: var(--surf-raised);
+  color: var(--text-dim);
+}
+.tape-turn.think .tape-phase {
+  color: var(--ph-think);
+  border-color: var(--line-accent);
+  background: color-mix(in oklab, var(--ph-think) 10%, transparent);
+}
+.tape-turn.tool .tape-phase  {
+  color: var(--ph-tool);
+  border-color: color-mix(in oklab, var(--ph-tool) 40%, transparent);
+  background: color-mix(in oklab, var(--ph-tool) 10%, transparent);
+}
+.tape-turn.judge .tape-phase {
+  color: var(--ph-judge);
+  border-color: color-mix(in oklab, var(--ph-judge) 40%, transparent);
+  background: color-mix(in oklab, var(--ph-judge) 10%, transparent);
+}
+.tape-turn.hilt .tape-phase  {
+  color: var(--ph-hilt);
+  border-color: color-mix(in oklab, var(--ph-hilt) 40%, transparent);
+  background: color-mix(in oklab, var(--ph-hilt) 12%, transparent);
+}
+.tape-turn.fail .tape-phase  {
+  color: var(--ph-fail);
+  border-color: color-mix(in oklab, var(--ph-fail) 40%, transparent);
+  background: color-mix(in oklab, var(--ph-fail) 12%, transparent);
+}
+.tape-turn.overflow .tape-phase,
+.tape-turn.compact  .tape-phase { color: var(--ph-hilt); }
+
+.tape-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+/* ─ Content ─
+   Default: sans-serif for reading. Tool I/O: mono for structure.
+   body 는 grid 자식 — min-width:0 필수. */
+.tape-content {
+  min-width: 0;
+  font-family: var(--font-ui);
+  font-size: var(--fs-4);
+  color: var(--text-bright);
+  line-height: var(--lh-body);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.tape-turn.tool .tape-content {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  font-size: var(--fs-3);
+  letter-spacing: 0.01em;
+  /* tool path는 한 줄 유지, 넘치면 말줄임 — 긴 URL이 UI를 깨지 않게 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tape-turn.tool.expanded .tape-content {
+  white-space: pre-wrap;
+  overflow: visible;
+  word-break: break-all;
+}
+.tape-turn.tool .tape-content strong,
+.tape-turn.tool .tape-content b {
+  color: var(--text-bright);
+  font-weight: 500;
+}
+
+/* Auto-follow sticky pill */
+.tape-followhint {
+  position: sticky;
+  bottom: var(--sp-2);
+  align-self: center;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-2);
+  background: color-mix(in oklab, var(--accent-brass) 20%, var(--surface-1));
+  border: 1px solid var(--line-accent);
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  color: var(--accent-brass);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  backdrop-filter: blur(6px);
+}

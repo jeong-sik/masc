@@ -63,6 +63,14 @@ describe('KeeperBDIPanel', () => {
     render(null, container)
   })
 
+  it('applies v2-monitoring marker classes', () => {
+    const container = makeContainer()
+    render(html`<${KeeperBDIPanel} will="w" needs="n" desires="d" short_goal="s" mid_goal="m" long_goal="l" />`, container)
+    expect(container.innerHTML).toContain('v2-monitoring-panel')
+    expect(container.innerHTML).toContain('v2-monitoring-row')
+    render(null, container)
+  })
+
   it('does not render BDI section when only goals provided', () => {
     const container = makeContainer()
     render(html`<${KeeperBDIPanel} short_goal="only goal" />`, container)

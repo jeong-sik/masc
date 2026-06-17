@@ -1,17 +1,72 @@
 import { html } from 'htm/preact'
+import type { ComponentChildren, VNode } from 'preact'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { ActionButton } from '../common/button'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { ringFocusClasses } from '../common/ring'
+import { collectAttachments } from './attachments'
+import { parseMarkdownToBlocks } from './markdown-blocks'
+import { showToast } from '../common/toast'
 import { useVoiceInput } from './voice-input'
+
+const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
-import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
+import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
 import type { ToolCallOutputBlob } from '../../api/dashboard'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
+import { Sigil } from '../common/sigil-chip'
+import { SuggestionChip } from '../common/suggestion-chip'
+import { StatusDot } from '../common/status-dot'
+import type { JSX } from 'preact'
+
+/** Keeper identity used by SigilBadge. */
+export interface SigilBadgeKeeper {
+  slot: number
+  id: string
+  sigil?: string
+}
+
+/** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
+export function ChatStatusDot({ status, pulse }: { status: string; pulse?: boolean }): VNode {
+  const state = status === 'run' ? 'ok' : status === 'pause' ? 'warn' : status === 'off' ? 'idle' : status
+  const toneClass = `bg-[var(--color-status-${state})]`
+  return html`
+    <${StatusDot}
+      class=${`${toneClass}${pulse ? ' animate-pulse' : ''}`}
+      ariaLabel=${state}
+    />
+  `
+}
+
+/** Canonical keeper identity badge — delegates to the shared Sigil primitive. */
+export function ChatSigilBadge({ k, size = 18, beat }: { k: SigilBadgeKeeper; size?: number; beat?: boolean }): VNode {
+  const monogram = k.sigil ?? k.id.slice(0, 2).toUpperCase()
+  return html`
+    <${Sigil}
+      slot=${k.slot}
+      size=${size}
+      heartbeat=${beat}
+      title=${k.id}
+      fontScale=${0.46}
+    >${monogram}<//>
+  `
+}
+
+/** Suggestion chip wrapper — delegates to the shared SuggestionChip primitive. */
+export function ChatSuggestionChip({
+  pre = '\u2192',
+  children,
+  ...rest
+}: {
+  pre?: string
+  children?: ComponentChildren
+} & JSX.HTMLAttributes<HTMLButtonElement>): VNode {
+  return html`<${SuggestionChip} pre=${pre} ...${rest}>${children}<//>`
+}
 
 function surfaceLink(surface?: SurfaceRef | null): { url: string; label: string; icon: string } | null {
   if (!surface || !surface.kind) return null
@@ -183,7 +238,7 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
 
-function formatAttachmentSize(bytes: number): string {
+export function formatAttachmentSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
   if (bytes < 1024) return `${Math.round(bytes)} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
@@ -204,6 +259,119 @@ function isRenderableImageAttachment(attachment: KeeperConversationAttachment): 
 
 function attachmentMeta(attachment: KeeperConversationAttachment): string {
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
+}
+
+function dataUriToText(data: string): string | null {
+  const comma = data.indexOf(',')
+  if (comma === -1 || !data.startsWith('data:')) return null
+  const header = data.slice(0, comma)
+  const body = data.slice(comma + 1)
+  if (header.includes(';base64')) {
+    try {
+      return atob(body)
+    } catch {
+      return null
+    }
+  }
+  try {
+    return decodeURIComponent(body)
+  } catch {
+    return null
+  }
+}
+
+function downloadArtifact(data: string, filename: string, mimeType?: string): void {
+  const href = data.startsWith('data:')
+    ? data
+    : URL.createObjectURL(new Blob([data], { type: mimeType ?? 'application/octet-stream' }))
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  if (!data.startsWith('data:')) {
+    setTimeout(() => URL.revokeObjectURL(href), 1000)
+  }
+}
+
+function artifactPreviewType(kind?: string, data?: string, mimeType?: string): 'image' | 'svg' | 'md' | 'code' | 'unknown' {
+  const k = (kind ?? '').toLowerCase()
+  const mt = (mimeType ?? '').toLowerCase()
+  if (k === 'image' || mt.startsWith('image/') || data?.startsWith('data:image/')) return 'image'
+  if (k === 'svg' || mt === 'image/svg+xml' || data?.startsWith('data:image/svg')) return 'svg'
+  if (k === 'md' || k === 'markdown' || mt.includes('markdown')) return 'md'
+  if (
+    k === 'code'
+    || k === 'json'
+    || mt.startsWith('text/')
+    || mt === 'application/json'
+    || data?.startsWith('data:text/')
+    || data?.startsWith('data:application/json')
+  ) {
+    return 'code'
+  }
+  return 'unknown'
+}
+
+function isPreviewableArtifact(kind?: string, data?: string, mimeType?: string): boolean {
+  return !!data && artifactPreviewType(kind, data, mimeType) !== 'unknown'
+}
+
+function ChatArtifactPreview({
+  kind,
+  name,
+  data,
+  mimeType,
+  onClose,
+}: {
+  kind?: string
+  name: string
+  data: string
+  mimeType?: string
+  onClose: () => void
+}) {
+  const type = artifactPreviewType(kind, data, mimeType)
+  if (type === 'image') {
+    return html`
+      <${ChatPreviewModal} title=${name} onClose=${onClose}>
+        <img
+          src=${data}
+          alt=${name}
+          class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+        />
+      <//>
+    `
+  }
+  if (type === 'svg') {
+    return html`
+      <${ChatPreviewModal} title=${name} onClose=${onClose}>
+        <div
+          class="chat-lightbox-svg"
+          dangerouslySetInnerHTML=${{ __html: sanitizeHtml(data) }}
+        />
+      <//>
+    `
+  }
+  const text = dataUriToText(data) ?? data
+  if (type === 'md') {
+    return html`
+      <${ChatPreviewModal} title=${name} onClose=${onClose}>
+        <div
+          class="chat-lightbox-md markdown-body"
+          dangerouslySetInnerHTML=${{
+            __html: DOMPurify.sanitize(marked.parse(text) as string),
+          }}
+        />
+      <//>
+    `
+  }
+  return html`
+    <${ChatPreviewModal} title=${name} onClose=${onClose}>
+      <pre class="chat-lightbox-code"><code>${escapeHtml(text)}</code></pre>
+    <//>
+  `
 }
 
 // --- Keeper v2 rich block helpers -------------------------------------------------
@@ -281,7 +449,7 @@ function ChatTableBlock({ head, rows }: ChatTableBlock) {
         <tr>
           ${head.map((h, i) => {
             const c = cell(h)
-            return html`<th key=${i} class=${c.num ? 'chat-block-cell-num' : ''}>${c.v}</th>`
+            return html`<th key=${i} class=${c.num ? 'chat-block-cell-num' : ''} dangerouslySetInnerHTML=${renderInlineHtml(String(c.v))} />`
           })}
         </tr>
       </thead>
@@ -290,7 +458,7 @@ function ChatTableBlock({ head, rows }: ChatTableBlock) {
           <tr key=${ri}>
             ${row.map((c0, ci) => {
               const c = cell(c0)
-              return html`<td key=${ci} class="${c.num ? 'chat-block-cell-num' : ''} ${c.muted ? 'chat-block-cell-muted' : ''}">${c.v}</td>`
+              return html`<td key=${ci} class="${c.num ? 'chat-block-cell-num' : ''} ${c.muted ? 'chat-block-cell-muted' : ''}" dangerouslySetInnerHTML=${renderInlineHtml(String(c.v))} />`
             })}
           </tr>
         `)}
@@ -299,11 +467,114 @@ function ChatTableBlock({ head, rows }: ChatTableBlock) {
   `
 }
 
-function ChatCodeBlock({ cap, html: htmlContent }: { cap?: string; html: string }) {
+function ChatPreviewModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string
+  onClose: () => void
+  children: ComponentChildren
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
   return html`
-    <div class="chat-block-code" data-chat-block="code">
-      ${cap ? html`<div class="chat-block-code-cap">${cap}</div>` : null}
-      <pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed"><code dangerouslySetInnerHTML=${{ __html: sanitizeHtml(htmlContent) }} /></pre>
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick=${onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label=${title}
+    >
+      <div
+        class="relative max-h-[90vh] max-w-[90vw] overflow-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-[var(--shadow-raised)]"
+        onClick=${(e: Event) => e.stopPropagation()}
+      >
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${title}</span>
+          <button
+            type="button"
+            class="rounded-[var(--r-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+            onClick=${onClose}
+            aria-label="닫기"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="chat-preview-modal-body">${children}</div>
+      </div>
+    </div>
+  `
+}
+
+function codeBlockText(htmlContent: string, source?: string): string {
+  if (source !== undefined) return source
+  if (typeof document !== 'undefined') {
+    const el = document.createElement('div')
+    el.innerHTML = htmlContent
+    return el.textContent ?? htmlContent
+  }
+  return htmlContent
+}
+
+async function copyCodeToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast('코드를 복사했습니다', 'success')
+  } catch {
+    showToast('복사하지 못했습니다', 'error')
+  }
+}
+
+function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
+  const [highlighted, setHighlighted] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const codeId = useId()
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const shiki = await import('shiki')
+        const text = codeBlockText(htmlContent, source)
+        const next = await shiki.codeToHtml(text, {
+          lang: cap && cap.trim() ? cap.trim() : 'text',
+          theme: 'github-dark',
+        })
+        if (!cancelled) setHighlighted(next)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [htmlContent, cap, source])
+
+  const plain = codeBlockText(htmlContent, source)
+
+  return html`
+    <div class="chat-block-code ${failed ? 'chat-block-code-fallback' : ''}" data-chat-block="code">
+      <div class="chat-block-code-hd">
+        ${cap ? html`<span class="chat-block-code-cap">${cap}</span>` : html`<span class="chat-block-code-cap" />`}
+        <button
+          type="button"
+          class="chat-block-code-copy"
+          aria-label="코드 복사"
+          title="복사"
+          onClick=${() => { void copyCodeToClipboard(plain) }}
+        >
+          복사
+        </button>
+      </div>
+      ${highlighted
+        ? html`<div class="m-0 overflow-x-auto p-0 text-2xs leading-relaxed" id=${codeId} dangerouslySetInnerHTML=${{ __html: highlighted }} />`
+        : html`<pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed" id=${codeId}><code dangerouslySetInnerHTML=${{ __html: htmlContent }} /></pre>`}
     </div>
   `
 }
@@ -332,8 +603,30 @@ function ChatShellBlock({ title, lines, exit, dur }: ChatShellBlock) {
   `
 }
 
-function ChatArtifactBlock({ kind, name, size, note }: { kind?: string; name: string; size?: string; note?: string }) {
+function ChatArtifactBlock({
+  kind,
+  name,
+  size,
+  note,
+  data,
+  mimeType,
+}: {
+  kind?: string
+  name: string
+  size?: string
+  note?: string
+  data?: string
+  mimeType?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const hasData = !!data
+  const previewable = isPreviewableArtifact(kind, data, mimeType)
   const icon = kind === 'md' ? '⌹' : kind === 'svg' ? '◫' : kind === 'json' ? '{ }' : '⎙'
+
+  const handleDownload = () => {
+    if (data) downloadArtifact(data, name, mimeType)
+  }
+
   return html`
     <div class="chat-block-artifact" data-chat-block="artifact">
       <span class="chat-block-artifact-icon">${icon}</span>
@@ -343,13 +636,40 @@ function ChatArtifactBlock({ kind, name, size, note }: { kind?: string; name: st
           ${(kind || 'file').toUpperCase()}${size ? ` · ${size}` : ''}${note ? ` · ${note}` : ''}
         </div>
       </div>
-      <button type="button" class="chat-block-artifact-btn" aria-label="열기">열기</button>
-      <button type="button" class="chat-block-artifact-btn" aria-label="다운로드">다운로드</button>
+      <button
+        type="button"
+        class="chat-block-artifact-btn"
+        disabled=${!previewable}
+        onClick=${() => previewable && setOpen(true)}
+        aria-label="열기"
+      >
+        열기
+      </button>
+      <button
+        type="button"
+        class="chat-block-artifact-btn"
+        disabled=${!hasData}
+        onClick=${handleDownload}
+        aria-label="다운로드"
+      >
+        다운로드
+      </button>
+      ${open && previewable
+        ? html`
+            <${ChatArtifactPreview}
+              kind=${kind}
+              name=${name}
+              data=${data}
+              mimeType=${mimeType}
+              onClose=${() => setOpen(false)}
+            />
+          `
+        : null}
     </div>
   `
 }
 
-function ChatAttachBlock({ name, dims, svg, ph, via, size }: { name: string; dims?: string; svg?: string; ph?: string; via?: string; size?: string }) {
+function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string; dims?: string; src?: string; svg?: string; ph?: string; via?: string; size?: string }) {
   return html`
     <figure class="chat-block-attach" data-chat-block="attach">
       <div class="chat-block-attach-hd">
@@ -358,9 +678,11 @@ function ChatAttachBlock({ name, dims, svg, ph, via, size }: { name: string; dim
         ${dims ? html`<span class="chat-block-attach-dims">${dims}</span>` : null}
       </div>
       <div class="chat-block-attach-frame">
-        ${svg
-          ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
-          : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}</div>`}
+        ${src
+          ? html`<img src=${src} alt=${name} class="chat-block-attach-img" />`
+          : svg
+            ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
+            : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}</div>`}
       </div>
       <figcaption class="chat-block-attach-cap">
         <span>이미지 첨부</span>${via ? ` · ${via}` : ''}${size ? ` · ${size}` : ''}
@@ -450,23 +772,88 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 }
 
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
+  const [open, setOpen] = useState(false)
   return html`
     <figure class="chat-block-media" data-chat-block="image">
-      <div class="chat-block-media-frame">
+      <div class="chat-block-media-frame ${src ? 'cursor-zoom-in' : ''}" onClick=${() => src && setOpen(true)}>
         ${src
           ? html`<img src=${src} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
           : html`<div class="chat-block-media-ph">${ph || '실행 화면'}</div>`}
       </div>
       ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${open && src
+        ? html`
+            <${ChatPreviewModal} title=${cap || '이미지'} onClose=${() => setOpen(false)}>
+              <img
+                src=${src}
+                alt=${cap || ''}
+                class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+              />
+            <//>
+          `
+        : null}
     </figure>
   `
 }
 
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
+  const [open, setOpen] = useState(false)
+  const clean = useMemo(() => sanitizeHtml(svg), [svg])
   return html`
     <figure class="chat-block-media" data-chat-block="svg">
-      <div class="chat-block-media-frame" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />
+      <div
+        class="chat-block-media-frame cursor-zoom-in"
+        onClick=${() => setOpen(true)}
+        dangerouslySetInnerHTML=${{ __html: clean }}
+      />
       ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${open
+        ? html`
+            <${ChatPreviewModal} title=${cap || 'SVG'} onClose=${() => setOpen(false)}>
+              <div class="chat-preview-modal-body-svg" dangerouslySetInnerHTML=${{ __html: clean }} />
+            <//>
+          `
+        : null}
+    </figure>
+  `
+}
+
+function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
+  const id = useId()
+  const [svg, setSvg] = useState<string | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const run = async () => {
+      try {
+        const mod = await import('mermaid')
+        const mermaid = mod.default
+        if (typeof mermaid.initialize === 'function') {
+          mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' })
+        }
+        const { svg: rendered } = await mermaid.render(`mermaid-${id}`, source)
+        if (active) setSvg(rendered)
+      } catch {
+        if (active) setError(true)
+      }
+    }
+    void run()
+    return () => { active = false }
+  }, [source, id])
+
+  if (error) {
+    return html`<${ChatCodeBlock} cap="mermaid" html=${escapeHtml(source)} source=${source} />`
+  }
+
+  return html`
+    <figure class="chat-block-media" data-chat-block="mermaid">
+      <div class="chat-block-mermaid">
+        ${svg
+          ? html`<div dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
+          : html`<div class="chat-block-media-ph">다이어그램 렌더링 중…</div>`}
+      </div>
+      ${caption ? html`<figcaption class="chat-block-media-cap">${caption}</figcaption>` : null}
     </figure>
   `
 }
@@ -636,13 +1023,14 @@ function ChatBlock({ block }: { block: ChatBlock }) {
     case 'ul': return html`<${ChatListBlock} items=${block.items} />`
     case 'callout': return html`<${ChatCalloutBlock} severity=${block.severity} html=${block.html} />`
     case 'table': return html`<${ChatTableBlock} head=${block.head} rows=${block.rows} />`
-    case 'code': return html`<${ChatCodeBlock} cap=${block.cap} html=${block.html} />`
+    case 'code': return html`<${ChatCodeBlock} cap=${block.cap} html=${block.html} source=${block.source} />`
     case 'shell': return html`<${ChatShellBlock} title=${block.title} lines=${block.lines} exit=${block.exit} dur=${block.dur} />`
-    case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} />`
-    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
+    case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} data=${block.data} mimeType=${block.mimeType} />`
+    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
     case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} src=${block.src} />`
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
+    case 'mermaid': return html`<${ChatMermaidBlock} source=${block.source} caption=${block.caption} />`
     case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
@@ -674,50 +1062,90 @@ function LiveMessagePlaceholder({ label }: { label: string }) {
   `
 }
 
-function renderAttachmentCard(attachment: KeeperConversationAttachment) {
-  const canLink = isSafeAttachmentHref(attachment)
+function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachment }) {
+  const [open, setOpen] = useState(false)
+  const canDownload = isSafeAttachmentHref(attachment)
   const meta = attachmentMeta(attachment)
-  const content = isRenderableImageAttachment(attachment)
-    ? html`
-        <img
-          src=${attachment.data}
-          alt=${attachment.name}
-          class="max-h-52 w-full rounded-[var(--r-1)] object-contain"
-          loading="lazy"
-        />
-      `
-    : html`
-        <div class="flex min-h-18 items-center gap-3 px-3 py-3">
-          <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">
-            FILE
-          </span>
-          <div class="min-w-0">
-            <div class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">${attachment.name}</div>
-            <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">${meta}</div>
-          </div>
-        </div>
-      `
+  const isImage = isRenderableImageAttachment(attachment)
 
   return html`
-    <div class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-      ${canLink
+    <div
+      class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      data-chat-attachment-card=${attachment.id}
+    >
+      ${isImage
         ? html`
-            <a
-              href=${attachment.data}
-              download=${attachment.name}
-              class="block hover:bg-[var(--color-bg-hover)]"
-              aria-label=${`${attachment.name} 내려받기`}
+            <button
+              type="button"
+              class="block w-full text-left hover:bg-[var(--color-bg-hover)]"
+              onClick=${() => setOpen(true)}
+              aria-label=${`${attachment.name} 미리보기`}
             >
-              ${content}
-            </a>
+              <img
+                src=${attachment.data}
+                alt=${attachment.name}
+                class="max-h-52 w-full rounded-[var(--r-1)] object-contain"
+                loading="lazy"
+              />
+            </button>
           `
-        : content}
-      ${isRenderableImageAttachment(attachment)
+        : canDownload
+          ? html`
+              <a
+                href=${attachment.data}
+                download=${attachment.name}
+                class="block hover:bg-[var(--color-bg-hover)]"
+                aria-label=${`${attachment.name} 날려받기`}
+              >
+                <div class="flex min-h-18 items-center gap-3 px-3 py-3">
+                  <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">
+                    FILE
+                  </span>
+                  <div class="min-w-0">
+                    <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+                    <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+                  </div>
+                </div>
+              </a>
+            `
+          : html`
+              <div class="flex min-h-18 items-center gap-3 px-3 py-3">
+                <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">
+                  FILE
+                </span>
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+                  <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+                </div>
+              </div>
+            `}
+      <div class="flex items-center justify-between gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
+        <div class="min-w-0">
+          <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+          <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+        </div>
+        ${canDownload
+          ? html`
+              <a
+                href=${attachment.data}
+                download=${attachment.name}
+                class="chat-block-artifact-btn shrink-0"
+                aria-label=${`${attachment.name} 날려받기`}
+              >
+                ↓
+              </a>
+            `
+          : null}
+      </div>
+      ${open && isImage
         ? html`
-            <div class="border-t border-[var(--color-border-default)] px-3 py-2">
-              <div class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">${attachment.name}</div>
-              <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">${meta}</div>
-            </div>
+            <${ChatPreviewModal} title=${attachment.name} onClose=${() => setOpen(false)}>
+              <img
+                src=${attachment.data}
+                alt=${attachment.name}
+                class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+              />
+            <//>
           `
         : null}
     </div>
@@ -743,29 +1171,34 @@ function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
   const audioSrc = clip.audioUrl ?? fallbackSrc
   const duration = formatAudioDuration(clip.durationSec)
   return html`
-    <div
-      class="flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5"
-      data-chat-audio-clip
-    >
+    <div class="chat-audio-clip" data-chat-audio-clip>
+      <div class="chat-audio-wave" aria-hidden="true">
+        ${Array.from({ length: 24 }, (_, i) => html`
+          <span
+            key=${i}
+            class="chat-audio-bar"
+            style=${{ height: `${6 + (i % 7) * 3}px` }}
+          />
+        `)}
+      </div>
       <audio
         controls
         preload="none"
         src=${audioSrc}
-        class="h-8 max-w-[16rem]"
         aria-label=${clip.messageText || '음성 메시지'}
         onError=${() => { setLoadError(true) }}
       />
       ${duration
-        ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${duration}</span>`
+        ? html`<span class="chat-audio-dur">${duration}</span>`
         : null}
       ${clip.deviceId
-        ? html`<span class="text-2xs text-[var(--color-fg-muted)]" title=${`device: ${clip.deviceId}`}>🔊</span>`
+        ? html`<span class="chat-audio-device" title=${`device: ${clip.deviceId}`}>🔊</span>`
         : null}
       ${clip.messageText
-        ? html`<span class="text-2xs text-[var(--color-fg-secondary)]">${clip.messageText}</span>`
+        ? html`<span class="chat-audio-caption">${clip.messageText}</span>`
         : null}
       ${loadError
-        ? html`<span class="text-2xs text-[var(--color-status-err)]">음성을 불러올 수 없습니다.</span>`
+        ? html`<span class="chat-audio-error">음성을 불러올 수 없습니다.</span>`
         : null}
     </div>
   `
@@ -789,8 +1222,15 @@ function ChatMessageBubble({
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
+  const parsedBlocks = useMemo(() => {
+    if (hasBlocks) return null
+    if (entry.role !== 'assistant' && entry.role !== 'system') return null
+    return parseMarkdownToBlocks(messageText)
+  }, [hasBlocks, entry.role, messageText])
+  const effectiveBlocks = entry.blocks && entry.blocks.length > 0 ? entry.blocks : (parsedBlocks ?? [])
+  const hasEffectiveBlocks = effectiveBlocks.length > 0
   const collapseThreshold = 1200
-  const isCollapsible = !hasBlocks && messageLength > collapseThreshold
+  const isCollapsible = !hasEffectiveBlocks && messageLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -804,7 +1244,7 @@ function ChatMessageBubble({
 
   return html`
     <article
-      class=${`chat-bubble ${tone} flex w-full flex-col border backdrop-blur-sm ${
+      class=${`chat-bubble ${tone} flex w-full flex-col backdrop-blur-sm ${
         isMessenger
           ? 'max-w-[82%] gap-2.5 rounded-[var(--radius-xl)] px-4 py-3.5'
           : 'max-w-[90%] gap-3 rounded-[var(--r-5)] px-4 py-3'
@@ -814,7 +1254,7 @@ function ChatMessageBubble({
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-2xs font-semibold uppercase tracking-[var(--track-caps)] ${
+            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
               isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-[var(--r-1)]'
             }`}
           >
@@ -824,16 +1264,16 @@ function ChatMessageBubble({
             ${isMessenger
               ? html`
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">
+                    <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">
                       ${avatarLabel(entry)}
                     </span>
                     ${timestamp
-                      ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
+                      ? html`<span class="text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
                       : null}
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -846,7 +1286,7 @@ function ChatMessageBubble({
                             href=${surfaceInfo.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -856,7 +1296,7 @@ function ChatMessageBubble({
                       : surfaceInfo
                       ? html`
                           <span
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -869,14 +1309,14 @@ function ChatMessageBubble({
               : html`
                   <div class="flex flex-wrap items-center gap-1.5">
                     <span
-                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] border px-2.5 py-1 text-3xs font-semibold uppercase tracking-3`}
+                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] px-2.5 py-1 text-2xs font-bold uppercase tracking-2`}
                     >
                       ${entry.label}
                     </span>
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-3xs font-medium uppercase tracking-2 text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-secondary)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -885,7 +1325,7 @@ function ChatMessageBubble({
                       : null}
                     ${timestamp
                       ? html`
-                          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">
+                          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">
                             ${timestamp}
                           </span>
                         `
@@ -896,7 +1336,7 @@ function ChatMessageBubble({
                             href=${surfaceInfo.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -906,7 +1346,7 @@ function ChatMessageBubble({
                       : surfaceInfo
                       ? html`
                           <span
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -915,7 +1355,7 @@ function ChatMessageBubble({
                         `
                       : null}
                   </div>
-                  <div class="mt-2 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">
+                  <div class="mt-2 truncate text-sm font-bold text-[var(--color-fg-primary)]">
                     ${avatarLabel(entry)}
                   </div>
                 `}
@@ -925,7 +1365,7 @@ function ChatMessageBubble({
           ? html`
               <button
                 type="button"
-                class=${`border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${
+                class=${`border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING} ${
                   isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
                 }`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
@@ -940,7 +1380,7 @@ function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-secondary)]">
+              <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-fg-primary)]">
                 ${item}
               </span>
             `)}
@@ -950,8 +1390,8 @@ function ChatMessageBubble({
       ${liveLabel
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
-            ${hasBlocks
-              ? html`<${ChatBlocks} blocks=${entry.blocks!} />`
+            ${hasEffectiveBlocks
+              ? html`<${ChatBlocks} blocks=${effectiveBlocks} />`
               : html`
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
@@ -971,7 +1411,7 @@ function ChatMessageBubble({
         ? html`
             <button
               type="button"
-              class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+              class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
               onClick=${() => { setMessageCollapsed(!messageCollapsed) }}
             >
               ${messageCollapsed ? '더 보기' : '접기'}
@@ -981,7 +1421,7 @@ function ChatMessageBubble({
       ${attachments.length > 0
         ? html`
             <div class="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2">
-              ${attachments.map(attachment => renderAttachmentCard(attachment))}
+              ${attachments.map(attachment => html`<${AttachmentCard} key=${attachment.id} attachment=${attachment} />`)}
             </div>
           `
         : null}
@@ -990,7 +1430,7 @@ function ChatMessageBubble({
         : null}
       ${entry.error
         ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm font-medium leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `
@@ -1004,8 +1444,8 @@ function ChatMessageBubble({
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
                         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5">
-                          <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">${item.label}</div>
-                          <div class="mt-1 text-sm font-semibold text-[var(--color-fg-secondary)]">${item.value}</div>
+                          <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">${item.label}</div>
+                          <div class="mt-1 text-sm font-bold text-[var(--color-fg-primary)]">${item.value}</div>
                         </div>
                       `)}
                     </div>
@@ -1014,10 +1454,10 @@ function ChatMessageBubble({
               ${entry.details.skillPrimary
                 ? html`
                     <div class="chat-detail-callout rounded-[var(--r-1)] border border-[var(--ok-border)] px-3 py-3">
-                      <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--ok-fg)]">스킬 경로</div>
-                      <div class="mt-1 text-sm font-semibold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
+                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--ok-fg)]">스킬 경로</div>
+                      <div class="mt-1 text-sm font-bold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
-                        ? html`<div class="mt-1 text-xs leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
+                        ? html`<div class="mt-1 text-sm leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
                         : null}
                     </div>
                   `
@@ -1025,12 +1465,12 @@ function ChatMessageBubble({
               ${state.length > 0
                 ? html`
                     <div class="flex flex-col gap-2">
-                      <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">상태 스냅샷</div>
+                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
                           <div class="rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-6)] px-3 py-2.5">
-                            <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
-                            <div class="mt-1 text-xs leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
+                            <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
+                            <div class="mt-1 text-sm leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
                           </div>
                         `)}
                       </div>
@@ -1042,7 +1482,7 @@ function ChatMessageBubble({
                     <div class="flex flex-col gap-2">
                       <button
                         type="button"
-                        class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+                        class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
@@ -1135,59 +1575,59 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
     >
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-bg-hover)] transition-colors"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-bg-hover)] transition-colors ${CHAT_FOCUS_RING}"
         onClick=${() => { setExpanded(!expanded) }}
         aria-expanded=${expanded}
       >
-        <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-mono font-bold text-[var(--color-fg-muted)]">T</span>
-        <span class="font-mono text-xs font-medium text-[var(--color-accent-fg)] truncate">${toolName}</span>
-        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">입력</span>
+        <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-mono font-bold text-[var(--color-fg-secondary)]">T</span>
+        <span class="font-mono text-sm font-semibold text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]">입력</span>
         ${outputEntry
           ? html`<span
-              class=${`text-2xs ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-[var(--color-status-err)]'}`}
+              class=${`text-xs font-semibold ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-[var(--color-status-err)]'}`}
               title=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
               aria-label=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
             >${outputEntry.success ? '✓' : '✗'}</span>`
           : null}
         ${timestamp
-          ? html`<span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
+          ? html`<span class="ml-auto text-xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
           : null}
-        <span class="ml-1 text-xs text-[var(--color-fg-muted)]">${expanded ? '▾' : '▸'}</span>
+        <span class="ml-1 text-sm text-[var(--color-fg-secondary)]">${expanded ? '▾' : '▸'}</span>
       </button>
       ${expanded
         ? html`
             <div class="flex flex-col gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
               ${isEmptyArgs
-                ? html`<div class="text-2xs font-mono text-[var(--color-fg-muted)]">입력 없음 (매개변수가 없는 도구)</div>`
+                ? html`<div class="text-xs font-mono text-[var(--color-fg-secondary)]">입력 없음 (매개변수가 없는 도구)</div>`
                 : html`
                     <div>
-                      <div class="mb-1 text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">arguments</div>
-                      <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-48 overflow-y-auto">${displayArgs}</pre>
+                      <div class="mb-1 text-2xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">arguments</div>
+                      <pre class="text-xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-primary)] max-h-48 overflow-y-auto">${displayArgs}</pre>
                     </div>
                   `}
               ${hasOutput
                 ? html`
                     <div>
-                      <div class="mb-1 flex items-center gap-1 text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">
+                      <div class="mb-1 flex items-center gap-1 text-2xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">
                         <span>output</span>
                         ${outputView.truncated
-                          ? html`<span class="font-normal normal-case text-[var(--color-fg-muted)]">· truncated, see tool inspector</span>`
+                          ? html`<span class="font-normal normal-case text-[var(--color-fg-secondary)]">· truncated, see tool inspector</span>`
                           : null}
                       </div>
-                      <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-64 overflow-y-auto">${outputView.text}</pre>
+                      <pre class="text-xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-primary)] max-h-64 overflow-y-auto">${outputView.text}</pre>
                     </div>
                   `
                 : null}
               ${!hasOutput
                 ? isEmptyArgs
-                  ? html`<div class="text-2xs text-[var(--color-fg-muted)]">출력 대기 중…</div>`
-                  : html`<div class="text-3xs text-[var(--color-fg-muted)]">출력(결과)은 도구 실행 추적 패널에서 확인</div>`
+                  ? html`<div class="text-xs text-[var(--color-fg-secondary)]">출력 대기 중…</div>`
+                  : html`<div class="text-2xs text-[var(--color-fg-secondary)]">출력(결과)은 도구 실행 추적 패널에서 확인</div>`
                 : null}
             </div>
           `
         : html`
             <div class="px-3 pb-2">
-              <div class="truncate text-2xs font-mono text-[var(--color-fg-muted)]">${preview}</div>
+              <div class="truncate text-xs font-mono text-[var(--color-fg-secondary)]">${preview}</div>
             </div>
           `
       }
@@ -1238,11 +1678,13 @@ export function ChatTranscript({
     if (pinned) setUnread(false)
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scrollerRef.current
     if (!el) return
     if (pinnedRef.current) {
-      el.scrollTop = el.scrollHeight
+      const snap = () => { el.scrollTop = el.scrollHeight }
+      snap()
+      requestAnimationFrame(snap)
     } else {
       setUnread(true)
     }
@@ -1271,8 +1713,8 @@ export function ChatTranscript({
         ${entries.length === 0
           ? html`
               <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
-                <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 메시지 없음</div>
-                <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--color-fg-secondary)]">${emptyText}</div>
+                <div class="text-xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">직접 메시지 없음</div>
+                <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">${emptyText}</div>
               </div>
             `
           : entries.map(entry => entry.role === 'tool'
@@ -1284,7 +1726,7 @@ export function ChatTranscript({
         ? html`
             <button
               type="button"
-              class="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-1.5 text-2xs font-medium text-[var(--color-fg-primary)] shadow-[var(--shadow-raised)] transition-colors hover:bg-[var(--color-bg-hover)]"
+              class="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] shadow-[var(--shadow-raised)] transition-colors hover:bg-[var(--color-bg-hover)] ${CHAT_FOCUS_RING}"
               onClick=${scrollToBottom}
               data-chat-jump-latest
             >
@@ -1299,6 +1741,42 @@ export function ChatTranscript({
 // Streaming with no SSE event for longer than this is surfaced as a
 // stall so the operator can tell "slow model" from "dead transport".
 export const STREAM_STALL_THRESHOLD_S = 15
+
+function escapeHtml(raw: string): string {
+  return raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+export function AttachDraftChip({
+  attachment,
+  onRemove,
+}: {
+  attachment: KeeperConversationAttachment
+  onRemove: () => void
+}) {
+  const meta = [attachment.dims, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
+  return html`
+    <div class="cdraft att" data-chat-attachment-draft=${attachment.id}>
+      <div class="cdraft-thumb">
+        ${attachment.type === 'image'
+          ? html`<img src=${attachment.data} alt=${attachment.name} />`
+          : html`<span class="cdraft-glyph">◫</span>`}
+      </div>
+      <div class="cdraft-meta">
+        <span class="cdraft-name mono">${attachment.name}</span>
+        <span class="cdraft-sub mono">${meta}</span>
+      </div>
+      <button
+        type="button"
+        class="cdraft-x"
+        title="첨부 제거"
+        aria-label="${attachment.name} 첨부 제거"
+        onClick=${onRemove}
+      >
+        ✕
+      </button>
+    </div>
+  `
+}
 
 export function ChatComposer({
   draft,
@@ -1326,11 +1804,16 @@ export function ChatComposer({
   queueEnabled?: boolean
   queueCount?: number
   onDraftChange: (value: string) => void
-  onSend: () => void
+  onSend: (payload: { blocks: ChatBlock[] }) => void | Promise<void>
   onAbort?: () => void
   layout?: 'default' | 'primary'
 }) {
   const [elapsed, setElapsed] = useState(0)
+  const [focus, setFocus] = useState(false)
+  const [drag, setDrag] = useState(false)
+  const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   // RFC-0236 P1: speak to compose. Transcribed text appends to the draft at a
   // newline; an empty draft is replaced outright. Send stays manual (no
@@ -1364,92 +1847,215 @@ export function ChatComposer({
     ? canQueue
       ? '대기열 추가'
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
-    : '보내기'
+    : '볂이기'
   const isStreamWarning = streaming && elapsed > 60
-  const sendDisabled = disabled || draft.trim() === '' || (streaming && !queueEnabled)
+  const hasContent = draft.trim() !== '' || attachments.length > 0
+  const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
 
   const isPrimary = layout === 'primary'
 
+  const ingestFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    const { attachments: added, errors } = await collectAttachments(files, attachments)
+    errors.forEach((message) => showToast(message, 'error'))
+    if (added.length > 0) {
+      setAttachments((prev) => [...prev, ...added])
+    }
+  }
+
+  const handlePaste = (event: ClipboardEvent) => {
+    const items = event.clipboardData?.items
+    if (!items) return
+    const imageFiles: File[] = []
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length > 0) {
+      event.preventDefault()
+      const dt = new DataTransfer()
+      for (const f of imageFiles) dt.items.add(f)
+      void ingestFiles(dt.files)
+    }
+  }
+
+  const handleSend = () => {
+    if (sendDisabled) return
+    const blocks: ChatBlock[] = []
+    for (const att of attachments) {
+      blocks.push({
+        t: 'attach',
+        id: att.id,
+        kind: att.type,
+        name: att.name,
+        dims: att.dims,
+        src: att.type === 'image' ? att.data : undefined,
+        ph: att.type !== 'image' ? att.name : undefined,
+        size: formatAttachmentSize(att.size),
+        via: 'Dashboard 업로드',
+        data: att.data,
+        mimeType: att.mimeType,
+        sizeBytes: att.size,
+      } as ChatBlock)
+    }
+    const text = draft.trim()
+    if (text) {
+      blocks.push({ t: 'p', html: escapeHtml(text) } as ChatBlock)
+    }
+    void onSend({ blocks })
+    onDraftChange('')
+    setAttachments([])
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
+  }
+
+  const grow = (event: Event) => {
+    const target = event.target as HTMLTextAreaElement
+    onDraftChange(target.value)
+    target.style.height = 'auto'
+    target.style.height = `${Math.min(target.scrollHeight, 160)}px`
+  }
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (isSubmitEnter(event) && !event.shiftKey) {
+      event.preventDefault()
+      if (!sendDisabled) {
+        handleSend()
+      }
+    }
+  }
+
+  const onDragOver = (event: DragEvent) => {
+    event.preventDefault()
+    if (!drag) setDrag(true)
+  }
+  const onDragLeave = (event: DragEvent) => {
+    if (event.currentTarget === event.target) setDrag(false)
+  }
+  const onDrop = (event: DragEvent) => {
+    event.preventDefault()
+    setDrag(false)
+    void ingestFiles(event.dataTransfer?.files ?? null)
+  }
+
+  const composerClass = isPrimary ? 'composer primary' : 'composer'
+  const boxClass = `composer-box ${focus ? 'focus' : ''} ${drag ? 'drag' : ''}`
+
   return html`
-    <div class="chat-composer flex flex-col gap-3">
-      ${isPrimary ? null : html`
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">메시지</div>
-          <div class="text-2xs text-[var(--color-fg-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
-        </div>
-      `}
-      <textarea
-        class=${isPrimary
-          ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-4 py-4 text-base leading-loose'
-          : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose'}
-        placeholder=${placeholder}
-        aria-label="메시지 입력"
-        value=${draft}
-        onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}
-        onKeyDown=${(event: KeyboardEvent) => {
-          if (isSubmitEnter(event) && !event.shiftKey) {
-            event.preventDefault()
-            if (!sendDisabled) {
-              onSend()
-            }
-          }
-        }}
-        disabled=${disabled}
-      ></textarea>
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="flex min-w-0 flex-col gap-1">
-          <div class="text-2xs leading-paragraph text-[var(--color-fg-muted)]">
-            ${streaming
-              ? canQueue
-                ? '응답 스트리밍 중 — 지금 보내는 메시지는 대기열에 쌓였다가 차례로 전달됩니다.'
-                : '키퍼 응답 스트림이 활성 상태입니다. 멈춘 것 같으면 중지할 수 있습니다.'
-              : '직접 메시지만 이 레인에 표시됩니다. 내부 키퍼 프롬프트는 숨겨집니다.'}
+    <div
+      class=${composerClass}
+      onDragOver=${onDragOver}
+      onDragLeave=${onDragLeave}
+      onDrop=${onDrop}
+      onPaste=${handlePaste}
+    >
+      <div class="composer-inner">
+        ${isPrimary
+          ? null
+          : html`
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="text-xs font-bold uppercase tracking-3 text-[var(--color-fg-secondary)]">메시지</div>
+                <div class="text-xs text-[var(--color-fg-secondary)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
+              </div>
+            `}
+        ${attachments.length > 0
+          ? html`
+              <div class="composer-tray">
+                ${attachments.map((att) => html`
+                  <${AttachDraftChip}
+                    key=${att.id}
+                    attachment=${att}
+                    onRemove=${() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}
+                  />
+                `)}
+              </div>
+            `
+          : null}
+        <div class=${boxClass}>
+          <textarea
+            ref=${textareaRef}
+            class=${(isPrimary
+              ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-4 py-4 text-base leading-loose'
+              : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose') + ` ${CHAT_FOCUS_RING}`}
+            placeholder=${placeholder}
+            aria-label="메시지 입력"
+            value=${draft}
+            onInput=${grow}
+            onKeyDown=${onKeyDown}
+            onFocus=${() => setFocus(true)}
+            onBlur=${() => setFocus(false)}
+            disabled=${disabled}
+          ></textarea>
+          <div class="composer-tools">
+            <input
+              ref=${fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,application/json,text/csv"
+              multiple
+              class="hidden"
+              aria-label="파일 첨부"
+              onChange=${(event: Event) => {
+                const target = event.target as HTMLInputElement
+                void ingestFiles(target.files)
+                target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              class="ctool"
+              title="이미지·파일 첨부"
+              aria-label="이미지·파일 첨부"
+              disabled=${disabled}
+              onClick=${() => fileInputRef.current?.click()}
+            >
+              ⊕
+            </button>
+            ${voice.supported ? html`
+              <button
+                type="button"
+                class="ctool ${voice.state === 'recording' ? 'recording' : ''}"
+                title=${voice.state === 'recording' ? '녹음 중지' : voice.state === 'transcribing' ? '음성 인식 중' : '음성으로 입력'}
+                aria-label=${voice.state === 'recording' ? '녹음 중지' : '음성으로 입력'}
+                disabled=${voice.state === 'transcribing' || disabled}
+                onClick=${() => (voice.state === 'recording' ? voice.stop() : voice.start())}
+              >
+                ${voice.state === 'recording' ? '■ 녹음중' : voice.state === 'transcribing' ? '전사 중…' : '🎤 음성'}
+              </button>
+            ` : null}
+            <button
+              type="button"
+              class="send ${isStreamWarning && !canQueue ? 'warn' : ''}"
+              disabled=${sendDisabled}
+              onClick=${handleSend}
+            >
+              ${streamLabel}
+            </button>
+            ${streaming && onAbort
+              ? html`
+                  <button
+                    type="button"
+                    class="ctool abort"
+                    title="응답 중지"
+                    aria-label="응답 중지"
+                    onClick=${onAbort}
+                  >
+                    중지${elapsed > 0 ? ` (${elapsed}s)` : ''}
+                  </button>
+                `
+              : null}
           </div>
-          ${isStalled
-            ? html`
-                <div class="text-2xs font-medium text-[var(--color-status-warn)]" data-chat-stall-hint>
-                  마지막 수신 ${sinceLastEvent}초 전 — 스트림이 지연되고 있습니다. 계속 멈춰 있으면 중지 후 다시 시도하세요.
-                </div>
-              `
-            : null}
         </div>
-        <div class="flex gap-2 items-center">
-        ${queueCount > 0
-          ? html`
-              <span
-                class="inline-flex items-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]"
-                data-chat-queue-count
-              >
-                대기 ${queueCount}
-              </span>
-            `
-          : null}
-        ${voice.supported ? html`
-          <${ActionButton}
-            variant=${voice.state === 'recording' ? 'danger' : 'ghost'}
-            onClick=${() => (voice.state === 'recording' ? voice.stop() : voice.start())}
-            disabled=${voice.state === 'transcribing' || disabled}
-            aria-label=${voice.state === 'recording' ? '녹음 중지' : '음성으로 입력'}
-            title=${voice.state === 'recording' ? '녹음 중지' : voice.state === 'transcribing' ? '음성 인식 중' : '음성으로 입력'}
-          >${voice.state === 'recording' ? '■ 녹음중' : voice.state === 'transcribing' ? '전사 중…' : '🎤 음성'}<//>
-        ` : null}
-        <${ActionButton}
-          variant=${isStreamWarning && !canQueue ? 'danger' : 'primary'}
-          onClick=${onSend}
-          disabled=${sendDisabled}
-        >
-          ${streamLabel}
-        <//>
-        ${streaming && onAbort
-          ? html`
-              <${ActionButton}
-                variant="ghost"
-                onClick=${onAbort}
-              >
-                중지${elapsed > 0 ? ` (${elapsed}s)` : ''}
-              <//>
-            `
-          : null}
+        <div class="composer-foot">
+          <span class="hint">
+            <kbd>⌘</kbd> <kbd>↵</kbd> 전송 · 끌어다 놓아 첨부
+            ${isStalled
+              ? html`<span class="ml-2 text-[var(--color-status-warn)]" data-chat-stall-hint>마지막 수신 ${sinceLastEvent}초 전 — 스트림 지연</span>`
+              : null}
+          </span>
+          ${queueCount > 0
+            ? html`<span class="queue-badge" data-chat-queue-count>대기 ${queueCount}</span>`
+            : null}
         </div>
       </div>
     </div>

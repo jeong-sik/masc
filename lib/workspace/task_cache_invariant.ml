@@ -83,6 +83,55 @@ let clear_stale_agent_task
          "task_cache_invariant: log_event failed (%s %s): %s"
          module_name task_id (Printexc.to_string exn))
 
+(** Scan every on-disk agent record and clear [current_task] when it equals
+    [task_id].  Use this when the backlog no longer references the task
+    (terminal status or deletion) and the exact previous assignee is not
+    known.  Logs one [cache_desync.cleared] event per affected agent.
+
+    The read is best-effort and unlocked; [clear_stale_agent_task] re-checks
+    the match under the per-agent file lock before writing, so the worst race
+    is a no-op or a duplicate log rather than a corrupt agent record. *)
+let clear_stale_agent_task_for_task
+      config
+      ~(task_id : string)
+      ~(status : Masc_domain.task_status)
+      ~(module_name : string)
+    : unit =
+  let agents_path = agents_dir config in
+  if path_exists config agents_path
+  then
+    (try
+       let agent_files = Sys.readdir agents_path in
+       Array.iter
+         (fun name ->
+            if Filename.check_suffix name ".json"
+            then (
+              let agent_file = Filename.concat agents_path name in
+              match read_json_opt config agent_file with
+              | None -> ()
+              | Some json -> (
+                  match agent_of_yojson json with
+                  | Ok agent when agent.current_task = Some task_id ->
+                      clear_stale_agent_task config
+                        ~agent_name:agent.name
+                        ~task_id
+                        ~status
+                        ~module_name
+                  | Ok _ | Error _ -> ())))
+         agent_files
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | Sys_error msg ->
+         Log.Misc.warn
+           "task_cache_invariant: agent directory scan failed (%s): %s"
+           module_name
+           msg
+     | exn ->
+         Log.Misc.warn
+           "task_cache_invariant: unexpected scan error (%s): %s"
+           module_name
+           (Printexc.to_string exn))
+
 (** Core invariant wrapper.
 
     [with_fresh_task_status config ~agent_name ~task_id ~module_name f]

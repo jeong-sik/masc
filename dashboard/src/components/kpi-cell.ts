@@ -56,8 +56,8 @@ const spotlightOverrideStyle = {
 export function KpiCell(props: KpiCellProps): VNode {
   const variant = props.variant ?? DEFAULT_KPI_CELL_VARIANT
   const valueColor = props.kind ? VALUE_COLOR_BY_KIND[props.kind] : 'var(--color-fg-primary)'
-  const labelColor = 'var(--color-fg-disabled)'
-  const captionColor = 'var(--color-fg-muted)'
+  const labelColor = 'var(--color-fg-muted)'
+  const captionColor = 'var(--color-fg-secondary)'
 
   const bare = props.bare === true
   const isSpotlight = props.spotlight === true
@@ -119,7 +119,7 @@ export function KpiCell(props: KpiCellProps): VNode {
             display: 'inline-flex',
             alignItems: 'center',
             gap: '6px',
-            fontSize: 'var(--fs-9)',
+            fontSize: 'var(--fs-10)',
             fontFamily: 'var(--font-mono)',
             color: captionColor,
             letterSpacing: '0.06em',

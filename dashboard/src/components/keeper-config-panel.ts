@@ -364,7 +364,7 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
 
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
-    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}</span>
       <span class="text-sm font-semibold text-text-strong">${value}</span>
     </div>
@@ -373,7 +373,7 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
 
 function BoolRow({ label, value }: { label: string; value: boolean }) {
   return html`
-    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2">
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 v2-monitoring-row">
       <span class="text-sm text-[var(--color-fg-muted)]">${label}</span>
       <${BoolBadge} value=${value} />
     </div>
@@ -397,7 +397,7 @@ function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
 
 function MajorSectionHeader({ title }: { title: string }) {
   return html`
-    <div class="rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--accent-5)] px-4 py-3 mt-8 mb-4 flex items-center gap-2 shadow-[var(--shadow-1)]">
+    <div class="rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--accent-5)] px-4 py-3 mt-8 mb-4 flex items-center gap-2 shadow-[var(--shadow-1)] v2-monitoring-panel">
       <${StatusDot} size="sm" class="bg-[var(--accent-50)] shadow-[0_0_8px_rgb(var(--info-glow)/0.6)]" />
       <span class="text-xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg">${title}</span>
     </div>
@@ -418,7 +418,7 @@ function Callout({
       ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
       : 'border-card-border/60 bg-card/35 text-text-body'
   return html`
-    <div class="rounded-[var(--r-1)] border px-3 py-3 shadow-[var(--shadow-1)] ${toneClass}">
+    <div class="rounded-[var(--r-1)] border px-3 py-3 shadow-[var(--shadow-1)] ${toneClass} v2-monitoring-panel">
       <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-text-muted mb-1">${title}</div>
       <div class="text-xs leading-relaxed">${body}</div>
     </div>
@@ -442,7 +442,7 @@ function formatHookDestructiveTools(value: string[] | string): string {
 function ModelList({ models }: { models: string[] }) {
   if (models.length === 0) return html`<span class="text-2xs text-text-muted italic">none</span>`
   return html`
-    <div class="flex flex-wrap gap-1.5">
+    <div class="flex flex-wrap gap-1.5 v2-monitoring-row">
       ${models.map(m => html`<span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-1 hover:bg-[var(--accent-20)] transition-colors cursor-default">${m}</span>`)}
     </div>
   `
@@ -451,7 +451,7 @@ function ModelList({ models }: { models: string[] }) {
 function RuntimeList({ runtimes }: { runtimes: string[] }) {
   if (runtimes.length === 0) return html`<span class="text-2xs text-text-muted italic">none</span>`
   return html`
-    <div class="flex flex-wrap gap-1.5">
+    <div class="flex flex-wrap gap-1.5 v2-monitoring-row">
       ${runtimes.map((_runtime, index) => html`<span class="inline-flex items-center py-1 px-2.5 rounded-[var(--r-1)] text-2xs font-semibold bg-[var(--accent-10)] text-accent-fg border border-[var(--accent-20)] shadow-1 hover:bg-[var(--accent-20)] transition-colors cursor-default">runtime ${index + 1}</span>`)}
     </div>
   `
@@ -463,7 +463,7 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
     truncateAt !== null && truncateAt >= 0 && text.length > truncateAt
       ? text.slice(0, truncateAt) + '...'
       : text
-  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-35 overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded-[var(--r-1)] mt-1.5 leading-relaxed shadow-inset hover:bg-card/60 transition-colors">${truncated}</div>`
+  return html`<div class="text-xs text-text-body whitespace-pre-wrap max-h-35 overflow-y-auto custom-scrollbar border border-card-border bg-card/40 backdrop-blur-sm p-3 rounded-[var(--r-1)] mt-1.5 leading-relaxed shadow-inset hover:bg-card/60 transition-colors v2-monitoring-panel">${truncated}</div>`
 }
 
 
@@ -485,7 +485,7 @@ function PromptBlock({
   block: { key: string; source: string; text: string }
 }) {
   return html`
-    <div class="mt-2">
+    <div class="mt-2 v2-monitoring-panel">
       <${SectionHeader} size="xs" class="mb-1" right=${html`
         <div class="flex items-center gap-2">
           <span class="text-3xs text-text-dim">${block.key}</span>
@@ -501,7 +501,7 @@ function PromptBlock({
 
 function InlineToggleRow({ label, value, onChange, dirty = false }: { label: string; value: boolean; onChange: (v: boolean) => void; dirty?: boolean }) {
   return html`
-    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
       <button type="button"
         class="relative inline-flex h-6 w-11 items-center rounded-[var(--r-0)] transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--color-bg-hover)]'}"
@@ -521,7 +521,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix, dirty
 }) {
   const [invalid, setInvalid] = useState(false)
   return html`
-    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2">
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
       <div class="flex items-center gap-2">
         <input type="number"
@@ -558,7 +558,7 @@ export function InlineSelectRow({
   dirty?: boolean
 }) {
   return html`
-    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 gap-3">
+    <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-4)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 gap-3 v2-monitoring-row">
       <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
       <select
         aria-label=${label}
@@ -587,7 +587,7 @@ function EditTextarea({ field, label, rows = 6 }: { field: keyof EditDraft; labe
   const orig = configState.value.status === 'loaded' ? configState.value.data.prompt[field] : val
   const dirty = val.trim() !== (orig as string).trim()
   return html`
-    <div class="mt-3">
+    <div class="mt-3 v2-monitoring-panel">
       <div class="flex items-center gap-2 mb-1.5">
         <span class="text-2xs font-semibold uppercase tracking-wider text-text-muted">${label}</span>
         ${dirty ? html`<span class="text-2xs text-[var(--color-accent-fg)] font-semibold">● 수정됨</span>` : null}
@@ -723,21 +723,21 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     ? `마지막 저장: ${formatRelativeTime(new Date(lastSavedAt.value))}`
     : null
   const toolbar = html`
-    <div class="flex flex-wrap gap-2 items-center mb-3">
+    <div class="flex flex-wrap gap-2 items-center mb-3 v2-monitoring-toolbar">
       ${isEditing ? html`
         <button type="button"
-          class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
+          class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] v2-monitoring-action"
           onClick=${saveConfig}
           disabled=${isSaving}
         >${isSaving ? '저장 중...' : '저장'}</button>
         <button type="button"
-          class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]"
+          class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] v2-monitoring-action"
           onClick=${cancelEdit}
           disabled=${isSaving}
         >취소</button>
       ` : html`
         <button type="button"
-          class="${BTN_FILLED_BASE} bg-[var(--purple)] text-[var(--color-bg-0)]"
+          class="${BTN_FILLED_BASE} bg-[var(--purple)] text-[var(--color-bg-0)] v2-monitoring-action"
           title="편집: 프롬프트 편집 모드로 진입합니다"
           onClick=${enterEditMode}
         >편집하기</button>
@@ -781,20 +781,20 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
     <${SectionHeader} size="xs" class="mt-3 mb-0.5">시스템 프롬프트</${SectionHeader}>
-    <div class="flex gap-2 mb-2">
+    <div class="flex gap-2 mb-2 v2-monitoring-toolbar">
       <button
         type="button"
-        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'blocks' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
+        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'blocks' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'} v2-monitoring-action"
         onClick=${() => { promptPreviewTab.value = 'blocks' }}
       >블록</button>
       <button
         type="button"
-        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'system' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
+        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'system' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'} v2-monitoring-action"
         onClick=${() => { promptPreviewTab.value = 'system' }}
       >통합 시스템</button>
       <button
         type="button"
-        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'world' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
+        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'world' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'} v2-monitoring-action"
         onClick=${() => { promptPreviewTab.value = 'world' }}
       >월드 상태</button>
     </div>
@@ -821,7 +821,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     : []
 
   return html`
-    <div class="flex flex-col gap-1.5">
+    <div class="flex flex-col gap-1.5 v2-monitoring-surface">
       ${toolbar}
 
       <${KeeperToolAccessSummary} config=${c} />
@@ -841,16 +841,16 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       </div>
 
       ${runtimeHasChanges ? html`
-        <div class="sticky top-0 z-20 flex flex-wrap items-center gap-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] shadow-[var(--shadow-2)] mb-3">
+        <div class="sticky top-0 z-20 flex flex-wrap items-center gap-2 p-3 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-5)] shadow-[var(--shadow-2)] mb-3 v2-monitoring-toolbar">
           <span class="text-xs font-semibold text-accent-fg">변경된 런타임 설정이 있습니다</span>
           <div class="flex-1"></div>
           <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-sm"
+            class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-sm v2-monitoring-action"
             onClick=${saveRuntimeConfig}
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           <button type="button"
-            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-sm"
+            class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-sm v2-monitoring-action"
             title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
             onClick=${resetRuntimeDraft}
           >초기화하기</button>
@@ -955,7 +955,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
           dirty=${dirtyFlags.network_mode}
         />
-        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.allowed_paths ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''}">
+        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.allowed_paths ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
           <div class="flex items-center justify-between mb-2">
             <span class="text-sm text-[var(--color-fg-secondary)]">allowed_paths</span>
             <span class="text-xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>

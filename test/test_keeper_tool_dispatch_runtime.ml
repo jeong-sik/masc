@@ -1125,6 +1125,195 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
              Yojson.Safe.Util.(member "error" json |> to_string)
              "Self-approval"))
 
+(* ── OAS descriptor concurrency class ────────────────────────
+
+   WebSearch/WebFetch hit external rate-limited APIs. They must not be
+   classified as [Parallel_read] even though they are read-only. *)
+
+let make_dummy_oas_tool name =
+  Masc.Tool_bridge.oas_tool_of_masc
+    ~name
+    ~description:"descriptor probe"
+    ~input_schema:
+      (`Assoc
+         [ "type", `String "object"
+         ; "properties", `Assoc []
+         ; "required", `List []
+         ])
+    (fun _ -> Tool_result.make_ok ~tool_name:name ~start_time:0.0 ~data:(`String "") ())
+;;
+
+let string_of_concurrency_class = function
+  | Agent_sdk.Tool.Parallel_read -> "parallel_read"
+  | Agent_sdk.Tool.Sequential_workspace -> "sequential_workspace"
+  | Agent_sdk.Tool.Exclusive_external -> "exclusive_external"
+;;
+
+let string_of_permission = function
+  | Agent_sdk.Tool.ReadOnly -> "read_only"
+  | Agent_sdk.Tool.Write -> "write"
+  | Agent_sdk.Tool.Destructive -> "destructive"
+;;
+
+let check_descriptor ~msg name expected_cc expected_perm =
+  let tool = make_dummy_oas_tool name in
+  match Agent_sdk.Tool.descriptor tool with
+  | None -> fail (Printf.sprintf "%s: descriptor missing for %s" msg name)
+  | Some d ->
+    let actual_cc =
+      match d.Agent_sdk.Tool.concurrency_class with
+      | Some cc -> string_of_concurrency_class cc
+      | None -> "none"
+    in
+    check string (msg ^ " concurrency_class") expected_cc actual_cc;
+    let actual_perm =
+      match d.Agent_sdk.Tool.permission with
+      | Some p -> string_of_permission p
+      | None -> "none"
+    in
+    check string (msg ^ " permission") expected_perm actual_perm
+;;
+
+let test_web_search_oas_descriptor_is_exclusive_external () =
+  check_descriptor ~msg:"masc_web_search" "masc_web_search" "exclusive_external" "read_only"
+;;
+
+let test_web_fetch_oas_descriptor_is_exclusive_external () =
+  check_descriptor ~msg:"masc_web_fetch" "masc_web_fetch" "exclusive_external" "read_only"
+;;
+
+let test_read_oas_descriptor_is_parallel_read () =
+  check_descriptor ~msg:"tool_read_file" "tool_read_file" "parallel_read" "read_only"
+;;
+
+let find_tool_by_name tools name =
+  List.find_opt
+    (fun (t : Agent_sdk.Tool.t) -> String.equal t.Agent_sdk.Tool.schema.Agent_sdk.Types.name name)
+    tools
+;;
+
+let check_bundle_concurrency ~msg tools name expected_cc =
+  match find_tool_by_name tools name with
+  | None -> fail (Printf.sprintf "%s: %s not in bundle" msg name)
+  | Some t ->
+    (match Agent_sdk.Tool.descriptor t with
+     | None -> fail (Printf.sprintf "%s: %s has no descriptor" msg name)
+     | Some d ->
+       let actual =
+         Option.fold
+           ~none:"none"
+           ~some:string_of_concurrency_class
+           d.Agent_sdk.Tool.concurrency_class
+       in
+       check string (msg ^ " concurrency_class") expected_cc actual)
+;;
+
+let test_public_alias_oas_descriptors () =
+  with_exec_fixture
+    "public_alias_oas_descriptors"
+    (fun ~config ~meta ~ctx_work:_ ->
+       let tools =
+         Masc.Keeper_tools_oas_bundle.make_tools
+           ~config
+           ~meta
+           ~ctx_snapshot:(make_ctx ())
+           ()
+       in
+       check_bundle_concurrency ~msg:"WebSearch" tools "WebSearch" "exclusive_external";
+       check_bundle_concurrency ~msg:"WebFetch" tools "WebFetch" "exclusive_external";
+       (* Read is a direct internal tool and is correctly classified as
+          [Parallel_read] by [Tool_bridge.oas_descriptor_of_masc_tool].
+          Grep is currently not marked read-only in [Tool_catalog], so it
+          carries no descriptor and defaults to sequential execution. *)
+       check_bundle_concurrency ~msg:"Read" tools "Read" "parallel_read")
+;;
+
+(* ── Parallel read execution ─────────────────────────────────
+
+   Confirm that two [Parallel_read] tools run concurrently and that
+   [Agent_tools.execute_tools] returns results in input order even when the
+   second tool finishes before the first. *)
+
+let make_delayed_read_tool clock name delay_ms =
+  let descriptor =
+    { Agent_sdk.Tool.kind = Some "test"
+    ; mutation_class = Some "read_only"
+    ; concurrency_class = Some Agent_sdk.Tool.Parallel_read
+    ; permission = Some Agent_sdk.Tool.ReadOnly
+    ; evidence_role = None
+    ; shell = None
+    ; notes = []
+    ; examples = []
+    }
+  in
+  Agent_sdk.Tool.create
+    ~descriptor
+    ~name
+    ~description:"Delayed read-only probe"
+    ~parameters:[]
+    (fun _args ->
+       Eio.Time.sleep clock (Float.of_int delay_ms /. 1000.0);
+       Ok { Agent_sdk.Types.content = name })
+;;
+
+let execute_tools_in_env env ~tools tool_uses =
+  let net = Eio.Stdenv.net env in
+  let config =
+    { Agent_sdk.Types.default_config with
+      Agent_sdk.Types.name = "parallel-read-test"
+    ; system_prompt = Some "test"
+    ; max_turns = 1
+    }
+  in
+  let agent = Agent_sdk.Agent.create ~net ~config ~tools () in
+  let opts = Agent_sdk.Agent.options agent in
+  let state = Agent_sdk.Agent.state agent in
+  Agent_sdk.Agent_tools.execute_tools
+    ~context:(Agent_sdk.Agent.context agent)
+    ~tools
+    ~hooks:opts.Agent_sdk.Agent.hooks
+    ~event_bus:opts.Agent_sdk.Agent.event_bus
+    ~tracer:opts.Agent_sdk.Agent.tracer
+    ~agent_name:state.Agent_sdk.Types.config.Agent_sdk.Types.name
+    ~turn_count:state.Agent_sdk.Types.turn_count
+    ~usage:state.Agent_sdk.Types.usage
+    ~approval:opts.Agent_sdk.Agent.approval
+    ~missing_approval_callback_policy:opts.Agent_sdk.Agent.missing_approval_callback_policy
+    tool_uses
+;;
+
+let test_parallel_read_tools_reorder_results () =
+  let tool_uses =
+    [ Agent_sdk.Types.ToolUse { id = "u-1"; name = "slow_read"; input = `Assoc [] }
+    ; Agent_sdk.Types.ToolUse { id = "u-2"; name = "fast_read"; input = `Assoc [] }
+    ]
+  in
+  let elapsed_ms, results =
+    Eio_main.run
+    @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let tools =
+      [ make_delayed_read_tool clock "slow_read" 150
+      ; make_delayed_read_tool clock "fast_read" 30
+      ]
+    in
+    let t0 = Unix.gettimeofday () in
+    let results = execute_tools_in_env env ~tools tool_uses in
+    let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
+    (elapsed_ms, results)
+  in
+  match elapsed_ms, results with
+  | _, [ r1; r2 ] ->
+    check string "first result id" "u-1" r1.Agent_sdk.Agent_tools.tool_use_id;
+    check string "first result content" "slow_read" r1.Agent_sdk.Agent_tools.content;
+    check string "second result id" "u-2" r2.Agent_sdk.Agent_tools.tool_use_id;
+    check string "second result content" "fast_read" r2.Agent_sdk.Agent_tools.content;
+    (* If they ran sequentially the elapsed time would be at least 180 ms.
+       Allow generous slack for scheduler jitter on shared CI runners. *)
+    check bool "parallel read ran concurrently" true (elapsed_ms < 250)
+  | _ -> fail "expected exactly two tool execution results"
+;;
+
 (* ── Exec cache data structure tests ───────────────────────── *)
 
 let test_exec_cache_stats_json () =
@@ -1215,6 +1404,18 @@ let () =
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick
         test_keeper_tools_list_json_uses_typed_groups;
+    ]);
+    ("oas_descriptor", [
+      test_case "masc_web_search is Exclusive_external" `Quick
+        test_web_search_oas_descriptor_is_exclusive_external;
+      test_case "masc_web_fetch is Exclusive_external" `Quick
+        test_web_fetch_oas_descriptor_is_exclusive_external;
+      test_case "tool_read_file is Parallel_read" `Quick
+        test_read_oas_descriptor_is_parallel_read;
+      test_case "public aliases carry correct concurrency class" `Quick
+        test_public_alias_oas_descriptors;
+      test_case "parallel read tools reorder results" `Quick
+        test_parallel_read_tools_reorder_results;
     ]);
     ("exec_cache", [
       test_case "stats json" `Quick test_exec_cache_stats_json;

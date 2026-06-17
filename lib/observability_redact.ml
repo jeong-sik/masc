@@ -26,18 +26,48 @@ let is_denied_tool ~tool_name =
   let lower = String.lowercase_ascii tool_name in
   List.exists (fun infix -> String_util.contains_substring lower infix) denied_tool_infixes
 
-(** Sensitive value patterns — matches API keys, tokens, long hex strings.
-    24+ contiguous alphanumeric/base64 characters. *)
-let sensitive_value_re =
-  Re.compile (Re.repn (Re.alt [Re.alnum; Re.set "_/+=-"]) 24 None)
-
 (** URL credential pattern — ://user:pass@ *)
 let url_credential_re =
   Re.compile (Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@'])
 
+(** Common secret-bearing value patterns — structural prefixes only.
+
+    Each pattern identifies a secret by its *structure* (a known prefix family
+    or the [://user:pass@] URL shape), not by a length heuristic. The former
+    generic "20+ alphanumeric run" matcher was removed: it classified ordinary
+    identifiers (keeper names, commit hashes, task ids) as secrets by length
+    alone, erasing them from observability fields, while every real prefix it
+    caught is already matched here in one shot (e.g. [sk-proj-...] via the
+    [sk-] body below). Known secret *values* loaded from the environment remain
+    redacted exactly by {!Keeper_secret_redaction}, which does not rely on this
+    heuristic.
+
+    Each prefix literal is anchored at a word boundary ([Re.bow]) so a
+    word-internal substring is not mistaken for a key. Without the anchor, the
+    [sk-] pattern matched the substring [sk-1234] inside the task id
+    [task-1234] and redacted it to [ta\[REDACTED\]], destroying diagnostic
+    identifiers in error previews (and any other observability field carrying a
+    [task-XXXX] reference). [bow] rejects that match because [sk-] is preceded
+    by the identifier char 'a'. [Re.bow]/[eow] are zero-width assertions, so
+    [Re.replace_string] preserves the boundary character (=, space, quote)
+    automatically. The [sk-] body allows [-] so modern [sk-proj-...] keys are
+    matched in one shot instead of leaving a [-abc...] tail. [AKIA] is anchored
+    at both ends so a 17-char run is not truncated to its first 16 chars. *)
+let secret_res () =
+  let open Re in
+  [ url_credential_re
+  ; compile (seq [str "Bearer "; rep1 (compl [set " \t\r\n"])])
+  ; compile (seq [bow; str "ghp_"; rep1 alnum])
+  ; compile (seq [bow; str "github_pat_"; rep1 (alt [alnum; char '_'])])
+  ; compile (seq [bow; str "sk-"; rep1 (alt [alnum; char '-'])])
+  ; compile (seq [bow; str "AKIA"; repn alnum 16 (Some 16); eow])
+  ]
+
 let redact_patterns (s : string) : string =
-  let s = Re.replace_string url_credential_re ~by:"://[REDACTED]@" s in
-  Re.replace_string sensitive_value_re ~by:"[REDACTED]" s
+  List.fold_left
+    (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc)
+    s
+    (secret_res ())
 
 let redact_text (s : string) : string =
   redact_patterns s
@@ -47,11 +77,12 @@ let truncate ?(max_len = default_max_len) (s : string) : string =
   if String.length s <= max_len then s
   else String.sub s 0 max_len ^ "...(truncated)"
 
-(* Blob markers (see [Tool_output.encode_for_oas]) embed a 64-hex sha256
-   that the 24+ alnum pattern would otherwise overwrite with [REDACTED],
-   destroying the structural fields the dashboard needs to render the marker
-   as a "Stored blob" preview. Decode, redact only the user-visible preview
-   body, then re-encode so sha256/bytes/mime survive intact. *)
+(* Blob markers (see [Tool_output.encode_for_oas]) carry structural fields
+   (sha256/bytes/mime) the dashboard needs to render the marker as a "Stored
+   blob" preview. Decode, redact only the user-visible preview body, then
+   re-encode so those fields survive intact. The prefix matchers do not match a
+   64-hex sha256, but scoping redaction to the preview body keeps the marker
+   structure correct regardless of which patterns run. *)
 let redact_preview ?(max_len = default_max_len) (s : string) : string =
   if Tool_output.is_marker s then
     match Tool_output.decode_from_oas s with

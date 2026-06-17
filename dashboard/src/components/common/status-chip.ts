@@ -63,18 +63,18 @@ export interface StatusChipSummary {
 }
 
 const BASE_SHAPE =
-  'inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-3xs'
-const UPPERCASE_CLASS = 'uppercase tracking-wider'
+  'inline-flex items-center rounded-[var(--r-0)] border px-2 py-0.5 text-[11px]'
+const UPPERCASE_CLASS = 'uppercase tracking-[0.05em]'
 
 const SEMANTIC_TONE: Record<StatusChipTone, string> = {
-  ok: 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]',
-  warn: 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]',
-  bad: 'border-[var(--bad-20)] bg-[var(--bad-10)] text-[var(--bad-light)]',
-  info: 'border-[var(--accent-20)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]',
-  neutral: 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]',
+  ok: 'border-success/20 bg-success/10 text-success',
+  warn: 'border-warning/20 bg-warning/10 text-warning',
+  bad: 'border-destructive/20 bg-destructive/10 text-destructive',
+  info: 'border-brand/20 bg-brand/10 text-brand',
+  neutral: 'border-border bg-surface-subtle text-text-tertiary',
   paused: 'border-[var(--paused-20)] bg-[var(--paused-10)] text-[var(--paused)]',
   select: 'border-[var(--select-20)] bg-[var(--select-10)] text-[var(--select)]',
-  '': 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]',
+  '': 'border-border bg-surface-subtle text-text-tertiary',
 }
 
 /** Keeper lifecycle state → StatusChip tone.

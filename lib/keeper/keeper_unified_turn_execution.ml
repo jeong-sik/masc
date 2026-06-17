@@ -26,41 +26,28 @@ type retry_loop_input =
   ; attempted_runtimes : string list
   }
 
+(** [run] operates on the immutable [Keeper_unified_turn_types.turn_state]
+    accumulator instead of casual [ref] cells. *)
+
 type ctx =
   { attempt : int
   ; base_dir : string
   ; build_turn_prompt :
       base_system_prompt:string -> messages:Agent_sdk.Types.message list ->
       Keeper_agent_run.turn_prompt
-  ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list ref
   ; channel : Keeper_world_observation.keeper_cycle_channel
   ; cleanup : unit -> unit
   ; committed_mutating_tools_snapshot : unit -> string list
   ; config : Workspace.config
-  ; current_turn_blocker_info : blocker_info option ref
-  ; degraded_retry_info : EC.degraded_retry option ref
   ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
-  ; failure_reason : Keeper_turn_fsm.failure_reason option ref
   ; generation : int
   ; keeper_turn_id : int
-  ; last_execution : runtime_execution ref
-  ; last_provider_timeout_budget : provider_timeout_budget option ref
-  ; max_cost_usd : float option
   ; meta : keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
   ; observation : Keeper_world_observation.world_observation
-  ; post_commit_failure_reason : Keeper_registry.failure_reason option ref
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; prompt_timeout_estimate_tokens : int
-  ; record_runtime_rotation_attempt
-      : ?productive_phase_elapsed_ms:int
-      -> ?retry_phase_elapsed_ms:int
-      -> from_runtime:string
-      -> retry:EC.degraded_retry
-      -> outcome:Keeper_execution_receipt.runtime_rotation_outcome
-      -> Agent_sdk.Error.sdk_error
-      -> unit
   ; shared_context : Agent_sdk.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_affordances : string list
@@ -69,10 +56,10 @@ type ctx =
 
 let run (ctx : ctx)
       ~(initial_execution : runtime_execution)
+      ~(turn_state : turn_state)
       ~(timeout_sec : float)
       ~(remaining_turn_budget_s : unit -> float)
-      ~(retry_phase_started_at : float option ref)
-      ~(current_turn_phase_elapsed_ms : unit -> int * int option)
+      ~(current_turn_phase_elapsed_ms : float option -> int * int option)
       ~(keeper_profile : Keeper_types_profile.keeper_profile_defaults)
       ~(max_turns : int)
       ~(max_idle_turns : int)
@@ -82,7 +69,7 @@ let run (ctx : ctx)
       ~(record_streaming_cancelled_observation : ?cancel_reason:string -> config:Workspace.config -> run_meta:keeper_meta -> run_generation:int -> runtime_id:string -> keeper_turn_id:int -> unit -> unit)
       ~(runtime_id_of_meta : keeper_meta -> string)
       ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
-  : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result
+  : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result * turn_state
 =
   let { config
       ; meta
@@ -96,28 +83,19 @@ let run (ctx : ctx)
       ; base_dir
       ; build_turn_prompt
       ; turn_affordances
-      ; max_cost_usd
       ; trajectory_acc
-      ; last_execution
-      ; last_provider_timeout_budget
-      ; degraded_retry_info
-      ; runtime_rotation_attempts
-      ; current_turn_blocker_info
-      ; post_commit_failure_reason
       ; profile_defaults
       ; prompt_timeout_estimate_tokens
       ; cleanup
       ; drain_turn_event_bus
       ; event_bus_integrity_error_snapshot
       ; committed_mutating_tools_snapshot
-      ; record_runtime_rotation_attempt
-      ; failure_reason
       ; attempt = _attempt
       } =
     ctx
   in
   (match Eio_context.get_clock () with
-   | Error msg -> Error (Agent_sdk.Error.Internal msg)
+   | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
    | Ok clock ->
    let do_run
         ~(execution : runtime_execution)
@@ -125,94 +103,122 @@ let run (ctx : ctx)
         ~run_generation
         ~is_retry
         ~oas_timeout_s
+        ~(turn_state : turn_state)
     =
-    last_execution := execution;
-    Otel_genai.with_keeper_turn_span
-      ~keeper_name:run_meta.name
-      ~agent_name:run_meta.agent_name
-      ~runtime_id:execution.runtime_id
-      ~trace_id:
-        (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
-      ~generation:run_generation
-      ~max_context:execution.max_context
-      ~max_turns
-      ~max_idle_turns
-      ~channel:(Keeper_world_observation.channel_to_string channel)
-      ~is_retry
-      ~current_task_id:
-        (Option.map
-           Keeper_id.Task_id.to_string
-           run_meta.current_task_id)
-      (fun trace_link ->
-         Keeper_registry.mark_turn_provider_attempt_started
-           ~base_path:config.base_path
-           meta.name;
-         Keeper_unified_turn_attempt_watchdog.dispatch
-           ~clock
-           ~keeper_name:meta.name
-           ~attempt_watchdog_s:None
-           ~on_cancelled:(fun reason ->
-             record_streaming_cancelled_observation
-               ~cancel_reason:reason
-               ~config
-               ~run_meta
-               ~run_generation
-               ~runtime_id:execution.runtime_id
-               ~keeper_turn_id
-               ())
-           ~run:(fun () ->
-             (* Emit before the provider/tool run so operator forensics can see
-                that the keeper entered Streaming. [dispatch] observes external
-                cancellation only; it must not impose a MASC wall-clock timeout
-                around active tool execution. *)
-             Keeper_turn_fsm.emit_transition
-               ~keeper_name:meta.name
-               ~turn_id:keeper_turn_id
-               ~prev:Keeper_turn_fsm.Awaiting_provider
-               Keeper_turn_fsm.Streaming;
-             Keeper_agent_run.run_turn
-               ~config
-               ~meta:run_meta
-               ~turn_ctx_cell
-               ~base_dir
-               ~max_context:execution.max_context
-               ~build_turn_prompt
-               ~user_message
-               ~runtime_id:execution.runtime_id
-               ~world_observation:observation
-               ~turn_affordances
-               ~generation:run_generation
-               ~max_turns
-               ~max_idle_turns
-               ~history_user_source:"world_state_prompt"
-               ~history_assistant_source:"internal_assistant"
-               ~degraded_retry_applied:
-                 (Option.is_some !degraded_retry_info)
-               ?degraded_retry_runtime:
-                 (Option.map
-                    (fun (retry : EC.degraded_retry) ->
-                       retry.next_runtime)
-                    !degraded_retry_info)
-               ?fallback_reason:
-                 (Option.map
-                    (fun (retry : EC.degraded_retry) ->
-                       retry.fallback_reason)
-                    !degraded_retry_info)
-               ~runtime_rotation_attempts:
-                 (List.rev !runtime_rotation_attempts)
-               ~temperature:execution.temperature
-               ~max_tokens:execution.max_tokens
-               ~oas_timeout_s
-               ~oas_timeout_is_explicit:false
-               ?max_cost_usd
-               ~trajectory_acc
-               ~is_retry
-               ?shared_context
-               ?event_bus:(Keeper_event_bus.get ())
-               ?trace_link:(trace_link ())
-               ()))
+    let turn_state =
+      { turn_state with last_execution = Some execution }
+    in
+    let result =
+      Otel_genai.with_keeper_turn_span
+        ~keeper_name:run_meta.name
+        ~agent_name:run_meta.agent_name
+        ~runtime_id:execution.runtime_id
+        ~trace_id:
+          (Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
+        ~generation:run_generation
+        ~max_context:execution.max_context
+        ~max_turns
+        ~max_idle_turns
+        ~channel:(Keeper_world_observation.channel_to_string channel)
+        ~is_retry
+        ~current_task_id:
+          (Option.map
+             Keeper_id.Task_id.to_string
+             run_meta.current_task_id)
+        (fun trace_link ->
+           Keeper_registry.mark_turn_provider_attempt_started
+             ~base_path:config.base_path
+             meta.name;
+           Keeper_unified_turn_attempt_watchdog.dispatch
+             ~clock
+             ~keeper_name:meta.name
+             ~attempt_watchdog_s:None
+             ~on_cancelled:(fun reason ->
+               record_streaming_cancelled_observation
+                 ~cancel_reason:reason
+                 ~config
+                 ~run_meta
+                 ~run_generation
+                 ~runtime_id:execution.runtime_id
+                 ~keeper_turn_id
+                 ())
+             ~run:(fun () ->
+               (* Emit before the provider/tool run so operator forensics can see
+                  that the keeper entered Streaming. [dispatch] observes external
+                  cancellation only; it must not impose a MASC wall-clock timeout
+                  around active tool execution. *)
+               Keeper_turn_fsm.emit_transition
+                 ~keeper_name:meta.name
+                 ~turn_id:keeper_turn_id
+                 ~prev:Keeper_turn_fsm.Awaiting_provider
+                 Keeper_turn_fsm.Streaming;
+               Keeper_agent_run.run_turn
+                 ~config
+                 ~meta:run_meta
+                 ~turn_ctx_cell
+                 ~base_dir
+                 ~max_context:execution.max_context
+                 ~build_turn_prompt
+                 ~user_message
+                 ~runtime_id:execution.runtime_id
+                 ~world_observation:observation
+                 ~turn_affordances
+                 ~generation:run_generation
+                 ~max_turns
+                 ~max_idle_turns
+                 ~history_user_source:"world_state_prompt"
+                 ~history_assistant_source:"internal_assistant"
+                 ~degraded_retry_applied:
+                   (Option.is_some turn_state.degraded_retry_info)
+                 ?degraded_retry_runtime:
+                   (Option.map
+                      (fun (retry : EC.degraded_retry) ->
+                         retry.next_runtime)
+                      turn_state.degraded_retry_info)
+                 ?fallback_reason:
+                   (Option.map
+                      (fun (retry : EC.degraded_retry) ->
+                         retry.fallback_reason)
+                      turn_state.degraded_retry_info)
+                 ~runtime_rotation_attempts:
+                   (List.rev turn_state.runtime_rotation_attempts)
+                 ~temperature:execution.temperature
+                 ~max_tokens:execution.max_tokens
+                 ~oas_timeout_s
+                 ~oas_timeout_is_explicit:false
+                 ~trajectory_acc
+                 ~is_retry
+                 ?shared_context
+                 ?event_bus:(Keeper_event_bus.get ())
+                 ?trace_link:(trace_link ())
+                 ()))
+    in
+    result, turn_state
   in
-  let rec retry_loop (input : retry_loop_input) =
+  let record_runtime_rotation_attempt
+        turn_state
+        ~productive_phase_elapsed_ms
+        ?retry_phase_elapsed_ms
+        ~(from_runtime : string)
+        ~(retry : EC.degraded_retry)
+        ~(outcome : Keeper_execution_receipt.runtime_rotation_outcome)
+        (err : Agent_sdk.Error.sdk_error)
+    =
+    let attempt : Keeper_execution_receipt.runtime_rotation_attempt =
+      Keeper_unified_turn_rotation_attempt.build
+        ~recorded_at:(now_iso ())
+        ~productive_phase_elapsed_ms
+        ?retry_phase_elapsed_ms
+        ~from_runtime
+        ~retry
+        ~outcome
+        err
+    in
+    { turn_state with
+      runtime_rotation_attempts = attempt :: turn_state.runtime_rotation_attempts
+    }
+  in
+  let rec retry_loop (input : retry_loop_input) (turn_state : turn_state) =
     let { run_meta
         ; execution
         ; run_generation
@@ -256,7 +262,6 @@ let run (ctx : ctx)
           ~attempted_runtimes
           err
     in
-    let attempt_provider_timeout_budget = ref None in
     let max_turns =
       match channel with
       | Keeper_world_observation.Reactive ->
@@ -267,7 +272,7 @@ let run (ctx : ctx)
         .effective_max_turns_per_call_scheduled_autonomous
           keeper_profile
     in
-    let attempt_result =
+    let attempt_result, turn_state =
       let allow_wall_clock_retry_budget =
         allow_wall_clock_retry_budget_for_attempt
           ~is_retry
@@ -284,14 +289,18 @@ let run (ctx : ctx)
           ~estimated_input_tokens:prompt_timeout_estimate_tokens
           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
       in
-      attempt_provider_timeout_budget := Some provider_timeout_budget;
-      last_provider_timeout_budget := Some provider_timeout_budget;
+      let turn_state =
+        { turn_state with
+          last_provider_timeout_budget = Some provider_timeout_budget
+        }
+      in
       do_run
         ~execution
         ~run_meta
         ~run_generation
         ~is_retry
         ~oas_timeout_s:provider_timeout_budget.effective_timeout_sec
+        ~turn_state
     in
     match attempt_result with
     | Ok result ->
@@ -307,7 +316,7 @@ let run (ctx : ctx)
       Keeper_registry.mark_turn_runtime_done
         ~base_path:config.base_path
         meta.name;
-      Ok result
+      Ok result, turn_state
     | Error err ->
       (* RFC-XXXX: reclassify_provider_timeout_for_attempt removed.
          The per-attempt wall-clock watchdog no longer fires, so the
@@ -346,7 +355,7 @@ let run (ctx : ctx)
           ~labels:[ "keeper", meta.name; "reason", reason ]
           ();
         mark_terminal_error err;
-        Error err)
+        Error err, turn_state)
       else if committed_tools <> []
       then (
         let reclassified, failure_reason =
@@ -369,7 +378,11 @@ let run (ctx : ctx)
                       err
                 } )
         in
-        post_commit_failure_reason := Some failure_reason;
+        let turn_state =
+          { turn_state with
+            post_commit_failure_reason = Some failure_reason
+          }
+        in
         let err_preview =
           short_preview (Agent_sdk.Error.to_string err)
         in
@@ -402,7 +415,7 @@ let run (ctx : ctx)
           ~labels:[ "keeper", meta.name ]
           ();
         mark_terminal_error reclassified;
-        Error reclassified)
+        Error reclassified, turn_state)
       else (
         match
           next_fail_open_runtime_for_turn_with_budget
@@ -417,15 +430,36 @@ let run (ctx : ctx)
             err
         with
         | Degraded_retry_allowed degraded_retry ->
+          let fallback_reason =
+            EC.degraded_retry_reason_to_string degraded_retry.fallback_reason
+          in
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
             ~decision:Degraded_retry_allowed
-            ~reason:(EC.degraded_retry_reason_to_string degraded_retry.fallback_reason)
+            ~reason:fallback_reason
             ~next_runtime:(Some degraded_retry.next_runtime)
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string RuntimeSelected)
+            ~labels:
+              [ ("keeper", meta.name)
+              ; ("runtime_id", degraded_retry.next_runtime)
+              ; ("source", "fallback")
+              ; ("fallback_reason", fallback_reason)
+              ]
+            ();
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string RuntimeRotation)
+            ~labels:
+              [ ("keeper", meta.name)
+              ; ("from_runtime", execution.runtime_id)
+              ; ("to_runtime", degraded_retry.next_runtime)
+              ; ("reason", fallback_reason)
+              ]
+            ();
           (match
              Keeper_unified_turn_pre_dispatch
              .build_runtime_execution
@@ -440,16 +474,19 @@ let run (ctx : ctx)
            with
            | Error fail_open_err ->
              let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
-               current_turn_phase_elapsed_ms ()
+               current_turn_phase_elapsed_ms turn_state.retry_phase_started_at
              in
-             record_runtime_rotation_attempt
-               ~productive_phase_elapsed_ms
-               ?retry_phase_elapsed_ms
-               ~from_runtime:execution.runtime_id
-               ~retry:degraded_retry
-               ~outcome:
-                 Keeper_execution_receipt.Rotation_setup_failed
-               fail_open_err;
+             let turn_state =
+               record_runtime_rotation_attempt
+                 turn_state
+                 ~productive_phase_elapsed_ms
+                 ?retry_phase_elapsed_ms
+                 ~from_runtime:execution.runtime_id
+                 ~retry:degraded_retry
+                 ~outcome:
+                   Keeper_execution_receipt.Rotation_setup_failed
+                 fail_open_err
+             in
              Log.Keeper.warn
                "%s: recoverable runtime failure in %s suggested \
                 degraded retry to %s (reason=%s), but retry setup \
@@ -462,25 +499,33 @@ let run (ctx : ctx)
                (short_preview
                   (Agent_sdk.Error.to_string fail_open_err));
              mark_terminal_error fail_open_err;
-             Error fail_open_err
+             Error fail_open_err, turn_state
            | Ok next_execution ->
              let next_execution_runtime_id =
                next_execution.runtime_id
              in
-             if Option.is_none !retry_phase_started_at
-             then retry_phase_started_at := Some (Eio.Time.now clock);
-             let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
-               current_turn_phase_elapsed_ms ()
+             let turn_state =
+               if Option.is_none turn_state.retry_phase_started_at
+               then { turn_state with retry_phase_started_at = Some (Eio.Time.now clock) }
+               else turn_state
              in
-             record_runtime_rotation_attempt
-               ~productive_phase_elapsed_ms
-               ?retry_phase_elapsed_ms
-               ~from_runtime:execution.runtime_id
-               ~retry:degraded_retry
-               ~outcome:
-                 Keeper_execution_receipt.Rotation_retry_scheduled
-               err;
-             degraded_retry_info := Some degraded_retry;
+             let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+               current_turn_phase_elapsed_ms turn_state.retry_phase_started_at
+             in
+             let turn_state =
+               record_runtime_rotation_attempt
+                 turn_state
+                 ~productive_phase_elapsed_ms
+                 ?retry_phase_elapsed_ms
+                 ~from_runtime:execution.runtime_id
+                 ~retry:degraded_retry
+                 ~outcome:
+                   Keeper_execution_receipt.Rotation_retry_scheduled
+                 err
+             in
+             let turn_state =
+               { turn_state with degraded_retry_info = Some degraded_retry }
+             in
              Log.Keeper.warn
                "%s: recoverable runtime failure in %s; rotation \
                 retry on runtime=%s reason=%s max_context=%d \
@@ -511,7 +556,8 @@ let run (ctx : ctx)
                ; allow_degraded_wall_clock_retry_budget = true
                ; attempted_runtimes =
                    next_execution_runtime_id :: attempted_runtimes
-               })
+               }
+               turn_state)
         | Degraded_retry_slot_phase_exhausted degraded_retry ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
@@ -523,16 +569,19 @@ let run (ctx : ctx)
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
-            current_turn_phase_elapsed_ms ()
+            current_turn_phase_elapsed_ms turn_state.retry_phase_started_at
           in
-          record_runtime_rotation_attempt
-            ~productive_phase_elapsed_ms
-            ?retry_phase_elapsed_ms
-            ~from_runtime:execution.runtime_id
-            ~retry:degraded_retry
-            ~outcome:
-              Keeper_execution_receipt.Rotation_slot_phase_exhausted
-            err;
+          let turn_state =
+            record_runtime_rotation_attempt
+              turn_state
+              ~productive_phase_elapsed_ms
+              ?retry_phase_elapsed_ms
+              ~from_runtime:execution.runtime_id
+              ~retry:degraded_retry
+              ~outcome:
+                Keeper_execution_receipt.Rotation_slot_phase_exhausted
+              err
+          in
           Log.Keeper.warn
             "%s: recoverable runtime failure in %s suggested \
              degraded retry to %s (reason=%s), but productive slot \
@@ -547,7 +596,7 @@ let run (ctx : ctx)
             (timeout_sec -. remaining_turn_budget_s ())
             (short_preview (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
-          Error err
+          Error err, turn_state
         | No_degraded_retry
           when EC.is_transient_network_error err
                && attempt <= EC.max_transient_retries () ->
@@ -600,6 +649,7 @@ let run (ctx : ctx)
             ; allow_degraded_wall_clock_retry_budget = false
             ; attempted_runtimes
             }
+            turn_state
         | No_degraded_retry when EC.is_context_overflow err ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
@@ -619,15 +669,19 @@ let run (ctx : ctx)
               ~turn_event_bus:current_turn_event_bus
               err
           in
-          current_turn_blocker_info
-          := Some
-               { klass = Sdk_token_budget_exceeded
-               ; detail =
-                   Keeper_state_machine.event_to_string
-                     overflow_event
-                   ^ ": "
-                   ^ Agent_sdk.Error.to_string err
-               };
+          let turn_state =
+            { turn_state with
+              current_turn_blocker_info =
+                Some
+                  { klass = Sdk_token_budget_exceeded
+                  ; detail =
+                      Keeper_state_machine.event_to_string
+                        overflow_event
+                      ^ ": "
+                      ^ Agent_sdk.Error.to_string err
+                  }
+            }
+          in
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string OasExecutionErrors)
             ~labels:
@@ -643,7 +697,7 @@ let run (ctx : ctx)
             meta.name
             (short_preview (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
-          Error err
+          Error err, turn_state
         | No_degraded_retry ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
@@ -655,7 +709,7 @@ let run (ctx : ctx)
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
-          Error err)
+          Error err, turn_state)
   in
   (* Do not wrap the full keeper turn in a cumulative wall-clock timeout.
      Long voice/OAS turns can keep making stream or tool progress beyond the
@@ -663,15 +717,19 @@ let run (ctx : ctx)
      attempt liveness, tool-level timeouts, max-turn limits, and the optional
      supervisor stale-turn watchdog. Retry admission must not reintroduce the
      cumulative wall-clock cap between provider attempts. *)
-  retry_loop
-    { run_meta = meta
-    ; execution = initial_execution
-    ; run_generation = generation
-    ; attempt = 1
-    ; is_retry = false
-    ; allow_degraded_wall_clock_retry_budget = false
-    ; attempted_runtimes =
-        [ initial_execution.runtime_id
-        ]
-    }
+  let result, turn_state =
+    retry_loop
+      { run_meta = meta
+      ; execution = initial_execution
+      ; run_generation = generation
+      ; attempt = 1
+      ; is_retry = false
+      ; allow_degraded_wall_clock_retry_budget = false
+      ; attempted_runtimes =
+          [ initial_execution.runtime_id
+          ]
+      }
+      turn_state
+  in
+  result, turn_state
 )

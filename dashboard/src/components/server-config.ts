@@ -60,7 +60,7 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
       : 'text-[var(--color-accent-fg)] font-medium'
 
   return html`
-    <div class="flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-hover)] transition-colors">
+    <div class="v2-connector-row flex items-start gap-3 py-2 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-hover)] transition-colors">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-[var(--color-fg-secondary)]">${entry.env}</code>
@@ -102,7 +102,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
   if (filtered.length === 0) return null
 
   return html`
-    <div class="border border-[var(--color-border-divider)] rounded-[var(--r-1)] overflow-hidden mb-3">
+    <div class="v2-connector-detail border border-[var(--color-border-divider)] rounded-[var(--r-1)] overflow-hidden mb-3">
       <button
         class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--bg-surface)] hover:bg-[var(--color-bg-hover)] transition-colors text-left"
         aria-expanded=${isExpanded ? 'true' : 'false'}
@@ -136,19 +136,19 @@ function ServerMeta() {
 
   return html`
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
+      <div class="v2-connector-card px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>버전</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.version}</div>
       </div>
-      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
+      <div class="v2-connector-card px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>가동시간</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${formatUptime(server.uptime_seconds)}</div>
       </div>
-      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
+      <div class="v2-connector-card px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>OCaml</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.ocaml_version}</div>
       </div>
-      <div class="px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
+      <div class="v2-connector-card px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>PID</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.pid}</div>
       </div>
@@ -169,46 +169,48 @@ export function ServerConfig() {
   }
 
   return html`
-    <${SectionCard} label="서버 설정" class="section">
-      <div class="mb-3 flex items-center gap-2">
-        <${TextInput}
-          class="flex-1"
-          placeholder="환경변수 또는 설명으로 검색..."
-          value=${searchQuery.value}
-          onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
+    <div class="v2-connector-surface">
+      <${SectionCard} label="서버 설정" class="section">
+        <div class="v2-connector-toolbar mb-3 flex items-center gap-2">
+          <${TextInput}
+            class="flex-1"
+            placeholder="환경변수 또는 설명으로 검색..."
+            value=${searchQuery.value}
+            onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
+          />
+          <button
+            class="v2-connector-action px-3 py-1.5 text-xs rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            onClick=${() => void refreshServerConfig()}
+            disabled=${loading}
+          >
+            ${loading ? '...' : '새로고침'}
+          </button>
+        </div>
+
+        ${error ? html`
+          <div class="v2-connector-panel text-sm text-[var(--color-status-err)] mb-3" role="alert">${error}</div>
+        ` : null}
+
+        ${loading && !data ? html`
+          <${LoadingState}>설정 불러오는 중...<//>
+        ` : null}
+
+        <${ConfigResolutionPanel}
+          resolution=${configResolution ?? undefined}
+          runtimeResolution=${runtimeResolution ?? undefined}
         />
-        <button
-          class="px-3 py-1.5 text-xs rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-          onClick=${() => void refreshServerConfig()}
-          disabled=${loading}
-        >
-          ${loading ? '...' : '새로고침'}
-        </button>
+
+        ${data ? html`
+          <${ServerMeta} />
+          ${Object.entries(data.categories).map(([name, entries]) =>
+            html`<${CategoryPanel} name=${name} entries=${entries} />`
+          )}
+        ` : null}
+      <//>
+
+      <div class="mt-4">
+        <${TransportHealthPanel} />
       </div>
-
-      ${error ? html`
-        <div class="text-sm text-[var(--color-status-err)] mb-3" role="alert">${error}</div>
-      ` : null}
-
-      ${loading && !data ? html`
-        <${LoadingState}>설정 불러오는 중...<//>
-      ` : null}
-
-      <${ConfigResolutionPanel}
-        resolution=${configResolution ?? undefined}
-        runtimeResolution=${runtimeResolution ?? undefined}
-      />
-
-      ${data ? html`
-        <${ServerMeta} />
-        ${Object.entries(data.categories).map(([name, entries]) =>
-          html`<${CategoryPanel} name=${name} entries=${entries} />`
-        )}
-      ` : null}
-    <//>
-
-    <div class="mt-4">
-      <${TransportHealthPanel} />
     </div>
   `
 }

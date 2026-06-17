@@ -11,6 +11,11 @@ import {
   deriveAgentAlerts,
   deriveTaskAlerts,
   deriveFleetTickerEvents,
+  deriveKeeperAttentionReason,
+  pickAttentionKeepers,
+  computeOverviewStats,
+  telemetryBars,
+  OVERVIEW_TELEMETRY_BAR_COUNT,
   type FunnelCounts,
   Overview,
 } from './overview'
@@ -382,14 +387,14 @@ describe('deriveFleetTickerEvents', () => {
 
 describe('severityToneClass', () => {
   it.each<[string | null | undefined, string]>([
-    ['critical', 'text-[var(--color-status-err)]'],
-    ['HIGH', 'text-[var(--color-status-err)]'],
-    ['warn', 'text-[var(--color-status-warn)]'],
-    ['medium', 'text-[var(--color-status-warn)]'],
-    ['info', 'text-[var(--color-fg-muted)]'],
-    ['', 'text-[var(--color-fg-muted)]'],
-    [null, 'text-[var(--color-fg-muted)]'],
-    [undefined, 'text-[var(--color-fg-muted)]'],
+    ['critical', 'text-destructive'],
+    ['HIGH', 'text-destructive'],
+    ['warn', 'text-warning'],
+    ['medium', 'text-warning'],
+    ['info', 'text-text-tertiary'],
+    ['', 'text-text-tertiary'],
+    [null, 'text-text-tertiary'],
+    [undefined, 'text-text-tertiary'],
   ])('maps severity %s to expected tone', (input, expected) => {
     expect(severityToneClass(input)).toBe(expected)
   })
@@ -504,6 +509,140 @@ describe('deriveTaskAlerts', () => {
   })
 })
 
+describe('deriveKeeperAttentionReason', () => {
+  it('returns default warn reason when keeper has no attention signal', () => {
+    const reason = deriveKeeperAttentionReason(makeKeeper({ name: 'plain' }))
+    expect(reason.sev).toBe('warn')
+    expect(reason.text).toBe('점검 필요')
+    expect(reason.act).toBe('대화 열기')
+  })
+
+  it('marks continue_gate keepers as warn with approval action', () => {
+    const reason = deriveKeeperAttentionReason(makeKeeper({
+      name: 'gate',
+      runtime_blocker_continue_gate: true,
+      runtime_blocker_class: 'ambiguous_post_commit_timeout',
+    }))
+    expect(reason.sev).toBe('warn')
+    expect(reason.act).toBe('승인 검토')
+  })
+
+  it('marks critical lifecycle states as bad', () => {
+    const reason = deriveKeeperAttentionReason(makeKeeper({
+      name: 'dead',
+      lifecycle_phase: 'Dead',
+      runtime_blocker_class: 'exception',
+    }))
+    expect(reason.sev).toBe('bad')
+    expect(reason.act).toBe('재시작')
+  })
+
+  it('surfaces trust attention_reason as warn', () => {
+    const reason = deriveKeeperAttentionReason(makeKeeper({
+      name: 'trust',
+      trust: {
+        needs_attention: true,
+        attention_reason: '승인 대기 3건',
+        next_human_action: '승인 검토',
+      },
+    }))
+    expect(reason.sev).toBe('warn')
+    expect(reason.text).toBe('승인 대기 3건')
+    expect(reason.act).toBe('승인 검토')
+  })
+})
+
+describe('pickAttentionKeepers', () => {
+  it('returns empty array when no keepers need attention', () => {
+    expect(pickAttentionKeepers([makeKeeper({ name: 'k1' })])).toEqual([])
+  })
+
+  it('selects keepers with needs_attention flag', () => {
+    const keepers = [
+      makeKeeper({ name: 'ok' }),
+      makeKeeper({ name: 'att', needs_attention: true }),
+    ]
+    expect(pickAttentionKeepers(keepers).map(k => k.name)).toEqual(['att'])
+  })
+
+  it('selects keepers with runtime blocker awaiting_operator', () => {
+    const keepers = [
+      makeKeeper({ name: 'ok' }),
+      makeKeeper({ name: 'op', runtime_blocker_class: 'awaiting_operator' }),
+    ]
+    expect(pickAttentionKeepers(keepers).map(k => k.name)).toEqual(['op'])
+  })
+})
+
+describe('computeOverviewStats', () => {
+  it('returns zeroed stats when empty', () => {
+    expect(computeOverviewStats([], [])).toEqual({
+      run: 0,
+      att: 0,
+      hot: 0,
+      avgCtx: 0,
+      tasks: 0,
+      traces: 0,
+      total: 0,
+    })
+  })
+
+  it('counts running keepers and context pressure', () => {
+    const keepers = [
+      makeKeeper({ name: 'a', status: 'active', context_ratio: 0.9, total_turns: 10 }),
+      makeKeeper({ name: 'b', status: 'offline', context_ratio: 0.5, total_turns: 5 }),
+    ]
+    const stats = computeOverviewStats(keepers, [])
+    expect(stats.run).toBe(1)
+    expect(stats.total).toBe(2)
+    expect(stats.hot).toBe(1)
+    expect(stats.traces).toBe(15)
+  })
+
+  it('counts tasks assigned to keepers', () => {
+    const keepers = [makeKeeper({ name: 'a' })]
+    const taskList = [
+      makeTask({ id: 't1', assignee: 'a' }),
+      makeTask({ id: 't2', assignee: 'a' }),
+      makeTask({ id: 't3', assignee: 'other' }),
+    ]
+    expect(computeOverviewStats(keepers, taskList).tasks).toBe(2)
+  })
+
+  it('computes average context of running keepers', () => {
+    const keepers = [
+      makeKeeper({ name: 'a', status: 'active', context_ratio: 0.8 }),
+      makeKeeper({ name: 'b', status: 'active', context_ratio: 0.6 }),
+    ]
+    expect(computeOverviewStats(keepers, []).avgCtx).toBe(70)
+  })
+})
+
+describe('telemetryBars', () => {
+  it('returns 28 deterministic bars', () => {
+    const bars = telemetryBars([])
+    expect(bars).toHaveLength(OVERVIEW_TELEMETRY_BAR_COUNT)
+    expect(bars.every(b => b >= 0 && b <= 1)).toBe(true)
+  })
+
+  it('produces identical output for identical keeper input', () => {
+    const keepers = [makeKeeper({ name: 'a', total_turns: 42 })]
+    expect(telemetryBars(keepers)).toEqual(telemetryBars(keepers))
+  })
+
+  it('produces different output for different trace counts', () => {
+    const a = telemetryBars([makeKeeper({ name: 'a', total_turns: 1 })])
+    const b = telemetryBars([makeKeeper({ name: 'b', total_turns: 999 })])
+    expect(a).not.toEqual(b)
+  })
+
+  it('spikes indices 9 and 22 to 1', () => {
+    const bars = telemetryBars([])
+    expect(bars[9]).toBe(1)
+    expect(bars[22]).toBe(1)
+  })
+})
+
 describe('Overview v2 marker classes', () => {
   afterEach(() => {
     cleanup()
@@ -515,5 +654,44 @@ describe('Overview v2 marker classes', () => {
     expect(container.querySelector('.v2-overview-surface')).not.toBeNull()
     expect(container.querySelector('.v2-overview-funnel')).not.toBeNull()
     expect(container.querySelector('.v2-overview-keepers')).not.toBeNull()
+  })
+
+  it('renders keeper-v2 port marker classes', () => {
+    const { container } = render(h(Overview, null))
+
+    expect(container.querySelector('.v2-overview-head')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-kpis')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-attention')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-telemetry')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-fleet')).not.toBeNull()
+  })
+})
+
+describe('Overview StyleSeed surfaces', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('applies StyleSeed surface/page tokens to root', () => {
+    const { container } = render(h(Overview, null))
+    const root = container.querySelector('.v2-overview-surface')
+    expect(root?.classList.contains('ss-surface')).toBe(true)
+    expect(root?.classList.contains('bg-surface-page')).toBe(true)
+    expect(root?.classList.contains('space-y-6')).toBe(true)
+  })
+
+  it('wraps major sections in ss-card with mx-6', () => {
+    const { container } = render(h(Overview, null))
+    expect(container.querySelector('.v2-overview-kpis')?.classList.contains('ss-card')).toBe(true)
+    expect(container.querySelector('.v2-overview-kpis')?.classList.contains('mx-6')).toBe(true)
+    expect(container.querySelector('.v2-overview-funnel')?.classList.contains('ss-card')).toBe(true)
+    expect(container.querySelector('.v2-overview-keepers')?.classList.contains('ss-card')).toBe(true)
+    expect(container.querySelector('.v2-overview-fleet')?.classList.contains('ss-card')).toBe(true)
+  })
+
+  it('uses px-6 on the two-column grid container', () => {
+    const { container } = render(h(Overview, null))
+    const grid = container.querySelector('.lg\\:grid-cols-2')
+    expect(grid?.classList.contains('px-6')).toBe(true)
   })
 })

@@ -104,7 +104,7 @@ export function BundleStalenessBanner({ reload }: BannerProps = {}) {
   return html`
     <div
       data-bundle-staleness-banner
-      class="fixed bottom-5 left-1/2 z-[var(--z-overlay-toast,3070)] flex -translate-x-1/2 items-center gap-3 rounded-[var(--r-2)] border border-solid border-[var(--warn-20)] bg-[var(--color-bg-surface)] px-4 py-2.5 text-xs text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)]"
+      class="v2-shell-panel fixed bottom-5 left-1/2 z-[var(--z-overlay-toast,3070)] flex -translate-x-1/2 items-center gap-3 rounded-[var(--r-2)] border border-solid border-[var(--warn-20)] bg-[var(--color-bg-surface)] px-4 py-2.5 text-xs text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)]"
       role="status"
     >
       <span>

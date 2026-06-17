@@ -1,0 +1,67 @@
+/* ─── Composer — interject + action buttons ─────────────── */
+
+.v-composer {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--line);
+  background: var(--surf-panel);
+}
+.v-composer .c-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surf-sink);
+  color: var(--text-bright);
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  transition: border-color 0.12s;
+}
+.v-composer .c-input:focus {
+  outline: none;
+  border-color: var(--line-accent);
+  background: var(--bg);
+}
+.v-composer .c-input::placeholder { color: var(--text-dim); }
+
+.v-composer .c-btn {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surf-raised);
+  color: var(--text-bright);
+  font-family: var(--font-display);
+  font-size: var(--fs-3);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.12s;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+.v-composer .c-btn:hover {
+  border-color: var(--line-accent);
+  background: color-mix(in oklab, var(--accent-brass) 8%, var(--surf-raised));
+}
+.v-composer .c-btn.primary {
+  color: var(--accent-brass);
+  border-color: var(--line-accent);
+  background: color-mix(in oklab, var(--accent-brass) 12%, transparent);
+  font-weight: 500;
+}
+.v-composer .c-btn.danger {
+  color: var(--bad);
+  border-color: color-mix(in oklab, var(--bad) 40%, transparent);
+}
+.v-composer .c-btn.danger:hover {
+  background: color-mix(in oklab, var(--bad) 12%, transparent);
+  border-color: color-mix(in oklab, var(--bad) 55%, transparent);
+}
+.v-composer .c-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+  margin: 0 var(--sp-1);
+}

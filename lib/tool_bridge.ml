@@ -226,29 +226,57 @@ let oas_permission_of_masc_tool name =
     Some Agent_sdk.Tool.ReadOnly
   | _ -> None
 
+(** Tools that perform real external network I/O (not local file reads) should
+    never be marked [Parallel_read], even when read-only. Running multiple web
+    searches or fetches concurrently would violate provider rate limits and
+    abuse external services. Keep this list in sync with
+    [Keeper_tool_descriptor.public_descriptors] web aliases and their internal
+    names. *)
+let is_external_network_tool name =
+  List.mem name [ "masc_web_search"; "masc_web_fetch"; "WebSearch"; "WebFetch" ]
+;;
+
 let oas_descriptor_of_masc_tool name =
-  let descriptor_of_permission permission =
+  let permission =
+    match oas_permission_of_masc_tool name with
+    | Some _ as p -> p
+    | None ->
+      (* Public aliases such as WebSearch/WebFetch do not appear in
+         [Tool_catalog] metadata, but they still need a descriptor so the
+         OAS runtime does not default them to Sequential_workspace and so
+         they are never classified as Parallel_read. *)
+      if is_external_network_tool name
+      then Some Agent_sdk.Tool.ReadOnly
+      else None
+  in
+  let descriptor_of_permission perm =
     let mutation_class, concurrency_class =
-      match permission with
+      match perm with
+      | Agent_sdk.Tool.ReadOnly when is_external_network_tool name ->
+        (* External read-only tools are not workspace-parallel: they hit
+           rate-limited remote APIs. Use [Exclusive_external] so the OAS
+           runtime runs them in isolation and flushes any parallel-read batch
+           before and after. *)
+        Some "external_effect", Some Agent_sdk.Tool.Exclusive_external
       | Agent_sdk.Tool.ReadOnly ->
-          Some "read_only", Some Agent_sdk.Tool.Parallel_read
+        Some "read_only", Some Agent_sdk.Tool.Parallel_read
       | Agent_sdk.Tool.Write ->
-          Some "workspace_mutating", Some Agent_sdk.Tool.Sequential_workspace
+        Some "workspace_mutating", Some Agent_sdk.Tool.Sequential_workspace
       | Agent_sdk.Tool.Destructive ->
-          Some "external_effect", Some Agent_sdk.Tool.Exclusive_external
+        Some "external_effect", Some Agent_sdk.Tool.Exclusive_external
     in
     {
       Agent_sdk.Tool.kind = Some "masc";
       mutation_class;
       concurrency_class;
-      permission = Some permission;
+      permission = Some perm;
       evidence_role = None;
       shell = None;
       notes = [];
       examples = [];
     }
   in
-  Option.map descriptor_of_permission (oas_permission_of_masc_tool name)
+  Option.map descriptor_of_permission permission
 
 let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result =
   if Tool_result.is_success tr
@@ -281,14 +309,19 @@ let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result 
         ~input_schema:schema_json
         (fun args -> handle_board_post ctx args)
     ]} *)
-let oas_tool_of_masc ~name ~description ~input_schema
+let oas_tool_of_masc ?descriptor ~name ~description ~input_schema
     handler : Agent_sdk.Tool.t =
   let parameters = params_of_json_schema input_schema in
-  let descriptor = oas_descriptor_of_masc_tool name in
+  let descriptor =
+    match descriptor with
+    | Some _ -> descriptor
+    | None -> oas_descriptor_of_masc_tool name
+  in
   let oas_handler json_args =
     to_oas_typed_result (handler json_args)
   in
   Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler
 
 let () =
-  Runtime_agent.set_oas_tool_of_masc_hook oas_tool_of_masc
+  Runtime_agent.set_oas_tool_of_masc_hook (fun ~name ~description ~input_schema handler ->
+    oas_tool_of_masc ~name ~description ~input_schema handler)

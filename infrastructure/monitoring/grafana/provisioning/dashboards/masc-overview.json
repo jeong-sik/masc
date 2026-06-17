@@ -79,7 +79,7 @@
       "description": "99th percentile dashboard snapshot latency.",
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum(rate(masc_dashboard_snapshot_latency_seconds_bucket_total[5m])) by (le)) * 1000",
+          "expr": "histogram_quantile(0.99, sum(rate(masc_dashboard_snapshot_latency_seconds_bucket[5m])) by (le)) * 1000",
           "legendFormat": "p99",
           "refId": "A"
         }
@@ -305,11 +305,170 @@
       }
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "panels": [],
+      "title": "Runtime & Provider Selection",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Runtime selections per minute by source.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "pointSize": 0,
+            "showPoints": "never"
+          },
+          "unit": "cpm"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 17
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (source) (rate(masc_keeper_runtime_selected_total[5m])) * 60",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Runtime Selected / min by Source",
+      "transparent": true,
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "99th percentile LLM provider request latency.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "pointSize": 0,
+            "showPoints": "never"
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 17
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(masc_llm_provider_request_latency_seconds_bucket_total[5m])) by (le)) * 1000",
+          "legendFormat": "p99",
+          "refId": "A"
+        }
+      ],
+      "title": "Provider Request Latency p99",
+      "transparent": true,
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "99th percentile time to first response chunk.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "pointSize": 0,
+            "showPoints": "never"
+          },
+          "unit": "ms"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 17
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(gen_ai_client_operation_time_to_first_chunk_bucket_total[5m])) by (le)) * 1000",
+          "legendFormat": "p99",
+          "refId": "A"
+        }
+      ],
+      "title": "LLM Time To First Chunk p99",
+      "transparent": true,
+      "type": "timeseries"
+    },
+    {
       "type": "timeseries",
       "title": "LLM Calls / min",
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 25,
         "w": 24,
         "h": 8
       },
@@ -320,7 +479,7 @@
       "description": "GenAI client calls per minute.",
       "targets": [
         {
-          "expr": "sum(rate(gen_ai_client_operation_duration_count_total[5m])) * 60",
+          "expr": "sum(rate(masc_llm_provider_requests_started_total[5m])) * 60",
           "legendFormat": "calls/min",
           "refId": "A"
         }
@@ -350,10 +509,10 @@
     },
     {
       "type": "barchart",
-      "title": "Token Usage / min",
+      "title": "Provider Token Usage / min",
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 33,
         "w": 12,
         "h": 8
       },
@@ -364,9 +523,14 @@
       "description": "Token usage rate by type (input / output).",
       "targets": [
         {
-          "expr": "sum by (token_type) (rate(gen_ai_client_token_usage[5m])) * 60",
-          "legendFormat": "{{token_type}}",
+          "expr": "sum(rate(masc_llm_provider_input_tokens_total[5m])) * 60",
+          "legendFormat": "input",
           "refId": "A"
+        },
+        {
+          "expr": "sum(rate(masc_llm_provider_output_tokens_total[5m])) * 60",
+          "legendFormat": "output",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -392,7 +556,7 @@
       "title": "Goal Attainment %",
       "gridPos": {
         "x": 12,
-        "y": 32,
+        "y": 41,
         "w": 12,
         "h": 8
       },
@@ -428,7 +592,7 @@
       "title": "Active Keepers",
       "gridPos": {
         "x": 0,
-        "y": 40,
+        "y": 49,
         "w": 8,
         "h": 8
       },
@@ -462,7 +626,7 @@
       "title": "Keeper Compactions / min",
       "gridPos": {
         "x": 8,
-        "y": 48,
+        "y": 57,
         "w": 16,
         "h": 8
       },
@@ -480,7 +644,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
+          "unit": "cpm",
           "color": {
             "mode": "palette-classic"
           },
@@ -505,7 +669,7 @@
       "title": "Goal Attainment Measured",
       "gridPos": {
         "x": 0,
-        "y": 56,
+        "y": 65,
         "w": 8,
         "h": 8
       },
@@ -541,7 +705,7 @@
       "title": "Keeper Input Tokens / min",
       "gridPos": {
         "x": 8,
-        "y": 64,
+        "y": 73,
         "w": 16,
         "h": 8
       },
@@ -584,7 +748,7 @@
       "title": "Board Signal Wakeups / min",
       "gridPos": {
         "x": 0,
-        "y": 72,
+        "y": 81,
         "w": 24,
         "h": 8
       },
@@ -627,7 +791,7 @@
       "title": "OCaml Heap Memory",
       "gridPos": {
         "x": 0,
-        "y": 80,
+        "y": 89,
         "w": 12,
         "h": 8
       },
@@ -670,7 +834,7 @@
       "title": "GC Major Allocation Rate",
       "gridPos": {
         "x": 12,
-        "y": 88,
+        "y": 97,
         "w": 12,
         "h": 8
       },
@@ -713,7 +877,7 @@
       "title": "Recent Traces",
       "gridPos": {
         "x": 0,
-        "y": 96,
+        "y": 105,
         "w": 24,
         "h": 16
       },
@@ -750,7 +914,7 @@
       "title": "Keeper Instruction Monitoring",
       "gridPos": {
         "x": 0,
-        "y": 112,
+        "y": 121,
         "w": 24,
         "h": 1
       },
@@ -766,7 +930,7 @@
       "title": "Prompt Segment Bytes",
       "gridPos": {
         "x": 0,
-        "y": 113,
+        "y": 122,
         "w": 12,
         "h": 8
       },
@@ -814,7 +978,7 @@
       "title": "Template Render Outcome",
       "gridPos": {
         "x": 12,
-        "y": 113,
+        "y": 122,
         "w": 6,
         "h": 8
       },
@@ -848,7 +1012,7 @@
       "title": "Tool Call Param Completeness",
       "gridPos": {
         "x": 18,
-        "y": 113,
+        "y": 122,
         "w": 6,
         "h": 8
       },
@@ -887,7 +1051,7 @@
       "title": "Turn Instruction Hash",
       "gridPos": {
         "x": 0,
-        "y": 121,
+        "y": 130,
         "w": 24,
         "h": 6
       },
@@ -920,13 +1084,74 @@
       }
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 136
+      },
+      "panels": [],
+      "title": "Tool Calls",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Tool dispatches per minute by tool type.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "pointSize": 0,
+            "showPoints": "never"
+          },
+          "unit": "cpm"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 137
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (tool_type) (rate(tool_dispatch_total[5m])) * 60",
+          "legendFormat": "{{tool_type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Tool Calls / min by Type",
+      "transparent": true,
+      "type": "timeseries"
+    },
+    {
       "id": 1,
       "type": "row",
       "title": "Fleet Health \u2014 Freeze Forensics",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 127,
+        "y": 145,
         "w": 24,
         "h": 1
       },
@@ -938,7 +1163,7 @@
       "title": "Eio Loop Lag",
       "gridPos": {
         "x": 0,
-        "y": 128,
+        "y": 146,
         "w": 8,
         "h": 8
       },
@@ -988,7 +1213,7 @@
       "title": "Console Sink (writer health)",
       "gridPos": {
         "x": 8,
-        "y": 128,
+        "y": 146,
         "w": 8,
         "h": 8
       },
@@ -1042,7 +1267,7 @@
       "title": "Store Size (masc-root)",
       "gridPos": {
         "x": 16,
-        "y": 128,
+        "y": 146,
         "w": 8,
         "h": 8
       },
@@ -1075,7 +1300,7 @@
       "title": "Event Bus Backpressure",
       "gridPos": {
         "x": 0,
-        "y": 136,
+        "y": 154,
         "w": 8,
         "h": 8
       },
@@ -1109,10 +1334,10 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Snapshot Loop Duty Cycle",
+      "title": "Average Snapshot Latency",
       "gridPos": {
         "x": 8,
-        "y": 136,
+        "y": 154,
         "w": 8,
         "h": 8
       },
@@ -1126,35 +1351,29 @@
             "drawStyle": "line",
             "fillOpacity": 10
           },
-          "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.3
-              },
-              {
-                "color": "red",
-                "value": 0.7
-              }
-            ]
-          }
+          "unit": "s"
         },
         "overrides": []
       },
       "targets": [
         {
-          "expr": "rate(masc_dashboard_snapshot_latency_seconds[5m])",
+          "expr": "rate(masc_dashboard_snapshot_latency_seconds_sum[5m]) / rate(masc_dashboard_snapshot_latency_seconds_count_total[5m])",
           "legendFormat": "duty (s/s)",
           "refId": "A"
         }
       ],
-      "description": "Fraction of wall-clock the 2s dashboard snapshot loop spends computing. ~1.0 = the loop re-parses continuously (pre-#20677 behaviour)."
+      "description": "Average dashboard snapshot latency.",
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
     },
     {
       "id": 7,
@@ -1162,7 +1381,7 @@
       "title": "Telemetry Read Cost",
       "gridPos": {
         "x": 16,
-        "y": 136,
+        "y": 154,
         "w": 8,
         "h": 8
       },
@@ -1200,7 +1419,7 @@
       "title": "FD Open vs Limit",
       "gridPos": {
         "x": 0,
-        "y": 144,
+        "y": 162,
         "w": 8,
         "h": 8
       },
@@ -1237,7 +1456,7 @@
       "title": "Transition Audit Queue",
       "gridPos": {
         "x": 8,
-        "y": 144,
+        "y": 162,
         "w": 8,
         "h": 8
       },
@@ -1274,7 +1493,7 @@
       "title": "Watchdog Fires (24h)",
       "gridPos": {
         "x": 16,
-        "y": 144,
+        "y": 162,
         "w": 8,
         "h": 8
       },
@@ -1316,7 +1535,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 152,
+        "y": 170,
         "w": 24,
         "h": 1
       },
@@ -1328,7 +1547,7 @@
       "title": "Time To First Chunk (avg)",
       "gridPos": {
         "x": 0,
-        "y": 153,
+        "y": 171,
         "w": 8,
         "h": 8
       },
@@ -1378,7 +1597,7 @@
       "title": "OAS Bridge Timeouts / Cancels",
       "gridPos": {
         "x": 8,
-        "y": 153,
+        "y": 171,
         "w": 8,
         "h": 8
       },
@@ -1414,7 +1633,7 @@
       "title": "Provider Errors by Reason",
       "gridPos": {
         "x": 16,
-        "y": 153,
+        "y": 171,
         "w": 8,
         "h": 8
       },
@@ -1446,7 +1665,7 @@
       "title": "HTTP Pool Occupancy",
       "gridPos": {
         "x": 0,
-        "y": 161,
+        "y": 179,
         "w": 8,
         "h": 8
       },
@@ -1489,7 +1708,7 @@
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 169,
+        "y": 187,
         "w": 24,
         "h": 1
       },
@@ -1501,7 +1720,7 @@
       "title": "Discord Gateway Events / min",
       "gridPos": {
         "x": 0,
-        "y": 170,
+        "y": 188,
         "w": 8,
         "h": 8
       },
@@ -1539,7 +1758,7 @@
       "title": "Discord Inbound Dispatch / min",
       "gridPos": {
         "x": 8,
-        "y": 170,
+        "y": 188,
         "w": 8,
         "h": 8
       },
@@ -1572,7 +1791,7 @@
       "title": "Discord Ambient Capture / min",
       "gridPos": {
         "x": 16,
-        "y": 170,
+        "y": 188,
         "w": 8,
         "h": 8
       },
@@ -1605,7 +1824,7 @@
       "title": "Discord Reconnects, Closes, ACK Timeouts",
       "gridPos": {
         "x": 0,
-        "y": 178,
+        "y": 196,
         "w": 12,
         "h": 8
       },
@@ -1648,7 +1867,7 @@
       "title": "Discord Outbound Replies / min",
       "gridPos": {
         "x": 12,
-        "y": 178,
+        "y": 196,
         "w": 12,
         "h": 8
       },

@@ -720,7 +720,7 @@ export function FsmHub(props: FsmHubProps = {}) {
 
   const rootGap = density === 'compact' ? 'gap-1.5' : 'gap-3'
   return html`
-    <div class=${`contain-content flex flex-col ${rootGap}`} data-density=${density}>
+    <div class=${`v2-monitoring-surface contain-content flex flex-col ${rootGap}`} data-density=${density}>
       ${/* ── Zone 1: Status Bar ── */ ''}
       <${StatusBar}
         snapshot=${snapshot}
@@ -806,7 +806,7 @@ export function FsmHub(props: FsmHubProps = {}) {
         <//>
 
         ${/* ── Zone 5: Collapsible Graph ── */ ''}
-        <details class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+        <details class="v2-monitoring-detail rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
           open=${graphOpen}
           onToggle=${(e: Event) => setGraphOpen((e.target as HTMLDetailsElement).open)}
         >
@@ -853,14 +853,14 @@ function ShortcutsOverlay({
           키보드 단축키
         </h2>
         <button
-          class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] cursor-pointer"
+          class="v2-monitoring-action text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] cursor-pointer"
           onClick=${onClose}
           aria-label="닫기"
         >Esc</button>
       </div>
       <div class="flex flex-col gap-1.5">
         ${rows.map(r => html`
-          <div class="flex items-center gap-3 text-2xs">
+          <div class="v2-monitoring-row flex items-center gap-3 text-2xs">
             <${Kbd} size="md" class="min-w-16">${r.keys}<//>
             <span class="text-[var(--color-fg-primary)]">${r.desc}</span>
           </div>
@@ -944,13 +944,13 @@ function StatusBar({
 
   const containerPadding = density === 'compact' ? 'px-3 py-1.5' : 'px-4 py-2.5'
   return html`
-    <div class=${`sticky top-0 z-20 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-[var(--shadow-panel)] ${containerPadding}`}>
+    <div class=${`v2-monitoring-toolbar sticky top-0 z-20 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--panel-dark-60)] backdrop-blur-sm shadow-[var(--shadow-panel)] ${containerPadding}`}>
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <div class="flex items-center gap-3">
           <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">FSM Hub</span>
           <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
           <button
-            class=${`text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border cursor-pointer transition-[background-color,border-color] ${
+            class=${`v2-monitoring-action text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border cursor-pointer transition-[background-color,border-color] ${
               refreshFlash
                 ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
                 : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)]'
@@ -962,7 +962,7 @@ function StatusBar({
             ${refreshFlash ? '✓' : '↻'}
           </button>
           <button
-            class="text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)] cursor-pointer"
+            class="v2-monitoring-action text-3xs font-mono px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] hover:border-[var(--accent-30)] cursor-pointer"
             onClick=${onDensityToggle}
             title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
             aria-label=${`밀도 토글: 현재 ${density === 'compact' ? '조밀' : '여유'}`}
@@ -1024,7 +1024,7 @@ function StatusBar({
                 role="tab"
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
-                class=${`rounded-[var(--r-0)] border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, offset: 1, offsetSurface: 'page' })} ${cls}`}
+                class=${`v2-monitoring-action rounded-[var(--r-0)] border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, offset: 1, offsetSurface: 'page' })} ${cls}`}
                 onClick=${() => onSelect(name)}
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {
@@ -1100,7 +1100,7 @@ function SkeletonLayout() {
   return html`
     <div class="flex flex-col gap-3" aria-hidden="true" aria-label="통합 스냅샷 로딩 중">
       ${/* Operator Meaning skeleton */ ''}
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
         <${SkeletonBar} w="w-24" h="h-2" />
         <div class="mt-3"><${SkeletonBar} w="w-3/4" h="h-5" /></div>
         <div class="mt-2"><${SkeletonBar} w="w-full" h="h-3" /></div>
@@ -1112,7 +1112,7 @@ function SkeletonLayout() {
       </div>
 
       ${/* Hero Phase skeleton */ ''}
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-5">
         <${SkeletonBar} w="w-32" h="h-2" />
         <div class="mt-2"><${SkeletonBar} w="w-40" h="h-8" /></div>
         <div class="mt-2"><${SkeletonBar} w="w-20" h="h-2" /></div>
@@ -1122,11 +1122,11 @@ function SkeletonLayout() {
       </div>
 
       ${/* Pipeline Strip skeleton */ ''}
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         <${SkeletonBar} w="w-24" h="h-2" />
         <div class="mt-2 flex gap-2">
           ${[1,2,3,4].map(i => html`
-            <div key=${i} class="flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-2">
+            <div key=${i} class="v2-monitoring-card flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] p-2">
               <${SkeletonBar} w="w-10" h="h-2" />
               <div class="mt-1"><${SkeletonBar} w="w-16" h="h-4" /></div>
               <div class="mt-1"><${SkeletonBar} w="w-14" h="h-2" /></div>
@@ -1136,7 +1136,7 @@ function SkeletonLayout() {
       </div>
 
       ${/* Swimlane skeleton */ ''}
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
         <${SkeletonBar} w="w-28" h="h-2" />
         <div class="mt-2 flex flex-col gap-1.5">
           ${[1,2,3,4,5].map(i => html`
@@ -1151,7 +1151,7 @@ function SkeletonLayout() {
       ${/* Health Grid skeleton */ ''}
       <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         ${[1,2,3].map(i => html`
-          <div key=${i} class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+          <div key=${i} class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <${SkeletonBar} w="w-20" h="h-2" />
             <div class="mt-2 flex flex-wrap gap-1.5">
               <${SkeletonBar} w="w-14" h="h-5" />
@@ -1211,10 +1211,10 @@ function CollapsibleZone({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] overflow-hidden">
+    <div class="v2-monitoring-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] overflow-hidden">
       <button
         type="button"
-        class="w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[var(--color-bg-surface)] transition-colors cursor-pointer select-none"
+        class="v2-monitoring-detail w-full flex items-center justify-between px-4 py-2 text-left hover:bg-[var(--color-bg-surface)] transition-colors cursor-pointer select-none"
         onClick=${toggle}
         aria-expanded=${!collapsed}
         aria-controls=${`zone-${id}`}

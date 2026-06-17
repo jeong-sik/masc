@@ -1,10 +1,16 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { fireEvent } from '@testing-library/preact'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
 import { ChatComposer, ChatTranscript } from './primitives'
+import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
+
+vi.mock('./attachments', () => ({
+  collectAttachments: vi.fn(),
+}))
 
 const flushUi = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
 
@@ -932,5 +938,167 @@ describe('Keeper v2 chat blocks', () => {
 
     expect(container.textContent).toContain('plain markdown reply')
     expect(container.querySelector('[data-chat-blocks]')).toBeNull()
+  })
+})
+
+
+describe('ChatComposer multimodal', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.mocked(collectAttachments).mockReset()
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.useRealTimers()
+  })
+
+  function renderComposer(props: {
+    draft?: string
+    onSend?: (payload: { blocks: ChatBlock[] }) => void
+    disabled?: boolean
+    streaming?: boolean
+  } = {}) {
+    render(
+      html`<${ChatComposer}
+        draft=${props.draft ?? ''}
+        placeholder="메시지 입력..."
+        disabled=${props.disabled ?? false}
+        streaming=${props.streaming ?? false}
+        onDraftChange=${() => {}}
+        onSend=${props.onSend ?? (() => {})}
+      />`,
+      container,
+    )
+  }
+
+  it('renders attachment and voice buttons', () => {
+    Object.assign(globalThis.navigator, { mediaDevices: { getUserMedia: vi.fn() } })
+    Object.assign(globalThis, { MediaRecorder: vi.fn() })
+    renderComposer()
+    expect(container.querySelector('[title="이미지·파일 첨부"]')).not.toBeNull()
+    expect(container.querySelector('[title="음성으로 입력"]')).not.toBeNull()
+  })
+
+  it('adds attachment chips from file input and removes them', async () => {
+    vi.mocked(collectAttachments).mockResolvedValue({
+      attachments: [
+        {
+          id: 'att-1',
+          type: 'image',
+          name: 'screen.png',
+          size: 1024,
+          mimeType: 'image/png',
+          data: 'data:image/png;base64,abc123',
+          dims: '100×100',
+        },
+        {
+          id: 'att-2',
+          type: 'file',
+          name: 'log.txt',
+          size: 512,
+          mimeType: 'text/plain',
+          data: 'data:text/plain;base64,bG9n',
+        },
+      ],
+      errors: [],
+    })
+
+    renderComposer()
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    const dt = new DataTransfer()
+    dt.items.add(new File(['x'], 'screen.png', { type: 'image/png' }))
+    fileInput.files = dt.files
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(container.querySelector('[data-chat-attachment-draft="att-1"]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-attachment-draft="att-2"]')).not.toBeNull()
+    expect(container.textContent).toContain('screen.png')
+    expect(container.textContent).toContain('log.txt')
+
+    const removeBtn = container.querySelector('[data-chat-attachment-draft="att-1"] .cdraft-x') as HTMLButtonElement
+    removeBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(container.querySelector('[data-chat-attachment-draft="att-1"]')).toBeNull()
+    expect(container.querySelector('[data-chat-attachment-draft="att-2"]')).not.toBeNull()
+  })
+
+  it('highlights drag-over state and ingests dropped files', async () => {
+    vi.mocked(collectAttachments).mockResolvedValue({
+      attachments: [
+        {
+          id: 'att-drop',
+          type: 'file',
+          name: 'drop.json',
+          size: 128,
+          mimeType: 'application/json',
+          data: 'data:application/json;base64,e30=',
+        },
+      ],
+      errors: [],
+    })
+
+    renderComposer()
+    const composer = container.querySelector('.composer') as HTMLDivElement
+
+    fireEvent.dragOver(composer)
+    expect(composer.querySelector('.composer-box')?.classList.contains('drag')).toBe(true)
+
+    const dt = new DataTransfer()
+    dt.items.add(new File(['{}'], 'drop.json', { type: 'application/json' }))
+    fireEvent.drop(composer, { dataTransfer: dt })
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(composer.querySelector('.composer-box')?.classList.contains('drag')).toBe(false)
+    expect(container.querySelector('[data-chat-attachment-draft="att-drop"]')).not.toBeNull()
+  })
+
+  it('composes ordered blocks on send: attach, text', async () => {
+    vi.mocked(collectAttachments).mockResolvedValue({
+      attachments: [
+        {
+          id: 'att-img',
+          type: 'image',
+          name: 'screen.png',
+          size: 1024,
+          mimeType: 'image/png',
+          data: 'data:image/png;base64,abc123',
+          dims: '100×100',
+        },
+      ],
+      errors: [],
+    })
+
+    const onSend = vi.fn()
+    renderComposer({ draft: 'check this <tag>', onSend })
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    const dt = new DataTransfer()
+    dt.items.add(new File(['x'], 'screen.png', { type: 'image/png' }))
+    fileInput.files = dt.files
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledOnce()
+    const blocks = onSend.mock.calls[0]?.[0].blocks as ChatBlock[]
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toMatchObject({ t: 'attach', name: 'screen.png', kind: 'image' })
+    expect(blocks[1]).toMatchObject({ t: 'p', html: 'check this &lt;tag&gt;' })
+  })
+
+  it('keeps send disabled until there is content', () => {
+    renderComposer()
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    expect(sendBtn.disabled).toBe(true)
   })
 })

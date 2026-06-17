@@ -104,7 +104,7 @@ export function KeeperDetailBody({
   onSocialSweep,
 }: KeeperDetailBodyProps) {
   return html`
-    <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
+    <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-5 v2-monitoring-surface">
         <${KeeperRuntimeAlertStrip} keeper=${keeper} />
         <${KeeperDetailSectionRail} />
 

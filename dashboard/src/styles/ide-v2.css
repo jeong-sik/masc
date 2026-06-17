@@ -1,0 +1,515 @@
+/* MASC Dashboard — keeper-v2 IDE surface layout.
+ *
+ * Ports the three-pane IDE surface from keeper-v2/ide.jsx into the dashboard
+ * using the existing semantic token ladder and the keeper-v2 token bridge
+ * aliases defined in variables.css.
+ *
+ * The layout is intentionally scoped to .ide-v2-* so legacy surfaces are not
+ * affected. Existing dashboard IDE components keep their legacy class names
+ * for test compatibility; this stylesheet layers v2 chrome on top.
+ */
+
+/* ── Surface shell ─────────────────────────────────────────────────────────── */
+
+.ide-v2-surface {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+}
+
+.ide-v2-surface[data-terminal-open="true"] .ide-v2-body {
+  /* Terminal drawer lives below the body and steals vertical space. */
+}
+
+/* ── Top chrome ────────────────────────────────────────────────────────────── */
+
+.ide-v2-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  height: 42px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-main);
+  background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
+}
+
+.ide-v2-top .ide-plane-statusbar,
+.ide-v2-top .ide-toolbar {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+}
+
+.ide-v2-top .ide-plane-statusbar {
+  flex: 0 1 auto;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ide-v2-top .ide-plane-statusbar-title {
+  color: var(--text-bright);
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ide-v2-top .ide-plane-statusbar-meta {
+  gap: 6px;
+}
+
+.ide-v2-top .ide-plane-statusbar-meta .chip {
+  max-width: 10rem;
+}
+
+.ide-v2-top .ide-toolbar {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ide-v2-top .ide-toolbar-tabs {
+  flex: none;
+  gap: 3px;
+}
+
+.ide-v2-top .ide-toolbar-command-cluster {
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 360px;
+}
+
+.ide-v2-top .ide-toolbar-layers {
+  flex: none;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.ide-v2-top .ide-plane-connection {
+  margin-left: 0;
+  flex: none;
+}
+
+/* ── View tabs (keeper-v2 style) ───────────────────────────────────────────── */
+
+.ide-v2-views {
+  display: flex;
+  gap: 3px;
+}
+
+.ide-v2-view {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: 0.13s;
+}
+
+.ide-v2-view:hover {
+  color: var(--text-mid);
+  background: var(--bg-card);
+}
+
+.ide-v2-view[aria-selected="true"],
+.ide-v2-view.on {
+  color: var(--volt-strong);
+  background: var(--bg-card);
+  border-color: var(--border-main);
+}
+
+.ide-v2-top .spacer {
+  flex: 1;
+}
+
+/* ── Presence strip in top chrome ──────────────────────────────────────────── */
+
+.ide-v2-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  min-width: 0;
+}
+
+.ide-v2-presence .lbl {
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+
+/* ── Three-pane body ───────────────────────────────────────────────────────── */
+
+.ide-v2-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr) minmax(270px, 320px);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.ide-v2-body.no-tree {
+  grid-template-columns: 0 minmax(0, 1fr) minmax(270px, 320px);
+}
+
+.ide-v2-body.no-rail {
+  grid-template-columns: 230px minmax(0, 1fr) 0;
+}
+
+.ide-v2-body.no-tree.no-rail {
+  grid-template-columns: 0 minmax(0, 1fr) 0;
+}
+
+/* Override the legacy dashboard.css grid placement so the right-hand
+   conversation + activity panels collapse into a single v2 rail column. */
+.ide-v2-body.ide-plane-grid {
+  grid-template-columns: 230px minmax(0, 1fr) minmax(270px, 320px);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.ide-plane-shell[data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid {
+  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.ide-v2-body.ide-plane-grid .ide-plane-tree {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.ide-v2-body.ide-plane-grid .ide-plane-editor {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.ide-v2-body.ide-plane-grid .ide-plane-conversation {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.ide-plane-shell[data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-tree,
+.ide-plane-shell[data-rails-collapsed="true"] .ide-v2-body.ide-plane-grid .ide-plane-editor {
+  grid-row: 1;
+}
+
+/* ── Left keeper/file rail ─────────────────────────────────────────────────── */
+
+.ide-v2-tree {
+  border-right: 1px solid var(--border-main);
+  background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 70%);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.ide-v2-tree .ide-explorer {
+  height: 100%;
+  padding: 10px 7px;
+  border-right: 0;
+  background: transparent;
+}
+
+.ide-v2-tree .ide-explorer > header {
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.ide-v2-tree .ide-explorer-scroll {
+  padding: 0 2px;
+}
+
+.ide-v2-tree .ide-explorer-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 0;
+  background: none;
+  color: var(--text-mid);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: 0.12s;
+}
+
+.ide-v2-tree .ide-explorer-row:hover {
+  background: var(--bg-card);
+  color: var(--text-bright);
+}
+
+.ide-v2-tree .ide-explorer-row[aria-selected="true"] {
+  background: var(--bg-card);
+  color: var(--volt-strong);
+  border-left-color: transparent;
+}
+
+.ide-v2-tree .ide-explorer-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Center editor ─────────────────────────────────────────────────────────── */
+
+.ide-v2-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Breadcrumb */
+.ide-v2-crumb {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-sunken);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.ide-v2-crumb .seg {
+  color: var(--text-dim);
+}
+
+.ide-v2-crumb .seg.last {
+  color: var(--text-mid);
+}
+
+.ide-v2-crumb .own {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  flex: none;
+}
+
+/* Editor content area */
+.ide-v2-editor > .ide-codemirror-shell,
+.ide-v2-editor > [role="region"][aria-label^="에디터"],
+.ide-v2-editor > [data-testid="ide-editor-empty"] {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Right context lens / activity rail ────────────────────────────────────── */
+
+.ide-v2-rail {
+  border-left: 1px solid var(--border-main);
+  background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 70%);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ide-v2-rail-tabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 9px 10px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ide-v2-rail-tab {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  padding: 6px 11px;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.ide-v2-rail-tab.on {
+  color: var(--volt-strong);
+  border-bottom-color: var(--volt);
+}
+
+.ide-v2-rail-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Map existing context-stack / conversation / activity panels into the rail. */
+.ide-v2-rail .ide-plane-context-stack,
+.ide-v2-rail .ide-plane-primary-rail,
+.ide-v2-rail .ide-plane-activity {
+  border: 0;
+  background: transparent;
+  min-height: 0;
+}
+
+.ide-v2-rail .ide-plane-context-stack {
+  padding: 11px 12px;
+  overflow-y: visible;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ide-v2-rail .ide-plane-primary-rail {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ide-v2-rail .ide-plane-activity {
+  padding: 11px 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Execute output drawer ─────────────────────────────────────────────────── */
+
+.ide-v2-drawer {
+  flex: none;
+  border-top: 1px solid var(--border-main);
+  background: var(--color-bg-page);
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+}
+
+.ide-v2-drawer.closed {
+  max-height: 30px;
+}
+
+.ide-v2-drawer-h {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.ide-v2-drawer-h:hover {
+  color: var(--text-mid);
+}
+
+.ide-v2-drawer-h .chev {
+  transition: transform 0.18s;
+  font-size: 9px;
+}
+
+.ide-v2-drawer.closed .ide-v2-drawer-h .chev {
+  transform: rotate(-90deg);
+}
+
+.ide-v2-drawer-h .ok {
+  color: var(--status-ok);
+}
+
+.ide-v2-drawer-body {
+  overflow-y: auto;
+  padding: 2px 14px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text-mid);
+}
+
+.ide-v2-drawer.closed .ide-v2-drawer-body {
+  display: none;
+}
+
+/* ── Action icon buttons ───────────────────────────────────────────────────── */
+
+.ide-v2-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-main);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: 0.14s;
+}
+
+.ide-v2-action:hover {
+  border-color: var(--volt-dim);
+  color: var(--volt-strong);
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────────── */
+
+@media (max-width: 1280px) {
+  .ide-v2-body,
+  .ide-v2-body.ide-plane-grid {
+    grid-template-columns: 200px minmax(0, 1fr);
+  }
+
+  .ide-v2-rail,
+  .ide-v2-body.ide-plane-grid .ide-plane-conversation {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .ide-v2-top {
+    height: auto;
+    min-height: 42px;
+    flex-wrap: wrap;
+    padding: 6px 10px;
+  }
+
+  .ide-v2-top .ide-toolbar-command-cluster {
+    display: none;
+  }
+
+  .ide-v2-body,
+  .ide-v2-body.ide-plane-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ide-v2-tree,
+  .ide-v2-body.ide-plane-grid .ide-plane-tree {
+    display: none;
+  }
+}

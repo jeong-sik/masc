@@ -90,26 +90,6 @@ let sdk_api_error_fields = function
 let sdk_agent_error_fields = function
   | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
     [ "variant", `String "max_turns_exceeded"; "turns", `Int turns; "limit", `Int limit ]
-  | Agent_sdk.Error.TokenBudgetExceeded { kind; used; limit } ->
-    [ "variant", `String "token_budget_exceeded"
-    ; "kind", `String kind
-    ; "used", `Int used
-    ; "limit", `Int limit
-    ]
-  | Agent_sdk.Error.CostBudgetExceeded { spent_usd; limit_usd } ->
-    [ "variant", `String "cost_budget_exceeded"
-    ; "spent_usd", `Float spent_usd
-    ; "limit_usd", `Float limit_usd
-    ]
-  | Agent_sdk.Error.CostBudgetUnenforceable { model_id = _; limit_usd } ->
-    (* RFC-0132 PR-2: event surface model value = external boundary; redact via SSOT.
-       The "runtime" JSON key is a schema field name (not a label). *)
-    [ "variant", `String "cost_budget_unenforceable"
-    ; "runtime",
-      `String
-        (Boundary_redaction.to_string Boundary_redaction.runtime_model_label)
-    ; "limit_usd", `Float limit_usd
-    ]
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
     [ "variant", `String "unrecognized_stop_reason"; "reason", `String reason ]
   | Agent_sdk.Error.IdleDetected { consecutive_idle_turns } ->
@@ -184,6 +164,8 @@ let sdk_config_error_fields = function
     ; "field", `String field
     ; "detail", `String detail
     ]
+  | Agent_sdk.Error.SensitiveValueInConfig { detail } ->
+    [ "variant", `String "sensitive_value_in_config"; "detail", `String detail ]
 ;;
 
 let sdk_serialization_error_fields = function

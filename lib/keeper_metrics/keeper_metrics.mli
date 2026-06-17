@@ -98,7 +98,6 @@ type t =
   | OllamaSaturationSkip
   | TaskLoadFailures
   | ToolSelectionFailures
-  | ToolPolicyFailures
   | ReconcileFailures
   | DecisionAuditFlushFailures
   | OasCancel
@@ -187,6 +186,8 @@ type t =
   | StaleBroadcastEmitFailures
   | OasRunTimeout
   | RuntimeSaturationSignal
+  | RuntimeSelected
+  | RuntimeRotation
   | ToolUseFailure
   | ToolNotAllowed
   | TurnGateRejectedTerminal
@@ -196,6 +197,7 @@ type t =
   | DockerRuntimeDiscarded
   | ProactiveSkip
   | NoProgressLoopDetected
+  | NoProgressStreak
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures

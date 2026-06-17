@@ -73,6 +73,7 @@ const PHASE_LABEL_KO: Record<string, string> = {
   crashed: '비정상 종료',
   dead: '종료됨',
   zombie: '응답 없음',
+  idle: '유휴',
   unknown: '알 수 없음',
 }
 

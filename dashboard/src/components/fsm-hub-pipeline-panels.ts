@@ -90,7 +90,7 @@ export function OperationalMeaningPanel({
 
   return html`
     <div
-      class=${`rounded-[var(--r-1)] border p-4 transition-colors duration-[var(--t-slow)] ${panelCls}`}
+      class=${`v2-monitoring-card rounded-[var(--r-1)] border p-4 transition-colors duration-[var(--t-slow)] ${panelCls}`}
       role=${isAlarm ? 'alert' : undefined}
       aria-live=${isAlarm ? 'polite' : undefined}
     >
@@ -136,7 +136,7 @@ export function OperationalMeaningPanel({
         : html`
           <div class="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             ${visibleLanes.map(lane => html`
-              <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+              <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${lane.field}</span>
                   <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
@@ -310,7 +310,7 @@ export function HeroPhase({
   ].filter(Boolean).join(', ')
 
   return html`
-    <div class=${`rounded-[var(--r-1)] border p-5 transition-[background-color,border-color,box-shadow] duration-[var(--t-xslow)] ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}
+    <div class=${`v2-monitoring-card rounded-[var(--r-1)] border p-5 transition-[background-color,border-color,box-shadow] duration-[var(--t-xslow)] ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}
       role="status" aria-live="polite" aria-label=${ariaLabel}
       title=${title}
     >
@@ -400,10 +400,10 @@ export function PipelineStep({
   })()
 
   return html`
-    <div class="flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${limited ? ' (관찰 제한)' : ''}${heldFor ? `, ${heldFor}` : ''}`}
+    <div class="v2-monitoring-row flex items-center gap-0 flex-1 min-w-0" role="listitem" aria-label=${`${label}: ${displayState(value)}${limited ? ' (관찰 제한)' : ''}${heldFor ? `, ${heldFor}` : ''}`}
       title=${`${label} (${shortLabel}): ${value} → ${displayState(value)}${heldFor ? ` · ${heldFor}` : ''}${limited ? '\n⚠ 관찰 제한: 일부 상태만 registry에서 파생 가능 (#7122)' : ''}\n${STATE_DESCRIPTIONS[value] ?? ''}`}
     >
-      <div class=${`flex-1 rounded-[var(--r-1)] border px-3 py-2 transition-[background-color,border-color,opacity] duration-[var(--t-xslow)] ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
+      <div class=${`v2-monitoring-card flex-1 rounded-[var(--r-1)] border px-3 py-2 transition-[background-color,border-color,opacity] duration-[var(--t-xslow)] ${borderCls} ${bgCls} ${limited && !isActive ? 'opacity-60' : ''}`}>
         <div class="flex items-center justify-between gap-1.5">
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}
@@ -435,7 +435,7 @@ export function TurnPipelineStrip({
   // nowSecondsSignal independently, so this component itself never reads
   // the signal and is not re-rendered by 5 s ticks.
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         턴 파이프라인
       </div>

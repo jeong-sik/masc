@@ -56,7 +56,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
   const searchQuery = getTraceSearchQuery(agentName)
 
   return html`
-    <div class="space-y-2">
+    <div class="v2-monitoring-trace-toolbar space-y-2">
       <!-- Search -->
       <div class="relative">
         <${TextInput}
@@ -73,7 +73,7 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
         ${searchQuery ? html`
           <button
             onClick=${() => setTraceSearchQuery(agentName, '')}
-            class="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] text-base leading-none"
+            class="v2-monitoring-trace-action absolute right-2 top-1/2 -translate-y-1/2 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] text-base leading-none"
           >\u00d7</button>
         ` : null}
       </div>

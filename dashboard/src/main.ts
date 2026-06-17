@@ -2,6 +2,10 @@
 // Mounts the root <App /> component into the DOM
 
 // Foundation styles (load first)
+// Keeper-v2 design-system tokens are loaded earliest so the v2 vocabulary is
+// available to the dashboard token ladder; dashboard-specific tokens loaded
+// below override any name collisions.
+import './styles/ds-theme-tokens.css'
 import './styles/tokens.generated.css'
 import './styles/tokens.css'
 import './styles/variables.css'
@@ -21,9 +25,20 @@ import './styles/center.css'
 import './styles/base.css'
 import './styles/keyframes.css'
 
+/*
+ * EXPERIMENTAL: StyleSeed light theme — opt-in via data-theme='styleseed' on html
+ * These files define a self-contained StyleSeed-inspired token layer. Rules are
+ * scoped to [data-theme="styleseed"] so they have no effect on the default
+ * dark-fantasy / v2 surfaces unless the attribute is explicitly set.
+ */
+import './styles/styleseed-theme.css'
+import './styles/styleseed-base.css'
+
 // Global utilities and layout
 import './styles/global.css'
 import './styles/chat-blocks-v2.css'
+import './styles/surfaces-v2.css'
+import './styles/cockpit-v2.css'
 
 // Component-specific styles
 import './styles/ui.css'
@@ -36,7 +51,36 @@ import './styles/ops.css'
 import './styles/tools.css'
 import './styles/provider-matrix.css'
 import './styles/paper-theme.css'
+
+// StyleSeed design-system theme — default light palette.
+import './styles/styleseed-theme.css'
+
 import './styles/keeper-workspace.css'
+import './styles/copilot-dock.css'
+import './styles/keeper-turn-inspector.css'
+import './styles/ide-v2.css'
+import './styles/work-v2.css'
+import './styles/design-canvas.css'
+import './styles/states.css'
+import './styles/connectors-v2.css'
+import './styles/telemetry-v2.css'
+import './styles/craft-v2.css'
+import './styles/states.css'
+
+/*
+ * EXPERIMENTAL: keeper-v2 DS UI kits — may conflict with existing v2-* styles; enable after review
+ * import './styles/ds-ui-kits.css'
+ */
+
+// Keeper-v2 surface stylesheets are auto-imported by filename convention:
+// every dashboard/src/styles/*-v2.css is injected here at build time. A new v2
+// surface adds only its own stylesheet file — it must NOT add a per-surface
+// import line to main.ts. Per-surface import edits all landed in this one block
+// and serialized into repeated merge conflicts across parallel surface PRs;
+// the glob removes that shared anchor. Ordering note: all *-v2.css load at this
+// point (after variables.css and dashboard.css), preserving the cases where a
+// v2 rule overrides its v1 counterpart (.gd-board, .mg-board, .ide-plane-shell).
+import.meta.glob('./styles/*-v2.css', { eager: true })
 
 import { render } from 'preact'
 import { html } from 'htm/preact'
@@ -47,13 +91,15 @@ import { startNavTelemetry } from './lib/nav-telemetry'
 import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from './lib/theme'
 
 function normalizeTheme(raw: string | null): ThemeId {
-  if (raw === 'paper' || raw === 'light') {
+  if (raw === 'styleseed' || raw === 'light') {
+    return 'styleseed'
+  }
+  if (raw === 'paper') {
     return 'paper'
   }
   // Preserve compatibility with existing callers that may send dark-themed values
-  // while keeping the default dashboard branch at the non-paper
-  // baseline (`dark-fantasy` in the generated token stack).
-  if (raw === 'dark' || raw === 'dark-fantasy' || raw === null || raw === '') {
+  // while treating explicit dark values as an opt-out to the legacy palette.
+  if (raw === 'dark' || raw === 'dark-fantasy') {
     return null
   }
   return null
@@ -61,7 +107,7 @@ function normalizeTheme(raw: string | null): ThemeId {
 
 function persistTheme(theme: ThemeId): void {
   try {
-    if (theme === 'paper') {
+    if (theme === 'styleseed' || theme === 'paper') {
       THEME_STORAGE_KEYS.forEach((key) => localStorage.setItem(key, theme))
     } else {
       THEME_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key))
@@ -82,11 +128,13 @@ function resolveTheme(): ThemeId {
       if (stored) return normalizeTheme(stored)
     }
   } catch { /* access denied */ }
-  return null
+  return 'styleseed'
 }
 
 function applyTheme(theme: ThemeId): void {
-  if (theme === 'paper') {
+  if (theme === 'styleseed') {
+    document.documentElement.dataset.theme = 'styleseed'
+  } else if (theme === 'paper') {
     document.documentElement.dataset.theme = 'paper'
   } else {
     delete document.documentElement.dataset.theme

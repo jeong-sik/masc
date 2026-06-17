@@ -75,7 +75,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const totalLine = miniSparkline(promptTotals)
 
   return html`
-    <div class="mb-5">
+    <div class="mb-5 v2-monitoring-panel">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">프롬프트 핑거프린트</span>
         <${MutedSpan}>${promptPoints.length}개 스냅샷</${MutedSpan}>
@@ -86,7 +86,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             </span>`
           : null}
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-3 v2-monitoring-row">
         <${DetailCard} class="md:col-span-2">
           <${DetailRow}>
             <${Eyebrow}>estimated prompt tokens</${Eyebrow}>
@@ -131,7 +131,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
       </div>
 
       ${latestSegments.length > 0 ? html`
-        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 v2-monitoring-row">
           ${latestSegments.map(([segmentKey, segment]) => html`
             <${DetailCard}>
               <div class="flex items-center justify-between gap-2 mb-2">
@@ -142,11 +142,11 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
                 </span>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-card">
                   <${Eyebrow} tone="disabled">tokens</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(segment.estimated_tokens)}</div>
                 </div>
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-card">
                   <${Eyebrow} tone="disabled">bytes</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-fg-secondary)]">${segment.bytes.toLocaleString()}</div>
                 </div>
@@ -228,7 +228,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
   const providerHealth = keeper.provider_health
 
   return html`
-    <div class="mb-5">
+    <div class="mb-5 v2-monitoring-panel">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">추론 텔레메트리</span>
         <${MutedSpan}>${telemetryPoints.length}개 지점</${MutedSpan}>
@@ -240,7 +240,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
           </span>
         ` : null}
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-7 gap-3">
+      <div class="grid grid-cols-2 md:grid-cols-7 gap-3 v2-monitoring-row">
         ${wallTokPerSec.length > 0 ? html`
         <${DetailCard}>
           <${DetailRow}>

@@ -641,54 +641,6 @@ let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
 
-let credential_archived_starvation_total () =
-  int_of_float
-    (Lib.Otel_metric_store.metric_total
-       Lib.Otel_metric_store.metric_config_credential_archived_starvation)
-
-let record_test_credential_archive () =
-  let keeper_name =
-    Printf.sprintf "goal-loop-monitor-%d-%d"
-      (Unix.getpid ())
-      (Random.bits ())
-  in
-  Lib.Otel_metric_store.inc_counter
-    Lib.Otel_metric_store.metric_config_credential_archived_starvation
-    ~labels:[("keeper", keeper_name)]
-    ()
-
-let test_credential_monitoring_json_surfaces_archive_counter () =
-  let before = credential_archived_starvation_total () in
-  record_test_credential_archive ();
-  let json = Dashboard_http_monitoring.credential_monitoring_json () in
-  let open Yojson.Safe.Util in
-  check int "credential archive total"
-    (before + 1)
-    (json |> member "credential_archived_starvation_total" |> to_int);
-  check string "metric name"
-    Lib.Otel_metric_store.metric_config_credential_archived_starvation
-    (json |> member "metric_name" |> to_string);
-  check string "alert level" "bad"
-    (json |> member "alert_level" |> to_string);
-  check bool "needs attention" true
-    (json |> member "needs_attention" |> to_bool)
-
-let test_dashboard_batch_json_includes_credential_monitoring () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
-  let before = credential_archived_starvation_total () in
-  record_test_credential_archive ();
-  let json = Server_dashboard_http_core.dashboard_batch_json config in
-  let open Yojson.Safe.Util in
-  let credentials =
-    json |> member "status" |> member "monitoring" |> member "credentials"
-  in
-  check int "batch credential archive total"
-    (before + 1)
-    (credentials |> member "credential_archived_starvation_total" |> to_int);
-  check string "batch credential alert" "bad"
-    (credentials |> member "alert_level" |> to_string)
-
 let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let cfg =
@@ -1253,10 +1205,6 @@ let () =
             test_dashboard_proof_route_registered_in_http_routers;
           test_case "planning payload keeps UTF-8 valid after truncation" `Quick
             test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation;
-          test_case "credential monitoring surfaces archive counter" `Quick
-            test_credential_monitoring_json_surfaces_archive_counter;
-          test_case "batch payload includes credential monitoring" `Quick
-            test_dashboard_batch_json_includes_credential_monitoring;
           test_case "shell auth canonicalizes token owner" `Quick
             test_dashboard_shell_auth_json_canonicalizes_token_owner;
           test_case "shell auth reports missing token" `Quick

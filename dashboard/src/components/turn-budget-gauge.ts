@@ -92,7 +92,7 @@ function KeeperBudgetGaugeRow({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div
-      class="flex items-center gap-3 py-1.5 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      class="v2-monitoring-row flex items-center gap-3 py-1.5 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       role="listitem"
       aria-label="${keeper.name} 재시작 예산 ${state.used}/${state.max}"
     >
@@ -143,14 +143,14 @@ export function TurnBudgetGaugePanel({ keepers }: { keepers: Keeper[] }) {
 
   if (withBudget.length === 0) {
     return html`
-      <div class="text-xs text-[var(--color-fg-muted)] py-3 text-center">
+      <div class="v2-monitoring-row text-xs text-[var(--color-fg-muted)] py-3 text-center">
         재시작 예산 데이터 없음 — supervisor diagnostics가 활성화될 때 표시됩니다.
       </div>
     `
   }
 
   return html`
-    <div class="flex flex-col gap-1.5" role="list" aria-label="키퍼별 재시작 예산 게이지">
+    <div class="v2-monitoring-panel flex flex-col gap-1.5" role="list" aria-label="키퍼별 재시작 예산 게이지">
       ${withBudget.map(k => html`<${KeeperBudgetGaugeRow} keeper=${k} key=${k.name} />`)}
     </div>
   `

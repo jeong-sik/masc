@@ -360,3 +360,14 @@ end
 module Workspace_git : sig
   val local_op_timeout_sec : float
 end
+
+(** {1 Shell IR approval policy gate (RFC v5)} *)
+
+module Shell_ir_approval_gate : sig
+  val enabled : unit -> bool
+  (** [enabled ()] is true when [MASC_SHELL_IR_APPROVAL_GATE_ENABLED] is set.
+      Routes Execute tool calls through the capability-based approval policy
+      gate so safe commands can be auto-allowed while audited/privileged
+      operations require explicit approval. Default: [true] (the autonomous
+      policy is a strict safety improvement over the no-gate path). *)
+end

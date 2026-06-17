@@ -58,7 +58,7 @@ export function WidgetSoloBar({ routeState }: { routeState: RouteState }) {
 
   return html`
     <div
-      class="flex h-9 shrink-0 items-center gap-3 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 font-mono text-xs text-[var(--color-fg-muted)]"
+      class="v2-shell-panel flex h-9 shrink-0 items-center gap-3 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 font-mono text-xs text-[var(--color-fg-muted)]"
       data-testid="dashboard-widget-solo-bar"
     >
       <span class="size-2 shrink-0 rounded-full bg-[var(--brass-1)] shadow-[0_0_8px_rgb(var(--accent-glow)/0.5)]" aria-hidden="true"></span>
@@ -68,7 +68,7 @@ export function WidgetSoloBar({ routeState }: { routeState: RouteState }) {
       <${RouteLink}
         tab=${routeState.tab}
         params=${withoutWidgetSoloParam(routeState.params)}
-        class=${`inline-flex h-6 shrink-0 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 text-3xs uppercase text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+        class=${`v2-shell-action inline-flex h-6 shrink-0 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 text-3xs uppercase text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         aria-label="Return to full dashboard"
       >
         Full dashboard

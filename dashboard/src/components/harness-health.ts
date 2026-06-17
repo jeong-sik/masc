@@ -40,25 +40,28 @@ import {
 // Mermaid classDef requires literal hex values — CSS vars are not resolved.
 // These constants map to design system token values for single-source truth.
 
-const M_SOURCE_FILL = '#0f172a'     // --color-bg-3 (navy approx)
-const M_SOURCE_STROKE = '#475569'   // --color-line-2
-const M_SOURCE_TEXT = '#cbd5e1'     // --color-frost-100
-const M_HUB_FILL = '#111827'        // --color-bg-surface
-const M_HUB_STROKE = '#38bdf8'      // --color-cyan
-const M_HUB_TEXT = '#e0f2fe'        // --color-frost-100
-const M_HEALTHY_FILL = '#082f1d'
-const M_HEALTHY_STROKE = '#4ade80'
-const M_HEALTHY_TEXT = '#dcfce7'
-const M_WARN_FILL = '#3b2a07'
-const M_WARN_STROKE = '#fbbf24'
-const M_WARN_TEXT = '#fde68a'
-const M_STALE_FILL = '#1f2937'
-const M_STALE_STROKE = '#94a3b8'    // --color-fg-4
-const M_STALE_TEXT = '#e2e8f0'      // --color-frost-100
-const M_IDLE_FILL = '#111827'       // --color-bg-surface
-const M_IDLE_STROKE = '#475569'     // --color-line-2
-const M_IDLE_TEXT = '#94a3b8'       // --color-fg-4
-const M_ACTIVE_STROKE = '#7dd3fc'
+/* Mermaid classDef colors cannot reference CSS vars, so the dark-fantasy
+   palette is mirrored here as literals (dashboard is dark-only). Keep these
+   in sync with the _ds Dark-Fantasy tokens noted per line. */
+const M_SOURCE_FILL = '#221815'     // --color-bg-3 (bruised meat)
+const M_SOURCE_STROKE = '#5a3028'   // --color-line-2 (scab)
+const M_SOURCE_TEXT = '#b8a488'     // --color-fg-2 (bandage)
+const M_HUB_FILL = '#14100d'        // --color-bg-surface (rotted wood)
+const M_HUB_STROKE = '#c4a265'      // brass accent (central hub)
+const M_HUB_TEXT = '#e8d8b8'        // --color-fg-1 (bone)
+const M_HEALTHY_FILL = '#16210f'    // bile-green bg
+const M_HEALTHY_STROKE = '#5a7a3a'  // --status-ok (bile)
+const M_HEALTHY_TEXT = '#9abc7a'    // --ok-fg
+const M_WARN_FILL = '#2a1d08'       // ember bg
+const M_WARN_STROKE = '#a06a1a'     // --status-warn (ember)
+const M_WARN_TEXT = '#d49a3a'       // --warn-fg
+const M_STALE_FILL = '#1b1612'      // --color-bg-2
+const M_STALE_STROKE = '#6a5848'    // --color-fg-3 (mold dust)
+const M_STALE_TEXT = '#b8a488'      // --color-fg-2
+const M_IDLE_FILL = '#14100d'       // --color-bg-surface
+const M_IDLE_STROKE = '#5a3028'     // --color-line-2
+const M_IDLE_TEXT = '#6a5848'       // --color-fg-3
+const M_ACTIVE_STROKE = '#c4a265'   // brass accent (active highlight)
 
 type HarnessRailKey = 'evaluator' | 'pre_compact' | 'handoff'
 

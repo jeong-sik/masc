@@ -1,0 +1,407 @@
+/* MASC Dashboard — Work surface v2 (keeper-v2 goal/job layout).
+ *
+ * Ported from keeper-v2/styles/v2.css .wk-* rules. The design's raw
+ * palette vars (--bg-deep, --volt, --text-mid …) are bridged through
+ * variables.css aliases so the layout inherits dashboard theme changes.
+ */
+
+/* ── Surface shell ────────────────────────────────────────────────────────── */
+.wk-surface {
+  /* Work-v2 surface token bridge — scoped so the v2 skin tokens do not
+     clobber dashboard-wide semantic tokens in :root. */
+  --bg-panel: var(--color-bg-panel-alt);
+  --border-highlight: var(--border-strong);
+  --text-dim: var(--text-muted);
+  --pad-surface: 18px;
+  --pad-card: 14px;
+  --gap-card: 12px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-pill: 999px;
+  --font-display: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --font-ui: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* Background now comes from the .ss-surface / bg-surface-page utility. */
+}
+
+.wk-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--pad-surface, 18px);
+}
+
+.wk-inner {
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.wk-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.wk-head h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 22px;
+  color: var(--text-bright);
+  margin: 0;
+}
+
+.wk-sub {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.wk-sub .mono {
+  color: var(--text-mid);
+}
+
+.wk-blk-n {
+  color: var(--status-bad);
+}
+
+/* ── KPI strip ────────────────────────────────────────────────────────────── */
+.wk-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border-soft);
+  overflow: hidden;
+  /* Border/radius/shadow are provided by the .ss-card utility. */
+}
+
+.wk-kpi {
+  background: var(--bg-panel);
+  padding: 13px 15px;
+}
+
+.wk-kpi-k {
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.wk-kpi-v {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 23px;
+  color: var(--text-bright);
+  margin-top: 5px;
+}
+
+.wk-kpi-v.ok { color: var(--status-ok); }
+.wk-kpi-v.bad { color: var(--status-bad); }
+.wk-kpi-v.warn { color: var(--status-warn); }
+.wk-kpi-v.volt { color: var(--volt-strong); }
+
+/* ── Goal list ────────────────────────────────────────────────────────────── */
+.wk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.wk-goal {
+  /* Background/border/radius/shadow are provided by the .ss-card utility. */
+  overflow: hidden;
+}
+
+.wk-goal.has-block {
+  border-color: color-mix(in oklab, var(--status-bad) 32%, var(--border-main));
+}
+
+.wk-goal-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 15px 11px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+
+.wk-goal-h:hover {
+  background: color-mix(in oklab, var(--volt) 3%, transparent);
+}
+
+.wk-caret {
+  flex: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  width: 12px;
+}
+
+.wk-pri {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+}
+
+.wk-pri.high {
+  color: var(--status-bad);
+  border-color: color-mix(in oklab, var(--status-bad) 40%, transparent);
+  background: color-mix(in oklab, var(--status-bad) 10%, transparent);
+}
+
+.wk-pri.normal {
+  color: var(--volt-strong);
+  border-color: color-mix(in oklab, var(--volt) 32%, transparent);
+}
+
+.wk-pri.low {
+  color: var(--text-dim);
+}
+
+.wk-goal-id {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.wk-goal-title {
+  font-family: var(--font-ui);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.wk-goal-ns {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-mid);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+}
+
+.wk-spacer {
+  flex: 1;
+}
+
+.wk-due {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+.wk-lead {
+  flex: none;
+  display: inline-flex;
+}
+
+.wk-goal-sub {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 15px 13px 37px;
+}
+
+/* ── Segmented progress bar ───────────────────────────────────────────────── */
+.wk-prog {
+  flex: none;
+  width: 300px;
+  max-width: 42%;
+  height: 6px;
+  display: flex;
+  gap: 1.5px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.wk-seg {
+  height: 100%;
+}
+
+.wk-seg.done { background: var(--status-ok); }
+.wk-seg.wip { background: var(--volt); }
+.wk-seg.blocked { background: var(--status-bad); }
+
+.wk-prog-lbl {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-mid);
+  font-family: var(--font-mono);
+}
+
+.wk-metric {
+  margin-left: auto;
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+/* ── Job list ─────────────────────────────────────────────────────────────── */
+.wk-jobs {
+  border-top: 1px solid var(--border-soft);
+  padding: 10px 15px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wk-note {
+  font-size: 12px;
+  color: var(--text-mid);
+  line-height: 1.5;
+  padding: 2px 0 9px;
+  border-bottom: 1px dashed var(--border-soft);
+  margin-bottom: 7px;
+}
+
+.wk-job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: var(--radius-xs);
+}
+
+.wk-job:hover {
+  background: var(--bg-sunken);
+}
+
+.wk-job-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.wk-job-dot.done { background: var(--status-ok); }
+.wk-job-dot.wip { background: var(--volt); }
+.wk-job-dot.review { background: var(--status-warn); }
+.wk-job-dot.blocked { background: var(--status-bad); }
+
+.wk-job-id {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 52px;
+  font-family: var(--font-mono);
+}
+
+.wk-job-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.wk-job.done .wk-job-title {
+  color: var(--text-mid);
+}
+
+.wk-job-block {
+  font-size: 11px;
+  color: var(--status-bad);
+}
+
+.wk-job-state {
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.wk-job-state.done { color: var(--status-ok); }
+.wk-job-state.wip { color: var(--volt-strong); }
+.wk-job-state.review { color: var(--status-warn); }
+.wk-job-state.blocked { color: var(--status-bad); }
+
+.wk-job-kp {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 130px;
+  padding: 3px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  background: none;
+  cursor: pointer;
+  color: var(--text-mid);
+  font-size: 11.5px;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, color 0.15s ease;
+  font: inherit;
+}
+
+.wk-job-kp:hover {
+  border-color: var(--border-highlight);
+  color: var(--text-bright);
+}
+
+.wk-job-kp.none {
+  color: var(--text-dim);
+  cursor: default;
+}
+
+/* ── Footer / new goal button ─────────────────────────────────────────────── */
+.wk-newgoal {
+  width: auto;
+  margin: 0;
+  flex: none;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.wk-foot {
+  margin: 16px 2px 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .wk-kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .wk-goal-h {
+    flex-wrap: wrap;
+  }
+
+  .wk-goal-sub {
+    flex-wrap: wrap;
+  }
+
+  .wk-prog {
+    width: 100%;
+    max-width: none;
+  }
+}

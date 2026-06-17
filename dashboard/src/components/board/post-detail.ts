@@ -464,21 +464,21 @@ function CommentRouteFocusPanel({
     >
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+          <div class="font-mono text-2xs font-bold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
             ROUTE FOCUS
           </div>
           <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
-            <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+            <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-accent-fg)]">
               COMMENT ${commentId}
             </span>
-            <span class="font-mono text-3xs text-[var(--color-fg-muted)]">
+            <span class="font-mono text-2xs text-[var(--color-fg-secondary)]">
               ${comment ? `author ${authorLabel}` : 'comment not loaded'}
             </span>
           </div>
         </div>
         <button
           type="button"
-          class="v2-workspace-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="v2-workspace-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
           onClick=${() => clearCommentRouteFocus(postId)}
         >
           CLEAR
@@ -489,7 +489,7 @@ function CommentRouteFocusPanel({
 }
 
 // ── Comment form ───────────────────────────────────────────────────
-function CommentForm({ postId }: { postId: string }) {
+export function CommentForm({ postId }: { postId: string }) {
   return html`
     <div class="mt-4">
       <${RichComposer}
@@ -594,14 +594,14 @@ export function PostDetail({ post }: { post: BoardPost }) {
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
-                    ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
-                    ${post.flair ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
-                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
+                    ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
+                    ${post.flair ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
+                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
                     ${qualityPercent !== null ? html`
                       <span
-                        class=${`inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
+                        class=${`inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
                         aria-label=${qualityTitle}
                         title=${qualityTitle}
                       >품질 ${qualityPercent}</span>
@@ -610,7 +610,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
                     <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
                   </div>
                   ${post.classification_reason
-                    ? html`<div class="text-2xs text-[var(--color-fg-muted)]">분류 근거: ${post.classification_reason}</div>`
+                    ? html`<div class="text-2xs text-[var(--color-fg-secondary)]">분류 근거: ${post.classification_reason}</div>`
                     : null}
                 </div>
               `
@@ -620,11 +620,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
           ${post.meta
             ? html`
                 <details class="mt-1">
-                  <summary class="cursor-pointer text-xs text-[var(--color-fg-muted)] py-1.5 hover:text-[var(--color-fg-primary)] transition-colors">운영 메타</summary>
-                  <div class="mt-2 p-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)]">
-                    ${post.meta.source ? html`<div class="text-xs text-[var(--color-fg-primary)]"><span class="text-[var(--color-fg-muted)]">출처:</span> ${post.meta.source}</div>` : null}
+                  <summary class="cursor-pointer text-xs text-[var(--color-fg-secondary)] py-1.5 hover:text-[var(--color-fg-primary)] transition-colors">운영 메타</summary>
+                  <div class="mt-2 p-3 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-divider)]">
+                    ${post.meta.source ? html`<div class="text-xs text-[var(--color-fg-primary)]"><span class="text-[var(--color-fg-secondary)]">출처:</span> ${post.meta.source}</div>` : null}
                     ${post.meta.state_block
-                      ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--color-fg-muted)] leading-relaxed">${post.meta.state_block}</pre>`
+                      ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--color-fg-secondary)] leading-relaxed">${post.meta.state_block}</pre>`
                       : null}
                   </div>
                 </details>

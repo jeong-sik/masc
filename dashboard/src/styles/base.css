@@ -11,11 +11,40 @@ body {
 html {
   overflow-y: scroll;
   scrollbar-gutter: stable;
+  /* Foundation scrollbar (Firefox/standards). Webkit equivalent below.
+     Consumes the dark-fantasy scrollbar tokens so every scroll container
+     inherits one canonical thumb instead of re-declaring it per surface. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb, var(--line-2)) transparent;
   /* iOS Safari auto-inflates font sizes in landscape / narrow columns;
      pinning to 100% keeps the responsive --font-size-* scale honest on
      mobile so "state at a glance" isn't distorted by the browser. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+/* Canonical webkit scrollbar — foundation default for all scroll
+   containers. Per-surface overrides may still tune width, but the thumb
+   color is token-driven here so the palette stays consistent. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb, var(--line-2));
+  border-radius: var(--radius-pill, 999px);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover, var(--line-3));
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Kill the 300ms double-tap zoom delay on touch targets so taps feel
@@ -27,10 +56,17 @@ a, button, [role="tab"], [role="button"] {
 
 body {
   font-family: var(--font-sans);
-  color: var(--color-fg-secondary);
-  line-height: var(--lh-body);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-body);
+  line-height: 1.55;
+  color: var(--color-fg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background-color: var(--color-bg-page);
+  /* Dark-fantasy ambient: a faint blood bloom top-left and a tarnished
+     brass bloom top-right over the near-black ground. Subtle, not a hero. */
   background-image:
+    radial-gradient(ellipse at 12% 8%, rgb(var(--err-glow) / .05), transparent 42%),
     radial-gradient(circle at 88% 14%, rgb(var(--brass-glow) / .05), transparent 20%);
   background-attachment: fixed;
   position: relative;
@@ -40,6 +76,14 @@ body {
   position: relative;
   min-height: 100vh;
   z-index: 1;
+}
+
+/* Headings carry the engraved display voice (Cinzel). Uppercase/tracking is
+   left to component opt-in so Korean labels are not force-cased. */
+h1, h2, h3, h4, .display {
+  font-family: var(--font-display);
+  color: var(--color-fg-1);
+  letter-spacing: var(--track-caps, 0.08em);
 }
 
 a {

@@ -36,6 +36,7 @@ let field_to_json (field : Agent_sdk.Log.field) : string * Yojson.Safe.t =
   | Agent_sdk.Log.F (k, v) -> (k, `Float v)
   | Agent_sdk.Log.B (k, v) -> (k, `Bool v)
   | Agent_sdk.Log.J (k, v) -> (k, v)
+  | Agent_sdk.Log.Secret (k, _) -> (k, `String "[REDACTED]")
 
 let details_of_fields (fields : Agent_sdk.Log.field list)
     : (string * Yojson.Safe.t) list =

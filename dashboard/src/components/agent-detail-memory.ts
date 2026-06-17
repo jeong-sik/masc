@@ -14,6 +14,9 @@ import { formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { highlightMatch } from '../lib/highlight-match'
 import { TextInput } from './common/input'
+import { MemoryLineageRail } from './memory/memory-lineage-rail'
+import type { MemoryLineageRailProps } from './memory/memory-lineage-rail'
+import type { MemoryNode } from './memory/memory-primitives'
 
 interface Props {
   agentName: string
@@ -62,6 +65,39 @@ function synapseWeightFillClass(weight: number): string {
   if (weight >= 0.7) return 'bg-[var(--ok-10)]'
   if (weight >= 0.4) return 'bg-[var(--warn-10)]'
   return 'bg-[var(--bad-10)]'
+}
+
+const LINEAGE_NODE_TYPES: MemoryLineageRailProps['nodeTypes'] = {
+  memory: { kr: '기억', g: '◆', c: 'var(--volt)' },
+}
+
+function formatEpisodeTime(timestamp: number): string {
+  const d = new Date(timestamp * 1000)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+function buildEpisodeLineage(
+  episodes: readonly MemorySubsystemsEpisode[],
+  fallbackKp: string,
+): { steps: MemoryLineageRailProps['steps']; nodes: Record<string, MemoryNode> } {
+  const sorted = [...episodes].sort((a, b) => a.timestamp - b.timestamp)
+  const steps: MemoryLineageRailProps['steps'] = sorted.map((ep, i) => ({
+    id: ep.id,
+    t: formatEpisodeTime(ep.timestamp),
+    rel: ep.event_type,
+    anchor: i === sorted.length - 1,
+  }))
+  const nodes: Record<string, MemoryNode> = {}
+  for (const ep of sorted) {
+    nodes[ep.id] = {
+      type: 'memory',
+      title: ep.summary,
+      kp: ep.participants[0] ?? fallbackKp,
+      meta: ep.outcome,
+      ns: ep.event_type,
+    }
+  }
+  return { steps, nodes }
 }
 
 function SynapseWeightBar({ weight }: { weight: number }) {
@@ -230,16 +266,16 @@ export function AgentDetailMemory({ agentName }: Props) {
                               ? 'text-[var(--color-status-warn)]'
                               : 'text-[var(--bad-light)]'
                         return html`
-                          <div class="v2-monitoring-row border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-xs">
+                          <div class="v2-monitoring-row border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2.5 py-2 text-xs bg-[var(--color-bg-elevated)] hover:bg-[var(--color-bg-hover)] transition-colors">
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
-                                <span class="truncate text-[var(--color-fg-muted)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
+                                <span class="truncate text-[var(--color-fg-primary)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
-                              <span class="text-3xs text-[var(--color-fg-muted)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+                              <span class="text-2xs text-[var(--color-fg-secondary)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
-                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--color-border-default)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
+                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-secondary)] pl-3 border-l border-[var(--color-border-default)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
                               : null}
                           </div>
                         `
@@ -248,6 +284,28 @@ export function AgentDetailMemory({ agentName }: Props) {
                 `
           }
         </div>
+
+        <!-- Episode lineage rail -->
+        ${episodes.length > 0
+          ? html`
+              <div>
+                <div class="text-xs text-[var(--color-fg-disabled)] uppercase tracking-wide mb-2">
+                  에피소드 인과 레일
+                </div>
+                ${(() => {
+                  const { steps, nodes } = buildEpisodeLineage(visibleEpisodes, agentName)
+                  return html`
+                    <${MemoryLineageRail}
+                      steps=${steps}
+                      nodes=${nodes}
+                      nodeTypes=${LINEAGE_NODE_TYPES}
+                      ariaLabel="에피소드 인과 추적"
+                    />
+                  `
+                })()}
+              </div>
+            `
+          : null}
       </div>
     <//>
   `

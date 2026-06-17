@@ -228,8 +228,8 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
   // Full tabbed detail (FSM / 진단 / 정체성 / 설정 / 디버그) — the original
   // detail-page layout, preserved verbatim and surfaced behind "상세 보기".
   const detailContent = html`
-    <div class="mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8" data-route-focused-keeper=${keeper.name}>
-      <div class="sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl">
+    <div class="mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8 v2-monitoring-surface" data-route-focused-keeper=${keeper.name}>
+      <div class="sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl v2-monitoring-toolbar">
         <div class="flex flex-col items-stretch justify-between gap-3 px-4 py-2.5 sm:flex-row sm:items-center sm:px-5">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}
@@ -237,23 +237,23 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
             phaseEnteredAtSec=${phaseEnteredAtSec}
             onClose=${() => setDetailOpen(false)}
           />
-          <div class="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
+          <div class="flex flex-wrap items-center justify-start gap-2 sm:justify-end v2-monitoring-toolbar">
             <button
               type="button"
-              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
+              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)] hover:bg-[var(--bad-soft)] transition-colors v2-monitoring-action"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <button
               type="button"
               disabled=${purgePending}
-              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed v2-monitoring-action"
               onClick=${submitPurgeKeeper}
             >${purgePending ? '삭제 중...' : '완전 삭제'}</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />
             <button
               type="button"
               onClick=${() => closeKeeperDetail()}
-              class=${`flex items-center justify-center size-8 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer text-sm ${CLOSE_BUTTON_FOCUS_CLASS}`}
+              class=${`flex items-center justify-center size-8 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer text-sm ${CLOSE_BUTTON_FOCUS_CLASS} v2-monitoring-action`}
               aria-label="키퍼 상세 종료"
             >
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/></svg>
@@ -288,22 +288,22 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
   `
 
   return html`
-    <div class="kw-grid" data-detail=${detailOpen ? 'open' : 'closed'} data-route-focused-keeper=${keeper.name}>
+    <div class="kw-grid v2-monitoring-surface" data-detail=${detailOpen ? 'open' : 'closed'} data-route-focused-keeper=${keeper.name}>
       <${KeeperWorkspaceRoster} activeName=${keeper.name} />
       ${detailOpen
         ? html`
-            <div class="kw-detail">
-              <div class="kw-detail-head">
-                <button type="button" class="kw-act" onClick=${() => setDetailOpen(false)}>← 대화로</button>
+            <div class="kw-detail v2-monitoring-panel">
+              <div class="kw-detail-head v2-monitoring-toolbar">
+                <button type="button" class="kw-act v2-monitoring-action" onClick=${() => setDetailOpen(false)}>← 대화로</button>
                 <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">${keeper.name} · 상세</strong>
                 <span class="flex-1"></span>
                 <button
                   type="button"
-                  class=${`kw-act ${CLOSE_BUTTON_FOCUS_CLASS}`}
+                  class=${`kw-act ${CLOSE_BUTTON_FOCUS_CLASS} v2-monitoring-action`}
                   onClick=${() => closeKeeperDetail()}
                 >← Keepers</button>
               </div>
-              <div class="kw-detail-scroll">${detailContent}</div>
+              <div class="kw-detail-scroll v2-monitoring-panel">${detailContent}</div>
             </div>
           `
         : html`

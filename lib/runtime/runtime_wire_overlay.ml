@@ -93,9 +93,9 @@ let register_capability_overlay_provider
     ; resolve =
         (fun provider ->
            let api_key =
-             match String.trim provider_cfg.api_key with
-             | "" -> api_key_from_env provider.Agent_sdk.Provider.api_key_env
-             | value -> value
+             if Llm_provider.Secret.is_empty provider_cfg.api_key
+             then api_key_from_env provider.Agent_sdk.Provider.api_key_env
+             else Llm_provider.Secret.header_value provider_cfg.api_key
            in
            Ok
              ( provider_cfg.base_url
@@ -133,12 +133,12 @@ let apply
              (String.equal
                 provider_cfg.request_path
                 Masc_network_defaults.openai_chat_completions_path) ->
-      let api_key_trimmed = String.trim provider_cfg.api_key in
+      let api_key_value = Llm_provider.Secret.header_value provider_cfg.api_key in
       let auth_header =
-        if String.equal api_key_trimmed "" then None else Some auth_header_authorization
+        if String.equal api_key_value "" then None else Some auth_header_authorization
       in
       let static_token =
-        if String.equal api_key_trimmed "" then None else Some api_key_trimmed
+        if String.equal api_key_value "" then None else Some api_key_value
       in
       { provider with
         provider =

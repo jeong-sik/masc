@@ -9,17 +9,17 @@ const spawnMode = signal<SpawnMode>('persona')
 
 export function KeeperSpawnPanel() {
   if (!showSpawnPanel.value) {
-    return html`<div class="mb-4">
+    return html`<div class="mb-4 v2-monitoring-surface">
       <${ActionButton} variant="primary" size="md" onClick=${() => { showSpawnPanel.value = true }}>+ 키퍼 생성<//>
     </div>`
   }
   return html`
-    <div class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
-      <div class="flex items-center justify-between mb-3">
+    <div class="mb-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 v2-monitoring-panel">
+      <div class="flex items-center justify-between mb-3 v2-monitoring-toolbar">
         <h3 class="text-sm text-[var(--color-fg-secondary)] font-medium">키퍼 생성</h3>
         <${ActionButton} variant="subtle" size="sm" onClick=${() => { showSpawnPanel.value = false }}>닫기<//>
       </div>
-      <div class="flex gap-2 mb-3">
+      <div class="flex gap-2 mb-3 v2-monitoring-toolbar">
         <${ActionButton} variant=${spawnMode.value === 'persona' ? 'primary' : 'ghost'} size="sm"
           onClick=${() => { spawnMode.value = 'persona' }}>페르소나에서 생성<//>
         <${ActionButton} variant=${spawnMode.value === 'direct' ? 'primary' : 'ghost'} size="sm"

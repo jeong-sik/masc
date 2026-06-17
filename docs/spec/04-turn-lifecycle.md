@@ -445,7 +445,7 @@ MASC keeper hot path는 단일 provider run만 사용하며(`oas_dispatch_mode =
 
 | ID | Question | Related code | Status |
 |----|----------|--------------|--------|
-| OQ-TURN-001 | `Cancelled_*` cancel reason이 run_turn 내부에서 `safe_emit_turn_end` catch-all로 소비되는 부분을 `Switch.on_release`로 명시적으로 FSM에 연결할 것인가? | `lib/keeper/keeper_agent_run.ml:148` | Open (RISKY) |
+| OQ-TURN-001 | `Cancelled_*` cancel reason이 run_turn 내부에서 `safe_emit_turn_end` catch-all로 소비되는 부분을 `Switch.on_release`로 명시적으로 FSM에 연결할 것인가? | `lib/keeper/keeper_agent_run.ml:178` | Partially addressed — observation `phase` now preserves cancellation terminal state through the finally block; full typed FSM `Cancelled _` transition routing remains open. |
 | OQ-TURN-002 | `Awaiting_provider → Streaming` 및 `Streaming ⇄ Awaiting_tool_result` transition을 run_turn 내부에서 emit할 것인가? | `lib/keeper/keeper_agent_run.ml` | Open |
 | OQ-TURN-003 | Direct message path도 FSM transition을 emit할 것인가? 현재는 autonomous path 위주로 기록된다. | `lib/keeper/keeper_turn.ml` | Open |
 

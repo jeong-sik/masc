@@ -40,7 +40,8 @@ export function FlowControlPanel() {
     ? 'OAS runtime'
     : admission?.throttle_owner ?? 'unknown'
   return html`
-    <${SurfaceCard} variant="compact" class="mb-4">
+    <div class="v2-command-surface flex flex-col gap-4">
+      <${SurfaceCard} variant="compact" class="v2-command-panel mb-4">
       <div class="flex items-center gap-3 mb-3">
         <h3 class="text-sm text-[var(--color-fg-secondary)] font-medium">Flow Control</h3>
         <${CountBadge} tone=${stateTone(state)}>${stateLabel(state)}<//>
@@ -66,7 +67,7 @@ export function FlowControlPanel() {
     <//>
 
     ${'' /* ── Maintenance ── */}
-    <${SurfaceCard} variant="compact">
+    <${SurfaceCard} variant="compact" class="v2-command-panel">
       <details>
         <summary class="cursor-pointer text-sm text-[var(--color-fg-secondary)] font-medium select-none py-1">Maintenance</summary>
         <div class="mt-3 flex flex-wrap gap-2">
@@ -88,5 +89,6 @@ export function FlowControlPanel() {
         ` : null}
       </details>
     <//>
+    </div>
   `
 }

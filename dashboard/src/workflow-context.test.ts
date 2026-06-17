@@ -187,7 +187,7 @@ describe('workflowInterveneParams', () => {
 
 describe('missionInterveneParams', () => {
   it('delegates to workflowInterveneParams', () => {
-    const ctx = makeContext({ target_type: 'agent', target_id: 'dreamer' })
+    const ctx = makeContext({ target_type: 'agent', target_id: 'alice' })
     expect(missionInterveneParams(ctx)).toEqual(workflowInterveneParams(ctx))
   })
 })

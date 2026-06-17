@@ -1,0 +1,195 @@
+/* MASC Dashboard — Copilot Dock
+   Global, co-view, streaming mini conversation panel. Toggleable from the
+   top bar, a floating FAB, or ⌘J. Dockable to the right or floating.
+   Uses the v2 token bridge aliases defined in variables.css. */
+
+/* stage wrapper: lets the docked panel push the body */
+.v2-stage { flex: 1; min-height: 0; display: flex; }
+.v2-stage > .v2-body { flex: 1; min-width: 0; }
+
+/* ── shell ── */
+.dock {
+  display: flex; flex-direction: column; min-height: 0;
+  background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 72%);
+  color: var(--text-primary);
+}
+.dock.docked {
+  width: var(--dock-w, 372px); flex: none;
+  border-left: 1px solid var(--border-main);
+}
+.dock.float {
+  position: fixed; z-index: 60;
+  width: 384px; height: min(78vh, 600px);
+  border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+/* ── header ── */
+.dock-head {
+  flex: none; display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border-main); background: var(--bg-panel);
+}
+.dock-head.drag { cursor: grab; user-select: none; }
+.dock-head.drag:active { cursor: grabbing; }
+.dock-title {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-family: var(--font-display); font-weight: 600; font-size: 13px;
+  letter-spacing: 0.02em; color: var(--text-bright);
+}
+.dock-spark { width: 16px; height: 16px; color: var(--volt-strong); }
+.dock-head .spacer { flex: 1; }
+.dock-iconbtn {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); border: 1px solid transparent; background: transparent;
+  color: var(--text-dim); cursor: pointer; transition: 0.14s; font-size: 13px;
+}
+.dock-iconbtn:hover { color: var(--text-bright); background: var(--bg-card); }
+
+/* ── identity row (keeper picker) ── */
+.dock-idrow { flex: none; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4) 0; }
+.dock-picker { position: relative; flex: none; }
+.dock-picker-btn {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 3px 9px 3px 3px; border-radius: var(--radius-pill);
+  border: 1px solid var(--border-main); background: var(--bg-card); cursor: pointer; transition: 0.14s;
+}
+.dock-picker-btn:hover { border-color: var(--border-highlight); }
+.dock-picker-btn .nm { font-size: 11.5px; color: var(--text-bright); font-weight: 600; white-space: nowrap; }
+.dock-picker-btn .cv { color: var(--text-dim); font-size: 9px; }
+.dock-idrow-hint { font-size: 10.5px; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-idrow-hint .mono { font-family: var(--font-mono); color: var(--text-mid); }
+
+.dock-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; width: 256px; max-height: 318px; overflow-y: auto;
+  background: var(--bg-panel); border: 1px solid var(--border-highlight);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-pop); z-index: 8; padding: 5px;
+}
+.dock-menu-row { display: flex; align-items: center; gap: var(--sp-3); padding: 7px 8px; border-radius: var(--radius-sm); cursor: pointer; transition: 0.12s; }
+.dock-menu-row:hover { background: var(--bg-card); }
+.dock-menu-row.on { background: var(--bg-card); box-shadow: inset 0 0 0 1px var(--volt-wash); }
+.dock-menu-row .minfo { min-width: 0; flex: 1; }
+.dock-menu-row .nm { font-size: 12px; color: var(--text-bright); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-menu-row .nm .h { color: var(--text-dim); font-weight: 400; font-size: 10px; }
+.dock-menu-row .sub { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); margin-top: 2px; }
+
+/* ── co-view context card ── */
+.dock-coview {
+  flex: none; margin: var(--sp-4) var(--sp-4) 0; padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-soft); border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--info) 6%, var(--bg-sunken));
+}
+.dock-coview-h { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.dock-coview-h .lbl { font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--info); font-weight: 600; }
+.dock-coview-h .route { margin-left: auto; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); }
+.dock-coview .scene { font-size: 12.5px; color: var(--text-bright); font-weight: 600; margin-bottom: var(--sp-2); }
+.dock-coview-fields { display: flex; flex-wrap: wrap; gap: 5px; }
+.dock-field {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 10px; padding: 2px 7px;
+  border-radius: var(--radius-pill); border: 1px solid var(--border-main);
+  background: var(--bg-deep); color: var(--text-mid);
+}
+.dock-field .k { color: var(--text-dim); }
+.dock-field.bad .v  { color: var(--status-bad); }
+.dock-field.warn .v { color: var(--status-warn); }
+.dock-field.volt .v { color: var(--volt-strong); }
+.dock-coview .sync { display: flex; align-items: center; gap: 5px; margin-top: var(--sp-2); font-size: 9.5px; color: var(--text-dim); }
+.dock-coview .sync .d { width: 5px; height: 5px; border-radius: 50%; background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); animation: dot-pulse 2s ease-in-out infinite; }
+
+/* ── thread ── */
+.dock-thread { flex: 1; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-4); }
+.dock-thread::-webkit-scrollbar { width: 8px; }
+.dock-thread::-webkit-scrollbar-thumb { background: var(--border-main); border-radius: var(--radius-md); border: 2px solid transparent; background-clip: padding-box; }
+.dock-empty { margin: auto; text-align: center; color: var(--text-dim); padding: var(--sp-5) var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3); align-items: center; }
+.dock-empty .ico { font-size: 24px; opacity: 0.5; color: var(--info); }
+.dock-empty .t { font-family: var(--font-display); font-size: 12.5px; color: var(--text-mid); letter-spacing: 0.03em; }
+.dock-empty .s { font-size: 11.5px; line-height: 1.6; max-width: 250px; }
+
+.dmsg { display: grid; grid-template-columns: 26px 1fr; gap: var(--sp-3); }
+.dmsg.user { grid-template-columns: 1fr 26px; }
+.dmsg.user .dmsg-col { order: 0; }
+.dmsg.user .dmsg-av { order: 1; }
+.dmsg-av.op { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 9px; color: var(--volt-ink); background: var(--volt); }
+.dmsg-av.k {
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 9px; font-weight: 600;
+  color: var(--volt-ink); background: var(--volt-strong);
+}
+.dmsg-col { min-width: 0; }
+.dmsg.user .dmsg-hd { justify-content: flex-end; }
+.dmsg-hd { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.dmsg-hd .who { font-family: var(--font-display); font-weight: 600; font-size: 11px; color: var(--text-bright); }
+.dmsg-hd .ts { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
+.dbubble {
+  background: var(--bg-card); border: 1px solid var(--border-main);
+  border-radius: 3px var(--radius-md) var(--radius-md) var(--radius-md);
+  padding: var(--sp-3) var(--sp-4); font-size: 12.5px; line-height: 1.6; color: var(--text-primary);
+}
+.dmsg.user .dbubble { background: var(--volt-wash); border-color: var(--volt-dim); border-radius: var(--radius-md) 3px var(--radius-md) var(--radius-md); color: var(--text-bright); }
+.dbubble p { margin: 0 0 7px; }
+.dbubble p:last-child { margin-bottom: 0; }
+.dbubble code { font-family: var(--font-mono); font-size: 11px; background: var(--bg-sunken); border: 1px solid var(--border-soft); padding: 0 4px; border-radius: var(--radius-xs); color: var(--volt-strong); }
+.dbubble strong { color: var(--text-bright); font-weight: 600; }
+.dcaret { display: inline-block; width: 7px; height: 13px; background: var(--volt); margin-left: 2px; vertical-align: -2px; animation: dcaret 1s steps(2) infinite; }
+@keyframes dcaret { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* ── suggestions (mini) ── */
+.dsug { display: flex; flex-direction: column; gap: 5px; margin-top: var(--sp-3); }
+.dsug button {
+  text-align: left; font-family: var(--font-ui); font-size: 11.5px; line-height: 1.3;
+  padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-main);
+  background: var(--bg-card); color: var(--text-primary); cursor: pointer; transition: 0.14s;
+}
+.dsug button:hover { border-color: var(--volt); color: var(--text-bright); background: var(--bg-card-hover); }
+.dsug button .pre { color: var(--volt); margin-right: 6px; }
+
+/* ── composer ── */
+.dock-composer { flex: none; padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 1px solid var(--border-main); background: var(--bg-panel); }
+.dock-comp-box {
+  display: flex; align-items: flex-end; gap: var(--sp-2);
+  background: var(--bg-card); border: 1px solid var(--border-main);
+  border-radius: var(--radius-md); padding: 5px 5px 5px var(--sp-4); transition: 0.15s;
+}
+.dock-comp-box.focus { border-color: var(--volt-dim); box-shadow: 0 0 0 3px var(--volt-wash); }
+.dock-comp-box textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--text-bright); font-family: var(--font-ui); font-size: 12.5px; line-height: 1.5; padding: 7px 0; max-height: 120px; min-height: 20px; }
+.dock-comp-box textarea::placeholder { color: var(--text-dim); }
+.dock-send { width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm); border: 1px solid var(--volt); background: var(--volt); color: var(--volt-ink); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: 0.14s; }
+.dock-send:hover:not(:disabled) { background: var(--volt-strong); box-shadow: 0 0 14px var(--volt-glow); }
+.dock-send:disabled { opacity: 0.4; cursor: default; }
+.dock-foot { display: flex; align-items: center; gap: var(--sp-3); margin-top: 7px; font-size: 10px; color: var(--text-dim); }
+.dock-foot b { color: var(--volt-strong); font-family: var(--font-mono); font-weight: 600; }
+.dock-foot kbd { font-family: var(--font-mono); font-size: 9px; background: var(--bg-card); border: 1px solid var(--border-main); border-bottom-width: 2px; border-radius: var(--radius-xs); padding: 1px 4px; color: var(--text-mid); }
+
+/* ── triggers: FAB + top-bar button ── */
+.dock-fab {
+  position: fixed; right: 22px; bottom: 22px; z-index: 55;
+  height: 44px; padding: 0 16px; display: flex; align-items: center; gap: var(--sp-2);
+  border-radius: var(--radius-pill); border: 1px solid var(--volt);
+  background: var(--volt); color: var(--volt-ink);
+  font-family: var(--font-ui); font-weight: 600; font-size: 12.5px; cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 0 18px var(--volt-glow); transition: 0.16s;
+}
+.dock-fab:hover { background: var(--volt-strong); transform: translateY(-1px); }
+.dock-fab .spark { width: 17px; height: 17px; }
+.dock-fab kbd { font-family: var(--font-mono); font-size: 9px; padding: 1px 5px; border-radius: var(--radius-xs); background: color-mix(in oklab, var(--volt-ink) 16%, transparent); }
+
+.topbar-copilot {
+  display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px;
+  border-radius: var(--radius-pill); border: 1px solid var(--border-main);
+  background: var(--bg-panel-alt); color: var(--text-mid); cursor: pointer;
+  font-family: var(--font-ui); font-size: 11px; transition: 0.14s; white-space: nowrap;
+}
+.topbar-copilot:hover { border-color: var(--volt-dim); color: var(--volt-strong); }
+.topbar-copilot.on { border-color: var(--volt); color: var(--volt-strong); background: var(--volt-wash); }
+.topbar-copilot .spark { width: 14px; height: 14px; }
+.topbar-copilot kbd { font-family: var(--font-mono); font-size: 9px; padding: 1px 4px; border-radius: var(--radius-xs); background: var(--bg-card); border: 1px solid var(--border-main); color: var(--text-mid); }
+
+@media (max-width: 1180px) {
+  .dock.docked { width: 320px; }
+}
+@media (max-width: 860px) {
+  .dock.docked { position: fixed; right: 0; top: 50px; bottom: 0; width: 320px; z-index: 60; box-shadow: var(--shadow-pop); }
+}

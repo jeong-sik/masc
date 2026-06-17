@@ -113,6 +113,28 @@ let test_gate_decision_shape () =
   must_contain ~tag:"verdict" line "\"gate_verdict\":\"allow\"";
   must_contain ~tag:"enforced" line "\"gate_enforced\":false"
 
+let test_argv_redaction () =
+  let captured = ref "" in
+  Exec_tap.enable ~writer:(fun line -> captured := line);
+  Exec_tap.record
+    ~kind:Exec_tap.Process_eio_run_argv
+    ~argv:
+      [ "curl"
+      ; "-H"
+      ; "Authorization: Bearer ghp_super_secret_token"
+      ; "https://user:password@api.example.com/v1"
+      ; "--flag"; "sk-proj-abc123"
+      ]
+    ();
+  let line = !captured in
+  Exec_tap.disable ();
+  must_not_contain ~tag:"bearer secret" line "ghp_super_secret_token";
+  must_not_contain ~tag:"url password" line "user:password";
+  must_not_contain ~tag:"sk secret" line "sk-proj-abc123";
+  must_contain ~tag:"redacted bearer" line "Bearer [REDACTED]";
+  must_contain ~tag:"redacted url" line "://[REDACTED]@api.example.com/v1";
+  must_contain ~tag:"redacted sk" line "[REDACTED]"
+
 let () =
   test_off_is_noop ();
   test_on_emits_one_line ();
@@ -121,4 +143,5 @@ let () =
   test_writer_exception_is_swallowed ();
   test_multiple_calls_each_line ();
   test_gate_decision_shape ();
+  test_argv_redaction ();
   print_endline "[test_exec_tap] all tests passed"

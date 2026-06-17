@@ -42,8 +42,8 @@ export function KeeperDetailMissingState({
     ? `현재 fleet에 ${keeperName}이(가) 없습니다 (live ${liveCount}명). watchdog 종료 또는 operator stop 가능성이 높습니다 — masc_keeper_stale_termination_total{keeper=\"${keeperName}\"} 에서 종료 시각을 확인하세요.`
     : '레지스트리가 아직 로드되지 않았습니다. 잠시 후 자동 갱신됩니다.'
   return html`
-    <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
-      <div class="rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 py-6 shadow-[var(--shadow-raised)]">
+    <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4 v2-monitoring-surface">
+      <div class="rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 py-6 shadow-[var(--shadow-raised)] v2-monitoring-panel">
         <${SectionLabel}>키퍼 상세</${SectionLabel}>
         <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--color-fg-primary)]">${keeperName}</h2>
         <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--color-fg-secondary)]">
@@ -52,7 +52,7 @@ export function KeeperDetailMissingState({
         <div class="mt-4">
           <button
             type="button"
-            class="inline-flex items-center gap-2 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+            class="inline-flex items-center gap-2 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-4 py-2 text-sm font-medium text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)] v2-monitoring-action"
             onClick=${onClose}
           >
             목록으로 돌아가기
@@ -75,11 +75,11 @@ export function KeeperDetailHeaderInfo({
   onClose: () => void
 }) {
   return html`
-    <div class="flex min-w-0 flex-wrap items-center gap-3">
+    <div class="flex min-w-0 flex-wrap items-center gap-3 v2-monitoring-surface">
       <button
         type="button"
         onClick=${onClose}
-        class="inline-flex shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+        class="inline-flex shrink-0 items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--color-bg-hover)] v2-monitoring-action"
       >
         <span aria-hidden="true">←</span>
         목록
@@ -160,7 +160,7 @@ export function KeeperDetailSectionRail() {
   const active = activeKeeperDetailSection.value
   return html`
     <nav
-      class="sm:sticky sm:top-[var(--header-h)] z-10 overflow-x-auto border-b border-[var(--color-border-default)] bg-[var(--color-bg-page)] py-1.5"
+      class="sm:sticky sm:top-[var(--header-h)] z-10 overflow-x-auto border-b border-[var(--color-border-default)] bg-[var(--color-bg-page)] py-1.5 v2-monitoring-toolbar"
       aria-label="키퍼 상세 섹션"
     >
       <div class="flex min-w-max items-center gap-1.5 px-1" role="tablist" aria-label="키퍼 상세 탭">
@@ -227,13 +227,13 @@ export function KeeperDetailSection({
   return html`
     <section
       id=${id}
-      class=${sectionClass}
+      class=${`${sectionClass} v2-monitoring-panel`}
       aria-label=${title}
       aria-labelledby=${`${id}-tab`}
       role="tabpanel"
     >
-      <div class=${headerClass}>${headerContent}</div>
-      <div id=${bodyId} class=${variant === 'primary' ? 'flex flex-col gap-4 px-0 py-0' : 'flex flex-col gap-4 px-4 py-4 sm:px-5'}>
+      <div class=${`${headerClass} v2-monitoring-toolbar`}>${headerContent}</div>
+      <div id=${bodyId} class=${variant === 'primary' ? 'flex flex-col gap-4 px-0 py-0 v2-monitoring-panel' : 'flex flex-col gap-4 px-4 py-4 sm:px-5 v2-monitoring-panel'}>
         ${children}
       </div>
     </section>

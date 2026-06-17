@@ -29,6 +29,13 @@ describe('AgentAvatar', () => {
     expect(avatar?.getAttribute('title')).toBe('Alpha')
   })
 
+  it('applies v2-overview-avatar marker class', () => {
+    const container = document.createElement('div')
+    render(h(AgentAvatar, { name: 'Alpha' }), container)
+    const avatar = container.querySelector('.v2-overview-avatar')
+    expect(avatar).not.toBeNull()
+  })
+
   it('shows name when showName is true', () => {
     const container = document.createElement('div')
     render(h(AgentAvatar, { name: 'Alpha', showName: true }), container)

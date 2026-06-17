@@ -79,12 +79,12 @@ type keeper_name_xlat =
   ; keeper_name_from_agent_name : string -> string option
   }
 
-let keeper_name_xlat : keeper_name_xlat option ref = ref None
+let keeper_name_xlat : keeper_name_xlat option Atomic.t = Atomic.make None
 
-let set_keeper_name_xlat (x : keeper_name_xlat) = keeper_name_xlat := Some x
+let set_keeper_name_xlat (x : keeper_name_xlat) = Atomic.set keeper_name_xlat (Some x)
 
 let require_keeper_name_xlat () =
-  match !keeper_name_xlat with
+  match Atomic.get keeper_name_xlat with
   | Some x -> x
   | None ->
     failwith

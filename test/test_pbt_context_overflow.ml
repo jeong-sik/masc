@@ -35,31 +35,6 @@ module KC = Masc.Keeper_context_core
 let gen_positive_int =
   QCheck.Gen.int_range 1 1_000_000
 
-let gen_input_budget_error =
-  QCheck.Gen.(
-    let* used = gen_positive_int in
-    let* limit = gen_positive_int in
-    return (Agent_sdk.Error.Agent
-      (TokenBudgetExceeded { kind = "Input"; used; limit })))
-
-let gen_non_input_kind =
-  QCheck.Gen.(oneof [
-    return "Total";
-    return "Output";
-    return "total";
-    return "input";  (* lowercase — only exact "Input" should match *)
-    return "";
-    return "Unknown";
-  ])
-
-let gen_non_input_budget_error =
-  QCheck.Gen.(
-    let* kind = gen_non_input_kind in
-    let* used = gen_positive_int in
-    let* limit = gen_positive_int in
-    return (Agent_sdk.Error.Agent
-      (TokenBudgetExceeded { kind; used; limit })))
-
 let gen_context_overflow_error =
   QCheck.Gen.(oneof [
     map (fun limit ->
@@ -68,23 +43,13 @@ let gen_context_overflow_error =
       gen_positive_int;
     return (Agent_sdk.Error.Api
       (ContextOverflow { message = "exceeded"; limit = None }));
-    gen_input_budget_error;
   ])
 
 (* ── Properties ──────────────────────────────────────────── *)
 
-let prop_input_budget_always_detected =
-  QCheck.Test.make ~count:200
-    ~name:"TokenBudgetExceeded(Input) always detected as context overflow"
-    (QCheck.make gen_input_budget_error)
-    (fun err -> EC.is_context_overflow err)
-
-let prop_non_input_budget_never_detected =
-  QCheck.Test.make ~count:200
-    ~name:"TokenBudgetExceeded(non-Input) never detected as context overflow"
-    (QCheck.make gen_non_input_budget_error)
-    (fun err -> not (EC.is_context_overflow err))
-
+(* Context overflow is now signalled solely by [Api (ContextOverflow _)]
+   (provider-rejected prompt); the removed token-budget cap no longer
+   participates. *)
 let prop_overflow_attribution_yields_positive_limit =
   QCheck.Test.make ~count:200
     ~name:"every overflow error yields positive limit for attribution"
@@ -93,8 +58,6 @@ let prop_overflow_attribution_yields_positive_limit =
       let limit = match err with
         | Agent_sdk.Error.Api
             (ContextOverflow { limit = Some limit; _ }) -> limit
-        | Agent_sdk.Error.Agent
-            (TokenBudgetExceeded { limit; _ }) -> limit
         | _ -> 4096  (* fallback path *)
       in
       limit > 0)
@@ -806,8 +769,6 @@ let test_pair_repair_caps_diagnostic_sample_strings () =
 let () =
   let qcheck_tests =
     List.map QCheck_alcotest.to_alcotest [
-      prop_input_budget_always_detected;
-      prop_non_input_budget_never_detected;
       prop_overflow_attribution_yields_positive_limit;
     ]
   in

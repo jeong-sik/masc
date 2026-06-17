@@ -211,7 +211,7 @@ let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t
       | value -> value
     in
     let detail =
-      if String.trim provider_cfg.Llm_provider.Provider_config.api_key = ""
+      if Llm_provider.Secret.is_empty provider_cfg.Llm_provider.Provider_config.api_key
       then Printf.sprintf "%s is empty or unset in this process" env_name
       else
         Printf.sprintf

@@ -1,0 +1,78 @@
+/* ─── Tweaks floating panel ─────────────────────────────── */
+
+.v-tweaks {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: 80px;
+  width: 256px;
+  padding: var(--sp-3) var(--sp-3) var(--sp-3);
+  background: color-mix(in oklab, var(--surface-1) 96%, transparent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  box-shadow:
+    0 12px 32px rgba(0,0,0,0.5),
+    0 2px 6px rgba(0,0,0,0.3),
+    inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 10%, transparent);
+  color: var(--text-bright);
+  z-index: 50;
+  display: none;
+  backdrop-filter: blur(8px);
+}
+.v-tweaks.on { display: block; }
+.v-tweaks h5 {
+  margin: 0 0 var(--sp-3);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: var(--fs-2);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-brass);
+  font-weight: 500;
+}
+.v-tweaks .row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+}
+.v-tweaks .row.col {
+  grid-template-columns: 1fr;
+  gap: var(--sp-1);
+  padding-top: var(--sp-2);
+}
+.v-tweaks .row .l {
+  font-family: var(--font-display);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: var(--fs-1);
+  font-weight: 500;
+}
+.v-tweaks .seg, .v-tweaks .filters {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.v-tweaks .seg button, .v-tweaks .filters button {
+  padding: 3px var(--sp-2);
+  border: 1px solid var(--line);
+  background: var(--surf-sink);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  cursor: pointer;
+  border-radius: var(--r-1);
+  letter-spacing: 0.04em;
+  transition: all 0.1s;
+}
+.v-tweaks .seg button:hover, .v-tweaks .filters button:hover {
+  color: var(--text-bright);
+  border-color: var(--line-strong);
+}
+.v-tweaks .seg button.on, .v-tweaks .filters button.on {
+  color: var(--accent-brass);
+  border-color: var(--line-accent);
+  background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
+}

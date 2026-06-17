@@ -1,11 +1,13 @@
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import type {
+  ChatBlock,
+  ChatAttachBlock,
   Keeper,
   KeeperConversationAttachment,
   KeeperConversationEntry,
@@ -33,13 +35,14 @@ import {
 import { isVisibleDirectConversationEntry } from '../keeper-state'
 import {
   enqueueInput,
-  dequeueInput,
-  markInputSent,
   clearInputQueue,
   getQueueLength,
+  getQueuedMessages,
+  updateQueuedMessage,
+  removeQueuedMessage,
+  type QueuedMessage,
 } from '../keeper-chat-store'
-import { ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S } from './chat/primitives'
-import { collectAttachments } from './chat/attachments'
+import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
@@ -230,67 +233,18 @@ export function filterConversationEntries(
   return entries.filter(entry => entry.text.toLowerCase().includes(q))
 }
 
-// ── Composer attachments (shared by both panel layouts) ──
-
-function AttachmentChips({
-  attachments,
-  onRemove,
-}: {
-  attachments: KeeperConversationAttachment[]
-  onRemove: (id: string) => void
-}) {
-  if (attachments.length === 0) return null
-  return html`
-    <div class="mb-2 flex flex-wrap gap-2" data-chat-attachment-chips>
-      ${attachments.map((att) => html`
-        <div class="group relative inline-flex items-center gap-1.5 rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-muted)] px-2 py-1 text-2xs" key=${att.id}>
-          ${att.type === 'image'
-            ? html`<img src=${att.data} class="h-6 w-6 rounded object-cover" alt="" />`
-            : html`<span class="text-[var(--color-fg-muted)]">📄</span>`}
-          <span class="max-w-32 truncate text-[var(--color-fg-secondary)]">${att.name}</span>
-          <button
-            type="button"
-            class="ml-1 rounded-full p-0.5 text-[var(--color-fg-muted)] hover:bg-[var(--warn-20)] hover:text-[var(--warn-bright)]"
-            onClick=${() => onRemove(att.id)}
-            title="제거"
-          >×</button>
-        </div>`)}
-    </div>
-  `
-}
-
-function AttachButton({
-  disabled,
-  onFiles,
-}: {
-  disabled: boolean
-  onFiles: (files: FileList | null) => void
-}) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  return html`
-    <button
-      type="button"
-      class="flex-shrink-0 rounded-lg border border-[var(--color-border-default)] px-2.5 py-2 text-sm hover:bg-[var(--color-bg-muted)] disabled:opacity-50"
-      onClick=${() => fileInputRef.current?.click()}
-      disabled=${disabled}
-      title="파일 첨부"
-      data-chat-attach-button
-    >
-      📎
-    </button>
-    <input
-      type="file"
-      ref=${fileInputRef}
-      class="hidden"
-      multiple
-      accept="image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,application/json,text/csv"
-      onChange=${(e: Event) => {
-        const target = e.target as HTMLInputElement
-        onFiles(target.files)
-        target.value = ''
-      }}
-    />
-  `
+function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[] {
+  return blocks
+    .filter((b): b is ChatAttachBlock => b.t === 'attach')
+    .map((b) => ({
+      id: b.id ?? `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: b.kind === 'image' || b.src?.startsWith('data:image/') ? 'image' : 'file',
+      name: b.name,
+      size: b.sizeBytes ?? 0,
+      mimeType: b.mimeType ?? 'application/octet-stream',
+      data: b.data ?? b.src ?? '',
+      dims: b.dims,
+    }))
 }
 
 // ── Diagnostic chip ──────────────────────────────────────
@@ -327,14 +281,14 @@ export function KeeperDiagnosticSummary({
   }
 
   return html`
-    <div class="py-3 px-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+    <div class="py-3 px-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-panel">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">명시적 상태 조회</div>
         <${GhostButton} disabled=${busy} onClick=${() => { void refreshStatus() }}>
           ${busy ? '불러오는 중...' : (detail ? '상태 새로고침' : '상태 불러오기')}
         <//>
       </div>
-      <div class="flex flex-wrap gap-1.5 mb-2">
+      <div class="flex flex-wrap gap-1.5 mb-2 v2-monitoring-row">
         ${continuityStateLabel(diagnostic?.continuity_state)
           ? html`<${DiagChip} label=${continuityStateLabel(diagnostic?.continuity_state)} />`
           : null}
@@ -354,7 +308,7 @@ export function KeeperDiagnosticSummary({
             ${diagnostic.continuity_summary ?? diagnostic.summary}
           </div>`
         : null}
-      <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed mt-1">
+      <div class="text-xs text-[var(--color-fg-primary)] leading-relaxed mt-1 v2-monitoring-row">
         응답: ${diagnostic?.last_reply_status ?? '미조회'}
         ${diagnostic?.last_reply_at ? html` -- ${formatTime(diagnostic.last_reply_at)}` : null}
         ${diagnostic?.next_eligible_at_s ? html` -- 다음 응답 가능 ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
@@ -366,8 +320,93 @@ export function KeeperDiagnosticSummary({
           />`
         : null}
       ${showRawStatus
-        ? html`<div class="mt-3 max-h-60 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
+        ? html`<div class="mt-3 max-h-60 overflow-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar v2-monitoring-panel"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`
         : null}
+    </div>
+  `
+}
+
+// ── Queued message editor (rendered inside the conversation panel) ──
+
+interface QueueItemCardProps {
+  keeperName: string
+  msg: QueuedMessage
+  onMutate: () => void
+}
+
+function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(msg.content)
+  const [attachments, setAttachments] = useState(msg.attachments ?? [])
+
+  const save = () => {
+    updateQueuedMessage(keeperName, msg.id, {
+      content: text.trim(),
+      attachments: attachments.length > 0 ? attachments : undefined,
+    })
+    setEditing(false)
+    onMutate()
+  }
+
+  const cancel = () => {
+    setText(msg.content)
+    setAttachments(msg.attachments ?? [])
+    setEditing(false)
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id))
+  }
+
+  return html`
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5" data-chat-queue-item=${msg.id}>
+      ${editing
+        ? html`
+            <textarea
+              class="w-full min-h-[3.5rem] rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-2 text-sm leading-relaxed text-[var(--color-fg-primary)] outline-none focus:border-[var(--color-accent-fg-dim)]"
+              value=${text}
+              onInput=${(e: Event) => { setText((e.target as HTMLTextAreaElement).value) }}
+            />
+            ${attachments.length > 0
+              ? html`
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    ${attachments.map(att => html`
+                      <${AttachDraftChip}
+                        key=${att.id}
+                        attachment=${att}
+                        onRemove=${() => { removeAttachment(att.id) }}
+                      />
+                    `)}
+                  </div>
+                `
+              : null}
+            <div class="mt-2 flex items-center justify-end gap-2">
+              <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${cancel}>취소</button>
+              <button type="button" class="rounded-[var(--r-0)] bg-[var(--color-accent-fg)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-bg-page)]" onClick=${save}>저장</button>
+            </div>
+          `
+        : html`
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm text-[var(--color-fg-primary)] whitespace-pre-wrap break-words">${msg.content}</div>
+                ${attachments.length > 0
+                  ? html`<div class="mt-1.5 flex flex-wrap gap-1.5">
+                      ${attachments.map(att => html`
+                        <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5 text-2xs text-[var(--color-fg-secondary)]">
+                          <span>${att.type === 'image' ? '▣' : '◫'}</span>
+                          <span class="truncate max-w-[12rem]">${att.name}</span>
+                          <span class="tabular-nums">${formatAttachmentSize(att.size)}</span>
+                        </span>
+                      `)}
+                    </div>`
+                  : null}
+              </div>
+              <div class="flex items-center gap-1.5 flex-none">
+                <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${() => { setEditing(true) }}>수정</button>
+                <button type="button" class="text-2xs text-[var(--color-status-err)] hover:text-[var(--color-status-err)]" onClick=${() => { removeQueuedMessage(keeperName, msg.id); onMutate() }}>삭제</button>
+              </div>
+            </div>
+          `}
     </div>
   `
 }
@@ -404,40 +443,10 @@ export function KeeperConversationPanel({
 
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedAttachments, setSelectedAttachments] = useState<KeeperConversationAttachment[]>([])
   // Bumped whenever the input queue mutates — the queue lives outside
   // the signal graph (keeper-chat-store), so re-renders must be forced.
   const [, setQueueVersion] = useState(0)
   const bumpQueue = () => setQueueVersion(v => v + 1)
-
-  const addFiles = async (files: FileList | null) => {
-    if (!files) return
-    const { attachments, errors } = await collectAttachments(files, selectedAttachments)
-    errors.forEach(message => showToast(message, 'error'))
-    if (attachments.length > 0) {
-      setSelectedAttachments(prev => [...prev, ...attachments])
-    }
-  }
-  const removeAttachment = (id: string) => {
-    setSelectedAttachments(prev => prev.filter(att => att.id !== id))
-  }
-  const handlePaste = (event: ClipboardEvent) => {
-    const items = event.clipboardData?.items
-    if (!items) return
-    const imageFiles: File[] = []
-    for (const item of Array.from(items)) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile()
-        if (file) imageFiles.push(file)
-      }
-    }
-    if (imageFiles.length > 0) {
-      event.preventDefault()
-      const dt = new DataTransfer()
-      for (const f of imageFiles) dt.items.add(f)
-      void addFiles(dt.files)
-    }
-  }
 
   // External-system sync: merge the server-persisted transcript
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
@@ -489,35 +498,35 @@ export function KeeperConversationPanel({
   }
 
   const drainQueue = async () => {
-    for (;;) {
-      const next = dequeueInput(keeperName)
-      if (!next) break
-      bumpQueue()
-      try {
-        await sendKeeperThreadMessage(keeperName, next.content, { attachments: next.attachments })
-      } catch (err) {
-        markInputSent(keeperName)
-        bumpQueue()
-        if (isAbortError(err)) return
-        const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
-        showToast(message, 'error')
-        return
-      }
-      markInputSent(keeperName)
-      bumpQueue()
+    const queued = getQueuedMessages(keeperName)
+    if (queued.length === 0) return
+    clearInputQueue(keeperName)
+    bumpQueue()
+
+    const batchedContent = queued.map(q => q.content.trim()).filter(Boolean).join('\n\n---\n\n')
+    const batchedAttachments = queued.flatMap(q => q.attachments ?? [])
+    if (!batchedContent && batchedAttachments.length === 0) return
+
+    try {
+      await sendKeeperThreadMessage(keeperName, batchedContent, {
+        attachments: batchedAttachments.length > 0 ? batchedAttachments : undefined,
+      })
+    } catch (err) {
+      if (isAbortError(err)) return
+      const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
+      showToast(message, 'error')
     }
   }
 
-  const submit = async () => {
+  const submit = async ({ blocks }: { blocks: ChatBlock[] }) => {
     const prompt = draft.trim()
     if (chatAccess.blocked) {
       showToast(chatAccess.message, 'error')
       return
     }
-    if (!keeperName || !prompt) return
-    const attachments = selectedAttachments
+    if (!keeperName || (!prompt && blocks.length === 0)) return
+    const attachments = blocksToAttachments(blocks)
     setDraft('')
-    setSelectedAttachments([])
     if (keeperSending.value[keeperName]) {
       enqueueInput(keeperName, prompt, attachments.length > 0 ? attachments : undefined)
       bumpQueue()
@@ -547,11 +556,10 @@ export function KeeperConversationPanel({
     // unchanged — only the chrome differs. Spacing comes from keeper-workspace.css.
     return html`
       <div
-        class="flex min-h-0 flex-1 flex-col"
+        class="flex min-h-0 flex-1 flex-col v2-monitoring-surface"
         data-keeper-chat-layout="workspace"
-        onPaste=${handlePaste}
       >
-        <div class="kw-chat-toolbar">
+        <div class="kw-chat-toolbar v2-monitoring-toolbar">
           <${TextInput}
             class="max-w-50"
             name="keeper_chat_search"
@@ -562,7 +570,7 @@ export function KeeperConversationPanel({
             onInput=${(e: Event) => { setSearchQuery((e.target as HTMLInputElement).value) }}
           />
           ${hasQuery
-            ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]" data-chat-search-count>
+            ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)] v2-monitoring-row" data-chat-search-count>
                 ${transcriptEntries.length} / ${visibleThread.length}
               </span>`
             : null}
@@ -592,14 +600,14 @@ export function KeeperConversationPanel({
 
         ${chatAccess.message
           ? html`
-              <div class="mx-10 mt-3 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+              <div class="mx-10 mt-3 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)] v2-monitoring-panel">
                 ${chatAccess.message}
               </div>
             `
           : null}
 
-        <div class="kw-thread">
-          <div class="kw-thread-inner">
+        <div class="kw-thread v2-monitoring-panel">
+          <div class="kw-thread-inner v2-monitoring-panel">
             <${ChatTranscript}
               entries=${transcriptEntries}
               emptyText=${transcriptEmptyText}
@@ -612,47 +620,51 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-10 mb-2 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="mx-10 mb-2 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지"로 볼 수 있습니다.
               </div>
             `
           : null}
 
-        <div class="kw-composer-wrap">
-          <div class="kw-composer-inner">
+        <div class="kw-composer-wrap v2-monitoring-panel">
+          <div class="kw-composer-inner v2-monitoring-panel">
             ${queueCount > 0
               ? html`
-                  <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-chat-queue-row>
-                    <span>${queueCount}개 메시지 대기 중</span>
-                    <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
+                  <div class="mb-3 flex flex-col gap-2" data-chat-queue-list>
+                    <div class="flex items-center justify-between gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
+                      <span>${queueCount}개 메시지 대기 중</span>
+                      <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
+                    </div>
+                    ${getQueuedMessages(keeperName).map(msg => html`
+                      <${QueueItemCard}
+                        key=${msg.id}
+                        keeperName=${keeperName}
+                        msg=${msg}
+                        onMutate=${bumpQueue}
+                      />
+                    `)}
                   </div>
                 `
               : null}
-            <${AttachmentChips} attachments=${selectedAttachments} onRemove=${removeAttachment} />
-            <div class="flex items-end gap-2">
-              <${AttachButton} disabled=${composerDisabled} onFiles=${(files: FileList | null) => { void addFiles(files) }} />
-              <div class="min-w-0 flex-1">
-                <${ChatComposer}
-                  draft=${draft}
-                  placeholder=${chatAccess.blocked
-                    ? '현재 actor는 direct keeper chat 권한이 없습니다'
-                    : sending
-                      ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
-                      : placeholder}
-                  disabled=${composerDisabled}
-                  streaming=${sending}
-                  streamStartedAt=${streamStartedAt}
-                  lastEventAt=${lastSignalAt}
-                  queueEnabled=${true}
-                  queueCount=${queueCount}
-                  onDraftChange=${setDraft}
-                  onSend=${() => { void submit() }}
-                  onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
-                  layout="primary"
-                />
-              </div>
-            </div>
-            ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+            <${ChatComposer}
+              draft=${draft}
+              placeholder=${chatAccess.blocked
+                ? '현재 actor는 direct keeper chat 권한이 없습니다'
+                : sending
+                  ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
+                  : placeholder}
+              disabled=${composerDisabled}
+              streaming=${sending}
+              streamStartedAt=${streamStartedAt}
+              lastEventAt=${lastSignalAt}
+              queueEnabled=${true}
+              queueCount=${queueCount}
+              onDraftChange=${setDraft}
+              onSend=${(payload: { blocks: ChatBlock[] }) => { void submit(payload) }}
+              onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+              layout="primary"
+            />
+            ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
           </div>
         </div>
       </div>
@@ -662,11 +674,10 @@ export function KeeperConversationPanel({
   if (layout === 'primary') {
     return html`
       <div
-        class="flex h-[clamp(30rem,calc(100svh-13rem),52rem)] min-h-0 flex-col gap-4 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-none"
+        class="flex h-[clamp(30rem,calc(100svh-13rem),52rem)] min-h-0 flex-col gap-4 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-none v2-monitoring-surface"
         data-keeper-chat-layout="primary"
-        onPaste=${handlePaste}
       >
-        <div class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-3">
+        <div class="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-default)] pb-3 v2-monitoring-toolbar">
           <div class="min-w-0">
             <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
             <div class="mt-1.5 flex flex-wrap items-center gap-2">
@@ -717,7 +728,7 @@ export function KeeperConversationPanel({
 
         ${chatAccess.message
           ? html`
-              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)] v2-monitoring-panel">
                 ${chatAccess.message}
               </div>
             `
@@ -733,56 +744,50 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
           : null}
 
-        <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none">
+        <div class="shrink-0 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 shadow-none v2-monitoring-panel">
           ${queueCount > 0
             ? html`
-                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-chat-queue-row>
+                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
                   <span>${queueCount}개 메시지 대기 중</span>
                   <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                 </div>
               `
             : null}
-          <${AttachmentChips} attachments=${selectedAttachments} onRemove=${removeAttachment} />
-          <div class="flex items-end gap-2">
-            <${AttachButton} disabled=${composerDisabled} onFiles=${(files: FileList | null) => { void addFiles(files) }} />
-            <div class="min-w-0 flex-1">
-              <${ChatComposer}
-                draft=${draft}
-                placeholder=${chatAccess.blocked
-                  ? '현재 actor는 direct keeper chat 권한이 없습니다'
-                  : sending
-                    ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
-                    : placeholder}
-                disabled=${composerDisabled}
-                streaming=${sending}
-                streamStartedAt=${streamStartedAt}
-                lastEventAt=${lastSignalAt}
-                queueEnabled=${true}
-                queueCount=${queueCount}
-                onDraftChange=${setDraft}
-                onSend=${() => { void submit() }}
-                onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
-                layout="primary"
-              />
-            </div>
-          </div>
+          <${ChatComposer}
+            draft=${draft}
+            placeholder=${chatAccess.blocked
+              ? '현재 actor는 direct keeper chat 권한이 없습니다'
+              : sending
+                ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
+                : placeholder}
+            disabled=${composerDisabled}
+            streaming=${sending}
+            streamStartedAt=${streamStartedAt}
+            lastEventAt=${lastSignalAt}
+            queueEnabled=${true}
+            queueCount=${queueCount}
+            onDraftChange=${setDraft}
+            onSend=${(payload: { blocks: ChatBlock[] }) => { void submit(payload) }}
+            onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+            layout="primary"
+          />
         </div>
 
-        ${error ? html`<div class="shrink-0 text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+        ${error ? html`<div class="shrink-0 text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
       </div>
     `
   }
 
   return html`
-    <div class="flex flex-col gap-3" onPaste=${handlePaste}>
-      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)]">
-        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-4">
+    <div class="flex flex-col gap-3 v2-monitoring-surface">
+      <div class="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] v2-monitoring-panel">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] px-4 py-4 v2-monitoring-toolbar">
           <div class="min-w-55 flex-1">
             <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 대화</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
@@ -834,7 +839,7 @@ export function KeeperConversationPanel({
         <div class="px-4 py-4">
           ${chatAccess.message
             ? html`
-                <div class="mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+                <div class="mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)] v2-monitoring-panel">
                   ${chatAccess.message}
                 </div>
               `
@@ -850,48 +855,42 @@ export function KeeperConversationPanel({
 
         ${!showInternal && hiddenCount > 0
           ? html`
-              <div class="mx-4 mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+              <div class="mx-4 mb-4 rounded-[var(--r-5)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)] v2-monitoring-panel">
                 ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지 표시"로 볼 수 있습니다.
               </div>
             `
           : null}
 
-        <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4">
+        <div class="border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-4 py-4 v2-monitoring-panel">
           ${queueCount > 0
             ? html`
-                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-chat-queue-row>
+                <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
                   <span>${queueCount}개 메시지 대기 중</span>
                   <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
                 </div>
               `
             : null}
-          <${AttachmentChips} attachments=${selectedAttachments} onRemove=${removeAttachment} />
-          <div class="flex items-end gap-2">
-            <${AttachButton} disabled=${composerDisabled} onFiles=${(files: FileList | null) => { void addFiles(files) }} />
-            <div class="min-w-0 flex-1">
-              <${ChatComposer}
-                draft=${draft}
-                placeholder=${chatAccess.blocked
-                  ? '현재 actor는 direct keeper chat 권한이 없습니다'
-                  : sending
-                    ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
-                    : placeholder}
-                disabled=${composerDisabled}
-                streaming=${sending}
-                streamStartedAt=${streamStartedAt}
-                lastEventAt=${lastSignalAt}
-                queueEnabled=${true}
-                queueCount=${queueCount}
-                onDraftChange=${setDraft}
-                onSend=${() => { void submit() }}
-                onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
-              />
-            </div>
-          </div>
+          <${ChatComposer}
+            draft=${draft}
+            placeholder=${chatAccess.blocked
+              ? '현재 actor는 direct keeper chat 권한이 없습니다'
+              : sending
+                ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
+                : placeholder}
+            disabled=${composerDisabled}
+            streaming=${sending}
+            streamStartedAt=${streamStartedAt}
+            lastEventAt=${lastSignalAt}
+            queueEnabled=${true}
+            queueCount=${queueCount}
+            onDraftChange=${setDraft}
+            onSend=${(payload: { blocks: ChatBlock[] }) => { void submit(payload) }}
+            onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+          />
         </div>
       </div>
 
-      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+      ${error ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed v2-monitoring-panel">${error}</div>` : null}
     </div>
   `
 }
@@ -921,7 +920,7 @@ export function KeeperRuntimeActions({
   const activeSecondaryBtn = `${btnBase} border-[var(--warn-border)] bg-[var(--warn-soft)] text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]`
 
   return html`
-    <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap gap-2 v2-monitoring-toolbar">
       <button type="button"
         class=${recommended === 'probe' ? activeGhostBtn : ghostBtn}
         onClick=${() => {

@@ -53,8 +53,6 @@ let run_named
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
-    ?max_input_tokens
-    ?max_cost_usd
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -163,8 +161,6 @@ let run_named
     body_timeout_s;
     temperature;
     max_tokens;
-    max_input_tokens;
-    max_cost_usd;
     accept;
     guardrails;
     hooks;

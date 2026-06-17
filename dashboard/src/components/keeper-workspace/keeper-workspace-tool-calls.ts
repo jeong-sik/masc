@@ -44,16 +44,16 @@ export function RecentToolList({
   onToggle: (key: string) => void
 }): VNode {
   return html`
-    <div class="kw-list">
+    <div class="kw-list v2-monitoring-panel">
       ${entries.map((e) => {
         const key = toolCallRowKey(e)
         const open = expandedKey === key
         const tone = e.success ? 'ok' : 'bad'
         return html`
-          <div class=${`kw-toolcall${open ? ' open' : ''}`} key=${key}>
+          <div class=${`kw-toolcall${open ? ' open' : ''} v2-monitoring-row`} key=${key}>
             <button
               type="button"
-              class="kw-toolcall-head"
+              class="kw-toolcall-head v2-monitoring-action"
               aria-expanded=${open ? 'true' : 'false'}
               onClick=${() => onToggle(key)}
             >
@@ -64,12 +64,12 @@ export function RecentToolList({
             </button>
             ${open
               ? html`
-                  <div class="kw-toolcall-body">
-                    <div class="kw-tc-block">
+                  <div class="kw-toolcall-body v2-monitoring-panel">
+                    <div class="kw-tc-block v2-monitoring-panel">
                       <div class="kw-tc-lbl">입력</div>
                       <pre>${formatInput(e.input)}</pre>
                     </div>
-                    <div class="kw-tc-block">
+                    <div class="kw-tc-block v2-monitoring-panel">
                       <div class="kw-tc-lbl">출력</div>
                       <pre>${formatOutput(e.output)}</pre>
                     </div>
@@ -121,7 +121,7 @@ export function KeeperWorkspaceRecentTools({ keeperName }: { keeperName: string 
   if (entries.length === 0) return null
 
   return html`
-    <div class="kw-sec">
+    <div class="kw-sec v2-monitoring-panel">
       <h4>최근 도구 호출</h4>
       <${RecentToolList}
         entries=${entries}

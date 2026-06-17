@@ -50,6 +50,20 @@ let test_redact_json_strings_redacts_sensitive_keys () =
   Alcotest.(check bool) "nested token hidden" false
     (String_util.contains_substring raw "nested-token")
 
+let test_redact_json_strings_redacts_secrets_in_values () =
+  let json =
+    `Assoc
+      [ ("message", `String "Retry with Authorization: Bearer ghp_xxxxxxxx");
+        ("url", `String "https://user:secret@api.example.com/v1")
+      ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  let raw = Yojson.Safe.to_string redacted in
+  Alcotest.(check bool) "bearer token hidden" false
+    (String_util.contains_substring raw "ghp_xxxxxxxx");
+  Alcotest.(check bool) "URL credential hidden" false
+    (String_util.contains_substring raw "user:secret")
+
 let test_denied_tool_input_returns_none () =
   let result = Observability_redact.redact_tool_input
     ~tool_name:"tool_auth_create" (`String "secret data") in
@@ -72,9 +86,11 @@ let test_normal_tool_output_returns_some () =
   Alcotest.(check bool) "normal tool returns Some" true
     (Option.is_some result)
 
-(* Regression: the 24+ alnum pattern used to eat the 64-hex sha256 in a blob
-   marker and produce "[masc:blob [REDACTED] bytes=... preview=..."
-   which [Tool_output.decode_from_oas] cannot parse back. *)
+(* Regression: the former generic 20+ alnum pattern used to eat the 64-hex
+   sha256 in a blob marker and produce "[masc:blob [REDACTED] bytes=... preview=..."
+   which [Tool_output.decode_from_oas] cannot parse back. That pattern is now
+   removed; decoding still scopes redaction to the preview body so the marker
+   structure is preserved either way. *)
 let test_blob_marker_preserves_structure () =
   let sha = String.make 64 'a' in
   let marker =
@@ -108,8 +124,9 @@ let test_blob_marker_redacts_preview_body () =
 (* Regression: a marker embedded inside a JSON string field used to be
    corrupted by callers that did [Yojson.Safe.to_string |> String.sub]
    because the top-level value looks like [{...}] not [\[masc:blob ...\]],
-   so [redact_preview] took the else-branch and the 24+ alnum scrubber
-   ate sha256. [preview_json_strings] walks leaves instead. *)
+   so [redact_preview] took the else-branch where the former 24+ alnum scrubber
+   ate sha256. [preview_json_strings] walks leaves instead. (That scrubber is
+   gone now, but leaf-walking remains the correct structural traversal.) *)
 let test_preview_json_strings_preserves_embedded_marker () =
   let sha = String.make 64 'c' in
   let marker =
@@ -133,6 +150,55 @@ let test_preview_json_strings_preserves_embedded_marker () =
        | _ -> Alcotest.fail "content field missing or not a string")
   | _ -> Alcotest.fail "expected Assoc root"
 
+(* Regression: prefix-based secret regexes used to match substrings of ordinary
+   identifiers. Without a word-boundary anchor, the sk- pattern matched the
+   substring "sk-1234" inside the task id "task-1234" and redacted it to
+   "ta[REDACTED]", corrupting error-preview diagnostics (and any observability
+   field carrying a task-XXXX reference). Same root cause affected ghp_ (inside
+   e.g. "baghp_12"). bow rejects these because the prefix is preceded by an
+   identifier char. *)
+let test_no_false_positive_on_task_ids () =
+  let inputs =
+    [ "task-1234"; "desk-1234"; "mask-abc"; "disk-99"
+    ; "flask-test"; "risk-5"; "bask-5"; "xsk-5" ]
+  in
+  List.iter
+    (fun input ->
+      let r = Observability_redact.redact_text input in
+      Alcotest.(check string)
+        (input ^ " not corrupted by sk-/ghp_ false positive") input r)
+    inputs
+
+let test_no_false_positive_on_keeper_identities () =
+  let inputs =
+    [ "task-claim-bot"; "heartbeat-keeper"; "baghp_12"; "diagnostic-judge"
+      (* 20+ char identities: these were redacted to [REDACTED] by the former
+         generic "20+ alphanumeric run" matcher (keeper-issue_king-agent=23,
+         keeper-ramarama-agent=21 chars) and are preserved now that the length
+         heuristic is removed. This is the regression the generic-matcher
+         removal targets. *)
+    ; "keeper-issue_king-agent"; "keeper-ramarama-agent"
+    ; "task-claim-bot-9a8b7c6d"; "heartbeat-keeper-2f4a1b" ]
+  in
+  List.iter
+    (fun input ->
+      let r = Observability_redact.redact_text input in
+      Alcotest.(check string)
+        (input ^ " keeper identity preserved") input r)
+    inputs
+
+(* Regression: the sk- body used to stop at the first '-', so modern keys with a
+   "-proj-" segment leaked the tail. The body now allows '-' so the whole key
+   matches in one shot via the prefix matcher alone — the generic 20+ fallback
+   this case once leaned on has been removed, so the prefix match must be
+   complete on its own. Token literal is split so it is not mistaken for a real
+   credential by tooling; it is a synthetic test value, not a live secret. *)
+let test_sk_modern_key_fully_redacted () =
+  let input = "sk-" ^ "proj-" ^ "0123456789abcdefghijklmnopqrstuv" in
+  let r = Observability_redact.redact_text input in
+  Alcotest.(check bool) "no partial sk- tail leak" true
+    (not (String_util.contains_substring r "0123456789abcdef"))
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -146,12 +212,20 @@ let () =
             test_redact_text_does_not_truncate;
           Alcotest.test_case "redact_json_strings redacts sensitive keys"
             `Quick test_redact_json_strings_redacts_sensitive_keys;
+          Alcotest.test_case "redact_json_strings redacts secrets embedded in values"
+            `Quick test_redact_json_strings_redacts_secrets_in_values;
           Alcotest.test_case "blob marker preserves structure" `Quick
             test_blob_marker_preserves_structure;
           Alcotest.test_case "blob marker redacts preview body" `Quick
             test_blob_marker_redacts_preview_body;
           Alcotest.test_case "preview_json_strings preserves embedded marker"
             `Quick test_preview_json_strings_preserves_embedded_marker;
+          Alcotest.test_case "no false positive on task ids" `Quick
+            test_no_false_positive_on_task_ids;
+          Alcotest.test_case "no false positive on keeper identities" `Quick
+            test_no_false_positive_on_keeper_identities;
+          Alcotest.test_case "modern sk- key fully redacted" `Quick
+            test_sk_modern_key_fully_redacted;
         ] );
       ( "deny_list",
         [

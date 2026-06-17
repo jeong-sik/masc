@@ -103,13 +103,15 @@ vi.mock('shiki', () => {
 })
 
 // Mock Mermaid to avoid heavyweight parsing/rendering during happy-dom tests.
+const mermaidMock = {
+  initialize: vi.fn(),
+  render: vi.fn(async (_id: string, source: string) => ({
+    svg: `<svg><text>${source}</text></svg>`,
+  })),
+}
 vi.mock('mermaid', () => ({
-  default: {
-    initialize: vi.fn(),
-    render: vi.fn(async (_id: string, source: string) => ({
-      svg: `<svg><text>${source}</text></svg>`,
-    })),
-  },
+  default: mermaidMock,
+  ...mermaidMock,
 }))
 
 // Block real network requests in tests. Tests that intentionally need

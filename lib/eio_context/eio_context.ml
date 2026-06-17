@@ -166,52 +166,71 @@ let get_switch () : (Eio.Switch.t, string) result =
   | None ->
       Error "Eio switch not initialized - ensure set_switch is called during server startup"
 
-(** TLS connector for Cohttp_eio HTTPS support. *)
+(** TLS connector for Cohttp_eio HTTPS support.
+
+    Stored as an [Atomic.t] cell so concurrent reads from multiple OCaml 5
+    domains are safe.  Initialization uses [Atomic.compare_and_set] for a
+    lock-free once pattern: the first domain that observes [None] builds the
+    connector and publishes it; any racing builder discards its own result and
+    returns the published one. *)
 let _https_connector_cache :
-  (Uri.t ->
-   [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
-   [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t) option ref = ref None
+  ((Uri.t ->
+     [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t ->
+     [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ] Eio.Resource.t),
+   string)
+  result
+  option
+  Atomic.t =
+  Atomic.make None
 
 let https_error message = Error message
 
 let build_https_connector_result () =
-  match Ca_certs.authenticator () with
-  | Error (`Msg msg) -> https_error ("CA certs unavailable: " ^ msg)
-  | Error _ -> https_error "CA certs unavailable: unknown error"
-  | Ok authenticator -> (
-      match Tls.Config.client ~authenticator () with
-      | Error (`Msg msg) -> https_error ("TLS config error: " ^ msg)
-      | Ok tls_config ->
-          Ok
-            (fun uri
-                  (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
-                ->
-              let flow =
-                (raw :>
-                  [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ]
-                  Eio.Resource.t)
-              in
-              let host =
-                match Uri.host uri with
-                | None -> None
-                | Some h -> (
-                    match Domain_name.of_string h with
-                    | Ok d -> Some (Domain_name.host_exn d)
-                    | Error _ -> None)
-              in
-              match host with
-              | None -> raise (Invalid_argument "TLS host missing/invalid")
-              | Some host -> Tls_eio.client_of_flow tls_config ~host flow))
+  try
+    match Ca_certs.authenticator () with
+    | Error (`Msg msg) -> https_error ("CA certs unavailable: " ^ msg)
+    | Error _ -> https_error "CA certs unavailable: unknown error"
+    | Ok authenticator -> (
+        match Tls.Config.client ~authenticator () with
+        | Error (`Msg msg) -> https_error ("TLS config error: " ^ msg)
+        | Ok tls_config ->
+            Ok
+              (fun uri
+                    (raw : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
+                  ->
+                let flow =
+                  (raw :>
+                    [> Eio.Flow.two_way_ty | Eio.Resource.close_ty ]
+                    Eio.Resource.t)
+                in
+                let host =
+                  match Uri.host uri with
+                  | None -> None
+                  | Some h -> (
+                      match Domain_name.of_string h with
+                      | Ok d -> Some (Domain_name.host_exn d)
+                      | Error _ -> None)
+                in
+                match host with
+                | None -> raise (Invalid_argument "TLS host missing/invalid")
+                | Some host -> Tls_eio.client_of_flow tls_config ~host flow))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> https_error ("HTTPS connector build failed: " ^ Printexc.to_string exn)
 
 let get_https_connector_result () =
-  match !_https_connector_cache with
-  | Some c -> Ok c
+  match Atomic.get _https_connector_cache with
+  | Some result -> result
   | None -> (
-      match build_https_connector_result () with
-      | Ok c ->
-          _https_connector_cache := Some c;
-          Ok c
-      | Error _ as error -> error)
+      let result = build_https_connector_result () in
+      match Atomic.compare_and_set _https_connector_cache None (Some result) with
+      | true -> result
+      | false -> (
+          (* Another domain published while we were building; return the
+             winner to keep the process-global connector deterministic. *)
+          match Atomic.get _https_connector_cache with
+          | Some other -> other
+          | None -> result))
 
 (* get_https_connector (crash variant) removed — all callers use
    get_https_connector_result which returns (connector, string) result. *)

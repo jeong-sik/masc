@@ -71,7 +71,7 @@ export function TurnFsmDetailPanel({ snapshot }: { snapshot: KeeperCompositeSnap
 
   return html`
     <section
-      class="grid gap-3"
+      class="v2-monitoring-panel grid gap-3"
       role="region"
       aria-labelledby="turn-fsm-detail-title"
     >

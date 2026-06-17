@@ -160,8 +160,10 @@ let last_simple_of_ir ir =
      | _ -> None)
 ;;
 
-(** Same pipeline as [dispatch_classified], but inserts the capability-based
-    approval policy gate between the typed gate and path validation.
+(** Same pipeline as [dispatch_classified], but runs the capability-based
+    approval policy gate {i before} the typed gate and path validation
+    (the approval decision is made first, then [dispatch_classified] applies
+    [Shell_gate.gate_typed] followed by [validate_paths]).
     [Ask] and [Deny] are surfaced as typed errors so the keeper runtime
     can log them and return a structured failure to the model. *)
 let dispatch_classified_with_approval
@@ -179,12 +181,17 @@ let dispatch_classified_with_approval
   =
   let ir = envelope.Masc_exec.Shell_ir_risk.ir in
   match last_simple_of_ir ir with
-  | None -> Error Cannot_parse
+  (* A nested pipeline as the last stage has no representative simple stage
+     to classify.  The non-approval [dispatch_classified] path rejects the
+     same input via [Shell_gate.gate_typed] as [Too_complex]
+     (Unsupported_nested_pipeline), so mirror that here instead of
+     mislabeling a parseable command as [Cannot_parse]. *)
+  | None -> Error Too_complex
   | Some simple ->
     let caps = Masc_exec.Capability_check.of_ir ir in
     let overlay = Masc_exec.Approval_config.lookup approval_config ~actor:agent_id in
     let raw_source = Format.asprintf "%a" Masc_exec.Shell_ir.pp ir in
-    let summary = "Shell IR command approval check" in
+    let summary = "shell IR capability approval check" in
     let policy_input = { Masc_exec.Approval_policy.raw_source; summary } in
     (match Masc_exec.Approval_policy.decide policy_input ~overlay ~caps ~simple with
      | Allow _trusted | Suggest_confirm (_trusted, _) ->
@@ -199,11 +206,21 @@ let dispatch_classified_with_approval
          ?on_output_chunk
          envelope
      | Ask _request ->
+       (* The policy wants explicit approval, but the keeper runtime has no
+          approval channel yet (RFC v5 HITL path is not wired), so this is a
+          block.  Report the binary and risk class so the failure is
+          actionable instead of an opaque "approval check" string. *)
+       let bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin in
        Error
          (Approval_required
-            { summary
-            ; bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+            { summary =
+                Printf.sprintf
+                  "command '%s' requires approval (audited/privileged risk \
+                   class); no approval channel is configured, so it is blocked"
+                  bin
+            ; bin
             })
-     | Deny { reason = _; caps = _ } ->
-       Error (Policy_denied { reason = "approval policy denied" }))
+     | Deny { reason; caps = _ } ->
+       Error
+         (Policy_denied { reason = Masc_exec.Verdict.deny_reason_to_string reason }))
 ;;

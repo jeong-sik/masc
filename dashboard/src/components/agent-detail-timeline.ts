@@ -110,24 +110,24 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
           ${cat.icon}
         </div>
         <span class="text-xs font-mono font-medium ${cat.color} truncate max-w-50" title=${toolName}>${toolName}</span>
-        <span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]">${cat.label}</span>
+        <span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)]">${cat.label}</span>
         ${durationMs != null
           ? html`<span class="text-2xs font-mono ${durationColor(durationMs)}">${formatMsCompact(durationMs)}</span>`
           : null}
         ${success
-          ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]">ok</span>`
-          : html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
+          ? html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]">ok</span>`
+          : html`<span class="text-2xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--bad-10)] text-[var(--color-status-err)]">err</span>`}
         <span class="flex-1"></span>
         ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
       </div>
       ${args ? html`
-        <div class="ml-8 mt-0.5 text-3xs text-[var(--color-fg-disabled)] font-mono truncate">
-          ${typeof args === 'string' ? trimText(args, 60) : formatArgs(args)}
+        <div class="ml-8 mt-0.5 text-2xs text-[var(--color-fg-secondary)] font-mono truncate">
+          ${typeof args === 'string' ? trimText(args, 80) : formatArgs(args)}
         </div>
       ` : null}
       ${errorMsg ? html`
-        <div class="ml-8 mt-0.5 text-3xs text-[var(--color-status-err)] font-mono truncate" title=${errorMsg}>
-          ${trimText(errorMsg, 60)}
+        <div class="ml-8 mt-0.5 text-2xs text-[var(--color-status-err)] font-mono truncate" title=${errorMsg}>
+          ${trimText(errorMsg, 80)}
         </div>
       ` : null}
     </div>
@@ -185,7 +185,7 @@ export function AgentTimelineSection() {
                 onInput=${(e: Event) => { timelineSearchQuery.value = (e.target as HTMLInputElement).value }}
               />
               ${filterActive
-                ? html`<span class="text-3xs text-[var(--color-fg-disabled)] tabular-nums">${filtered.length} / ${events.length}</span>`
+                ? html`<span class="text-2xs text-[var(--color-fg-secondary)] tabular-nums">${filtered.length} / ${events.length}</span>`
                 : null}
             </div>
             ${filtered.length === 0

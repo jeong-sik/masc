@@ -12,7 +12,7 @@ export function SkipLink({
   return html`
     <a
       href=${`#${targetId}`}
-      class="sr-only skip-link"
+      class="v2-shell-action sr-only skip-link"
       onClick=${(event: MouseEvent) => {
         const target = document.getElementById(targetId)
         if (!target) return

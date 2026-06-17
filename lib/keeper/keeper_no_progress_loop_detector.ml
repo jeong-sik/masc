@@ -37,7 +37,7 @@ let get_or_create keeper_name =
 
 let update_streak_gauge keeper_name value =
   Otel_metric_store.set_gauge
-    "masc_keeper_no_progress_streak"
+    Keeper_metrics.(to_string NoProgressStreak)
     ~labels:[ ("keeper", keeper_name) ]
     (Float.of_int value)
 

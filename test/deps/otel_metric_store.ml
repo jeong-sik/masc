@@ -91,16 +91,12 @@ let metric_total name =
 let snapshot () = List.map (fun metric -> { metric with labels = metric.labels }) !store
 let update_pool_metrics_gauges () = ()
 
-let metric_auth_bare_alias = "masc_auth_bare_alias"
-let metric_auth_bare_alias_audit_ticks_total = "masc_auth_bare_alias_audit_ticks_total"
-let metric_auth_bare_alias_outcome_total = "masc_auth_bare_alias_outcome_total"
 let metric_auth_credential_ambiguous_lookup = "masc_auth_credential_ambiguous_lookup_total"
 let metric_auth_strict_unknown_tool_denials = "masc_auth_strict_unknown_tool_denials_total"
 let metric_after_turn_response_model_empty = "masc_after_turn_response_model_empty_total"
 let metric_after_turn_response_model_alias = "masc_after_turn_response_model_alias_total"
 let metric_anti_rationalization_excuse_pattern = "masc_anti_rationalization_excuse_pattern_total"
 let metric_build_identity_probe_failures = "masc_build_identity_probe_failures_total"
-let metric_config_credential_archived_starvation = "masc_config_credential_archived_starvation_total"
 let metric_config_unknown_keys_ignored = "masc_config_unknown_keys_ignored_total"
 let metric_dashboard_execution_render_phase_sec = "masc_dashboard_execution_render_phase_seconds"
 let metric_dashboard_metric_all_zeros = "masc_dashboard_metric_all_zeros"

@@ -1,0 +1,74 @@
+/* ════════════════════════════════════════════════════════════════
+   StyleSeed base body / card / mobile styles
+   Active only when data-theme="styleseed" is set on <html>.
+   ════════════════════════════════════════════════════════════════ */
+
+/* Tailwind v4 theme bridge — StyleSeed semantic utilities fall back to
+   the existing v2 dark-brass tokens so components work in both themes.
+   When data-theme="styleseed" is active the StyleSeed CSS variables
+   override these values; otherwise the v2 fallbacks keep legacy styling. */
+@theme {
+  --color-surface-page: var(--surface-page, var(--color-bg-page));
+  --color-surface-subtle: var(--surface-subtle, var(--color-bg-surface));
+  --color-surface-muted: var(--surface-muted, var(--color-border-default));
+  --color-card: var(--card, var(--color-bg-surface));
+  --color-text-primary: var(--text-primary, var(--color-fg-primary));
+  --color-text-secondary: var(--text-secondary, var(--color-fg-secondary));
+  --color-text-tertiary: var(--text-tertiary, var(--color-fg-muted));
+  --color-text-disabled: var(--text-disabled, var(--color-fg-disabled));
+  --color-icon-default: var(--icon-default, var(--color-fg-muted));
+  --color-border: var(--border, var(--color-border-default));
+  --color-card-border: var(--card-border, var(--color-border-default));
+  --color-brand: var(--brand, var(--color-accent-fg));
+  --color-brand-tint: var(--brand-tint, var(--color-brass-soft));
+  --color-success: var(--success, var(--color-status-ok));
+  --color-destructive: var(--destructive, var(--color-status-err));
+  --color-warning: var(--warning, var(--color-status-warn));
+  --color-info: var(--info, var(--color-status-info));
+  --color-alert-badge: var(--alert-badge, var(--color-status-err));
+  --shadow-card: var(--shadow-card, 0 1px 3px rgba(0, 0, 0, 0.04));
+  --shadow-card-hover: var(--shadow-card-hover, 0 2px 4px rgba(0, 0, 0, 0.08));
+  --shadow-elevated: var(--shadow-elevated, 0 4px 12px rgba(0, 0, 0, 0.08));
+  --shadow-modal: var(--shadow-modal, 0 8px 24px rgba(0, 0, 0, 0.12));
+  --shadow-button: var(--shadow-button, 0 1px 3px rgba(0, 0, 0, 0.06));
+}
+
+/* Body base — CJK word-break + Pretendard-friendly metric reset */
+[data-theme="styleseed"] body {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Surface wrapper — page background + primary text color */
+[data-theme="styleseed"] .ss-surface {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+}
+
+/* Card base — all content lives inside cards */
+[data-theme="styleseed"] .ss-card {
+  background-color: var(--card);
+  border-radius: 1rem; /* rounded-2xl */
+  box-shadow: var(--shadow-card);
+}
+
+/* Dark mode: shadows are invisible, use subtle border for edges */
+[data-theme="styleseed"].dark .ss-card,
+.dark [data-theme="styleseed"] .ss-card {
+  box-shadow: none;
+  border: var(--card-border);
+}
+
+/* Mobile safe-area helpers */
+[data-theme="styleseed"] .ss-safe-bottom {
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+[data-theme="styleseed"] .ss-safe-top {
+  padding-top: calc(1.5rem + env(safe-area-inset-top, 0px));
+}

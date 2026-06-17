@@ -6,6 +6,8 @@ import { globalShortcutManager } from '../lib/global-shortcut-manager'
 import { route } from '../router'
 import { keepers } from '../store'
 import { isSubmitEnter } from '../lib/keyboard'
+import { streamKeeperMessage } from '../api/keeper'
+import { currentDashboardActor } from '../api/core'
 import type { Keeper } from '../types'
 
 interface DockState {
@@ -84,37 +86,6 @@ function keeperGlow(name: string): string {
     rama: 'var(--k-rama-glow)',
   }
   return map[name] ?? 'var(--brass-glow)'
-}
-
-function buildReply(keeper: DockKeeper, ctx: SurfaceContext): { body: string; sug: string[] } {
-  if (ctx.route === '/overview') {
-    return {
-      body: `지금 **${ctx.label}**를 같이 보고 있네요. 실행 중 keeper와 주의 큐를 훑었어요.\n\n가장 급한 건 \`drifter\` — 컨텍스트가 **오버플로우**라 재시작이 필요합니다. \`nick0cave\`도 91%라 곧 compact가 걸릴 거예요.\n\n제가 ${keeper.kr}로서 주의 4건을 우선순위대로 정리핼까요?`,
-      sug: ['drifter 재시작 절차 보기', '주의 4건 한 번에 트리아지', 'nick0cave compact 미리 돌리기'],
-    }
-  }
-  if (ctx.route === '/code') {
-    return {
-      body: `\`round.ml\`의 lock 재진입 경로를 같이 보고 있어요. \`compact()\`가 라운드 락을 잡은 채 호출되는 **L93**이 의심됩니다.\n\nPR **#7741**은 테스트 84/84 통과지만 아직 리뷰 대기예요.`,
-      sug: ['L93 FIXME 같이 보기', 'PR #7741 리뷰 코멘트 요약', 'sangsu에게 핸드오프'],
-    }
-  }
-  if (ctx.route === '/workspace') {
-    return {
-      body: `**전체 피드**를 같이 보고 있어요. \`@operator\` 멘션 3건 중 \`drifter\`의 restart 승인 대기가 가장 급합니다.`,
-      sug: ['멘션 인박스 정리', 'drifter 상태 블록 열기', 'scheduler 공지 스레드로'],
-    }
-  }
-  if (ctx.route === '/connectors') {
-    return {
-      body: `**Gate** 상태를 같이 보고 있어요. iMessage 게이트가 **stale** — heartbeat 120s 초과로 응답이 지연되고 있어요.`,
-      sug: ['stale 게이트 재연결', '바인딩 현황 요약', '최근 감사 로그 보기'],
-    }
-  }
-  return {
-    body: `\`${ctx.label}\` 화면을 같이 보고 있어요. \`${keeper.ns}\` 기준으로 관련 trace와 태스크를 모아둘게요. 무엇부터 볼까요?`,
-    sug: ['이 화면 요약', '관련 태스크 보기', '다음 액션 추천'],
-  }
 }
 
 function mdInline(s: string): string {
@@ -268,30 +239,40 @@ export function useCopilotDock() {
         ...dockThreads.value,
         [kid]: [...(dockThreads.value[kid] ?? []), { role: 'user', ts: nowHM(), text: text.trim() }],
       }
-      const { body, sug } = buildReply(keeper, ctx)
-      window.setTimeout(() => {
-        dockStreaming.value = { keeperId: kid, shown: '', full: body, sug }
-        const start = typeof performance !== 'undefined' ? performance.now() : Date.now()
-        const DUR = 900
-        const timer = window.setInterval(() => {
-          const now = typeof performance !== 'undefined' ? performance.now() : Date.now()
-          const p = Math.min(1, (now - start) / DUR)
-          if (p >= 1) {
-            window.clearInterval(timer)
-            dockStreaming.value = null
-            dockThreads.value = {
-              ...dockThreads.value,
-              [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: body, sug }],
-            }
-          } else {
-            const n = Math.max(1, Math.floor(body.length * p))
+      const abortController = new AbortController()
+      dockStreaming.value = { keeperId: kid, shown: '', full: '', sug: [] }
+      let replyText = ''
+      streamKeeperMessage(kid, text.trim(), {
+        signal: abortController.signal,
+        channel: 'copilot',
+        channelWorkspaceId: currentDashboardActor(),
+        surfaceContext: ctx,
+        onEvent: (event) => {
+          if (event.type === 'TEXT_MESSAGE_CONTENT' && typeof event.delta === 'string') {
+            replyText += event.delta
             const current = dockStreaming.value
             if (current && current.keeperId === kid) {
-              dockStreaming.value = { ...current, shown: body.slice(0, n) }
+              dockStreaming.value = { ...current, shown: replyText }
             }
           }
-        }, 40)
-      }, 220)
+        },
+      })
+        .then((outcome) => {
+          dockStreaming.value = null
+          const finalText = replyText.trim() || (outcome.terminal ? '(empty reply)' : '(stream ended unexpectedly)')
+          dockThreads.value = {
+            ...dockThreads.value,
+            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: finalText }],
+          }
+        })
+        .catch((err) => {
+          dockStreaming.value = null
+          const message = err instanceof Error ? err.message : 'Keeper stream failed'
+          dockThreads.value = {
+            ...dockThreads.value,
+            [kid]: [...(dockThreads.value[kid] ?? []), { role: 'assistant', ts: nowHM(), text: `Error: ${message}` }],
+          }
+        })
     },
   }
 }

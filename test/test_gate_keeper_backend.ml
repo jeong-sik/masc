@@ -2,6 +2,7 @@ open Alcotest
 open Masc
 
 module K = Keeper_chat_store
+module KT = Keeper_turn
 
 let rec remove_tree path =
   if Sys.file_exists path then
@@ -168,8 +169,108 @@ let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
   | Ok _ -> fail "expected partial connector context to be rejected"
   | Error err ->
       check string "validation message"
-        "channel, channel_user_id, and channel_workspace_id are required when connector context is supplied"
+        "channel and channel_workspace_id are required when connector context is supplied"
         err
+
+let test_parse_keeper_chat_stream_request_accepts_copilot_context () =
+  let body =
+    {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","turn_instructions":"focus on overview"}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok payload ->
+      check string "channel" "copilot" payload.channel;
+      check string "workspace id" "session-7" payload.channel_workspace_id;
+      check string "user id optional" "" payload.channel_user_id;
+      check (option string) "turn instructions" (Some "focus on overview") payload.turn_instructions;
+      check bool "surface context absent" true (Option.is_none payload.surface_context)
+  | Error err -> fail ("expected copilot context to parse: " ^ err)
+
+let test_parse_keeper_chat_stream_request_formats_surface_context () =
+  let body =
+    {|{"name":"luna","message":"hello","channel":"copilot","channel_workspace_id":"session-7","surface_context":{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok payload ->
+      check string "channel" "copilot" payload.channel;
+      check (option string) "turn instructions" None payload.turn_instructions;
+      check bool "surface context present" true (Option.is_some payload.surface_context)
+  | Error err -> fail ("expected surface context to parse: " ^ err)
+
+let test_surface_context_to_instructions_formats_copilot_context () =
+  let ctx =
+    Yojson.Safe.from_string
+      {|{"label":"Overview","route":"/overview","scene":"fleet view","fields":{"run":"2/5","alert":"1"}}|}
+  in
+  match Server_routes_http_keeper_stream.For_testing.surface_context_to_instructions ctx with
+  | Some instructions ->
+      check bool "includes label" true
+        (String_util.string_contains_substring ~needle:"Surface label: Overview" instructions);
+      check bool "includes route" true
+        (String_util.string_contains_substring ~needle:"Route: /overview" instructions);
+      check bool "includes scene" true
+        (String_util.string_contains_substring ~needle:"Scene: fleet view" instructions);
+      check bool "includes fields" true
+        (String_util.string_contains_substring ~needle:"Fields:" instructions)
+  | None -> fail "expected surface_context to format into instructions"
+
+let test_surface_context_to_instructions_ignores_empty () =
+  let ctx = `Assoc [ ("label", `String "  "); ("fields", `Assoc []) ] in
+  check (option string) "empty surface_context" None
+    (Server_routes_http_keeper_stream.For_testing.surface_context_to_instructions ctx)
+
+let test_chat_surface_of_request_labels_copilot_gate () =
+  let payload =
+    { Server_routes_http_keeper_stream.name = "luna";
+      message = "hello";
+      timeout_sec = None;
+      turn_instructions = None;
+      surface_context = None;
+      channel = "copilot";
+      channel_user_id = "";
+      channel_user_name = "";
+      channel_workspace_id = "session-7";
+      attachments = [] }
+  in
+  let surface = Server_routes_http_keeper_stream.For_testing.chat_surface_of_request payload in
+  check string "copilot surface label" "copilot" (Surface_ref.lane_label surface)
+
+let test_chat_speaker_of_request_copilot_is_owner () =
+  let payload =
+    { Server_routes_http_keeper_stream.name = "luna";
+      message = "hello";
+      timeout_sec = None;
+      turn_instructions = None;
+      surface_context = None;
+      channel = "copilot";
+      channel_user_id = "";
+      channel_user_name = "";
+      channel_workspace_id = "session-7";
+      attachments = [] }
+  in
+  let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
+  check (option string) "copilot speaker id" None speaker.speaker_id;
+  check (option string) "copilot speaker name" None speaker.speaker_name;
+  check bool "copilot speaker authority is owner" true
+    (speaker.speaker_authority = Keeper_chat_store.Owner)
+
+let test_chat_speaker_of_request_connector_is_external () =
+  let payload =
+    { Server_routes_http_keeper_stream.name = "luna";
+      message = "hello";
+      timeout_sec = None;
+      turn_instructions = None;
+      surface_context = None;
+      channel = "discord";
+      channel_user_id = "user-42";
+      channel_user_name = "Alice";
+      channel_workspace_id = "workspace-9";
+      attachments = [] }
+  in
+  let speaker = Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request payload in
+  check (option string) "connector speaker id" (Some "user-42") speaker.speaker_id;
+  check (option string) "connector speaker name" (Some "Alice") speaker.speaker_name;
+  check bool "connector speaker authority is external" true
+    (speaker.speaker_authority = Keeper_chat_store.External)
 
 let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
   let cases =
@@ -329,6 +430,20 @@ let () =
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects partial connector context" `Quick
             test_parse_keeper_chat_stream_request_rejects_partial_connector_context;
+          test_case "stream request accepts copilot context" `Quick
+            test_parse_keeper_chat_stream_request_accepts_copilot_context;
+          test_case "stream request formats surface context" `Quick
+            test_parse_keeper_chat_stream_request_formats_surface_context;
+          test_case "surface context formats into instructions" `Quick
+            test_surface_context_to_instructions_formats_copilot_context;
+          test_case "surface context ignores empty fields" `Quick
+            test_surface_context_to_instructions_ignores_empty;
+          test_case "copilot request labels gate surface" `Quick
+            test_chat_surface_of_request_labels_copilot_gate;
+          test_case "copilot request speaker is owner" `Quick
+            test_chat_speaker_of_request_copilot_is_owner;
+          test_case "connector request speaker is external" `Quick
+            test_chat_speaker_of_request_connector_is_external;
           test_case "stream request rejects legacy model args" `Quick
             test_parse_keeper_chat_stream_request_rejects_legacy_model_args;
         ] );

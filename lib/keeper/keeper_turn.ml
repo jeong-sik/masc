@@ -105,8 +105,47 @@ let direct_owner_conversation_context
       ~limit:8 ~config ~meta ()
     |> Keeper_world_observation_message_scope.render_recent_direct_conversation_context
 
+let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
+  match ctx with
+  | `Assoc fields ->
+      let string_field key =
+        match List.assoc_opt key fields with
+        | Some (`String s) ->
+            let s = String.trim s in
+            if s = "" then None else Some s
+        | _ -> None
+      in
+      let json_field key = List.assoc_opt key fields in
+      let parts =
+        (match string_field "label" with
+         | Some s -> [ Printf.sprintf "Surface label: %s" s ]
+         | None -> [])
+        @
+        (match string_field "route" with
+         | Some s -> [ Printf.sprintf "Route: %s" s ]
+         | None -> [])
+        @
+        (match string_field "scene" with
+         | Some s -> [ Printf.sprintf "Scene: %s" s ]
+         | None -> [])
+        @
+        (match json_field "fields" with
+         | Some (`Assoc fs) when fs <> [] ->
+             [ "Fields:\n"
+               ^ String.concat "\n"
+                   (List.map
+                      (fun (k, v) ->
+                        Printf.sprintf "- %s: %s" k (Yojson.Safe.to_string v))
+                      fs) ]
+         | Some _ | None -> [])
+      in
+      if parts = [] then None
+      else Some (String.concat "\n\n" parts)
+  | _ -> None
+
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
+  let surface_context_to_instructions = surface_context_to_instructions
 end
 
 let resolve_turn_runtime_id (meta : keeper_meta) =
@@ -297,7 +336,17 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
   else if message = "" then
     tool_result_error "message is required"
   else
-    let turn_instructions = get_string_opt args "turn_instructions" in
+    let turn_instructions =
+      match get_string_opt args "turn_instructions" with
+      | Some _ as ti -> ti
+      | None -> (
+          match args with
+          | `Assoc fields -> (
+              match List.assoc_opt "surface_context" fields with
+              | Some ctx -> surface_context_to_instructions ctx
+              | None -> None)
+          | _ -> None)
+    in
     let no_skill_route = get_bool args "no_skill_route" false in
     let no_state_block = get_bool args "no_state_block" false in
     let direct_reply = get_bool args "direct_reply" false in

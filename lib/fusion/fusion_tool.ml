@@ -12,10 +12,15 @@ let status_json ~ok fields =
   Yojson.Safe.to_string (`Assoc (("ok", `Bool ok) :: fields))
 
 let append_chat_failure ~base_dir ~keeper ~run_id content =
-  let conversation_id = "fusion/" ^ run_id in
+  (* 실패 알림도 성공 결론(fusion_sink.emit)과 동일하게 키퍼 *메인* conversation에
+     남긴다(conversation_id 생략). recent_direct_conversation observation 필터는
+     conversation_id를 보지 않고 role/kind만 보므로
+     (keeper_world_observation_message_scope.ml:recent_direct_conversation_of_messages),
+     별도 "fusion/<run_id>" 스레드는 메인 오염을 막지 못하면서 한 run의 성공/실패만
+     다른 lane으로 흩어지는 split-brain을 만든다. denied/sink_failed/aborted는 키퍼가
+     다음 턴에 인지해야 할 운영 실패이므로 메인 lane이 옳다(run_id는 content에 포함). *)
   try
-    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content
-      ~conversation_id ();
+    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
     Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
   with
   | Eio.Cancel.Cancelled _ as exn ->

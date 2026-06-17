@@ -704,3 +704,58 @@
   color: var(--color-fg-muted);
   margin-left: auto;
 }
+
+/* ── Rich code block header / copy button ────────────────────── */
+.chat-block-code-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface);
+}
+
+.chat-block-code-hd .chat-block-code-cap {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.chat-block-code-copy {
+  padding: 3px 8px;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-0);
+  background: var(--color-bg-panel-alt);
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semi);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+
+.chat-block-code-copy:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-primary);
+  border-color: var(--color-border-strong);
+}
+
+.chat-block-code-fallback pre {
+  color: var(--color-fg-secondary);
+}
+
+/* ── Mermaid diagram container ───────────────────────────────── */
+.chat-block-mermaid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  padding: 12px;
+  background: var(--color-bg-panel-alt);
+  overflow-x: auto;
+}
+
+.chat-block-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}

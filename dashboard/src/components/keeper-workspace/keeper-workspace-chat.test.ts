@@ -34,6 +34,10 @@ async function loadChat() {
   vi.doMock('../../lib/keeper-runtime-display', () => ({
     keeperDisplayStatus: () => 'running',
   }))
+  vi.doMock('../chat/artifact-panel', () => ({
+    ChatArtifactPanel: ({ entries }: { entries: unknown[] }) =>
+      html`<div data-testid="kw-artifact-panel" data-artifact-count=${entries.length}>Artifacts</div>`,
+  }))
   return import('./keeper-workspace-chat')
 }
 
@@ -56,6 +60,7 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../keeper-shared')
     vi.doUnmock('../keeper-turn-inspector')
     vi.doUnmock('../../lib/keeper-runtime-display')
+    vi.doUnmock('../chat/artifact-panel')
   })
 
   it('renders the chat header and conversation panel', async () => {
@@ -108,5 +113,39 @@ describe('KeeperWorkspaceChat', () => {
     })
 
     expect(container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')).toBeNull()
+  })
+
+  it('toggles the artifact panel when the artifacts button is clicked', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+
+    await act(async () => {
+      render(html`
+        <${KeeperWorkspaceChat}
+          keeper=${mockKeeper}
+          detailOpen=${false}
+          onToggleDetail=${vi.fn()}
+          onClear=${vi.fn()}
+        />
+      `, container)
+    })
+
+    expect(container.querySelector('[data-testid="kw-artifact-panel"]')).toBeNull()
+
+    const btn = container.querySelector('[data-testid="kw-chat-artifacts-toggle"]') as HTMLButtonElement
+    expect(btn?.textContent?.trim()).toBe('아티팩트')
+
+    await act(async () => {
+      btn.click()
+    })
+
+    const panel = container.querySelector('[data-testid="kw-artifact-panel"]')
+    expect(panel).not.toBeNull()
+    expect(btn?.textContent?.trim()).toBe('아티팩트 숨김')
+
+    await act(async () => {
+      btn.click()
+    })
+
+    expect(container.querySelector('[data-testid="kw-artifact-panel"]')).toBeNull()
   })
 })

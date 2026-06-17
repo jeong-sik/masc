@@ -456,6 +456,7 @@ jobs:
           bash scripts/ci/check-main-branch-protection.sh
           bash scripts/ci/check-ssot-spawn-drift.sh
           bash scripts/check-spec-truth.sh
+          bash scripts/ci/check-rfc-number-uniqueness.sh
           bash scripts/ci/check-silent-failure-patterns.sh
           bash scripts/ci/check-enum-string-safety.sh
           bash scripts/ci/check-masc-oas-boundary.sh

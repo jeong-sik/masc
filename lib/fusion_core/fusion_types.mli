@@ -54,7 +54,6 @@ type panel_failure =
 type panel_answer =
   { model : string
   ; answer : string
-  ; confidence : float option  (** 모델이 자기 확신도를 냈으면 *)
   ; usage : usage
   }
 [@@deriving yojson, show, eq]

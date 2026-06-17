@@ -30,7 +30,6 @@ type panel_failure =
 type panel_answer =
   { model : string
   ; answer : string
-  ; confidence : float option
   ; usage : usage
   }
 [@@deriving yojson, show, eq]

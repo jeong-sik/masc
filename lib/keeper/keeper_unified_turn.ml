@@ -297,7 +297,6 @@ let run_keeper_cycle
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                    ~generation:meta.runtime.generation ()
                in
-               let max_cost_usd = None in
                (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records
                   below read the same cell, so a concurrent run of this keeper
@@ -476,7 +475,6 @@ let run_keeper_cycle
                            ; event_bus_integrity_error_snapshot
                            ; generation
                            ; keeper_turn_id
-                           ; max_cost_usd
                            ; meta
                            ; turn_ctx_cell
                            ; observation

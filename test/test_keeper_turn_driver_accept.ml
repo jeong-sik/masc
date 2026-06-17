@@ -46,8 +46,7 @@ let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
     response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
-    max_input_tokens = None;
-    max_total_tokens = None;
+
     context = Agent_sdk.Context.create ();
     mcp_sessions = [];
     working_context = None;

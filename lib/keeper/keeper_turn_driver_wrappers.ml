@@ -23,8 +23,6 @@ let config_for_label
     ~(system_prompt : string)
     ~(tools : Agent_sdk.Tool.t list)
     ~(max_tokens : int)
-    ?(max_input_tokens : int option)
-    ?(max_cost_usd : float option)
     ~(temperature : float)
     ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
@@ -46,8 +44,6 @@ let config_for_label
          ~system_prompt ~tools)
       with
       max_tokens;
-      max_input_tokens;
-      max_cost_usd;
       temperature;
       max_idle_turns;
       stream_idle_timeout_s;
@@ -75,8 +71,6 @@ let run_model_by_label
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
-    ?max_input_tokens
-    ?max_cost_usd
     ?wait_timeout_sec
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
@@ -93,7 +87,7 @@ let run_model_by_label
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
-      ~tools ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
+      ~tools ~max_tokens ~temperature
       ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer
       ?enable_thinking
       ?compact_ratio
@@ -170,8 +164,6 @@ let run_named_with_masc_tools
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
-    ?max_input_tokens
-    ?max_cost_usd
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -196,7 +188,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   Keeper_turn_driver.run_named ~runtime_id ~goal ?priority ~system_prompt ~tools:oas_tools
     ~max_idle_turns
-    ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
+    ~temperature ~max_tokens
     ?stream_idle_timeout_s ?guardrails ?hooks
     ~accept
     ?compact_ratio
@@ -213,8 +205,6 @@ let run_model_with_masc_tools
     ?stream_idle_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
-    ?max_input_tokens
-    ?max_cost_usd
     ?wait_timeout_sec
     ?guardrails
     ?hooks
@@ -230,7 +220,7 @@ let run_model_with_masc_tools
   let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
-      ~tools:[] ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
+      ~tools:[] ~max_tokens ~temperature
       ?stream_idle_timeout_s ?guardrails ?hooks ?enable_thinking
       ?compact_ratio
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))

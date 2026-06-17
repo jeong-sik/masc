@@ -36,8 +36,6 @@ type config =
   max_execution_time_s : float option;
   body_timeout_s : float option;
   max_tokens : int;
-  max_input_tokens : int option;
-  max_cost_usd : float option;
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
   context_reducer : Agent_sdk.Context_reducer.t option;
@@ -505,18 +503,15 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
     The MASC config provides: provider, model_id, system_prompt,
     temperature, tools, hooks, guardrails, etc.
 
-    [max_cost_usd] is adjusted to account for cumulative values in
-    the checkpoint.
-
     @boundary-contract
     - MASC owns: per-turn config selection (model, temperature, tools,
-      system_prompt), per-turn budget allocation, checkpoint field patching
-      to align MASC intent with OAS resume semantics.
-    - OAS owns: cumulative token/cost accounting, turn_count tracking,
-      Agent.resume state restoration, loop guard enforcement.
-    - Neither may: MASC must not set [max_total_tokens] (OAS SSOT for
-      cumulative budgets); OAS must not override MASC model/temperature
-      selection after resume. *)
+      system_prompt), checkpoint field patching to align MASC intent with
+      OAS resume semantics.
+    - OAS owns: cumulative token/cost telemetry, turn_count tracking,
+      Agent.resume state restoration, loop guard enforcement (max_turns,
+      idle).
+    - OAS no longer enforces cost or cumulative-token budgets; cost is
+      observe-only telemetry. *)
 let resume_from_checkpoint
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)

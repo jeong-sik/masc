@@ -86,7 +86,12 @@ let run_safe ~caller ~timeout_s fn =
       Log.Misc.warn
         "masc_oas_bridge: OAS execution timed out after %.1fs (caller=%s, wall=%.1fs)"
         timeout_s caller wall;
-    Error (Agent_sdk.Error.Api (Timeout { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s }))
+    Error
+      (Agent_sdk.Error.Api
+         (Timeout
+            { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s
+            ; phase = None
+            }))
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* Mirror of #10942 (keeper_llm_bridge) for masc_oas_bridge: same opaque
        cancel message ate both wall-duration class and the inner cancel reason.

@@ -47,8 +47,6 @@ type config =
         owned by [stream_idle_timeout_s] plus attempt observation. Non-HTTP
         transports ignore it. *)
   ; max_tokens : int
-  ; max_input_tokens : int option
-  ; max_cost_usd : float option
   ; temperature : float
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -146,8 +144,6 @@ let default_config
   ; max_execution_time_s = None
   ; body_timeout_s = None
   ; max_tokens = Runtime_provider_defaults.agent_default_max_tokens
-  ; max_input_tokens = None
-  ; max_cost_usd = None
   ; temperature = Runtime_provider_defaults.agent_default_temperature
   ; hooks = None
   ; context_reducer = None
@@ -274,16 +270,6 @@ let builder_without_approval
     | None -> builder
   in
   let builder =
-    match config.max_cost_usd with
-    | Some usd -> Agent_sdk.Builder.with_max_cost_usd usd builder
-    | None -> builder
-  in
-  let builder =
-    match config.max_input_tokens with
-    | Some tokens -> Agent_sdk.Builder.with_max_input_tokens tokens builder
-    | None -> builder
-  in
-  let builder =
     match config.runtime_mcp_policy with
     | Some policy -> Agent_sdk.Builder.with_runtime_mcp_policy policy builder
     | None -> builder
@@ -401,11 +387,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   : prepared_resume
   =
 
-  let effective_max_cost_usd =
-    match config.max_cost_usd with
-    | Some budget -> Some (checkpoint.usage.estimated_cost_usd +. budget)
-    | None -> None
-  in
   let max_turns_for_resume = checkpoint.turn_count + config.max_turns in
   let patched_checkpoint =
     { checkpoint with
@@ -416,8 +397,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
-    ; max_input_tokens = config.max_input_tokens
-    ; max_total_tokens = None
     }
   in
   let agent_config : Agent_sdk.Types.agent_config =
@@ -432,8 +411,6 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
-    ; max_input_tokens = config.max_input_tokens
-    ; max_cost_usd = effective_max_cost_usd
     ; yield_on_tool = config.yield_on_tool
     ; context_compact_ratio = config.compact_ratio
     ; priority = config.priority

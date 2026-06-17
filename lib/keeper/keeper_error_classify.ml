@@ -677,9 +677,6 @@ let transient_backoff_sec (attempt : int) : float =
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
-  | Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
-  (* Output / non-input token budget exceeded does not represent prompt overflow. *)
-  | Agent_sdk.Error.Agent (TokenBudgetExceeded _) -> false
   (* Other API error variants do not indicate context overflow. *)
   | Agent_sdk.Error.Api (RateLimited _)
   | Agent_sdk.Error.Api (Overloaded _)
@@ -694,8 +691,6 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
   | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
   | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
-  | Agent_sdk.Error.Agent (CostBudgetExceeded _)
-  | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
@@ -730,9 +725,6 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
   | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
   | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
-  | Agent_sdk.Error.Agent (CostBudgetExceeded _)
-  | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
-  | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)

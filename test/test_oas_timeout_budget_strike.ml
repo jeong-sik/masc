@@ -81,7 +81,8 @@ let raw_provider_timeout_error ~phase =
 
 let raw_api_timeout_error () =
   Agent_sdk.Error.Api
-    (Llm_provider.Retry.Timeout { message = "Per-provider timeout after 90.0s" })
+    (Llm_provider.Retry.Timeout
+       { message = "Per-provider timeout after 90.0s"; phase = None })
 
 let turn_timeout_error () =
   KTD.sdk_error_of_masc_internal_error (KTD.Turn_timeout { elapsed_sec = 600.0 })

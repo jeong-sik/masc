@@ -42,9 +42,13 @@ let api_cases : (string * SdkE.api_error * string) list =
   ; ( "NetworkError"
     , Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_refused }
     , "api_error_network" )
-  ; "Timeout", Retry.Timeout { message = "60s" }, "api_error_timeout"
+  ; "Timeout", Retry.Timeout { message = "60s"; phase = None }, "api_error_timeout"
   ; ( "StructuralTimeout"
-    , Retry.Timeout { message = "Turn wall-clock budget exhausted during runtime attempt (budget=554.9s)" }
+    , Retry.Timeout
+        { message =
+            "Turn wall-clock budget exhausted during runtime attempt (budget=554.9s)"
+        ; phase = None
+        }
     , "api_error_oas_agent_execution_timeout" )
   ]
 ;;
@@ -69,19 +73,12 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
   ; ( "Agent/UnrecognizedStopReason"
     , SdkE.Agent (SdkE.UnrecognizedStopReason { reason = "abrupt" })
     , "agent_error_unrecognized_stop_reason:abrupt" )
-  ; ( "Agent/TokenBudgetExceeded"
-    , SdkE.Agent (SdkE.TokenBudgetExceeded { kind = "token"; used = 4096; limit = 4096 })
-    , "agent_error_token_budget_exceeded:kind=token,used=4096,limit=4096" )
-  ; ( "Agent/CostBudgetExceeded"
-    , SdkE.Agent (SdkE.CostBudgetExceeded { spent_usd = 0.42; limit_usd = 0.40 })
-    , "agent_error_cost_budget_exceeded:spent_usd=0.42,limit_usd=0.40" )
-  ; ( "Agent/CostBudgetUnenforceable"
-    , SdkE.Agent (SdkE.CostBudgetUnenforceable { model_id = "glm-5.1"; limit_usd = 0.40 })
-    , "agent_error_cost_budget_unenforceable:runtime=runtime,limit_usd=0.40" )
   ; ( "Agent/IdleDetected"
     , SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 })
     , "agent_error_idle_detected:consecutive_idle_turns=3" )
-  ; "Api/Timeout", SdkE.Api (Retry.Timeout { message = "60s" }), "api_error_timeout"
+  ; ( "Api/Timeout"
+    , SdkE.Api (Retry.Timeout { message = "60s"; phase = None })
+    , "api_error_timeout" )
   ; "Mcp", SdkE.Mcp (SdkE.InitializeFailed { detail = "boot" }), "mcp_error"
   ; "Config", SdkE.Config (SdkE.MissingEnvVar { var_name = "X" }), "config_error"
   ; ( "Serialization"

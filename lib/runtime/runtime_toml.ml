@@ -23,6 +23,20 @@ type parse_error =
 
 let error path message = [ { path; message } ]
 
+(** [typed_find kind path tbl key getter] wraps [Otoml.find_opt] so that a
+    type mismatch produces a structured [parse_error] instead of raising
+    [Otoml.Type_error] past the parser boundary. *)
+let typed_find (kind : string) (path : string) (tbl : Otoml.t) (key : string) getter
+  : ('a option, parse_error list) result
+  =
+  try Ok (Otoml.find_opt tbl getter [ key ]) with
+  | Otoml.Type_error msg ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf "%s must be %s; got %s" key kind msg))
+;;
+
 let required_non_empty_string
       ?(trim_result = false)
       (tbl : Otoml.t)
@@ -484,7 +498,6 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   : (Runtime_schema.binding, parse_error list) result
   =
   let path = Printf.sprintf "%s.%s" provider_id model_id in
-  let is_default = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "is-default" ] in
   (* [max-concurrent] is an explicit operator override, not a required binding
      property. Absence means "no static client-side cap"; provider pressure is
      handled by the global provider HTTP gate, live health/backoff, and any
@@ -493,34 +506,42 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
      An explicit non-positive value is a configuration error: 0 was historically
      used as an omission sentinel, and negative values are meaningless. Reject
      them at load time rather than silently downgrading to "no cap". *)
+  let is_default_result = typed_find "a boolean" path tbl "is-default" Otoml.get_boolean in
   let max_concurrent_result =
-    match Otoml.find_opt tbl Otoml.get_integer [ "max-concurrent" ] with
-    | None -> Ok None
-    | Some n when n > 0 -> Ok (Some n)
-    | Some n ->
+    match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
+    | Ok None -> Ok None
+    | Ok (Some n) when n > 0 -> Ok (Some n)
+    | Ok (Some n) ->
       Error
         (error
            (path ^ ".max-concurrent")
            (Printf.sprintf
               "max-concurrent must be a positive integer or omitted for no static cap; got %d"
               n))
+    | Error _ as e -> e
   in
-  Result.map
-    (fun max_concurrent ->
-       let price_input = Otoml.find_opt tbl Otoml.get_float [ "price-input" ] in
-       let price_output = Otoml.find_opt tbl Otoml.get_float [ "price-output" ] in
-       let keep_alive = Otoml.find_opt tbl Otoml.get_string [ "keep-alive" ] in
-       let num_ctx = Otoml.find_opt tbl Otoml.get_integer [ "num-ctx" ] in
-       { Runtime_schema.provider_id
-       ; model_id
-       ; is_default
-       ; max_concurrent
-       ; price_input
-       ; price_output
-       ; keep_alive
-       ; num_ctx
-       })
-    max_concurrent_result
+  let price_input_result = typed_find "a float" path tbl "price-input" Otoml.get_float in
+  let price_output_result = typed_find "a float" path tbl "price-output" Otoml.get_float in
+  let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
+  let num_ctx_result = typed_find "an integer" path tbl "num-ctx" Otoml.get_integer in
+  let ( let* ) = Result.bind in
+  let* is_default_opt = is_default_result in
+  let is_default = Option.value is_default_opt ~default:false (* DET-OK: fallback to false if omitted *) in
+  let* max_concurrent = max_concurrent_result in
+  let* price_input = price_input_result in
+  let* price_output = price_output_result in
+  let* keep_alive = keep_alive_result in
+  let* num_ctx = num_ctx_result in
+  Ok
+    { Runtime_schema.provider_id
+    ; model_id
+    ; is_default
+    ; max_concurrent
+    ; price_input
+    ; price_output
+    ; keep_alive
+    ; num_ctx
+    }
 ;;
 
 (* Parse one provider table ([<provider>.*]) into its Layer-3 bindings.

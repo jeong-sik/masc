@@ -263,6 +263,29 @@ let test_autonomous_allows_toolchain () =
     assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "git")
   | _ -> assert false
 
+(* Floor completeness — the [mkfs.<fstype>] family (mkfs.ext4, mkfs.xfs, ...)
+   is catastrophic-by-identity exactly like bare [mkfs], so it hits the floor
+   regardless of overlay. Probe finding 2026-06-18: the family bypassed the
+   floor when only bare [mkfs] was a recognized program. *)
+let test_mkfs_family_denied_under_autonomous () =
+  let s = simple (bin_ok "mkfs.ext4") ~args:[ lit "/dev/sdb1" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Deny { reason = Catastrophic_program bin; _ } ->
+    assert (Exec_program.to_string bin = "mkfs.ext4")
+  | _ -> assert false
+
+(* Floor completeness — [git clean] with a bundled force flag ([-fd], the
+   common force-delete-untracked form) is destructive and hits the floor.
+   Probe finding 2026-06-18: [git clean -fd] was graded as plain audited git
+   because the classifier matched only the standalone [-f] token. *)
+let test_git_clean_bundled_force_denied () =
+  let s = simple (bin_ok "git") ~args:[ lit "clean"; lit "-fd" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Clean_force); _ } -> ()
+  | _ -> assert false
+
 let () =
   test_safe_bin_strict_asks ();
   test_safe_bin_allowed_with_overlay ();
@@ -284,6 +307,8 @@ let () =
   (* RFC-0254 catastrophic floor *)
   test_destructive_git_floor_independent_of_trust ();
   test_mkfs_denied_under_autonomous ();
+  test_mkfs_family_denied_under_autonomous ();
+  test_git_clean_bundled_force_denied ();
   test_rm_root_allowed_at_policy_layer_jailed_downstream ();
   test_autonomous_allows_toolchain ();
   print_endline "[test_approval_policy] all tests passed"

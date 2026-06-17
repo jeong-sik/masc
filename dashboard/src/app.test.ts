@@ -17,6 +17,15 @@ describe('App v2 header chrome', () => {
     container.remove()
   })
 
+  it('renders v2 app shell wrapper with density/motion/bubble/surface attributes', () => {
+    const app = container.querySelector('.v2-app')
+    expect(app).not.toBeNull()
+    expect(app?.getAttribute('data-density')).toBe('regular')
+    expect(app?.getAttribute('data-motion')).toBe('subtle')
+    expect(app?.getAttribute('data-bubble')).toBe('card')
+    expect(app?.hasAttribute('data-surface')).toBe(true)
+  })
+
   it('renders v2 shell header and health strip scopes', () => {
     expect(container.querySelector('header.v2-shell-header')).not.toBeNull()
     expect(container.querySelector('[data-testid="dashboard-health-strip"].v2-health-strip')).not.toBeNull()
@@ -29,6 +38,8 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('.v2-header-title')).not.toBeNull()
     expect(container.querySelector('.v2-header-actions')).not.toBeNull()
     expect(container.querySelector('.v2-shell-tabs')).not.toBeNull()
+    expect(container.querySelector('.v2-app-header-status')).not.toBeNull()
+    expect(container.querySelector('.v2-statchip.live')).not.toBeNull()
   })
 
   it('renders health chips with the shared chip class', () => {

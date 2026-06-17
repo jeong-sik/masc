@@ -884,6 +884,7 @@ let test_librarian_runtime_provider_slot_gate () =
           | None -> Unix.putenv env_name "")
         (fun () ->
           Unix.putenv env_name "0.01";
+          let keeper_id = "slot-gate-keeper" in
           let entered, resolve_entered = Eio.Promise.create () in
           let release, resolve_release = Eio.Promise.create () in
           let provider_calls = Atomic.make 0 in
@@ -914,6 +915,7 @@ let test_librarian_runtime_provider_slot_gate () =
                     ~timeout_sec:1.0
                     ~sw
                     ~net
+                    ~keeper_id
                     ~provider_cfg:(test_provider_cfg ())
                     (input "trace-slot-a")));
           Eio.Promise.await entered;
@@ -926,6 +928,7 @@ let test_librarian_runtime_provider_slot_gate () =
                     ~timeout_sec:1.0
                     ~sw
                     ~net
+                    ~keeper_id
                     ~provider_cfg:(test_provider_cfg ())
                     (input "trace-slot-b")));
           wait_for_ref ~clock "second librarian result" second;

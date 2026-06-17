@@ -70,6 +70,7 @@ val extract_with_provider
   -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> keeper_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result

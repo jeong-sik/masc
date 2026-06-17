@@ -214,16 +214,15 @@ describe('ErrorFatal', () => {
     expect(container.querySelector('button')!.textContent).toContain('새로고침')
   })
 
-  it('uses the danger variant button (background tint)', () => {
+  it('uses the danger variant button (destructive outline)', () => {
     render(html`<${ErrorFatal} title="t" onReload=${() => {}} />`, container)
     const btn = container.querySelector('button')!
-    // ActionButton danger variant uses the component-level alias
-    // --button-danger-bg, which tokens.generated.ts resolves to
-    // var(--bad-10). Asserting on the literal classname keeps the
-    // test honest about what the component actually outputs (was
-    // missed in the cycle-34 migration to component-level aliases,
-    // commit c8011e3).
-    expect(btn.className).toContain('bg-[var(--button-danger-bg)]')
+    // ActionButton variant=danger now renders as a destructive outline
+    // (border-destructive/40, text-destructive, transparent bg with
+    // hover tint) rather than a filled background.
+    expect(btn.className).toContain('border-destructive/40')
+    expect(btn.className).toContain('text-destructive')
+    expect(btn.className).toContain('bg-transparent')
   })
 })
 

@@ -46,8 +46,6 @@ type t =
   ; default_preset : string
   ; max_concurrent_panels : int
   ; presets : preset list
-  ; low_confidence_threshold : float
-  ; high_stakes_task_kinds : string list
   ; per_hour_budget : int
   }
 [@@deriving show, eq]
@@ -57,12 +55,15 @@ val find_preset : t -> string -> preset option
 
 (** 결정론적 게이트 (순수, side-effect 없음).
 
-    판정 순서 (RFC-0252 §6):
+    판정 순서 (RFC-0252 §6) — 구조/자원 안전만 본다:
     + [enabled = false] → [Deny Disabled]
     + preset 없음/크기 위반 → [Deny (Preset_unknown _)]
     + [depth = Nested] → [Deny Depth_exceeded]
-    + 트리거 부적격 → [Deny Not_warranted]
     + 그 외 → [Allow request]
+
+    "이 턴이 심의할 가치가 있나"는 게이트가 score/문자열로 판정하지 않는다.
+    그 판단은 키퍼(이미 LLM)가 masc_fusion을 호출하는 것으로 표현되고, trigger는
+    발동 이유 라벨일 뿐이다. 남용은 [per_hour_budget] cap이 막는다.
 
     시간당 예산([per_hour_budget])은 decide에서 검사하지 않는다 — 검사·소모를
     원자적으로 묶어야 TOCTOU가 없으므로 [Fusion_budget.try_incr_if_under]가

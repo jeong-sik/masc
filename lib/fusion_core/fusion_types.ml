@@ -103,15 +103,9 @@ type judge_synthesis =
   }
 [@@deriving yojson, show, eq]
 
-type low_confidence =
-  { score : float
-  ; threshold : float
-  }
-[@@deriving yojson, show, eq]
-
 type fusion_trigger =
   | Explicit_tool_call
-  | Low_confidence of low_confidence
+  | Low_confidence
   | High_stakes of string
   | Contested_board of string
   | Operator_requested
@@ -120,7 +114,7 @@ type fusion_trigger =
 
 let trigger_label = function
   | Explicit_tool_call -> "explicit_tool_call"
-  | Low_confidence _ -> "low_confidence"
+  | Low_confidence -> "low_confidence"
   | High_stakes _ -> "high_stakes"
   | Contested_board _ -> "contested_board"
   | Operator_requested -> "operator_requested"
@@ -142,7 +136,6 @@ type deny_reason =
   | Preset_unknown of string
   | Depth_exceeded
   | Over_hourly_budget
-  | Not_warranted
 [@@deriving yojson, show, eq]
 
 let deny_reason_label = function
@@ -150,7 +143,6 @@ let deny_reason_label = function
   | Preset_unknown _ -> "preset_unknown"
   | Depth_exceeded -> "depth_exceeded"
   | Over_hourly_budget -> "over_hourly_budget"
-  | Not_warranted -> "not_warranted"
 
 type gate_decision =
   | Allow of fusion_request

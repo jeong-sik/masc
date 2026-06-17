@@ -18,8 +18,6 @@ let disabled : Fusion_policy.t =
   ; default_preset = ""
   ; max_concurrent_panels = 1
   ; presets = []
-  ; low_confidence_threshold = 0.0
-  ; high_stakes_task_kinds = []
   ; per_hour_budget = 0
   }
 
@@ -80,14 +78,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
   let max_concurrent_panels =
     Otoml.find_or ~default:1 toml Otoml.get_integer [ "fusion"; "max_concurrent_panels" ]
   in
-  let low_confidence_threshold =
-    Otoml.find_or ~default:0.0 toml Otoml.get_float
-      [ "fusion"; "gate"; "low_confidence_threshold" ]
-  in
-  let high_stakes_task_kinds =
-    Otoml.find_or ~default:[] toml (Otoml.get_array Otoml.get_string)
-      [ "fusion"; "gate"; "high_stakes_task_kinds" ]
-  in
   let per_hour_budget =
     Otoml.find_or ~default:0 toml Otoml.get_integer [ "fusion"; "gate"; "per_hour_budget" ]
   in
@@ -137,8 +127,6 @@ let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result
       ; default_preset
       ; max_concurrent_panels
       ; presets
-      ; low_confidence_threshold
-      ; high_stakes_task_kinds
       ; per_hour_budget
       }
 

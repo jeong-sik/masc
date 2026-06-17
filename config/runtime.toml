@@ -193,11 +193,9 @@ default_preset = "trio"
 max_concurrent_panels = 2
 
 [fusion.gate]
-# 결정론적 게이트 상한. low_confidence 트리거가 이 임계값을 SSOT로 쓴다.
-low_confidence_threshold = 0.6
-# high_stakes 트리거로 인정할 task kind 목록 (빈 목록 = 비활성).
-high_stakes_task_kinds = []
-# 시간당 최대 발동 횟수 (UTC hour bucket 기준).
+# 구조적 자원 cap만 둔다. "이 턴이 심의할 가치가 있나"는 게이트가 score 비교나
+# 문자열 매칭으로 판정하지 않는다 — 키퍼(이미 LLM)가 masc_fusion 호출로 판단하고,
+# 게이트는 발동 남용만 막는다 (RFC-0252 §6). 시간당 최대 발동 횟수 (UTC hour bucket).
 per_hour_budget = 20
 
 # 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.

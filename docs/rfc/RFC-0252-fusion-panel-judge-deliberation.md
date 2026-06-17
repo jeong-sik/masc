@@ -118,11 +118,12 @@ type judge_synthesis =
   ; decision         : judge_decision
   }
 
-(* 게이트 입력 — 발동 사유, catch-all 없음 *)
+(* 게이트 입력 — 발동 이유 라벨, catch-all 없음. 게이트는 종류로 적격성을 판정하지
+   않는다(심의 가치는 키퍼=LLM 판단). score/task_kind 매칭 페이로드를 두지 않는다. *)
 type fusion_trigger =
   | Explicit_tool_call                              (* 키퍼가 masc_fusion을 직접 호출 *)
-  | Low_confidence  of { score : float; threshold : float }
-  | High_stakes     of { task_kind : string }       (* config 목록과 대조 *)
+  | Low_confidence                                  (* 키퍼가 자기 확신이 낮다고 판단해 요청 *)
+  | High_stakes     of string                       (* 키퍼가 high-stakes로 판단한 task 설명 *)
   | Contested_board of { post_id : string }
   | Operator_requested
   | Harness_eval                                    (* eval 하네스가 결정론적으로 구동 *)
@@ -139,7 +140,7 @@ type fusion_request =
 (* 게이트 출력 *)
 type deny_reason =
   | Disabled | Preset_unknown of string | Depth_exceeded
-  | Over_hourly_budget | Not_warranted
+  | Over_hourly_budget
 
 type gate_decision = Allow of fusion_request | Deny of deny_reason
 ```
@@ -153,32 +154,27 @@ type gate_decision = Allow of fusion_request | Deny of deny_reason
 
 ---
 
-## 6. 트리거 / 게이트 (`fusion_policy`) — 결정론 우선
+## 6. 게이트 (`fusion_policy`) — 구조는 결정론, 판단은 LLM
 
-사용자가 "#4를 제대로 만들라"고 명시. fusion 발동은 **config 상한으로 결정론적**이어야 발동 횟수가 예측·테스트 가능하다.
+게이트는 **구조/자원 안전**만 결정론적으로 본다. "이 턴이 심의할 가치가 있나"라는 *판단*은 게이트가 score 임계값(`score < low_confidence_threshold`)이나 task_kind 문자열 매칭(`task_kind ∈ high_stakes_task_kinds`)으로 대신 내리지 않는다 — 그건 memory-os 점수머신과 같은 안티패턴(가치 미입증 수치 판정)이다. 심의 가치는 키퍼(이미 LLM)가 스스로 판단해 `masc_fusion`을 호출하는 것으로 표현되고, 발동 남용은 결정론적 `per_hour_budget` cap이 막는다. **판단=LLM, 억제=구조적 cap.**
 
 ```ocaml
 val decide
   :  policy:Fusion_policy.t          (* runtime.toml [fusion] + [fusion.gate]에서 로드 *)
-  -> hourly_count:int                (* per-hour 발동 카운터 (호출자 집계) *)
   -> fusion_request
   -> gate_decision
 ```
 
-판정 규칙(순수 함수, side-effect 없음):
+판정 규칙(순수 함수, side-effect 없음 — 구조/자원만):
 
 1. `policy.enabled = false` → `Deny Disabled`.
-2. `preset`이 `policy.presets`에 없음 → `Deny (Preset_unknown name)`. (fail-fast, silent default 금지)
+2. `preset`이 `policy.presets`에 없음/크기 위반 → `Deny (Preset_unknown name)`. (fail-fast, silent default 금지)
 3. `depth = Nested` → `Deny Depth_exceeded`.
-4. trigger별 게이트:
-   - `Explicit_tool_call` / `Operator_requested` / `Harness_eval` → 통과(아래 예산 검사만).
-   - `Low_confidence {score; threshold}` → `score < threshold`일 때만.
-   - `High_stakes {task_kind}` → `task_kind ∈ policy.high_stakes_task_kinds`.
-   - `Contested_board` → 통과.
-5. `per_hour_budget` 초과 → `Deny Over_hourly_budget`.
-6. 전부 통과 → `Allow request`.
+4. 그 외 → `Allow request`.
 
-모델이 "심의 필요"를 *요청*해도(키퍼가 `masc_fusion` 호출 = `Explicit_tool_call`) 4–5 게이트에 종속된다. 즉 **모델 판단은 보조, 결정론 상한이 주**. (MEMORY: 키퍼 wake-cascade thrash 전례 회피.)
+`trigger`는 "왜 발동했나"의 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다 (board meta·로그용). `per_hour_budget` 초과는 호출자가 `Fusion_budget.try_incr_if_under`로 원자적으로 강제해 `Deny Over_hourly_budget`을 낸다 (TOCTOU 회피, §10).
+
+키퍼가 `masc_fusion`을 호출하는 것 자체가 "심의가 필요하다"는 LLM 판단이다. 게이트는 그 판단을 score로 재판정하지 않고 구조적 안전과 시간당 cap만 강제한다. (MEMORY: 키퍼 wake-cascade thrash는 score 게이트가 아니라 `per_hour_budget` cap으로 막는다.)
 
 ---
 

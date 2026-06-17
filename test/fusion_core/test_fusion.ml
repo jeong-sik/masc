@@ -23,8 +23,6 @@ let base_policy : Fusion_policy.t =
         ; max_tool_calls_per_panel = 0
         }
       ]
-  ; low_confidence_threshold = 0.55
-  ; high_stakes_task_kinds = [ "goal_decision" ]
   ; per_hour_budget = 20
   }
 
@@ -52,23 +50,16 @@ let test_depth_nested () =
     (Deny Depth_exceeded)
     (decide (req ~depth:Fusion_depth.Nested ()))
 
-let test_low_conf_below () =
-  let r = req ~trigger:(Low_confidence { score = 0.4; threshold = 0.55 }) () in
-  Alcotest.check gate "low-conf below threshold -> allow" (Allow r) (decide r)
+(* trigger는 발동 이유 라벨일 뿐 — 게이트는 종류로 거부하지 않는다(심의 가치는
+   키퍼/LLM이 판단). 구조(enabled/preset/depth)만 통과하면 어떤 trigger든 Allow.
+   예전 score<threshold / task_kind∈list 판정(Not_warranted)은 제거됐다. *)
+let test_low_confidence_trigger_allowed () =
+  let r = req ~trigger:Low_confidence () in
+  Alcotest.check gate "low_confidence label -> allow" (Allow r) (decide r)
 
-let test_low_conf_above () =
-  let r = req ~trigger:(Low_confidence { score = 0.7; threshold = 0.55 }) () in
-  Alcotest.check gate "conf above threshold -> not warranted"
-    (Deny Not_warranted) (decide r)
-
-let test_high_stakes_listed () =
-  let r = req ~trigger:(High_stakes "goal_decision") () in
-  Alcotest.check gate "high-stakes listed -> allow" (Allow r) (decide r)
-
-let test_high_stakes_unlisted () =
-  let r = req ~trigger:(High_stakes "chitchat") () in
-  Alcotest.check gate "high-stakes unlisted -> not warranted"
-    (Deny Not_warranted) (decide r)
+let test_high_stakes_trigger_allowed () =
+  let r = req ~trigger:(High_stakes "anything") () in
+  Alcotest.check gate "high_stakes label -> allow" (Allow r) (decide r)
 
 let test_allow () =
   let r = req () in
@@ -98,8 +89,6 @@ enabled = true
 default_preset = "budget"
 max_concurrent_panels = 2
 [fusion.gate]
-low_confidence_threshold = 0.55
-high_stakes_task_kinds = ["goal_decision"]
 per_hour_budget = 20
 [fusion.presets.budget]
 web_tools = false
@@ -115,7 +104,6 @@ let test_config_valid () =
   | Ok p ->
     Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
     Alcotest.(check int) "one preset" 1 (List.length p.Fusion_policy.presets);
-    Alcotest.(check (float 0.0001)) "low_conf" 0.55 p.Fusion_policy.low_confidence_threshold;
     Alcotest.(check int) "per_hour" 20 p.Fusion_policy.per_hour_budget;
     (match p.Fusion_policy.presets with
      | [ preset ] ->
@@ -307,8 +295,6 @@ enabled = false
 default_preset = "trio"
 max_concurrent_panels = 2
 [fusion.gate]
-low_confidence_threshold = 0.6
-high_stakes_task_kinds = []
 per_hour_budget = 20
 [fusion.presets.trio]
 web_tools = false
@@ -465,10 +451,8 @@ let () =
       , [ Alcotest.test_case "disabled" `Quick test_disabled
         ; Alcotest.test_case "unknown_preset" `Quick test_unknown_preset
         ; Alcotest.test_case "depth_nested" `Quick test_depth_nested
-        ; Alcotest.test_case "low_conf_below" `Quick test_low_conf_below
-        ; Alcotest.test_case "low_conf_above" `Quick test_low_conf_above
-        ; Alcotest.test_case "high_stakes_listed" `Quick test_high_stakes_listed
-        ; Alcotest.test_case "high_stakes_unlisted" `Quick test_high_stakes_unlisted
+        ; Alcotest.test_case "low_confidence_trigger_allowed" `Quick test_low_confidence_trigger_allowed
+        ; Alcotest.test_case "high_stakes_trigger_allowed" `Quick test_high_stakes_trigger_allowed
         ; Alcotest.test_case "allow" `Quick test_allow
         ; Alcotest.test_case "explicit_still_budget_bound" `Quick test_explicit_still_budget_bound
         ] )

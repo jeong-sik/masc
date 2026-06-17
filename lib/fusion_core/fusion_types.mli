@@ -142,19 +142,17 @@ type judge_synthesis =
 
 (** {1 트리거} *)
 
-(** [Low_confidence] 페이로드 (variant inline record 회피용 named record). *)
-type low_confidence =
-  { score : float
-  ; threshold : float
-  }
-[@@deriving yojson, show, eq]
+(** fusion 발동 사유 — 게이트 입력(이유 라벨). catch-all 없음.
 
-(** fusion 발동 사유 — 게이트 입력. catch-all 없음.
-    결정론적 게이트가 각 변형을 config 상한과 대조한다 (RFC-0252 §6). *)
+    게이트는 trigger의 *종류*로 심의 가치를 판정하지 않는다(RFC-0252 §6).
+    "이 결정이 심의할 가치가 있나"는 키퍼(이미 LLM)가 스스로 판단해 masc_fusion을
+    호출하는 것으로 표현되고, 게이트는 구조적 안전(enabled/preset/depth/
+    per_hour_budget cap)만 본다. 따라서 각 변형은 score 비교·문자열 매칭 대상이
+    아니라 "왜 발동했나"를 기록하는 라벨이다 (board meta·로그·메트릭용). *)
 type fusion_trigger =
   | Explicit_tool_call  (** 키퍼가 masc_fusion을 직접 호출 *)
-  | Low_confidence of low_confidence  (** 단일 모델 확신도가 임계 미만 *)
-  | High_stakes of string  (** task_kind이 config 목록에 있음 *)
+  | Low_confidence  (** 키퍼가 자기 답의 확신이 낮다고 *판단*해 요청 *)
+  | High_stakes of string  (** 키퍼가 high-stakes로 판단한 task 설명 (라벨) *)
   | Contested_board of string  (** post_id — 보드에서 다툼 *)
   | Operator_requested
   | Harness_eval  (** eval 하네스가 결정론적으로 구동 *)
@@ -186,7 +184,6 @@ type deny_reason =
   | Preset_unknown of string  (** preset 이름이 config에 없음 (fail-fast) *)
   | Depth_exceeded  (** depth = Nested *)
   | Over_hourly_budget  (** per_hour_budget 초과 *)
-  | Not_warranted  (** 트리거가 게이트 조건 미충족 (예: low_confidence인데 score≥threshold) *)
 [@@deriving yojson, show, eq]
 
 (** 안정적 짧은 라벨 (로깅·메트릭용). *)

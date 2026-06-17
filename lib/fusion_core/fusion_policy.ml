@@ -41,8 +41,6 @@ type t =
   ; default_preset : string
   ; max_concurrent_panels : int
   ; presets : preset list
-  ; low_confidence_threshold : float
-  ; high_stakes_task_kinds : string list
   ; per_hour_budget : int
   }
 [@@deriving show, eq]
@@ -50,23 +48,13 @@ type t =
 let find_preset (policy : t) name =
   List.find_opt (fun (p : preset) -> String.equal p.name name) policy.presets
 
-(* 트리거 적격성 — config 상한이 SSOT. Low_confidence는 producer가 임베드한
-   threshold가 아니라 policy.low_confidence_threshold로 재판정한다. *)
-let trigger_eligible ~(policy : t) (trigger : Fusion_types.fusion_trigger) =
-  match trigger with
-  | Fusion_types.Explicit_tool_call
-  | Fusion_types.Operator_requested
-  | Fusion_types.Harness_eval
-  | Fusion_types.Contested_board _ -> true
-  | Fusion_types.Low_confidence { score; _ } ->
-    Float.compare score policy.low_confidence_threshold < 0
-  | Fusion_types.High_stakes task_kind ->
-    List.mem task_kind policy.high_stakes_task_kinds
-
 (* 시간당 예산은 여기서 검사하지 않는다 — 검사·소모를 한 연산으로 묶어야 TOCTOU가
    없으므로 [Fusion_budget.try_incr_if_under]가 게이트 통과 후 원자적으로 강제한다
-   (실패 시 호출자가 [Over_hourly_budget]로 Deny). decide는 enabled/preset/depth/
-   trigger의 순수 판정만 담당한다. *)
+   (실패 시 호출자가 [Over_hourly_budget]로 Deny). decide는 enabled/preset/depth의
+   구조적 판정만 담당한다 — "이 턴이 심의할 가치가 있나"는 게이트가 score 비교나
+   문자열 매칭으로 판정하지 않고, 키퍼(이미 LLM)가 판단해 masc_fusion을 호출하는
+   것으로 표현한다(RFC-0252 §6). 따라서 [req.trigger]는 발동 이유 라벨일 뿐
+   적격성 판정에 쓰이지 않으며, 남용은 [per_hour_budget] cap이 막는다. *)
 let decide ~(policy : t)
     (req : Fusion_types.fusion_request) : Fusion_types.gate_decision =
   if not policy.enabled then Fusion_types.Deny Fusion_types.Disabled
@@ -76,12 +64,7 @@ let decide ~(policy : t)
     | Some preset when not (preset_size_ok preset) ->
       Fusion_types.Deny (Fusion_types.Preset_unknown req.preset)
     | Some _preset ->
-      begin
-        match req.depth with
-        | Fusion_types.Fusion_depth.Nested ->
-          Fusion_types.Deny Fusion_types.Depth_exceeded
-        | Fusion_types.Fusion_depth.Top ->
-          if not (trigger_eligible ~policy req.trigger) then
-            Fusion_types.Deny Fusion_types.Not_warranted
-          else Fusion_types.Allow req
-      end
+      (match req.depth with
+       | Fusion_types.Fusion_depth.Nested ->
+         Fusion_types.Deny Fusion_types.Depth_exceeded
+       | Fusion_types.Fusion_depth.Top -> Fusion_types.Allow req)

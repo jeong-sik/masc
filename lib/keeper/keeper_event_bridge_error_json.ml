@@ -164,8 +164,8 @@ let sdk_config_error_fields = function
     ; "field", `String field
     ; "detail", `String detail
     ]
-  | Agent_sdk.Error.SensitiveValueInConfig { field } ->
-    [ "variant", `String "sensitive_value_in_config"; "field", `String field ]
+  | Agent_sdk.Error.SensitiveValueInConfig { detail } ->
+    [ "variant", `String "sensitive_value_in_config"; "detail", `String detail ]
 ;;
 
 let sdk_serialization_error_fields = function

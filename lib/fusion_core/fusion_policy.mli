@@ -60,12 +60,12 @@ val find_preset : t -> string -> preset option
     + preset 없음/크기 위반 → [Deny (Preset_unknown _)]
     + [depth = Nested] → [Deny Depth_exceeded]
     + 트리거 부적격 → [Deny Not_warranted]
-    + [hourly_count >= per_hour_budget] → [Deny Over_hourly_budget]
     + 그 외 → [Allow request]
 
-    @param hourly_count 현재 1시간 윈도우에 이미 시작된 fusion 수 (orchestrator가 집계). *)
+    시간당 예산([per_hour_budget])은 decide에서 검사하지 않는다 — 검사·소모를
+    원자적으로 묶어야 TOCTOU가 없으므로 [Fusion_budget.try_incr_if_under]가
+    게이트 통과 후 강제하고, 실패 시 호출자가 [Over_hourly_budget]로 Deny한다. *)
 val decide
   :  policy:t
-  -> hourly_count:int
   -> Fusion_types.fusion_request
   -> Fusion_types.gate_decision

@@ -21,6 +21,20 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
   }
 })
 
+vi.mock('../../api/mcp', () => ({
+  callMcpTool: vi.fn().mockResolvedValue(JSON.stringify({
+    before_tokens: 124000,
+    after_tokens: 62000,
+    saved_tokens: 62000,
+    phase: 'Running',
+    trigger: 'manual_operator_compact',
+  })),
+}))
+
+vi.mock('../common/toast', () => ({
+  showToast: vi.fn(),
+}))
+
 function mkKeeper(partial: Partial<Keeper>): Keeper {
   return { name: 'masc-improver', status: 'running', ...partial } as Keeper
 }
@@ -125,16 +139,13 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('압축 중…')
     expect((container.querySelector('.kw-compact-btn') as HTMLButtonElement).disabled).toBe(true)
 
-    await vi.advanceTimersByTimeAsync(1500)
     await flushPromises()
 
     expect(container.textContent).toContain('컴팩션 스냅샷')
-    expect(container.textContent).toContain('활성 태스크 소유권·상태')
-    expect(container.textContent).toContain('초기 분석 turn')
-    expect(container.textContent).toContain('중복된 사고')
+    expect(container.textContent).toContain('124.0k → 62.0k tok')
+    expect(container.textContent).toContain('절약 62.0k tok')
+    expect(container.textContent).toContain('manual_operator_compact')
     expect(container.textContent).toContain('완료')
-    // Live ratio override is lower than the original 62%.
-    expect(container.textContent).not.toContain('62%')
 
     await vi.advanceTimersByTimeAsync(2600)
     await flushPromises()
@@ -143,28 +154,23 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('accumulates multiple compaction snapshots', async () => {
-    vi.useFakeTimers()
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
 
     for (let i = 0; i < 2; i++) {
       fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
-      await vi.advanceTimersByTimeAsync(1500)
       await flushPromises()
     }
 
     expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(2)
   })
 
-  it('resets snapshots and live ratio when the keeper changes', async () => {
-    vi.useFakeTimers()
+  it('resets snapshots when the keeper changes', async () => {
     const { container, rerender } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
 
     fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
-    await vi.advanceTimersByTimeAsync(1500)
     await flushPromises()
 
     expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(1)
-    expect(container.textContent).not.toContain('62%')
 
     const other = mkKeeper({ name: 'other-keeper', context_ratio: 0.3, context_tokens: 60000, context_max: 200000 })
     rerender(html`<${KeeperWorkspaceRail} keeper=${other} onToggleDetail=${() => {}} />`)

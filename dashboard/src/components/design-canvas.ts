@@ -17,6 +17,23 @@ import { CountBadge } from './common/badge'
 import { PanelCard } from './common/panel-card'
 import { SurfaceCard } from './common/card'
 import { Sparkline } from './common/sparkline'
+import { Table } from './common/table'
+import { TimeAgo } from './common/time-ago'
+import { KeeperBadge } from './keeper-badge'
+import { SessionTraceEntry } from './session-trace/session-trace-entry'
+import { keeperStateTone } from './common/status-chip'
+import {
+  FIXTURE_KEEPERS,
+  FIXTURE_GOALS,
+  FIXTURE_POSTS,
+  FIXTURE_TURNS,
+  FIXTURE_EPISODES,
+  type FixtureKeeper,
+  type FixtureGoal,
+  type FixtureJob,
+  type FixturePost,
+} from './design-canvas-fixtures'
+import type { MemoryOsEpisodeSummary } from '../api/dashboard'
 
 export type DesignCanvasCategory =
   | 'primitives'
@@ -24,6 +41,7 @@ export type DesignCanvasCategory =
   | 'organisms'
   | 'surfaces'
   | 'motion'
+  | 'fixtures'
 
 const CATEGORIES: { id: DesignCanvasCategory; label: string }[] = [
   { id: 'primitives', label: 'Primitives' },
@@ -31,6 +49,7 @@ const CATEGORIES: { id: DesignCanvasCategory; label: string }[] = [
   { id: 'organisms', label: 'Organisms' },
   { id: 'surfaces', label: 'Surfaces' },
   { id: 'motion', label: 'Motion' },
+  { id: 'fixtures', label: 'Fixtures' },
 ]
 
 function useDesignCanvasTheme() {
@@ -336,6 +355,233 @@ function MotionGallery() {
   `
 }
 
+function SectionStack({ title, children }: { title: string; children: unknown }) {
+  return html`
+    <div class="dc-section" data-design-canvas-section>
+      <h3 class="dc-section-title">${title}</h3>
+      <div class="dc-fixtures-stack">${children}</div>
+    </div>
+  `
+}
+
+function jobStateTone(state: string): string {
+  switch (state) {
+    case 'done':
+      return 'ok'
+    case 'in-progress':
+      return 'info'
+    case 'review':
+      return 'warn'
+    case 'blocked':
+      return 'bad'
+    case 'todo':
+    default:
+      return 'neutral'
+  }
+}
+
+function priorityTone(priority: string): string {
+  switch (priority) {
+    case 'high':
+      return 'bad'
+    case 'normal':
+      return 'info'
+    case 'low':
+    default:
+      return 'neutral'
+  }
+}
+
+function FixtureKeeperCard({ keeper }: { keeper: FixtureKeeper }) {
+  return html`
+    <${SurfaceCard}
+      class="w-[260px]"
+      variant="compact"
+      data-design-canvas-fixture="keeper-card"
+    >
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <${KeeperBadge} id=${keeper.id} name=${keeper.kr} variant="full" />
+        <${StatusChip} tone=${keeperStateTone(keeper.phase)}>${keeper.phase}<//>
+      </div>
+      <${Vitals}
+        items=${[
+          { k: 'NS', v: keeper.ns, tone: 'default' },
+          { k: 'CTX', v: `${Math.round(keeper.ctx * 100)}%`, tone: keeper.ctx >= 0.85 ? 'warn' : 'default' },
+          { k: 'TRACES', v: keeper.traces, tone: 'default' },
+          { k: 'TASKS', v: keeper.tasks, tone: 'default' },
+          { k: 'TPS', v: keeper.tps, tone: keeper.tps > 0 ? 'volt' : 'default' },
+        ]}
+      />
+      <${Meter} pct=${Math.round(keeper.ctx * 100)} hot=${keeper.ctx >= 0.85} />
+      <div class="text-3xs text-[var(--color-fg-muted)] mt-2">${keeper.model} · ${keeper.runtime}</div>
+    <//>
+  `
+}
+
+function FixtureGoalsTable() {
+  const columns = [
+    { key: 'id', header: 'ID' },
+    { key: 'title', header: 'Title' },
+    {
+      key: 'lead',
+      header: 'Lead',
+      render: (row: FixtureGoal) => html`<${KeeperBadge} id=${row.lead} variant="sigil" />`,
+    },
+    {
+      key: 'priority',
+      header: 'Priority',
+      render: (row: FixtureGoal) => html`<${StatusChip} tone=${priorityTone(row.priority)} uppercase=${false}>${row.priority}<//>`,
+    },
+    { key: 'due', header: 'Due' },
+    {
+      key: 'metric',
+      header: 'Metric',
+      render: (row: FixtureGoal) => row.metric ?? html`<span class="text-[var(--color-fg-muted)]">—</span>`,
+    },
+  ]
+
+  return html`
+    <div class="overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)]">
+      <${Table}
+        columns=${columns}
+        rows=${FIXTURE_GOALS}
+        getRowId=${(row: FixtureGoal) => row.id}
+        aria-label="Fixture goals"
+      />
+    </div>
+  `
+}
+
+function FixtureJobsTable() {
+  const rows = FIXTURE_GOALS.flatMap((goal) =>
+    goal.jobs.map((job) => ({ ...job, goalId: goal.id, goalTitle: goal.title })),
+  )
+
+  const columns = [
+    { key: 'id', header: 'ID' },
+    { key: 'title', header: 'Title' },
+    {
+      key: 'keeper',
+      header: 'Keeper',
+      render: (row: FixtureJob & { goalId: string; goalTitle: string }) =>
+        row.keeper ? html`<${KeeperBadge} id=${row.keeper} variant="sigil" />` : html`<span class="text-[var(--color-fg-muted)]">unassigned</span>`,
+    },
+    {
+      key: 'state',
+      header: 'State',
+      render: (row: FixtureJob & { goalId: string; goalTitle: string }) => html`<${StatusChip} tone=${jobStateTone(row.state)} uppercase=${false}>${row.state}<//>`,
+    },
+    {
+      key: 'blocker',
+      header: 'Blocker',
+      render: (row: FixtureJob & { goalId: string; goalTitle: string }) => row.blocker ?? html`<span class="text-[var(--color-fg-muted)]">—</span>`,
+    },
+  ]
+
+  return html`
+    <div class="overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)]">
+      <${Table}
+        columns=${columns}
+        rows=${rows}
+        getRowId=${(row: FixtureJob & { goalId: string; goalTitle: string }) => row.id}
+        aria-label="Fixture jobs"
+      />
+    </div>
+  `
+}
+
+function FixturePostCard({ post }: { post: FixturePost }) {
+  return html`
+    <${SurfaceCard}
+      class="w-[320px]"
+      variant="compact"
+      data-design-canvas-fixture="post-card"
+    >
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <${KeeperBadge} id=${post.author} variant="full" />
+        <${StatusChip} tone="neutral" uppercase=${false}>${post.board}<//>
+      </div>
+      ${post.title ? html`<h4 class="text-sm font-semibold text-[var(--color-fg-secondary)] mb-1">${post.title}</h4>` : null}
+      <div
+        class="text-sm leading-relaxed text-[var(--color-fg-primary)] line-clamp-4"
+        dangerouslySetInnerHTML=${{ __html: post.body }}
+      />
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${post.reactions.map(([emoji, count, reacted]) => html`
+          <${StatusChip} key=${emoji} tone=${reacted ? 'info' : 'neutral'} uppercase=${false}>${emoji} ${count}<//>
+        `)}
+        <span class="text-3xs text-[var(--color-fg-muted)]">karma ${post.karma}</span>
+        <span class="text-3xs text-[var(--color-fg-muted)]">replies ${post.replies}</span>
+      </div>
+    <//>
+  `
+}
+
+function FixtureEpisodeCard({ episode }: { episode: MemoryOsEpisodeSummary }) {
+  return html`
+    <${SurfaceCard}
+      class="w-[260px]"
+      variant="compact"
+      data-design-canvas-fixture="episode-card"
+    >
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <span class="font-mono text-2xs text-[var(--color-fg-secondary)]">${episode.trace_id}</span>
+        <${StatusChip} tone=${episode.current ? 'ok' : 'warn'} uppercase=${false}>${episode.current ? 'current' : 'expired'}<//>
+      </div>
+      <div class="text-xs text-[var(--color-fg-secondary)] line-clamp-3 mb-2">${episode.summary}</div>
+      <div class="flex items-center justify-between text-3xs text-[var(--color-fg-muted)]">
+        <span>g${episode.generation.toString().padStart(4, '0')} · ${episode.claim_count} claims</span>
+        ${episode.terminal_marker ? html`<span class="font-mono">${episode.terminal_marker}</span>` : null}
+      </div>
+      ${episode.valid_until_iso
+        ? html`<div class="mt-2 text-3xs text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${episode.valid_until_iso} mode="both" /></div>`
+        : null}
+    <//>
+  `
+}
+
+function FixturesGallery() {
+  return html`
+    <${SectionStack} title="Fixtures">
+      <${Artboard} title="Keepers">
+        <div class="dc-fixtures-row">
+          ${FIXTURE_KEEPERS.map((keeper) => html`<${FixtureKeeperCard} key=${keeper.id} keeper=${keeper} />`)}
+        </div>
+      <//>
+
+      <${Artboard} title="Goals">
+        <div class="dc-fixtures-table-wrap">
+          <${FixtureGoalsTable} />
+        </div>
+      <//>
+
+      <${Artboard} title="Jobs">
+        <div class="dc-fixtures-table-wrap">
+          <${FixtureJobsTable} />
+        </div>
+      <//>
+
+      <${Artboard} title="Posts">
+        <div class="dc-fixtures-row">
+          ${FIXTURE_POSTS.map((post) => html`<${FixturePostCard} key=${post.id} post=${post} />`)}
+        </div>
+      <//>
+
+      <${Artboard} title="Turns">
+        <div class="dc-fixtures-stack">
+          ${FIXTURE_TURNS.map((event) => html`<${SessionTraceEntry} key=${event.id} event=${event} />`)}
+        </div>
+      <//>
+
+      <${Artboard} title="Episodes">
+        <div class="dc-fixtures-row">
+          ${FIXTURE_EPISODES.map((episode) => html`<${FixtureEpisodeCard} key=${`${episode.trace_id}-${episode.generation}`} episode=${episode} />`)}
+        </div>
+      <//>
+    <//>
+  `
+}
+
 export function DesignCanvas() {
   const [category, setCategory] = useState<DesignCanvasCategory>('primitives')
   const { theme, toggle } = useDesignCanvasTheme()
@@ -380,6 +626,7 @@ export function DesignCanvas() {
         ${category === 'organisms' ? html`<${OrganismsGallery} />` : null}
         ${category === 'surfaces' ? html`<${SurfacesGallery} />` : null}
         ${category === 'motion' ? html`<${MotionGallery} />` : null}
+        ${category === 'fixtures' ? html`<${FixturesGallery} />` : null}
       </div>
     </div>
   `

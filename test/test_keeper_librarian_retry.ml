@@ -94,6 +94,39 @@ let test_nudge_appended_each_retry () =
   let counts = List.rev_map nudge_count !seen in
   check (list int) "one nudge added per retry" [ 0; 1; 2 ] counts
 
+(* Drive [cadence_step] sequentially from a fresh keeper (counter 0) for [turns]
+   turns, collecting the [due] decision each turn. *)
+let run_cadence ~cadence ~turns =
+  let counter = ref 0 in
+  List.init turns (fun _ ->
+    let next, due = R.cadence_step ~cadence ~counter:!counter in
+    counter := next;
+    due)
+
+let test_cadence_three_fires_every_third () =
+  (* cadence 3: two skipped turns, then a due turn, repeating. *)
+  check (list bool) "every third turn is due"
+    [ false; false; true; false; false; true ]
+    (run_cadence ~cadence:3 ~turns:6)
+
+let test_cadence_one_always_due () =
+  (* cadence 1 (and the floored <=1 case) restores per-turn extraction. *)
+  check (list bool) "cadence 1 is due every turn"
+    [ true; true; true; true ]
+    (run_cadence ~cadence:1 ~turns:4);
+  check (pair int bool) "cadence<=1 pins counter at 0"
+    (0, true)
+    (R.cadence_step ~cadence:1 ~counter:5)
+
+let test_cadence_resets_after_due () =
+  (* A due turn returns counter 0 so the next cycle starts fresh. *)
+  check (pair int bool) "last turn of cycle is due and resets"
+    (0, true)
+    (R.cadence_step ~cadence:3 ~counter:2);
+  check (pair int bool) "mid-cycle advances without firing"
+    (2, false)
+    (R.cadence_step ~cadence:3 ~counter:1)
+
 let () =
   run "keeper_librarian_retry"
     [
@@ -104,5 +137,11 @@ let () =
           test_case "bounded then fails" `Quick test_bounded_then_fails;
           test_case "transport not retried" `Quick test_transport_not_retried;
           test_case "nudge appended each retry" `Quick test_nudge_appended_each_retry;
+        ] );
+      ( "cadence",
+        [
+          test_case "fires every third turn" `Quick test_cadence_three_fires_every_third;
+          test_case "cadence 1 always due" `Quick test_cadence_one_always_due;
+          test_case "resets after due" `Quick test_cadence_resets_after_due;
         ] );
     ]

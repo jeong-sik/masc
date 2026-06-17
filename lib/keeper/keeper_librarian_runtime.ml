@@ -24,6 +24,63 @@ let enabled () =
     ~default:true
 ;;
 
+(* Librarian extraction cadence (per keeper).
+
+   Memory extraction runs once per keeper turn by default, which means every
+   keeper issues a provider-backed LLM extraction every turn against a shared
+   inference pool. That per-turn LLM load — not the lack of a concurrency gate —
+   is the dominant source of the librarian empty-response saturation observed
+   2026-06-16 (HTTP 200 empty body under pool contention). The fleet-wide
+   [provider_slot] only masked it by dropping (skip) most attempts.
+
+   Extract once every [cadence_turns ()] turns per keeper instead. The extraction
+   window ([max_messages ()], default 24) already spans several recent turns, so
+   batching over a small cadence is a deferral, not a loss: a skipped turn's
+   messages are still in the window at the next due turn. Cadence must stay small
+   relative to [max_messages ()] or early turns can scroll out of the window.
+
+   Tradeoff: recall in turns between extractions sees slightly staler memory
+   (a turn's freshly-produced fact is not extracted until the next due turn).
+   Memory extraction is best-effort, so this eventual-consistency is acceptable.
+
+   Set MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS=1 to restore per-turn
+   extraction (the previous behavior). *)
+let cadence_turns () =
+  Keeper_memory_bank_env.memory_env_int_logged
+    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
+    ~default:3
+  |> max 1
+;;
+
+(* Per-keeper "turns since last extraction" counters. Stdlib.Mutex (not
+   Eio.Mutex): the critical section is a Hashtbl read/write that never yields,
+   and the table is reachable from concurrent keeper fibers. *)
+let cadence_mu = Stdlib.Mutex.create ()
+let cadence_counters : (string, int) Hashtbl.t = Hashtbl.create 16
+
+(* Advance [keeper_id]'s counter and report whether extraction is due this turn.
+   A due turn resets the counter to 0. cadence<=1 is always due (per-turn). *)
+(* Pure cadence decision. Given the keeper's current [counter] (turns since its
+   last extraction) and the [cadence], return the updated counter and whether
+   extraction is due now. cadence<=1 is always due and pins the counter at 0. *)
+let cadence_step ~cadence ~counter =
+  if cadence <= 1
+  then 0, true
+  else (
+    let next = counter + 1 in
+    if next >= cadence then 0, true else next, false)
+;;
+
+let cadence_due ~keeper_id =
+  Stdlib.Mutex.protect cadence_mu (fun () ->
+    let counter =
+      Option.value ~default:0 (Hashtbl.find_opt cadence_counters keeper_id)
+    in
+    let updated, due = cadence_step ~cadence:(cadence_turns ()) ~counter in
+    Hashtbl.replace cadence_counters keeper_id updated;
+    due)
+;;
+
 let max_messages () =
   Keeper_memory_bank_env.memory_env_int_logged
     "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
@@ -324,7 +381,10 @@ let provider_for_runtime ~runtime_id =
 ;;
 
 let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id inp =
-  if enabled ()
+  (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
+     advances its cadence counter, and a not-due turn skips extraction entirely
+     (the messages remain in the window for the next due turn). *)
+  if enabled () && cadence_due ~keeper_id
   then (
     try
       match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with

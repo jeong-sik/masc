@@ -16,6 +16,17 @@ type complete_fn =
 val enabled : unit -> bool
 (** Opt-in gate controlled by [MASC_KEEPER_MEMORY_OS_LIBRARIAN]. *)
 
+val cadence_turns : unit -> int
+(** Turns between librarian extractions per keeper. Default 3, floored at 1,
+    overridable with [MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS]. 1 restores
+    per-turn extraction. *)
+
+val cadence_step : cadence:int -> counter:int -> int * bool
+(** Pure cadence decision. [(updated_counter, due)] for a keeper whose counter
+    (turns since last extraction) is [counter] under [cadence]. cadence<=1 is
+    always due with the counter pinned at 0. Exposed for testing the cadence
+    logic without the per-keeper counter table. *)
+
 val max_messages : unit -> int
 (** Maximum recent checkpoint messages sent to the librarian prompt. *)
 

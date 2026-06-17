@@ -8,6 +8,8 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   timeout_sec : int option;
+  turn_instructions : string option;
+  surface_context : Yojson.Safe.t option;
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
@@ -21,6 +23,179 @@ let keeper_chat_stream_error_json message =
       ( "error",
         `Assoc [ ("message", `String message) ] );
     ]
+
+let normalized_context_value value =
+  value
+  |> String.to_seq
+  |> Seq.map (function
+       | '\n' | '\r' | '\t' -> ' '
+       | ch -> ch)
+  |> String.of_seq
+  |> String.trim
+
+let format_surface_context_field_value = function
+  | `String s -> normalized_context_value s
+  | json -> Yojson.Safe.to_string json
+
+let format_surface_context_fields fields_json =
+  let lines =
+    match fields_json with
+    | `List items ->
+        List.filter_map
+          (function
+            | `Assoc fields -> (
+                match
+                  ( List.assoc_opt "k" fields,
+                    List.assoc_opt "v" fields )
+                with
+                | Some (`String k), Some v ->
+                    let k = normalized_context_value k in
+                    if k = "" then None
+                    else Some (Printf.sprintf "  - %s: %s" k (format_surface_context_field_value v))
+                | _ -> None)
+            | _ -> None)
+          items
+    | `Assoc pairs ->
+        List.filter_map
+          (fun (k, v) ->
+            let k = normalized_context_value k in
+            if k = "" then None
+            else Some (Printf.sprintf "  - %s: %s" k (format_surface_context_field_value v)))
+          pairs
+    | _ -> []
+  in
+  if lines = [] then None else Some (String.concat "\n" lines)
+
+let format_surface_context = function
+  | `Assoc fields ->
+      let get_string key =
+        match List.assoc_opt key fields with
+        | Some (`String s) ->
+            let s = normalized_context_value s in
+            if s = "" then None else Some s
+        | _ -> None
+      in
+      let label = get_string "label" in
+      let route = get_string "route" in
+      let scene = get_string "scene" in
+      let fields_block =
+        match List.assoc_opt "fields" fields with
+        | Some fields_json -> format_surface_context_fields fields_json
+        | None -> None
+      in
+      let lines =
+        List.filter_map
+          (fun (name, value_opt) ->
+            Option.map (fun v -> Printf.sprintf "%s: %s" name v) value_opt)
+          [
+            ("Surface label", label);
+            ("Route", route);
+            ("Scene", scene);
+          ]
+      in
+      let lines =
+        match fields_block with
+        | Some block -> lines @ [ "Fields:"; block ]
+        | None -> lines
+      in
+      if lines = [] then "" else String.concat "\n" ("[Co-view context]" :: lines)
+  | json ->
+      Printf.sprintf "[Co-view context]\n%s" (Yojson.Safe.pretty_to_string json)
+
+let surface_context_to_instructions ctx =
+  let s = format_surface_context ctx in
+  if s = "" then None else Some s
+
+let has_connector_context (payload : keeper_chat_stream_request) =
+  payload.channel <> "" && payload.channel_workspace_id <> ""
+
+let has_external_speaker (payload : keeper_chat_stream_request) =
+  has_connector_context payload && payload.channel_user_id <> ""
+
+let message_for_request payload =
+  if has_external_speaker payload then
+    Gate_keeper_backend.contextualize_message
+      ~channel:payload.channel
+      ~channel_user_id:payload.channel_user_id
+      ~channel_user_name:payload.channel_user_name
+      ~channel_workspace_id:payload.channel_workspace_id
+      ~metadata:[]
+      ~content:payload.message
+  else
+    payload.message
+
+let chat_surface_of_request payload =
+  if has_connector_context payload then
+    Surface_ref.Gate { label = payload.channel; address = [] }
+  else Surface_ref.Dashboard { session_id = None }
+
+let chat_speaker_of_request payload =
+  if has_external_speaker payload then
+    { Keeper_chat_store.speaker_id = Some payload.channel_user_id;
+      speaker_name =
+        (let name = String.trim payload.channel_user_name in
+         if name = "" then None else Some name);
+      speaker_authority = Keeper_chat_store.External }
+  else
+    { Keeper_chat_store.speaker_id = None;
+      speaker_name = None;
+      speaker_authority = Keeper_chat_store.Owner }
+
+let turn_instructions_for_request payload =
+  let ctx_text =
+    match payload.surface_context with
+    | Some ctx -> format_surface_context ctx
+    | None -> ""
+  in
+  match payload.turn_instructions with
+  | None -> if ctx_text = "" then None else Some ctx_text
+  | Some ti ->
+      if ctx_text = "" then Some ti
+      else Some (ti ^ "\n\n" ^ ctx_text)
+
+let attachment_json (att : Keeper_chat_store.attachment) =
+  `Assoc
+    [ ("id", `String att.Keeper_chat_store.id);
+      ("type", `String att.att_type);
+      ("name", `String att.name);
+      ("size", `Int att.size);
+      ("mime_type", `String att.mime_type);
+      ("data", `String att.data) ]
+
+let args_of_request payload : Yojson.Safe.t =
+  let message = message_for_request payload in
+  let base_fields =
+    [ ("name", `String payload.name);
+      ("message", `String message);
+      ("direct_reply", `Bool true) ]
+    @
+    (match payload.timeout_sec with
+     | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
+     | None -> [])
+    @
+    (match turn_instructions_for_request payload with
+     | Some instructions when String.trim instructions <> "" ->
+         [ ("turn_instructions", `String instructions) ]
+     | _ -> [])
+  in
+  let connector_fields =
+    (if has_connector_context payload then
+       [ ("channel", `String payload.channel);
+         ("channel_workspace_id", `String payload.channel_workspace_id) ]
+     else [])
+    @
+    (if payload.channel_user_id <> "" then
+       [ ("channel_user_id", `String payload.channel_user_id) ]
+     else [])
+    @
+    (if payload.channel_user_name <> "" then
+       [ ("channel_user_name", `String payload.channel_user_name) ]
+     else [])
+  in
+  let fields = base_fields @ connector_fields in
+  `Assoc
+    (if payload.attachments = [] then fields
+     else ("attachments", `List (List.map attachment_json payload.attachments)) :: fields)
 
 let keeper_chat_request_prefixes =
   [
@@ -215,6 +390,19 @@ let parse_keeper_chat_stream_request body_str =
         |> Option.value ~default:""
         |> String.trim
       in
+      let turn_instructions =
+        match Json_util.get_string json "turn_instructions" with
+        | None -> None
+        | Some s ->
+            let s = String.trim s in
+            if s = "" then None else Some s
+      in
+      let surface_context : Yojson.Safe.t option =
+        match Json_util.assoc_member_opt "surface_context" json with
+        | Some (`Assoc _ as obj) -> Some obj
+        | Some `Null | None -> None
+        | Some _ -> None
+      in
       let has_connector_context =
         channel <> "" || channel_user_id <> ""
         || channel_user_name <> "" || channel_workspace_id <> ""
@@ -268,10 +456,10 @@ let parse_keeper_chat_stream_request body_str =
       else if message = "" then
         Error "message is required"
       else if has_connector_context
-              && (channel = "" || channel_user_id = "" || channel_workspace_id = "")
+              && (channel = "" || channel_workspace_id = "")
       then
         Error
-          "channel, channel_user_id, and channel_workspace_id are required when connector context is supplied"
+          "channel and channel_workspace_id are required when connector context is supplied"
       else
         match
           Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" json
@@ -285,6 +473,8 @@ let parse_keeper_chat_stream_request body_str =
                   name;
                   message;
                   timeout_sec;
+                  turn_instructions;
+                  surface_context;
                   channel;
                   channel_user_id;
                   channel_user_name;
@@ -525,54 +715,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     (Run_started { run_id; thread_id });
   Keeper_chat_events.publish events
     (Text_message_start { message_id; role = Assistant });
-  let has_connector_context =
-    payload.channel <> "" && payload.channel_user_id <> ""
-  in
-  let message =
-    if has_connector_context then
-      Gate_keeper_backend.contextualize_message
-         ~channel:payload.channel
-         ~channel_user_id:payload.channel_user_id
-         ~channel_user_name:payload.channel_user_name
-         ~channel_workspace_id:payload.channel_workspace_id
-         ~metadata:[]
-         ~content:payload.message
-    else
-      payload.message
-  in
-  let attachment_json (att : Keeper_chat_store.attachment) =
-    `Assoc
-      [ ("id", `String att.Keeper_chat_store.id);
-        ("type", `String att.att_type);
-        ("name", `String att.name);
-        ("size", `Int att.size);
-        ("mime_type", `String att.mime_type);
-        ("data", `String att.data) ]
-  in
-  let args =
-    let base_fields =
-      [ ("name", `String payload.name);
-        ("message", `String message);
-        ("direct_reply", `Bool true) ]
-      @
-      (match payload.timeout_sec with
-       | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
-       | None -> [])
-    in
-    let connector_fields =
-      if has_connector_context then
-        [ ("channel", `String payload.channel);
-          ("channel_user_id", `String payload.channel_user_id);
-          ("channel_user_name", `String payload.channel_user_name);
-          ("channel_workspace_id", `String payload.channel_workspace_id) ]
-      else
-        []
-    in
-    let fields = base_fields @ connector_fields in
-    `Assoc
-      (if payload.attachments = [] then fields
-       else ("attachments", `List (List.map attachment_json payload.attachments)) :: fields)
-  in
+  let args = args_of_request payload in
   (* Stream model text deltas live with per-delta redaction — the same
      treatment ThinkingDelta and Tool_call_args already get in
      [consume_worker_events]. The once-only invariant (live emit + terminal
@@ -620,28 +763,14 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
   in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for broadcast metadata. *)
-  let chat_surface =
-    if has_connector_context then
-      Surface_ref.Gate { label = payload.channel; address = [] }
-    else Surface_ref.Dashboard { session_id = None }
-  in
+  let chat_surface = chat_surface_of_request payload in
   let chat_source = Surface_ref.lane_label chat_surface in
-  (* RFC-0223 P1: authority derives from the arrival route. Connector
-     context means an arbitrary external person on that channel; its
-     absence means the authenticated dashboard operator (the route is
-     bearer-gated, and the dashboard supplies no per-user identity). *)
-  let chat_speaker : Keeper_chat_store.speaker =
-    if has_connector_context then
-      { speaker_id = Some payload.channel_user_id;
-        speaker_name =
-          (let name = String.trim payload.channel_user_name in
-           if name = "" then None else Some name);
-        speaker_authority = Keeper_chat_store.External }
-    else
-      { speaker_id = None;
-        speaker_name = None;
-        speaker_authority = Keeper_chat_store.Owner }
-  in
+  (* RFC-0223 P1: authority derives from the arrival route. A non-empty
+     [channel_user_id] means an arbitrary external person on that channel;
+     a channel label without a user id (e.g. dashboard Copilot Dock) is
+     still an authenticated dashboard operator, so it keeps Owner authority
+     while recording the Gate surface label. *)
+  let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
   let on_event evt =
     record_tool_event evt;
     push_worker_event (Stream_event evt)
@@ -730,7 +859,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
   Log.Keeper.info
     "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
     payload.name request_id
-    (if has_connector_context then payload.channel else "dashboard");
+    (if has_connector_context payload then payload.channel else "dashboard");
   Keeper_chat_events.publish events
     (Custom
        { name = "KEEPER_QUEUE_REQUEST";
@@ -740,7 +869,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                destination_type = "keeper";
                destination_id = payload.name;
                channel =
-                 (if has_connector_context then payload.channel
+                 (if has_connector_context payload then payload.channel
                   else "dashboard");
                actor_id = Some agent_name;
                status = Gate_protocol.Queued;
@@ -1009,11 +1138,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
       ignore
         (Eio.Switch.run @@ fun stream_sw ->
            Eio.Switch.on_release stream_sw close_stream;
-           let has_connector_context =
-             payload.channel <> "" && payload.channel_user_id <> ""
-           in
+           let has_external_actor = has_external_speaker payload in
            let agent_name =
-             if has_connector_context then
+             if has_external_actor then
                Gate_keeper_backend.agent_name_for_channel_actor
                  ~channel:payload.channel
                  ~channel_workspace_id:payload.channel_workspace_id
@@ -1039,3 +1166,16 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            ))
 
 (** Build routes for MCP server *)
+
+module For_testing = struct
+  let parse_request = parse_keeper_chat_stream_request
+  let has_connector_context = has_connector_context
+  let has_external_speaker = has_external_speaker
+  let message_for_request = message_for_request
+  let chat_surface_of_request = chat_surface_of_request
+  let chat_speaker_of_request = chat_speaker_of_request
+  let turn_instructions_for_request = turn_instructions_for_request
+  let args_of_request = args_of_request
+  let format_surface_context = format_surface_context
+  let surface_context_to_instructions = surface_context_to_instructions
+end

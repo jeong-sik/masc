@@ -331,6 +331,10 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "number");
           ("description", `String "Optional: overall timeout (sec) for this async keeper message request and its runtime turn");
         ]);
+        ("direct_reply", `Assoc [
+          ("type", `String "boolean");
+          ("description", `String "Optional: run the turn synchronously and return the reply directly instead of queueing");
+        ]);
         ("no_skill_route", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Optional: do not emit SKILL/SKILL_REASON headers in reply");
@@ -338,6 +342,30 @@ let keeper_schemas : tool_schema list = [
         ("no_state_block", `Assoc [
           ("type", `String "boolean");
           ("description", `String "Optional: do not emit [STATE]...[/STATE] block in reply");
+        ]);
+        ("turn_instructions", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: free-form instructions to prepend to the keeper prompt for this turn");
+        ]);
+        ("surface_context", `Assoc [
+          ("type", `String "object");
+          ("description", `String "Optional: co-view context from the dashboard ({ label, route, scene, fields }); formatted into turn instructions when turn_instructions is omitted");
+        ]);
+        ("channel", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: channel label (e.g. copilot) for the chat lane");
+        ]);
+        ("channel_user_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: external user id on the channel");
+        ]);
+        ("channel_user_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: external user name on the channel");
+        ]);
+        ("channel_workspace_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: operator session or workspace id for the channel");
         ]);
       ]);
       ("required", `List [`String "name"; `String "message"]);

@@ -38,6 +38,10 @@ module For_testing : sig
     channel_session_key:string option ->
     channel:string ->
     string
+
+  val surface_context_to_instructions : Yojson.Safe.t -> string option
+  (** Format a dashboard co-view context object ({ label, route, scene, fields })
+      into turn instructions when no explicit [turn_instructions] is supplied. *)
 end
 
 val handle_keeper_msg :

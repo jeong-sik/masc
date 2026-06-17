@@ -371,6 +371,14 @@ export interface StreamAttachment {
   data: string
 }
 
+/** Co-view context sent from dashboard surfaces such as the Copilot Dock. */
+export interface KeeperStreamSurfaceContext {
+  label: string
+  route: string
+  scene: string
+  fields: unknown
+}
+
 /** Outcome of a keeper chat stream read loop.
  *  `terminal: false` means the connection closed without a
  *  RUN_FINISHED / RUN_ERROR event — the response was cut mid-stream
@@ -444,6 +452,16 @@ async function refreshLoopbackDevTokenAfterMismatch(): Promise<boolean> {
   return getStoredToken() !== null
 }
 
+export interface StreamKeeperMessageOptions {
+  signal?: AbortSignal
+  onEvent: (event: KeeperChatStreamEvent) => void
+  attachments?: StreamAttachment[]
+  channel?: string
+  channelWorkspaceId?: string
+  turnInstructions?: string
+  surfaceContext?: KeeperStreamSurfaceContext
+}
+
 export async function streamKeeperMessage(
   name: string,
   message: string,
@@ -451,16 +469,28 @@ export async function streamKeeperMessage(
     signal,
     onEvent,
     attachments,
-  }: {
-    signal?: AbortSignal
-    onEvent: (event: KeeperChatStreamEvent) => void
-    attachments?: StreamAttachment[]
-  },
+    channel,
+    channelWorkspaceId,
+    turnInstructions,
+    surfaceContext,
+  }: StreamKeeperMessageOptions,
 ): Promise<KeeperStreamOutcome> {
   const body: Record<string, unknown> = {
     name,
     message,
     direct_reply: true,
+  }
+  if (channel && channel.trim() !== '') {
+    body.channel = channel.trim()
+  }
+  if (channelWorkspaceId && channelWorkspaceId.trim() !== '') {
+    body.channel_workspace_id = channelWorkspaceId.trim()
+  }
+  if (turnInstructions && turnInstructions.trim() !== '') {
+    body.turn_instructions = turnInstructions.trim()
+  }
+  if (surfaceContext && Object.keys(surfaceContext).length > 0) {
+    body.surface_context = surfaceContext
   }
   if (attachments && attachments.length > 0) {
     body.attachments = attachments.map(att => ({

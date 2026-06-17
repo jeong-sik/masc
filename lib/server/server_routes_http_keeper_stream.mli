@@ -44,6 +44,8 @@ type keeper_chat_stream_request = {
   name : string;
   message : string;
   timeout_sec : int option;
+  turn_instructions : string option;
+  surface_context : Yojson.Safe.t option;
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
@@ -52,10 +54,14 @@ type keeper_chat_stream_request = {
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [timeout_sec] is clamped to [\[5, 300\]] when
-    present.  [channel] / [channel_user_id] /
-    [channel_user_name] / [channel_workspace_id] are all
-    required together when any connector context is
-    supplied; otherwise they are accepted as empty. *)
+    present.  [turn_instructions] and [surface_context]
+    are optional copilot context fields; when
+    [turn_instructions] is absent but [surface_context]
+    is present, the surface context is formatted and
+    injected as turn instructions.  [channel] and
+    [channel_workspace_id] are required together when any
+    connector context is supplied; [channel_user_id] and
+    [channel_user_name] are optional. *)
 
 (** {1 Parsing} *)
 
@@ -127,3 +133,18 @@ val process_single_turn :
     event pushes when set to [true] (used by the SSE adapter when the
     HTTP stream is closed).  [auth_token] is [None] for queue-consumer
     turns where no HTTP request is available. *)
+
+(** {1 Testing helpers} *)
+
+module For_testing : sig
+  val parse_request : string -> (keeper_chat_stream_request, string) result
+  val has_connector_context : keeper_chat_stream_request -> bool
+  val has_external_speaker : keeper_chat_stream_request -> bool
+  val message_for_request : keeper_chat_stream_request -> string
+  val chat_surface_of_request : keeper_chat_stream_request -> Surface_ref.t
+  val chat_speaker_of_request : keeper_chat_stream_request -> Keeper_chat_store.speaker
+  val turn_instructions_for_request : keeper_chat_stream_request -> string option
+  val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
+  val format_surface_context : Yojson.Safe.t -> string
+  val surface_context_to_instructions : Yojson.Safe.t -> string option
+end

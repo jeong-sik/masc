@@ -925,6 +925,8 @@ let start_keeper_loops
                  name = keeper_name;
                  message = queued_message.content;
                  timeout_sec = None;
+                 turn_instructions = None;
+                 surface_context = None;
                  channel = projection.payload_channel;
                  channel_user_id = projection.payload_channel_user_id;
                  channel_user_name = projection.payload_channel_user_name;

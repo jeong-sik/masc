@@ -280,7 +280,7 @@ let git_rev_parse_short path =
         | None ->
           if Rev_parse_cache.try_begin_refresh dir
           then git_rev_parse_short_refresh dir
-          else Option.join (Rev_parse_cache.cached_any dir))
+          else Option.join (Rev_parse_cache.cached_any dir)))
 ;;
 
 let opt_string_json = Server_dashboard_http_runtime_info_json.opt_string_json
@@ -439,7 +439,7 @@ let git_upstream_status path =
         | None ->
           if Upstream_status_cache.try_begin_refresh dir
           then git_upstream_status_refresh dir
-          else Option.join (Upstream_status_cache.cached_any dir))
+          else Option.join (Upstream_status_cache.cached_any dir)))
 ;;
 
 let deployment_state_json

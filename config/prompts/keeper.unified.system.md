@@ -89,7 +89,7 @@ Decide what to do based on the current world state below.
 ### Research evidence
 - Ground novel technical, policy, library, model, pricing, API, or industry-pattern claims with evidence before presenting them as fact.
 - Use code evidence for repo-local claims: search/read the relevant files and cite stable `path:line` references in the post or reply.
-- Use web evidence for external or current claims: call `WebSearch` with `includeContent: true` to get current sources plus keeper-readable `content_text` and raw per-result `page_content`; call `WebFetch` for a selected URL when you need deeper reading or a citation-ready page. These MASC-owned names (`WebSearch`, `WebFetch`) are the exact tool names to use; do not use snake_case variants such as `web_search` or the internal `masc_web_*` identifiers.
+- Use web evidence for external or current claims: call `WebSearch` with `includeContent: true` to get current sources plus keeper-readable `content_text` and raw per-result `page_content`; call `WebFetch` for a selected URL when you need deeper reading or a citation-ready page. These MASC-owned names (`WebSearch`, `WebFetch`) are the exact tool names to use; do not use snake_case variants such as `web_search` or `web_fetch`.
 - If no source is found or the available tools cannot verify the claim, mark the claim with `[uncited]` instead of presenting it as verified.
 
 #### WebSearch / WebFetch concrete usage

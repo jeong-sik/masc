@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import type { RouteState, TabId } from '../types'
 import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import type { DashboardRuntimeProbePayload } from '../api/dashboard'
@@ -690,19 +690,40 @@ export function DashboardHealthStrip() {
   const live = wsOnly
     ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
     : connected.value
-  const chips = dashboardHealthChips({
-    connected: live,
-    counts: shellCounts.value,
-    namespaceTruthCounts: namespaceTruth.value?.root.counts,
-    namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
-    keepers: keepers.value,
-    runtimeResolution: shellRuntimeResolution.value,
-    runtimeProviderProbe: shellRuntimeProviderProbe.value,
-    runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
-    executionError: executionError.value,
-    loading: dashboardLoading.value || namespaceTruthInitializing.value,
-    pendingVerificationCount: tasksByStatus.value.awaitingVerification.length,
-  })
+  // dashboardHealthChips does 2 keeper filter passes + resolveRuntimeCounts +
+  // up to ~12 chip objects. The input object below is a fresh literal every
+  // render, so memoizing on the object would always miss — instead list the
+  // individual signal values as deps. DashboardHealthStrip re-renders on the
+  // 30s runtime probe tick and ws event counts, which are unrelated to most
+  // of these inputs; the chip rebuild is skipped when they are unchanged.
+  const chips = useMemo(
+    () => dashboardHealthChips({
+      connected: live,
+      counts: shellCounts.value,
+      namespaceTruthCounts: namespaceTruth.value?.root.counts,
+      namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
+      keepers: keepers.value,
+      runtimeResolution: shellRuntimeResolution.value,
+      runtimeProviderProbe: shellRuntimeProviderProbe.value,
+      runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
+      executionError: executionError.value,
+      loading: dashboardLoading.value || namespaceTruthInitializing.value,
+      pendingVerificationCount: tasksByStatus.value.awaitingVerification.length,
+    }),
+    [
+      live,
+      shellCounts.value,
+      namespaceTruth.value?.root.counts,
+      namespaceTruth.value?.root.configured_keepers,
+      keepers.value,
+      shellRuntimeResolution.value,
+      shellRuntimeProviderProbe.value,
+      shellRuntimeProviderProbeError.value,
+      executionError.value,
+      dashboardLoading.value || namespaceTruthInitializing.value,
+      tasksByStatus.value.awaitingVerification.length,
+    ],
+  )
 
   return html`
     <div

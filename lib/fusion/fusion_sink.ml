@@ -78,6 +78,37 @@ let render_panel (o : Fusion_types.panel_outcome) : string =
     Printf.sprintf "**[%s]** _(failed: %s)_" failed_model
       (Fusion_types.show_panel_failure reason)
 
+(* board post 증거의 보존 기간. 심의 증거는 transient 알림(24h)보다 오래 둬 사후
+   리뷰가 가능하도록 1주로 둔다 (Magic Number 회피 — named 상수). *)
+let board_post_ttl_hours = 24 * 7
+
+(* 패널 결과를 board meta_json 원소로. 토큰은 실측 관측. *)
+let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
+  match o with
+  | Fusion_types.Answered { model; usage; _ } ->
+    `Assoc
+      [ ("model", `String model)
+      ; ("status", `String "answered")
+      ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
+      ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
+      ]
+  | Fusion_types.Failed { failed_model; reason } ->
+    `Assoc
+      [ ("model", `String failed_model)
+      ; ("status", `String "failed")
+      ; ("reason", `String (Fusion_types.show_panel_failure reason))
+      ]
+
+(* 심판 결과를 board meta_json 원소로. *)
+let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.Safe.t =
+  match judge with
+  | Ok j ->
+    `Assoc
+      [ ("status", `String "ok")
+      ; ("decision", `String (render_decision j.Fusion_types.decision))
+      ]
+  | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
+
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : unit =
   let conversation_id = "fusion/" ^ run_id in
   let append content =
@@ -105,4 +136,33 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : unit =
    | Ok j -> append (render_judge j)
    | Error e -> append (Printf.sprintf "**[judge]** _(failed: %s)_" e));
   (* 모든 append 후 한 번 브로드캐스트 — 대시보드가 키퍼 chat을 재조회해 전체 표시. *)
-  Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
+  Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion";
+  (* board post — 구조화 증거(meta_json). chat lane은 사람이 읽는 *서사*,
+     board는 run_id로 묶인 쿼리 가능한 *증거*다. 사용자 가시성 요구는 두 surface
+     모두(RFC-0252 §3/§8.2). 실패는 심의를 죽이지 않되 기록한다. *)
+  let board_headline =
+    match judge with
+    | Ok j ->
+      Printf.sprintf "Fusion deliberation (run %s): %s" run_id
+        (render_decision j.Fusion_types.decision)
+    | Error _ -> Printf.sprintf "Fusion deliberation (run %s): judge failed" run_id
+  in
+  let meta_json =
+    Some
+      (`Assoc
+         [ ("source", `String "fusion")
+         ; ("run_id", `String run_id)
+         ; ("question", `String question)
+         ; ("panel", `List (List.map panel_meta panel))
+         ; ("judge", judge_meta judge)
+         ])
+  in
+  match
+    Board_dispatch.create_post ~author:keeper ~content:board_headline
+      ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
+      ~ttl_hours:board_post_ttl_hours ()
+  with
+  | Ok _ -> ()
+  | Error e ->
+    Log.Keeper.warn ~keeper_name:keeper "fusion run %s board post failed: %s" run_id
+      (Board.show_board_error e)

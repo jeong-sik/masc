@@ -228,6 +228,22 @@
   min-height: 120px;
 }
 
+.dc-fixtures-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.dc-fixtures-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.dc-fixtures-table-wrap {
+  overflow-x: auto;
+}
+
 .dc-rail-dot {
   width: 10px;
   height: 10px;

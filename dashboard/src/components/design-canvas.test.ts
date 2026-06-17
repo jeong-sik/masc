@@ -30,6 +30,7 @@ describe('DesignCanvas', () => {
     expect(container.querySelector('[data-testid="design-canvas-tab-organisms"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="design-canvas-tab-surfaces"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="design-canvas-tab-motion"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="design-canvas-tab-fixtures"]')).not.toBeNull()
   })
 
   it('renders the primitives gallery by default', async () => {
@@ -76,5 +77,23 @@ describe('DesignCanvas', () => {
       toggle.click()
     })
     expect(document.documentElement.dataset.theme).toBeUndefined()
+  })
+
+  it('switches to the fixtures gallery and renders fixture data', async () => {
+    await act(async () => {
+      render(html`<${DesignCanvas} />`, container)
+    })
+
+    const fixturesTab = container.querySelector('[data-testid="design-canvas-tab-fixtures"]') as HTMLButtonElement
+    await act(async () => {
+      fixturesTab.click()
+    })
+
+    expect(fixturesTab.getAttribute('aria-selected')).toBe('true')
+    const stage = container.querySelector('[data-testid="design-canvas-stage"]')
+    expect(stage).not.toBeNull()
+    expect(stage!.querySelector('[data-design-canvas-fixture="keeper-card"]')).not.toBeNull()
+    expect(stage!.querySelector('[data-design-canvas-fixture="post-card"]')).not.toBeNull()
+    expect(stage!.querySelector('[data-design-canvas-fixture="episode-card"]')).not.toBeNull()
   })
 })

@@ -101,7 +101,7 @@ let () =
     (not (EC.is_completion_contract_violation
             (Agent_sdk.Error.Api
                (Llm_provider.Retry.Timeout
-                  { message = "timeout" }))));
+                  { message = "timeout"; phase = None }))));
   check "non-contract: rate limited"
     (not (EC.is_completion_contract_violation
             (Agent_sdk.Error.Api

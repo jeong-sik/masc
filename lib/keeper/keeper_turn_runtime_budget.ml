@@ -233,13 +233,6 @@ let context_overflow_event_of_error
         }
   | None ->
       match err with
-      | Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Input"; used; limit }) ->
-          Keeper_state_machine.Context_overflow_detected
-            {
-              source = `Oas_signal;
-              token_count = used;
-              limit_tokens = Some limit;
-            }
       | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
           Keeper_state_machine.Context_overflow_detected
             {

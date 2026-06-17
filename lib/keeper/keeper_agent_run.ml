@@ -103,7 +103,6 @@ let run_turn
       ?max_tokens
       ?oas_timeout_s
       ?(oas_timeout_is_explicit = true)
-      ?max_cost_usd
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
       ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
@@ -371,7 +370,6 @@ let run_turn
       ~turn_affordances
       ~config_root
       ~runtime_config_path
-      ?max_cost_usd
       ~trajectory_acc
       ~tool_overlay
       ~runtime_manifest_context
@@ -508,7 +506,6 @@ let run_turn
                     ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
-                    ?max_cost_usd
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ~guardrails:keeper_oas_guardrails

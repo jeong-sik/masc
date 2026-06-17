@@ -18,8 +18,6 @@ type try_provider_ctx =
   ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
-  ; max_input_tokens : int option
-  ; max_cost_usd : float option
   ; accept : Agent_sdk_response.api_response -> bool
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option

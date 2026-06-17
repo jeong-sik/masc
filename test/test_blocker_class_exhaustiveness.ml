@@ -142,12 +142,6 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
     )
   ; ( "MaxTurnsExceeded"
     , SdkE.Agent (SdkE.MaxTurnsExceeded { turns = 10; limit = 10 }) )
-  ; ( "TokenBudgetExceeded"
-    , SdkE.Agent (SdkE.TokenBudgetExceeded { kind = "token"; used = 4096; limit = 4096 }) )
-  ; ( "CostBudgetExceeded"
-    , SdkE.Agent (SdkE.CostBudgetExceeded { spent_usd = 0.42; limit_usd = 0.40 }) )
-  ; ( "CostBudgetUnenforceable"
-    , SdkE.Agent (SdkE.CostBudgetUnenforceable { model_id = "m"; limit_usd = 0.40 }) )
   ; ( "UnrecognizedStopReason"
     , SdkE.Agent (SdkE.UnrecognizedStopReason { reason = "abrupt" }) )
   ; ( "IdleDetected"
@@ -214,7 +208,9 @@ let test_structural_timeout_maps_to_oas_timeout () =
       (SdkRetry.Timeout
          { message =
              "Turn wall-clock budget exhausted during runtime attempt \
-              (budget=554.9s)" })
+              (budget=554.9s)"
+         ; phase = None
+         })
   in
   match KSB.blocker_class_of_sdk_error structural with
   | Some klass ->

@@ -104,8 +104,6 @@ val run_named :
   ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_input_tokens:int ->
-  ?max_cost_usd:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->

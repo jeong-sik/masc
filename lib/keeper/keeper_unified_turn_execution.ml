@@ -43,7 +43,6 @@ type ctx =
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
   ; generation : int
   ; keeper_turn_id : int
-  ; max_cost_usd : float option
   ; meta : keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
   ; observation : Keeper_world_observation.world_observation
@@ -84,7 +83,6 @@ let run (ctx : ctx)
       ; base_dir
       ; build_turn_prompt
       ; turn_affordances
-      ; max_cost_usd
       ; trajectory_acc
       ; profile_defaults
       ; prompt_timeout_estimate_tokens
@@ -188,7 +186,6 @@ let run (ctx : ctx)
                  ~max_tokens:execution.max_tokens
                  ~oas_timeout_s
                  ~oas_timeout_is_explicit:false
-                 ?max_cost_usd
                  ~trajectory_acc
                  ~is_retry
                  ?shared_context

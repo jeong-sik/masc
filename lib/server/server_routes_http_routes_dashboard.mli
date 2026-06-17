@@ -19,11 +19,3 @@ val ensure_dashboard_dev_token : string -> (string, string) result
     string, generating + persisting one to {!dashboard_dev_token_path}
     on first call. [Error msg] when the auth dir is unwritable. Exposed
     so the dashboard-keeper-routes test can drive the boot path directly. *)
-
-val git_remote_to_web_url : string -> string option
-(** Normalise a git remote string into a browsable https URL
-    (e.g. [git@github.com:o/r.git] / [ssh://git@github.com/o/r.git] /
-    [https://github.com/o/r.git] -> [https://github.com/o/r]). Returns
-    [None] for empty or unrecognised shapes rather than guessing.
-    Exposed for unit testing; surfaced on the worktree-status payload as
-    [web_url]. *)

@@ -53,6 +53,13 @@ import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-ke
 import { globalShortcutManager } from './lib/global-shortcut-manager'
 import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
 import { isWidgetSoloRoute } from './components/widget-solo'
+import {
+  CopilotDock,
+  CopilotDockFab,
+  CopilotDockTopBarButton,
+  useCopilotDock,
+  useCopilotDockShortcuts,
+} from './components/copilot-dock'
 
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
@@ -233,6 +240,9 @@ export function App() {
     refreshCurrentRoute({ recordVisit: true })
   }, [route.value.tab, route.value.params.section, route.value.params.view, route.value.params.q])
 
+  const dock = useCopilotDock()
+  useCopilotDockShortcuts(dock)
+
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
@@ -294,6 +304,7 @@ export function App() {
 
           <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
             <${EmergencyStopControl} />
+            <${CopilotDockTopBarButton} dock=${dock} />
             <${Suspense} fallback=${authStatusFallback()}>
               <${LazyAuthStatus} />
             <//>
@@ -340,13 +351,17 @@ export function App() {
             </aside>
           `}
 
-        <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0'}>
-          <div class=${isCodeSurface || widgetSoloMode || keeperDetailMode ? 'h-full overflow-hidden p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
-            <${DashboardMain} />
-          </div>
-        </main>
+        <div class="v2-stage">
+          <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0'}>
+            <div class=${isCodeSurface || widgetSoloMode || keeperDetailMode ? 'h-full overflow-hidden p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
+              <${DashboardMain} />
+            </div>
+          </main>
+          ${dock.state.value.open ? html`<${CopilotDock} dock=${dock} />` : null}
+        </div>
       </div>
       ${!compactChromeMode ? html`<${MobileBottomBar} currentTab=${currentTab} onMenuToggle=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }} />` : null}
+      ${!dock.state.value.open && !compactChromeMode ? html`<${CopilotDockFab} dock=${dock} />` : null}
 
       ${selectedAgentName.value
         ? html`<${Suspense} fallback=${null}><${LazyAgentDetailOverlay} /><//>`

@@ -4,6 +4,25 @@
     Sensitive patterns (API keys, URL credentials) are replaced with
     [\[REDACTED\]], and certain tool categories return [None] entirely. *)
 
+(** Tunable parameters for the generic secret matcher.
+
+    The defaults are conservative and based on the small measured sample in
+    {!Observability_redact}. Because that sample has only a handful of points,
+    callers that need a different false-positive/false-negative trade-off can
+    override individual fields. *)
+type redact_config =
+  { generic_min_len : int
+  ; generic_max_token_len : int
+  ; generic_entropy_threshold : float
+  ; generic_lower_entropy_threshold : float
+  ; generic_longer_min_len : int
+  ; generic_min_classes_for_low_entropy : int
+  ; max_input_len : int
+  }
+
+val default_redact_config : redact_config
+(** Default multi-signal configuration. *)
+
 val is_denied_tool : tool_name:string -> bool
 (** Returns [true] if the tool is on the deny list (auth, encryption, etc.)
     and its I/O must not be logged or previewed. *)
@@ -20,10 +39,12 @@ val redact_preview : ?max_len:int -> string -> string
     and redact only the user-visible preview body so sha256/bytes/mime
     survive intact for downstream parsers. *)
 
-val redact_text : string -> string
-(** Strip known sensitive patterns without truncating or trimming the
-    input. Use this for user-visible chat/transport text where the full
-    message length must be preserved. *)
+val redact_text : ?config:redact_config -> string -> string
+(** Strip known sensitive patterns. Inputs up to [config.max_input_len]
+    characters are fully scanned; longer inputs are redacted only on the
+    prefix and the remainder is replaced with [...(truncated)] to bound
+    computation. Use this for user-visible chat/transport text where the full
+    message length must be preserved for normal-sized payloads. *)
 
 val redact_json_strings : Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively apply {!redact_text} to string leaves and replace

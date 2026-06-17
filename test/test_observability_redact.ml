@@ -233,6 +233,66 @@ let test_high_entropy_run_redacted () =
   Alcotest.(check bool) "high-entropy run redacted" true
     (not (String_util.contains_substring r "7K3mP9x"))
 
+(* Multi-signal: entropy alone is not enough to catch every secret. A long,
+   character-class-diverse token whose entropy sits in the fuzzy band below
+   the primary threshold should still be redacted. Token is synthetic and
+   split to avoid credential scanners. *)
+let test_multi_signal_catches_low_entropy_secret () =
+  let token = "2SW_KJS1E2I=62E1SJS9WJT9_9_KWTW87N7W" in
+  let input = "prefix " ^ token ^ " suffix" in
+  let r = Observability_redact.redact_text input in
+  Alcotest.(check bool) "low-entropy but diverse secret redacted" true
+    (not (String_util.contains_substring r token));
+  Alcotest.(check bool) "non-secret context preserved" true
+    (String_util.contains_substring r "prefix")
+
+(* Blocklist: a long token built entirely from common identifier words can
+   have entropy above the primary threshold, but it must still be preserved
+   because it is a diagnostic identifier, not a secret. *)
+let test_blocklist_preserves_dictionary_identifier () =
+  let input = "task_claim_bot_heartbeat_keeper_agent_12345" in
+  let r = Observability_redact.redact_text input in
+  Alcotest.(check string) "dictionary identifier preserved" input r
+
+(* Length bound: inputs longer than [config.max_input_len] are truncated after
+   redacting the prefix. *)
+let test_redact_text_enforces_input_length_bound () =
+  let config =
+    { Observability_redact.default_redact_config with max_input_len = 80 }
+  in
+  let early_secret = "2SW_KJS1E2I=62E1SJS9WJT9_9_KWTW87N7W" in
+  let late_secret = "7K3mP9xQ2vN8bL4wR6tY1cJ5hD0z" in
+  let input =
+    "start " ^ early_secret ^ " middle " ^ String.make 200 'x' ^ " "
+    ^ late_secret ^ " end"
+  in
+  let r = Observability_redact.redact_text ~config input in
+  Alcotest.(check bool) "early secret redacted" true
+    (not (String_util.contains_substring r early_secret));
+  Alcotest.(check bool) "truncation marker present" true
+    (String_util.contains_substring r "...(truncated)");
+  Alcotest.(check bool) "overall output bounded" true
+    (String.length r <= config.max_input_len + String.length "...(truncated)")
+
+(* Configurability: a caller can lower the entropy threshold to catch tokens
+   that would pass the default scorer. *)
+let test_configurable_threshold () =
+  let config =
+    { Observability_redact.default_redact_config with
+      generic_entropy_threshold = 2.5;
+      generic_lower_entropy_threshold = 1.5
+    }
+  in
+  let token = "abcabcabcabcabcabcabcabc1234567890" in
+  Alcotest.(check bool) "default preserves low-entropy token" true
+    (String_util.contains_substring
+       (Observability_redact.redact_text token)
+       token);
+  Alcotest.(check bool) "lowered threshold redacts the same token" false
+    (String_util.contains_substring
+       (Observability_redact.redact_text ~config token)
+       token)
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -266,6 +326,14 @@ let () =
             test_low_entropy_long_identifier_preserved;
           Alcotest.test_case "high-entropy run redacted" `Quick
             test_high_entropy_run_redacted;
+          Alcotest.test_case "multi-signal catches low-entropy secret" `Quick
+            test_multi_signal_catches_low_entropy_secret;
+          Alcotest.test_case "blocklist preserves dictionary identifier" `Quick
+            test_blocklist_preserves_dictionary_identifier;
+          Alcotest.test_case "redact_text enforces input length bound" `Quick
+            test_redact_text_enforces_input_length_bound;
+          Alcotest.test_case "configurable threshold" `Quick
+            test_configurable_threshold;
         ] );
       ( "deny_list",
         [

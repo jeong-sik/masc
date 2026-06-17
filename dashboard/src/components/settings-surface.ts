@@ -45,11 +45,13 @@ const SET_SECTIONS: [SectionId, string, string][] = [
 ]
 
 const SET_GROUPS: [string, SectionId[]][] = [
-  ['Account', ['account']],
-  ['Keeper runtime', ['runtime', 'routing', 'prompts', 'lifecycle', 'policy']],
-  ['Infrastructure / Execution', ['runtimes', 'sandbox', 'paths']],
-  ['Connections / Integration', ['mcp', 'gate', 'ide']],
-  ['Observation / Display', ['logs', 'notify', 'display']],
+  // KO group labels per keeper-v2 settings.jsx SET_GROUPS — matches the
+  // Korean section names below (avoids EN-header / KO-item bilingual mismatch).
+  ['계정', ['account']],
+  ['Keeper 운영', ['runtime', 'routing', 'prompts', 'lifecycle', 'policy']],
+  ['인프라 · 실행', ['runtimes', 'sandbox', 'paths']],
+  ['연결 · 통합', ['mcp', 'gate', 'ide']],
+  ['관측 · 표시', ['logs', 'notify', 'display']],
 ]
 
 const MCP_TOOLS = [

@@ -14,7 +14,7 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 349 unique knobs across 9 modules.
+**Total**: 350 unique knobs across 9 modules.
 
 **Typed getter classification**: 21/207 tagged (`operator`: 21, `algorithm`: 0, `unclassified`: 186).
 

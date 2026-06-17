@@ -23,9 +23,9 @@ let get_state t = Atomic.get t.state
 let set_state t state = Atomic.set t.state state
 
 module For_testing = struct
-  let create_minimal ~state =
-    { config = Obj.magic ()
-    ; meta = Obj.magic ()
+  let create_minimal ~config ~meta ~state =
+    { config
+    ; meta
     ; turn_id = 0
     ; raw_host_root = ""
     ; host_root = ""

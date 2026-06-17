@@ -25,7 +25,12 @@ val cleanup : t -> unit
 (** Best-effort teardown. Safe to call multiple times. *)
 
 module For_testing : sig
-  val create_minimal : state:state -> t
+  val create_minimal
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> state:state
+    -> t
+
   val get_state : t -> state
   val set_state : t -> state -> unit
 end

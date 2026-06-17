@@ -7,7 +7,12 @@ module KSR = Masc.Keeper_turn_sandbox_runtime
 module KSL = Masc.Keeper_supervisor_launch
 
 let test_sandbox_state_atomic () =
-  let t = KSR.For_testing.create_minimal ~state:Not_started in
+  let t =
+    KSR.For_testing.create_minimal
+      ~config:(Obj.magic ())
+      ~meta:(Obj.magic ())
+      ~state:Not_started
+  in
   check bool "initial state is Not_started" true
     (match KSR.For_testing.get_state t with
      | Not_started -> true

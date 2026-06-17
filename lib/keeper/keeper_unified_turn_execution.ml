@@ -430,15 +430,36 @@ let run (ctx : ctx)
             err
         with
         | Degraded_retry_allowed degraded_retry ->
+          let fallback_reason =
+            EC.degraded_retry_reason_to_string degraded_retry.fallback_reason
+          in
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
             ~decision:Degraded_retry_allowed
-            ~reason:(EC.degraded_retry_reason_to_string degraded_retry.fallback_reason)
+            ~reason:fallback_reason
             ~next_runtime:(Some degraded_retry.next_runtime)
             ~attempt
             ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
             ~error_message:(Some (Agent_sdk.Error.to_string err));
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string RuntimeSelected)
+            ~labels:
+              [ ("keeper", meta.name)
+              ; ("runtime_id", degraded_retry.next_runtime)
+              ; ("source", "fallback")
+              ; ("fallback_reason", fallback_reason)
+              ]
+            ();
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string RuntimeRotation)
+            ~labels:
+              [ ("keeper", meta.name)
+              ; ("from_runtime", execution.runtime_id)
+              ; ("to_runtime", degraded_retry.next_runtime)
+              ; ("reason", fallback_reason)
+              ]
+            ();
           (match
              Keeper_unified_turn_pre_dispatch
              .build_runtime_execution

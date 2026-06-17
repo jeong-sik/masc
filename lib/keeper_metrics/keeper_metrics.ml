@@ -107,7 +107,6 @@ type t =
   | OllamaSaturationSkip
   | TaskLoadFailures
   | ToolSelectionFailures
-  | ToolPolicyFailures
   | ReconcileFailures
   | DecisionAuditFlushFailures
   | OasCancel
@@ -196,6 +195,8 @@ type t =
   | StaleBroadcastEmitFailures
   | OasRunTimeout
   | RuntimeSaturationSignal
+  | RuntimeSelected
+  | RuntimeRotation
   | ToolUseFailure
   | ToolNotAllowed
   | TurnGateRejectedTerminal
@@ -205,6 +206,7 @@ type t =
   | DockerRuntimeDiscarded
   | ProactiveSkip
   | NoProgressLoopDetected
+  | NoProgressStreak
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
@@ -333,7 +335,6 @@ let to_string = function
   | OllamaSaturationSkip -> "masc_keeper_ollama_saturation_skip_total"
   | TaskLoadFailures -> "masc_keeper_task_load_failures_total"
   | ToolSelectionFailures -> "masc_keeper_tool_selection_failures_total"
-  | ToolPolicyFailures -> "masc_keeper_tool_policy_failures_total"
   | ReconcileFailures -> "masc_keeper_reconcile_failures_total"
   | DecisionAuditFlushFailures -> "masc_keeper_decision_audit_flush_failures_total"
   | OasCancel -> "masc_keeper_oas_cancel_total"
@@ -431,6 +432,8 @@ let to_string = function
   | StaleBroadcastEmitFailures -> "masc_keeper_stale_broadcast_emit_failures"
   | OasRunTimeout -> "masc_keeper_oas_run_timeout_total"
   | RuntimeSaturationSignal -> "masc_keeper_runtime_saturation_signal_total"
+  | RuntimeSelected -> "masc_keeper_runtime_selected_total"
+  | RuntimeRotation -> "masc_keeper_runtime_rotation_total"
   | ToolUseFailure -> "masc_keeper_tool_use_failure_total"
   | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
   | TurnGateRejectedTerminal -> "masc_keeper_turn_gate_rejected_terminal_total"
@@ -440,6 +443,7 @@ let to_string = function
   | DockerRuntimeDiscarded -> "masc_keeper_docker_runtime_discarded_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
   | NoProgressLoopDetected -> "masc_keeper_no_progress_loop_detected_total"
+  | NoProgressStreak -> "masc_keeper_no_progress_streak"
   | UsageTrust -> "masc_keeper_usage_trust_total"
   | UsageAnomalyReason -> "masc_keeper_usage_anomaly_reason_total"
   | ConfigEnvParseFailures -> "masc_keeper_config_env_parse_failures_total"
@@ -491,7 +495,7 @@ let all : t list =
     LifecycleDispatchRejections; RecordingErrorDedup; PausedStatePersistErrors; UnexpectedToolPartialTolerance;
     ToolCallTotal; ProfileConfigConflicts; OasTimeoutClassifications; NoToolProvider;
     ProactiveOutcome; OllamaSaturationSkip; TaskLoadFailures; ToolSelectionFailures;
-    ToolPolicyFailures; ReconcileFailures; DecisionAuditFlushFailures; OasCancel;
+    ReconcileFailures; DecisionAuditFlushFailures; OasCancel;
     ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
     PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
     CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; PromptUnknownToolTokens;
@@ -513,9 +517,9 @@ let all : t list =
     NearExhaustionTotal; RestartAttempts; RestartOutcomes; ConsecutiveIdle;
     LastProductiveTs; ProviderTimeoutStrike; StaleTerminationTotal; StaleTerminationByClass;
     ProviderTimeoutWatchdogTermination; StaleTerminationThresholdBreached; StaleTerminationBatch; StaleBroadcastEmitFailures;
-    OasRunTimeout; RuntimeSaturationSignal; ToolUseFailure; ToolNotAllowed;
+    OasRunTimeout; RuntimeSaturationSignal; RuntimeSelected; RuntimeRotation; ToolUseFailure; ToolNotAllowed;
     TurnGateRejectedTerminal; ReceiptUnmappedDisposition; ExecuteNetworkUpgrade; ExecuteLocalExecution;
-    DockerRuntimeDiscarded; ProactiveSkip; NoProgressLoopDetected; UsageTrust;
+    DockerRuntimeDiscarded; ProactiveSkip; NoProgressLoopDetected; NoProgressStreak; UsageTrust;
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; RuntimeHttpProbeJsonParseFailures;
     PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;

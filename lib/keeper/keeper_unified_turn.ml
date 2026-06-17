@@ -155,6 +155,15 @@ let run_keeper_cycle
     =
       let _ = phase_opt in
       let effective_runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+      let source =
+        match Runtime.runtime_id_for_keeper meta.name with
+        | Some id when String.trim id <> "" -> "assigned"
+        | _ -> "default"
+      in
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string RuntimeSelected)
+        ~labels:[("keeper", meta.name); ("runtime_id", effective_runtime_id); ("source", source)]
+        ();
       let turn_state =
         append_manifest turn_state
           ~site:"runtime_routed"

@@ -428,9 +428,13 @@ let run_try_provider
   | Ok config ->
     (* Stream stall detection is handled by OAS's stream_idle_timeout_s.
        No separate liveness FSM — provider stall is an OAS-level concern.
-       Provider load is gated per binding by [Runtime_binding_capacity]
-       (RFC-0153 §4.2.3) using the candidate's [max_concurrent], in addition to
-       the operator tuning keeper count. *)
+
+       Provider load is gated per binding by [Runtime_binding_capacity] using
+       the candidate's [max_concurrent]. This gate runs *after* the per-keeper
+       turn admission ([Keeper_turn_admission], RFC-0225), so the Lane Per
+       Keeper single-flight invariant (at most one in-flight turn per keeper)
+       is preserved. The binding gate only limits how many admitted turns can
+       hit the same provider endpoint concurrently. *)
     let run_started_at =
       Unix.gettimeofday ()
       (* NDT-OK: provider-attempt latency telemetry only; dispatch/control

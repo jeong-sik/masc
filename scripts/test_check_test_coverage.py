@@ -30,14 +30,44 @@ class CheckTestCoverageTest(unittest.TestCase):
         )
 
     def test_changed_covered_files_include_dashboard_and_config(self):
-        with mock.patch(
-            "check_test_coverage.run_diff_or_fail",
-            return_value="lib/a.ml\ndashboard/app.ts\nconfig/runtime.toml\n",
-        ) as run_diff:
+        with mock.patch.dict(
+            os.environ, {"GITHUB_BASE_REF": "main"}, clear=False
+        ):
+            with mock.patch(
+                "check_test_coverage.run_diff_or_fail",
+                return_value="lib/a.ml\ndashboard/app.ts\nconfig/runtime.toml\n",
+            ) as run_diff:
+                self.assertEqual(
+                    coverage.get_changed_covered_files(),
+                    ["lib/a.ml", "dashboard/app.ts", "config/runtime.toml"],
+                )
+
             self.assertEqual(
-                coverage.get_changed_covered_files(),
-                ["lib/a.ml", "dashboard/app.ts", "config/runtime.toml"],
+                run_diff.call_args.args[0],
+                [
+                    "git",
+                    "diff",
+                    "--name-only",
+                    "origin/main...HEAD",
+                    "--",
+                    "lib/",
+                    "dashboard/",
+                    "config/",
+                ],
             )
+
+    def test_changed_covered_files_uses_pr_base_ref(self):
+        with mock.patch.dict(
+            os.environ, {"GITHUB_BASE_REF": "codex/runtime-cap-policy"}, clear=False
+        ):
+            with mock.patch(
+                "check_test_coverage.run_diff_or_fail",
+                return_value="lib/a.ml\n",
+            ) as run_diff:
+                self.assertEqual(
+                    coverage.get_changed_covered_files(),
+                    ["lib/a.ml"],
+                )
 
         self.assertEqual(
             run_diff.call_args.args[0],
@@ -45,7 +75,7 @@ class CheckTestCoverageTest(unittest.TestCase):
                 "git",
                 "diff",
                 "--name-only",
-                "origin/main...HEAD",
+                "origin/codex/runtime-cap-policy...HEAD",
                 "--",
                 "lib/",
                 "dashboard/",

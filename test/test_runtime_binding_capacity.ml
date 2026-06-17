@@ -97,6 +97,24 @@ let test_release_on_exception () =
   check bool "slot released after exception" true !ran
 ;;
 
+(* The protected body may return a [Result.Error] value (e.g. provider Rate
+   Limit). The slot must still be released so the next acquire on the same key
+   can proceed. *)
+let test_release_on_error_result () =
+  Eio_main.run @@ fun env ->
+  let key = "error-result-key" in
+  let result =
+    with_slot_exn ~clock:env#clock ~key ~max_concurrent:(Some 1) (fun () ->
+      Error "provider rate limit")
+  in
+  check (result string string) "body error is returned" (Error "provider rate limit") result;
+  let ran = ref false in
+  with_slot_exn ~clock:env#clock ~key ~max_concurrent:(Some 1) (fun () ->
+    ran := true;
+    Ok ());
+  check bool "slot released after Error return" true !ran
+;;
+
 (* A fiber cancelled while holding a slot must run the [Switch.on_release]
    cleanup. The second cap-1 acquire proves the semaphore permit was restored;
    the snapshot proves bookkeeping returned to zero. *)
@@ -188,6 +206,7 @@ let () =
             test_caps_concurrency;
           test_case "None runs ungated" `Quick test_none_is_ungated;
           test_case "releases slot on exception" `Quick test_release_on_exception;
+          test_case "releases slot on Error return" `Quick test_release_on_error_result;
           test_case "releases slot on cancellation" `Quick
             test_release_on_cancellation;
           test_case "bounded acquire times out while saturated" `Quick

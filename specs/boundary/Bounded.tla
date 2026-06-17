@@ -1,7 +1,9 @@
 ---- MODULE Bounded ----
-\* Boundary spec for the bounded execution loop (lib/bounded.ml).
+\* Boundary spec for the bounded execution loop.
 \*
-\* Source declares formal-verification intent up front (lib/bounded.ml:3-9):
+\* The source implementation (formerly lib/bounded.ml, now split into
+\* lib/bounded_event_dedupe and lib/bounded_proc) declares formal-verification
+\* intent up front:
 \*
 \*     Provides formal guarantees:
 \*     - Termination: Always terminates via hard_max_iterations
@@ -16,7 +18,7 @@
 \* classes. A follow-up spec can grow them once these invariants are
 \* paid for.
 \*
-\* Source loop (lib/bounded.ml:296-320):
+\* Source loop shape:
 \*
 \*     let rec loop () =
 \*       if state.turns >= constraints.hard_max_iterations then

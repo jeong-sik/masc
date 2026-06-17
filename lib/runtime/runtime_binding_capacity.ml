@@ -1,6 +1,13 @@
-(* Per-binding provider concurrency gate. See runtime_binding_capacity.mli for
-   the rationale (RFC-0153 §4.2.3 deferred per-runtime cap; activates the inert
-   binding max_concurrent left over from the RFC-0206 runtime rebirth). *)
+(* Per-binding provider concurrency gate.
+
+   RFC-0153 §4.2.3 deferred a per-runtime cap to post-merge measurement. This
+   module implements a coarser interim per-binding cap ([provider:model@base_url]
+   keyed semaphore) because the live ollama.com endpoint showed that the global
+   [Fd_accountant.Provider_http] gate (default 16, shared across every provider)
+   cannot hold a single over-subscribed endpoint under its own limit. The
+   [max_concurrent] binding field, previously parsed but inert, is now enforced
+   by this gate. A future RFC may narrow the granularity to per-HTTP-call or
+   per-endpoint once we have fleet-wide concurrency measurements. *)
 
 type slot =
   { sem : Eio.Semaphore.t
@@ -39,26 +46,8 @@ let slot_for ~key ~max_concurrent =
       Hashtbl.replace registry key slot;
       slot)
 
-let finite_positive = function
-  | Some value when Float.is_finite value && value > 0.0 -> Some value
-  | Some _ | None -> None
-
-let acquire ~clock ~wait_timeout_sec (slot : slot) =
-  match finite_positive (Some wait_timeout_sec) with
-  | Some wait_timeout_sec ->
-    (try
-       Eio.Time.with_timeout_exn clock wait_timeout_sec (fun () ->
-         Eio.Semaphore.acquire slot.sem);
-       Ok ()
-     with Eio.Time.Timeout ->
-       Error
-         { key = ""
-         ; wait_timeout_sec
-         ; in_flight = Atomic.get slot.in_flight
-         ; cap = slot.cap
-         })
-  | None ->
-    invalid_arg "Runtime_binding_capacity.acquire: wait_timeout_sec must be finite and positive"
+let finite_positive value =
+  Float.is_finite value && value > 0.0
 
 let with_slot_result ~clock ~wait_timeout_sec ~key ~max_concurrent f =
   (* [None] (or [Some n] with [n <= 0]) = unconfigured binding (runtime.toml
@@ -68,21 +57,48 @@ let with_slot_result ~clock ~wait_timeout_sec ~key ~max_concurrent f =
   | None -> Ok (f ())
   | Some max_concurrent when max_concurrent <= 0 -> Ok (f ())
   | Some max_concurrent ->
+    if not (finite_positive wait_timeout_sec)
+    then
+      invalid_arg
+        "Runtime_binding_capacity.with_slot_result: wait_timeout_sec must be \
+         finite and positive";
     let slot = slot_for ~key ~max_concurrent in
-    (* Acquire before registering cleanup: if acquisition is cancelled it raises
-       here and no slot is held. After [acquire] returns, [Atomic.incr] and
-       [Switch.on_release] registration are synchronous, so every held slot has
-       a release hook before [f] can yield. *)
-    match acquire ~clock ~wait_timeout_sec slot with
-    | Error timeout -> Error { timeout with key }
-    | Ok () ->
-      Atomic.incr slot.in_flight;
+    (* Cancellation-safe acquisition:
+
+       1. The semaphore permit is acquired inside the same [Eio.Switch.run] that
+          registers the release hook.
+       2. The [acquired] flag starts as [false]. If [Eio.Semaphore.acquire]
+          raises (timeout, cancellation, or other), the release hook sees
+          [false] and does nothing.
+       3. Only after [acquire] returns successfully do we set [acquired := true]
+          and increment [in_flight]. At that point the release hook is already
+          registered, so any subsequent cancellation cannot leak the permit or
+          the counter.
+
+       This removes the window between "acquire succeeded" and "release hook
+       registered" that existed in the previous version. *)
+    try
       Ok
         (Eio.Switch.run (fun sw ->
+           let acquired = ref false in
            Eio.Switch.on_release sw (fun () ->
-             Atomic.decr slot.in_flight;
-             Eio.Semaphore.release slot.sem);
+             if !acquired
+             then (
+               Atomic.decr slot.in_flight;
+               Eio.Semaphore.release slot.sem));
+           Eio.Time.with_timeout_exn clock wait_timeout_sec (fun () ->
+             Eio.Semaphore.acquire slot.sem);
+           acquired := true;
+           Atomic.incr slot.in_flight;
            f ()))
+    with
+    | Eio.Time.Timeout ->
+      Error
+        { key
+        ; wait_timeout_sec
+        ; in_flight = Atomic.get slot.in_flight
+        ; cap = slot.cap
+        }
 
 let snapshot () =
   Eio.Mutex.use_ro registry_mutex (fun () ->

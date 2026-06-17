@@ -462,9 +462,20 @@ keeper turn이 무기한 같은 binding에 묶이지 않는다.
 gate를 만들지 않으며, 기존 global `Fd_accountant.Provider_http` gate만
 적용된다. 양수 값은 같은 capacity key(`provider:model@base_url`)를 공유하는
 keeper 호출의 동시 실행 수를 제한한다. 이 값은 runtime catalog metadata로
-보존되지만, OAS multi-turn/tool 실행 전체를 제한하는 keeper-attempt cap으로
-해석하면 안 된다. enforcement가 필요하면 provider HTTP transport call 단위 또는
-endpoint-discovery 단위에서 적용해야 한다.
+보존되지만,
+
+{b Phase A granularity.} 현재 implementation은 OAS multi-turn/tool 실행 전체를
+감싸는 attempt-level cap이다. 이는 RFC-0153 §4.2.3에서 언급한 eventual
+per-HTTP-call 또는 endpoint-discovery enforcement보다 coarse하지만, fleet-wide
+측정 데이터가 쌓이기 전에 endpoint overload를 즉시 막을 수 있는 가장 단순한
+interim 대응이다. provider HTTP transport call 단위나 endpoint-discovery 단위의
+더 세밀한 enforcement는 향후 measurement-driven RFC로 대첸할 예정이다.
+
+Attempt-level cap의 trade-off: keeper가 provider 호출 중간에 로컬 툴 실행 등
+provider와 무관한 작업을 길게 하는 동안에도 slot을 점유하므로, 그 시간 동안
+같은 binding의 다른 keeper는 backpressure를 받을 수 있다. 이를 피하려면
+`binding_slot_wait_timeout_sec`를 짧게 하거나, 향후 HTTP-call granularity로
+전환해야 한다.
 
 ```toml
 [cli-tool-a.agent-code-spark]

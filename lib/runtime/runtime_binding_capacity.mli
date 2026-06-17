@@ -1,21 +1,26 @@
-(** Per-binding provider concurrency gate (RFC-0153 §4.2.3).
+(** Per-binding provider concurrency gate.
 
-    Activates the [max_concurrent] binding limit (runtime.toml
-    [<provider>.<model>] [max-concurrent], RFC-0058 §3.4) that
-    {!Runtime_candidate} already carries but the runtime rebirth (RFC-0206)
-    left inert: [register_http_probe_capable] discards it and the
-    [Runtime_client_capacity] machinery was gutted to no-ops
-    ([declared_client_capacity] returns [None]). Before this module the only
-    active provider gate was the single global [Fd_accountant.Provider_http]
-    semaphore (default 16), shared across every provider — so it cannot hold a
-    single over-subscribed endpoint under its own limit when several keepers are
+    RFC-0153 §4.2.3 deferred a per-runtime cap to post-merge measurement. This
+    module activates the binding [max_concurrent] field (runtime.toml
+    [<provider>.<model>] [max-concurrent], RFC-0058 §3.4) as an interim
+    per-binding gate. The previous global [Fd_accountant.Provider_http]
+    semaphore (default 16, shared across every provider) could not hold a single
+    over-subscribed endpoint under its own limit when several keepers were
     assigned to the same runtime binding.
 
     The gate is a process-global registry of one [Eio.Semaphore.t] per capacity
     key (provider:model@base_url — see {!Runtime_candidate.capacity_key}).
-    Acquisition can either block until a slot is free or, when the caller
-    supplies a clock and wait timeout, fail as bounded backpressure. The holder
-    is released when its turn completes, errors, or is cancelled. *)
+    Acquisition is bounded by a mandatory caller-supplied timeout; a saturated
+    key fails as typed backpressure rather than blocking forever. The holder is
+    released on normal return, exception, or fiber cancellation.
+
+    {b Note on granularity:} the current enforcement wraps the whole provider
+    attempt (multi-turn + local tool execution), which is coarser than the
+    eventual per-HTTP-call target mentioned in RFC-0153. This is an intentional
+    interim trade-off: it is simple to reason about and immediately protects
+    endpoints from keeper-storm overload. Finer-grained HTTP-call or
+    endpoint-discovery enforcement is future work once fleet-wide concurrency
+    data is available. *)
 
 type wait_timeout =
   { key : string

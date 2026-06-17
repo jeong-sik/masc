@@ -125,11 +125,15 @@ supports-seed = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
-# max-concurrent is now enforced per binding by Runtime_binding_capacity
-# (RFC-0153 §4.2.3). Sized to the keeper assignment: up to 8 keepers route
-# turns here ([autonomous]4 + [reactive]4), so 8 lets them all run while
-# staying under the ollama.com endpoint concurrency limit (~10; 8 turns +
-# librarian slot = 9).
+# max-concurrent is now enforced per binding by Runtime_binding_capacity.
+# This is an interim per-model@base_url gate (RFC-0153 §4.2.3 deferred a
+# per-runtime cap to future measurement). Sized to the keeper assignment:
+# up to 8 keepers route turns here ([autonomous]4 + [reactive]4), so 8 lets
+# them all run while staying under the ollama.com endpoint concurrency limit.
+# Note that the gate wraps the whole provider attempt, not individual HTTP
+# calls; a keeper doing long local tool work while holding the slot can still
+# block other keepers on the same binding. Finer-grained enforcement is future
+# work.
 [ollama_cloud.deepseek-v4-flash]
 max-concurrent = 8
 

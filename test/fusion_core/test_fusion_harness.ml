@@ -28,6 +28,19 @@ let test_majority_normalize () =
 let test_majority_singleton () =
   Alcotest.(check string) "1개" "only" (H.majority_vote [ "only" ])
 
+let test_majority_not_first () =
+  (* 다수결이 첫 원소가 아닌 케이스 — List.hd 스텁을 잡는 결정적 테스트.
+     "no"가 첫 원소지만 "yes"가 2표라 다수결은 "yes". *)
+  Alcotest.(check string)
+    "다수결은 첫 원소가 아님" "yes"
+    (H.majority_vote [ "no"; "yes"; "yes" ])
+
+let test_majority_last_wins () =
+  (* 최빈이 마지막에 몰린 케이스 — first/hd 편향을 추가로 배제. *)
+  Alcotest.(check string)
+    "후미 최빈" "b"
+    (H.majority_vote [ "a"; "b"; "c"; "b"; "b" ])
+
 (* ── 정답 매칭 (채점, 결정론) ── *)
 
 let test_score_match_normalized () =
@@ -91,6 +104,8 @@ let () =
         ; Alcotest.test_case "tie_first" `Quick test_majority_tie_first
         ; Alcotest.test_case "normalize" `Quick test_majority_normalize
         ; Alcotest.test_case "singleton" `Quick test_majority_singleton
+        ; Alcotest.test_case "not_first" `Quick test_majority_not_first
+        ; Alcotest.test_case "last_wins" `Quick test_majority_last_wins
         ] )
     ; ( "score_answer"
       , [ Alcotest.test_case "match_normalized" `Quick test_score_match_normalized

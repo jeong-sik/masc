@@ -89,19 +89,24 @@ describe('App v2 header chrome', () => {
 })
 
 describe('shouldUseCompactDashboardChrome', () => {
-  it('uses compact chrome for keeper detail routes', () => {
+  it('keeps the standard shell for keeper detail routes', () => {
     expect(shouldUseCompactDashboardChrome({
       widgetSoloMode: false,
       focusMode: false,
-      keeperDetailMode: true,
+    })).toBe(false)
+  })
+
+  it('uses compact chrome for widget solo routes', () => {
+    expect(shouldUseCompactDashboardChrome({
+      widgetSoloMode: true,
+      focusMode: false,
     })).toBe(true)
   })
 
-  it('keeps the standard shell for normal dashboard routes', () => {
+  it('uses compact chrome for focus mode', () => {
     expect(shouldUseCompactDashboardChrome({
       widgetSoloMode: false,
-      focusMode: false,
-      keeperDetailMode: false,
-    })).toBe(false)
+      focusMode: true,
+    })).toBe(true)
   })
 })

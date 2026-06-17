@@ -185,7 +185,7 @@
 .topbar-copilot:hover { border-color: var(--volt-dim); color: var(--volt-strong); }
 .topbar-copilot.on { border-color: var(--volt); color: var(--volt-strong); background: var(--volt-wash); }
 .topbar-copilot .spark { width: 14px; height: 14px; }
-.topbar-copilot kbd { font-family: var(--font-mono); font-size: 9px; padding: 1px 4px; border-radius: var(--radius-xs); background: var(--bg-card); border: 1px solid var(--border-main); color: var(--text-mid); }
+.topbar-copilot kbd { font-family: var(--font-mono); font-size: 9px; padding: 1px 4px; border-radius: var(--radius-xs); background: var(--bg-card); border: 1px solid var(--border-main); color: var(--text-dim); /* v2 source override */ }
 
 @media (max-width: 1180px) {
   .dock.docked { width: 320px; }

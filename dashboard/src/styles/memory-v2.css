@@ -10,6 +10,9 @@
 }
 
 .mg-board {
+  --kp1: #e0b057;
+  --kp3: #e0a82e;
+  --kp9: #5b9cf0;
   box-sizing: border-box;
   height: 100%;
   padding: 14px 16px 16px;
@@ -140,7 +143,7 @@
   flex: none;
   font-family: var(--font-mono);
   font-weight: 700;
-  color: var(--color-bg-page);
+  color: #0b0c10; /* v2 source override */
   background: var(--kc);
   border-radius: var(--radius-xs);
 }

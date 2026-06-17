@@ -18,7 +18,7 @@
 
 .cp-world {
   border-right: 1px solid var(--border-main);
-  background: var(--bg-deepest);
+  background: var(--bg-well); /* v2 source override */
   position: relative;
   overflow: hidden;
   display: flex;
@@ -74,7 +74,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  background: color-mix(in srgb, var(--bg-deepest) 70%, transparent);
+  background: rgba(8, 9, 13, 0.7); /* v2 source override */
 }
 
 .cp-world-foot .row {

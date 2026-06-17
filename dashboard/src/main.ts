@@ -52,9 +52,6 @@ import './styles/tools.css'
 import './styles/provider-matrix.css'
 import './styles/paper-theme.css'
 
-// StyleSeed design-system theme — default light palette.
-import './styles/styleseed-theme.css'
-
 import './styles/keeper-workspace.css'
 import './styles/copilot-dock.css'
 import './styles/keeper-turn-inspector.css'
@@ -65,7 +62,6 @@ import './styles/states.css'
 import './styles/connectors-v2.css'
 import './styles/telemetry-v2.css'
 import './styles/craft-v2.css'
-import './styles/states.css'
 
 // v2 skin — cool-charcoal palette + voltage accent (brass/blood/ice) +
 // Space Grotesk display, for the --color-* surfaces. Activated by
@@ -155,6 +151,13 @@ function applyTheme(theme: ThemeId): void {
 
 const theme = resolveTheme()
 applyTheme(theme)
+
+// Ensure the v2 voltage accent attribute is present so skin-v2.css voltage
+// variants (brass/blood/ice) resolve. The source default is brass; an explicit
+// attribute in index.html wins and is preserved.
+if (!document.documentElement.dataset.volt) {
+  document.documentElement.dataset.volt = 'brass'
+}
 
 const root = document.getElementById('app')
 if (root) {

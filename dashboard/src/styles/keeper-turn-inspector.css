@@ -371,6 +371,7 @@
   height: 12px;
   border-radius: 3px;
   min-width: 4px;
+  transition: none; /* v2 source: waterfall bars are not animated */
 }
 
 .kti-wf-dur {
@@ -769,4 +770,11 @@
     grid-template-columns: 110px 1fr 48px;
     gap: 8px;
   }
+}
+
+/* Drawer entrance from v2 source — transform-only so a backgrounded tab
+   never holds the drawer invisible. */
+@keyframes turn-in {
+  from { transform: translateX(18px); }
+  to   { transform: none; }
 }

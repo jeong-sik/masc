@@ -63,6 +63,12 @@
   margin-top: 4px;
 }
 
+/* v2 source keeps the action margin on any button inside the state surface. */
+.kv-state .act,
+.kv-state button {
+  margin-top: 4px;
+}
+
 /* Loading skeleton */
 .kv-state.loading {
   align-items: stretch;

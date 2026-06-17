@@ -2159,3 +2159,8 @@
  (preprocess
   (pps ppx_safe_shell))
  (libraries alcotest masc.masc_exec masc.exec_policy))
+
+(test
+ (name test_keeper_chat_slack)
+ (modules test_keeper_chat_slack)
+ (libraries masc_test_deps))

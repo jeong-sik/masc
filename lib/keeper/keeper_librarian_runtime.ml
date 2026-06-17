@@ -39,28 +39,105 @@ let default_timeout_sec () =
 
 let provider_slot_busy = "librarian provider slot busy"
 
-(* Per-keeper librarian provider slot (Lane Per Keeper, RFC-0225).
-   A single global slot would let one keeper's librarian block every other
-   keeper's memory ingestion. Keeping the slot per-keeper still bounds each
-   keeper to one concurrent librarian call while removing cross-keeper
-   starvation.
+(* IMPORTANT: mutually exclusive with PR #21376.
 
-   The integer passed to [Hashtbl.create] is only the initial bucket count;
-   it is not a capacity limit. The registry grows as new keepers are seen. *)
-let provider_slot_registry : (string, Eio.Semaphore.t) Hashtbl.t =
-  Hashtbl.create 1
+   PR #21376 (per-keeper memory execution lane, RFC-0252) removes the
+   [provider_slot]/[with_provider_slot] mechanism entirely and moves
+   serialization into [Keeper_memory_lane.mem_mu]. This PR keeps and
+   per-keeper-izes the slot. The two changes edit the same lines in
+   [keeper_librarian_runtime.ml] and cannot both land.
+
+   Decision needed before merge: pick one.
+   - If #21376's lane already covers per-keeper librarian serialization,
+     close this PR (#21408) and let #21376 be the canonical fix.
+   - If the lane does NOT cover the shared provider pool, keep this PR
+     but make sure the fleet-total provider concurrency bound below is
+     explicit and preserved.
+
+   The current code adds a fleet-total semaphore on top of per-keeper
+   semaphores so that the shared flash/glm provider is not overwhelmed
+   when N keepers each hold their own slot (#21230 regression guard). *)
+
+(* Per-keeper slot registry entry. [last_used] is a monotonic stamp updated on
+   every access so that the registry can evict stale entries when it reaches
+   its configured capacity. *)
+type slot_entry =
+  { sem : Eio.Semaphore.t
+  ; mutable last_used : int
+  }
+
+let provider_slot_registry : (string, slot_entry) Hashtbl.t = Hashtbl.create 1
+let provider_slot_mutex = Eio.Mutex.create ()
+let provider_slot_access_counter = Atomic.make 0
+
+let provider_max_keepers () =
+  Keeper_memory_bank_env.memory_env_int_logged
+    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_KEEPERS"
+    ~default:1024
+  |> max 1
 ;;
 
-let provider_slot_mutex = Eio.Mutex.create ()
+let provider_total_slots () =
+  Keeper_memory_bank_env.memory_env_int_logged
+    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TOTAL_SLOTS"
+    ~default:1
+  |> max 1
+;;
+
+(* The total slot semaphore is created lazily so that tests that set the
+   env var before the first librarian call still take effect. The value is
+   read once, at first use. *)
+let provider_total_slot_sem =
+  lazy (Eio.Semaphore.make (provider_total_slots ()))
+;;
 
 let provider_slot_for keeper_id =
   Eio.Mutex.use_rw ~protect:true provider_slot_mutex (fun () ->
     match Hashtbl.find_opt provider_slot_registry keeper_id with
-    | Some sem -> sem
+    | Some entry ->
+      entry.last_used <- Atomic.fetch_and_add provider_slot_access_counter 1;
+      entry.sem
     | None ->
+      let cap = provider_max_keepers () in
+      (* Evict stale entries when at capacity. Only entries whose semaphore
+         is currently free ([get_value] == 1) are removed, so we never drop
+         a slot that a fiber is actively holding. *)
+      let rec evict () =
+        if Hashtbl.length provider_slot_registry < cap
+        then ()
+        else (
+          let victim =
+            Hashtbl.fold
+              (fun k entry acc ->
+                 let free = Eio.Semaphore.get_value entry.sem = 1 in
+                 match acc, free with
+                 | _, false -> acc
+                 | None, true -> Some (k, entry.last_used)
+                 | Some (_, acc_ts), true when entry.last_used < acc_ts ->
+                   Some (k, entry.last_used)
+                 | _ -> acc)
+              provider_slot_registry
+              None
+          in
+          match victim with
+          | Some (k, _) ->
+            Hashtbl.remove provider_slot_registry k;
+            evict ()
+          | None ->
+            (* All existing slots are in use; allow a temporary exceed
+               rather than block the current keeper or clear active slots. *)
+            ())
+      in
+      evict ();
       let sem = Eio.Semaphore.make 1 in
-      Hashtbl.replace provider_slot_registry keeper_id sem;
+      let ts = Atomic.fetch_and_add provider_slot_access_counter 1 in
+      Hashtbl.replace provider_slot_registry keeper_id { sem; last_used = ts };
       sem)
+;;
+
+let provider_slot_registry_length_for_testing () =
+  Eio.Mutex.use_rw ~protect:true provider_slot_mutex (fun () ->
+    Hashtbl.length provider_slot_registry)
 ;;
 
 let provider_slot_wait_sec () =
@@ -218,6 +295,11 @@ let with_timeout ?clock ~timeout_sec f =
 
 let with_provider_slot ~keeper_id ?clock f =
   let slot = provider_slot_for keeper_id in
+  let total_sem = Lazy.force provider_total_slot_sem in
+  (* Per-keeper slot first: this preserves the Lane Per Keeper invariant and
+     avoids holding the fleet-total slot while waiting for a single keeper's
+     slot. The global semaphore is acquired second; because it never waits on
+     a per-keeper semaphore there is no deadlock. *)
   match
     with_timeout ?clock ~timeout_sec:(provider_slot_wait_sec ()) (fun () ->
       Eio.Semaphore.acquire slot)
@@ -226,7 +308,18 @@ let with_provider_slot ~keeper_id ?clock f =
   | Some () ->
     (* fun-protect-finally-ok: [Eio.Semaphore.release] only returns the
        provider slot; it does not wait, acquire, or perform I/O. *)
-    Fun.protect ~finally:(fun () -> Eio.Semaphore.release slot) f
+    Fun.protect
+      ~finally:(fun () -> Eio.Semaphore.release slot)
+      (fun () ->
+         match
+           with_timeout ?clock ~timeout_sec:(provider_slot_wait_sec ()) (fun () ->
+             Eio.Semaphore.acquire total_sem)
+         with
+         | None -> Error provider_slot_busy
+         | Some () ->
+           Fun.protect
+             ~finally:(fun () -> Eio.Semaphore.release total_sem)
+             f)
 ;;
 
 let extract_with_provider

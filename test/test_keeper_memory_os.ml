@@ -947,6 +947,132 @@ let test_librarian_runtime_provider_slot_gate () =
           Alcotest.(check int) "only one provider call entered" 1 (Atomic.get provider_calls))))
 ;;
 
+let test_librarian_runtime_total_slot_gate_across_keepers () =
+  with_prompt_registry (fun () ->
+    with_eio (fun ~sw ~net ~clock ->
+      let env_name = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_SLOT_WAIT_SEC" in
+      let previous = Sys.getenv_opt env_name in
+      Fun.protect
+        ~finally:(fun () ->
+          match previous with
+          | Some value -> Unix.putenv env_name value
+          | None -> Unix.putenv env_name "")
+        (fun () ->
+           Unix.putenv env_name "0.01";
+           let keeper_a = "total-slot-keeper-a" in
+           let keeper_b = "total-slot-keeper-b" in
+           let entered, resolve_entered = Eio.Promise.create () in
+           let release, resolve_release = Eio.Promise.create () in
+           let provider_calls = Atomic.make 0 in
+           let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+             let n = Atomic.fetch_and_add provider_calls 1 in
+             if n = 0
+             then (
+               Eio.Promise.resolve resolve_entered ();
+               Eio.Promise.await release;
+               Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string)))
+             else
+               Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+           in
+           let input trace_id keeper_id : Librarian.input =
+             { Librarian.trace_id
+             ; generation = 1
+             ; messages = [ text_message ("remember this for " ^ keeper_id) ]
+             }
+           in
+           let first = ref None in
+           let second = ref None in
+           Eio.Fiber.fork ~sw (fun () ->
+             first
+             := Some
+                  (Librarian_runtime.extract_with_provider
+                     ~complete
+                     ~clock
+                     ~timeout_sec:1.0
+                     ~sw
+                     ~net
+                     ~keeper_id:keeper_a
+                     ~provider_cfg:(test_provider_cfg ())
+                     (input "trace-total-a" keeper_a)));
+           Eio.Promise.await entered;
+           Eio.Fiber.fork ~sw (fun () ->
+             second
+             := Some
+                  (Librarian_runtime.extract_with_provider
+                     ~complete
+                     ~clock
+                     ~timeout_sec:1.0
+                     ~sw
+                     ~net
+                     ~keeper_id:keeper_b
+                     ~provider_cfg:(test_provider_cfg ())
+                     (input "trace-total-b" keeper_b)));
+           wait_for_ref ~clock "second librarian result" second;
+           Eio.Promise.resolve resolve_release ();
+           wait_for_ref ~clock "first librarian result" first;
+           (match !second with
+            | Some (Error "librarian provider slot busy") -> ()
+            | Some (Error msg) -> Alcotest.failf "unexpected busy error: %s" msg
+            | Some (Ok _) -> Alcotest.fail "expected second librarian call to skip"
+            | None -> Alcotest.fail "second result missing");
+           (match !first with
+            | Some (Ok episode) ->
+              Alcotest.(check string) "first trace" "trace-total-a" episode.Types.trace_id
+            | Some (Error msg) -> Alcotest.failf "first call failed: %s" msg
+            | None -> Alcotest.fail "first result missing");
+           Alcotest.(check int) "only one provider call entered" 1 (Atomic.get provider_calls))))
+;;
+
+let test_librarian_runtime_registry_size_cap () =
+  let env_name = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_KEEPERS" in
+  let previous = Sys.getenv_opt env_name in
+  let with_cap value f =
+    Fun.protect
+      ~finally:(fun () ->
+        match previous with
+        | Some v -> Unix.putenv env_name v
+        | None -> Unix.putenv env_name "")
+      (fun () -> Unix.putenv env_name value; f ())
+  in
+  with_cap "1" (fun () ->
+    with_prompt_registry (fun () ->
+      with_eio (fun ~sw ~net ~clock ->
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+        in
+        let input keeper_id : Librarian.input =
+          { Librarian.trace_id = "trace-cap-" ^ keeper_id
+          ; generation = 1
+          ; messages = [ text_message "cap test fact" ]
+          }
+        in
+        let run keeper_id =
+          Librarian_runtime.extract_with_provider
+            ~complete
+            ~clock
+            ~timeout_sec:1.0
+            ~sw
+            ~net
+            ~keeper_id
+            ~provider_cfg:(test_provider_cfg ())
+            (input keeper_id)
+        in
+        (match run "cap-keeper-a" with
+         | Ok _ -> ()
+         | Error msg -> Alcotest.failf "first capped call failed: %s" msg);
+        Alcotest.(check int)
+          "registry size after first keeper"
+          1
+          (Librarian_runtime.provider_slot_registry_length_for_testing ());
+        (match run "cap-keeper-b" with
+         | Ok _ -> ()
+         | Error msg -> Alcotest.failf "second capped call failed: %s" msg);
+        Alcotest.(check int)
+          "registry size capped at one"
+          1
+          (Librarian_runtime.provider_slot_registry_length_for_testing ()))))
+;;
+
 let test_librarian_runtime_reports_fact_upsert_failure () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -2558,6 +2684,14 @@ let () =
             "librarian runtime provider slot gate"
             `Quick
             test_librarian_runtime_provider_slot_gate
+        ; Alcotest.test_case
+            "librarian runtime total slot gate across keepers"
+            `Quick
+            test_librarian_runtime_total_slot_gate_across_keepers
+        ; Alcotest.test_case
+            "librarian runtime registry size cap"
+            `Quick
+            test_librarian_runtime_registry_size_cap
         ; Alcotest.test_case
             "librarian runtime reports fact upsert failure"
             `Quick

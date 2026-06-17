@@ -86,6 +86,10 @@ val extract_and_append_with_provider
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
 
+val provider_slot_registry_length_for_testing : unit -> int
+(** Number of keepers currently present in the per-keeper slot registry.
+    Exposed only for tests that verify the registry cap. *)
+
 val run_best_effort
   :  ?complete:complete_fn
   -> ?timeout_sec:float

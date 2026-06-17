@@ -215,6 +215,34 @@ function RolePill({ children }: { children: ComponentChildren }) {
   return html`<span class="set-rolepill">${children}</span>`
 }
 
+function LogFilter({
+  filter,
+  active,
+  onClick,
+}: {
+  filter: LogFilter
+  active: boolean
+  onClick: () => void
+}) {
+  const label =
+    filter === 'all' ? 'All'
+    : filter === 'tool' ? 'Tool'
+    : filter === 'success' ? 'Success'
+    : 'Failure'
+
+  return html`
+    <button
+      type="button"
+      class=${`log-f ${active ? 'on' : ''}`}
+      data-filter=${filter}
+      data-active=${active ? 'true' : 'false'}
+      onClick=${onClick}
+    >
+      ${label}
+    </button>
+  `
+}
+
 function LogViewer() {
   const [filter, setFilter] = useState<LogFilter>('all')
   const rows = SYS_LOG.filter(r => {
@@ -231,16 +259,12 @@ function LogViewer() {
     <div class="log-view" data-testid="log-viewer">
       <div class="log-filters">
         ${filters.map(f => html`
-          <button
-            type="button"
+          <${LogFilter}
             key=${f}
-            class=${`log-f ${filter === f ? 'on' : ''}`}
-            data-filter=${f}
-            data-active=${filter === f ? 'true' : 'false'}
+            filter=${f}
+            active=${filter === f}
             onClick=${() => setFilter(f)}
-          >
-            ${f === 'all' ? 'All' : f === 'tool' ? 'Tool' : f === 'success' ? 'Success' : 'Failure'}
-          </button>
+          />
         `)}
         <span class="log-live"><span class="tps-dot"></span>tail -f</span>
       </div>

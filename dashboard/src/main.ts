@@ -47,6 +47,7 @@ import './styles/design-canvas.css'
 import './styles/connectors-v2.css'
 import './styles/telemetry-v2.css'
 import './styles/craft-v2.css'
+import './styles/states.css'
 
 // Keeper-v2 surface stylesheets are auto-imported by filename convention:
 // every dashboard/src/styles/*-v2.css is injected here at build time. A new v2

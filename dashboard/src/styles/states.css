@@ -1,0 +1,389 @@
+/* MASC Dashboard v2 — empty / error / loading state surfaces
+   Ported from keeper-v2 styles/states.css. Maps the v2 token ladder to
+   existing dashboard semantic tokens via the keeper-v2 bridge. */
+
+.kv-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-5);
+  text-align: center;
+  min-height: 200px;
+}
+
+.kv-state.compact {
+  padding: var(--space-4) var(--space-4);
+  min-height: 120px;
+}
+
+.kv-state-g {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  border-radius: 50%;
+  color: var(--text-dim);
+  background: var(--bg-card);
+  border: 1px solid var(--border-main);
+}
+
+.kv-state.error .kv-state-g {
+  color: var(--status-bad);
+  border-color: color-mix(in oklab, var(--status-bad) 45%, var(--border-main));
+  background: color-mix(in oklab, var(--status-bad) 9%, var(--bg-card));
+}
+
+.kv-state-t {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text-bright);
+  letter-spacing: -0.01em;
+}
+
+.kv-state-h {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-mid);
+  max-width: 320px;
+}
+
+.kv-state.error .kv-state-h {
+  color: var(--status-bad);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 7px 11px;
+}
+
+.kv-state-a {
+  margin-top: 4px;
+}
+
+/* Loading skeleton */
+.kv-state.loading {
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+.kv-skel-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.kv-skel-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.kv-skel-av {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  flex: none;
+}
+
+.kv-skel-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.kv-skel-line {
+  height: 10px;
+  border-radius: 4px;
+  width: 70%;
+}
+
+.kv-skel-line.short {
+  width: 40%;
+}
+
+.kv-skel-av,
+.kv-skel-line {
+  background: linear-gradient(
+    100deg,
+    var(--bg-card) 30%,
+    color-mix(in oklab, var(--text-dim) 18%, var(--bg-card)) 50%,
+    var(--bg-card) 70%
+  );
+  background-size: 220% 100%;
+  animation: kv-skel-sweep 1.3s ease-in-out infinite;
+}
+
+@keyframes kv-skel-sweep {
+  from {
+    background-position: 180% 0;
+  }
+  to {
+    background-position: -40% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kv-skel-av,
+  .kv-skel-line {
+    animation: none;
+  }
+}
+
+/* ── Keeper config panel v2 (organisms-5 port) ─────────────────────── */
+
+.kcp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  justify-content: flex-end;
+  background: var(--backdrop-modal);
+}
+
+.kcp-drawer {
+  width: 420px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-base);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+
+.kcp-hd {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-base);
+}
+
+.kcp-hd-title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.kcp-hd-id {
+  margin-left: auto;
+  font-size: var(--fs-xs);
+  color: var(--text-mid);
+}
+
+.kcp-close {
+  padding: 4px 8px;
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-mid);
+  cursor: pointer;
+}
+
+.kcp-close:hover {
+  background: var(--bg-card);
+  color: var(--text-bright);
+}
+
+.kcp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.kcp-section-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-bright);
+}
+
+.kcp-note {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-mid);
+  margin-bottom: var(--space-3);
+}
+
+.kcp-codectx {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+}
+
+.kcp-cc-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 12px;
+}
+
+.kcp-cc-k {
+  color: var(--text-mid);
+}
+
+.kcp-cc-v {
+  color: var(--text-bright);
+}
+
+.kcp-inherit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+}
+
+.kcp-inh-row {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+
+.kcp-inh-tag {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-10);
+  color: var(--volt);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.kcp-inh-txt {
+  color: var(--text-bright);
+}
+
+.kcp-inh-note {
+  margin-top: var(--space-2);
+  font-size: 11px;
+  color: var(--text-mid);
+}
+
+.kcp-link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--volt);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.kcp-textarea {
+  width: 100%;
+  padding: var(--space-3);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--text-bright);
+  font: inherit;
+  resize: vertical;
+}
+
+.kcp-textarea:focus {
+  outline: none;
+  border-color: var(--volt);
+}
+
+.kcp-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.kcp-trait {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-10);
+  color: var(--volt);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.kcp-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+
+.kcp-seg-b {
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-mid);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.kcp-seg-b.on {
+  background: var(--accent-10);
+  color: var(--volt);
+  font-weight: 600;
+}
+
+.kcp-perm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.kcp-perm-label {
+  font-size: 13px;
+  color: var(--text-bright);
+}
+
+.kcp-toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-pill);
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.kcp-toggle.on {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+.kcp-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-bright);
+  transition: transform var(--t-fast) var(--ease);
+}
+
+.kcp-toggle.on .kcp-toggle-knob {
+  transform: translateX(18px);
+}

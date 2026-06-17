@@ -406,8 +406,18 @@ let handle_tool_execute_typed
             if Env_config_runtime.Shell_ir_approval_gate.enabled ()
             then (
               let agent_id = Masc_exec.Agent_id.of_string meta.name in
+              (* RFC-0254 §5.2/§5.5: the keeper lane is autonomous — no human or
+                 resolver can answer an [Ask], so the overlay is [autonomous]
+                 (all [Observe] => non-catastrophic [Allow] + telemetry).  This
+                 unblocks the toolchain (defect §2.2.2) while the
+                 trust-independent catastrophic floor in [Approval_policy.decide]
+                 (destructive git, redirect write-escape, [mkfs]) still denies.
+                 The floor is applied identically on Host and inside Docker
+                 (RFC §13 Q2: defense-in-depth — a destructive git push reaches
+                 the real remote even from a container), so no sandbox-conditional
+                 branch is needed: both profiles use the same overlay. *)
               let approval_config =
-                { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.permissive_default
+                { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.autonomous
                 ; per_agent = []
                 }
               in

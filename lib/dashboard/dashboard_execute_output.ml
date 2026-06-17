@@ -82,9 +82,7 @@ let now_unix () =
   (* NDT-OK: runtime freshness timestamp only; not a deterministic input. *)
   Unix.gettimeofday ()
 
-let with_lock f =
-  Mutex.lock mu;
-  Fun.protect ~finally:(fun () -> Mutex.unlock mu) f
+let with_lock f = Mutex.protect mu f
 
 let queue_to_list q =
   Queue.fold (fun acc value -> value :: acc) [] q |> List.rev

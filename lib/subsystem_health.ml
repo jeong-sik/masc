@@ -13,11 +13,7 @@
 let registry : (string, bool * float option) Hashtbl.t = Hashtbl.create 8
 let registry_mu = Stdlib.Mutex.create ()
 
-let with_lock f =
-  Stdlib.Mutex.lock registry_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock registry_mu)
-    f
+let with_lock f = Stdlib.Mutex.protect registry_mu f
 
 let register name =
   with_lock (fun () ->

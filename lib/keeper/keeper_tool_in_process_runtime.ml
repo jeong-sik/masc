@@ -347,6 +347,46 @@ let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~nam
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
+(* RFC-0252 — masc_fusion out-of-band panel+judge deliberation.  The
+   gate -> fiber fork -> orchestrator logic lives in [Fusion_tool.handle];
+   this handler only gathers the keeper context (base_path, name, a fresh
+   run_id, wall-clock) and loads the [fusion] policy from runtime.toml.
+
+   Switch: fusion forks a background fiber that MUST outlive this keeper turn
+   (out-of-band, ~7x latency).  So it forks on the server ROOT switch
+   ([Eio_context.get_root_switch_opt], documented for exactly this case —
+   "work that must survive a single keeper turn"), NOT the turn-scoped
+   [ctx.sw], which would cancel the deliberation when the turn ends.  Net is
+   the server net capability (not turn-scoped) from the same context.  When
+   either is unavailable we return an explicit error JSON rather than
+   silently dropping the request (CLAUDE.md Silent-Failure avoidance). *)
+let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args () =
+  match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net ->
+    (match Fusion_config_loader.load ~base_path:config.Workspace.base_path with
+     | Error msg ->
+       Yojson.Safe.to_string (`Assoc [ "ok", `Bool false; "error", `String msg ])
+     | Ok policy ->
+       let now_unix = Time_compat.now () in
+       let run_id = Random_id.prefixed ~prefix:"fus-" ~bytes:16 in
+       Fusion_tool.handle
+         ~sw
+         ~net
+         ~base_dir:config.Workspace.base_path
+         ~keeper:meta.name
+         ~now_unix
+         ~run_id
+         ~policy
+         ~args)
+  | _ ->
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool false
+         ; ( "error"
+           , `String "fusion requires the server root switch + net (unavailable)" )
+         ])
+;;
+
 (* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]
    returns the older [(bool * Yojson.Safe.t)] tuple (predates RFC-0189
    typed-result migration), same shape as Tool_local_runtime.  Tool_shard

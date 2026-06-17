@@ -74,7 +74,8 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
-  | Tool_masc_surface_audit -> None
+  | Tool_masc_surface_audit
+  | Tool_masc_fusion_dispatch -> None
 ;;
 
 (* Shell IR mechanics live under Execute lowerers. Keeper_tool_command_runtime is
@@ -128,7 +129,8 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
-  | Tool_masc_surface_audit -> None
+  | Tool_masc_surface_audit
+  | Tool_masc_fusion_dispatch -> None
 ;;
 
 let handle_in_process ctx descriptor args =
@@ -290,6 +292,15 @@ let handle_in_process ctx descriptor args =
          ())
   | Tool_masc_surface_audit ->
     Some (Keeper_tool_in_process_runtime.handle_masc_surface_audit ~args)
+  | Tool_masc_fusion_dispatch ->
+    (* sw/net는 핸들러가 Eio_context(서버 root switch + net)에서 직접 해석한다 —
+       턴 스코프 ctx.sw를 쓰면 out-of-band 심의가 턴 종료 시 취소된다. *)
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_fusion
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~args
+         ())
   | Tool_execute
   | Tool_search_files
   | Tool_read_file

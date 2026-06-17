@@ -178,3 +178,51 @@ nick0cave = "ollama.gemma4-26b-a4b-qat"
 # Env var MASC_DISCORD_TRIGGER_POLICY overrides this value.
 [discord]
 trigger_policy = "mention_or_thread"
+
+# ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
+# masc_fusion 도구의 out-of-band 심의 루프 설정. 기본 OFF (opt-in).
+# [fusion] 섹션이 없거나 enabled=false면 masc_fusion 호출은 게이트에서
+# Deny로 즉시 반환되고 모델을 호출하지 않는다.
+#
+# 패널/심판 모델 문자열은 위의 <provider>.<model> 런타임 id를 그대로 쓴다.
+# 패널은 1..8개. 심판은 패널 답변을 종합한다.
+[fusion]
+enabled = false
+default_preset = "trio"
+# 동시에 띄울 수 있는 패널 수 (Async_agent.all max_fibers 상한).
+max_concurrent_panels = 2
+
+[fusion.gate]
+# 구조적 자원 cap만 둔다. "이 턴이 심의할 가치가 있나"는 게이트가 score 비교나
+# 문자열 매칭으로 판정하지 않는다 — 키퍼(이미 LLM)가 masc_fusion 호출로 판단하고,
+# 게이트는 발동 남용만 막는다 (RFC-0252 §6). 시간당 최대 발동 횟수 (UTC hour bucket).
+per_hour_budget = 20
+
+# 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.
+# 프롬프트는 행동을 정의하므로 코드 default가 아니라 여기서 받는다 (누락 시 로드
+# 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
+[fusion.presets.trio]
+panel = [
+  "deepseek.deepseek-v4-pro",
+  "glm-coding.glm-5-turbo",
+  "ollama_cloud.deepseek-v4-flash",
+]
+judge = "deepseek.deepseek-v4-pro"
+panel_system_prompt = """
+You are an expert panelist. Answer the user's question directly and concisely \
+with your best independent analysis. Do not defer to other models; give your \
+own view.
+"""
+judge_system_prompt = """
+You are an impartial judge. You are given a panel of model answers to the same \
+question. Synthesize them: identify points of consensus, contradictions, \
+partial coverage, unique insights, and blind spots, then give one resolved \
+answer. Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+# 구조적 타임아웃(초). 미지정 시 Fusion_policy.default_timeout_s.
+panel_timeout_s = 120.0
+judge_timeout_s = 120.0
+# 패널/심판에 MASC web_search/web_fetch 도구를 주입할지 여부.
+web_tools = false
+# 패널 모델당 최대 tool 호출 수 (0 = 무제한, OpenRouter Fusion 허용 범위 0..16).
+max_tool_calls_per_panel = 0

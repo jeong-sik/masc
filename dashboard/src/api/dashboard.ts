@@ -186,7 +186,8 @@ export async function fetchAgentRelations(agentName: string): Promise<AgentRelat
   return parseAgentRelationsResponse(raw)
 }
 
-export function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
+export async function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
+  await ensureDevToken()
   return get<unknown>('/api/v1/dashboard/config').then(parseDashboardConfigResponse)
 }
 

@@ -23,6 +23,20 @@ type parse_error =
 
 let error path message = [ { path; message } ]
 
+(** [typed_find kind path tbl key getter] wraps [Otoml.find_opt] so that a
+    type mismatch produces a structured [parse_error] instead of raising
+    [Otoml.Type_error] past the parser boundary. *)
+let typed_find (kind : string) (path : string) (tbl : Otoml.t) (key : string) getter
+  : ('a option, parse_error list) result
+  =
+  try Ok (Otoml.find_opt tbl getter [ key ]) with
+  | Otoml.Type_error msg ->
+    Error
+      (error
+         (path ^ "." ^ key)
+         (Printf.sprintf "%s must be %s; got %s" key kind msg))
+;;
+
 let required_non_empty_string
       ?(trim_result = false)
       (tbl : Otoml.t)
@@ -481,30 +495,53 @@ let is_toml_table : Otoml.t -> bool = function
   | Otoml.TomlTableArray _ -> false
 
 let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml.t)
-  : Runtime_schema.binding
+  : (Runtime_schema.binding, parse_error list) result
   =
-  let is_default = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "is-default" ] in
-  (* RFC-0058 §3.4: max-concurrent is REQUIRED. The marker value 0
-     here makes the omission visible to the validator instead of
-     silently throttling every binding to 1. *)
-  let max_concurrent =
-    match Otoml.find_opt tbl Otoml.get_integer [ "max-concurrent" ] with
-    | Some n -> n
-    | None -> 0
+  let path = Printf.sprintf "%s.%s" provider_id model_id in
+  (* [max-concurrent] is an explicit operator override, not a required binding
+     property. Absence means "no static client-side cap"; provider pressure is
+     handled by the global provider HTTP gate, live health/backoff, and any
+     provider-reported throttling.
+
+     An explicit non-positive value is a configuration error: 0 was historically
+     used as an omission sentinel, and negative values are meaningless. Reject
+     them at load time rather than silently downgrading to "no cap". *)
+  let is_default_result = typed_find "a boolean" path tbl "is-default" Otoml.get_boolean in
+  let max_concurrent_result =
+    match typed_find "an integer" path tbl "max-concurrent" Otoml.get_integer with
+    | Ok None -> Ok None
+    | Ok (Some n) when n > 0 -> Ok (Some n)
+    | Ok (Some n) ->
+      Error
+        (error
+           (path ^ ".max-concurrent")
+           (Printf.sprintf
+              "max-concurrent must be a positive integer or omitted for no static cap; got %d"
+              n))
+    | Error _ as e -> e
   in
-  let price_input = Otoml.find_opt tbl Otoml.get_float [ "price-input" ] in
-  let price_output = Otoml.find_opt tbl Otoml.get_float [ "price-output" ] in
-  let keep_alive = Otoml.find_opt tbl Otoml.get_string [ "keep-alive" ] in
-  let num_ctx = Otoml.find_opt tbl Otoml.get_integer [ "num-ctx" ] in
-  { Runtime_schema.provider_id
-  ; model_id
-  ; is_default
-  ; max_concurrent
-  ; price_input
-  ; price_output
-  ; keep_alive
-  ; num_ctx
-  }
+  let price_input_result = typed_find "a float" path tbl "price-input" Otoml.get_float in
+  let price_output_result = typed_find "a float" path tbl "price-output" Otoml.get_float in
+  let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
+  let num_ctx_result = typed_find "an integer" path tbl "num-ctx" Otoml.get_integer in
+  let ( let* ) = Result.bind in
+  let* is_default_opt = is_default_result in
+  let is_default = Option.value is_default_opt ~default:false (* DET-OK: fallback to false if omitted *) in
+  let* max_concurrent = max_concurrent_result in
+  let* price_input = price_input_result in
+  let* price_output = price_output_result in
+  let* keep_alive = keep_alive_result in
+  let* num_ctx = num_ctx_result in
+  Ok
+    { Runtime_schema.provider_id
+    ; model_id
+    ; is_default
+    ; max_concurrent
+    ; price_input
+    ; price_output
+    ; keep_alive
+    ; num_ctx
+    }
 ;;
 
 (* Parse one provider table ([<provider>.*]) into its Layer-3 bindings.
@@ -513,26 +550,29 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
    alias declarations), only the model's own leaf fields are used to build
    the binding; the nested sub-tables are ignored. *)
 let parse_provider_table (provider_id : string) (tbl : Otoml.t)
-  : Runtime_schema.binding list
+  : (Runtime_schema.binding list, parse_error list) result
   =
   let entries = Otoml.get_table tbl in
-  List.map
-    (fun (model_id, sub) ->
-       if is_toml_table sub
-       then (
-         (* [sub] is TomlTable/TomlInlineTable (per [is_toml_table]); both
-            unwrap to a (key, value) list via [Otoml.get_table]. The
-            nested sub-tables (Layer-4 aliases) are filtered out so the
-            binding is built from this model's leaf fields only. *)
-         let fields = Otoml.get_table sub in
-         let leaf_fields = List.filter (fun (_, v) -> not (is_toml_table v)) fields in
-         let synthetic_tbl = Otoml.TomlTable leaf_fields in
-         parse_binding_fields provider_id model_id synthetic_tbl)
-       else parse_binding_fields provider_id model_id sub)
-    entries
+  partition_results
+    (List.map
+       (fun (model_id, sub) ->
+          if is_toml_table sub
+          then (
+            (* [sub] is TomlTable/TomlInlineTable (per [is_toml_table]); both
+               unwrap to a (key, value) list via [Otoml.get_table]. The
+               nested sub-tables (Layer-4 aliases) are filtered out so the
+               binding is built from this model's own leaf fields only. *)
+            let fields = Otoml.get_table sub in
+            let leaf_fields = List.filter (fun (_, v) -> not (is_toml_table v)) fields in
+            let synthetic_tbl = Otoml.TomlTable leaf_fields in
+            parse_binding_fields provider_id model_id synthetic_tbl)
+          else parse_binding_fields provider_id model_id sub)
+       entries)
 ;;
 
-let parse_bindings (toml : Otoml.t) : Runtime_schema.binding list =
+let parse_bindings (toml : Otoml.t)
+  : (Runtime_schema.binding list, parse_error list) result
+  =
   let top_entries = Otoml.get_table toml in
   (* Only top-level tables can describe a provider; scalar / array entries
      (e.g. an operator-authored ["comment = ..."]) would crash
@@ -542,9 +582,12 @@ let parse_bindings (toml : Otoml.t) : Runtime_schema.binding list =
       (fun (name, value) -> (not (is_reserved name)) && is_toml_table value)
       top_entries
   in
-  List.concat_map
-    (fun (provider_id, tbl) -> parse_provider_table provider_id tbl)
-    provider_tables
+  Result.map
+    List.concat
+    (partition_results
+       (List.map
+          (fun (provider_id, tbl) -> parse_provider_table provider_id tbl)
+          provider_tables))
 ;;
 
 (* --- Top-level parse --- *)
@@ -602,11 +645,14 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
   let assignments_result = parse_keeper_assignments toml in
+  let bindings_result = parse_bindings toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
-    errs providers_result @ errs models_result @ errs assignments_result
+    errs providers_result
+    @ errs models_result
+    @ errs assignments_result
+    @ errs bindings_result
   in
-  let bindings = parse_bindings toml in
   let default_runtime_id =
     Otoml.find_opt toml Otoml.get_string [ "runtime"; "default" ]
   in
@@ -619,6 +665,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let models = extract_after_all_errors_guard ~label:"models" models_result in
     let keeper_assignments =
       extract_after_all_errors_guard ~label:"assignments" assignments_result
+    in
+    let bindings =
+      extract_after_all_errors_guard ~label:"bindings" bindings_result
     in
     Ok
       { Runtime_schema.providers

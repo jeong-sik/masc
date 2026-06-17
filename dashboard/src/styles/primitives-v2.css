@@ -72,7 +72,9 @@
 }
 
 .rfilter.on {
-  color: #ffffff;
+  /* ink-on-accent token (theme-adaptive) per keeper-v2 v2.css .rfilter.on;
+     hardcoded #ffffff was illegible on the ice-cyan brand in the default theme */
+  color: var(--volt-ink);
   background: var(--color-brand);
   border-color: var(--color-brand);
   font-weight: 600;

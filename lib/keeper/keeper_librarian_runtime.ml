@@ -15,6 +15,62 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 ;;
 
+(* RFC-0252 adversarial review: the previous process-global slot was removed in
+   favor of per-keeper lanes, but measured production data showed that an
+   unbounded shared flash/glm provider pool can spike empty-response rates.
+   Re-introduce an optional fleet-wide concurrency gate around librarian provider
+   calls only. Per-keeper lanes still serialize ordering and fairness; this slot
+   only caps simultaneous provider round-trips. Default 1 preserves the prior
+   #21230 protection; 0 disables the gate. *)
+let global_slot_capacity () =
+  Keeper_memory_bank_env.memory_env_int_logged
+    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+    ~default:1
+  |> max 0
+;;
+
+let global_slot_wait_sec () =
+  Keeper_memory_bank_env.memory_env_float_logged
+    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT_WAIT_SEC"
+    ~default:0.25
+  |> Float.max 0.0
+;;
+
+let provider_slot =
+  lazy
+    (match global_slot_capacity () with
+     | 0 -> None
+     | n -> Some (Eio.Semaphore.make n))
+;;
+
+let with_provider_slot ?clock f =
+  match Lazy.force provider_slot with
+  | None -> Some (f ())
+  | Some sem ->
+    let acquired = ref false in
+    (try
+       match clock with
+       | None ->
+         Eio.Semaphore.acquire sem;
+         acquired := true
+       | Some clock ->
+         (try
+            Eio.Time.with_timeout_exn clock (global_slot_wait_sec ()) (fun () ->
+              Eio.Semaphore.acquire sem);
+            acquired := true
+          with
+          | Eio.Time.Timeout -> ())
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.warn
+         "librarian provider slot acquisition failed: %s"
+         (Printexc.to_string exn));
+    if !acquired
+    then Some (Eio_guard.protect ~finally:(fun () -> Eio.Semaphore.release sem) f)
+    else None
+;;
+
 let enabled () =
   (* Default on: a keeper without conversation ingestion is the pathology
      the Memory OS exists to fix (2026-06-12 diagnosis, issue #20909).
@@ -412,17 +468,28 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                Option.value timeout_sec ~default:(default_timeout_sec ())
              in
              match
-               extract_and_append_with_provider
-                 ?complete
-                 ?clock
-                 ~timeout_sec
-                 ~sw
-                 ~net
-                 ~keeper_id
-                 ~provider_cfg
-                 inp
+               with_provider_slot ?clock (fun () ->
+                 extract_and_append_with_provider
+                   ?complete
+                   ?clock
+                   ~timeout_sec
+                   ~sw
+                   ~net
+                   ~keeper_id
+                   ~provider_cfg
+                   inp)
              with
-             | Ok episode ->
+             | None ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
+                 ~labels:
+                   [ "keeper", keeper_id; "site", "memory_os_librarian_provider_slot" ]
+                 ();
+               Log.Keeper.warn ~keeper_name:keeper_id
+                 "memory os librarian skipped runtime=%s: global provider slot busy (capacity=%d)"
+                 runtime_id
+                 (global_slot_capacity ())
+             | Some (Ok episode) ->
                (* Only a successful write resets the cadence. Skipped or failed
                   attempts leave the keeper due on the next turn. *)
                cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
@@ -431,7 +498,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  episode.Keeper_memory_os_types.trace_id
                  episode.generation
                  (List.length episode.claims)
-             | Error err ->
+             | Some (Error err) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)
                  ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]

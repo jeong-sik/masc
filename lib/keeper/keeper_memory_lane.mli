@@ -11,14 +11,24 @@
     The unit submitted must be self-contained over immutable values: it reads
     its Eio capabilities from [Eio_context] (the lane binds the executor switch
     via [Eio_context.with_turn_switch] before running it), and must not close
-    over mutable turn-local state that a later turn can overwrite. *)
+    over mutable turn-local state that a later turn can overwrite. The OCaml
+    type system cannot enforce this immutability precondition; callers are
+    responsible for passing a closure that only closes over immutable snapshots
+    (e.g. [Keeper_meta_contract.keeper_meta], [Workspace.config]) and never over
+    mutable turn-local references.
+
+    The per-keeper reservation bound is controlled by
+    [MASC_KEEPER_MEMORY_LANE_MAX_PENDING] (default [2]). Submission outcomes
+    are counted under [masc_keeper_memory_lane_*] and per-keeper pending /
+    in-flight gauges are exported. *)
 
 type outcome =
   | Submitted
       (** Forked onto the keeper's lane and serialized behind its mutex. *)
   | Ran_inline
       (** Executor switch not initialized; the unit ran synchronously in the
-          caller so no work is lost (tests, or startup before {!init}). *)
+          caller so no work is lost (tests, or startup before {!init}). A
+          raising unit is contained and emits a metric instead of escaping. *)
   | Dropped
       (** The keeper's lane was saturated (pending at the bound); the unit was
           discarded. Memory extraction is best-effort, so saturation drops
@@ -36,7 +46,9 @@ val submit
 (** [submit ~base_path ~keeper_name f] runs [f] on [keeper_name]'s memory lane.
     When the executor switch is set, [f] is forked and serialized behind that
     keeper's mutex; over the pending bound it is dropped and counted. When the
-    executor is not initialized, [f] runs inline. *)
+    executor is not initialized, [f] runs inline and any exception is contained
+    and counted rather than escaping. The bound, outcomes, and per-keeper
+    pending/in-flight state are exported as metrics. *)
 
 module For_testing : sig
   val reset : unit -> unit

@@ -144,7 +144,14 @@ type t =
   | OasEnvKeyRejections
   | ContinuityTsRecovered
   | MemoryWriteFailures
+  | MemoryLaneUnitFailures
   | MemoryConsolidations
+  | MemoryLaneSubmitted
+  | MemoryLaneRanInline
+  | MemoryLaneDropped
+  | MemoryLanePending
+  | MemoryLaneInFlight
+  | MemoryLaneProviderSlotBusy
   | WriteMetaCycleFailures
   | AlertPersistFailures
   | MetricsSseFailures

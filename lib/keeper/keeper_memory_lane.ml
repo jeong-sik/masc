@@ -15,10 +15,16 @@ type outcome =
   | Ran_inline
   | Dropped
 
-(* One unit in flight (holding [mem_mu]) plus one queued. A third concurrent
-   post-turn unit for the same keeper means turns outpace extraction; the excess
-   is best-effort and dropped rather than piling up fibers. *)
-let max_pending = 2
+(* Per-keeper reservation bound: 1 in-flight (holding [mem_mu]) plus 1 queued.
+   A third concurrent post-turn unit for the same keeper means turns outpace
+   extraction; the excess is best-effort and dropped rather than piling up
+   fibers. Tunable via environment for fleet-wide capacity experiments. *)
+let max_pending () =
+  Keeper_memory_bank_env.memory_env_int_logged
+    "MASC_KEEPER_MEMORY_LANE_MAX_PENDING"
+    ~default:2
+  |> max 1
+;;
 
 let entries : (string, entry) Hashtbl.t = Hashtbl.create 16
 
@@ -52,62 +58,119 @@ let entry_for ~base_path ~keeper_name =
       e)
 ;;
 
-let try_reserve entry =
-  Stdlib.Mutex.protect entry.state_mu (fun () ->
-    if entry.pending >= max_pending
-    then false
-    else (
-      entry.pending <- entry.pending + 1;
-      true))
+let metric_name m = Keeper_metrics.(to_string m)
+
+let record_counter ~keeper_name metric =
+  Otel_metric_store.inc_counter
+    (metric_name metric)
+    ~labels:[ "keeper", keeper_name ]
+    ()
 ;;
 
-let release_reservation entry =
-  Stdlib.Mutex.protect entry.state_mu (fun () -> entry.pending <- entry.pending - 1)
+let inc_pending ~keeper_name () =
+  Otel_metric_store.inc_gauge
+    (metric_name MemoryLanePending)
+    ~labels:[ "keeper", keeper_name ]
+    ()
+;;
+
+let dec_pending ~keeper_name () =
+  Otel_metric_store.dec_gauge
+    (metric_name MemoryLanePending)
+    ~labels:[ "keeper", keeper_name ]
+    ()
+;;
+
+let inc_in_flight ~keeper_name () =
+  Otel_metric_store.inc_gauge
+    (metric_name MemoryLaneInFlight)
+    ~labels:[ "keeper", keeper_name ]
+    ()
+;;
+
+let dec_in_flight ~keeper_name () =
+  Otel_metric_store.dec_gauge
+    (metric_name MemoryLaneInFlight)
+    ~labels:[ "keeper", keeper_name ]
+    ()
+;;
+
+let try_reserve ~keeper_name entry =
+  Stdlib.Mutex.protect entry.state_mu (fun () ->
+    let bound = max_pending () in
+    if entry.pending >= bound
+    then None
+    else (
+      entry.pending <- entry.pending + 1;
+      inc_pending ~keeper_name ();
+      Some bound))
+;;
+
+let release_reservation ~keeper_name entry =
+  Stdlib.Mutex.protect entry.state_mu (fun () ->
+    entry.pending <- entry.pending - 1;
+    dec_pending ~keeper_name ())
 ;;
 
 (* Runs on a forked fiber owned by the executor switch. Holds [mem_mu] across
-   [f]. Releases the mutex (only if acquired) and the reservation on every exit,
-   including cancellation at shutdown. No exception escapes: a best-effort unit
-   must never propagate into the executor switch — that would cancel the
+   the unit. Releases the mutex (only if acquired) and the reservation on every
+   exit, including cancellation at shutdown. No exception escapes: a best-effort
+   unit must never propagate into the executor switch — that would cancel the
    fleet. *)
-let run_unit entry sw f =
+let run_unit ~keeper_name entry sw f =
   let acquired = ref false in
   (try
      Eio.Mutex.lock entry.mem_mu;
      (* No suspension point between [lock] returning and this assignment, so
         cancellation cannot strand a held mutex with [acquired = false]. *)
      acquired := true;
+     inc_in_flight ~keeper_name ();
      Eio_context.with_turn_switch sw f
    with
    | Eio.Cancel.Cancelled _ -> () (* shutdown: silent *)
    | exn ->
-     Log.Keeper.warn "memory lane unit failed: %s" (Printexc.to_string exn));
-  if !acquired then Eio.Mutex.unlock entry.mem_mu;
-  release_reservation entry
+     record_counter ~keeper_name MemoryLaneUnitFailures;
+     Log.Keeper.warn ~keeper_name
+       "memory lane unit failed: %s"
+       (Printexc.to_string exn));
+  if !acquired then (
+    dec_in_flight ~keeper_name ();
+    Eio.Mutex.unlock entry.mem_mu);
+  release_reservation ~keeper_name entry
 ;;
 
 let submit ~base_path ~keeper_name f =
   match current_sw () with
   | None ->
     (* Not initialized: run inline. The caller is still inside the per-keeper
-       turn lane, so single-fiber-per-keeper memory access is preserved. *)
-    f ();
+       turn lane, so single-fiber-per-keeper memory access is preserved. A
+       raising unit is contained and counted rather than escaping. *)
+    (try f () with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       record_counter ~keeper_name MemoryLaneUnitFailures;
+       Log.Keeper.warn ~keeper_name
+         "memory lane unit failed (inline): %s"
+         (Printexc.to_string exn));
+    record_counter ~keeper_name MemoryLaneRanInline;
     Ran_inline
   | Some sw ->
     let entry = entry_for ~base_path ~keeper_name in
-    if not (try_reserve entry)
-    then (
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string DispatchEventFailures)
-        ~labels:[ "keeper", keeper_name; "site", "memory_lane_saturated" ]
-        ();
-      Log.Keeper.warn ~keeper_name
-        "memory lane saturated (pending>=%d): dropping post-turn memory unit"
-        max_pending;
-      Dropped)
-    else (
-      Eio.Fiber.fork ~sw (fun () -> run_unit entry sw f);
-      Submitted)
+    (match try_reserve ~keeper_name entry with
+     | None ->
+       record_counter ~keeper_name MemoryLaneDropped;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string DispatchEventFailures)
+         ~labels:[ "keeper", keeper_name; "site", "memory_lane_saturated" ]
+         ();
+       Log.Keeper.warn ~keeper_name
+         "memory lane saturated (pending>=%d): dropping post-turn memory unit"
+         (max_pending ());
+       Dropped
+     | Some _bound ->
+       record_counter ~keeper_name MemoryLaneSubmitted;
+       Eio.Fiber.fork ~sw (fun () -> run_unit ~keeper_name entry sw f);
+       Submitted)
 ;;
 
 module For_testing = struct

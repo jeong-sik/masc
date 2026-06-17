@@ -104,20 +104,47 @@ on the lane. The data the unit reads must not race that later turn:
 
 ## Accepted consequence
 
-Detaching memory work means a keeper can have a chat turn and a memory extraction in flight at the
-same time — up to two concurrent provider calls per keeper. Across the fleet on a shared endpoint
-this raises peak concurrency and can worsen the librarian empty-response rate (HTTP 200 empty body
-under saturation, `keeper_librarian_runtime.ml:232`).
+Detaching memory work means a keeper can have a chat turn and a memory unit queued or in flight at
+the same time. Without a fleet-wide bound, N keepers could issue N concurrent provider calls to the
+shared flash/glm librarian pool. Measured production data (2026-06-16, issue #21230) showed that
+this exact pattern spiked the librarian empty-response rate to 62%, so an unbounded concurrency
+increase cannot be treated as a pure operator concern.
 
-This is accepted. Provider load is an operator concern in this codebase, not a code gate
-(`keeper_turn_driver_try_provider.ml:401`: "No per-lane capacity gate — provider load is managed by
-operator adjusting keeper count."). Endpoint over-subscription is addressed by capacity/routing
-(keeper count, endpoint parallelism), not by re-introducing a shared cap. Lane independence and
-endpoint contention are separate concerns and are kept separate here.
+To reconcile the lane independence goal with that measurement, this design adds a **separate fleet-wide
+provider concurrency gate** around librarian calls:
+
+- `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` (default `1`): maximum simultaneous librarian
+  provider round-trips across all keepers. `0` disables the gate.
+- `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT_WAIT_SEC` (default `0.25`): how long a lane fiber
+  waits for the shared slot before dropping the extraction best-effort.
+
+Per-keeper lane fairness is preserved (`mem_mu` still orders each keeper's units), while the shared
+pool is protected from the empty-response storm observed in #21230. Lane independence and provider
+pool protection are now handled on separate axes rather than pretending one implies the other.
 
 Memory writes become eventually consistent: a keeper's turn N+1 can begin before turn N's
 deterministic note lands, so recall on turn N+1 may miss turn N's note. Ordering within a keeper is
 preserved by `mem_mu` (turn N completes before turn N+1 on the lane).
+
+## Relationship to #21408 (mutually exclusive)
+
+PR #21408 is a competing solution to the same underlying problem: the old process-global
+`provider_slot` serialized every keeper's librarian work fleet-wide. #21408 keeps the slot concept
+but re-implements it as a per-keeper `Hashtbl` registry of slots (`provider_slot_for keeper_id`),
+while #21376 (this RFC) removes the slot entirely and moves serialization into the per-keeper
+memory lane (`Keeper_memory_lane.mem_mu`). The two PRs touch the same lines in
+`keeper_librarian_runtime.ml` in opposite directions (one modifies `provider_slot`; the other deletes
+it), so they are textually and semantically mutually exclusive — both cannot merge.
+
+**Recommendation: keep #21376 and close #21408.** The per-keeper lane in #21376 already subsumes the
+per-keeper serialization goal of #21408 (`mem_mu` orders each keeper's units independently), and it
+does so with a cleaner architecture (lane admission + bounded queue + leak-safety tests). The
+fleet-wide provider-pool gate added above covers the shared-pool protection that #21408 was trying
+to re-introduce. Merging both would create two concurrent primitives for the same concern.
+
+If #21376 is deemed too large to land first, the alternative is to close #21376, merge #21408 as a
+minimal fix, and then rework #21376 on top of it — but simultaneous open competition between the two
+PRs must end before either merges.
 
 ## Known limitations
 
@@ -126,6 +153,26 @@ preserved by `mem_mu` (turn N completes before turn N+1 on the lane).
   that unit runs to completion rather than being cancelled with the keeper. The work is bounded and
   best-effort, writing only to that keeper's own memory bank, so the blast radius is one stale
   extraction. Tying memory units to keeper lifecycle is deferred.
+
+## Runtime tunables and metrics
+
+Per-keeper lane:
+
+- `MASC_KEEPER_MEMORY_LANE_MAX_PENDING` (default `2`): reservation bound per keeper. Values `< 1`
+  are clamped to `1`.
+- `masc_keeper_memory_lane_submitted_total`
+- `masc_keeper_memory_lane_ran_inline_total`
+- `masc_keeper_memory_lane_dropped_total`
+- `masc_keeper_memory_lane_pending` (gauge, per-keeper)
+- `masc_keeper_memory_lane_in_flight` (gauge, per-keeper)
+
+Fleet-wide librarian provider gate:
+
+- `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` (default `1`)
+- `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT_WAIT_SEC` (default `0.25`)
+- `masc_keeper_memory_lane_provider_slot_busy_total`
+
+Saturation and provider-slot-busy events are also logged at WARN level with the keeper name.
 
 ## Tests
 

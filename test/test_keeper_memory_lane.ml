@@ -22,6 +22,18 @@ let test_inline_when_uninitialized () =
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
 ;;
 
+(* A raising unit in the inline path is contained and returns Ran_inline. *)
+let test_inline_contains_raise () =
+  Lane.For_testing.reset ();
+  let outcome =
+    Lane.submit ~base_path ~keeper_name:"k1" (fun () -> failwith "inline boom")
+  in
+  match outcome with
+  | Lane.Ran_inline -> ()
+  | Lane.Submitted -> Alcotest.fail "expected Ran_inline, got Submitted"
+  | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
+;;
+
 (* Two units for the same keeper run one after another: the second only starts
    after the first releases the keeper's mutex. *)
 let test_serializes_within_keeper () =
@@ -123,14 +135,12 @@ let test_releases_on_raise () =
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
       let _ =
-        Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
-          failwith "boom")
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () -> failwith "boom")
       in
       Eio.Fiber.yield ();
       Eio.Fiber.yield ();
       let _ =
-        Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
-          ran_after := true)
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () -> ran_after := true)
       in
       Eio.Fiber.yield ();
       Eio.Fiber.yield ()));
@@ -149,6 +159,10 @@ let () =
             "inline when uninitialized"
             `Quick
             test_inline_when_uninitialized
+        ; Alcotest.test_case
+            "inline contains raise"
+            `Quick
+            test_inline_contains_raise
         ; Alcotest.test_case
             "serializes within keeper"
             `Quick

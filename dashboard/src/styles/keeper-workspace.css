@@ -22,6 +22,15 @@
  */
 
 /* ── Shell grid: roster | conversation | context rail ───────────── */
+
+/* The workspace is rendered inside .v2-surface, which is otherwise
+ * height:auto. In keeper detail mode the outer scroll container is hidden,
+ * so .v2-surface must fill the stage for .kw-grid height:100% to resolve
+ * to the viewport and give the thread a constrained scroll box. */
+[data-keeper-detail-mode="true"] .v2-surface {
+  height: 100%;
+}
+
 .kw-grid {
   display: grid;
   grid-template-columns:

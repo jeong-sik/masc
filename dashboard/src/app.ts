@@ -167,21 +167,21 @@ export function App() {
         if (cancelled) return
         void refreshShell({ light: true })
         requestNamespaceTruthNow()
-      })
 
-    // Fetch runtime thresholds so health-strip and lifecycle state use
-    // server-side config instead of compiled fallback defaults (P-DASH-07).
-    void fetchDashboardConfig()
-      .then(data => {
-        const thresholds = parseContextThresholds(data, {
-          critical: CONTEXT_RATIO_CRITICAL,
-          warn: CONTEXT_RATIO_WARN,
-          compacting: CONTEXT_RATIO_COMPACTING,
-        })
-        setContextThresholds(thresholds)
-      })
-      .catch(err => {
-        console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
+        // Fetch runtime thresholds so health-strip and lifecycle state use
+        // server-side config instead of compiled fallback defaults (P-DASH-07).
+        void fetchDashboardConfig()
+          .then(data => {
+            const thresholds = parseContextThresholds(data, {
+              critical: CONTEXT_RATIO_CRITICAL,
+              warn: CONTEXT_RATIO_WARN,
+              compacting: CONTEXT_RATIO_COMPACTING,
+            })
+            setContextThresholds(thresholds)
+          })
+          .catch(err => {
+            console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
+          })
       })
 
     // Replay durable OAS state before opening the live SSE tail.

@@ -1,0 +1,113 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC v2 — High-contrast skin tokens
+   Loaded AFTER colors_and_type.css / global.css.
+   ══════════════════════════════════════════════════════════════ */
+[data-skin="v2"] {
+  /* Surfaces — cool neutral charcoal, clean elevation steps */
+  --bg-deep:        #08090d;
+  --bg-panel:       #0f1015;
+  --bg-panel-alt:   #15161d;
+  --bg-card:        #1b1c25;
+  --bg-card-hover:  #23242f;
+  --bg-sunken:      #0a0b0f;
+
+  /* Borders — crisper, cooler */
+  --border-main:      #282a36;
+  --border-soft:      #1e1f29;
+  --border-highlight: #3b3d4e;
+
+  /* Text — bone, pushed bright for reading (raised contrast on mid/dim
+     so 9–11px labels, eyebrows and captions stay legible on dark ground) */
+  --text-bright:  #f7f1e6;
+  --text-primary: #e3dacb;
+  --text-mid:     #c0b7a6;
+  --text-dim:     #968fa1;
+
+  /* Accents — vivid */
+  --accent-blood:     #e8472f;
+  --accent-blood-dim: #7a1a12;
+  --accent-viscera:   #ff6a4d;
+  --accent-brass:     #e0b057;
+  --accent-brass-dim: #8a6a28;
+  --accent-bone:      #e6d8b6;
+  --accent-ice:       #46c6f0;
+  --accent-ice-dim:   #1c6b86;
+  --accent-bile:      #8aa83f;
+
+  /* Information / reference accent — distinct from volt (primary action).
+     Used for mentions, state badges, syntax fns, tool events. Volt-aware:
+     under volt=ice it shifts off-cyan so it never collides with primary. */
+  --info:     var(--accent-ice);
+  --info-dim: var(--accent-ice-dim);
+
+  /* Status — saturated but composed */
+  --status-ok:    #46c66a;
+  --status-warn:  #e0a02a;
+  --status-bad:   #e8472f;
+  --status-idle:  #6b6478;
+  --status-busy:  #46c6f0;
+
+  /* Voltage — the single primary accent (default brass/gold) */
+  --volt:        var(--accent-brass);
+  --volt-strong: #f0c373;
+  --volt-dim:    var(--accent-brass-dim);
+  --volt-ink:    #1a1405;
+  --volt-glow:   rgba(224,176,87,0.22);
+  --volt-wash:   rgba(224,176,87,0.10);
+
+  /* Radius scale — engraved, tiny corners (brand: 2/4/6/…). One ladder;
+     literals below recovered into these tokens. */
+  --radius-2xs: 2px;
+  --radius-xs:  3px;
+  --radius-sm:  4px;   /* chips · tabs · inputs · small controls */
+  --radius-md:  6px;   /* cards · panels · composer */
+  --radius-lg:  10px;  /* large panels */
+
+  /* Spacing scale (2px base) + semantic aliases. Surface padding, card
+     padding and inter-card gaps were drifting (12·13·14 / 22·20…) — these
+     give every surface one rhythm. */
+  --sp-1: 4px;  --sp-2: 6px;  --sp-3: 8px;  --sp-4: 10px; --sp-5: 12px;
+  --sp-6: 14px; --sp-7: 16px; --sp-8: 20px; --sp-9: 24px; --sp-10: 32px;
+  --pad-surface: 22px 26px 40px;  /* surface scroll outer padding */
+  --pad-card:    12px 14px;       /* card / panel body padding */
+  --gap-card:    14px;            /* between sibling cards / panels */
+  --gap-row:     8px;             /* between list rows */
+
+  --shadow-card:   0 1px 3px rgba(0,0,0,0.5);
+  --shadow-panel:  0 4px 22px rgba(0,0,0,0.55);
+  --shadow-pop:    0 12px 40px rgba(0,0,0,0.6), 0 0 0 1px var(--border-main);
+  /* Override the base (dark-fantasy) blood-tinted glow so it tracks volt
+     instead — keeps title/primary glow coherent in every voltage. */
+  --accent-glow:   var(--volt-glow);
+  --shadow-glow:   0 0 20px var(--volt-glow);
+
+  /* v2 type — sharp grotesque replaces the gothic Cinzel */
+  --font-display: 'Space Grotesk', 'Noto Sans KR', system-ui, sans-serif;
+  --font-body:    'Noto Sans KR', 'Space Grotesk', system-ui, sans-serif;
+
+  /* ── TYPE LADDER — one heading system across every surface ──
+     T1 surface/subject title · T2 region/panel title ·
+     T3 card/section header (UPPER) · T4 micro label (UPPER).
+     All display = Space Grotesk, all weight 600. The authoritative
+     selector block lives at the end of surfaces.css. */
+  --fs-t1: 22px; --fw-t1: 600; --tr-t1: -0.005em;  /* bright · sentence */
+  --fs-t2: 16px; --fw-t2: 600; --tr-t2: 0;         /* bright · sentence */
+  --fs-t3: 11px; --fw-t3: 600; --tr-t3: 0.14em;    /* mid · UPPER */
+  --fs-t4: 9px;  --fw-t4: 600; --tr-t4: 0.2em;     /* dim · UPPER */
+}
+
+[data-skin="v2"][data-volt="blood"] {
+  --volt: var(--accent-blood); --volt-strong: #ff6a4d; --volt-dim: var(--accent-blood-dim);
+  --volt-ink: #ffffff; --volt-glow: rgba(232,71,47,0.26); --volt-wash: rgba(232,71,47,0.10);
+}
+[data-skin="v2"][data-volt="ice"] {
+  --volt: var(--accent-ice); --volt-strong: #7ad8f6; --volt-dim: var(--accent-ice-dim);
+  --volt-ink: #04121a; --volt-glow: rgba(70,198,240,0.24); --volt-wash: rgba(70,198,240,0.09);
+  /* primary is now cyan → shift the info accent to violet to stay distinct */
+  --info: #8a6cf0; --info-dim: #4a3aa0;
+}
+
+/* Ensure the skinned root/html/body fill the viewport. */
+[data-skin="v2"],
+[data-skin="v2"] body { height: 100%; }
+

@@ -2,6 +2,10 @@
 // Mounts the root <App /> component into the DOM
 
 // Foundation styles (load first)
+// Keeper-v2 design-system tokens are loaded earliest so the v2 vocabulary is
+// available to the dashboard token ladder; dashboard-specific tokens loaded
+// below override any name collisions.
+import './styles/ds-theme-tokens.css'
 import './styles/tokens.generated.css'
 import './styles/tokens.css'
 import './styles/variables.css'

@@ -152,6 +152,7 @@ supports-structured-output = false
 [glm-coding.glm-5-turbo]
 
 [ollama.gemma4-26b-a4b-qat]
+max-concurrent = 1
 
 # ── Keeper assignments ──────────────────────────────────────────────
 # Keepers are assigned to a model by provider.model key. Unassigned

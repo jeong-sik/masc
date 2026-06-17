@@ -459,6 +459,9 @@ metadata로 보존되지만, OAS multi-turn/tool 실행 전체를 제한하는 k
 cap으로 해석하면 안 된다. enforcement가 필요하면 provider HTTP transport call
 단위 또는 endpoint-discovery 단위에서 적용해야 한다.
 
+명시된 값은 반드시 **양의 정수**여야 한다. `0`이나 음수는 누락과 다르게
+fail-fast parse error로 거부된다. (`0`은 과거 omission sentinel로 쓰였으므로
+조용히 무시하면 "차단" 의도가 "무제한"으로 뒤집힐 수 있다.)
 ```toml
 [cli-tool-a.agent-code-spark]
 is-default = true

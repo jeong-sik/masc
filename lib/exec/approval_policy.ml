@@ -15,8 +15,10 @@ type t = {
 
    [@@warning "-4"] (on the function below): the [_ :: rest] arm is a
    find-first scan that *intentionally* skips every non-matching
-   capability — including future [Capability.t] ctors and future
-   [Git_op.t] ctors that are not [Destructive]. Forcing an explicit
+   capability — including future [Capability.t] ctors and [Git_op.t]
+   ctors that are not [Destructive] — notably [Destructive_recoverable]
+   (reset --hard, branch -D), which RFC-0255 §4.5 intentionally keeps OUT
+   of the floor (reflog-recoverable, graded by the overlay). Forcing an explicit
    enumeration over both nested variants adds friction with no safety
    gain (the answer is always "skip and keep scanning"). RFC-0071
    §3.4.1 — nested find-first scan exemption, not a closed-sum dispatch. *)

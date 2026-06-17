@@ -6,8 +6,17 @@ type t =
       [ `Commit | `Merge | `Rebase | `Pull | `Fetch
       | `Push | `Tag | `Stash_push | `Checkout_branch ]
   | Destructive of
-      [ `Reset_hard | `Push_force | `Branch_delete
-      | `Clean_force | `Stash_drop | `Worktree_remove ]
+      (* Irreversible (RFC-0255 §4.5): stays in the trust-independent
+         catastrophic floor. push --force/--delete overwrite a remote;
+         clean -f[d] deletes untracked files (not in reflog); stash drop is
+         dangling-commit-only; worktree remove discards uncommitted state and
+         races concurrent keepers. *)
+      [ `Push_force | `Clean_force | `Stash_drop | `Worktree_remove ]
+  | Destructive_recoverable of
+      (* Reflog-recoverable (RFC-0255 §4.5): demoted OUT of the floor to
+         overlay-graded (autonomous Observe -> Allow). reset --hard restores
+         from reflog; branch -D restores the tip from reflog for the gc window. *)
+      [ `Reset_hard | `Branch_delete ]
 
 let has_flag args flag = List.mem flag args
 
@@ -49,7 +58,7 @@ let of_argv = function
        | "blame" -> Ok (Read `Blame)
        | "branch" ->
            if has_flag rest "-D" || has_flag rest "--delete" then
-             Ok (Destructive `Branch_delete)
+             Ok (Destructive_recoverable `Branch_delete)
            else Ok (Read `Branch_list)
        | "remote" -> Ok (Read `Remote_list)
        | "commit" -> Ok (Mutating `Commit)
@@ -68,7 +77,7 @@ let of_argv = function
              Ok (Destructive `Push_force)
            else Ok (Mutating `Push)
        | "reset" when has_flag rest "--hard" ->
-           Ok (Destructive `Reset_hard)
+           Ok (Destructive_recoverable `Reset_hard)
        | "clean" when has_short_flag rest 'f' || has_flag rest "--force" ->
            Ok (Destructive `Clean_force)
        | "worktree" ->
@@ -82,3 +91,4 @@ let pp fmt = function
   | Read _ -> Format.fprintf fmt "git:read"
   | Mutating _ -> Format.fprintf fmt "git:mutating"
   | Destructive _ -> Format.fprintf fmt "git:destructive"
+  | Destructive_recoverable _ -> Format.fprintf fmt "git:destructive-recoverable"

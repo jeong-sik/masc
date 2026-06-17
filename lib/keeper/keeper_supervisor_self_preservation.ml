@@ -62,6 +62,15 @@ let update_suppression_streak dominant_key =
   loop ()
 ;;
 
+let reset_suppression_streak () =
+  let rec loop () =
+    let current = Atomic.get escape_state in
+    let next = { current with consecutive_suppressions = 0 } in
+    if not (Atomic.compare_and_set escape_state current next) then loop ()
+  in
+  loop ()
+;;
+
 let publish_suppression
       ~publish_lifecycle
       ~suppressed_count
@@ -130,6 +139,11 @@ module For_testing = struct
   let should_warn_partial_suppression_streak =
     should_warn_partial_suppression_streak
   ;;
+
+  let update_suppression_streak = update_suppression_streak
+  let reset_suppression_streak = reset_suppression_streak
+  let consecutive_suppressions () = (Atomic.get escape_state).consecutive_suppressions
+  let last_dominant_cohort () = (Atomic.get escape_state).last_dominant_cohort
 end
 
 let apply ~keepers_dir ~publish_lifecycle ~total_keepers to_restart =
@@ -195,13 +209,7 @@ let apply ~keepers_dir ~publish_lifecycle ~total_keepers to_restart =
              streak_at_probe
              ratio
              dominant_key;
-           let rec reset_loop () =
-             let current = Atomic.get escape_state in
-             let next = { current with consecutive_suppressions = 0 } in
-             if not (Atomic.compare_and_set escape_state current next)
-             then reset_loop ()
-           in
-           reset_loop ()
+           reset_suppression_streak ()
          | None -> log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count);
         publish_suppression
           ~publish_lifecycle

@@ -773,7 +773,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ),
     [scopedAgents, keeperRuntimeLookup, runtimeKeeperList],
   )
-  const filtered = scopedAgents
+  const filtered = useMemo(() => scopedAgents
     .filter((a: Agent) => {
       if (filter !== 'all' && bandByAgent.get(a.name)?.key !== filter) return false
       if (normalizedSearch) {
@@ -799,7 +799,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       const bOrder = order[bandByAgent.get(b.name)?.key ?? 'attention']
       if (aOrder !== bOrder) return aOrder - bOrder
       return a.name.localeCompare(b.name)
-    })
+    }),
+    [scopedAgents, filter, bandByAgent, normalizedSearch, searchTermsByAgent, search],
+  )
 
   const counts = countAgentsByStatus(scopedAgents, runtimeKeeperList, compositeByKeeperKey)
   const showExecutionFallbackState = shouldShowExecutionFallbackState({
@@ -875,7 +877,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         ? `${countSourceLabel} 기준 ${scopeLabel}입니다. 일부만 상세 목록에 반영됐습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''}`
         : `${countSourceLabel} 기준 ${scopeLabel}입니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
 
-  const rosterRows = filtered.map((agent: Agent) => {
+  const rosterRows = useMemo(() => filtered.map((agent: Agent) => {
     const keeperRuntime =
       keeperRuntimeLookup.get(agent.name)
       ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
@@ -976,7 +978,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       detailLabel,
       openDetail,
     }
-  })
+  }),
+    [filtered, keeperRuntimeLookup, runtimeKeeperList, bandByAgent, compositeByKeeperKey],
+  )
   const selectedRow = rosterRows.find(row => row.key === selectedKey) ?? rosterRows[0] ?? null
   const selectedBlockerDisplay = selectedRow
     ? rosterBlockerDisplay(selectedRow.stateNote, selectedRow.keeperRuntime)

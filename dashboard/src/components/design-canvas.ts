@@ -34,6 +34,11 @@ import {
   type FixturePost,
 } from './design-canvas-fixtures'
 import type { MemoryOsEpisodeSummary } from '../api/dashboard'
+import { Sigil, SigilChip } from './common/sigil-chip'
+import { LogFilter } from './common/log-filter'
+import { SuggestionChip } from './common/suggestion-chip'
+import { KeeperConfigPanel } from './keeper-config-panel-v2'
+import { EmptyState, ErrorState, LoadingState } from './state-surfaces'
 
 export type DesignCanvasCategory =
   | 'primitives'
@@ -85,11 +90,11 @@ function Section({ title, children }: { title: string; children: unknown }) {
   `
 }
 
-function Artboard({ title, children }: { title: string; children: unknown }) {
+function Artboard({ title, h, children }: { title: string; h?: number; children: unknown }) {
   return html`
     <div class="dc-artboard" data-design-canvas-artboard>
       <div class="dc-artboard-label">${title}</div>
-      <div class="dc-artboard-well">${children}</div>
+      <div class="dc-artboard-well" style=${h !== undefined ? { height: `${h}px` } : undefined}>${children}</div>
     </div>
   `
 }
@@ -165,6 +170,31 @@ function PrimitivesGallery() {
           <${StatusBadge} status="active" />
           <${StatusBadge} status="error" />
           <${StatusBadge} status="paused" />
+        </div>
+      <//>
+
+      <${Artboard} title="Sigil">
+        <div class="dc-row-wrap">
+          <${Sigil} slot=${3} size=${32} title="iron-claw">IC<//>
+          <${Sigil} slot=${5} size=${24} heartbeat=${true} fontScale=${0.46}>LU<//>
+          <${SigilChip} slot=${7} mono="SV">svalbard<//>
+        </div>
+      <//>
+
+      <${Artboard} title="LogFilter">
+        <div class="dc-row-wrap">
+          <${LogFilter} active=${true}>All<//>
+          <${LogFilter}>Info<//>
+          <${LogFilter}>Warn<//>
+          <${LogFilter}>Error<//>
+        </div>
+      <//>
+
+      <${Artboard} title="SuggestionChip">
+        <div class="dc-row-wrap">
+          <${SuggestionChip}>Re-run preflight<//>
+          <${SuggestionChip}>Open the diff<//>
+          <${SuggestionChip} pre="\u21bb">Regenerate reply<//>
         </div>
       <//>
     <//>
@@ -288,6 +318,38 @@ function OrganismsGallery() {
             <${LoadingBar} ariaLabel="Fleet telemetry loading" />
           </div>
         <//>
+      <//>
+
+      <${Artboard} title="Keeper config" h=${420}>
+        <div style=${{ height: '100%', overflow: 'auto' }}>
+          <${KeeperConfigPanel}
+            keeper=${{ id: 'iron-claw', ns: 'ns:masc-core', model: 'claude-sonnet-4', runtime: 'oas·seoul-1' }}
+            base=${{
+              persona: '간결하고 분석적인 keeper. 산문보다 diff를 선호.',
+              instructions: '항상 preflight를 먼저 실행한다.\n스키마 변경은 마이그레이션과 함께 제출한다.',
+              traits: ['analytical', 'terse', 'cautious'],
+            }}
+            inherit=${[
+              { tag: '① System', txt: 'You are {{keeper}}, a persistent coding keeper in {{namespace}}.' },
+              { tag: '② World', txt: 'Runtime {{runtime}} · model {{model}} · shared worktree under basepath.' },
+            ]}
+            permissions=${{ '읽기': true, '쓰기': true, 'git': true, '외부 호출': false }}
+          />
+        </div>
+      <//>
+
+      <${Artboard} title="State surfaces" h=${240}>
+        <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1px', background: 'var(--color-border-default)', height: '100%' }}>
+          <div style=${{ background: 'var(--color-bg-page)', display: 'grid', placeItems: 'center' }}>
+            <${EmptyState} title="실행 중인 keeper 없음" hint="이 네임스페이스에는 아직 활성 keeper가 없습니다." action="Keeper 생성" />
+          </div>
+          <div style=${{ background: 'var(--color-bg-page)', display: 'grid', placeItems: 'center' }}>
+            <${ErrorState} title="게이트에 연결할 수 없음" detail="ECONNREFUSED gate.masc.local:7070" />
+          </div>
+          <div style=${{ background: 'var(--color-bg-page)', padding: '16px' }}>
+            <${LoadingState} title="로스터 불러오는 중…" rows=${3} />
+          </div>
+        </div>
       <//>
     <//>
   `

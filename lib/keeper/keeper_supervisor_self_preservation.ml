@@ -3,11 +3,11 @@
 module StringMap = Set_util.StringMap
 
 type escape_state =
-  { mutable last_dominant_cohort : string
-  ; mutable consecutive_suppressions : int
+  { last_dominant_cohort : string
+  ; consecutive_suppressions : int
   }
 
-let escape_state = { last_dominant_cohort = ""; consecutive_suppressions = 0 }
+let escape_state = Atomic.make { last_dominant_cohort = ""; consecutive_suppressions = 0 }
 
 (* 10 sweeps times the default 30s sweep interval gives a 5 minute probe cadence:
    long enough to avoid probing persistent systemic failures every cycle, short
@@ -23,8 +23,7 @@ let should_warn_partial_suppression_streak ~streak =
 ;;
 
 let reset_for_test () =
-  escape_state.last_dominant_cohort <- "";
-  escape_state.consecutive_suppressions <- 0
+  Atomic.set escape_state { last_dominant_cohort = ""; consecutive_suppressions = 0 }
 ;;
 
 let group_by_failure_cohort to_restart =
@@ -48,13 +47,16 @@ let dominant_cohort cohorts =
 ;;
 
 let update_suppression_streak dominant_key =
-  if String.equal escape_state.last_dominant_cohort dominant_key
+  let current = Atomic.get escape_state in
+  if String.equal current.last_dominant_cohort dominant_key
   then
-    escape_state.consecutive_suppressions
-    <- escape_state.consecutive_suppressions + 1
-  else (
-    escape_state.last_dominant_cohort <- dominant_key;
-    escape_state.consecutive_suppressions <- 1)
+    Atomic.set escape_state
+      { current with
+        consecutive_suppressions = current.consecutive_suppressions + 1
+      }
+  else
+    Atomic.set escape_state
+      { last_dominant_cohort = dominant_key; consecutive_suppressions = 1 }
 ;;
 
 let publish_suppression
@@ -96,11 +98,11 @@ let log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count =
       n_total
       ratio
       dominant_key
-      escape_state.consecutive_suppressions
+      (Atomic.get escape_state).consecutive_suppressions
       probe_after_n_suppressions)
   else if
     should_warn_partial_suppression_streak
-      ~streak:escape_state.consecutive_suppressions
+      ~streak:(Atomic.get escape_state).consecutive_suppressions
   then
     Log.Keeper.warn
       "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s, \
@@ -109,7 +111,7 @@ let log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count =
       n_total
       ratio
       dominant_key
-      escape_state.consecutive_suppressions
+      (Atomic.get escape_state).consecutive_suppressions
   else
     Log.Keeper.debug
       "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s, \
@@ -118,7 +120,7 @@ let log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count =
       n_total
       ratio
       dominant_key
-      escape_state.consecutive_suppressions
+      (Atomic.get escape_state).consecutive_suppressions
 ;;
 
 module For_testing = struct
@@ -161,7 +163,7 @@ let apply ~keepers_dir ~publish_lifecycle ~total_keepers to_restart =
       else (
         update_suppression_streak dominant_key;
         let probe_due =
-          escape_state.consecutive_suppressions >= probe_after_n_suppressions
+          (Atomic.get escape_state).consecutive_suppressions >= probe_after_n_suppressions
         in
         let probe_entry =
           if probe_due
@@ -186,10 +188,11 @@ let apply ~keepers_dir ~publish_lifecycle ~total_keepers to_restart =
              "self-preservation probe: allowing %s through after %d consecutive \
               same-cohort suppressions (ratio=%.2f, cohort=%s)"
              probe_name
-             escape_state.consecutive_suppressions
+             (Atomic.get escape_state).consecutive_suppressions
              ratio
              dominant_key;
-           escape_state.consecutive_suppressions <- 0
+           Atomic.set escape_state
+             { (Atomic.get escape_state) with consecutive_suppressions = 0 }
          | None -> log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count);
         publish_suppression
           ~publish_lifecycle

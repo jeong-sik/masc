@@ -39,6 +39,8 @@
 @import "./v2-shell.css";
 @import "./app-shell-v2.css";
 @import "./v2-theme.css";
+@import "./v2-skin-tokens.css";
+@import "./v2-keeper-chat.css";
 @import "./keeper-turn-inspector.css";
 @import "./v2-logs.css";
 @import "./v2-overview.css";

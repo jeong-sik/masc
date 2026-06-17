@@ -60,6 +60,14 @@ import {
   useCopilotDock,
   useCopilotDockShortcuts,
 } from './components/copilot-dock'
+import {
+  TweaksPanel,
+  TweaksPanelToggle,
+  tweaksDensity,
+  tweaksFontScale,
+  tweaksMotion,
+  tweaksBubble,
+} from './components/tweaks-panel'
 
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
@@ -258,10 +266,15 @@ export function App() {
 
   return html`
     <div
-      class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
+      class="v2-app flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
       data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
       data-focus-mode=${focusMode ? 'true' : 'false'}
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
+      data-density=${tweaksDensity.value}
+      data-motion=${tweaksMotion.value}
+      data-bubble=${tweaksBubble.value}
+      data-font-scale=${tweaksFontScale.value}
+      style=${{ '--twk-font-scale': String(tweaksFontScale.value) }}
     >
       <${SkipLink} />
       <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5">
@@ -312,6 +325,7 @@ export function App() {
             <${ErrorCounterBadge} />
             <div class="max-[768px]:hidden"><${TransportBeacon} /></div>
             <div class="max-[768px]:hidden"><${ThemeSwitch} /></div>
+            <div class="max-[768px]:hidden"><${TweaksPanelToggle} /></div>
             <div class="max-[768px]:hidden"><${BuildIdentityBadge} /></div>
           </div>
         </div>
@@ -376,6 +390,7 @@ export function App() {
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
       <${BundleStalenessBanner} />
+      <${TweaksPanel} />
       <${Suspense} fallback=${null}>
         <${LazyCommandPalette} />
       <//>

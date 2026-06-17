@@ -1,0 +1,334 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Dashboard — Craft v2 layer
+   Ported from keeper-v2/styles/craft.css.
+
+   Loaded after component styles. A polish pass driven by attributes on
+   the app root:
+     data-density = compact | regular | spacious
+     data-motion  = off | subtle | lively
+     data-bubble  = flat | card
+     data-font-scale = 80 .. 125
+
+   Purely additive — refines spacing, motion and message finish on top
+   of the existing token system.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Motion tokens ────────────────────────────────────────────── */
+.v2-app {
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.32, 0.5, 1);
+  --dur-fast: 110ms;
+  --dur: 170ms;
+  --dur-slow: 260ms;
+  --lift: -2px;
+  --press: 1px;
+}
+
+/* ── Font scale ───────────────────────────────────────────────── */
+.v2-app[data-font-scale] {
+  font-size: calc(var(--twk-font-scale, 100) * 1%);
+}
+
+/* ── Density ──────────────────────────────────────────────────── */
+.v2-app[data-density="spacious"] {
+  --twk-pad-surface: 32px 42px 60px;
+  --twk-pad-card: 16px 18px;
+  --twk-gap-card: 18px;
+  --twk-gap-row: 11px;
+}
+
+.v2-app[data-density="regular"] {
+  --twk-pad-surface: 22px 26px 40px;
+  --twk-pad-card: 12px 14px;
+  --twk-gap-card: 14px;
+  --twk-gap-row: 8px;
+}
+
+.v2-app[data-density="compact"] {
+  --twk-pad-surface: 15px 18px 30px;
+  --twk-pad-card: 9px 11px;
+  --twk-gap-card: 10px;
+  --twk-gap-row: 6px;
+}
+
+/* Apply density breathing rhythm to the main scroll surface and cards. */
+.v2-app[data-density] .dashboard-main-scroll {
+  padding: var(--twk-pad-surface);
+}
+
+.v2-app[data-density] .card,
+.v2-app[data-density] [class*="-card"]:not(.twk-panel):not(.twk-panel *) {
+  padding: var(--twk-pad-card);
+}
+
+.v2-app[data-density] .dashboard-main-scroll > * + * {
+  margin-top: var(--twk-gap-card);
+}
+
+/* ── Motion ───────────────────────────────────────────────────── */
+.v2-app[data-motion]:not([data-motion="off"]) button,
+.v2-app[data-motion]:not([data-motion="off"]) [role="button"],
+.v2-app[data-motion]:not([data-motion="off"]) a,
+.v2-app[data-motion]:not([data-motion="off"]) input,
+.v2-app[data-motion]:not([data-motion="off"]) select,
+.v2-app[data-motion]:not([data-motion="off"]) textarea {
+  transition: background var(--dur) var(--ease-out),
+              border-color var(--dur) var(--ease-out),
+              color var(--dur) var(--ease-out),
+              box-shadow var(--dur) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+
+/* Press sink on active controls. */
+.v2-app[data-motion]:not([data-motion="off"]) button:active,
+.v2-app[data-motion]:not([data-motion="off"]) [role="button"]:active {
+  transform: translateY(var(--press));
+}
+
+/* Lively tier. */
+.v2-app[data-motion="lively"] {
+  --lift: -3px;
+}
+
+.v2-app[data-motion="lively"] .card:hover,
+.v2-app[data-motion="lively"] [class*="-card"]:not(.twk-panel):not(.twk-panel *):hover {
+  transition-timing-function: var(--ease-spring);
+}
+
+/* Off tier — kill motion (also reduced-motion is respected via base). */
+.v2-app[data-motion="off"] *,
+.v2-app[data-motion="off"] *::before,
+.v2-app[data-motion="off"] *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Keyboard focus ring consistency. */
+.v2-app a:focus-visible,
+.v2-app button:focus-visible,
+.v2-app [role="button"]:focus-visible,
+.v2-app [tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-page), 0 0 0 4px var(--color-accent-fg-dim, var(--accent-15));
+}
+
+/* ── Bubble style ─────────────────────────────────────────────── */
+.v2-app[data-bubble="flat"] .bubble {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  padding: 2px 0 0;
+}
+
+.v2-app[data-bubble="flat"] .bubble.user {
+  background: transparent;
+  border: 0;
+  border-left: 2px solid var(--color-accent-fg-dim, var(--accent-15));
+  border-radius: 0;
+  padding: 2px 0 2px 16px;
+}
+
+/* ── Scrollbar treatment ──────────────────────────────────────── */
+.v2-app .dashboard-main-scroll::-webkit-scrollbar,
+.v2-app .v2-shell-rail::-webkit-scrollbar {
+  width: 10px;
+}
+
+.v2-app .dashboard-main-scroll::-webkit-scrollbar-thumb,
+.v2-app .v2-shell-rail::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: var(--r-2, 6px);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.v2-app * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-default) transparent;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Tweaks panel chrome — self-contained, does not depend on the
+   attribute-driven craft rules above.
+   ═══════════════════════════════════════════════════════════════ */
+.twk-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483646;
+  width: 280px;
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklab, var(--color-bg-surface) 92%, transparent);
+  color: var(--color-fg-primary);
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid var(--color-border-default);
+  border-radius: 14px;
+  box-shadow: var(--shadow-panel, 0 12px 40px rgba(0, 0, 0, 0.18));
+  font-family: var(--font-ui), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow: hidden;
+}
+
+.twk-panel-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 8px 10px 14px;
+  cursor: move;
+  user-select: none;
+  border-bottom: 1px solid var(--color-border-divider, var(--color-border-default));
+}
+
+.twk-panel-hd b {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.twk-panel-close {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--color-fg-muted);
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+
+.twk-panel-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-primary);
+}
+
+.twk-panel-body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.twk-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.twk-row-l {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.twk-row-label {
+  font-weight: 500;
+  color: var(--color-fg-secondary);
+}
+
+.twk-row-hint {
+  font-size: 10.5px;
+  color: var(--color-fg-muted);
+}
+
+.twk-row-c {
+  display: flex;
+  align-items: center;
+}
+
+/* Segmented control */
+.twk-seg {
+  position: relative;
+  display: flex;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  user-select: none;
+  width: 100%;
+}
+
+.twk-seg-b {
+  appearance: none;
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--color-fg-muted);
+  font: inherit;
+  font-weight: 500;
+  min-height: 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 4px 6px;
+  line-height: 1.2;
+  transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.twk-seg-b:hover {
+  color: var(--color-fg-secondary);
+}
+
+.twk-seg-b.on {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* Slider */
+.twk-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.twk-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1;
+  height: 4px;
+  margin: 6px 0;
+  border-radius: 999px;
+  background: var(--color-border-strong, var(--color-border-default));
+  outline: none;
+}
+
+.twk-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-fg-primary);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.twk-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-fg-primary);
+  border: 1px solid var(--color-border-strong);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+}
+
+.twk-slider-val {
+  color: var(--color-fg-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 3ch;
+  text-align: right;
+}

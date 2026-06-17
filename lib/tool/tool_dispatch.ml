@@ -138,12 +138,23 @@ type trace_id = string
 
 type span_wrapper =
   ?force_new_trace_id:bool
+  -> ?surface:string
   -> tool_name:string
   -> ((unit -> (trace_id * trace_id) option) -> Tool_result.result option * string)
   -> Tool_result.result option * string
 
 let identity_span_wrapper : span_wrapper =
-  fun ?force_new_trace_id:_ ~tool_name:_ body -> body (fun () -> None)
+  fun ?force_new_trace_id:_ ?surface:_ ~tool_name:_ body -> body (fun () -> None)
+;;
+
+let surface_of_tool_name name =
+  let name = String.lowercase_ascii (String.trim name) in
+  if String.starts_with ~prefix:"masc_" name
+     || String.starts_with ~prefix:"mcp__masc__" name
+  then "mcp"
+  else if String.starts_with ~prefix:"keeper_" name
+  then "keeper"
+  else "internal"
 ;;
 
 let span_wrapper_ref : span_wrapper ref = ref identity_span_wrapper
@@ -206,7 +217,10 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
     (* Injected telemetry span wrapper (default identity). The composition
        root registers [Tool_telemetry.with_span] so this lib stays free of
        the Otel/Otel_metric_store stack. *)
-    !span_wrapper_ref ~tool_name:token.name (fun _trace_id_thunk ->
+    !span_wrapper_ref
+      ~tool_name:token.name
+      ~surface:(surface_of_tool_name token.name)
+      (fun _trace_id_thunk ->
       let name = token.name in
       let r =
         match run_pre_hooks ~name ~args with

@@ -1100,3 +1100,135 @@ describe('filterKeeperGroups', () => {
     expect(rows).toHaveLength(3)
   })
 })
+
+describe('ConnectorStatusPanel v2 surface layout', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(async () => {
+    const { resetConnectorStatusState } = await import('./connector-status')
+    resetConnectorStatusState()
+    render(null, container)
+    container.remove()
+    vi.resetModules()
+    vi.clearAllMocks()
+    vi.doUnmock('../api/core')
+    vi.doUnmock('../api/gate')
+    vi.doUnmock('../sse')
+    vi.doUnmock('./common/toast')
+  })
+
+  it('renders the keeper-v2 surface header, toolbar, and gate strip', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    expect(container.querySelector('.cn-surf-head')).not.toBeNull()
+    expect(container.querySelector('.cn-toolbar')).not.toBeNull()
+    expect(container.querySelector('[data-testid="connector-search-input"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="connector-add-button"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="connector-gate-strip"]')).not.toBeNull()
+    expect(container.textContent).toContain('Gate')
+    expect(container.textContent).toContain('Add connector')
+  })
+
+  it('filters connector tiles from the toolbar search input', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const discord = sampleConnectorsResponse().connectors[0]
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [
+        discord,
+        {
+          ...discord,
+          connector_id: 'imessage',
+          display_name: 'iMessage',
+          channel: 'imessage',
+          status_path: '/tmp/imessage_status.json',
+          binding_store_path: '/tmp/imessage_bindings.json',
+          audit_path: '/tmp/imessage_binding_audit.jsonl',
+          names_path: '/tmp/imessage_names.json',
+          configured_bindings: [{ channel_id: 'imsg-workspace', keeper_name: 'nova' }],
+          recent_audit: [],
+        },
+      ],
+      total: 2,
+      active_count: 2,
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    expect(container.querySelectorAll('[data-overview-tile]').length).toBe(4)
+
+    const searchInput = container.querySelector('[data-testid="connector-search-input"]') as HTMLInputElement
+    searchInput.value = 'imessage'
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+
+    expect(container.querySelector('[data-overview-tile="imessage"]')).not.toBeNull()
+    expect(container.querySelector('[data-overview-tile="discord"]')).toBeNull()
+
+    searchInput.value = ''
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+
+    expect(container.querySelectorAll('[data-overview-tile]').length).toBe(4)
+  })
+
+  it('opens the detail config drawer from a tile config button', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const configButton = container.querySelector<HTMLButtonElement>('button[aria-label="Discord 설정 열기"]')
+    expect(configButton).not.toBeNull()
+    configButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    const drawer = container.querySelector('[data-testid="connector-detail-drawer"]')
+    expect(drawer).not.toBeNull()
+    expect(drawer!.textContent).toContain('Discord 설정')
+    expect(drawer!.textContent).toContain('connection')
+    expect(drawer!.textContent).toContain('config')
+    expect(drawer!.textContent).toContain('events')
+
+    const configTab = Array.from(drawer!.querySelectorAll('button')).find(b => b.textContent === 'config')
+    expect(configTab).not.toBeUndefined()
+    configTab!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    expect(drawer!.textContent).toContain('server in-process')
+  })
+})

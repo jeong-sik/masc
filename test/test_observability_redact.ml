@@ -29,7 +29,12 @@ let test_short_input_unchanged () =
 
 let test_redact_text_does_not_truncate () =
   let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz" in
-  let input = String.make 300 'x' ^ secret in
+  (* A separator before the sk- prefix is what lets the bow-anchored pattern
+     match in real payloads (secrets sit after =, space, quote). The alphabetic
+     run here is low-entropy, so without the separator the entropy gate would
+     (correctly) preserve it — the point of this test is no-truncation, so we
+     put a space before the secret. *)
+  let input = String.make 300 'x' ^ " " ^ secret in
   let redacted = Observability_redact.redact_text input in
   Alcotest.(check bool) "not preview-truncated" false
     (String_util.contains_substring redacted "...(truncated)");
@@ -188,6 +193,46 @@ let test_sk_modern_key_fully_redacted () =
   Alcotest.(check bool) "no partial sk- tail leak" true
     (not (String_util.contains_substring r "0123456789abcdef"))
 
+(* Regression: the generic high-entropy matcher used to redact any 20+ char
+   run, so keeper identities that exceed 20 chars (e.g. keeper-issue_king-agent)
+   were redacted to [REDACTED], destroying the assignee in error diagnostics.
+   The matcher now also requires Shannon entropy >= 4.0; keeper names are
+   English-word combinations (entropy < 4.0) and pass through. *)
+let test_generic_keeper_identity_preserved () =
+  let inputs =
+    [ "keeper-issue_king-agent"; "keeper-ramarama-agent"
+    ; "task-claim-bot-9a8b7c6d"; "heartbeat-keeper-2f4a" ]
+  in
+  List.iter
+    (fun input ->
+      let r = Observability_redact.redact_text input in
+      Alcotest.(check string)
+        (input ^ " preserved by entropy gating") input r)
+    inputs
+
+(* Low-entropy long identifiers (commit-hash runs, UUIDs) are diagnostic, not
+   secrets — they must survive the generic matcher. *)
+let test_low_entropy_long_identifier_preserved () =
+  let inputs =
+    [ "0123456789abcdef0123456789abcdef01234567"
+    ; "550e8400-e29b-41d4-a716-446655440000-extra" ]
+  in
+  List.iter
+    (fun input ->
+      let r = Observability_redact.redact_text input in
+      Alcotest.(check string)
+        (input ^ " low-entropy identifier preserved") input r)
+    inputs
+
+(* Positive: a genuinely high-entropy run (>= 4.0 bits/char) is still
+   redacted. Token split so it is not mistaken for a live credential by
+   tooling; it is a synthetic test value. *)
+let test_high_entropy_run_redacted () =
+  let input = "7K3mP9x" ^ "Q2vN8bL4w" ^ "R6tY1cJ5hD0z" in
+  let r = Observability_redact.redact_text input in
+  Alcotest.(check bool) "high-entropy run redacted" true
+    (not (String_util.contains_substring r "7K3mP9x"))
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -215,6 +260,12 @@ let () =
             test_no_false_positive_on_keeper_identities;
           Alcotest.test_case "modern sk- key fully redacted" `Quick
             test_sk_modern_key_fully_redacted;
+          Alcotest.test_case "generic keeper identity preserved (entropy)" `Quick
+            test_generic_keeper_identity_preserved;
+          Alcotest.test_case "low-entropy long identifier preserved" `Quick
+            test_low_entropy_long_identifier_preserved;
+          Alcotest.test_case "high-entropy run redacted" `Quick
+            test_high_entropy_run_redacted;
         ] );
       ( "deny_list",
         [

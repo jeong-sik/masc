@@ -29,30 +29,63 @@ let is_denied_tool ~tool_name =
 (** Minimum length for the generic high-entropy token pattern. *)
 let default_min_secret_len = 20
 
-(** Generic high-entropy token pattern — alphanumeric/base64 characters. *)
+(** Generic high-entropy token pattern — alphanumeric/base64 characters.
+
+    A length gate alone (the previous form) redacts any 20+ char run, including
+    ordinary identifiers (keeper names like [keeper-issue_king-agent], task ids,
+    commit hashes). The match is therefore re-verified by Shannon entropy in
+    {!redact_patterns}: real secrets (API keys, base64 tokens) score
+    [>= generic_entropy_threshold]; English-word identifiers score lower and are
+    preserved. This is the gitleaks-standard "regex candidate, then entropy
+    verification" approach. *)
 let generic_secret_re min_len =
   Re.compile (Re.repn (Re.alt [Re.alnum; Re.set "_/+=-"]) min_len None)
+
+(** Shannon entropy in bits/char over a substring. *)
+let shannon_entropy (s : string) : float =
+  let len = String.length s in
+  if len = 0 then 0.0
+  else
+    let counts = Array.make 256 0 in
+    for i = 0 to len - 1 do
+      let c = Char.code s.[i] in
+      counts.(c) <- counts.(c) + 1
+    done;
+    let log2 = Stdlib.log 2.0 in
+    let flen = float_of_int len in
+    Array.fold_left
+      (fun acc n ->
+        if n = 0 then acc
+        else
+          let p = float_of_int n /. flen in
+          acc -. p *. (Stdlib.log p /. log2))
+      0.0 counts
+
+(** Entropy threshold separating real secrets from ordinary identifiers.
+
+    Measured (bits/char): keeper identities score [<= 3.85]
+    (e.g. [keeper-issue_king-agent]=3.50, [task-claim-bot-9a8b7c6d]=3.85),
+    real secret forms score [>= 4.08] (AWS key=4.08, sk-proj token=4.83,
+    github PAT=5.32). [4.0] sits in the clean separation gap. *)
+let generic_entropy_threshold = 4.0
 
 (** URL credential pattern — ://user:pass@ *)
 let url_credential_re =
   Re.compile (Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@'])
 
-(** Common secret-bearing value patterns. Specific prefixes are listed before
-    the generic high-entropy matcher so short, well-known tokens are not missed
-    when they are embedded inside larger strings.
-
-    Each prefix literal is anchored at a word boundary ([Re.bow]) so a
-    word-internal substring is not mistaken for a key. Without the anchor, the
-    [sk-] pattern matched the substring [sk-1234] inside the task id
-    [task-1234] and redacted it to [ta\[REDACTED\]], destroying diagnostic
-    identifiers in error previews (and any other observability field carrying a
-    [task-XXXX] reference). [bow] rejects that match because [sk-] is preceded
-    by the identifier char 'a'. [Re.bow]/[eow] are zero-width assertions, so
-    [Re.replace_string] preserves the boundary character (=, space, quote)
-    automatically. The [sk-] body allows [-] so modern [sk-proj-...] keys are
-    matched in one shot instead of leaving a [-abc...] tail. [AKIA] is anchored
-    at both ends so a 17-char run is not truncated to its first 16 chars. *)
-let secret_res ?(min_len = default_min_secret_len) () =
+(** Prefix-anchored secret patterns. Entropy is irrelevant here — the prefix
+    itself identifies the secret family — so these are applied with plain
+    [Re.replace_string]. Each prefix literal is anchored at a word boundary
+    ([Re.bow]) so a word-internal substring is not mistaken for a key: without
+    the anchor, [sk-] matched the substring [sk-1234] inside the task id
+    [task-1234] and redacted it to [ta\[REDACTED\]]. [Re.bow]/[eow] are
+    zero-width, so [Re.replace_string] preserves the boundary character
+    (=, space, quote) automatically. The [sk-] body allows [-] so modern
+    [sk-proj-...] keys match in one shot. [AKIA] is anchored at both ends so a
+    17-char run is not truncated to its first 16 chars. The generic
+    high-entropy matcher is applied separately with entropy gating in
+    {!redact_patterns}. *)
+let prefix_secret_res () =
   let open Re in
   [ url_credential_re
   ; compile (seq [str "Bearer "; rep1 (compl [set " \t\r\n"])])
@@ -60,14 +93,24 @@ let secret_res ?(min_len = default_min_secret_len) () =
   ; compile (seq [bow; str "github_pat_"; rep1 (alt [alnum; char '_'])])
   ; compile (seq [bow; str "sk-"; rep1 (alt [alnum; char '-'])])
   ; compile (seq [bow; str "AKIA"; repn alnum 16 (Some 16); eow])
-  ; generic_secret_re min_len
   ]
 
 let redact_patterns ?min_len (s : string) : string =
-  List.fold_left
-    (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc)
-    s
-    (secret_res ?min_len ())
+  let min_len = Option.value min_len ~default:default_min_secret_len in
+  let s =
+    List.fold_left
+      (fun acc re -> Re.replace_string re ~by:"[REDACTED]" acc)
+      s (prefix_secret_res ())
+  in
+  (* Generic high-entropy matcher: redact the run only if it also clears the
+     entropy threshold, so ordinary identifiers (keeper names, task ids, commit
+     hashes) pass through while real secrets (API keys, base64 tokens) are
+     still redacted. *)
+  Re.replace (generic_secret_re min_len) s
+    ~f:(fun group ->
+      let token = Re.Group.get group 0 in
+      if shannon_entropy token >= generic_entropy_threshold then "[REDACTED]"
+      else token)
 
 let redact_text (s : string) : string =
   redact_patterns s

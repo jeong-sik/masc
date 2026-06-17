@@ -42,6 +42,28 @@ let url_credential_re =
     redacted exactly by {!Keeper_secret_redaction}, which does not rely on this
     heuristic.
 
+    Specific prefix regexes are hoisted to module level so they are compiled
+    once at init, not rebuilt on every [redact_text] call. [Re] is thread-safe
+    (see file header), so sharing compiled regexes across fibers/domains is
+    safe — [url_credential_re] already does this. *)
+let bearer_re =
+  Re.compile (Re.seq [Re.str "Bearer "; Re.rep1 (Re.compl [Re.set " \t\r\n"])])
+
+let ghp_re = Re.compile (Re.seq [Re.bow; Re.str "ghp_"; Re.rep1 Re.alnum])
+
+let github_pat_re =
+  Re.compile (Re.seq [Re.bow; Re.str "github_pat_"; Re.rep1 (Re.alt [Re.alnum; Re.char '_'])])
+
+let sk_re =
+  Re.compile (Re.seq [Re.bow; Re.str "sk-"; Re.rep1 (Re.alt [Re.alnum; Re.char '-'])])
+
+let awsakia_re =
+  Re.compile (Re.seq [Re.bow; Re.str "AKIA"; Re.repn Re.alnum 16 (Some 16); Re.eow])
+
+(** Common secret-bearing value patterns. Specific prefixes are listed before
+    any generic matcher so short, well-known tokens are not missed when they
+    are embedded inside larger strings.
+
     Each prefix literal is anchored at a word boundary ([Re.bow]) so a
     word-internal substring is not mistaken for a key. Without the anchor, the
     [sk-] pattern matched the substring [sk-1234] inside the task id
@@ -54,13 +76,12 @@ let url_credential_re =
     matched in one shot instead of leaving a [-abc...] tail. [AKIA] is anchored
     at both ends so a 17-char run is not truncated to its first 16 chars. *)
 let secret_res () =
-  let open Re in
   [ url_credential_re
-  ; compile (seq [str "Bearer "; rep1 (compl [set " \t\r\n"])])
-  ; compile (seq [bow; str "ghp_"; rep1 alnum])
-  ; compile (seq [bow; str "github_pat_"; rep1 (alt [alnum; char '_'])])
-  ; compile (seq [bow; str "sk-"; rep1 (alt [alnum; char '-'])])
-  ; compile (seq [bow; str "AKIA"; repn alnum 16 (Some 16); eow])
+  ; bearer_re
+  ; ghp_re
+  ; github_pat_re
+  ; sk_re
+  ; awsakia_re
   ]
 
 let redact_patterns (s : string) : string =

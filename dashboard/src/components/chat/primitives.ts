@@ -280,10 +280,34 @@ function dataUriToText(data: string): string | null {
   }
 }
 
+function dataUriToBlob(data: string): Blob | null {
+  const comma = data.indexOf(',')
+  if (comma === -1 || !data.startsWith('data:')) return null
+  const header = data.slice(0, comma)
+  const body = data.slice(comma + 1)
+  const mime = header.replace(/^data:/, '').replace(/;base64$/, '') || 'application/octet-stream'
+  const isBase64 = header.includes(';base64')
+  try {
+    if (isBase64) {
+      const byteString = atob(body)
+      const bytes = new Uint8Array(byteString.length)
+      for (let i = 0; i < byteString.length; i += 1) {
+        bytes[i] = byteString.charCodeAt(i)
+      }
+      return new Blob([bytes], { type: mime })
+    }
+    return new Blob([decodeURIComponent(body)], { type: mime })
+  } catch {
+    return null
+  }
+}
+
 function downloadArtifact(data: string, filename: string, mimeType?: string): void {
-  const href = data.startsWith('data:')
-    ? data
-    : URL.createObjectURL(new Blob([data], { type: mimeType ?? 'application/octet-stream' }))
+  const blob = data.startsWith('data:')
+    ? dataUriToBlob(data)
+    : new Blob([data], { type: mimeType ?? 'application/octet-stream' })
+  if (!blob) return
+  const href = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = href
   a.download = filename
@@ -291,9 +315,7 @@ function downloadArtifact(data: string, filename: string, mimeType?: string): vo
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  if (!data.startsWith('data:')) {
-    setTimeout(() => URL.revokeObjectURL(href), 1000)
-  }
+  setTimeout(() => URL.revokeObjectURL(href), 1000)
 }
 
 function artifactPreviewType(kind?: string, data?: string, mimeType?: string): 'image' | 'svg' | 'md' | 'code' | 'unknown' {
@@ -670,6 +692,7 @@ function ChatArtifactBlock({
 }
 
 function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string; dims?: string; src?: string; svg?: string; ph?: string; via?: string; size?: string }) {
+  const safeSrc = src && isSafeUrl(src) ? src : null
   return html`
     <figure class="chat-block-attach" data-chat-block="attach">
       <div class="chat-block-attach-hd">
@@ -678,11 +701,11 @@ function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string
         ${dims ? html`<span class="chat-block-attach-dims">${dims}</span>` : null}
       </div>
       <div class="chat-block-attach-frame">
-        ${src
-          ? html`<img src=${src} alt=${name} class="chat-block-attach-img" />`
+        ${safeSrc
+          ? html`<img src=${safeSrc} alt=${name} class="chat-block-attach-img" />`
           : svg
             ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
-            : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}</div>`}
+            : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}${src ? ' (unsafe URL)' : ''}</div>`}
       </div>
       <figcaption class="chat-block-attach-cap">
         <span>이미지 첨부</span>${via ? ` · ${via}` : ''}${size ? ` · ${size}` : ''}
@@ -694,7 +717,7 @@ function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string
 function isSafeUrl(url: string): boolean {
   try {
     const u = new URL(url, typeof window !== 'undefined' ? window.location.href : 'http://localhost')
-    return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'data:'
+    return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'blob:'
   } catch {
     return false
   }

@@ -117,6 +117,38 @@ let test_blocks_of_yojson_roundtrip () =
       (blocks_to_json_list parsed)
   | None -> Alcotest.fail "blocks_of_yojson rejected valid blocks"
 
+let test_non_http_markdown_image_becomes_text () =
+  let blocks = B.parse_text_to_blocks "before ![alt](ftp://example.com/a.png) after" in
+  Alcotest.(check (list yojson_testable))
+    "non-http markdown image falls back to escaped text fragments"
+    [
+      `Assoc [ ("t", `String "p"); ("html", `String "before ") ];
+      `Assoc [ ("t", `String "p"); ("html", `String "![alt](ftp://example.com/a.png)") ];
+      `Assoc [ ("t", `String "p"); ("html", `String " after") ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_non_http_bare_url_becomes_text () =
+  let blocks = B.parse_text_to_blocks "ftp://example.com/a.png" in
+  Alcotest.(check (list yojson_testable))
+    "non-http bare url falls back to escaped text"
+    [ `Assoc [ ("t", `String "p"); ("html", `String "ftp://example.com/a.png") ] ]
+    (blocks_to_json_list blocks)
+
+let test_case_insensitive_standalone_url () =
+  let blocks = B.parse_text_to_blocks "HTTPS://EXAMPLE.COM/IMG.PNG" in
+  Alcotest.(check (list yojson_testable))
+    "uppercase scheme and extension are accepted"
+    [ `Assoc [ ("t", `String "image"); ("src", `String "HTTPS://EXAMPLE.COM/IMG.PNG") ] ]
+    (blocks_to_json_list blocks)
+
+let test_query_string_stripped_for_extension_check () =
+  let blocks = B.parse_text_to_blocks "https://example.com/a.png?w=100" in
+  Alcotest.(check (list yojson_testable))
+    "query string does not prevent image detection"
+    [ `Assoc [ ("t", `String "image"); ("src", `String "https://example.com/a.png?w=100") ] ]
+    (blocks_to_json_list blocks)
+
 let test_blocks_of_yojson_rejects_malformed () =
   Alcotest.(check bool) "not a list" true (B.blocks_of_yojson (`String "x") = None);
   Alcotest.(check bool) "empty list" true (B.blocks_of_yojson (`List []) = None);
@@ -145,6 +177,14 @@ let () =
             test_empty_lines_ignored;
           Alcotest.test_case "www stripped from hostname" `Quick
             test_link_without_www;
+          Alcotest.test_case "non-http markdown image becomes text" `Quick
+            test_non_http_markdown_image_becomes_text;
+          Alcotest.test_case "non-http bare url becomes text" `Quick
+            test_non_http_bare_url_becomes_text;
+          Alcotest.test_case "case-insensitive standalone url" `Quick
+            test_case_insensitive_standalone_url;
+          Alcotest.test_case "query string stripped for extension check" `Quick
+            test_query_string_stripped_for_extension_check;
         ] );
       ( "serialization",
         [

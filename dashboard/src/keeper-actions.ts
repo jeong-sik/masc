@@ -327,6 +327,8 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
   return assistantId
 }
 
+let localIdCounter = 0
+
 const resumingKeeperChatRequests = new Set<string>()
 
 async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
@@ -431,8 +433,13 @@ export function noteKeeperChatAppended(name: string, audio?: unknown, _blocks?: 
   const keeperName = name.trim()
   if (!keeperName) return
   if (!hydratedChatKeepers.has(keeperName)) return
-  const attached = audio != null && attachKeeperAudioClip(keeperName, audio)
-  if (attached) return
+  // Try to attach an RFC-0235 audio clip to the streaming assistant bubble,
+  // but always fall through to the history re-merge so the transcript stays
+  // current even if the clip had no matching text or no content text was
+  // generated.
+  if (audio != null) {
+    attachKeeperAudioClip(keeperName, audio)
+  }
   const pending = chatRefreshTimers.get(keeperName)
   if (pending) clearTimeout(pending)
   chatRefreshTimers.set(keeperName, setTimeout(() => {
@@ -492,8 +499,8 @@ export async function sendKeeperThreadMessage(
   const attachments =
     options.attachments && options.attachments.length > 0 ? options.attachments : undefined
   abortKeeperThreadMessage(keeperName)
-  const localId = `local-${Date.now()}`
-  const assistantId = `reply-${Date.now()}`
+  const localId = `local-${++localIdCounter}-${Date.now()}`
+  const assistantId = `reply-${++localIdCounter}-${Date.now()}`
   appendThreadEntry(keeperName, {
     id: localId,
     role: 'user',

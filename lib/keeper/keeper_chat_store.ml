@@ -232,12 +232,22 @@ let audio_to_json a =
     ; ("message_text", `String a.message_text)
     ]
   in
-  let with_duration =
-    match a.duration_sec with
-    | None -> base
-    | Some d -> base @ [ ("duration_sec", `Float d) ]
+  let with_optional =
+    base
+    |> fun fs ->
+    (match a.audio_url with
+     | None -> fs
+     | Some url -> fs @ [ ("audio_url", `String url) ])
+    |> fun fs ->
+    (match a.duration_sec with
+     | None -> fs
+     | Some d -> fs @ [ ("duration_sec", `Float d) ])
+    |> fun fs ->
+    (match a.device_id with
+     | None -> fs
+     | Some id -> fs @ [ ("device_id", `String id) ])
   in
-  if a.expired then with_duration @ [ ("expired", `Bool true) ] else with_duration
+  if a.expired then with_optional @ [ ("expired", `Bool true) ] else with_optional
 
 let audio_fields = function
   | None -> []
@@ -880,15 +890,25 @@ let audio_clip_file_path ~base_dir token =
     (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "audio")
     (token ^ ".mp3")
 
+let valid_audio_token token =
+  Re.execp (Re.compile (Re.Pcre.re "^[A-Za-z0-9_-]+$")) token
+
+let file_exists_safe path =
+  try Sys.file_exists path with
+  | Sys_error _ | Unix.Unix_error _ -> false
+
 let audio_fields_with_expired ~base_dir audio =
   match audio with
   | None -> []
   | Some a ->
       let expired =
-        match base_dir with
-        | None -> a.expired
-        | Some base_dir ->
-            a.expired || not (Sys.file_exists (audio_clip_file_path ~base_dir a.token))
+        if not (valid_audio_token a.token) then true
+        else
+          match base_dir with
+          | None -> a.expired
+          | Some base_dir ->
+              a.expired
+              || not (file_exists_safe (audio_clip_file_path ~base_dir a.token))
       in
       [ ("audio", `Assoc (audio_to_json { a with expired })) ]
 

@@ -110,12 +110,13 @@ let hostname_of_url url =
         else host
   with _ -> url
 
-let standalone_url_re = Str.regexp "^https?://[^ \t\r\n]+$"
-let markdown_image_re = Str.regexp "!\\[\\([^]]*\\)\\](\\([^)]+\\))"
+let standalone_url_re =
+  Re.Pcre.re ~flags:[ `CASELESS ] "^https?://\\S+$" |> Re.compile
 
-let is_standalone_url line =
-  try Str.string_match standalone_url_re (String.trim line) 0
-  with _ -> false
+let markdown_image_re =
+  Re.Pcre.re "!\\[([^\\]]*)\\]\\(([^)]+)\\)" |> Re.compile
+
+let is_standalone_url line = Re.execp standalone_url_re (String.trim line)
 
 let line_to_block line =
   let trimmed = String.trim line in
@@ -132,14 +133,15 @@ let content_blocks_of_text text =
   let rec scan_images acc pos =
     if pos >= String.length text then List.rev acc
     else
-      try
-        let _ = Str.search_forward markdown_image_re text pos in
-        let before = String.sub text pos (Str.match_beginning () - pos) in
-        let alt = Str.matched_group 1 text in
-        let url = Str.matched_group 2 text in
-        let next = Str.match_end () in
+      match Re.exec_opt ~pos markdown_image_re text with
+      | Some group ->
+        let start = Re.Group.start group 0 in
+        let before = String.sub text pos (start - pos) in
+        let alt = Re.Group.get group 1 in
+        let url = Re.Group.get group 2 in
+        let next = Re.Group.stop group 0 in
         scan_images ((before, Some url, Some alt) :: acc) next
-      with Not_found ->
+      | None ->
         let rest = String.sub text pos (String.length text - pos) in
         List.rev ((rest, None, None) :: acc)
   in
@@ -190,26 +192,33 @@ let send_message_with_blocks ~token ~channel ~content ~blocks =
         ]
       ~body:body_json ()
   with
-  | Error err -> Log.Keeper.warn "keeper_chat_slack: post failed: %s" err
-  | Ok (code, response_body) -> (
-      if code < 200 || code >= 300 then
-        Log.Keeper.warn "keeper_chat_slack: HTTP %d: %s" code response_body
+  | Error err ->
+      Log.Keeper.warn "keeper_chat_slack: post failed: %s" err;
+      Error (Network err)
+  | Ok (code, response_body) ->
+      if code < 200 || code >= 300 then (
+        Log.Keeper.warn "keeper_chat_slack: HTTP %d: %s" code response_body;
+        Error (Http_status { code; body = response_body }))
       else
         try
           let json = Yojson.Safe.from_string response_body in
           match Json_util.get_bool json "ok" with
-          | Some true -> ()
+          | Some true -> Ok ()
           | Some false -> (
               match Json_util.get_string json "error" with
               | Some err ->
-                  Log.Keeper.warn "keeper_chat_slack: Slack API error: %s" err
+                  Log.Keeper.warn "keeper_chat_slack: Slack API error: %s" err;
+                  Error (Slack_api { error = err })
               | None ->
-                  Log.Keeper.warn "keeper_chat_slack: Slack ok=false")
+                  Log.Keeper.warn "keeper_chat_slack: Slack ok=false";
+                  Error (Other "Slack ok=false"))
           | None ->
-              Log.Keeper.warn "keeper_chat_slack: missing ok in response"
+              Log.Keeper.warn "keeper_chat_slack: missing ok in response";
+              Error (Other "missing ok in response")
         with
         | Yojson.Json_error msg ->
-            Log.Keeper.warn "keeper_chat_slack: JSON parse error: %s" msg)
+            Log.Keeper.warn "keeper_chat_slack: JSON parse error: %s" msg;
+            Error (Other ("JSON parse error: " ^ msg))
 
 let send_message ~token ~channel ~content =
   send_message_with_blocks ~token ~channel ~content ~blocks:[]
@@ -229,10 +238,14 @@ let adapter_loop ~token ~channel ~events ?base_url () =
     | Run_finished { run_id = _ } ->
         let blocks = List.rev acc_blocks in
         if String.length acc_text > 0 || List.length blocks > 0 then
-          send_message_with_blocks ~token ~channel ~content:acc_text ~blocks;
+          ignore
+            (send_message_with_blocks ~token ~channel ~content:acc_text ~blocks
+              : (unit, error) result);
         ()
     | Event_error { message } ->
-        send_message ~token ~channel ~content:("Keeper error: " ^ message);
+        ignore
+          (send_message ~token ~channel ~content:("Keeper error: " ^ message)
+            : (unit, error) result);
         ()
     | Run_started { run_id; thread_id = _ } ->
         loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:(Some run_id)

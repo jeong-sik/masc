@@ -70,14 +70,24 @@ let hostname_title url =
 ;;
 
 let standalone_url_re =
-  Re.Pcre.re "^https?://\\S+$" |> Re.compile |> Re.execp
+  Re.Pcre.re ~flags:[ `CASELESS ] "^https?://\\S+$" |> Re.compile |> Re.execp
+;;
+
+let is_http_url url =
+  try
+    let scheme = Uri.scheme (Uri.of_string url) in
+    match scheme with
+    | Some "http" | Some "https" -> true
+    | _ -> false
+  with
+  | _ -> false
 ;;
 
 let line_to_block line : chat_block option =
   let trimmed = String.trim line in
   if trimmed = ""
   then None
-  else if standalone_url_re trimmed
+  else if standalone_url_re trimmed && is_http_url trimmed
   then (
     if is_image_url trimmed
     then Some (Image { src = trimmed; cap = None })
@@ -115,9 +125,13 @@ let parse_text_to_blocks text : chat_block list =
       let alt = Re.Group.get group 1 in
       let url = Re.Group.get group 2 in
       let acc = push_text_fragment acc before in
-      let cap = if String.trim alt = "" then None else Some alt in
-      let acc = Image { src = url; cap } :: acc in
-      scan acc stop
+      if is_http_url url then
+        let cap = if String.trim alt = "" then None else Some alt in
+        let acc = Image { src = url; cap } :: acc in
+        scan acc stop
+      else
+        let fallback = String.sub text start (stop - start) in
+        scan (push_text_fragment acc fallback) stop
   in
   List.rev (scan [] 0)
 ;;

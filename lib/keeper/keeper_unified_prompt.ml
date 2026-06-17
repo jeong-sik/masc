@@ -740,6 +740,14 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     Keeper_memory_policy.filter_forward_looking_summary
       observation.continuity_summary
   in
+  (* Strip stale tool tokens from the continuity surface before it is embedded
+     in the user message. The ratchet below scans the pre-strip text so the
+     producer-side alarm is preserved. *)
+  let sanitized_continuity_for_prompt =
+    Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
+      ~keeper_name:meta.name
+      continuity_for_prompt
+  in
   let content_of : Keeper_context_layers.layer_id -> string option = function
     (* 1. Active goals — stable turn context. *)
     | Keeper_context_layers.Active_goals ->
@@ -848,7 +856,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ("\n### Continuity\n"
           ^ "- Advisory only: ignore prior silence/wait directives until you re-verify them against the live world state.\n"
           ^ "- If this turn was still scheduled or backlog/repo signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n"
-          ^ continuity_for_prompt
+          ^ sanitized_continuity_for_prompt
           ^ "\n")
       else None
     (* 7. Pending mentions — reactive trigger. *)
@@ -941,7 +949,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       ~keeper_name:meta.name
       ~system_prompt:explicit_rename_system
       ~user_message:explicit_rename_user
-      ~continuity_summary:meta.continuity_summary
+      ~continuity_summary:continuity_for_prompt
   in
   let sanitized_system =
     explicit_rename_system

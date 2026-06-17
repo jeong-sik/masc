@@ -30,6 +30,8 @@ val decide :
        - any [Destructive] git op → [Deny Destructive_git];
        - a redirect [Write_path] whose scope is [Outside_workspace] or
          [Absolute_unknown] → [Deny Path_escape];
+       - a redirect [Read_path] whose scope is [Outside_workspace] or
+         [Absolute_unknown] → [Deny Path_escape];
        - a catastrophic-by-identity binary ([mkfs]) → [Deny
          Catastrophic_program].
     2. Otherwise the highest program risk class is graded by the matching

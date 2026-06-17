@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-06-17T10:55:41Z (HEAD: 034279325c)
+Generated: 2026-06-17T13:54:53Z (HEAD: 48a3061b4f)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -86,7 +86,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | MemoryCompaction.tla | MemoryCompaction | manual | 2 | 1 | clean={inv:ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} buggy={inv:ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} | 0002c4c1a901 |
 | OllamaBodyIntegrity.tla | OllamaBodyIntegrity | manual | 2 | 1 | clean={inv:BalancedNeverFails, inv:ParseErrorImpliesUnbalanced} buggy={inv:BalancedNeverFails} | 4b99edc99fe1 |
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | baa8b016ef40 |
-| ShellIRApprovalFloor.tla | ShellIRApprovalFloor | manual | 2 | 1 | clean={inv:TypeOK, inv:CatastrophicNeverAllowed} buggy={inv:TypeOK, inv:CatastrophicNeverAllowed} | 29efda8572e5 |
+| ShellIRApprovalFloor.tla | ShellIRApprovalFloor | manual | 2 | 1 | clean={inv:TypeOK, inv:CatastrophicNeverAllowed} buggy={inv:TypeOK, inv:CatastrophicNeverAllowed} | a1c5025f0fea |
 | SlotScheduler.tla | SlotScheduler | manual | 2 | 1 | clean={inv:TypeOK, inv:MutualExclusion, inv:NeverStuck} buggy={inv:TypeOK, inv:NeverStuck} | 5d3029adffa6 |
 
 ### specs/checkpoint-trim (1 specs)

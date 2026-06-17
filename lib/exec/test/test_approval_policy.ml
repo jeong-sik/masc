@@ -134,6 +134,23 @@ let test_write_outside_denies () =
   | Verdict.Deny { reason = Path_escape _; _ } -> ()
   | _ -> assert false
 
+(* RFC-0254 §5.4: read-escape is symmetric with write-escape at the floor.
+   A redirect read from outside the workspace is denied before any trust
+   overlay, even under the autonomous overlay. *)
+let test_read_outside_denies () =
+  let target = Path_scope.classify ~raw:"/etc/shadow" ~cwd:"/tmp" in
+  let redir =
+    Redirect_scope.File
+      { fd = 0; target; mode = Redirect_scope.Read }
+  in
+  let s = simple (bin_ok "cat") ~redirects:[ redir ] in
+  let caps = Capability_check.of_simple s in
+  match
+    Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s
+  with
+  | Verdict.Deny { reason = Path_escape _; _ } -> ()
+  | _ -> assert false
+
 (* -- P9: trust_level dispatch tests --------------------------------- *)
 
 let test_observe_safe_bin_allows () =
@@ -273,6 +290,7 @@ let () =
   test_destructive_git_denies ();
   test_destructive_git_denied_under_permissive_overlay ();
   test_write_outside_denies ();
+  test_read_outside_denies ();
   (* P9 trust_level dispatch *)
   test_observe_safe_bin_allows ();
   test_observe_audited_bin_allows ();

@@ -10,17 +10,18 @@
 \* Allow (defect 2.2.4).  Only a redirect write-escape was an unconditional Deny.
 \*
 \* Fix (RFC-0254 5.3-5.4): catastrophic_floor (destructive git, redirect
-\* write-escape, catastrophic-by-identity program) is evaluated BEFORE any trust
-\* level, so a catastrophic command is always Deny regardless of overlay.
+\* write-escape, redirect read-escape, catastrophic-by-identity program) is
+\* evaluated BEFORE any trust level, so a catastrophic command is always Deny
+\* regardless of overlay.
 \*
 \* Property: CatastrophicNeverAllowed — for every command class and every trust
 \* level, a catastrophic command never reaches a verdict that executes it.
 
 \* Command classes the capability walker (Capability_check.of_ir) can produce.
-AllCommands == {"safe", "audited", "destructive_git", "catastrophic_prog", "redirect_escape"}
+AllCommands == {"safe", "audited", "destructive_git", "catastrophic_prog", "write_redirect_escape", "read_redirect_escape"}
 
 \* Catastrophic classes: must be denied regardless of trust (RFC-0254 floor).
-Catastrophic == {"destructive_git", "catastrophic_prog", "redirect_escape"}
+Catastrophic == {"destructive_git", "catastrophic_prog", "write_redirect_escape", "read_redirect_escape"}
 
 \* Approval_config trust levels for the matching risk class.
 AllTrusts == {"enforced", "auto_safe", "observe", "suggest"}
@@ -59,13 +60,15 @@ NextClean == DecideClean
 SpecClean == Init /\ [][NextClean]_vars
 
 \* ── Buggy decide: catastrophic graded by trust (pre-RFC-0254) ──────────
-\* Only redirect_escape was an unconditional Deny; destructive_git and
+\* Only write_redirect_escape was an unconditional Deny; destructive_git and
 \* catastrophic_prog were graded by privileged_trust, so a loosened overlay
-\* downgrades them to Allow.  This is the BugAction.
+\* downgrades them to Allow.  (read_redirect_escape did not exist in the
+\* pre-RFC model; adding it here would not change the bug demonstration.)
+\* This is the BugAction.
 DecideBuggy ==
     /\ phase = "init"
     /\ phase' = "decided"
-    /\ verdict' = IF cmd = "redirect_escape"
+    /\ verdict' = IF cmd = "write_redirect_escape"
                   THEN "deny"
                   ELSE TrustGrade(trust)
     /\ UNCHANGED <<cmd, trust>>

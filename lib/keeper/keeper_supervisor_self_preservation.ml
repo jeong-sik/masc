@@ -47,16 +47,18 @@ let dominant_cohort cohorts =
 ;;
 
 let update_suppression_streak dominant_key =
-  let current = Atomic.get escape_state in
-  if String.equal current.last_dominant_cohort dominant_key
-  then
-    Atomic.set escape_state
+  Atomic_util.update escape_state (fun current ->
+    if String.equal current.last_dominant_cohort dominant_key
+    then
       { current with
         consecutive_suppressions = current.consecutive_suppressions + 1
       }
-  else
-    Atomic.set escape_state
-      { last_dominant_cohort = dominant_key; consecutive_suppressions = 1 }
+    else { last_dominant_cohort = dominant_key; consecutive_suppressions = 1 })
+;;
+
+let reset_suppression_streak () =
+  Atomic_util.update escape_state (fun current ->
+    { current with consecutive_suppressions = 0 })
 ;;
 
 let publish_suppression
@@ -127,6 +129,11 @@ module For_testing = struct
   let should_warn_partial_suppression_streak =
     should_warn_partial_suppression_streak
   ;;
+
+  let update_suppression_streak = update_suppression_streak
+  let reset_suppression_streak = reset_suppression_streak
+  let consecutive_suppressions () = (Atomic.get escape_state).consecutive_suppressions
+  let last_dominant_cohort () = (Atomic.get escape_state).last_dominant_cohort
 end
 
 let apply ~keepers_dir ~publish_lifecycle ~total_keepers to_restart =
@@ -184,15 +191,15 @@ let apply ~keepers_dir ~publish_lifecycle ~total_keepers to_restart =
         let suppressed_count = List.length suppressed_names in
         (match probe_entry with
          | Some probe_name ->
+           let streak_at_probe = (Atomic.get escape_state).consecutive_suppressions in
            Log.Keeper.warn
              "self-preservation probe: allowing %s through after %d consecutive \
               same-cohort suppressions (ratio=%.2f, cohort=%s)"
              probe_name
-             (Atomic.get escape_state).consecutive_suppressions
+             streak_at_probe
              ratio
              dominant_key;
-           Atomic.set escape_state
-             { (Atomic.get escape_state) with consecutive_suppressions = 0 }
+           reset_suppression_streak ()
          | None -> log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count);
         publish_suppression
           ~publish_lifecycle

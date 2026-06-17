@@ -29,6 +29,57 @@ let test_self_preservation_reset_for_test () =
   check unit "reset returns unit" () (KSP.reset_for_test ())
 ;;
 
+let test_update_suppression_streak_increments_same_cohort () =
+  KSP.reset_for_test ();
+  KSP.For_testing.update_suppression_streak "c1";
+  check string "cohort after first update" "c1" (KSP.For_testing.last_dominant_cohort ());
+  check int "count after first update" 1 (KSP.For_testing.consecutive_suppressions ());
+  KSP.For_testing.update_suppression_streak "c1";
+  check int "count after second update" 2 (KSP.For_testing.consecutive_suppressions ());
+  KSP.For_testing.update_suppression_streak "c1";
+  check int "count after third update" 3 (KSP.For_testing.consecutive_suppressions ())
+;;
+
+let test_update_suppression_streak_resets_on_cohort_change () =
+  KSP.reset_for_test ();
+  KSP.For_testing.update_suppression_streak "c1";
+  check string "cohort set" "c1" (KSP.For_testing.last_dominant_cohort ());
+  check int "count after first cohort" 1 (KSP.For_testing.consecutive_suppressions ());
+  KSP.For_testing.update_suppression_streak "c2";
+  check string "cohort changed" "c2" (KSP.For_testing.last_dominant_cohort ());
+  check int "count reset on change" 1 (KSP.For_testing.consecutive_suppressions ());
+  KSP.For_testing.update_suppression_streak "c2";
+  check int "count increments new cohort" 2 (KSP.For_testing.consecutive_suppressions ())
+;;
+
+let test_reset_suppression_streak_zeroes_count () =
+  KSP.reset_for_test ();
+  KSP.For_testing.update_suppression_streak "c1";
+  KSP.For_testing.update_suppression_streak "c1";
+  KSP.For_testing.update_suppression_streak "c1";
+  check int "count before reset" 3 (KSP.For_testing.consecutive_suppressions ());
+  KSP.For_testing.reset_suppression_streak ();
+  check int "count after reset" 0 (KSP.For_testing.consecutive_suppressions ());
+  check string "cohort preserved" "c1" (KSP.For_testing.last_dominant_cohort ())
+;;
+
+let test_update_suppression_streak_concurrent () =
+  KSP.reset_for_test ();
+  let n = 100 in
+  let domains =
+    List.init 4 (fun _ ->
+      Domain.spawn (fun () ->
+        for _ = 1 to n do
+          KSP.For_testing.update_suppression_streak "c"
+        done))
+  in
+  List.iter Domain.join domains;
+  check string "cohort after concurrent updates" "c"
+    (KSP.For_testing.last_dominant_cohort ());
+  check int "count after concurrent updates" (4 * n)
+    (KSP.For_testing.consecutive_suppressions ())
+;;
+
 (* ── Link-task idempotency cache (immutable Map + Atomic CAS) ──────────── *)
 
 let test_link_task_cache_mark_and_query () =
@@ -85,6 +136,14 @@ let () =
       , [ test_case "warn thresholds" `Quick
             test_should_warn_partial_suppression_streak
         ; test_case "reset for test" `Quick test_self_preservation_reset_for_test
+        ; test_case "streak increments same cohort" `Quick
+            test_update_suppression_streak_increments_same_cohort
+        ; test_case "streak resets on cohort change" `Quick
+            test_update_suppression_streak_resets_on_cohort_change
+        ; test_case "streak reset zeroes count" `Quick
+            test_reset_suppression_streak_zeroes_count
+        ; test_case "streak increments concurrently" `Quick
+            test_update_suppression_streak_concurrent
         ] )
     ; ( "link-task-cache"
       , [ test_case "mark and query" `Quick test_link_task_cache_mark_and_query

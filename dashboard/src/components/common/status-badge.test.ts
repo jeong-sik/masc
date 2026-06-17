@@ -5,63 +5,63 @@ import { StatusBadge, statusBadgeTone, statusDotColor } from './status-badge'
 
 describe('statusDotColor', () => {
   it('returns warn for in_progress', () => {
-    expect(statusDotColor('in_progress')).toBe('bg-[var(--color-status-warn)]')
+    expect(statusDotColor('in_progress')).toBe('bg-warning')
   })
 
   it('normalizes hyphenated in-progress states', () => {
-    expect(statusDotColor('in-progress')).toBe('bg-[var(--color-status-warn)]')
+    expect(statusDotColor('in-progress')).toBe('bg-warning')
     expect(statusBadgeTone('claimed')).toBe('warn')
   })
 
   it('returns warn for running', () => {
-    expect(statusDotColor('running')).toBe('bg-[var(--color-status-warn)]')
+    expect(statusDotColor('running')).toBe('bg-warning')
   })
 
   it('returns info for awaiting_verification', () => {
-    expect(statusDotColor('awaiting_verification')).toBe('bg-[var(--color-status-info)]')
+    expect(statusDotColor('awaiting_verification')).toBe('bg-info')
   })
 
   it('returns info for interrupted', () => {
-    expect(statusDotColor('interrupted')).toBe('bg-[var(--color-status-info)]')
+    expect(statusDotColor('interrupted')).toBe('bg-info')
   })
 
   it('returns info for listening', () => {
-    expect(statusDotColor('listening')).toBe('bg-[var(--color-status-info)]')
+    expect(statusDotColor('listening')).toBe('bg-info')
   })
 
   it('returns idle for inactive', () => {
-    expect(statusDotColor('inactive')).toBe('bg-[var(--color-status-idle)]')
+    expect(statusDotColor('inactive')).toBe('bg-text-disabled')
   })
 
   it('returns idle for offline', () => {
-    expect(statusDotColor('offline')).toBe('bg-[var(--color-status-idle)]')
+    expect(statusDotColor('offline')).toBe('bg-text-disabled')
   })
 
   it('returns ok for active', () => {
-    expect(statusDotColor('active')).toBe('bg-[var(--color-status-ok)]')
+    expect(statusDotColor('active')).toBe('bg-success')
   })
 
   it('returns warn for busy', () => {
-    expect(statusDotColor('busy')).toBe('bg-[var(--color-status-warn)]')
+    expect(statusDotColor('busy')).toBe('bg-warning')
   })
 
   it('returns warn for paused', () => {
-    expect(statusDotColor('paused')).toBe('bg-[var(--color-status-warn)]')
+    expect(statusDotColor('paused')).toBe('bg-warning')
     expect(statusBadgeTone('paused')).toBe('warn')
   })
 
   it('returns idle for stopped', () => {
-    expect(statusDotColor('stopped')).toBe('bg-[var(--color-status-idle)]')
+    expect(statusDotColor('stopped')).toBe('bg-text-disabled')
   })
 
   it('returns bad for error', () => {
-    expect(statusDotColor('error')).toBe('bg-[var(--color-status-err)]')
-    expect(statusDotColor('failed')).toBe('bg-[var(--color-status-err)]')
+    expect(statusDotColor('error')).toBe('bg-destructive')
+    expect(statusDotColor('failed')).toBe('bg-destructive')
   })
 
   it('returns muted for unknown status', () => {
-    expect(statusDotColor('unknown')).toBe('bg-[var(--color-status-idle)]')
-    expect(statusDotColor('')).toBe('bg-[var(--color-status-idle)]')
+    expect(statusDotColor('unknown')).toBe('bg-text-disabled')
+    expect(statusDotColor('')).toBe('bg-text-disabled')
   })
 })
 

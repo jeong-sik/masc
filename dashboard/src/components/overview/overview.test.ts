@@ -387,14 +387,14 @@ describe('deriveFleetTickerEvents', () => {
 
 describe('severityToneClass', () => {
   it.each<[string | null | undefined, string]>([
-    ['critical', 'text-[var(--color-status-err)]'],
-    ['HIGH', 'text-[var(--color-status-err)]'],
-    ['warn', 'text-[var(--color-status-warn)]'],
-    ['medium', 'text-[var(--color-status-warn)]'],
-    ['info', 'text-[var(--color-fg-muted)]'],
-    ['', 'text-[var(--color-fg-muted)]'],
-    [null, 'text-[var(--color-fg-muted)]'],
-    [undefined, 'text-[var(--color-fg-muted)]'],
+    ['critical', 'text-destructive'],
+    ['HIGH', 'text-destructive'],
+    ['warn', 'text-warning'],
+    ['medium', 'text-warning'],
+    ['info', 'text-text-tertiary'],
+    ['', 'text-text-tertiary'],
+    [null, 'text-text-tertiary'],
+    [undefined, 'text-text-tertiary'],
   ])('maps severity %s to expected tone', (input, expected) => {
     expect(severityToneClass(input)).toBe(expected)
   })
@@ -664,5 +664,34 @@ describe('Overview v2 marker classes', () => {
     expect(container.querySelector('.v2-overview-attention')).not.toBeNull()
     expect(container.querySelector('.v2-overview-telemetry')).not.toBeNull()
     expect(container.querySelector('.v2-overview-fleet')).not.toBeNull()
+  })
+})
+
+describe('Overview StyleSeed surfaces', () => {
+  afterEach(() => {
+    cleanup()
+  })
+
+  it('applies StyleSeed surface/page tokens to root', () => {
+    const { container } = render(h(Overview, null))
+    const root = container.querySelector('.v2-overview-surface')
+    expect(root?.classList.contains('ss-surface')).toBe(true)
+    expect(root?.classList.contains('bg-surface-page')).toBe(true)
+    expect(root?.classList.contains('space-y-6')).toBe(true)
+  })
+
+  it('wraps major sections in ss-card with mx-6', () => {
+    const { container } = render(h(Overview, null))
+    expect(container.querySelector('.v2-overview-kpis')?.classList.contains('ss-card')).toBe(true)
+    expect(container.querySelector('.v2-overview-kpis')?.classList.contains('mx-6')).toBe(true)
+    expect(container.querySelector('.v2-overview-funnel')?.classList.contains('ss-card')).toBe(true)
+    expect(container.querySelector('.v2-overview-keepers')?.classList.contains('ss-card')).toBe(true)
+    expect(container.querySelector('.v2-overview-fleet')?.classList.contains('ss-card')).toBe(true)
+  })
+
+  it('uses px-6 on the two-column grid container', () => {
+    const { container } = render(h(Overview, null))
+    const grid = container.querySelector('.lg\\:grid-cols-2')
+    expect(grid?.classList.contains('px-6')).toBe(true)
   })
 })

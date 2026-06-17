@@ -16,4 +16,4 @@ export const THEME_STORAGE_KEYS = ['dashboardTheme', 'masc-theme-v2'] as const
 
 export const THEME_SEARCH_PARAM = 'theme'
 
-export type ThemeId = 'paper' | null
+export type ThemeId = 'styleseed' | 'paper' | null

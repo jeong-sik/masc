@@ -205,7 +205,7 @@ function GoalCard({
   const hasBlock = progress.blocked > 0
 
   return html`
-    <div class=${`wk-goal ${open ? 'open' : ''} ${hasBlock ? 'has-block' : ''}`} data-testid="goal-card" data-goal-id=${goal.id}>
+    <div class=${`wk-goal ss-card ${open ? 'open' : ''} ${hasBlock ? 'has-block' : ''}`} data-testid="goal-card" data-goal-id=${goal.id}>
       <button type="button" class="wk-goal-h" onClick=${onToggle} aria-expanded=${open}>
         <span class="wk-caret" aria-hidden="true">${open ? '\u25BE' : '\u25B8'}</span>
         <span class=${`wk-pri ${priority.cls}`}>${priority.label}</span>
@@ -278,12 +278,12 @@ function WorkSurfaceV2() {
   }, [goalList, allTasks])
 
   return html`
-    <main class="wk-surface">
+    <main class="wk-surface ss-surface bg-surface-page text-text-primary">
       <div class="wk-scroll">
-        <div class="wk-inner">
+        <div class="wk-inner space-y-6">
           <header class="wk-head">
             <div>
-              <h1>작업 · 목표</h1>
+              <h1 class="text-[18px] font-bold text-text-secondary">작업 · 목표</h1>
               <p class="wk-sub">
                 <span title="최상위 조정 범위">namespace <span class="mono">${workspaceNamespace()}</span></span>
                 · <span>목표 ${totals.goals}</span>
@@ -295,7 +295,7 @@ function WorkSurfaceV2() {
             <button type="button" class="wk-newgoal" title="새 목표 생성 — 다음 단계에서 설계">＋ 새 목표</button>
           </header>
 
-          <section class="wk-kpis" data-testid="work-kpis">
+          <section class="wk-kpis ss-card mx-6" data-testid="work-kpis">
             <div class="wk-kpi">
               <div class="wk-kpi-k">활성 목표</div>
               <div class="wk-kpi-v volt" data-testid="kpi-goals">${totals.goals}</div>
@@ -314,7 +314,7 @@ function WorkSurfaceV2() {
             </div>
           </section>
 
-          <div class="wk-list">
+          <div class="wk-list px-6">
             ${goalList.map(g => html`
               <${GoalCard}
                 key=${g.id}

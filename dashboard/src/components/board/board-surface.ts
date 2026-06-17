@@ -180,7 +180,7 @@ function renderCategorySection(
   }
 
   return html`
-    <${SectionCard} label=${`${label} (${total})`} class="mb-4 v2-workspace-panel" variant="standard">
+    <${SectionCard} label=${`${label} (${total})`} class="mb-4 v2-workspace-panel ss-card" variant="standard">
       <div class="flex flex-col gap-2">
         ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>
@@ -241,8 +241,8 @@ function BoardSummary() {
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   const metrics = boardLatencyMetrics.value
   return html`
-    <div class="v2-workspace-panel flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
-      <span class="font-semibold text-[var(--color-fg-secondary)] tabular-nums text-md">${visibleCount}</span>
+    <div class="v2-workspace-panel ss-card mx-6 flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 text-xs text-text-secondary">
+      <span class="font-semibold text-text-primary tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
         const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
@@ -808,13 +808,13 @@ export function BoardSurface() {
   if (postId) {
     return post
       ? html`
-          <div class="v2-workspace-surface">
+          <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
             <${BoardSummary} />
             <${PostDetail} post=${post} />
           </div>
         `
       : html`
-          <div class="v2-workspace-surface">
+          <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
             <${BoardSummary} />
             <button type="button"
               class="v2-workspace-action mb-4 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer"
@@ -829,7 +829,7 @@ export function BoardSurface() {
 
   if (focus === 'mention-inbox') {
     return html`
-      <div class="v2-workspace-surface">
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
         <${BoardSummary} />
         <${MentionInbox} />
       </div>
@@ -838,7 +838,7 @@ export function BoardSurface() {
 
   if (focus === 'messages-workspace') {
     return html`
-      <div class="v2-workspace-surface">
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
         <${BoardSummary} />
         <${MessageWorkspaceTimeline} />
       </div>
@@ -847,7 +847,7 @@ export function BoardSurface() {
 
   if (focus === 'state-block') {
     return html`
-      <div class="v2-workspace-surface">
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
         <${BoardSummary} />
         <${StateBlockMessages} />
       </div>
@@ -856,7 +856,7 @@ export function BoardSurface() {
 
   if (focus === 'curation') {
     return html`
-      <div class="v2-workspace-surface">
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
         <${BoardSummary} />
         <${BoardCurationPanel} />
       </div>
@@ -865,7 +865,7 @@ export function BoardSurface() {
 
   if (focus === 'karma') {
     return html`
-      <div class="v2-workspace-surface">
+      <div class="v2-workspace-surface ss-surface bg-surface-page text-text-primary">
         <${BoardSummary} />
         <${BoardKarmaPanel} />
       </div>
@@ -878,7 +878,7 @@ export function BoardSurface() {
     : null
 
   return html`
-    <div class="v2-board-surface">
+    <div class="v2-board-surface ss-surface bg-surface-page text-text-primary">
       <div class=${`bd-body ${selectedPost ? '' : 'no-detail'}`}>
         <${BdRail}
           activeSub=${activeSub}

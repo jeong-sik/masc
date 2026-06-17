@@ -88,3 +88,93 @@
   color: var(--color-fg-secondary);
   border-bottom: 1px solid var(--color-border-default);
 }
+
+/* ── StyleSeed theme overrides ───────────────────────────────────────────────
+   When data-theme="styleseed" is active, map v2 lab chrome to StyleSeed
+   semantic tokens. Cards already carry .ss-card via SurfaceCard; this
+   bridges the remaining v2-scoped panels, rows, and tables. */
+
+[data-theme="styleseed"] .v2-lab-surface {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  /* Bridge v2 token ladder to StyleSeed values inside this surface. */
+  --color-fg-primary: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-tertiary);
+  --color-fg-disabled: var(--text-disabled);
+  --color-border-default: var(--border);
+  --color-border-strong: var(--border);
+  --color-bg-page: var(--surface-page);
+  --color-bg-surface: var(--card);
+  --color-bg-elevated: var(--surface-subtle);
+  --color-bg-hover: var(--surface-muted);
+  --color-bg-muted: var(--surface-muted);
+  --color-accent-fg: var(--brand);
+}
+
+[data-theme="styleseed"] .v2-lab-panel,
+[data-theme="styleseed"] .v2-lab-card,
+[data-theme="styleseed"] .v2-lab-surface [data-surface-card] {
+  background-color: var(--card);
+  border-color: var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="styleseed"] .v2-lab-panel:hover,
+[data-theme="styleseed"] .v2-lab-card:hover,
+[data-theme="styleseed"] .v2-lab-surface [data-surface-card]:hover {
+  border-color: var(--border);
+  background-color: var(--surface-subtle);
+}
+
+[data-theme="styleseed"] .v2-lab-row,
+[data-theme="styleseed"] .v2-lab-table tbody tr,
+[data-theme="styleseed"] .v2-lab-panel table tbody tr,
+[data-theme="styleseed"] .v2-lab-detail table tbody tr {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-lab-row:hover,
+[data-theme="styleseed"] .v2-lab-table tbody tr:hover,
+[data-theme="styleseed"] .v2-lab-panel table tbody tr:hover,
+[data-theme="styleseed"] .v2-lab-detail table tbody tr:hover {
+  background-color: var(--surface-subtle);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-lab-action:not(:disabled),
+[data-theme="styleseed"] .v2-lab-panel .v2-lab-action:not(:disabled),
+[data-theme="styleseed"] .v2-lab-surface [data-action-button]:not(:disabled) {
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+[data-theme="styleseed"] .v2-lab-action:not(:disabled):hover,
+[data-theme="styleseed"] .v2-lab-surface [data-action-button]:not(:disabled):hover {
+  border-color: var(--brand);
+  background-color: var(--brand-tint);
+  color: var(--brand);
+}
+
+[data-theme="styleseed"] .v2-lab-table,
+[data-theme="styleseed"] .v2-lab-panel table,
+[data-theme="styleseed"] .v2-lab-detail table,
+[data-theme="styleseed"] .v2-lab-table thead,
+[data-theme="styleseed"] .v2-lab-panel table thead,
+[data-theme="styleseed"] .v2-lab-detail table thead {
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-lab-table th,
+[data-theme="styleseed"] .v2-lab-panel table th,
+[data-theme="styleseed"] .v2-lab-detail table th {
+  color: var(--text-secondary);
+}
+
+[data-theme="styleseed"] .v2-lab-table td,
+[data-theme="styleseed"] .v2-lab-panel table td,
+[data-theme="styleseed"] .v2-lab-detail table td {
+  color: var(--text-primary);
+  border-color: var(--border);
+}

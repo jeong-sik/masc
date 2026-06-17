@@ -19,14 +19,14 @@ export interface CountBadgeProps {
 }
 
 const TONE_CLASSES: Record<BadgeTone, string> = {
-  default: 'bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]',
-  warn: 'bg-[var(--warn-12)] text-[var(--color-status-warn)]',
-  ok: 'bg-[var(--ok-10)] text-[var(--ok-20)]',
-  bad: 'bg-[var(--bad-10)] text-[var(--bad-light)]',
-  accent: 'bg-[var(--accent-12)] text-[var(--color-accent-fg)]',
+  default: 'bg-surface-muted text-text-secondary',
+  warn: 'bg-warning/10 text-warning',
+  ok: 'bg-success/10 text-success',
+  bad: 'bg-destructive/10 text-destructive',
+  accent: 'bg-brand/10 text-brand',
 }
 
-const BASE = 'inline-flex items-center text-3xs px-1.5 py-px rounded-[var(--r-1)] tabular-nums font-medium'
+const BASE = 'inline-flex items-center text-[12px] px-1.5 py-px rounded-md tabular-nums font-medium uppercase tracking-[0.05em]'
 
 export function countBadgeClasses(tone: BadgeTone = 'default', extra?: string): string {
   return [BASE, TONE_CLASSES[tone], extra].filter(Boolean).join(' ')

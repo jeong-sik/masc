@@ -25,7 +25,7 @@ export function Lab() {
   const section = currentSection()
 
   return html`
-    <div class="v2-lab-surface flex flex-col gap-6" data-testid="lab-surface">
+    <div class="v2-lab-surface ss-surface bg-surface-page flex flex-col gap-6" data-testid="lab-surface">
       ${section === 'tools' ? html`
         <${Tools} />
       ` : null}

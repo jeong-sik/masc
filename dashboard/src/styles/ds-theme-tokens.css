@@ -233,3 +233,104 @@
   --shadow-card:  0 1px 0 rgba(0,0,0,0.04);
   --shadow-glow:  none;
 }
+
+/* ── StyleSeed ───────────────────────────────────────────
+   Brand-agnostic light design engine. Single accent, grayscale
+   hierarchy, card-based layouts, ≤8% opacity shadows. */
+[data-theme="styleseed"] {
+  color-scheme: light;
+
+  /* Brand / impact */
+  --brand:        #721FE5;
+  --primary:      #030213;
+  --destructive:  #d4183d;
+  --success:      #6B9B7A;
+  --warning:      #D97706;
+  --info:         #3B82F6;
+
+  /* Surfaces */
+  --bg-surface-page:  #FAFAFA;
+  --bg-card:          #FFFFFF;
+  --bg-surface-subtle:#FAFAF9;
+  --bg-surface-muted: #E8E6E1;
+  --bg-brand-tint:    #F0E8FF;
+
+  /* Text — never pure black */
+  --text-primary:     #3C3C3C;
+  --text-secondary:   #6A6A6A;
+  --text-tertiary:    #7A7A7A;
+  --text-disabled:    #9B9B9B;
+  --text-brand:       var(--brand);
+  --text-success:     var(--success);
+  --text-warning:     var(--warning);
+  --text-destructive: var(--destructive);
+  --text-info:        var(--info);
+
+  /* Icons */
+  --icon-default:     #6A6A6A;
+
+  /* Borders */
+  --border-border:    #E8E6E1;
+  --border-strong:    #D4D4D4;
+
+  /* Status tints */
+  --bg-alert-badge:   rgba(212, 90, 84, 0.10);
+
+  /* Shadows — ≤ 8% opacity */
+  --shadow-card:       0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-elevated:   0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal:      0 8px 24px rgba(0, 0, 0, 0.12);
+
+  /* Shape */
+  --radius:       0.625rem;
+  --radius-2xl:   1rem;
+
+  /* Typography */
+  --font-sans:    'Pretendard Variable', Pretendard, 'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* Tailwind v4 bridge so utilities like bg-card / text-text-primary resolve */
+  --color-card:          var(--bg-card);
+  --color-surface-page:  var(--bg-surface-page);
+  --color-surface-subtle:var(--bg-surface-subtle);
+  --color-surface-muted: var(--bg-surface-muted);
+  --color-brand-tint:    var(--bg-brand-tint);
+  --color-text-primary:  var(--text-primary);
+  --color-text-secondary:var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-disabled: var(--text-disabled);
+  --color-brand:         var(--brand);
+  --color-success:       var(--success);
+  --color-warning:       var(--warning);
+  --color-destructive:   var(--destructive);
+  --color-info:          var(--info);
+  --color-icon-default:  var(--icon-default);
+  --color-border:        var(--border-border);
+  --color-border-strong: var(--border-strong);
+  --color-alert-badge:   var(--bg-alert-badge);
+
+  /* Keeper-v2 surface token bridge so *-v2.css files render correctly
+     under StyleSeed without a full rewrite. */
+  --bg-deep:      var(--bg-surface-page);
+  --bg-panel:     var(--bg-card);
+  --bg-panel-alt: var(--bg-surface-subtle);
+  --bg-card-hover:var(--bg-surface-subtle);
+  --bg-sunken:    var(--bg-surface-muted);
+  --border-main:  var(--border-border);
+  --border-soft:  var(--border-border);
+  --border-highlight: var(--border-strong);
+  --text-bright:  var(--text-primary);
+  --text-dim:     var(--text-tertiary);
+  --text-mid:     var(--text-secondary);
+  --volt:         var(--brand);
+  --volt-strong:  var(--brand);
+  --volt-dim:     color-mix(in srgb, var(--brand) 70%, black);
+  --volt-wash:    var(--bg-brand-tint);
+  --volt-ink:     var(--bg-card);
+  --volt-glow:    color-mix(in srgb, var(--brand) 25%, transparent);
+  --status-ok:    var(--success);
+  --status-warn:  var(--warning);
+  --status-bad:   var(--destructive);
+  --status-idle:  var(--text-disabled);
+}

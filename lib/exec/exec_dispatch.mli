@@ -40,36 +40,6 @@ val dispatch_decided :
 (** RFC-0160 S3: dispatch a risk-classified IR.  The phantom type
     ensures the IR has passed through [Shell_ir_risk.classify]. *)
 
-val dispatch_async :
-  ?base_host_env:string array ->
-  ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
-  sw:Eio.Switch.t ->
-  Shell_ir_risk.decided Shell_ir_risk.decided_ir ->
-  dispatch_result Eio.Promise.t
-(** Start a classified Shell IR dispatch in a new fiber and return a
-    promise for its result. Cancellation of [sw] propagates to the
-    forked fiber; successful completion resolves the promise with the
-    {!dispatch_result}. *)
-
-type dispatch_outcome = {
-  status : Unix.process_status;
-  stdout : string;
-  stderr : string;
-  semantic : Exec_semantic.t;
-}
-(** Structured dispatch result that carries a post-execution semantic
-    classification alongside raw status and captured output. *)
-
-val dispatch_decided_outcome :
-  ?base_host_env:string array ->
-  ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
-  Shell_ir_risk.decided Shell_ir_risk.decided_ir ->
-  dispatch_outcome
-(** Like {!dispatch_decided}, but returns a {!dispatch_outcome} with
-    [Exec_semantic.interpret] applied to the result. The semantic class
-    is derived from the executed command's argv, exit status, and
-    captured output. *)
-
 val dispatch_pipeline :
   ?base_host_env:string array ->
   ?stdin_content:string ->

@@ -24,14 +24,21 @@ describe('App v2 header chrome', () => {
     render(h(App, {}), container)
   }
 
-  it('renders v2 app shell wrapper with density/motion/bubble/surface attributes', () => {
+  it('renders v2 app shell wrapper with StyleSeed theme and tweak attributes', () => {
     renderApp()
     const app = container.querySelector('.v2-app')
     expect(app).not.toBeNull()
+    expect(app?.getAttribute('data-shell-theme')).toBe('styleseed')
     expect(app?.getAttribute('data-density')).toBe('regular')
     expect(app?.getAttribute('data-motion')).toBe('subtle')
     expect(app?.getAttribute('data-bubble')).toBe('card')
     expect(app?.hasAttribute('data-surface')).toBe(true)
+  })
+
+  it('sets the default StyleSeed theme on the dashboard root', () => {
+    renderApp()
+    const app = container.querySelector('.v2-app')
+    expect(app?.getAttribute('data-theme')).toBe('styleseed')
   })
 
   it('renders v2 shell header and health strip scopes', () => {
@@ -52,6 +59,21 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('.v2-statchip.live')).not.toBeNull()
   })
 
+  it('renders the main stage as a StyleSeed card (white, rounded-2xl, soft shadow)', () => {
+    window.innerWidth = 1280
+    renderApp()
+
+    const main = container.querySelector('#main-content') as HTMLElement | null
+    expect(main).not.toBeNull()
+    expect(main?.classList.contains('v2-body')).toBe(true)
+
+    const cls = main?.className ?? ''
+    expect(cls).toContain('bg-[var(--ss-card)]')
+    expect(cls).toContain('rounded-[var(--ss-radius-card)]')
+    expect(cls).toContain('shadow-[var(--ss-shadow-card)]')
+    expect(cls).toContain('border-[var(--ss-border)]')
+  })
+
   it('renders health chips with the shared chip class', () => {
     renderApp()
     const chip = container.querySelector('.dashboard-health-chip')
@@ -63,6 +85,15 @@ describe('App v2 header chrome', () => {
     renderApp()
     const app = container.querySelector('.v2-app')
     expect(app?.getAttribute('data-mobile')).toBe('true')
+  })
+
+  it('uses a 44x44 mobile menu button touch target', () => {
+    window.innerWidth = 760
+    renderApp()
+
+    const menuButton = container.querySelector('button[aria-controls="dashboard-side-rail"]') as HTMLElement | null
+    expect(menuButton).not.toBeNull()
+    expect(menuButton?.classList.contains('size-11')).toBe(true)
   })
 
   it('hides MobileBottomBar when the mobile side-rail drawer is open', async () => {

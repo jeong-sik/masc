@@ -547,6 +547,50 @@
   --sp-10: var(--space-6);
   --radius-2xs: var(--radius-xs);
   --shadow-pop: var(--shadow-cmd-palette);
+
+  /* ── StyleSeed semantic token bridge ───────────────────────────
+     Default to dashboard dark tokens so surfaces can use StyleSeed
+     utilities (bg-card, text-text-primary, border-border) without
+     breaking when data-theme="styleseed" is not active. The styleseed
+     theme block in ds-theme-tokens.css overrides these values. */
+  --bg-surface-page:   var(--color-bg-page);
+  --bg-surface-subtle: var(--color-bg-panel-alt);
+  --bg-surface-muted:  var(--color-border-divider);
+  --bg-brand-tint:     var(--color-accent-soft);
+  --text-secondary:    var(--color-fg-secondary);
+  --text-tertiary:     var(--color-fg-muted);
+  --text-disabled:     var(--color-fg-disabled);
+  --text-brand:        var(--color-accent-fg);
+  --text-success:      var(--color-status-ok);
+  --text-warning:      var(--color-status-warn);
+  --text-destructive:  var(--color-status-err);
+  --text-info:         var(--color-status-info);
+  --icon-default:      var(--color-fg-secondary);
+  --border-border:     var(--color-border-default);
+  --border-strong:     var(--color-border-strong);
+  --bg-alert-badge:    var(--color-err-soft);
+
+  /* Tailwind v4 utility bridge */
+  --color-card:           var(--bg-card);
+  --color-surface-page:   var(--bg-surface-page);
+  --color-surface-subtle: var(--bg-surface-subtle);
+  --color-surface-muted:  var(--bg-surface-muted);
+  --color-brand-tint:     var(--bg-brand-tint);
+  --color-text-primary:   var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary:  var(--text-tertiary);
+  --color-text-disabled:  var(--text-disabled);
+  --color-brand:          var(--text-brand);
+  --color-success:        var(--text-success);
+  --color-warning:        var(--text-warning);
+  --color-destructive:    var(--text-destructive);
+  --color-info:           var(--text-info);
+  --color-icon-default:   var(--icon-default);
+  --color-border:         var(--border-border);
+  --color-alert-badge:    var(--bg-alert-badge);
+  --shadow-card:          0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-elevated:      0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal:         0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 /* Readability lift for the v2 dark-fantasy muted tone: the mapped

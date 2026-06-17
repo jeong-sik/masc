@@ -3,16 +3,17 @@ import type { ComponentChildren, VNode } from 'preact'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
+import { parseMarkdownToBlocks } from './markdown-blocks'
 import { showToast } from '../common/toast'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
-import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
+import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
 import type { ToolCallOutputBlob } from '../../api/dashboard'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
@@ -259,6 +260,119 @@ function attachmentMeta(attachment: KeeperConversationAttachment): string {
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
 }
 
+function dataUriToText(data: string): string | null {
+  const comma = data.indexOf(',')
+  if (comma === -1 || !data.startsWith('data:')) return null
+  const header = data.slice(0, comma)
+  const body = data.slice(comma + 1)
+  if (header.includes(';base64')) {
+    try {
+      return atob(body)
+    } catch {
+      return null
+    }
+  }
+  try {
+    return decodeURIComponent(body)
+  } catch {
+    return null
+  }
+}
+
+function downloadArtifact(data: string, filename: string, mimeType?: string): void {
+  const href = data.startsWith('data:')
+    ? data
+    : URL.createObjectURL(new Blob([data], { type: mimeType ?? 'application/octet-stream' }))
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  a.style.display = 'none'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  if (!data.startsWith('data:')) {
+    setTimeout(() => URL.revokeObjectURL(href), 1000)
+  }
+}
+
+function artifactPreviewType(kind?: string, data?: string, mimeType?: string): 'image' | 'svg' | 'md' | 'code' | 'unknown' {
+  const k = (kind ?? '').toLowerCase()
+  const mt = (mimeType ?? '').toLowerCase()
+  if (k === 'image' || mt.startsWith('image/') || data?.startsWith('data:image/')) return 'image'
+  if (k === 'svg' || mt === 'image/svg+xml' || data?.startsWith('data:image/svg')) return 'svg'
+  if (k === 'md' || k === 'markdown' || mt.includes('markdown')) return 'md'
+  if (
+    k === 'code'
+    || k === 'json'
+    || mt.startsWith('text/')
+    || mt === 'application/json'
+    || data?.startsWith('data:text/')
+    || data?.startsWith('data:application/json')
+  ) {
+    return 'code'
+  }
+  return 'unknown'
+}
+
+function isPreviewableArtifact(kind?: string, data?: string, mimeType?: string): boolean {
+  return !!data && artifactPreviewType(kind, data, mimeType) !== 'unknown'
+}
+
+function ChatArtifactPreview({
+  kind,
+  name,
+  data,
+  mimeType,
+  onClose,
+}: {
+  kind?: string
+  name: string
+  data: string
+  mimeType?: string
+  onClose: () => void
+}) {
+  const type = artifactPreviewType(kind, data, mimeType)
+  if (type === 'image') {
+    return html`
+      <${ChatPreviewModal} title=${name} onClose=${onClose}>
+        <img
+          src=${data}
+          alt=${name}
+          class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+        />
+      <//>
+    `
+  }
+  if (type === 'svg') {
+    return html`
+      <${ChatPreviewModal} title=${name} onClose=${onClose}>
+        <div
+          class="chat-lightbox-svg"
+          dangerouslySetInnerHTML=${{ __html: sanitizeHtml(data) }}
+        />
+      <//>
+    `
+  }
+  const text = dataUriToText(data) ?? data
+  if (type === 'md') {
+    return html`
+      <${ChatPreviewModal} title=${name} onClose=${onClose}>
+        <div
+          class="chat-lightbox-md markdown-body"
+          dangerouslySetInnerHTML=${{
+            __html: DOMPurify.sanitize(marked.parse(text) as string),
+          }}
+        />
+      <//>
+    `
+  }
+  return html`
+    <${ChatPreviewModal} title=${name} onClose=${onClose}>
+      <pre class="chat-lightbox-code"><code>${escapeHtml(text)}</code></pre>
+    <//>
+  `
+}
+
 // --- Keeper v2 rich block helpers -------------------------------------------------
 
 function linkifyHtml(raw: string): string {
@@ -334,7 +448,7 @@ function ChatTableBlock({ head, rows }: ChatTableBlock) {
         <tr>
           ${head.map((h, i) => {
             const c = cell(h)
-            return html`<th key=${i} class=${c.num ? 'chat-block-cell-num' : ''}>${c.v}</th>`
+            return html`<th key=${i} class=${c.num ? 'chat-block-cell-num' : ''} dangerouslySetInnerHTML=${renderInlineHtml(String(c.v))} />`
           })}
         </tr>
       </thead>
@@ -343,7 +457,7 @@ function ChatTableBlock({ head, rows }: ChatTableBlock) {
           <tr key=${ri}>
             ${row.map((c0, ci) => {
               const c = cell(c0)
-              return html`<td key=${ci} class="${c.num ? 'chat-block-cell-num' : ''} ${c.muted ? 'chat-block-cell-muted' : ''}">${c.v}</td>`
+              return html`<td key=${ci} class="${c.num ? 'chat-block-cell-num' : ''} ${c.muted ? 'chat-block-cell-muted' : ''}" dangerouslySetInnerHTML=${renderInlineHtml(String(c.v))} />`
             })}
           </tr>
         `)}
@@ -352,11 +466,114 @@ function ChatTableBlock({ head, rows }: ChatTableBlock) {
   `
 }
 
-function ChatCodeBlock({ cap, html: htmlContent }: { cap?: string; html: string }) {
+function ChatPreviewModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string
+  onClose: () => void
+  children: ComponentChildren
+}) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
   return html`
-    <div class="chat-block-code" data-chat-block="code">
-      ${cap ? html`<div class="chat-block-code-cap">${cap}</div>` : null}
-      <pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed"><code dangerouslySetInnerHTML=${{ __html: sanitizeHtml(htmlContent) }} /></pre>
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+      onClick=${onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label=${title}
+    >
+      <div
+        class="relative max-h-[90vh] max-w-[90vw] overflow-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-[var(--shadow-raised)]"
+        onClick=${(e: Event) => e.stopPropagation()}
+      >
+        <div class="mb-3 flex items-center justify-between gap-4">
+          <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${title}</span>
+          <button
+            type="button"
+            class="rounded-[var(--r-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+            onClick=${onClose}
+            aria-label="닫기"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="chat-preview-modal-body">${children}</div>
+      </div>
+    </div>
+  `
+}
+
+function codeBlockText(htmlContent: string, source?: string): string {
+  if (source !== undefined) return source
+  if (typeof document !== 'undefined') {
+    const el = document.createElement('div')
+    el.innerHTML = htmlContent
+    return el.textContent ?? htmlContent
+  }
+  return htmlContent
+}
+
+async function copyCodeToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    showToast('코드를 복사했습니다', 'success')
+  } catch {
+    showToast('복사하지 못했습니다', 'error')
+  }
+}
+
+function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
+  const [highlighted, setHighlighted] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const codeId = useId()
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const shiki = await import('shiki')
+        const text = codeBlockText(htmlContent, source)
+        const next = await shiki.codeToHtml(text, {
+          lang: cap && cap.trim() ? cap.trim() : 'text',
+          theme: 'github-dark',
+        })
+        if (!cancelled) setHighlighted(next)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    }
+    void run()
+    return () => { cancelled = true }
+  }, [htmlContent, cap, source])
+
+  const plain = codeBlockText(htmlContent, source)
+
+  return html`
+    <div class="chat-block-code ${failed ? 'chat-block-code-fallback' : ''}" data-chat-block="code">
+      <div class="chat-block-code-hd">
+        ${cap ? html`<span class="chat-block-code-cap">${cap}</span>` : html`<span class="chat-block-code-cap" />`}
+        <button
+          type="button"
+          class="chat-block-code-copy"
+          aria-label="코드 복사"
+          title="복사"
+          onClick=${() => { void copyCodeToClipboard(plain) }}
+        >
+          복사
+        </button>
+      </div>
+      ${highlighted
+        ? html`<div class="m-0 overflow-x-auto p-0 text-2xs leading-relaxed" id=${codeId} dangerouslySetInnerHTML=${{ __html: highlighted }} />`
+        : html`<pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed" id=${codeId}><code dangerouslySetInnerHTML=${{ __html: htmlContent }} /></pre>`}
     </div>
   `
 }
@@ -385,8 +602,30 @@ function ChatShellBlock({ title, lines, exit, dur }: ChatShellBlock) {
   `
 }
 
-function ChatArtifactBlock({ kind, name, size, note }: { kind?: string; name: string; size?: string; note?: string }) {
+function ChatArtifactBlock({
+  kind,
+  name,
+  size,
+  note,
+  data,
+  mimeType,
+}: {
+  kind?: string
+  name: string
+  size?: string
+  note?: string
+  data?: string
+  mimeType?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const hasData = !!data
+  const previewable = isPreviewableArtifact(kind, data, mimeType)
   const icon = kind === 'md' ? '⌹' : kind === 'svg' ? '◫' : kind === 'json' ? '{ }' : '⎙'
+
+  const handleDownload = () => {
+    if (data) downloadArtifact(data, name, mimeType)
+  }
+
   return html`
     <div class="chat-block-artifact" data-chat-block="artifact">
       <span class="chat-block-artifact-icon">${icon}</span>
@@ -396,8 +635,35 @@ function ChatArtifactBlock({ kind, name, size, note }: { kind?: string; name: st
           ${(kind || 'file').toUpperCase()}${size ? ` · ${size}` : ''}${note ? ` · ${note}` : ''}
         </div>
       </div>
-      <button type="button" class="chat-block-artifact-btn" aria-label="열기">열기</button>
-      <button type="button" class="chat-block-artifact-btn" aria-label="다운로드">다운로드</button>
+      <button
+        type="button"
+        class="chat-block-artifact-btn"
+        disabled=${!previewable}
+        onClick=${() => previewable && setOpen(true)}
+        aria-label="열기"
+      >
+        열기
+      </button>
+      <button
+        type="button"
+        class="chat-block-artifact-btn"
+        disabled=${!hasData}
+        onClick=${handleDownload}
+        aria-label="다운로드"
+      >
+        다운로드
+      </button>
+      ${open && previewable
+        ? html`
+            <${ChatArtifactPreview}
+              kind=${kind}
+              name=${name}
+              data=${data}
+              mimeType=${mimeType}
+              onClose=${() => setOpen(false)}
+            />
+          `
+        : null}
     </div>
   `
 }
@@ -493,23 +759,88 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 }
 
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
+  const [open, setOpen] = useState(false)
   return html`
     <figure class="chat-block-media" data-chat-block="image">
-      <div class="chat-block-media-frame">
+      <div class="chat-block-media-frame ${src ? 'cursor-zoom-in' : ''}" onClick=${() => src && setOpen(true)}>
         ${src
           ? html`<img src=${src} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
           : html`<div class="chat-block-media-ph">${ph || '실행 화면'}</div>`}
       </div>
       ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${open && src
+        ? html`
+            <${ChatPreviewModal} title=${cap || '이미지'} onClose=${() => setOpen(false)}>
+              <img
+                src=${src}
+                alt=${cap || ''}
+                class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+              />
+            <//>
+          `
+        : null}
     </figure>
   `
 }
 
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
+  const [open, setOpen] = useState(false)
+  const clean = useMemo(() => sanitizeHtml(svg), [svg])
   return html`
     <figure class="chat-block-media" data-chat-block="svg">
-      <div class="chat-block-media-frame" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />
+      <div
+        class="chat-block-media-frame cursor-zoom-in"
+        onClick=${() => setOpen(true)}
+        dangerouslySetInnerHTML=${{ __html: clean }}
+      />
       ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+      ${open
+        ? html`
+            <${ChatPreviewModal} title=${cap || 'SVG'} onClose=${() => setOpen(false)}>
+              <div class="chat-preview-modal-body-svg" dangerouslySetInnerHTML=${{ __html: clean }} />
+            <//>
+          `
+        : null}
+    </figure>
+  `
+}
+
+function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
+  const id = useId()
+  const [svg, setSvg] = useState<string | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    const run = async () => {
+      try {
+        const mod = await import('mermaid')
+        const mermaid = mod.default
+        if (typeof mermaid.initialize === 'function') {
+          mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' })
+        }
+        const { svg: rendered } = await mermaid.render(`mermaid-${id}`, source)
+        if (active) setSvg(rendered)
+      } catch {
+        if (active) setError(true)
+      }
+    }
+    void run()
+    return () => { active = false }
+  }, [source, id])
+
+  if (error) {
+    return html`<${ChatCodeBlock} cap="mermaid" html=${escapeHtml(source)} source=${source} />`
+  }
+
+  return html`
+    <figure class="chat-block-media" data-chat-block="mermaid">
+      <div class="chat-block-mermaid">
+        ${svg
+          ? html`<div dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
+          : html`<div class="chat-block-media-ph">다이어그램 렌더링 중…</div>`}
+      </div>
+      ${caption ? html`<figcaption class="chat-block-media-cap">${caption}</figcaption>` : null}
     </figure>
   `
 }
@@ -679,13 +1010,14 @@ function ChatBlock({ block }: { block: ChatBlock }) {
     case 'ul': return html`<${ChatListBlock} items=${block.items} />`
     case 'callout': return html`<${ChatCalloutBlock} severity=${block.severity} html=${block.html} />`
     case 'table': return html`<${ChatTableBlock} head=${block.head} rows=${block.rows} />`
-    case 'code': return html`<${ChatCodeBlock} cap=${block.cap} html=${block.html} />`
+    case 'code': return html`<${ChatCodeBlock} cap=${block.cap} html=${block.html} source=${block.source} />`
     case 'shell': return html`<${ChatShellBlock} title=${block.title} lines=${block.lines} exit=${block.exit} dur=${block.dur} />`
-    case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} />`
+    case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} data=${block.data} mimeType=${block.mimeType} />`
     case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
     case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} />`
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
+    case 'mermaid': return html`<${ChatMermaidBlock} source=${block.source} caption=${block.caption} />`
     case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
@@ -717,50 +1049,90 @@ function LiveMessagePlaceholder({ label }: { label: string }) {
   `
 }
 
-function renderAttachmentCard(attachment: KeeperConversationAttachment) {
-  const canLink = isSafeAttachmentHref(attachment)
+function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachment }) {
+  const [open, setOpen] = useState(false)
+  const canDownload = isSafeAttachmentHref(attachment)
   const meta = attachmentMeta(attachment)
-  const content = isRenderableImageAttachment(attachment)
-    ? html`
-        <img
-          src=${attachment.data}
-          alt=${attachment.name}
-          class="max-h-52 w-full rounded-[var(--r-1)] object-contain"
-          loading="lazy"
-        />
-      `
-    : html`
-        <div class="flex min-h-18 items-center gap-3 px-3 py-3">
-          <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">
-            FILE
-          </span>
-          <div class="min-w-0">
-            <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
-            <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
-          </div>
-        </div>
-      `
+  const isImage = isRenderableImageAttachment(attachment)
 
   return html`
-    <div class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-      ${canLink
+    <div
+      class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      data-chat-attachment-card=${attachment.id}
+    >
+      ${isImage
         ? html`
-            <a
-              href=${attachment.data}
-              download=${attachment.name}
-              class="block hover:bg-[var(--color-bg-hover)]"
-              aria-label=${`${attachment.name} 내려받기`}
+            <button
+              type="button"
+              class="block w-full text-left hover:bg-[var(--color-bg-hover)]"
+              onClick=${() => setOpen(true)}
+              aria-label=${`${attachment.name} 미리보기`}
             >
-              ${content}
-            </a>
+              <img
+                src=${attachment.data}
+                alt=${attachment.name}
+                class="max-h-52 w-full rounded-[var(--r-1)] object-contain"
+                loading="lazy"
+              />
+            </button>
           `
-        : content}
-      ${isRenderableImageAttachment(attachment)
+        : canDownload
+          ? html`
+              <a
+                href=${attachment.data}
+                download=${attachment.name}
+                class="block hover:bg-[var(--color-bg-hover)]"
+                aria-label=${`${attachment.name} 날려받기`}
+              >
+                <div class="flex min-h-18 items-center gap-3 px-3 py-3">
+                  <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">
+                    FILE
+                  </span>
+                  <div class="min-w-0">
+                    <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+                    <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+                  </div>
+                </div>
+              </a>
+            `
+          : html`
+              <div class="flex min-h-18 items-center gap-3 px-3 py-3">
+                <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">
+                  FILE
+                </span>
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+                  <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+                </div>
+              </div>
+            `}
+      <div class="flex items-center justify-between gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
+        <div class="min-w-0">
+          <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+          <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+        </div>
+        ${canDownload
+          ? html`
+              <a
+                href=${attachment.data}
+                download=${attachment.name}
+                class="chat-block-artifact-btn shrink-0"
+                aria-label=${`${attachment.name} 날려받기`}
+              >
+                ↓
+              </a>
+            `
+          : null}
+      </div>
+      ${open && isImage
         ? html`
-            <div class="border-t border-[var(--color-border-default)] px-3 py-2">
-              <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
-              <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
-            </div>
+            <${ChatPreviewModal} title=${attachment.name} onClose=${() => setOpen(false)}>
+              <img
+                src=${attachment.data}
+                alt=${attachment.name}
+                class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+              />
+            <//>
           `
         : null}
     </div>
@@ -780,22 +1152,27 @@ function formatAudioDuration(seconds?: number | null): string {
 function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
   const duration = formatAudioDuration(clip.durationSec)
   return html`
-    <div
-      class="flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5"
-      data-chat-audio-clip
-    >
+    <div class="chat-audio-clip" data-chat-audio-clip>
+      <div class="chat-audio-wave" aria-hidden="true">
+        ${Array.from({ length: 24 }, (_, i) => html`
+          <span
+            key=${i}
+            class="chat-audio-bar"
+            style=${{ height: `${6 + (i % 7) * 3}px` }}
+          />
+        `)}
+      </div>
       <audio
         controls
         preload="none"
         src=${clip.audioUrl ?? `/api/v1/voice/audio/${encodeURIComponent(clip.token)}`}
-        class="h-8 max-w-[16rem]"
         aria-label=${clip.messageText || '음성 메시지'}
       />
       ${duration
-        ? html`<span class="text-xs tabular-nums text-[var(--color-fg-secondary)]">${duration}</span>`
+        ? html`<span class="chat-audio-dur">${duration}</span>`
         : null}
       ${clip.deviceId
-        ? html`<span class="text-xs text-[var(--color-fg-secondary)]" title=${`device: ${clip.deviceId}`}>🔊</span>`
+        ? html`<span class="chat-audio-device" title=${`device: ${clip.deviceId}`}>🔊</span>`
         : null}
     </div>
   `
@@ -819,8 +1196,15 @@ function ChatMessageBubble({
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
+  const parsedBlocks = useMemo(() => {
+    if (hasBlocks) return null
+    if (entry.role !== 'assistant' && entry.role !== 'system') return null
+    return parseMarkdownToBlocks(messageText)
+  }, [hasBlocks, entry.role, messageText])
+  const effectiveBlocks = entry.blocks && entry.blocks.length > 0 ? entry.blocks : (parsedBlocks ?? [])
+  const hasEffectiveBlocks = effectiveBlocks.length > 0
   const collapseThreshold = 1200
-  const isCollapsible = !hasBlocks && messageLength > collapseThreshold
+  const isCollapsible = !hasEffectiveBlocks && messageLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -980,8 +1364,8 @@ function ChatMessageBubble({
       ${liveLabel
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
-            ${hasBlocks
-              ? html`<${ChatBlocks} blocks=${entry.blocks!} />`
+            ${hasEffectiveBlocks
+              ? html`<${ChatBlocks} blocks=${effectiveBlocks} />`
               : html`
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
@@ -1011,7 +1395,7 @@ function ChatMessageBubble({
       ${attachments.length > 0
         ? html`
             <div class="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2">
-              ${attachments.map(attachment => renderAttachmentCard(attachment))}
+              ${attachments.map(attachment => html`<${AttachmentCard} key=${attachment.id} attachment=${attachment} />`)}
             </div>
           `
         : null}

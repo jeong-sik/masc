@@ -116,3 +116,105 @@
 .v2-sidecar-startup-watch [data-action-button]:not(:disabled) {
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
+
+/* ── StyleSeed theme overrides ───────────────────────────────────────────────
+   When data-theme="styleseed" is active, map v2 connector chrome to
+   StyleSeed semantic tokens. SurfaceCard already carries .ss-card, so
+   this file only needs to bridge the v2-scoped panels and strips. */
+
+[data-theme="styleseed"] .v2-connector-status,
+[data-theme="styleseed"] .v2-connectors-surface {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  /* Bridge v2 token ladder to StyleSeed values inside this surface. */
+  --color-fg-primary: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-tertiary);
+  --color-fg-disabled: var(--text-disabled);
+  --color-border-default: var(--border);
+  --color-border-strong: var(--border);
+  --color-bg-page: var(--surface-page);
+  --color-bg-surface: var(--card);
+  --color-bg-elevated: var(--surface-subtle);
+  --color-bg-hover: var(--surface-muted);
+  --color-status-ok: var(--success);
+  --color-status-warn: var(--warning);
+  --color-status-err: var(--destructive);
+  --color-accent-fg: var(--brand);
+  --ok-10: color-mix(in srgb, var(--success) 10%, transparent);
+  --ok-20: color-mix(in srgb, var(--success) 20%, transparent);
+  --ok-border: color-mix(in srgb, var(--success) 35%, transparent);
+  --warn-10: color-mix(in srgb, var(--warning) 10%, transparent);
+  --warn-20: color-mix(in srgb, var(--warning) 20%, transparent);
+  --bad-10: color-mix(in srgb, var(--destructive) 10%, transparent);
+  --bad-soft: color-mix(in srgb, var(--destructive) 12%, transparent);
+  --err-border: color-mix(in srgb, var(--destructive) 40%, transparent);
+  --bad-light: var(--destructive);
+}
+
+[data-theme="styleseed"] .v2-connector-status [data-surface-card],
+[data-theme="styleseed"] .v2-connector-overview-strip [data-surface-card],
+[data-theme="styleseed"] .v2-connector-onboarding [data-surface-card],
+[data-theme="styleseed"] .v2-connector-keeper-matrix [data-surface-card],
+[data-theme="styleseed"] .v2-connector-paths-strip [data-surface-card],
+[data-theme="styleseed"] .v2-connector-quick-bind [data-surface-card],
+[data-theme="styleseed"] .v2-connector-flow [data-surface-card],
+[data-theme="styleseed"] .v2-connector-config-form [data-surface-card],
+[data-theme="styleseed"] .v2-sidecar-startup-watch [data-surface-card] {
+  background-color: var(--card);
+  border-color: var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="styleseed"] .v2-connector-overview-strip {
+  background-color: var(--surface-page);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-connector-overview-strip [data-overview-tile] [data-surface-card] {
+  background-color: var(--card);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-connector-overview-strip [data-overview-tile] [data-surface-card]:hover {
+  border-color: var(--border);
+  background-color: var(--surface-subtle);
+}
+
+[data-theme="styleseed"] .v2-connector-readiness-rail [data-rail-pill]:not(:disabled):hover {
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-connector-quick-bind [data-surface-card] {
+  background-color: var(--card);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-connector-config-form [data-surface-card] {
+  background-color: var(--card);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-connector-flow [data-surface-card] {
+  background-color: var(--surface-subtle);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-sidecar-startup-watch [data-surface-card] {
+  background-color: var(--warning);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-connector-status [data-action-button]:not(:disabled):hover,
+[data-theme="styleseed"] .v2-connector-overview-strip [data-action-button]:not(:disabled):hover,
+[data-theme="styleseed"] .v2-connector-onboarding [data-action-button]:not(:disabled):hover,
+[data-theme="styleseed"] .v2-connector-keeper-matrix [data-action-button]:not(:disabled):hover,
+[data-theme="styleseed"] .v2-connector-paths-strip [data-action-button]:not(:disabled):hover,
+[data-theme="styleseed"] .v2-connector-quick-bind [data-action-button]:not(:disabled):hover,
+[data-theme="styleseed"] .v2-connector-flow [data-action-button]:not(:disabled):hover,
+[data-theme="styleseed"] .v2-connector-config-form [data-action-button]:not(:disabled):hover,
+[data-theme="styleseed"] .v2-sidecar-startup-watch [data-action-button]:not(:disabled):hover {
+  border-color: var(--brand);
+  background-color: var(--brand-tint);
+  color: var(--brand);
+}

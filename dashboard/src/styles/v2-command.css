@@ -105,3 +105,108 @@
 .v2-command-surface .v2-command-composer:hover {
   border-color: var(--color-border-strong);
 }
+
+/* ── StyleSeed theme overrides ───────────────────────────────────────────────
+   When data-theme="styleseed" is active, map v2 command chrome to
+   StyleSeed semantic tokens. Lab inspector reuses .v2-command-* classes. */
+
+[data-theme="styleseed"] .v2-command-surface {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  /* Bridge v2 token ladder to StyleSeed values inside this surface. */
+  --color-fg-primary: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-tertiary);
+  --color-fg-disabled: var(--text-disabled);
+  --color-border-default: var(--border);
+  --color-border-strong: var(--border);
+  --color-bg-page: var(--surface-page);
+  --color-bg-surface: var(--card);
+  --color-bg-elevated: var(--surface-subtle);
+  --color-bg-hover: var(--surface-muted);
+  --color-accent-fg: var(--brand);
+}
+
+[data-theme="styleseed"] .v2-command-panel,
+[data-theme="styleseed"] .v2-command-card,
+[data-theme="styleseed"] .v2-command-surface [data-surface-card] {
+  background-color: var(--card);
+  border-color: var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="styleseed"] .v2-command-panel:hover,
+[data-theme="styleseed"] .v2-command-card:hover,
+[data-theme="styleseed"] .v2-command-surface [data-surface-card]:hover {
+  border-color: var(--border);
+  background-color: var(--surface-subtle);
+}
+
+[data-theme="styleseed"] .v2-command-row,
+[data-theme="styleseed"] .v2-command-table tbody tr,
+[data-theme="styleseed"] .v2-command-panel table tbody tr,
+[data-theme="styleseed"] .v2-command-detail table tbody tr {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-command-row:hover,
+[data-theme="styleseed"] .v2-command-table tbody tr:hover,
+[data-theme="styleseed"] .v2-command-panel table tbody tr:hover,
+[data-theme="styleseed"] .v2-command-detail table tbody tr:hover {
+  background-color: var(--surface-subtle);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-command-action:not(:disabled),
+[data-theme="styleseed"] .v2-command-panel .v2-command-action:not(:disabled),
+[data-theme="styleseed"] .v2-command-surface [data-action-button]:not(:disabled) {
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+[data-theme="styleseed"] .v2-command-action:not(:disabled):hover,
+[data-theme="styleseed"] .v2-command-surface [data-action-button]:not(:disabled):hover {
+  border-color: var(--brand);
+  background-color: var(--brand-tint);
+  color: var(--brand);
+}
+
+[data-theme="styleseed"] .v2-command-table,
+[data-theme="styleseed"] .v2-command-panel table,
+[data-theme="styleseed"] .v2-command-detail table,
+[data-theme="styleseed"] .v2-command-table thead,
+[data-theme="styleseed"] .v2-command-panel table thead,
+[data-theme="styleseed"] .v2-command-detail table thead {
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-command-table th,
+[data-theme="styleseed"] .v2-command-panel table th,
+[data-theme="styleseed"] .v2-command-detail table th {
+  color: var(--text-secondary);
+}
+
+[data-theme="styleseed"] .v2-command-table td,
+[data-theme="styleseed"] .v2-command-panel table td,
+[data-theme="styleseed"] .v2-command-detail table td {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+[data-theme="styleseed"] .v2-command-detail {
+  background-color: var(--card);
+  border-color: var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="styleseed"] .v2-command-surface .v2-command-composer {
+  background-color: var(--card);
+  border-color: var(--border);
+  box-shadow: var(--shadow-card);
+}
+
+[data-theme="styleseed"] .v2-command-surface .v2-command-composer:hover {
+  border-color: var(--border);
+  background-color: var(--surface-subtle);
+}

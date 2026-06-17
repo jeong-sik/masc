@@ -27,9 +27,12 @@ val decide_and_record
   -> generation:int
   -> keeper_turn_id:int
   -> append_phase_gate_decision:
-       (Keeper_unified_turn_phase_plan.turn_plan -> unit)
+       (Keeper_unified_turn_phase_plan.turn_plan
+        -> Keeper_unified_turn_types.turn_state
+        -> Keeper_unified_turn_types.turn_state)
+  -> turn_state:Keeper_unified_turn_types.turn_state
   -> registry_base_path:string
-  -> phase_gate_outcome
+  -> phase_gate_outcome * Keeper_unified_turn_types.turn_state
 (** Run the phase gate logic, including all FSM transitions,
     observability records, and runtime-manifest decisions.
 
@@ -49,6 +52,11 @@ val decide_and_record
     @param generation Current generation counter.
     @param keeper_turn_id Turn identifier assigned at function entry.
     @param append_phase_gate_decision Callback closing over the
-      caller's [runtime_manifest_context]; called once per outcome.
+      caller's [runtime_manifest_context]; takes the current
+      [turn_state] and returns the updated state with the manifest
+      decision appended. Called once per outcome.
+    @param turn_state Immutable turn-state accumulator at phase-gate
+      entry. The returned state reflects any manifest decision appended
+      by the gate.
     @param registry_base_path Pre-resolved [config.base_path] reused
       from the caller's setup. *)

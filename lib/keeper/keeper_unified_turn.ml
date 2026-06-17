@@ -37,10 +37,9 @@ let run_keeper_cycle
      EmptyQueueSleep=scheduled_autonomous else, TurnComplete=run_turn body,
      TaskRejected=NoTaskOrphan invariant (every claim reaches Ok/Error). *)
   (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete bracket — the
-     ref is set to true on the [Ok updated_meta] return at the end of
-     this function; an [Error _] branch leaves it false and skips the
-     wrap, mirroring the spec's "completed-on-success" semantics. *)
-  let cycle_completed = ref false in
+     cycle_completed flag is set to true on the [Ok updated_meta] return at
+     the end of this function; an [Error _] branch leaves it false and
+     skips the wrap, mirroring the spec's "completed-on-success" semantics. *)
   (* 0. Phase gate + state-aware runtime routing.
      The gate owns turn executability; select_runtime remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
@@ -62,54 +61,73 @@ let run_keeper_cycle
     }
   in
   let turn_start = Mtime_clock.now () in
-  let seq_ref = ref 0 in
-  let append_manifest ?status ?decision ?runtime_id ?clock_refs ~site event =
-    let decision =
+  let initial_turn_state : Keeper_unified_turn_types.turn_state =
+    { cycle_completed = false
+    ; manifest_seq = 0
+    ; post_commit_failure_reason = None
+    ; paused_meta_override = None
+    ; current_turn_blocker_info = None
+    ; last_execution = None
+    ; last_provider_timeout_budget = None
+    ; degraded_retry_info = None
+    ; runtime_rotation_attempts = []
+    ; failure_reason = None
+    ; retry_phase_started_at = None
+    }
+  in
+  let append_manifest (turn_state : Keeper_unified_turn_execution.turn_state)
+        ?status ?decision ?runtime_id ?clock_refs ~site event =
+    let decision, manifest_seq =
       let decision =
         match decision with
         | Some value -> value
         | None -> `Assoc []
       in
-      let clock_refs =
-        match clock_refs with
-        | Some value -> value
-        | None ->
-          seq_ref := !seq_ref + 1;
-          let elapsed_ms =
-            let ns =
-              Mtime.Span.to_uint64_ns
-                (Mtime.span turn_start (Mtime_clock.now ()))
-            in
-            Some (Int64.to_int (Int64.div ns 1_000_000L))
+      match clock_refs with
+      | Some value ->
+        ( Some (Keeper_runtime_manifest.with_clock_refs ~clock_refs:value decision)
+        , turn_state.manifest_seq )
+      | None ->
+        let manifest_seq = turn_state.manifest_seq + 1 in
+        let elapsed_ms =
+          let ns =
+            Mtime.Span.to_uint64_ns
+              (Mtime.span turn_start (Mtime_clock.now ()))
           in
+          Some (Int64.to_int (Int64.div ns 1_000_000L))
+        in
+        let clock_refs =
           Keeper_runtime_manifest.clock_refs_for_context
             runtime_manifest_context ~event ?elapsed_ms
-            ~logical_seq:!seq_ref ()
-      in
-      Some
-        (Keeper_runtime_manifest.with_clock_refs
-           ~clock_refs
-           decision)
+            ~logical_seq:manifest_seq ()
+        in
+        Some (Keeper_runtime_manifest.with_clock_refs ~clock_refs decision), manifest_seq
     in
     Keeper_runtime_manifest.make_for_context runtime_manifest_context ~event
       ?runtime_id ?status ?decision ()
-    |> Keeper_runtime_manifest.append_best_effort ~site config
+    |> Keeper_runtime_manifest.append_best_effort ~site config;
+    { turn_state with manifest_seq }
   in
-  let append_phase_gate_decision turn_plan =
-    append_manifest ~site:"phase_gate_decided"
+  let append_phase_gate_decision
+        (turn_state : Keeper_unified_turn_execution.turn_state)
+        turn_plan
+    =
+    append_manifest turn_state ~site:"phase_gate_decided"
       ~status:(turn_plan_manifest_status turn_plan)
       ~decision:(turn_plan_manifest_decision turn_plan)
       Keeper_runtime_manifest.Phase_gate_decided
   in
-  append_manifest ~site:"turn_started"
-    ~decision:
-      (`Assoc
-        [
-          ( "channel",
-            `String (Keeper_world_observation.channel_to_string channel) );
-          ("usage_total_turns", `Int meta.runtime.usage.total_turns);
-        ])
-    Keeper_runtime_manifest.Turn_started;
+  let turn_state =
+    append_manifest initial_turn_state ~site:"turn_started"
+      ~decision:
+        (`Assoc
+          [
+            ( "channel",
+              `String (Keeper_world_observation.channel_to_string channel) );
+            ("usage_total_turns", `Int meta.runtime.usage.total_turns);
+          ])
+      Keeper_runtime_manifest.Turn_started
+  in
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.name
     ~turn_id:keeper_turn_id
@@ -131,20 +149,25 @@ let run_keeper_cycle
      State-aware runtime routing (TLA+ KeeperCoreTriad.SelectRuntime)
      resumes inside [main_path]; at that point [phase_opt] is whatever
      the registry returned for an executable phase. *)
-  let main_path phase_opt =
+  let main_path (turn_state : Keeper_unified_turn_execution.turn_state) phase_opt
+    : (keeper_meta, Agent_sdk.Error.sdk_error) result
+      * Keeper_unified_turn_execution.turn_state
+    =
       let _ = phase_opt in
       let effective_runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
-      append_manifest
-        ~site:"runtime_routed"
-        ~runtime_id:effective_runtime_id
-        (* RFC-0132-EXEMPT: internal observability — manifest decision reason label, not a redacted public surface *)
-        ~decision:(`Assoc [ "reason", `String "runtime" ])
-        Keeper_runtime_manifest.Runtime_routed;
+      let turn_state =
+        append_manifest turn_state
+          ~site:"runtime_routed"
+          ~runtime_id:effective_runtime_id
+          (* RFC-0132-EXEMPT: internal observability — manifest decision reason label, not a redacted public surface *)
+          ~decision:(`Assoc [ "reason", `String "runtime" ])
+          Keeper_runtime_manifest.Runtime_routed
+      in
       (* Concrete runtime health/capacity is owned by OAS/provider adapters.
          Keeper routing no longer rewrites runtimes from provider cooldown or
          process-queue probes. *)
       (match None with
-       | Some meta_after_skip -> Ok meta_after_skip
+       | Some meta_after_skip -> Ok meta_after_skip, turn_state
        | None ->
          (* RFC-0136 PR-3: pre-dispatch validation extracted to
             [Keeper_unified_turn_pre_dispatch].  profile_defaults stays
@@ -198,7 +221,7 @@ let run_keeper_cycle
               ~turn_id:keeper_turn_id
               ~prev:Keeper_turn_fsm.Runtime_routing
               (Keeper_turn_fsm.Failed failure_reason);
-            Error err
+            Error err, turn_state
           | Ok initial_execution ->
             record_pre_dispatch_terminal_observation
               ~config
@@ -229,14 +252,15 @@ let run_keeper_cycle
                  ()
              with
              | Keeper_turn_livelock.Blocked reason ->
-               Keeper_unified_turn_livelock_block.handle
-                 ~config
-                 ~meta
-                 ~generation
-                 ~keeper_turn_id
-                 ~turn_id
-                 ~initial_execution
-                 ~reason
+               ( Keeper_unified_turn_livelock_block.handle
+                   ~config
+                   ~meta
+                   ~generation
+                   ~keeper_turn_id
+                   ~turn_id
+                   ~initial_execution
+                   ~reason
+               , turn_state )
              | Keeper_turn_livelock.Started _ ->
                Keeper_turn_fsm.emit_transition
                  ~keeper_name:meta.name
@@ -314,9 +338,9 @@ let run_keeper_cycle
          Uses the OAS Event_bus (ToolCalled + ToolCompleted) rather than
          MASC-side observers. The per-turn subscription is scoped by
          [filter_agent meta.name], so no cross-keeper contamination. *)
-               let post_commit_failure_reason = ref None in
-               let paused_meta_override = ref None in
-               let current_turn_blocker_info = ref None in
+               let turn_state =
+                 { turn_state with last_execution = Some initial_execution }
+               in
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create ~keeper_name:meta.name ()
                in
@@ -382,33 +406,7 @@ let run_keeper_cycle
                     meta.name
                     Keeper_registry.Decision_active_guard_ok
                 | _ -> ());
-               let last_execution = ref initial_execution in
-               let last_provider_timeout_budget : provider_timeout_budget option ref =
-                 ref None
-               in
-               let degraded_retry_info = ref None in
-               let runtime_rotation_attempts = ref [] in
-               let record_runtime_rotation_attempt
-                     ?productive_phase_elapsed_ms
-                     ?retry_phase_elapsed_ms
-                     ~(from_runtime : string)
-                     ~(retry : EC.degraded_retry)
-                     ~(outcome : Keeper_execution_receipt.runtime_rotation_outcome)
-                     (err : Agent_sdk.Error.sdk_error)
-                 =
-                 let attempt : Keeper_execution_receipt.runtime_rotation_attempt =
-                   Keeper_unified_turn_rotation_attempt.build
-                     ~recorded_at:(now_iso ())
-                     ?productive_phase_elapsed_ms
-                     ?retry_phase_elapsed_ms
-                     ~from_runtime
-                     ~retry
-                     ~outcome
-                     err
-                 in
-                 runtime_rotation_attempts := attempt :: !runtime_rotation_attempts
-               in
-               let run_result, latency_ms =
+               let (run_result, turn_state), latency_ms =
                  (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps cleanup
            exceptions in [Fun.Finally_raised], losing the outer
            [Eio.Cancel.Cancelled]. Cleanup here swallows Cancelled (the
@@ -445,14 +443,13 @@ let run_keeper_cycle
                  match
                    Keeper_context_runtime.timed (fun () ->
                      match Eio_context.get_clock () with
-                     | Error msg -> Error (Agent_sdk.Error.Internal msg)
+                     | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
                        let { Keeper_unified_turn_retry_setup.timeout_sec
                            ; turn_started_at
                            ; turn_deadline
                            ; remaining_turn_budget_s
-                           ; retry_phase_started_at
                            ; elapsed_ms
                            ; current_turn_phase_elapsed_ms
                            ; keeper_profile
@@ -466,51 +463,46 @@ let run_keeper_cycle
                            ~channel
                            ~turn_affordances
                        in
-                        Keeper_unified_turn_execution.run
-                          { attempt = 1
-                          ; base_dir
-                          ; build_turn_prompt
-                          ; runtime_rotation_attempts
-                          ; channel
-                          ; cleanup
-                          ; committed_mutating_tools_snapshot
-                          ; config
-                          ; current_turn_blocker_info
-                          ; degraded_retry_info
-                          ; drain_turn_event_bus
-                          ; event_bus_integrity_error_snapshot
-                          ; failure_reason = ref None
-                          ; generation
-                          ; keeper_turn_id
-                          ; last_execution
-                          ; last_provider_timeout_budget
-                          ; max_cost_usd
-                          ; meta
-                          ; turn_ctx_cell
-                          ; observation
-                          ; post_commit_failure_reason
-                          ; profile_defaults
-                          ; prompt_timeout_estimate_tokens
-                          ; record_runtime_rotation_attempt
-                          ; shared_context
-                          ; trajectory_acc
-                          ; turn_affordances
-                          ; turn_id = keeper_turn_id
-                          }
-                          ~initial_execution
-                          ~timeout_sec
-                          ~remaining_turn_budget_s
-                          ~retry_phase_started_at
-                          ~current_turn_phase_elapsed_ms
-                          ~keeper_profile
-                          ~max_turns
-                          ~max_idle_turns
-                          ~user_message
-                          ~registry_base_path
-                          ~degraded_retry_slot_phase_budget_sec
-                          ~record_streaming_cancelled_observation
-                          ~runtime_id_of_meta
-                          ~start_background_turn_event_bus_drain
+                       let run_result, turn_state =
+                         Keeper_unified_turn_execution.run
+                           { attempt = 1
+                           ; base_dir
+                           ; build_turn_prompt
+                           ; channel
+                           ; cleanup
+                           ; committed_mutating_tools_snapshot
+                           ; config
+                           ; drain_turn_event_bus
+                           ; event_bus_integrity_error_snapshot
+                           ; generation
+                           ; keeper_turn_id
+                           ; max_cost_usd
+                           ; meta
+                           ; turn_ctx_cell
+                           ; observation
+                           ; profile_defaults
+                           ; prompt_timeout_estimate_tokens
+                           ; shared_context
+                           ; trajectory_acc
+                           ; turn_affordances
+                           ; turn_id = keeper_turn_id
+                           }
+                           ~initial_execution
+                           ~turn_state
+                           ~timeout_sec
+                           ~remaining_turn_budget_s
+                           ~current_turn_phase_elapsed_ms
+                           ~keeper_profile
+                           ~max_turns
+                           ~max_idle_turns
+                           ~user_message
+                           ~registry_base_path
+                           ~degraded_retry_slot_phase_budget_sec
+                           ~record_streaming_cancelled_observation
+                           ~runtime_id_of_meta
+                           ~start_background_turn_event_bus_drain
+                       in
+                       run_result, turn_state
                     )
                  with
                  | result ->
@@ -541,25 +533,27 @@ let run_keeper_cycle
                    then "observed"
                    else "empty"
                in
-               append_manifest ~site:"event_bus_correlated"
-                 ~status:event_bus_manifest_status
-                 ~clock_refs:
-                   (Keeper_runtime_manifest.clock_refs_for_context
-                      runtime_manifest_context
-                      ~event:Keeper_runtime_manifest.Event_bus_correlated
-                      ?event_bus_correlation_id:turn_event_bus.correlation_id
-                      ?event_bus_run_id:turn_event_bus.run_id
-                      ?caused_by:turn_event_bus.caused_by ())
-                 ~decision:
-                   (Keeper_runtime_manifest.with_payload_role ~payload_role:Operator_evidence
-                      (turn_event_bus_manifest_decision turn_event_bus))
-                 Keeper_runtime_manifest.Event_bus_correlated;
+               let turn_state =
+                 append_manifest turn_state ~site:"event_bus_correlated"
+                   ~status:event_bus_manifest_status
+                   ~clock_refs:
+                     (Keeper_runtime_manifest.clock_refs_for_context
+                        runtime_manifest_context
+                        ~event:Keeper_runtime_manifest.Event_bus_correlated
+                        ?event_bus_correlation_id:turn_event_bus.correlation_id
+                        ?event_bus_run_id:turn_event_bus.run_id
+                        ?caused_by:turn_event_bus.caused_by ())
+                   ~decision:
+                     (Keeper_runtime_manifest.with_payload_role ~payload_role:Operator_evidence
+                        (turn_event_bus_manifest_decision turn_event_bus))
+                   Keeper_runtime_manifest.Event_bus_correlated
+               in
                let run_result =
                  match event_bus_integrity_error_snapshot () with
                  | Some integrity_err -> Error integrity_err
                  | None -> run_result
                in
-               let degraded_retry_info = !degraded_retry_info in
+               let degraded_retry_info = turn_state.degraded_retry_info in
                let degraded_retry_applied = Option.is_some degraded_retry_info in
                let degraded_retry_runtime =
                  Option.map
@@ -586,11 +580,13 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "input_required" ]
                     ();
-                  cycle_completed := true;
-                  post_turn_complete_task ~cycle_completed;
-                  Ok meta
+                  let turn_state =
+                    { turn_state with cycle_completed = true }
+                  in
+                  post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
+                  Ok meta, turn_state
                 | Error err ->
-                  let final_execution = !last_execution in
+                  let final_execution = Option.get turn_state.last_execution in
                   finalize_trajectory_acc
                     ~config
                     ~keeper_name:meta.name
@@ -702,7 +698,7 @@ let run_keeper_cycle
                       ~reason:e_str
                   in
                   let failure_meta_base =
-                    match !paused_meta_override with
+                    match turn_state.paused_meta_override with
                     | Some paused_meta -> paused_meta
                     | None -> meta
                   in
@@ -734,7 +730,7 @@ let run_keeper_cycle
                                { kind = Keeper_registry.Post_commit_failure
                                ; detail = e_str
                                })
-                          !post_commit_failure_reason
+                          turn_state.post_commit_failure_reason
                       in
                       Keeper_registry.set_failure_reason
                         ~base_path:config.base_path
@@ -866,7 +862,7 @@ dominant source of the observed CAS race exhaustion after
                              { kind = Keeper_registry.Post_commit_failure
                              ; detail = e_str
                              })
-                        !post_commit_failure_reason
+                        turn_state.post_commit_failure_reason
                     in
                     Keeper_registry.set_failure_reason
                       ~base_path:config.base_path
@@ -897,9 +893,9 @@ dominant source of the observed CAS race exhaustion after
                     Keeper_metrics.(to_string TurnCompleted)
                     ~labels:[("keeper", meta.name)]
                     ();
-                  Error err
+                  Error err, turn_state
                 | Ok result ->
-                  let final_execution = !last_execution in
+                  let final_execution = Option.get turn_state.last_execution in
                   finalize_trajectory_acc
                     ~config
                     ~keeper_name:meta.name
@@ -918,27 +914,35 @@ dominant source of the observed CAS race exhaustion after
                       ~degraded_retry_applied
                       ~degraded_retry_runtime
                       ~fallback_reason
-                      ~last_provider_timeout_budget:!last_provider_timeout_budget
-                      ~current_turn_blocker_info:!current_turn_blocker_info
+                      ~last_provider_timeout_budget:turn_state.last_provider_timeout_budget
+                      ~current_turn_blocker_info:turn_state.current_turn_blocker_info
                       ~keeper_turn_id
                       result
                   in
                   (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)
-                  cycle_completed := true;
-                  post_turn_complete_task ~cycle_completed;
-                  Ok updated_meta))))
+                  let turn_state =
+                    { turn_state with cycle_completed = true }
+                  in
+                  post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
+                  Ok updated_meta, turn_state))))
   in
-  match
+  let append_phase_gate_decision_for_gate turn_plan turn_state =
+    append_phase_gate_decision turn_state turn_plan
+  in
+  let phase_gate_outcome, turn_state =
     Keeper_unified_turn_phase_gate.decide_and_record
       ~config
       ~meta
       ~generation
       ~keeper_turn_id
-      ~append_phase_gate_decision
+      ~append_phase_gate_decision:append_phase_gate_decision_for_gate
+      ~turn_state
       ~registry_base_path
-  with
+  in
+  match phase_gate_outcome with
   | Keeper_unified_turn_phase_gate.Phase_gate_terminal_ok meta -> Ok meta
   | Keeper_unified_turn_phase_gate.Phase_gate_terminal_error err -> Error err
   | Keeper_unified_turn_phase_gate.Phase_gate_proceed phase_opt ->
-    main_path phase_opt
+    let result, _turn_state = main_path turn_state phase_opt in
+    result
 ;;

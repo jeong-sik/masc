@@ -1,11 +1,6 @@
 (** Core entry/provenance helpers for {!Env_config_snapshot}. *)
 
-let mask_sensitive value =
-  if String.length value <= 4
-  then "***"
-  else (
-    let visible = min 4 (String.length value) in
-    String.sub value 0 visible ^ "***")
+let mask_sensitive _value = "[REDACTED]"
 
 let is_sensitive_name name =
   let lower = String.lowercase_ascii name in

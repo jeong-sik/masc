@@ -101,8 +101,8 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
 
 (* 심판 결과를 board meta_json 원소로. *)
 let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.Safe.t =
-  (* status는 형제 panel_meta와 같은 동사형(판이 *무엇을 했는가*): 종합 산출 =
-     "synthesized", 실패 = "failed". tool-result ok-봉투("ok")가 아니라 board
+  (* status는 형제 panel_meta와 같은 동사형(판이 무엇을 했는가): 종합 산출이면
+     "synthesized", 실패면 "failed". tool-result ok-봉투("ok")가 아니라 board
      증거의 judge 서술 필드다 (no-inline-ok-envelope 가드 대상과 별개 개념). *)
   match judge with
   | Ok j ->

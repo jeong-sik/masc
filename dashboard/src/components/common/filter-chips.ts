@@ -33,14 +33,14 @@ export function FilterChips<T extends string>({
 }: FilterChipsProps<T>) {
   const activeKey = active?.value ?? value
   const chipClass = size === 'md'
-    ? 'inline-flex min-h-9 items-center gap-1.5 rounded-[var(--r-1)] border px-3 py-2 text-2xs font-medium'
-    : 'inline-flex items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-1 text-[length:var(--fs-xs)]'
+    ? 'inline-flex min-h-9 items-center gap-1.5 rounded-md border px-3 py-2 text-[12px] font-medium'
+    : 'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[12px] font-medium'
   const activeToneClass = tone === 'accent'
-    ? 'border-[var(--color-border-default)] bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)]'
-    : 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn-bright)]'
+    ? 'border-border bg-brand/10 text-brand'
+    : 'border-warning/20 bg-warning/10 text-warning'
   const idleToneClass = tone === 'accent'
-    ? 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-default)] hover:text-[var(--color-fg-primary)]'
-    : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-30)]'
+    ? 'border-border bg-card text-text-disabled hover:bg-surface-subtle hover:border-border hover:text-text-primary'
+    : 'border-border bg-card text-text-disabled hover:bg-surface-subtle hover:border-brand/30'
 
   return html`
     <div class="flex flex-wrap gap-1.5 ${cx ?? ''}" role="tablist">
@@ -61,7 +61,7 @@ export function FilterChips<T extends string>({
           ${chip.label}
           ${chip.count != null ? html`
             <${CountBadge} class=${activeKey === chip.key
-              ? 'bg-[var(--color-bg-hover)] text-current'
+              ? 'bg-surface-muted text-current'
               : ''}>${chip.count}<//>
           ` : null}
         </button>

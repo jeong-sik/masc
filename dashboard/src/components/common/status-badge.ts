@@ -14,11 +14,11 @@ interface StatusBadgeProps {
 }
 
 const DOT_CLASS: Record<StatusBadgeTone, string> = {
-  ok: 'bg-[var(--color-status-ok)]',
-  warn: 'bg-[var(--color-status-warn)]',
-  bad: 'bg-[var(--color-status-err)]',
-  info: 'bg-[var(--color-status-info)]',
-  neutral: 'bg-[var(--color-status-idle)]',
+  ok: 'bg-success',
+  warn: 'bg-warning',
+  bad: 'bg-destructive',
+  info: 'bg-info',
+  neutral: 'bg-text-disabled',
 }
 
 export function statusBadgeTone(status: string): StatusBadgeTone {

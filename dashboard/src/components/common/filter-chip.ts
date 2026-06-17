@@ -25,7 +25,7 @@ export function FilterChip({
   return html`
     <button
       type="button"
-      class=${`rfilter${active ? ' on' : ''} ${cx ?? ''}`.trim()}
+      class=${`rfilter${active ? ' on' : ''}${cx ? ` ${cx}` : ''}`}
       onClick=${onClick}
       aria-pressed=${active}
     >

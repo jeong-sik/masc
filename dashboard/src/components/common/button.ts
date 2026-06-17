@@ -12,7 +12,6 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { isNonEmptyString } from '../../lib/format-string'
-import { ringFocusClasses } from './ring'
 
 export type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'ok' | 'warn'
 export type ButtonSize = 'sm' | 'md' | 'lg'
@@ -42,9 +41,9 @@ export interface ActionButtonSummary {
 }
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: 'py-1 px-2 text-xs font-medium',
-  md: 'py-1.5 px-2.5 text-xs font-medium',
-  lg: 'py-2 px-4 text-sm font-semibold',
+  sm: 'py-1 px-2 text-[14px] font-medium rounded-md',
+  md: 'py-1.5 px-2.5 text-[14px] font-medium rounded-md',
+  lg: 'py-2 px-4 text-[18px] font-semibold rounded-lg',
 }
 
 // Component-level token slots (button-{variant}-bg/fg/border/bg-hover/bg-pressed).
@@ -58,36 +57,27 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
 // utility for the variants whose `--button-{warn,subtle}-border` slot
 // is `transparent` (rendering-as-none for layout-grid stability).
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'border border-solid border-[var(--button-primary-border)] bg-[var(--button-primary-bg)] text-[var(--button-primary-fg)] hover:bg-[var(--button-primary-bg-hover)]',
-  ghost: 'border border-solid border-[var(--button-ghost-border)] bg-[var(--button-ghost-bg)] text-[var(--button-ghost-fg)] hover:bg-[var(--button-ghost-bg-hover)]',
-  danger: 'border border-solid border-[var(--button-danger-border)] bg-[var(--button-danger-bg)] text-[var(--button-danger-fg)] hover:bg-[var(--button-danger-bg-hover)]',
-  subtle: 'border-none bg-[var(--button-subtle-bg)] text-[var(--button-subtle-fg)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--button-subtle-bg-hover)]',
-  ok: 'border border-solid border-[var(--button-ok-border)] bg-[var(--button-ok-bg)] text-[var(--button-ok-fg)] hover:bg-[var(--button-ok-bg-hover)]',
-  warn: 'border-none bg-[var(--button-warn-bg)] text-[var(--button-warn-fg)] hover:bg-[var(--button-warn-bg-hover)]',
+  primary: 'border border-solid border-brand bg-brand text-white hover:bg-brand-hover',
+  ghost: 'border border-solid border-border bg-transparent text-text-primary hover:bg-surface-subtle',
+  danger: 'border border-solid border-destructive/40 bg-transparent text-destructive hover:bg-destructive/10',
+  subtle: 'border-none bg-transparent text-text-secondary hover:text-text-primary hover:bg-surface-subtle',
+  ok: 'border border-solid border-success/40 bg-success/10 text-success hover:bg-success/20',
+  warn: 'border-none bg-warning/10 text-warning hover:bg-warning/20',
 }
 
 // Pressed-state overrides per variant. Applied when `pressed=true` so the
 // button visually conveys the "selected" / "active filter" / "active tab"
-// state that aria-pressed announces to assistive tech. Without this the
-// button can be aria-pressed but visually identical to unpressed, which
-// is a confusing mismatch.
-//
-// ghost pressed deliberately swaps its border/fg to the primary slots —
-// the active state borrows primary's affordance so the user reads it
-// as "selected" instead of "still neutral".
+// state that aria-pressed announces to assistive tech.
 const PRESSED_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'bg-[var(--button-primary-bg-pressed)]',
-  ghost: 'bg-[var(--button-ghost-bg-pressed)] border-[var(--button-primary-border)] text-[var(--button-primary-fg)]',
-  danger: 'bg-[var(--button-danger-bg-pressed)]',
-  subtle: 'bg-[var(--button-subtle-bg-pressed)] text-[var(--color-fg-primary)]',
-  ok: 'bg-[var(--button-ok-bg-pressed)]',
-  warn: 'bg-[var(--button-warn-bg-pressed)]',
+  primary: 'bg-brand-hover',
+  ghost: 'bg-surface-muted border-brand text-brand',
+  danger: 'bg-destructive/10',
+  subtle: 'bg-surface-muted text-text-primary',
+  ok: 'bg-success/20',
+  warn: 'bg-warning/20',
 }
 
-// `duration-[var(--t-med)]` reads from the design-token duration scale
-// (--t-med = 200ms by default). Token retune (e.g. dampening interaction
-// motion for accessibility) propagates without callsite edits.
-const BASE = `rounded-[var(--r-1)] cursor-pointer transition-[background-color,border-color,box-shadow,transform,opacity] duration-[var(--t-med)] font-medium ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} active:scale-[0.97] active:opacity-90`
+const BASE = `cursor-pointer transition-[background-color,border-color,box-shadow,opacity] duration-150 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`
 
 export interface ActionButtonProps {
   variant?: ButtonVariant

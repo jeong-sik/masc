@@ -73,6 +73,10 @@ let cadence_step ~cadence ~counter =
 
 let cadence_due ~keeper_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
+    (* sound-partial: allow — a Hashtbl miss means an unseen keeper, whose
+       cadence counter legitimately starts at 0 (documented in the .mli). This
+       is fresh-state initialization, not a permissive default that hides a
+       parse failure of unknown external input. *)
     let counter =
       Option.value ~default:0 (Hashtbl.find_opt cadence_counters keeper_id)
     in

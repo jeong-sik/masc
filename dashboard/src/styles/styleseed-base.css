@@ -1,0 +1,38 @@
+/* ════════════════════════════════════════════════════════════════
+   StyleSeed base body / card / mobile styles
+   Active only when data-theme="styleseed" is set on <html>.
+   ════════════════════════════════════════════════════════════════ */
+
+/* Body base — CJK word-break + Pretendard-friendly metric reset */
+[data-theme="styleseed"] body {
+  background-color: var(--surface-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  word-break: keep-all;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Card base — all content lives inside cards */
+[data-theme="styleseed"] .ss-card {
+  background-color: var(--card);
+  border-radius: 1rem; /* rounded-2xl */
+  box-shadow: var(--shadow-card);
+}
+
+/* Dark mode: shadows are invisible, use subtle border for edges */
+[data-theme="styleseed"].dark .ss-card,
+.dark [data-theme="styleseed"] .ss-card {
+  box-shadow: none;
+  border: var(--card-border);
+}
+
+/* Mobile safe-area helpers */
+[data-theme="styleseed"] .ss-safe-bottom {
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+[data-theme="styleseed"] .ss-safe-top {
+  padding-top: calc(1.5rem + env(safe-area-inset-top, 0px));
+}

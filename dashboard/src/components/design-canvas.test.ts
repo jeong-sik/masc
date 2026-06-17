@@ -30,6 +30,8 @@ describe('DesignCanvas', () => {
     expect(container.querySelector('[data-testid="design-canvas-tab-organisms"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="design-canvas-tab-surfaces"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="design-canvas-tab-motion"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="design-canvas-tab-craft"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="design-canvas-tab-states"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="design-canvas-tab-fixtures"]')).not.toBeNull()
   })
 
@@ -77,6 +79,38 @@ describe('DesignCanvas', () => {
       toggle.click()
     })
     expect(document.documentElement.dataset.theme).toBeUndefined()
+  })
+
+  it('switches to the craft gallery', async () => {
+    await act(async () => {
+      render(html`<${DesignCanvas} />`, container)
+    })
+
+    const craftTab = container.querySelector('[data-testid="design-canvas-tab-craft"]') as HTMLButtonElement
+    await act(async () => {
+      craftTab.click()
+    })
+
+    expect(craftTab.getAttribute('aria-selected')).toBe('true')
+    const stage = container.querySelector('[data-testid="design-canvas-stage"]')
+    expect(stage!.querySelector('[data-design-canvas-organism="craft-card"]')).not.toBeNull()
+    expect(stage!.querySelector('[data-design-canvas-organism="tool-call-card"]')).not.toBeNull()
+  })
+
+  it('switches to the states gallery', async () => {
+    await act(async () => {
+      render(html`<${DesignCanvas} />`, container)
+    })
+
+    const statesTab = container.querySelector('[data-testid="design-canvas-tab-states"]') as HTMLButtonElement
+    await act(async () => {
+      statesTab.click()
+    })
+
+    expect(statesTab.getAttribute('aria-selected')).toBe('true')
+    const stage = container.querySelector('[data-testid="design-canvas-stage"]')
+    expect(stage!.textContent).toContain('Keeper lifecycle pills')
+    expect(stage!.textContent).toContain('Meter thresholds')
   })
 
   it('switches to the fixtures gallery and renders fixture data', async () => {

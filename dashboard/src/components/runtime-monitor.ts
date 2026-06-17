@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchDashboardRuntimeProbe,
@@ -456,6 +456,19 @@ export function RuntimeMonitor() {
   const probeError = current.data?.probeError ?? null
   const providerProbes = providerProbeMap(probe)
 
+  // filterModelMetrics was called twice per render (no-results check + the
+  // sorted list) with identical args. Memoize once and reuse so it runs at most
+  // once per render — only re-deriving when the metrics payload or the search
+  // term changes.
+  const filteredModels = useMemo(
+    () => filterModelMetrics(metrics?.models ?? [], modelSearch.value),
+    [metrics, modelSearch.value],
+  )
+  const sortedModels = useMemo(
+    () => sortModelMetricsByUrgency(filteredModels),
+    [filteredModels],
+  )
+
   return html`
     <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
@@ -589,12 +602,12 @@ export function RuntimeMonitor() {
             onInput=${(e: Event) => { modelSearch.value = (e.target as HTMLInputElement).value }}
           />
         </div>
-        ${(metrics?.models ?? []).length > 0 && filterModelMetrics(metrics?.models ?? [], modelSearch.value).length === 0
+        ${(metrics?.models ?? []).length > 0 && filteredModels.length === 0
           ? html`<div class="text-2xs text-[var(--color-fg-muted)] mb-2">검색 결과 없음 (${metrics?.models.length ?? 0}개 중)</div>`
           : null}
         <div class="flex flex-col gap-3">
           ${(metrics?.models ?? []).length > 0
-            ? sortModelMetricsByUrgency(filterModelMetrics(metrics?.models ?? [], modelSearch.value)).map(metric => {
+            ? sortedModels.map(metric => {
                 const isFailing = (metric.error_count ?? 0) > 0
                 const hasCoverageGap =
                   metric.coverage_status === 'none'

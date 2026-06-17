@@ -61,6 +61,15 @@ let token_kind_at pos text len :
 
 let is_token_start pos text = pos = 0 || not (is_tool_token_char text.[pos - 1])
 
+(* 도구 토큰은 소문자(masc_board_list, keeper_memory_search)이고 환경변수는
+   대문자(MASC_BASE_PATH)다. 알파벳이 하나도 소문자가 아니면 env 변수로 보고
+   도구 토큰 판정에서 제외한다 — masc_/keeper_ 접두 휴리스틱이 도구가 아닌
+   식별자를 오탐하지 않게 한다. *)
+let is_env_var_shaped name =
+  let has_lower = ref false in
+  String.iter (fun c -> if c >= 'a' && c <= 'z' then has_lower := true) name;
+  not !has_lower
+
 (** Find all keeper_*/masc_* tokens in [text]. Each token is returned as
     [(kind, raw_name, position)]. The scan is linear in the length of the
     input. *)
@@ -103,8 +112,12 @@ let dedup_tokens tokens =
 (* ── Verification ─────────────────────────────────────────────────── *)
 
 let verify_token ~keeper_name ~source (kind, name) : string option =
-  let normalized = String.lowercase_ascii name in
-  match Keeper_tool_resolution.resolve normalized with
+  if is_env_var_shaped name then None
+    (* all-uppercase masc_/keeper_ 토큰은 도구가 아니라 env 변수(MASC_BASE_PATH 등).
+       도구명은 소문자 관례이므로 flag/strip 대상에서 제외 — 접두 휴리스틱 오탐 방지. *)
+  else
+    let normalized = String.lowercase_ascii name in
+    match Keeper_tool_resolution.resolve normalized with
   | Keeper_tool_resolution.Resolved _ | Keeper_tool_resolution.Alias_to _ ->
       None
   | Keeper_tool_resolution.Unknown _ ->
@@ -141,3 +154,53 @@ let scan_rendered_prompt
     scan_text ~keeper_name ~source:Continuity continuity_summary
   in
   system_unknowns @ user_unknowns @ continuity_unknowns |> dedup_strings
+
+(* ── Registry-driven sanitization ─────────────────────────────────── *)
+
+(** Remove keeper_*/masc_* tokens that do not resolve to a live tool, driven
+    by [Keeper_tool_resolution] (the same source of truth the scanner uses).
+
+    Root fix for stale tool names leaking into prompts: the legacy
+    [Keeper_unified_prompt.sanitize_retired_tool_names] is a hardcoded
+    retired-prefix list that must be hand-edited on every tool rename and
+    silently misses renames it does not enumerate (e.g. masc_board_get ->
+    masc_board_post_get). This pass instead asks the registry: any
+    lowercase masc_/keeper_ token that resolves is kept; one that does not
+    (a removed/renamed tool, or a hallucinated name frozen in an injected
+    episode) is dropped so the model never sees it as a callable tool.
+
+    Env-var-shaped tokens (all-uppercase, e.g. MASC_BASE_PATH) are kept —
+    they are not tool invocations and stripping them would mangle legitimate
+    configuration prose. A resolved alias is also kept. *)
+let strip_unresolved_tool_tokens text : string =
+  let len = String.length text in
+  let buf = Buffer.create len in
+  let i = ref 0 in
+  while !i < len do
+    match token_kind_at !i text len with
+    | Some kind when is_token_start !i text ->
+        let prefix_len =
+          match kind with
+          | Keeper -> 7
+          | Masc -> 5
+        in
+        let j = ref (!i + prefix_len) in
+        while !j < len && is_tool_token_char text.[!j] do
+          incr j
+        done;
+        let name = String.sub text !i (!j - !i) in
+        let keep =
+          is_env_var_shaped name
+          ||
+          match Keeper_tool_resolution.resolve (String.lowercase_ascii name) with
+          | Keeper_tool_resolution.Resolved _ | Keeper_tool_resolution.Alias_to _ ->
+              true
+          | Keeper_tool_resolution.Unknown _ -> false
+        in
+        if keep then Buffer.add_string buf name;
+        i := !j
+    | _ ->
+        Buffer.add_char buf text.[!i];
+        incr i
+  done;
+  Buffer.contents buf

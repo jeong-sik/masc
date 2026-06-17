@@ -42,20 +42,22 @@ let test_unknown_token_reported () =
   Alcotest.(check (float 0.0001))
     "metric +1" (before +. 1.0) (total_unknown ())
 
-let test_unknown_capitalized_token_reported () =
-  (* Prefix matching must be case-insensitive so capitalized stale tokens are
-     caught, not silently missed. *)
-  let prompt = "Call KEEPER_P0_3_FICTIONAL_TOOL to proceed." in
+let test_all_uppercase_token_is_env_var_not_reported () =
+  (* All-uppercase masc_/keeper_ tokens are env-var-shaped (MASC_BASE_PATH,
+     KEEPER_FOO), not tool invocations — tool names are lowercase by
+     convention. They are skipped rather than flagged, so config prose
+     mentioning env vars does not produce false-positive unknown-token WARNs.
+     (Mixed-case stale tokens with at least one lowercase letter are still
+     normalized and checked — see [test_case_insensitive_resolution].) *)
+  let prompt = "Set KEEPER_P0_3_FICTIONAL_ENV before proceeding." in
   let before = total_unknown () in
   let unknowns =
     Scanner.scan_text ~keeper_name:keeper ~source:System_prompt prompt
   in
   Alcotest.(check (list string))
-    "capitalized unknown keeper token is reported"
-    [ "keeper_p0_3_fictional_tool" ]
-    unknowns;
+    "all-uppercase env-var-shaped token is not reported" [] unknowns;
   Alcotest.(check (float 0.0001))
-    "metric +1" (before +. 1.0) (total_unknown ())
+    "metric unchanged" before (total_unknown ())
 
 let test_unknown_masc_token_reported () =
   let prompt = "Use masc_p0_3_unknown_gadget for diagnostics." in
@@ -128,6 +130,32 @@ let test_case_insensitive_resolution () =
   Alcotest.(check (list string))
     "mixed-case known tokens resolve" [] unknowns
 
+(* ── strip_unresolved_tool_tokens (registry-driven sanitization) ── *)
+
+let test_strip_removes_unresolved_lowercase_token () =
+  (* A stale/removed lowercase tool name is dropped (its chars removed,
+     surrounding text untouched) so the model never sees it as a callable
+     tool; a resolving tool in the same text is preserved. *)
+  let text = "First call masc_p0_3_dead_gadget then keeper_board_post." in
+  Alcotest.(check string)
+    "dead token removed, resolved tool kept"
+    "First call  then keeper_board_post."
+    (Scanner.strip_unresolved_tool_tokens text)
+
+let test_strip_keeps_env_var_shaped_token () =
+  (* All-uppercase env-var-shaped tokens are not tool invocations; stripping
+     them would mangle legitimate configuration prose. *)
+  let text = "Set MASC_BASE_PATH=/srv before launch." in
+  Alcotest.(check string)
+    "env var preserved verbatim" text
+    (Scanner.strip_unresolved_tool_tokens text)
+
+let test_strip_is_identity_when_all_resolve () =
+  let text = "Use keeper_board_post and masc_keeper_status only." in
+  Alcotest.(check string)
+    "no change when every token resolves" text
+    (Scanner.strip_unresolved_tool_tokens text)
+
 let () =
   Alcotest.run "keeper_prompt_token_integrity_p0_3"
     [
@@ -137,8 +165,8 @@ let () =
             test_known_tokens_are_not_reported;
           Alcotest.test_case "unknown keeper token reported" `Quick
             test_unknown_token_reported;
-          Alcotest.test_case "unknown capitalized keeper token reported" `Quick
-            test_unknown_capitalized_token_reported;
+          Alcotest.test_case "all-uppercase token is env-var, not reported"
+            `Quick test_all_uppercase_token_is_env_var_not_reported;
           Alcotest.test_case "unknown masc token reported" `Quick
             test_unknown_masc_token_reported;
           Alcotest.test_case "deduplicates within surface" `Quick
@@ -148,5 +176,14 @@ let () =
             test_rendered_prompt_scans_all_surfaces;
           Alcotest.test_case "case insensitive resolution" `Quick
             test_case_insensitive_resolution;
+        ] );
+      ( "sanitization",
+        [
+          Alcotest.test_case "strip removes unresolved lowercase token" `Quick
+            test_strip_removes_unresolved_lowercase_token;
+          Alcotest.test_case "strip keeps env-var-shaped token" `Quick
+            test_strip_keeps_env_var_shaped_token;
+          Alcotest.test_case "strip is identity when all resolve" `Quick
+            test_strip_is_identity_when_all_resolve;
         ] );
     ]

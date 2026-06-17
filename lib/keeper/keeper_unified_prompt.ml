@@ -922,8 +922,19 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
   let user_message =
     "## Current World State\n\n" ^ Keeper_context_layers.assemble ~content_of
   in
-  let sanitized_system = sanitize_retired_tool_names system_prompt in
-  let sanitized_user = sanitize_retired_tool_names user_message in
+  (* 1차: 명시적 rename 치환(keeper_bash->execute_command 등)은 하드코딩 유지.
+     2차: registry-driven strip — rename/제거되어 더 이상 resolve되지 않는 도구
+     토큰을 Keeper_tool_resolution 기준으로 제거한다. 하드코딩 목록이 놓치는
+     stale 토큰(주입된 옛 episode의 죽은 도구명 등)을 단일 소스로 자동 정리하고,
+     warn-only ratchet이 세던 누수를 실제로 막는다. env 변수(대문자)는 보존. *)
+  let sanitized_system =
+    sanitize_retired_tool_names system_prompt
+    |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
+  in
+  let sanitized_user =
+    sanitize_retired_tool_names user_message
+    |> Keeper_prompt_token_integrity.strip_unresolved_tool_tokens
+  in
   (* set_gauge only: a stray inc_counter here used to create this
      (name, labels) cell as Counter first, so the system_prompt series
      kept Counter kind, carried a non-monotonic byte length, and exported

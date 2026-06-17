@@ -71,24 +71,20 @@ let render_judge (j : Fusion_types.judge_synthesis) : string =
   add (Printf.sprintf "**Decision**: %s\n" (render_decision decision));
   Buffer.contents buf
 
-let render_panel (o : Fusion_types.panel_outcome) : string =
-  match o with
-  | Fusion_types.Answered { model; answer; _ } -> Printf.sprintf "**[%s]**\n%s" model answer
-  | Fusion_types.Failed { failed_model; reason } ->
-    Printf.sprintf "**[%s]** _(failed: %s)_" failed_model
-      (Fusion_types.show_panel_failure reason)
-
 (* board post 증거의 보존 기간. 심의 증거는 transient 알림(24h)보다 오래 둬 사후
    리뷰가 가능하도록 1주로 둔다 (Magic Number 회피 — named 상수). *)
 let board_post_ttl_hours = 24 * 7
 
-(* 패널 결과를 board meta_json 원소로. 토큰은 실측 관측. *)
+(* 패널 결과를 board meta_json 원소로. chat lane이 아니라 여기(board)가 패널 답변
+   *서사*를 담는 surface다 (키퍼 observation 도배 방지, RFC §8.1 개정). 답변 텍스트와
+   실측 토큰을 함께 남긴다. *)
 let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
   match o with
-  | Fusion_types.Answered { model; usage; _ } ->
+  | Fusion_types.Answered { model; answer; usage; _ } ->
     `Assoc
       [ ("model", `String model)
       ; ("status", `String "answered")
+      ; ("answer", `String answer)
       ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
       ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
       ]
@@ -109,22 +105,31 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
     `Assoc
       [ ("status", `String "synthesized")
       ; ("decision", `String (render_decision j.Fusion_types.decision))
+      ; ("resolved_answer", `String j.Fusion_types.resolved_answer)
+      ; ("synthesis", `String (render_judge j))
       ]
   | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
 
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) result =
-  let conversation_id = "fusion/" ^ run_id in
   try
-    let append content =
-      Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content
-        ~conversation_id ()
-    in
-    append
-      (Printf.sprintf "**Fusion deliberation** (run `%s`)\n\n**Question**\n%s" run_id
-         question);
-    List.iter (fun o -> append (render_panel o)) panel;
-    (* 비용 관측(제약 아님) — 패널이 실제 사용한 토큰을 합산해 표시한다. cost cap은
-       v1에서 제외(추정기 부재)하고, 측정값만 남긴다 (괴상한 제약 제거 원칙). *)
+    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
+       상세 트랜스크립트(패널 답변 N개)는 아래 board post 증거로만 남기고, 키퍼 chat
+       lane에는 judge 결론(decision + resolved_answer)만 키퍼 *메인* conversation
+       (conversation_id 생략)에 append한다. → 키퍼 observation(recent_direct_conversation)이
+       패널 답변으로 도배되지 않고, librarian이 메인 chat 결론을 fact로 추출한다(memory-os
+       fact 타입에 직접 의존하지 않음 = 강결합 없는 통합). judge 실패 시에는 메인 흐름을
+       오염시키지 않으려 결론을 남기지 않는다(board에는 실패도 증거로 남는다). *)
+    (match judge with
+     | Ok j ->
+       Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper
+         ~content:
+           (Printf.sprintf "Fusion deliberation (run %s) — %s\n\n%s" run_id
+              (render_decision j.Fusion_types.decision) j.Fusion_types.resolved_answer)
+         ();
+       Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
+     | Error _ -> ());
+    (* 비용 관측(제약 아님) — 패널 실측 토큰 합산. board 증거에만 남긴다 (cost cap은
+       v1 제외, 측정값만 — 괴상한 제약 제거 원칙). *)
     let total_usage =
       List.fold_left
         (fun acc (o : Fusion_types.panel_outcome) ->
@@ -133,32 +138,9 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) resu
           | Fusion_types.Failed _ -> acc)
         Fusion_types.zero_usage panel
     in
-    append
-      (Printf.sprintf "**Observed usage** — input=%d output=%d tokens (panel)"
-         total_usage.Fusion_types.input_tokens total_usage.Fusion_types.output_tokens);
-    (match judge with
-     | Ok j -> append (render_judge j)
-     | Error e -> append (Printf.sprintf "**[judge]** _(failed: %s)_" e));
-    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기").
-       위의 상세 트랜스크립트는 "fusion/<run>" thread(사용자 가시 증거)에 두고, judge
-       결론 한 줄을 키퍼의 *메인* conversation(conversation_id 생략)에 남긴다. 그러면
-       (1) 키퍼가 다음 턴 observation(recent_direct_conversation)으로 결론을 수령하고,
-       (2) librarian이 메인 chat에서 이를 fact로 추출한다 — fusion이 memory-os fact
-       타입에 직접 의존하지 않으므로 강결합 없이 기존 memory 파이프라인에 흡수된다.
-       judge 실패 시에는 메인 흐름을 오염시키지 않으려 결론을 남기지 않는다. *)
-    (match judge with
-     | Ok j ->
-       Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper
-         ~content:
-           (Printf.sprintf "Fusion deliberation (run %s) — %s" run_id
-              (render_decision j.Fusion_types.decision))
-         ()
-     | Error _ -> ());
-    (* 모든 append 후 한 번 브로드캐스트 — 대시보드가 키퍼 chat을 재조회해 전체 표시. *)
-    Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion";
-    (* board post — 구조화 증거(meta_json). chat lane은 사람이 읽는 *서사*,
-       board는 run_id로 묶인 쿼리 가능한 *증거*다. 사용자 가시성 요구는 두 surface
-       모두(RFC-0252 §3/§8.2). 실패는 [Error]로 상위(orchestrator)에 전달한다. *)
+    (* board post — 패널 답변 전체 + 심판 종합을 쿼리 가능한 구조화 증거(meta_json)로.
+       사용자는 대시보드 board에서 상세를 본다. chat lane *서사*를 board로 옮긴 것이
+       RFC §8.1 대비 변경점(키퍼 observation 도배 방지). 실패는 [Error]로 orchestrator에. *)
     let board_headline =
       match judge with
       | Ok j ->
@@ -174,6 +156,11 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) resu
            ; ("question", `String question)
            ; ("panel", `List (List.map panel_meta panel))
            ; ("judge", judge_meta judge)
+           ; ( "observed_usage"
+             , `Assoc
+                 [ ("input_tokens", `Int total_usage.Fusion_types.input_tokens)
+                 ; ("output_tokens", `Int total_usage.Fusion_types.output_tokens)
+                 ] )
            ])
     in
     (match

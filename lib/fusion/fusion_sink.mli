@@ -1,21 +1,24 @@
-(** Fusion — 심의 결과 가시화. 패널 답 N개 + 심판 종합을 요청 키퍼의 chat lane에
-    authored 메시지로 append하고 SSE 브로드캐스트한다 → 대시보드가 자동 반영
-    (keeper chat lane이 곧 대시보드에 렌더되므로 "키퍼 개별 채팅"+"대시보드" 동시 충족).
+(** Fusion — 심의 결과 가시화 (RFC-0252 §8, "결과를 키퍼 흐름에 녹이기" 개정).
 
-    [run_id]를 [conversation_id]([fusion/<run_id>])로 써서 한 심의의 모든 voice를
-    하나의 서브스레드로 묶어 증명한다. 패널 참가자는 모델이므로 [model]: 접두로 귀속한다.
+    judge 결론(decision + resolved_answer)을 요청 키퍼의 *메인* chat lane에 authored
+    메시지로 한 줄 남기고 SSE 브로드캐스트한다 → 키퍼가 다음 턴 observation
+    ([recent_direct_conversation])으로 결론을 수령하고, librarian이 그 결론을 memory-os
+    fact로 추출한다(fact 타입에 직접 의존하지 않는 강결합 없는 통합).
 
-    두 surface(사용자 가시성 요구, RFC-0252 §3): (1) keeper chat lane = 사람이 읽는
-    *서사*, (2) board post([Board.System_post] + [meta_json] 구조화 증거) = run_id로
-    묶인 쿼리 가능한 *증거*. 둘 다 대시보드에 도달한다.
+    패널 답변 N개 전체 + 심판 종합은 board post([Board.System_post] + [meta_json])에
+    run_id로 묶인 쿼리 가능한 구조화 *증거*로 남긴다 — 사용자는 대시보드 board에서 상세를
+    본다. chat lane에 패널 트랜스크립트를 쌓지 않는 이유: [Keeper_chat_store.load]는
+    conversation을 필터하지 않아, 긴 패널 답변이 키퍼 [recent_direct_conversation]
+    observation을 도배한다(§8.1 개정).
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §8 *)
 
-(** 심의 트랜스크립트를 키퍼 chat lane에 기록하고 board에 구조화 증거를 post한다.
+(** judge 결론을 키퍼 메인 chat lane에 남기고 board에 패널/심판 구조화 증거를 post한다.
 
-    순서: 헤더(질문) → 패널 답/실패(모델 순) → usage 관측 → 심판 종합. 모두 [base_dir]의
-    keeper_chat에 append되고, [chat_appended]로 대시보드에 알린 뒤 [Board_dispatch.create_post]로
-    meta_json(source/run_id/panel/judge) 증거를 남긴다. [base_dir]는 호출자(orchestrator)가 주입한다.
+    chat lane: judge가 [Ok]면 "결론 — resolved_answer" 한 줄을 메인 conversation에
+    append하고 [chat_appended]로 대시보드에 알린다(judge 실패면 메인 흐름 비오염을 위해
+    생략). board: [Board_dispatch.create_post]로 meta_json(source/run_id/question/panel
+    답변 전체/judge 종합/observed_usage) 증거를 남긴다. [base_dir]는 호출자(orchestrator) 주입.
 
     chat store append, broadcast, board post 중 예외가 발생하면 [Error msg]를 반환한다.
     [Eio.Cancel.Cancelled]는 재전파한다. *)

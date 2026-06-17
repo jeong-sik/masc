@@ -209,14 +209,13 @@ val extract : sw:_ -> net:_ -> ?provider:Provider.config -> config:agent_config
 
 "대시보드 + 키퍼 개별 채팅에서 panel/judge 메시지가 증명·표시." v1은 **코어 스키마 변경 없이** 달성:
 
-### 8.1 키퍼 chat lane (상세 트랜스크립트)
+### 8.1 키퍼 chat lane (결론만) — "결과를 키퍼 흐름에 녹이기"
 
-`Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name ~content ?conversation_id ()` → `Keeper_chat_broadcast.chat_appended ~keeper_name ~source` → SSE `keeper_chat_appended` → 대시보드 자동 갱신.
+judge 결론만 키퍼 **메인** conversation에 남긴다. 패널 트랜스크립트는 board(§8.2)로 옮긴다 — 이유: `Keeper_chat_store.load`는 conversation을 필터하지 않으므로, 긴 패널 답변을 chat lane에 쌓으면 키퍼 `recent_direct_conversation` observation의 최근 N개를 도배한다(관측 오염).
 
-- 패널 각 답: `content = "**[<model>]**\n<answer>"`, `conversation_id = run_id`.
-- 심판 종합: `content`에 `consensus/contradictions/blind_spots` + `resolved_answer`를 마크다운으로.
-- **모델 귀속은 content-prefix로**(키퍼 chat에 native author 필드 없음 — 추가는 코어 침습이라 v2). content에 모델명이 보이므로 "주고받은 메시지 증명·가시" 충족.
-- 순서: 패널 먼저(모델 순), 심판 마지막. 단일 atomic 윈도우.
+- chat lane: `Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name ~content ()` (conversation_id **생략** = 메인 lane) → `chat_appended` → SSE → 대시보드. `content = "Fusion deliberation (run <id>) — <decision>\n\n<resolved_answer>"`. judge 실패면 생략(메인 흐름 비오염; board에는 실패 증거를 남긴다).
+- **키퍼 통합**: 메인 chat 결론을 키퍼가 다음 턴 observation으로 수령하고, librarian이 그것을 memory-os fact로 추출한다. fusion이 memory-os `fact` 타입(재설계 중)에 직접 의존하지 않으므로 강결합 없이 기존 memory 파이프라인에 흡수된다.
+- 상세(패널 답변 N개 + 심판 종합)는 board meta_json(§8.2)에서 본다.
 
 ### 8.2 board post (구조화 증거)
 

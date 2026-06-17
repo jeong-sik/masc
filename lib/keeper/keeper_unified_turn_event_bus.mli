@@ -23,3 +23,39 @@ val start_background_drain
   -> unit
 
 val unsubscribe : t -> unit
+
+module For_testing : sig
+  type fsm_transition =
+    | Enter_awaiting
+    | Leave_awaiting
+
+  type event_bus_state =
+    { summary : Keeper_turn_runtime_budget.turn_event_bus_summary
+    ; tracker : Keeper_unified_turn_types.turn_tool_event_tracker
+    ; pending_tool_count : int
+    }
+
+  type drain_cancel_state =
+    | Inactive
+    | Active of Eio.Cancel.t
+    | Closed
+
+  val record_fsm_tool_transitions
+    :  keeper_name:string
+    -> turn_id:int
+    -> int
+    -> Agent_sdk.Event_bus.event list
+    -> int * fsm_transition list
+
+  (** Test-only read accessor. *)
+  val get_state : t -> event_bus_state
+
+  (** Test-only read accessor. *)
+  val get_drain_cancel : t -> drain_cancel_state
+
+  (** Test-only write accessor. No production caller. *)
+  val set_drain_cancel : t -> drain_cancel_state -> unit
+
+  (** Test-only write accessor. No production caller. *)
+  val exchange_drain_cancel : t -> drain_cancel_state -> drain_cancel_state
+end

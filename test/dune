@@ -2172,3 +2172,10 @@
  (name test_keeper_immutable_state_refactor)
  (modules test_keeper_immutable_state_refactor)
  (libraries masc_test_deps masc.runtime))
+
+; Event-bus concurrency regression tests (S1–S3).
+
+(test
+ (name test_keeper_unified_turn_event_bus)
+ (modules test_keeper_unified_turn_event_bus)
+ (libraries masc_test_deps masc.runtime))

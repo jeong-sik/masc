@@ -117,6 +117,21 @@ let test_binding_cleared_after_with_turn_switch_exits () =
   | None ->
     Alcotest.fail "atomic was set; fallback should have returned root_sw"
 
+(** The HTTPS connector cache is stored as an [Atomic.t] cell so that
+    concurrent reads from multiple OCaml 5 domains do not race on a plain
+    [ref].  Calling the public getter repeatedly must return a stable result
+    (Ok/Ok or Error/Error with the same message). *)
+let test_get_https_connector_result_is_idempotent () =
+  let a = Eio_context.get_https_connector_result () in
+  let b = Eio_context.get_https_connector_result () in
+  match (a, b) with
+  | Ok _, Ok _ ->
+    Alcotest.(check pass) "repeated connector reads are both Ok" () ()
+  | Error e1, Error e2 ->
+    Alcotest.(check string) "repeated connector reads return the same error" e1 e2
+  | _ ->
+    Alcotest.fail "HTTPS connector result is not stable across repeated reads"
+
 let () =
   Alcotest.run "eio_context_fiber_local"
     [
@@ -143,5 +158,11 @@ let () =
           Alcotest.test_case "sibling fiber does not see binding"
             `Quick
             test_binding_does_not_leak_to_sibling_fiber;
+        ] );
+      ( "HTTPS connector atomic cache",
+        [
+          Alcotest.test_case "get_https_connector_result is idempotent"
+            `Quick
+            test_get_https_connector_result_is_idempotent;
         ] );
     ]

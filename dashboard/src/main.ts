@@ -2,6 +2,10 @@
 // Mounts the root <App /> component into the DOM
 
 // Foundation styles (load first)
+// Keeper-v2 design-system tokens are loaded earliest so the v2 vocabulary is
+// available to the dashboard token ladder; dashboard-specific tokens loaded
+// below override any name collisions.
+import './styles/ds-theme-tokens.css'
 import './styles/tokens.generated.css'
 import './styles/tokens.css'
 import './styles/variables.css'
@@ -23,6 +27,9 @@ import './styles/keyframes.css'
 
 // Global utilities and layout
 import './styles/global.css'
+import './styles/chat-blocks-v2.css'
+import './styles/surfaces-v2.css'
+import './styles/cockpit-v2.css'
 
 // Component-specific styles
 import './styles/ui.css'
@@ -36,6 +43,31 @@ import './styles/tools.css'
 import './styles/provider-matrix.css'
 import './styles/paper-theme.css'
 import './styles/keeper-workspace.css'
+import './styles/copilot-dock.css'
+import './styles/keeper-turn-inspector.css'
+import './styles/ide-v2.css'
+import './styles/work-v2.css'
+import './styles/design-canvas.css'
+import './styles/states.css'
+import './styles/connectors-v2.css'
+import './styles/telemetry-v2.css'
+import './styles/craft-v2.css'
+import './styles/states.css'
+
+/*
+ * EXPERIMENTAL: keeper-v2 DS UI kits — may conflict with existing v2-* styles; enable after review
+ * import './styles/ds-ui-kits.css'
+ */
+
+// Keeper-v2 surface stylesheets are auto-imported by filename convention:
+// every dashboard/src/styles/*-v2.css is injected here at build time. A new v2
+// surface adds only its own stylesheet file — it must NOT add a per-surface
+// import line to main.ts. Per-surface import edits all landed in this one block
+// and serialized into repeated merge conflicts across parallel surface PRs;
+// the glob removes that shared anchor. Ordering note: all *-v2.css load at this
+// point (after variables.css and dashboard.css), preserving the cases where a
+// v2 rule overrides its v1 counterpart (.gd-board, .mg-board, .ide-plane-shell).
+import.meta.glob('./styles/*-v2.css', { eager: true })
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

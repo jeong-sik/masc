@@ -70,73 +70,29 @@ let fallback_tool_policy_for_kind kind =
 let tool_policy_for_kind kind = fallback_tool_policy_for_kind kind
 ;;
 
-(** Whether the resolved provider config is a CLI runtime (Anthropic CLI).
-    MASC uses this only for local tool-delivery projection after OAS has
-    resolved provider/model capabilities. *)
-let is_cli_agent_provider (_provider_cfg : Llm_provider.Provider_config.t) =
-  (* CLI subprocess provider kinds were removed in the agent_sdk pin bump;
-     no provider kind is a subprocess CLI. *)
-  false
-;;
-
-(** [normalize_cli_caps_when ~is_cli caps] overrides CLI runtime caps when
-    [is_cli] is [true]. Decoupled from [is_cli_agent_provider] so callers
-    that have already resolved the provider config (e.g.
-    [oas_capabilities_of_config] below) can avoid re-resolving for the same
-    provider.
-
-    Override semantics: CLI providers (Anthropic CLI) do not expose inline
-    function-calling to this gate. Runtime MCP support remains
-    runtime.toml/OAS-owned because not every CLI can consume request-scoped
-    MCP policy. *)
-let normalize_cli_caps_when ~is_cli (caps : Llm_provider.Capabilities.capabilities) =
-  if is_cli
-  then { caps with supports_tools = false; supports_tool_choice = false }
-  else caps
-;;
-
 (** Resolve OAS-level capabilities for a provider config, then merge
-    declarative runtime.toml capabilities.  For CLI runtimes, the merge
-    is unconditional (runtime MCP lane from tool policy).  For non-CLI
-    runtimes, the merge applies when the declarative tool policy declares
-    a runtime MCP lane — this ensures [classify_rejection] respects the
+    declarative runtime.toml capabilities when the tool policy declares a
+    runtime MCP lane — this ensures [classify_rejection] respects the
     operator's [supports-runtime-mcp-tools] even when the OAS model-level
     lookup returns a narrower capability set. *)
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
-  let is_cli = is_cli_agent_provider provider_cfg in
   let caps =
     Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config provider_cfg
   in
-  if is_cli
-  then
-    let tool_policy = tool_policy_for_config provider_cfg in
+  match tool_policy_for_config provider_cfg with
+  | exception _ -> caps
+  | tool_policy ->
     let runtime_mcp_lane =
       tool_policy.supports_runtime_mcp_http_headers
       || tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
     in
-    { (normalize_cli_caps_when ~is_cli caps) with
-      supports_runtime_mcp_tools = runtime_mcp_lane
-    ; supports_runtime_tool_events = runtime_mcp_lane
-    }
-  else (
-    (* Non-CLI providers: merge declarative runtime.toml capabilities
-       so that [classify_rejection] respects the operator's declared
-       [supports-runtime-mcp-tools] even when the OAS model-level
-       lookup returns a narrower capability set. *)
-    match tool_policy_for_config provider_cfg with
-    | exception _ -> caps
-    | tool_policy ->
-      let runtime_mcp_lane =
-        tool_policy.supports_runtime_mcp_http_headers
-        || tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
-      in
-      if runtime_mcp_lane
-      then
-        { caps with
-          supports_runtime_mcp_tools = true
-        ; supports_runtime_tool_events = true
-        }
-      else caps)
+    if runtime_mcp_lane
+    then
+      { caps with
+        supports_runtime_mcp_tools = true
+      ; supports_runtime_tool_events = true
+      }
+    else caps
 ;;
 
 let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_config.t) =

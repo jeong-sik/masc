@@ -180,7 +180,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
   const enabledRatio = categoryData.total > 0 ? Math.round((categoryData.enabled / categoryData.total) * 100) : 0
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
       <div class="mb-3 flex items-center justify-between">
         <div>
           <div class="text-sm font-medium text-[var(--color-fg-primary)]">${categoryLabel}</div>
@@ -205,8 +205,8 @@ export function FeatureHealth() {
   }, [])
 
   return html`
-    <div class="space-y-4">
-      <${SectionCard} label="기능 상태" class="section">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
+      <${SectionCard} label="기능 상태" class="section v2-monitoring-panel">
         <${AsyncContainer}
           state=${featureHealth.state}
           loadingMessage="기능 상태 데이터를 불러오는 중..."
@@ -215,7 +215,7 @@ export function FeatureHealth() {
             const overview = data.overview
             return html`
               <div class="space-y-4">
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
+                <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
                   <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div class="max-w-3xl">
                       <${SectionCap}>기능 플래그 상태<//>
@@ -230,7 +230,7 @@ export function FeatureHealth() {
                     </div>
                     <button
                       type="button"
-                      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--color-fg-secondary)]"
+                      class="v2-monitoring-action rounded-[var(--r-1)] border border-[var(--color-border-default)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--color-fg-secondary)]"
                       onClick=${() => { void loadFeatureHealth() }}
                     >새로고침</button>
                   </div>
@@ -298,13 +298,13 @@ export function FeatureHealth() {
                   )
                   if (filtered.length === 0) {
                     return html`
-                      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 text-xs text-[var(--color-fg-disabled)]">
+                      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 text-xs text-[var(--color-fg-disabled)]">
                         조건에 맞는 기능이 없습니다.
                       </div>
                     `
                   }
                   return html`
-                    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
+                    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
                       <div class="mb-3 text-xs text-[var(--color-fg-muted)]">
                         ${filtered.length} / ${data.all_features.length}개 기능
                       </div>

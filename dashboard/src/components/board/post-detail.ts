@@ -257,14 +257,14 @@ function CommentItem({
   return html`
     <div style=${indentStyle}>
       <div
-        class=${`board-comment rounded-[var(--r-1)] border p-3 ${commentToneClass} ${depthBorderClass}`}
+        class=${`board-comment v2-workspace-row rounded-[var(--r-1)] border p-3 ${commentToneClass} ${depthBorderClass}`}
         data-route-focused-comment=${isRouteFocused ? comment.id : undefined}
       >
         <div class="flex items-center gap-2 mb-1.5">
           ${canToggleReplies ? html`
             <button
               type="button"
-              class="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+              class="v2-workspace-action flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] text-2xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
               aria-expanded=${repliesExpanded}
               aria-label=${repliesExpanded ? `답글 ${replyCount}개 접기` : `답글 ${replyCount}개 펼치기`}
               onClick=${() => setCollapsed(!collapsed)}
@@ -277,7 +277,7 @@ function CommentItem({
           <div class="ml-auto flex items-center gap-1">
             <button
               type="button"
-              class=${`h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--warn-10)] hover:text-[var(--warn-bright)]'}`}
+              class=${`v2-workspace-action h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${upvoteActive ? 'active text-[var(--warn-bright)] bg-[var(--warn-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--warn-10)] hover:text-[var(--warn-bright)]'}`}
               aria-label="댓글 추천"
               aria-pressed=${upvoteActive ? 'true' : 'false'}
               disabled=${upvoteActive}
@@ -292,7 +292,7 @@ function CommentItem({
             >${scoreLabel}</span>
             <button
               type="button"
-              class=${`h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]'}`}
+              class=${`v2-workspace-action h-5 w-6 rounded-[var(--r-1)] border-0 bg-transparent text-2xs ${downvoteActive ? 'active text-[var(--color-accent-fg)] bg-[var(--accent-10)] cursor-default' : 'text-[var(--color-fg-muted)] hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)]'}`}
               aria-label="댓글 비추천"
               aria-pressed=${downvoteActive ? 'true' : 'false'}
               disabled=${downvoteActive}
@@ -349,7 +349,7 @@ function CommentItem({
         ${cappedByDepth ? html`
           <button
             type="button"
-            class="mt-2 rounded-[var(--r-1)] border border-dashed border-[var(--accent-20)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
+            class="v2-workspace-action mt-2 rounded-[var(--r-1)] border border-dashed border-[var(--accent-20)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
             onClick=${() => setDeepExpanded(true)}
           >스레드 계속 펼치기 · 답글 ${replyCount}개</button>
         ` : null}
@@ -360,7 +360,7 @@ function CommentItem({
           ${canLoadMoreSiblingReplies ? html`
             <button
               type="button"
-              class="ml-4 mt-1 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-divider)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
+              class="v2-workspace-action ml-4 mt-1 rounded-[var(--r-1)] border border-dashed border-[var(--color-border-divider)] bg-transparent px-2 py-1 text-left text-2xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-10)]"
               onClick=${() => setVisibleReplyLimit(visibleReplyLimit + INITIAL_CHILD_REPLY_LIMIT)}
             >답글 ${hiddenSiblingReplyCount}개 더 보기</button>
           ` : null}
@@ -458,27 +458,27 @@ function CommentRouteFocusPanel({
 
   return html`
     <section
-      class="mb-3 rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
+      class="v2-workspace-panel mb-3 rounded-[var(--r-1)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-3 py-2"
       data-testid="board-comment-route-focus"
       aria-label="Board comment route focus"
     >
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
+          <div class="font-mono text-2xs font-bold uppercase tracking-[var(--track-section)] text-[var(--color-accent-fg)]">
             ROUTE FOCUS
           </div>
           <div class="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--color-fg-secondary)]">
-            <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-accent-fg)]">
+            <span class="rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-accent-fg)]">
               COMMENT ${commentId}
             </span>
-            <span class="font-mono text-3xs text-[var(--color-fg-muted)]">
+            <span class="font-mono text-2xs text-[var(--color-fg-secondary)]">
               ${comment ? `author ${authorLabel}` : 'comment not loaded'}
             </span>
           </div>
         </div>
         <button
           type="button"
-          class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="v2-workspace-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
           onClick=${() => clearCommentRouteFocus(postId)}
         >
           CLEAR
@@ -489,7 +489,7 @@ function CommentRouteFocusPanel({
 }
 
 // ── Comment form ───────────────────────────────────────────────────
-function CommentForm({ postId }: { postId: string }) {
+export function CommentForm({ postId }: { postId: string }) {
   return html`
     <div class="mt-4">
       <${RichComposer}
@@ -594,14 +594,14 @@ export function PostDetail({ post }: { post: BoardPost }) {
             ? html`
                 <div class="flex flex-col gap-2">
                   <div class="flex gap-1.5 flex-wrap">
-                    ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
-                    ${post.flair ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
-                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
-                    <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
+                    ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
+                    ${post.flair ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
+                    ${post.hearth ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+                    ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${kindBadgeColor(boardPostKind(post))}">${kindLabel(boardPostKind(post))}</span>
                     ${qualityPercent !== null ? html`
                       <span
-                        class=${`inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
+                        class=${`inline-flex items-center px-2 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
                         aria-label=${qualityTitle}
                         title=${qualityTitle}
                       >품질 ${qualityPercent}</span>
@@ -610,7 +610,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
                     <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
                   </div>
                   ${post.classification_reason
-                    ? html`<div class="text-2xs text-[var(--color-fg-muted)]">분류 근거: ${post.classification_reason}</div>`
+                    ? html`<div class="text-2xs text-[var(--color-fg-secondary)]">분류 근거: ${post.classification_reason}</div>`
                     : null}
                 </div>
               `
@@ -620,11 +620,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
           ${post.meta
             ? html`
                 <details class="mt-1">
-                  <summary class="cursor-pointer text-xs text-[var(--color-fg-muted)] py-1.5 hover:text-[var(--color-fg-primary)] transition-colors">운영 메타</summary>
-                  <div class="mt-2 p-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-divider)]">
-                    ${post.meta.source ? html`<div class="text-xs text-[var(--color-fg-primary)]"><span class="text-[var(--color-fg-muted)]">출처:</span> ${post.meta.source}</div>` : null}
+                  <summary class="cursor-pointer text-xs text-[var(--color-fg-secondary)] py-1.5 hover:text-[var(--color-fg-primary)] transition-colors">운영 메타</summary>
+                  <div class="mt-2 p-3 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] border border-[var(--color-border-divider)]">
+                    ${post.meta.source ? html`<div class="text-xs text-[var(--color-fg-primary)]"><span class="text-[var(--color-fg-secondary)]">출처:</span> ${post.meta.source}</div>` : null}
                     ${post.meta.state_block
-                      ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--color-fg-muted)] leading-relaxed">${post.meta.state_block}</pre>`
+                      ? html`<pre class="whitespace-pre-wrap mt-2 text-2xs text-[var(--color-fg-secondary)] leading-relaxed">${post.meta.state_block}</pre>`
                       : null}
                   </div>
                 </details>

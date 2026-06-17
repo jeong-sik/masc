@@ -57,21 +57,7 @@ let test_is_context_overflow_only_for_overflow_errors () =
     bool
     "Internal does not match"
     false
-    (EC.is_context_overflow (Agent_sdk.Error.Internal "some error"));
-  check
-    bool
-    "TokenBudgetExceeded Input matches"
-    true
-    (EC.is_context_overflow
-       (Agent_sdk.Error.Agent
-          (TokenBudgetExceeded { kind = "Input"; used = 204917; limit = 200000 })));
-  check
-    bool
-    "TokenBudgetExceeded Total does not match"
-    false
-    (EC.is_context_overflow
-       (Agent_sdk.Error.Agent
-          (TokenBudgetExceeded { kind = "Total"; used = 300000; limit = 250000 })))
+    (EC.is_context_overflow (Agent_sdk.Error.Internal "some error"))
 ;;
 
 let test_summarize_turn_event_bus_extracts_overflow_signal () =

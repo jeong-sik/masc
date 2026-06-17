@@ -63,11 +63,11 @@ export function TaskStaleAlert() {
 
   return html`
     <section
-      class="rounded-[var(--r-1)] border border-warn/30 bg-warn/5 p-3"
+      class="v2-workspace-panel rounded-[var(--r-1)] border border-warn/30 bg-warn/5 p-3"
       aria-label="오래된 태스크 점유"
       aria-live="polite"
     >
-      <header class="mb-2 flex items-baseline justify-between gap-2">
+      <header class="v2-workspace-toolbar mb-2 flex items-baseline justify-between gap-2">
         <h3 class="text-xs font-semibold uppercase tracking-[var(--track-caps)] text-warn">
           오래 점유 중인 태스크 (${entries.length})
         </h3>
@@ -79,11 +79,11 @@ export function TaskStaleAlert() {
         ${entries.map(e => html`
           <li
             key=${e.task.id}
-            class="flex flex-wrap items-center gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs"
+            class="v2-workspace-row flex flex-wrap items-center gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5 text-xs"
           >
             <button
               type="button"
-              class="font-mono text-text-strong hover:underline"
+              class="v2-workspace-action font-mono text-text-strong hover:underline"
               title=${e.task.id}
               aria-label=${`태스크 상세 열기: ${e.task.id} ${e.task.title}`}
               onClick=${() => navigate('workspace', { section: 'planning', task: e.task.id })}
@@ -101,7 +101,7 @@ export function TaskStaleAlert() {
               ${e.task.assignee ? html`
                 <button
                   type="button"
-                  class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent-fg hover:bg-[var(--accent-15)]"
+                  class="v2-workspace-action rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent-fg hover:bg-[var(--accent-15)]"
                   title="해당 키퍼 상세로 이동해 직접 nudge"
                   aria-label=${`${e.task.assignee} 키퍼 상세에서 ${e.task.id} nudge`}
                   onClick=${() => e.task.assignee && navigate('monitoring', { section: 'agents', view: 'keepers', keeper: e.task.assignee })}
@@ -111,7 +111,7 @@ export function TaskStaleAlert() {
               ` : null}
               <button
                 type="button"
-                class="rounded-[var(--r-1)] border border-text-muted/30 px-2 py-0.5 text-2xs text-text-muted hover:bg-[var(--color-bg-panel-alt)]"
+                class="v2-workspace-action rounded-[var(--r-1)] border border-text-muted/30 px-2 py-0.5 text-2xs text-text-muted hover:bg-[var(--color-bg-panel-alt)]"
                 title="태스크 상세 패널 열기"
                 aria-label=${`태스크 상세 패널 열기: ${e.task.id}`}
                 onClick=${() => navigate('workspace', { section: 'planning', task: e.task.id })}

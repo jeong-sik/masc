@@ -82,6 +82,93 @@ let add_json_array_of_strings buf xs =
 let add_json_bool buf value =
   Buffer.add_string buf (if value then "true" else "false")
 
+(* ── argv secret redaction ─────────────────────────────────────── *)
+
+let token_prefixes = [ "ghp_"; "github_pat_"; "sk-" ]
+
+let is_token_char c =
+  match c with
+  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '-' | '.' | '/' | '+' | '=' -> true
+  | _ -> false
+;;
+
+let rec skip_token s i =
+  if i < String.length s && is_token_char s.[i] then skip_token s (i + 1) else i
+;;
+
+(** [redact_url_credentials s i] is called when [s.[i-3..i-1] = "://"].
+    It returns [Some (replacement, end_of_authority)] if an embedded
+    [user:pass@] or [user@] authority is found, so it can be replaced with
+    [[REDACTED]@]; otherwise [None]. *)
+let redact_url_credentials s i =
+  let len = String.length s in
+  let end_of_auth =
+    let rec scan j =
+      if j >= len then j
+      else
+        match s.[j] with
+        | '/' | ' ' | '?' | '#' -> j
+        | _ -> scan (j + 1)
+    in
+    scan i
+  in
+  let authority = String.sub s i (end_of_auth - i) in
+  match String.index_opt authority '@' with
+  | None -> None
+  | Some at_idx ->
+    let host_port = String.sub authority (at_idx + 1) (String.length authority - at_idx - 1) in
+    Some ("[REDACTED]@" ^ host_port, end_of_auth)
+;;
+
+let redact_arg s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len
+    then Buffer.contents buf
+    else if i + 7 <= len && String.sub s i 7 = "Bearer "
+    then (
+      Buffer.add_string buf "Bearer ";
+      let j = skip_token s (i + 7) in
+      if j > i + 7
+      then (
+        Buffer.add_string buf "[REDACTED]";
+        loop j)
+      else loop (i + 1))
+    else if List.exists
+              (fun prefix ->
+                 let plen = String.length prefix in
+                 i + plen <= len && String.sub s i plen = prefix)
+              token_prefixes
+    then (
+      let prefix =
+        List.find
+          (fun prefix ->
+             let plen = String.length prefix in
+             i + plen <= len && String.sub s i plen = prefix)
+          token_prefixes
+      in
+      Buffer.add_string buf "[REDACTED]";
+      loop (skip_token s (i + String.length prefix)))
+    else if i + 3 <= len && String.sub s i 3 = "://"
+    then (
+      match redact_url_credentials s (i + 3) with
+      | Some (replacement, end_of_auth) ->
+        Buffer.add_string buf "://";
+        Buffer.add_string buf replacement;
+        loop end_of_auth
+      | None ->
+        Buffer.add_string buf "://";
+        loop (i + 3))
+    else (
+      Buffer.add_char buf s.[i];
+      loop (i + 1))
+  in
+  loop 0
+;;
+
+let redact_argv argv = List.map redact_arg argv
+
 let env_keys = function
   | None -> None
   | Some arr ->
@@ -119,7 +206,7 @@ let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
       Buffer.add_string buf ",\"kind\":";
       add_json_string buf (kind_to_string kind);
       Buffer.add_string buf ",\"argv\":";
-      add_json_array_of_strings buf argv;
+      add_json_array_of_strings buf (redact_argv argv);
       Buffer.add_string buf ",\"env_keys\":";
       (match env_keys env with
        | None -> Buffer.add_string buf "null"
@@ -174,7 +261,7 @@ let default_out_path = "audits/exec-corpus.jsonl"
 let open_append_fd path =
   Unix.openfile path
     [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
-    0o644
+    0o600
 
 let install_from_env () =
   match Sys.getenv_opt "MASC_EXEC_TAP" with

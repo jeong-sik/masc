@@ -87,6 +87,7 @@ describe('IdeToolbar', () => {
     const routeGroupButtons = [...container.querySelectorAll<HTMLButtonElement>(
       '.ide-toolbar-context-route-group-action',
     )]
+    expect(routeGroupButtons.every(group => group.classList.contains('v2-ide-action'))).toBe(true)
     expect(routeGroupButtons.map(group => group.getAttribute('aria-label'))).toEqual([
       'Open Code lib/runtime.ml:42',
       'Open Task task-runtime',
@@ -95,6 +96,7 @@ describe('IdeToolbar', () => {
     ])
 
     const routeLinks = [...container.querySelectorAll<HTMLButtonElement>('.ide-toolbar-context-links button')]
+    expect(routeLinks.every(link => link.classList.contains('v2-ide-action'))).toBe(true)
     expect(routeLinks.map(link => link.getAttribute('aria-label'))).toEqual([
       'Open Code lib/runtime.ml:42',
       'Open Task task-runtime',
@@ -147,6 +149,22 @@ describe('IdeToolbar', () => {
     const command = [...container.querySelectorAll('[role="option"]')]
       .find(option => option.textContent === 'Open context: Goal · goal-runtime')
     expect(command).toBeTruthy()
+  })
+
+  it('marks the rails toggle and context route buttons with v2 action classes', () => {
+    container = document.createElement('div')
+
+    render(h(IdeToolbar, {
+      activeView: 'source',
+      activeLayers: new Set<string>(),
+      onViewChange: vi.fn(),
+      onLayersChange: vi.fn(),
+      railsCollapsed: false,
+      onRailsToggle: vi.fn(),
+    }), container)
+
+    const railsButton = container.querySelector<HTMLButtonElement>('[title="Hide IDE rails"]')
+    expect(railsButton?.classList.contains('v2-ide-action')).toBe(true)
   })
 
   it('groups focused context links by operational surface', () => {

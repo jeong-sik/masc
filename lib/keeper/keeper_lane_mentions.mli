@@ -11,10 +11,10 @@
     Tokenization contract (unchanged from the legacy tokenizer): a line
     mentions [x] when some whitespace-separated token equals ["@" ^ x]
     after trimming non-word edge characters.  Token equality, not
-    substring — ["@dreamerx"] and ["email@dreamer.com"] do not mention
-    ["dreamer"].  On top of the legacy contract, extracted names are
+    substring — ["@alicex"] and ["email@alice.com"] do not mention
+    ["alice"].  On top of the legacy contract, extracted names are
     minted through {!Keeper_identity.Keeper_id.of_string}, so
-    keeper-shaped forms (["@keeper-dreamer"]) canonicalize to the same
+    keeper-shaped forms (["@keeper-alice"]) canonicalize to the same
     id as the bare name. *)
 
 val mention_ids_of_content : string -> Keeper_identity.Keeper_id.t list

@@ -1221,7 +1221,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
 
 export function CostDashboard({ view = 'cost' }: { view?: CostView }) {
   return html`
-    <div class="contain-content flex flex-col gap-4">
+    <div class="v2-monitoring-surface contain-content flex flex-col gap-4">
       <${CostDashboardContent} view=${view} />
     </div>
   `

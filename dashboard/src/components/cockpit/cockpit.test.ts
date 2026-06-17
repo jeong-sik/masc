@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
 import { route } from '../../router'
+import { COCKPIT_ENTRYPOINTS } from '../../cockpit-entrypoints'
 import { Cockpit } from './cockpit'
 
 vi.mock('../world-visualizer', () => ({
@@ -31,17 +32,22 @@ describe('Cockpit command map', () => {
     expect(document.querySelectorAll('[data-cockpit-plane]')).toHaveLength(5)
     expect(document.querySelector('[data-cockpit-plane="work"]')).toHaveTextContent('2 covered')
     expect(document.querySelector('[data-cockpit-plane="ide"]')).toHaveTextContent('Source')
+
+    expect(document.querySelector('.cp-body')).not.toBeNull()
+    expect(document.querySelector('.cp-head')).not.toBeNull()
+    expect(document.querySelector('.cp-disc')).not.toBeNull()
+    expect(document.querySelectorAll('.cp-plane')).toHaveLength(5)
+    expect(document.querySelectorAll('.cp-route')).toHaveLength(COCKPIT_ENTRYPOINTS.length)
   })
 
   it('renders progressive disclosure levels over the route map', () => {
     render(h(Cockpit, null))
 
     const disclosure = screen.getByTestId('cockpit-disclosure')
-    expect(disclosure).toHaveAttribute('data-cognitive-complete', 'true')
-    expect(disclosure.querySelectorAll('[data-cognitive-level]')).toHaveLength(3)
-    expect(disclosure.querySelector('[data-cognitive-level="perceive"]')).toHaveTextContent('Route coverage')
-    expect(disclosure.querySelector('[data-cognitive-level="comprehend"]')).toHaveTextContent('Plane grouping')
-    expect(disclosure.querySelector('[data-cognitive-level="project"]')).toHaveTextContent('Route gaps')
+    expect(disclosure.querySelectorAll('[data-cockpit-disclosure-level]')).toHaveLength(3)
+    expect(disclosure.querySelector('[data-cockpit-disclosure-level="perceive"]')).toHaveTextContent('Route coverage')
+    expect(disclosure.querySelector('[data-cockpit-disclosure-level="comprehend"]')).toHaveTextContent('Plane grouping')
+    expect(disclosure.querySelector('[data-cockpit-disclosure-level="project"]')).toHaveTextContent('Route gaps')
     expect(disclosure).toHaveTextContent('10 routes')
     expect(disclosure).toHaveTextContent('No backend-blocked routes')
   })

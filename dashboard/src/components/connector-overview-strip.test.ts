@@ -50,6 +50,7 @@ describe('ConnectorOverviewStrip', () => {
       html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
       container,
     )
+    expect(container.querySelector('.v2-connector-overview-strip')).not.toBeNull()
     const tiles = container.querySelectorAll('[data-overview-tile]')
     expect(tiles.length).toBe(4)
     const ids = Array.from(tiles).map(t => t.getAttribute('data-overview-tile'))
@@ -163,6 +164,23 @@ describe('ConnectorOverviewStrip', () => {
       container,
     )
     expect(container.querySelector('[data-incident-banner]')).toBeNull()
+  })
+
+  it('respects filterQuery and hides non-matching tiles', () => {
+    render(
+      html`<${ConnectorOverviewStrip}
+        connectors=${[
+          mkConnector({ connector_id: 'discord', display_name: 'Discord', available: true }),
+          mkConnector({ connector_id: 'slack', display_name: 'Slack', available: true }),
+        ]}
+        keeperCount=${0}
+        filterQuery="slack"
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-overview-tile="slack"]')).not.toBeNull()
+    expect(container.querySelector('[data-overview-tile="discord"]')).toBeNull()
+    expect(container.querySelector('[data-overview-tile="imessage"]')).toBeNull()
   })
 
   it('does not render the old celebration banner even when all 4 sidecars are up', () => {

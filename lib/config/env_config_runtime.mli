@@ -205,6 +205,20 @@ module Keeper_max_turn_watchdog : sig
       recovery, higher for long-running research keepers. *)
 end
 
+(** {1 Keeper stale-run window (RFC-0250)} *)
+
+module Keeper_stale_run : sig
+  val threshold_sec_opt : unit -> float option
+  (** [threshold_sec_opt ()] returns the stale-run wall-clock threshold
+      when [MASC_KEEPER_STALE_RUN_SEC] is positive, or [None] when unset /
+      zero / negative.
+
+      Distinct from [Keeper_max_turn_watchdog] (opt-in, [In_turn_hung]):
+      this keys on [last_turn_ts] while [current_turn_observation = None],
+      producing [Idle_turn] — the no-turn-produced case. Default-on at
+      [1800.0] (30 min). *)
+end
+
 (** {1 Slot scheduling} *)
 
 module Slot : sig

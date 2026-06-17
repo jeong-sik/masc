@@ -419,6 +419,25 @@ module Keeper_max_turn_watchdog = struct
     if v > 0.0 then Some v else None
 end
 
+(** {1 Keeper Stale-Run Window (RFC-0250)}
+
+    Default-on wall-clock window for the no-turn-produced case, distinct
+    from the opt-in [Keeper_max_turn_watchdog] above. The max-turn watchdog
+    produces [In_turn_hung] (a turn is taking too long); this window produces
+    [Idle_turn] (no turn has completed at all). It keys on [last_turn_ts]
+    while [current_turn_observation = None] — exactly the [Idle_turn]
+    variant's doc contract — so it does not re-introduce the per-turn
+    wall-clock timeout that was deliberately removed
+    ([keeper_unified_turn_attempt_watchdog]).
+
+    Default 1800s: a [Running] keeper that has not completed a turn in 30 min
+    is presumed wedged. Set [MASC_KEEPER_STALE_RUN_SEC=0] to disable. *)
+module Keeper_stale_run = struct
+  let threshold_sec_opt () =
+    let v = get_float ~default:1800.0 "MASC_KEEPER_STALE_RUN_SEC" in
+    if v > 0.0 then Some v else None
+end
+
 (** {1 Slot Scheduling} *)
 
 module Slot = struct

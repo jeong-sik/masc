@@ -34,6 +34,7 @@ describe('QuickBindForm', () => {
 
   it('renders a channel input + keeper select + Bind button', () => {
     render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a'), mkKeeper('kpr-b')]} />`, container)
+    expect(container.querySelector('.v2-connector-quick-bind')).not.toBeNull()
     const form = container.querySelector('[data-quick-bind="discord"]')!
     expect(form.querySelector('input[placeholder*="1234567890"]')).toBeTruthy()
     const options = form.querySelectorAll('select option')

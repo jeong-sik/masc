@@ -37,7 +37,7 @@ export function BlameTimeline(
   const stats = keeperOwnershipStats(ownership, keepers)
   return html`
     <div
-      class="ide-blame-timeline"
+      class="ide-blame-timeline v2-ide-panel"
       role="status"
       aria-label="Blame timeline"
     >
@@ -68,6 +68,7 @@ export function LayerOverlaySummary(
   const latestEdit = latestEditMs(ownership)
   return html`
     <div
+      class="ide-layer-overlay-summary v2-ide-toolbar"
       role="status"
       aria-label="Active IDE overlays"
       style=${{

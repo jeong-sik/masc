@@ -62,8 +62,6 @@ Reference:
   - too indirect for immediate blocker/request-help expression
 
 Related local context:
-- `docs/archive/keeper-autonomy-identity-v2/ARCHITECTURE.md`
-- `docs/archive/keeper-autonomy-identity-v2/RESEARCH.md`
 
 ### `tom_diversity_v1`
 

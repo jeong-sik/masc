@@ -93,7 +93,7 @@ function GovernanceSummaryStrip() {
 
   return html`
     ${isStale ? html`
-      <div class="mb-3.5 flex items-center gap-3 rounded-[var(--r-1)] border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-[var(--shadow-1)]">
+      <div class="v2-command-panel mb-3.5 flex items-center gap-3 rounded-[var(--r-1)] border border-warn/30 bg-warn/10 p-3.5 text-sm font-medium text-warn shadow-[var(--shadow-1)]">
         <div class="shrink-0"><${AlertTriangle} size=${18} aria-hidden="true" /></div>
         <div>
           All open cases are older than ${formatAgeSummary(oldestAge)}.
@@ -102,7 +102,7 @@ function GovernanceSummaryStrip() {
         </div>
       </div>
     ` : null}
-    <div class="mb-2.5 flex items-center justify-between gap-3 px-0.5">
+    <div class="v2-command-toolbar mb-2.5 flex items-center justify-between gap-3 px-0.5">
       <div class="flex items-center gap-3 min-w-0">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">Live Judgment</h2>
         <span class="rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-medium text-text-muted">
@@ -123,7 +123,7 @@ function GovernanceSummaryStrip() {
         <//>
       </div>
     </div>
-    <div class="mb-5">
+    <div class="v2-command-panel mb-5">
       <${KpiStripIsland}
         ariaLabel="Governance summary"
         cols=${4}
@@ -158,7 +158,7 @@ function GovernanceSummaryStrip() {
       />
     </div>
     <${JudgeStatusBar} />
-    ${governanceError.value ? html`<div class="mb-5 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[var(--rose-light)]">${governanceError.value}</div>` : null}
+    ${governanceError.value ? html`<div class="v2-command-panel mb-5 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[var(--rose-light)]">${governanceError.value}</div>` : null}
   `
 }
 
@@ -177,7 +177,7 @@ function JudgeStatusBar() {
     ? 'text-warn'
     : 'text-bad/80'
   return html`
-    <div class="mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs" data-testid="judge-status">
+    <div class="v2-command-panel mb-4 flex items-center gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] bg-[var(--color-bg-surface)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
         <span class="font-medium text-text-muted">Judge runtime ${label}</span>
@@ -238,7 +238,7 @@ function JudgmentsSection() {
       ? 'border-warn/30 bg-warn/10 text-warn'
       : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
     return html`
-      <div data-testid="live-judge-empty">
+      <div class="v2-command-panel" data-testid="live-judge-empty">
         <${SectionCard} label=${title} class="section mb-5 v2-command-panel" variant="compact">
           <${EmptyState} message=${message} compact />
           ${lastSeen || meta ? html`
@@ -256,7 +256,7 @@ function JudgmentsSection() {
 
   return html`
     <${SectionCard} label=${title} class="section mb-5 v2-command-panel" variant="compact">
-      <div class="flex flex-col gap-2.5">
+      <div class="v2-command-panel flex flex-col gap-2.5">
         ${judgments.map(j => html`
           <div class="v2-command-row rounded-[var(--r-1)] border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
             <div class="flex items-center gap-2 mb-1.5">
@@ -366,7 +366,7 @@ function KeeperApprovalAlertBanner() {
 
   return html`
     <div
-      class="mb-3.5 flex items-center gap-4 rounded-[var(--r-1)] border ${tone} p-4 shadow-[var(--shadow-1)] ring-2 ${ringTone}"
+      class="v2-command-panel mb-3.5 flex items-center gap-4 rounded-[var(--r-1)] border ${tone} p-4 shadow-[var(--shadow-1)] ring-2 ${ringTone}"
       data-testid="keeper-hitl-alert-banner"
       role="status"
       aria-live="polite"
@@ -408,7 +408,7 @@ function KeeperApprovalEmptyState() {
       ? 'border-[var(--accent-20)] bg-[var(--accent-10)] text-accent-fg'
       : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted'
   return html`
-    <div data-testid="keeper-hitl-empty">
+    <div class="v2-command-panel" data-testid="keeper-hitl-empty">
       <${EmptyState} message=${ctx.primary} compact />
       ${ctx.secondary ? html`<div class="mt-0.5 text-center text-2xs text-text-dim">${ctx.secondary}</div>` : null}
       ${ctx.lastActivity || meta ? html`
@@ -499,9 +499,9 @@ function KeeperApprovalQueueSection() {
         : 'border-warn/40 bg-warn/15 text-warn text-sm px-3 py-1 font-extrabold')
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
-    <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
+    <div class="v2-command-panel" id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
     <${SectionCard} label="Keeper HITL Approval Queue" class="section mb-5 v2-command-panel" variant="compact">
-      <div class="mb-3 flex items-center justify-between gap-3">
+      <div class="v2-command-toolbar mb-3 flex items-center justify-between gap-3">
         <div class="text-xs text-text-muted">
           Keeper tool calls above the risk threshold wait here.
         </div>
@@ -510,7 +510,7 @@ function KeeperApprovalQueueSection() {
         </span>
       </div>
       ${hasItems ? html`
-        <div class="mb-3 flex items-center gap-2">
+        <div class="v2-command-toolbar mb-3 flex items-center gap-2">
           <${TextInput}
             type="search"
             value=${query.value}
@@ -526,12 +526,12 @@ function KeeperApprovalQueueSection() {
         ? html`<${KeeperApprovalEmptyState} />`
         : isFiltering && visibleItems.length === 0
           ? html`
-              <div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]" data-testid="keeper-hitl-approval-empty-filter">
+              <div class="v2-command-row py-4 text-center text-2xs text-[var(--color-fg-disabled)]" data-testid="keeper-hitl-approval-empty-filter">
                 No filter results (${items.length} items)
               </div>
             `
           : html`
-            <div class="flex flex-col gap-3.5" data-testid="governance-approval-queue">
+            <div class="v2-command-panel flex flex-col gap-3.5" data-testid="governance-approval-queue">
               ${visibleItems.map(item => {
                 const disabled = actingId === item.id
                 return html`
@@ -619,7 +619,7 @@ function ApprovalRulesSection() {
       ${rules.length === 0
         ? html`<${EmptyState} message="No stored Always rules." compact />`
         : html`
-            <div class="flex flex-col gap-3" data-testid="governance-approval-rules">
+            <div class="v2-command-panel flex flex-col gap-3" data-testid="governance-approval-rules">
               ${rules.map((rule: KeeperApprovalRule) => {
                 const deleting = actingId === `rule:${rule.id}`
                 return html`

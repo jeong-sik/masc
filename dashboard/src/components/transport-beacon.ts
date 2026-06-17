@@ -131,7 +131,7 @@ export function TransportBeacon() {
   const view = beaconView.value
   return html`
     <div
-      class="flex items-center gap-1.5 whitespace-nowrap rounded-[var(--r-1)] border border-solid px-2 py-0.5 text-xs ${STATE_CLASS[view.state]}"
+      class="v2-shell-panel flex items-center gap-1.5 whitespace-nowrap rounded-[var(--r-1)] border border-solid px-2 py-0.5 text-xs ${STATE_CLASS[view.state]}"
       title=${view.title}
       role="status"
       data-beacon-state=${view.state}

@@ -179,6 +179,7 @@ function findKeeper(rows: readonly Keeper[], name: string): Keeper | null {
 function LifecycleMini({ state, phase }: { state: LifecycleState; phase: string | null }) {
   return html`
     <div
+      class="ide-persistence-lifecycle v2-ide-card"
       role="region"
       aria-label="Keeper lifecycle"
       data-testid="ide-persistence-lifecycle"
@@ -308,6 +309,7 @@ export function IdePersistencePanel({
 
   return html`
     <section
+      class="ide-persistence-panel v2-ide-panel"
       aria-label="PERSISTENCE MAP"
       data-testid="ide-persistence-panel"
       style=${{
@@ -374,6 +376,7 @@ export function IdePersistencePanel({
             />
 
             <div
+              class="ide-persistence-memory-graph v2-ide-card"
               style=${{
                 display: 'grid',
                 gap: 'var(--sp-2)',
@@ -448,7 +451,7 @@ function PersistenceFocusChip({
   return html`
     <button
       type="button"
-      class="ide-persistence-focus"
+      class="ide-persistence-focus v2-ide-action"
       title=${routeLink.evidence}
       aria-label=${`Open current persistence focus ${routeLink.evidence}`}
       onClick=${() => openIdeContextRouteLink(routeLink)}
@@ -495,6 +498,7 @@ function PersistenceRouteLinks({
         <button
           key=${link.id}
           type="button"
+          class="v2-ide-action"
           title=${link.evidence}
           aria-label=${`Open ${link.evidence}`}
           onClick=${() => openIdeContextRouteLink(link)}

@@ -731,6 +731,8 @@ export interface KeeperConversationAttachment {
   size: number
   mimeType: string
   data: string
+  /** Optional image dimensions (e.g. "1920×1080") computed for composer blocks. */
+  dims?: string
 }
 
 // RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
@@ -745,6 +747,78 @@ export interface KeeperConversationAudioClip {
   messageText: string
   deviceId?: string | null
 }
+
+// --- Keeper v2 rich chat blocks (optional; when present the bubble renderer
+// uses them instead of plain markdown text). See ChatMessageBubble in
+// src/components/chat/primitives.ts.
+
+export type ChatTextBlock = { t: 'p'; html: string }
+export type ChatHeadingBlock = { t: 'h4'; html: string }
+export type ChatListBlock = { t: 'ul'; items: string[] }
+
+export type ChatCalloutSeverity = 'info' | 'warn' | 'bad'
+export type ChatCalloutBlock = { t: 'callout'; severity?: ChatCalloutSeverity; html: string }
+
+export type ChatTableCellValue = string | { v: string; num?: boolean; muted?: boolean }
+export type ChatTableBlock = { t: 'table'; head: ChatTableCellValue[]; rows: ChatTableCellValue[][] }
+
+export type ChatCodeBlock = { t: 'code'; cap?: string; html: string }
+
+export type ChatShellLine = { t?: 'cmd' | 'out' | 'err'; v: string }
+export type ChatShellBlock = { t: 'shell'; title?: string; lines: ChatShellLine[]; exit?: number; dur?: string }
+
+export type ChatArtifactBlock = { t: 'artifact'; kind?: string; name: string; size?: string; note?: string }
+
+export type ChatAttachBlock = {
+  t: 'attach'
+  name: string
+  dims?: string
+  src?: string
+  svg?: string
+  ph?: string
+  via?: string
+  size?: string
+  /** Optional source data carried so the parent can forward attachments to the API. */
+  data?: string
+  mimeType?: string
+  sizeBytes?: number
+  id?: string
+  kind?: string
+}
+
+export type ChatVoiceBlock = { t: 'voice'; secs?: number; wave?: number[]; via?: string; size?: string; transcript?: string }
+
+export type ChatImageBlock = { t: 'image'; src?: string; ph?: string; cap?: string }
+export type ChatSvgBlock = { t: 'svg'; svg: string; cap?: string }
+
+export type ChatTraceThinkStep = { kind: 'think'; text: string }
+export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string }
+export type ChatTraceToolStep = { kind: 'tool'; name: string; status?: 'ok' | 'err'; dur?: string; args?: unknown; result?: string }
+export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceToolStep
+export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[] }
+
+export type ChatLinkBlock = { t: 'link'; url: string; title: string; desc?: string; meta?: string; fav?: string; kind?: string }
+
+export type ChatBroadcastAck = 'acked' | 'read' | 'delivered' | string
+export type ChatBroadcastRecipient = { id: string; ack: ChatBroadcastAck; at?: string }
+export type ChatBroadcastBlock = { t: 'broadcast'; scope: string; via?: string; note: string; recipients: ChatBroadcastRecipient[] }
+
+export type ChatBlock =
+  | ChatTextBlock
+  | ChatHeadingBlock
+  | ChatListBlock
+  | ChatCalloutBlock
+  | ChatTableBlock
+  | ChatCodeBlock
+  | ChatShellBlock
+  | ChatArtifactBlock
+  | ChatAttachBlock
+  | ChatVoiceBlock
+  | ChatImageBlock
+  | ChatSvgBlock
+  | ChatTraceBlock
+  | ChatLinkBlock
+  | ChatBroadcastBlock
 
 export type KeeperConversationStreamState =
   | 'opening'
@@ -781,6 +855,7 @@ export interface KeeperConversationEntry {
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   attachments?: KeeperConversationAttachment[]
+  blocks?: ChatBlock[]
   details?: KeeperConversationDetails | null
   error?: string | null
   surface?: SurfaceRef | null

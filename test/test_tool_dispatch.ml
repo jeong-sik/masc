@@ -254,7 +254,7 @@ let () =
               register_full ~tool_name:tool ~handler:echo_handler ();
               let calls = ref [] in
               let probe : Tool_dispatch.span_wrapper =
-                fun ?force_new_trace_id:_ ~tool_name body ->
+                fun ?force_new_trace_id:_ ?surface:_ ~tool_name body ->
                   calls := tool_name :: !calls;
                   body (fun () -> Some ("probe-trace", "probe-trace"))
               in
@@ -273,7 +273,7 @@ let () =
               let tool = "__test_span_wrap_b" in
               register_full ~tool_name:tool ~handler:echo_handler ();
               let calls = ref 0 in
-              Tool_dispatch.set_span_wrapper (fun ?force_new_trace_id:_ ~tool_name:_ body ->
+              Tool_dispatch.set_span_wrapper (fun ?force_new_trace_id:_ ?surface:_ ~tool_name:_ body ->
                   incr calls;
                   body (fun () -> None));
               Tool_dispatch.clear_hooks ();

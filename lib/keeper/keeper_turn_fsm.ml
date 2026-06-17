@@ -65,18 +65,16 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
         (fun () -> invalid_arg detail)
 
 (* Per-keeper last-transition wallclock, used to record the dwell time
-   spent in [prev] state when a transition fires. Keeper turns run on
-   concurrent Eio fibers, so serialize Hashtbl access with an [Eio.Mutex.t].
-   Stale entries left behind by terminal transitions are bounded by keeper
-   count. *)
-let last_transition_at : (string, float) Hashtbl.t = Hashtbl.create 64
-let last_transition_mu = Eio.Mutex.create ()
+   spent in [prev] state when a transition fires. Kept as an immutable
+   [StringMap] under an [Atomic.t] and updated with a CAS loop so
+   concurrent Eio fibers do not need a mutex. Stale entries left behind
+   by terminal transitions are bounded by keeper count. *)
+module StringMap = Set_util.StringMap
+
+let last_transition_at : float StringMap.t Atomic.t = Atomic.make StringMap.empty
 
 let observe_phase_dwell ~keeper_name ~from_label =
-  match
-    Eio.Mutex.use_ro last_transition_mu (fun () ->
-      Hashtbl.find_opt last_transition_at keeper_name)
-  with
+  match StringMap.find_opt keeper_name (Atomic.get last_transition_at) with
   | None -> ()
   | Some prev_at ->
     let now = Unix.gettimeofday () in
@@ -99,8 +97,8 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   (match prev with
    | Some _ -> observe_phase_dwell ~keeper_name ~from_label:prev_label
    | None -> ());
-  Eio.Mutex.use_rw ~protect:true last_transition_mu (fun () ->
-    Hashtbl.replace last_transition_at keeper_name now);
+  Lockfree_atomic.update last_transition_at (fun m ->
+    StringMap.add keeper_name now m);
   let classified =
     match prev with
     | Some from_state ->

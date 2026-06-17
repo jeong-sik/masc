@@ -117,6 +117,7 @@ describe('ConnectorKeeperMatrix', () => {
     const keepers = [mkKeeper('alpha'), mkKeeper('beta')]
     const matrix = deriveMatrix(connectors, keepers)
     render(html`<${ConnectorKeeperMatrix} matrix=${matrix} />`, container)
+    expect(container.querySelector('.v2-connector-keeper-matrix')).not.toBeNull()
     const cells = container.querySelectorAll('[data-matrix-cell]')
     // 2 keepers × 4 connectors = 8 cells
     expect(cells.length).toBe(8)

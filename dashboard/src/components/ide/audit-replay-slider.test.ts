@@ -43,6 +43,7 @@ describe('audit replay slider', () => {
 
     const slider = container.querySelector('[role="slider"]') as HTMLElement
     expect(slider).not.toBeNull()
+    expect(container.firstElementChild?.classList.contains('v2-ide-toolbar')).toBe(true)
     expect(slider.getAttribute('aria-label')).toBe('Audit replay timestamp')
     expect(container.textContent).toContain('2/3')
 

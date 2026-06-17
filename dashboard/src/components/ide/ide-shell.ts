@@ -641,64 +641,66 @@ export function IdeShell() {
 
   return html`
     <section
-      class="ide-plane-shell"
+      class="ide-plane-shell ide-v2-surface v2-ide-surface"
       role="region"
       aria-label="Code IDE shell"
       data-terminal-open=${terminalOpen ? 'true' : 'false'}
       data-rails-collapsed=${railsCollapsed ? 'true' : 'false'}
     >
-      <header
-        class="ide-plane-statusbar"
-        aria-label="IDE operational status"
-        data-testid="ide-statusbar"
-      >
-        <span class="ide-plane-statusbar-title">MASC IDE</span>
-        <span>·</span>
-        <span
-          class="chip sm is-brass"
-          style=${{ flexShrink: 0 }}
-          data-testid="ide-statusbar-workspace"
-          title=${statusbar.workspaceBasePath
-            ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
-            : undefined}
-        >${statusbar.workspaceLabel}</span>
-        <div
-          class="ide-plane-statusbar-meta"
-          aria-label="IDE operational context"
+      <div class="ide-v2-top">
+        <header
+          class="ide-plane-statusbar"
+          aria-label="IDE operational status"
+          data-testid="ide-statusbar"
         >
-          ${statusbar.chips.map(chip => html`
-            <span
-              key=${chip.id}
-              class=${`chip sm is-${chip.tone}`}
-              title=${chip.title}
-              data-testid=${`ide-statusbar-chip-${chip.id}`}
-            >${chip.label}</span>
-          `)}
-        </div>
-        <${IdePresenceStrip} />
-        <span
-          class="ide-plane-connection"
-          data-state=${statusbar.connectionTone}
-        >● ${statusbar.connectionLabel}</span>
-      </header>
-      <${IdeToolbar}
-        activeView=${activeView}
-        activeLayers=${activeLayers}
-        onViewChange=${handleViewChange}
-        onLayersChange=${handleLayersChange}
-        railsCollapsed=${railsCollapsed}
-        onRailsToggle=${handleRailsToggle}
-        onTerminalOpen=${handleTerminalOpen}
-        onFindOpen=${handleFindOpen}
-      />
+          <span class="ide-plane-statusbar-title">MASC IDE</span>
+          <span>·</span>
+          <span
+            class="chip sm is-brass"
+            style=${{ flexShrink: 0 }}
+            data-testid="ide-statusbar-workspace"
+            title=${statusbar.workspaceBasePath
+              ? `base_path: ${statusbar.workspaceBasePath} (set MASC_BASE_PATH to change)`
+              : undefined}
+          >${statusbar.workspaceLabel}</span>
+          <div
+            class="ide-plane-statusbar-meta"
+            aria-label="IDE operational context"
+          >
+            ${statusbar.chips.map(chip => html`
+              <span
+                key=${chip.id}
+                class=${`chip sm is-${chip.tone}`}
+                title=${chip.title}
+                data-testid=${`ide-statusbar-chip-${chip.id}`}
+              >${chip.label}</span>
+            `)}
+          </div>
+          <${IdePresenceStrip} />
+          <span
+            class="ide-plane-connection"
+            data-state=${statusbar.connectionTone}
+          >● ${statusbar.connectionLabel}</span>
+        </header>
+        <${IdeToolbar}
+          activeView=${activeView}
+          activeLayers=${activeLayers}
+          onViewChange=${handleViewChange}
+          onLayersChange=${handleLayersChange}
+          railsCollapsed=${railsCollapsed}
+          onRailsToggle=${handleRailsToggle}
+          onTerminalOpen=${handleTerminalOpen}
+          onFindOpen=${handleFindOpen}
+        />
+      </div>
       ${reviewFocusActive
         ? html`<${IdeReviewFocusStrip} activeLayers=${activeLayers} />`
         : html`<${IdeBreadcrumb} />`}
       <div
-        class="ide-plane-grid"
+        class="ide-plane-grid ide-v2-body ${railsCollapsed ? 'no-rail' : ''}"
         role="presentation"
       >
-        <div class="ide-plane-tree">
+        <div class="ide-plane-tree ide-v2-tree v2-ide-panel">
           <${IdeExplorer}
             fileTreeStore=${workspaceStore.fileTreeStore}
             workspaceSource=${workspaceStore.workspaceSource}
@@ -711,7 +713,7 @@ export function IdeShell() {
           />
         </div>
         <div
-          class="ide-plane-editor"
+          class="ide-plane-editor ide-v2-editor v2-ide-panel"
         >
           <${IdeEditor}
             activeView=${activeView}
@@ -731,36 +733,39 @@ export function IdeShell() {
           ? null
           : html`
             <div
-              class="ide-plane-conversation"
+              class="ide-plane-conversation ide-v2-rail v2-ide-panel"
               data-testid="ide-right-rail"
             >
-              <div
-                class="ide-plane-context-stack"
-                data-testid="ide-right-context-stack"
-              >
-                <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
-                <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                <${IdeMemoryPanel} keeperName=${terminalKeeper} />
-                <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
+              <div class="ide-v2-rail-tabs" aria-label="Context lens">
+                <button type="button" class="ide-v2-rail-tab on">Context</button>
+                <button type="button" class="ide-v2-rail-tab">Activity</button>
+                <button type="button" class="ide-v2-rail-tab">Cursors</button>
               </div>
-              <div
-                class="ide-plane-primary-rail"
-                data-testid="ide-primary-conversation-rail"
-              >
-                <${IdeConversationRail} />
+              <div class="ide-v2-rail-scroll">
+                <div
+                  class="ide-plane-context-stack"
+                  data-testid="ide-right-context-stack"
+                >
+                  <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
+                  <${IdePersistencePanel} keeperName=${terminalKeeper} />
+                  <${IdeMemoryPanel} keeperName=${terminalKeeper} />
+                  <${InspectorKeeperBDI} traceActive=${activeLayers.has('keeper-trace')} />
+                </div>
+                <div
+                  class="ide-plane-primary-rail"
+                  data-testid="ide-primary-conversation-rail"
+                >
+                  <${IdeConversationRail} />
+                </div>
+                <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
+                  <${IdeActivityPanel}
+                    activeFile=${activeFilePath}
+                    annotations=${annotations}
+                    diffRows=${diffRows}
+                    pollMs=${IDE_ACTIVITY_POLL_MS}
+                  />
+                </div>
               </div>
-            </div>
-          `}
-        ${railsCollapsed
-          ? null
-          : html`
-            <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
-              <${IdeActivityPanel}
-                activeFile=${activeFilePath}
-                annotations=${annotations}
-                diffRows=${diffRows}
-                pollMs=${IDE_ACTIVITY_POLL_MS}
-              />
             </div>
           `}
       </div>

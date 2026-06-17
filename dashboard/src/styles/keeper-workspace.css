@@ -22,6 +22,15 @@
  */
 
 /* ── Shell grid: roster | conversation | context rail ───────────── */
+
+/* The workspace is rendered inside .v2-surface, which is otherwise
+ * height:auto. In keeper detail mode the outer scroll container is hidden,
+ * so .v2-surface must fill the stage for .kw-grid height:100% to resolve
+ * to the viewport and give the thread a constrained scroll box. */
+[data-keeper-detail-mode="true"] .v2-surface {
+  height: 100%;
+}
+
 .kw-grid {
   display: grid;
   grid-template-columns:
@@ -55,12 +64,12 @@
   flex-direction: column;
   min-height: 0;
   border-right: 1px solid var(--color-border-default);
-  background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-page) 60%);
+  background: var(--color-bg-panel-alt);
 }
-.kw-roster-head { padding: 15px 14px; border-bottom: 1px solid var(--color-border-divider); }
+.kw-roster-head { padding: 14px; border-bottom: 1px solid var(--color-border-divider); }
 .kw-roster-search {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--fs-13);
   padding: 8px 11px;
   background: var(--color-bg-page);
   color: var(--color-fg-primary);
@@ -73,22 +82,22 @@
 
 .kw-roster-filters { display: flex; gap: 5px; padding: 10px 14px; flex-wrap: wrap; border-bottom: 1px solid var(--color-border-divider); }
 .kw-rfilter {
-  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  font-size: var(--fs-11); letter-spacing: 0.06em; text-transform: uppercase;
   padding: 4px 10px; border-radius: 9999px; cursor: pointer;
-  border: 1px solid var(--color-border-default); background: transparent; color: var(--color-fg-muted);
+  border: 1px solid var(--color-border-default); background: transparent; color: var(--color-fg-secondary);
   display: inline-flex; gap: 5px; align-items: center;
   transition: color .15s, border-color .15s, background .15s;
 }
-.kw-rfilter:hover { color: var(--color-fg-secondary); border-color: var(--color-border-strong); }
-.kw-rfilter[aria-pressed="true"] { color: var(--color-bg-page); background: var(--color-accent-fg); border-color: var(--color-accent-fg); font-weight: 600; }
-.kw-rfilter .n { opacity: 0.75; }
+.kw-rfilter:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); }
+.kw-rfilter[aria-pressed="true"] { color: var(--color-bg-page); background: var(--color-accent-fg); border-color: var(--color-accent-fg); font-weight: var(--fw-semi); }
+.kw-rfilter .n { opacity: 0.8; }
 
 .kw-roster-list { flex: 1; overflow-y: auto; padding: 9px 8px; }
 .kw-roster-group {
-  font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--color-fg-muted);
-  padding: 12px 8px 5px;
+  font-size: var(--fs-11); font-weight: var(--fw-bold); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-fg-secondary);
+  padding: 12px 8px 6px;
 }
-.kw-roster-empty { padding: 30px 12px; text-align: center; color: var(--color-fg-muted); font-size: 12.5px; }
+.kw-roster-empty { padding: 30px 12px; text-align: center; color: var(--color-fg-secondary); font-size: var(--fs-13); }
 
 .kw-kp-row {
   display: grid; grid-template-columns: 40px 1fr auto; gap: 11px; align-items: start;
@@ -98,7 +107,7 @@
   transition: background .14s, border-color .14s;
   position: relative;
 }
-.kw-kp-row:hover { background: var(--color-bg-surface); }
+.kw-kp-row:hover { background: var(--color-bg-surface); border-color: var(--color-border-default); }
 .kw-kp-row[aria-current="true"] { background: var(--color-bg-surface); border-color: var(--color-accent-fg-dim); box-shadow: inset 0 0 0 1px var(--accent-10); }
 .kw-kp-row[aria-current="true"]::before {
   content: ""; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 3px;
@@ -106,16 +115,16 @@
   box-shadow: 0 0 10px rgb(var(--color-accent-glow) / 0.6);
 }
 .kw-kp-meta { min-width: 0; }
-.kw-kp-name { font-weight: 600; font-size: 15px; color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--color-fg-muted); margin-top: 3px; min-width: 0; }
+.kw-kp-name { font-weight: var(--fw-bold); font-size: 15px; color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kw-kp-sub { display: flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--color-fg-secondary); margin-top: 3px; min-width: 0; }
 .kw-kp-state { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .kw-kp-handle { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.kw-kp-work { margin-top: 4px; font-size: 11.5px; color: var(--color-fg-muted); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kw-kp-work { margin-top: 4px; font-size: var(--fs-12); color: var(--color-fg-secondary); line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kw-kp-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; padding-top: 2px; }
-.kw-kp-time { font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted); }
+.kw-kp-time { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-muted); }
 .kw-kp-att {
-  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
-  min-width: 16px; text-align: center; padding: 1px 5px; border-radius: 9999px;
+  font-family: var(--font-mono); font-size: var(--fs-10); font-weight: var(--fw-semi);
+  min-width: 16px; text-align: center; padding: 2px 6px; border-radius: 9999px;
   color: var(--color-status-err);
   background: rgb(var(--color-status-err-glow) / 0.16);
   border: 1px solid rgb(var(--color-status-err-glow) / 0.35);
@@ -124,7 +133,7 @@
 /* shared sigil avatar (roster + chat hero) — color from --color-keeper-N */
 .kw-sigil {
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--r-2); font-family: var(--font-mono); font-weight: 700;
+  border-radius: var(--r-2); font-family: var(--font-mono); font-weight: var(--fw-bold);
   color: var(--color-bg-page); flex: none;
 }
 
@@ -137,24 +146,24 @@
 @keyframes kw-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* ════ CONVERSATION (center) ════════════════════════════════════ */
-.kw-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-bg-page); }
+.kw-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--color-bg-page); }
 
 /* Single-row header (identity + status + actions). Slimmer than the old
  * two-row variant — the runtime/model/throughput sub-row moved to the rail —
  * so the conversation below gets the reclaimed vertical space. */
 .kw-chat-head {
-  flex: none; padding: 10px 28px;
+  flex: none; padding: 12px 28px;
   border-bottom: 1px solid var(--color-border-default);
-  background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-page));
+  background: var(--color-bg-panel-alt);
   display: flex; align-items: center; gap: 14px;
 }
 .kw-chat-id { min-width: 0; flex: 1; }
 .kw-chat-name-row { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
-.kw-chat-name { font-size: 19px; font-weight: 600; letter-spacing: 0.01em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
+.kw-chat-name { font-size: var(--fs-20); font-weight: var(--fw-bold); letter-spacing: -0.01em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
 
 .kw-state-pill {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 11px; letter-spacing: 0.04em; padding: 4px 10px; border-radius: 9999px;
+  font-size: var(--fs-12); font-weight: var(--fw-med); letter-spacing: 0.02em; padding: 5px 11px; border-radius: 9999px;
   background: var(--color-bg-surface); border: 1px solid var(--color-border-default); color: var(--color-fg-secondary);
 }
 .kw-state-pill.run { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.45); background: rgb(var(--color-status-ok-glow) / 0.10); }
@@ -164,7 +173,7 @@
 
 .kw-chat-actions { display: flex; gap: 7px; align-items: center; flex: none; }
 .kw-act {
-  font-size: 11px; letter-spacing: 0.04em;
+  font-size: var(--fs-12); font-weight: var(--fw-med); letter-spacing: 0.02em;
   padding: 7px 12px; border-radius: var(--r-1); cursor: pointer;
   border: 1px solid var(--color-border-default); background: var(--color-bg-surface); color: var(--color-fg-secondary);
   white-space: nowrap; transition: color .15s, border-color .15s, background .15s;
@@ -177,11 +186,12 @@
  * Provide the spacious rhythm + centered max-width column here. */
 .kw-thread {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
+  overflow: hidden;
   padding: 0;
 }
 .kw-thread-inner {
   width: 100%; max-width: var(--kw-thread-w, 980px); margin: 0 auto;
-  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  height: 100%; min-height: 0; display: flex; flex-direction: column;
 }
 /* Overrides for the reused ChatTranscript (chat/primitives.ts).
  * Two-class specificity beats its single-class Tailwind gap/padding.
@@ -218,20 +228,20 @@
 .kw-rail {
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   border-left: 1px solid var(--color-border-default);
-  background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-page) 70%);
+  background: var(--color-bg-panel-alt);
 }
 .kw-rail-scroll { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 22px; }
 .kw-sec h4 {
-  font-weight: 600; text-transform: uppercase; letter-spacing: 0.16em;
-  font-size: 12px; color: var(--color-fg-secondary); margin: 0 0 9px;
+  font-weight: var(--fw-bold); text-transform: uppercase; letter-spacing: 0.12em;
+  font-size: var(--fs-12); color: var(--color-fg-primary); margin: 0 0 9px;
   display: flex; align-items: center; gap: 7px;
 }
-.kw-card { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-2); padding: 12px 13px; }
+.kw-card { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-2); padding: 13px 14px; }
 
 .kw-vitals { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--color-border-divider); border: 1px solid var(--color-border-default); border-radius: var(--r-2); overflow: hidden; }
-.kw-vital { background: var(--color-bg-surface); padding: 9px 11px; min-width: 0; }
-.kw-vital .vk { font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-fg-secondary); font-weight: 600; }
-.kw-vital .vv { font-family: var(--font-mono); font-size: 14px; color: var(--color-fg-primary); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kw-vital { background: var(--color-bg-elevated); padding: 10px 12px; min-width: 0; }
+.kw-vital .vk { font-size: var(--fs-11); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-fg-secondary); font-weight: var(--fw-bold); }
+.kw-vital .vv { font-family: var(--font-mono); font-size: 15px; font-weight: var(--fw-semi); color: var(--color-fg-primary); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .kw-meter-wrap { position: relative; margin-top: 18px; }
 .kw-meter { height: 7px; border-radius: 9999px; background: var(--color-bg-page); border: 1px solid var(--color-border-divider); overflow: hidden; }
@@ -243,51 +253,51 @@
   font-style: normal; font-size: 8.5px; letter-spacing: 0.04em; white-space: nowrap;
   color: var(--color-status-warn); opacity: 0.85;
 }
-.kw-ctx-tok { display: flex; align-items: baseline; gap: 5px; margin-top: 8px; font-size: 11.5px; }
-.kw-ctx-tok .mono { font-family: var(--font-mono); color: var(--color-fg-secondary); }
-.kw-ctx-tok .lbl { margin-left: auto; color: var(--color-fg-muted); font-size: 10.5px; }
+.kw-ctx-tok { display: flex; align-items: baseline; gap: 5px; margin-top: 8px; font-size: var(--fs-12); }
+.kw-ctx-tok .mono { font-family: var(--font-mono); color: var(--color-fg-primary); }
+.kw-ctx-tok .lbl { margin-left: auto; color: var(--color-fg-secondary); font-size: var(--fs-11); }
 
 .kw-list { display: flex; flex-direction: column; gap: 7px; }
-.kw-list-empty { font-size: 12.5px; color: var(--color-fg-muted); }
-.kw-tasktag { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r-1); background: var(--color-bg-page); border: 1px solid var(--color-border-divider); font-size: 12.5px; color: var(--color-fg-primary); }
-.kw-tasktag .tid { font-family: var(--font-mono); font-size: 11px; color: var(--color-accent-fg); flex: none; }
+.kw-list-empty { font-size: var(--fs-13); color: var(--color-fg-secondary); }
+.kw-tasktag { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-radius: var(--r-1); background: var(--color-bg-elevated); border: 1px solid var(--color-border-divider); font-size: var(--fs-13); color: var(--color-fg-primary); }
+.kw-tasktag .tid { font-family: var(--font-mono); font-size: var(--fs-12); color: var(--color-accent-fg); flex: none; }
 .kw-tasktag .ttl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
-.kw-tasktag .tstate { font-size: 10px; flex: none; color: var(--color-fg-muted); }
+.kw-tasktag .tstate { font-size: var(--fs-11); flex: none; color: var(--color-fg-secondary); }
 .kw-tasktag .tstate.review { color: var(--color-status-warn); }
 
 /* Recent tool calls: compact rows (status dot + name + duration + age) that
  * expand on click to reveal input/output. Replaces the old names-only .kw-tool. */
 .kw-toolcall { border-radius: var(--r-1); }
-.kw-toolcall.open { background: var(--color-bg-page); border: 1px solid var(--color-border-divider); }
+.kw-toolcall.open { background: var(--color-bg-elevated); border: 1px solid var(--color-border-divider); }
 .kw-toolcall-head {
   display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 3px 6px; border-radius: var(--r-1); cursor: pointer;
+  padding: 4px 7px; border-radius: var(--r-1); cursor: pointer;
   background: none; border: none; text-align: left; color: var(--color-fg-secondary);
-  font-size: 12.5px;
+  font-size: var(--fs-13);
 }
 .kw-toolcall-head:hover { background: var(--color-bg-hover); }
-.kw-toolcall-head .nm { font-family: var(--font-mono); font-size: 12px; color: var(--color-fg-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kw-toolcall-head .dur { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted); flex: none; }
-.kw-toolcall-head .age { font-size: 10.5px; color: var(--color-fg-muted); flex: none; white-space: nowrap; }
-.kw-toolcall-body { padding: 4px 8px 8px; display: flex; flex-direction: column; gap: 6px; }
+.kw-toolcall-head .nm { font-family: var(--font-mono); font-size: var(--fs-13); font-weight: var(--fw-semi); color: var(--color-fg-primary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kw-toolcall-head .dur { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-secondary); flex: none; }
+.kw-toolcall-head .age { font-size: var(--fs-11); color: var(--color-fg-muted); flex: none; white-space: nowrap; }
+.kw-toolcall-body { padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
 .kw-tc-block { display: flex; flex-direction: column; gap: 2px; }
-.kw-tc-lbl { font-size: 10px; letter-spacing: 0.04em; color: var(--color-fg-muted); text-transform: uppercase; }
+.kw-tc-lbl { font-size: var(--fs-10); letter-spacing: 0.06em; color: var(--color-fg-secondary); text-transform: uppercase; font-weight: var(--fw-bold); }
 .kw-tc-block pre {
   margin: 0; max-height: 160px; overflow: auto;
-  font-family: var(--font-mono); font-size: 11px; line-height: 1.45;
-  color: var(--color-fg-secondary); white-space: pre-wrap; word-break: break-word;
-  background: var(--color-bg-surface); border: 1px solid var(--color-border-divider);
-  border-radius: var(--r-0); padding: 6px 8px;
+  font-family: var(--font-mono); font-size: var(--fs-12); line-height: 1.5;
+  color: var(--color-fg-primary); white-space: pre-wrap; word-break: break-word;
+  background: var(--color-bg-page); border: 1px solid var(--color-border-divider);
+  border-radius: var(--r-1); padding: 8px 10px;
 }
 
 .kw-detail-btn {
   width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 11px 13px; border-radius: var(--r-2); cursor: pointer;
+  padding: 12px 14px; border-radius: var(--r-2); cursor: pointer;
   border: 1px solid var(--color-border-default); background: var(--color-bg-surface); color: var(--color-fg-primary);
-  font-size: 12.5px; font-weight: 600; transition: background .15s, border-color .15s;
+  font-size: var(--fs-13); font-weight: var(--fw-bold); transition: background .15s, border-color .15s;
 }
 .kw-detail-btn:hover { background: var(--color-bg-hover); border-color: var(--color-border-strong); }
-.kw-detail-btn .sub { font-weight: 400; color: var(--color-fg-muted); font-size: 11px; }
+.kw-detail-btn .sub { font-weight: 400; color: var(--color-fg-secondary); font-size: var(--fs-12); }
 
 /* ════ DETAIL ("상세 보기") — reuse KeeperDetailBody, scrollable column ══ */
 .kw-detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--color-bg-page); }
@@ -296,17 +306,17 @@
   padding: 12px 18px; border-bottom: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);
 }
-.kw-detail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 18px; }
+.kw-detail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 20px; }
 
 /* ════ ATTENTION (rail, top) ════════════════════════════════════ */
-.kw-att-list { display: flex; flex-direction: column; gap: 6px; }
+.kw-att-list { display: flex; flex-direction: column; gap: 7px; }
 .kw-att-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px; border-radius: var(--r-1); font-size: 12px;
-  background: var(--color-bg-page); border: 1px solid var(--color-border-divider); color: var(--color-fg-secondary);
+  padding: 9px 11px; border-radius: var(--r-1); font-size: 12.5px;
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border-divider); color: var(--color-fg-primary);
 }
-.kw-att-item.bad { border-color: rgb(var(--color-status-err-glow) / 0.35); background: rgb(var(--color-status-err-glow) / 0.08); color: var(--color-fg-primary); }
-.kw-att-item.warn { border-color: rgb(var(--color-status-warn-glow) / 0.35); background: rgb(var(--color-status-warn-glow) / 0.08); }
+.kw-att-item.bad { border-color: rgb(var(--color-status-err-glow) / 0.35); background: rgb(var(--color-status-err-glow) / 0.1); color: var(--color-fg-primary); }
+.kw-att-item.warn { border-color: rgb(var(--color-status-warn-glow) / 0.35); background: rgb(var(--color-status-warn-glow) / 0.1); }
 .kw-att-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--color-fg-muted); }
 .kw-att-item.bad .kw-att-dot { background: var(--color-status-err); box-shadow: 0 0 6px var(--color-status-err); }
 .kw-att-item.warn .kw-att-dot { background: var(--color-status-warn); box-shadow: 0 0 6px var(--color-status-warn); }

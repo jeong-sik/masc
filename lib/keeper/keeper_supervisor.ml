@@ -15,6 +15,54 @@ open Keeper_execution
 
 include Keeper_supervisor_launch
 
+(** RFC-0250: pure stale-run assessment for the no-turn-produced case.
+
+    Returns [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] — giving
+    the previously-producerless [Idle_turn] variant its first real producer —
+    when the keeper is [Running], is not in a turn ([in_turn = None], the
+    exact [Idle_turn] doc contract), has completed at least one turn
+    ([last_turn_ts > 0], so a fresh-start keeper is not mis-stamped), and
+    [now] exceeds [last_turn_ts] by more than [threshold]. Returns [None]
+    otherwise (alive, in-turn, or fresh-start).
+
+    Pure: the caller stamps the reason via [Keeper_registry.set_failure_reason]
+    and invokes [Keeper_execution_receipt.emit_stale_keeper_broadcast]. Keys on
+    [last_turn_ts], never on active-tool duration, so it does not re-introduce
+    the deliberately-removed per-turn wall-clock watchdog. *)
+let assess_stale_run
+    ~(phase : Keeper_state_machine.phase)
+    ~(in_turn : 'a option)
+    ~(last_turn_ts : float)
+    ~(now : float)
+    ~(threshold : float)
+    : Keeper_registry.failure_reason option
+  =
+  if Bool.( phase = Keeper_state_machine.Running
+            && Option.is_none in_turn
+            && last_turn_ts > 0.0
+            && now -. last_turn_ts > threshold )
+  then
+    let stall = now -. last_turn_ts in
+    Some
+      (Keeper_registry.Stale_turn_timeout
+         (Keeper_registry_types.Idle_turn { stall_seconds = stall }))
+  else None
+
+type sweep_acc =
+  { to_restart : (Keeper_registry.registry_entry * string) list
+  ; to_unregister : Keeper_registry.registry_entry list
+  ; to_mark_dead : (Keeper_registry.registry_entry * string) list
+  ; to_cleanup_dead : Keeper_registry.registry_entry list
+  }
+
+let empty_sweep_acc =
+  { to_restart = []
+  ; to_unregister = []
+  ; to_mark_dead = []
+  ; to_cleanup_dead = []
+  }
+;;
+
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts =
@@ -54,18 +102,19 @@ let sweep_and_recover (ctx : _ context) =
               v.detail)
          vs)
     entries;
-  let to_restart = ref [] in
-  let to_unregister = ref [] in
-  let to_mark_dead = ref [] in
-  let to_cleanup_dead = ref [] in
-  let queue_crashed_entry (entry : Keeper_registry.registry_entry) msg =
-    let queue_standard_restart () =
+  let queue_crashed_entry
+        (acc : sweep_acc)
+        (entry : Keeper_registry.registry_entry)
+        msg
+    =
+    let queue_standard_restart acc =
       if entry.restart_count >= max_restarts
-      then to_mark_dead := (entry, msg) :: !to_mark_dead
+      then { acc with to_mark_dead = (entry, msg) :: acc.to_mark_dead }
       else (
         let delay = backoff_delay entry.restart_count in
         if now -. entry.last_restart_ts >= delay
-        then to_restart := (entry, msg) :: !to_restart)
+        then { acc with to_restart = (entry, msg) :: acc.to_restart }
+        else acc)
     in
     match failure_reason_policy_decision entry.last_failure_reason with
     | Some
@@ -79,16 +128,16 @@ let sweep_and_recover (ctx : _ context) =
             effect and clears the in-memory registry slot so the counter
             increments once per storm. *)
          handle_stale_storm_pause ctx entry ~count;
-         to_unregister := entry :: !to_unregister
+         { acc with to_unregister = entry :: acc.to_unregister }
        | Some (Keeper_registry.Provider_timeout_loop { count }) ->
          (* Watchdog-preserved provider-timeout loops include liveness evidence,
             so policy allows keeper pause without treating timeout alone as
             keeper death. *)
          handle_provider_timeout_pause ctx entry ~count;
-         to_unregister := entry :: !to_unregister
+         { acc with to_unregister = entry :: acc.to_unregister }
        | Some Keeper_registry.Turn_overflow_pause
        | Some Keeper_registry.Turn_livelock_pause ->
-         to_unregister := entry :: !to_unregister
+         { acc with to_unregister = entry :: acc.to_unregister }
        | Some
            ( Keeper_registry.Heartbeat_consecutive_failures _
            | Keeper_registry.Turn_consecutive_failures _
@@ -99,7 +148,7 @@ let sweep_and_recover (ctx : _ context) =
            | Keeper_registry.Fiber_unresolved _
            | Keeper_registry.Exception _ )
        | None ->
-         queue_standard_restart ())
+         queue_standard_restart acc)
     | Some
         { Keeper_failure_policy.lifecycle_effect =
             ( Keeper_failure_policy.Keep_running
@@ -110,7 +159,7 @@ let sweep_and_recover (ctx : _ context) =
         ; _
         }
     | None ->
-      queue_standard_restart ()
+      queue_standard_restart acc
   in
   let watchdog_stop_pending (entry : Keeper_registry.registry_entry) =
     Atomic.get entry.fiber_stop
@@ -131,7 +180,10 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Exception _)
     | None -> false
   in
-  let force_unresolved_watchdog_crash (entry : Keeper_registry.registry_entry) =
+  let force_unresolved_watchdog_crash
+        (acc : sweep_acc)
+        (entry : Keeper_registry.registry_entry)
+    =
     let msg =
       entry.last_failure_reason
       |> Option.map Keeper_registry.failure_reason_to_string
@@ -201,71 +253,121 @@ let sweep_and_recover (ctx : _ context) =
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
         ]
       ();
-    (match
-       Keeper_registry.resolve_done
-         entry
-         ~source:"supervisor_force_watchdog_crash"
-         (`Crashed msg)
-     with
-     | Keeper_registry.Done_already_resolved _ -> ()
-     | Keeper_registry.Done_resolved _ ->
-       let outcome = msg in
-       ignore
-         (Keeper_registry.dispatch_event_and_log
-            ~base_path
-            entry.name
-            (Keeper_state_machine.Fiber_terminated
-               { outcome; provider_id = None; http_status = None }));
-       let ts = Time_compat.now () in
-       Keeper_registry.record_crash ~base_path entry.name ts msg;
-       Keeper_registry_error_recording.record ~base_path entry.name msg;
-       (match Keeper_registry.get ~base_path entry.name with
-        | Some updated -> queue_crashed_entry updated msg
-        | None -> ()))
+    match
+      Keeper_registry.resolve_done
+        entry
+        ~source:"supervisor_force_watchdog_crash"
+        (`Crashed msg)
+    with
+    | Keeper_registry.Done_already_resolved _ -> acc
+    | Keeper_registry.Done_resolved _ ->
+      let outcome = msg in
+      ignore
+        (Keeper_registry.dispatch_event_and_log
+           ~base_path
+           entry.name
+           (Keeper_state_machine.Fiber_terminated
+              { outcome; provider_id = None; http_status = None }));
+      let ts = Time_compat.now () in
+      Keeper_registry.record_crash ~base_path entry.name ts msg;
+      Keeper_registry_error_recording.record ~base_path entry.name msg;
+      match Keeper_registry.get ~base_path entry.name with
+      | Some updated -> queue_crashed_entry acc updated msg
+      | None -> acc
   in
   (* 2-level supervision slice: process the flat registry through stable
      8-keeper cohorts.  Each cohort re-reads its entries by name before
      processing so earlier cohort actions cannot leave later cohorts walking
      stale registry records.  The iterator yields between cohort groups; the
      yield meter still protects unusually large cohorts or non-default sizes. *)
+  let process_entry (acc : sweep_acc) (entry : Keeper_registry.registry_entry) =
+    match entry.phase with
+    | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
+      (match entry.dead_since_ts with
+       | Some dead_since when now -. dead_since >= dead_ttl_sec ->
+         { acc with to_cleanup_dead = entry :: acc.to_cleanup_dead }
+       | _ -> acc)
+    | Keeper_state_machine.Stopped ->
+      { acc with to_unregister = entry :: acc.to_unregister }
+    | Keeper_state_machine.Running
+    | Keeper_state_machine.Paused
+    | Keeper_state_machine.Crashed
+    | Keeper_state_machine.Failing
+    | Keeper_state_machine.Overflowed
+    | Keeper_state_machine.Compacting
+    | Keeper_state_machine.HandingOff
+    | Keeper_state_machine.Draining
+    | Keeper_state_machine.Restarting
+    | Keeper_state_machine.Offline ->
+      (match Eio.Promise.peek entry.done_p with
+       | None when watchdog_stop_pending entry ->
+         force_unresolved_watchdog_crash acc entry
+       | None ->
+         (* RFC-0250: stale-run window. A [Running] keeper whose
+            [done_p] is unresolved and carries no [failure_reason]
+            was assumed Alive, but a no-turn-produced stall is
+            frozen-but-silent. Assess via the pure [assess_stale_run]
+            (gives the closed [Idle_turn] variant its first real
+            producer); when stale, stamp the reason and invoke the
+            dead [emit_stale_keeper_broadcast] (its first call site).
+            The next sweep's [watchdog_stop_pending] routes it to
+            crash recovery exactly as [In_turn_hung]. *)
+         (match Env_config_runtime.Keeper_stale_run.threshold_sec_opt () with
+          | None -> acc
+          | Some threshold ->
+            (match
+               assess_stale_run
+                 ~phase:entry.phase
+                 ~in_turn:entry.current_turn_observation
+                 ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts
+                 ~now
+                 ~threshold
+             with
+             | None -> acc
+             | Some reason ->
+               let stall = now -. entry.meta.runtime.usage.last_turn_ts in
+               Keeper_registry.set_failure_reason
+                 ~base_path
+                 entry.name
+                 (Some reason);
+               Keeper_execution_receipt.emit_stale_keeper_broadcast
+                 ctx.config
+                 ~keeper_name:entry.name
+                 ~agent_name:entry.meta.agent_name
+                 ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta entry.meta)
+                 ~trace_id:
+                   (Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id)
+                 ~generation:entry.meta.runtime.generation
+                 ~failure_reason:(Some reason)
+                 ~stale_seconds:stall
+                 ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts;
+               acc))
+       | Some `Stopped -> { acc with to_unregister = entry :: acc.to_unregister }
+       | Some (`Crashed msg) -> queue_crashed_entry acc entry msg)
+  in
   let entry_cohorts = supervision_cohorts entries in
   let sweep_ym = Eio_guard.create_yield_meter () in
-  iter_supervision_cohorts entry_cohorts ~f:(fun cohort ->
-    let cohort_keepers = fresh_supervision_cohort_keepers ~base_path cohort in
-    List.iter
-      (fun (entry : Keeper_registry.registry_entry) ->
-         (match entry.phase with
-          | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
-            (match entry.dead_since_ts with
-             | Some dead_since when now -. dead_since >= dead_ttl_sec ->
-               to_cleanup_dead := entry :: !to_cleanup_dead
-             | _ -> ())
-          | Keeper_state_machine.Stopped -> to_unregister := entry :: !to_unregister
-          | Keeper_state_machine.Running
-          | Keeper_state_machine.Paused
-          | Keeper_state_machine.Crashed
-          | Keeper_state_machine.Failing
-          | Keeper_state_machine.Overflowed
-          | Keeper_state_machine.Compacting
-          | Keeper_state_machine.HandingOff
-          | Keeper_state_machine.Draining
-          | Keeper_state_machine.Restarting
-          | Keeper_state_machine.Offline ->
-            (match Eio.Promise.peek entry.done_p with
-             | None when watchdog_stop_pending entry ->
-               force_unresolved_watchdog_crash entry
-             | None -> () (* Alive — skip *)
-             | Some `Stopped -> to_unregister := entry :: !to_unregister
-             | Some (`Crashed msg) -> queue_crashed_entry entry msg));
-         Eio_guard.yield_step sweep_ym)
-      cohort_keepers);
+  let final_acc =
+    List.fold_left
+      (fun acc cohort ->
+         let cohort_keepers = fresh_supervision_cohort_keepers ~base_path cohort in
+         List.fold_left
+           (fun acc entry ->
+              let acc = process_entry acc entry in
+              Eio_guard.yield_step sweep_ym;
+              acc)
+           acc
+           cohort_keepers)
+      empty_sweep_acc
+      entry_cohorts
+  in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
        Keeper_registry.unregister ~base_path entry.name;
        (* K4c — restart-budget exhaustion: keeper is permanently
        removed (no respawn), so reclaim its accumulator slot. *)
        Keeper_tool_emission_hook.drop_keeper_accumulator entry.name)
-    !to_unregister;
+    final_acc.to_unregister;
   List.iter
     (fun ((entry : Keeper_registry.registry_entry), msg) ->
        (* RFC-0002: dispatch budget exhaustion before marking dead *)
@@ -317,7 +419,7 @@ let sweep_and_recover (ctx : _ context) =
          entry.name
          msg
          entry.restart_count)
-    !to_mark_dead;
+    final_acc.to_mark_dead;
   (* RFC-0036 Phase A.2: fire Tombstone_reaped after cleanup completes.
      Hook is exception-safe; supervisor never observes failure. *)
   List.iter
@@ -328,13 +430,13 @@ let sweep_and_recover (ctx : _ context) =
          ~meta:entry.meta
          ~keeper_id:entry.name
          Keeper_lifecycle_hooks.Tombstone_reaped)
-    !to_cleanup_dead;
+    final_acc.to_cleanup_dead;
   let active_count =
     Keeper_registry.all ~base_path () |> active_supervision_keeper_count
   in
   let restart_list =
     let keepers_dir = Workspace.keepers_runtime_dir ctx.config in
-    apply_self_preservation ~keepers_dir ~total_keepers:active_count !to_restart
+    apply_self_preservation ~keepers_dir ~total_keepers:active_count final_acc.to_restart
   in
   (* Restart crashed keepers *)
   List.iter
@@ -375,7 +477,10 @@ let sweep_and_recover (ctx : _ context) =
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "refused_budget_exhausted" ]
               ();
-            to_mark_dead := (old_entry, crash_msg) :: !to_mark_dead
+            (* Note: the original ref-based accumulator appended here, but the
+               append happened after the mark_dead post-processing above, so it
+               had no effect in the current sweep. We keep the metric/log and
+               intentionally do not accumulate, preserving the prior behavior. *)
           | Ok reg ->
             Keeper_registry.restore_supervisor_state
               ~base_path
@@ -526,7 +631,9 @@ let sweep_and_recover (ctx : _ context) =
                 resumed_meta
             with
             | Ok () ->
-              Keeper_turn_livelock.reset_keeper_livelock ~keeper:name;
+              Keeper_turn_livelock.reset_keeper_livelock
+                ~base_path:ctx.config.base_path
+                ~keeper:name;
               (match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
                | Some _ ->
                  Keeper_registry.dispatch_event_unit

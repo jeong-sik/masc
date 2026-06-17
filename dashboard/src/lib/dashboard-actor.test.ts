@@ -72,11 +72,11 @@ describe('resolveDashboardActorName', () => {
   })
 
   it('resolves from agent_name query param', () => {
-    expect(resolveDashboardActorName('?agent_name=dreamer', null)).toBe('dreamer')
+    expect(resolveDashboardActorName('?agent_name=alice', null)).toBe('alice')
   })
 
   it('prioritizes agent over agent_name', () => {
-    expect(resolveDashboardActorName('?agent=janitor&agent_name=dreamer', null)).toBe('janitor')
+    expect(resolveDashboardActorName('?agent=janitor&agent_name=alice', null)).toBe('janitor')
   })
 
   it('falls back to storage when no query param', () => {

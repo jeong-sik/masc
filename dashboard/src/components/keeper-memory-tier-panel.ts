@@ -183,8 +183,8 @@ export function KeeperMemoryTierPanel({
   const compactionSpec = buildCompactionSpec(compactionStage, phase)
 
   return html`
-    <div class="flex flex-col gap-3">
-      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
+    <div class="flex flex-col gap-3 v2-monitoring-panel">
+      <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)] v2-monitoring-toolbar">
         <${MemoryTierBadge}>total ${totalUsed} / ${totalCap}</${MemoryTierBadge}>
         <${MemoryTierBadge}>${usage.length} kinds</${MemoryTierBadge}>
         <${MemoryTierBadge}>KMC ${compactionStage}</${MemoryTierBadge}>
@@ -193,7 +193,7 @@ export function KeeperMemoryTierPanel({
         ` : null}
       </div>
 
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2 v2-monitoring-toolbar">
         <${TextInput}
           type="search"
           value=${query}
@@ -213,12 +213,12 @@ export function KeeperMemoryTierPanel({
       </div>
 
       ${visible.length === 0 ? html`
-        <div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
+        <div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">
           필터 결과 없음
         </div>
       ` : null}
 
-      <div class="flex flex-col gap-1.5">
+      <div class="flex flex-col gap-1.5 v2-monitoring-row">
         ${visible.map(row => {
           const pct = row.cap > 0 ? Math.min(100, Math.round((row.used / row.cap) * 100)) : 0
           const saturated = row.used >= row.cap
@@ -228,7 +228,7 @@ export function KeeperMemoryTierPanel({
               ? 'bg-[var(--ok-20)]'
               : 'bg-[var(--info-fg)]'
           return html`
-            <div class="flex items-center gap-2 text-2xs">
+            <div class="flex items-center gap-2 text-2xs v2-monitoring-row">
               <div class="w-24 truncate text-[var(--color-fg-primary)] font-mono" title=${row.kind}>
                 ${row.kind}
               </div>

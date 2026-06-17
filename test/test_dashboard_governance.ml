@@ -184,9 +184,9 @@ let test_runtime_status_and_judgments_are_live () =
         `Assoc
           [
             ("target_kind", `String "agent_health");
-            ("target_id", `String "dreamer");
+            ("target_id", `String "alice");
             ("status", `String "active");
-            ("summary", `String "dreamer has been stalled for 30 minutes");
+            ("summary", `String "alice has been stalled for 30 minutes");
             ("confidence", `Float 0.85);
             ("generated_at", `String generated_at);
             ("expires_at", `String expires_at);
@@ -198,7 +198,7 @@ let test_runtime_status_and_judgments_are_live () =
                   ("action_kind", `String "recover");
                   ("resolved_tool", `String "masc_operator_confirm");
                   ("target_type", `String "agent");
-                  ("target_id", `String "dreamer");
+                  ("target_id", `String "alice");
                   ("reason", `String "zombie agent detected");
                 ] );
             ( "guardrail_state",
@@ -239,7 +239,7 @@ let test_runtime_status_and_judgments_are_live () =
       let judgments = json |> member "judgments" |> to_list in
       check int "legacy judgment surfaced" 1 (List.length judgments);
       let first = List.hd judgments in
-      check string "judgment target id" "dreamer"
+      check string "judgment target id" "alice"
         (first |> member "target_id" |> to_string);
       check string "judgment tool" "masc_operator_confirm"
         (first |> member "recommended_action" |> member "resolved_tool" |> to_string))
@@ -433,8 +433,8 @@ let test_parse_governance_response_requires_guardrail_state () =
                 `Assoc
                   [
                     ("kind", `String "agent_health");
-                    ("id", `String "dreamer");
-                    ("summary", `String "dreamer is stuck");
+                    ("id", `String "alice");
+                    ("summary", `String "alice is stuck");
                     ("confidence", `Float 0.9);
                     ("evidence_refs", `List []);
                   ];
@@ -464,10 +464,10 @@ let test_parse_governance_response_preserves_guardrail_state () =
                 `Assoc
                   [
                     ("kind", `String "agent_health");
-                    ("id", `String "dreamer");
-                    ("summary", `String "dreamer is stuck");
+                    ("id", `String "alice");
+                    ("summary", `String "alice is stuck");
                     ("confidence", `Float 0.9);
-                    ("evidence_refs", `List [ `String "agent:dreamer" ]);
+                    ("evidence_refs", `List [ `String "agent:alice" ]);
                     ( "guardrail_state",
                       `Assoc
                         [
@@ -507,10 +507,10 @@ let test_parse_governance_response_requires_guardrail_fields () =
                 `Assoc
                   [
                     ("kind", `String "agent_health");
-                    ("id", `String "dreamer");
-                    ("summary", `String "dreamer is stuck");
+                    ("id", `String "alice");
+                    ("summary", `String "alice is stuck");
                     ("confidence", `Float 0.9);
-                    ("evidence_refs", `List [ `String "agent:dreamer" ]);
+                    ("evidence_refs", `List [ `String "agent:alice" ]);
                     ( "guardrail_state",
                       `Assoc
                         [
@@ -682,7 +682,7 @@ let test_refresh_failure_marks_judge_output_invalid () =
       let now = Unix.gettimeofday () in
       let message =
         "Governance judge returned structurally invalid response \
-         (item agent_health:dreamer missing guardrail_state)"
+         (item agent_health:alice missing guardrail_state)"
       in
       Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- true;

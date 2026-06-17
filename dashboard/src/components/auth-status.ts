@@ -23,7 +23,10 @@ import { refreshShell, shellAuthSummary } from '../store'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { KvRow } from './kv-row'
+import { ringFocusClasses } from './common/ring'
 import { X } from 'lucide-preact'
+
+const AUTH_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'page' })
 
 const popoverOpen = signal(false)
 const tokenInput = signal('')
@@ -197,9 +200,9 @@ export function AuthStatus() {
   const { dotColor, label } = authBadgeSummary()
 
   return html`
-    <div class="relative">
+    <div class="v2-shell-panel relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] cursor-pointer font-[inherit] transition-colors duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]"
+        class="flex items-center gap-1.5 text-xs font-medium py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] cursor-pointer font-[inherit] transition-colors duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] text-[var(--color-fg-secondary)] ${AUTH_FOCUS_RING} v2-shell-action"
         aria-expanded=${popoverOpen.value}
         aria-haspopup="true"
         aria-controls=${popoverId}
@@ -207,7 +210,7 @@ export function AuthStatus() {
         title="Auth status"
         aria-label="Auth status"
       >
-        <span class="size-[7px] rounded-[var(--r-0)] inline-block ${dotColor}"></span>
+        <span class="size-[8px] rounded-[var(--r-0)] inline-block ${dotColor}"></span>
         <span>${label}</span>
       </button>
       ${popoverOpen.value ? html`<${AuthPopover} popoverId=${popoverId} labelId=${labelId} />` : null}
@@ -267,11 +270,11 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
       role="dialog"
       aria-labelledby=${labelId}
       data-state="open"
-      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-panel)] p-3 z-50"
+      class="v2-shell-panel auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-panel)] p-3 z-50"
     >
       <h2 id=${labelId} class="sr-only">Auth status panel</h2>
       <div class="flex flex-col gap-3">
-        <div class="flex flex-col text-2xs">
+        <div class="flex flex-col text-xs">
           <${KvRow} label="stored actor" value=${storedActor ? `@${storedActor}` : '-'} wrap=${true} />
           <${KvRow} label="token owner" value=${summary?.token_agent ? `@${summary.token_agent}` : '-'} wrap=${true} />
           <${KvRow} label="effective actor" value=${effectiveActor ? `@${effectiveActor}` : '-'} wrap=${true} />
@@ -281,9 +284,9 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
         </div>
 
         <div class="flex flex-col gap-2">
-          <div class="text-2xs text-[var(--color-fg-muted)]">Actor override</div>
+          <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">Actor override</div>
           ${actorOverrideLocked ? html`
-            <div class="text-2xs text-[var(--color-fg-muted)]">
+            <div class="text-xs text-[var(--color-fg-secondary)]">
               Verified sessions use the token owner as the single actor. Local actor overrides are stored but not sent as the request actor.
             </div>
           ` : null}
@@ -292,7 +295,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
               type="text"
               placeholder="Dashboard actor"
               ariaLabel="Dashboard actor"
-              class="min-w-0 flex-1 !py-1.5 !px-2 !text-2xs"
+              class="min-w-0 flex-1 !py-1.5 !px-2 !text-xs"
               value=${actorInput.value}
               disabled=${actorOverrideLocked}
               onInput=${(e: Event) => { actorInput.value = (e.target as HTMLInputElement).value }}
@@ -301,7 +304,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
               }}
             />
             <button type="button"
-              class="shrink-0 py-1.5 px-3 rounded-[var(--r-1)] text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              class="shrink-0 py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${AUTH_FOCUS_RING} v2-shell-action"
               disabled=${actorOverrideLocked}
               onClick=${() => { void handleApplyActor() }}
             >Apply</button>
@@ -309,14 +312,14 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
         </div>
 
         <div class="flex flex-col gap-2">
-          <div class="text-2xs text-[var(--color-fg-muted)]">
+          <div class="text-xs text-[var(--color-fg-secondary)]">
             ${authenticated
               ? 'Bearer token verified by the server.'
               : 'Enter a Bearer token to verify mutation work in remote environments.'}
           </div>
           ${authenticated ? html`
             <button type="button"
-              class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-2xs border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
+              class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
               onClick=${() => { void handleClearToken() }}
             >Clear token</button>
           ` : html`
@@ -325,13 +328,13 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
                 type="password"
                 placeholder="Bearer token"
                 ariaLabel="Bearer token"
-                class="w-full !py-1.5 !px-2 !text-2xs"
+                class="w-full !py-1.5 !px-2 !text-xs"
                 value=${tokenInput.value}
                 onInput=${(e: Event) => { tokenInput.value = (e.target as HTMLInputElement).value }}
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void handleSetToken() }}
               />
               <button type="button"
-                class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+                class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
                 onClick=${() => { void handleSetToken() }}
               >Set token</button>
             </div>
@@ -348,26 +351,26 @@ export function RemoteWarningBanner() {
   if (bannerDismissed.value || !model) return null
 
   return html`
-    <div role="alert" class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-xs text-[var(--color-status-warn)]">
+    <div role="alert" class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-sm font-medium text-[var(--warn-fg)] v2-shell-panel">
       <span>${model.message}</span>
       <div class="flex items-center gap-2 shrink-0">
         ${model.canClearToken ? html`
           <button type="button"
-            class="px-2 py-0.5 rounded-[var(--r-1)] text-2xs border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors"
+            class="px-2 py-0.5 rounded-[var(--r-1)] text-xs font-medium border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
             aria-label="Clear stored bearer token"
             onClick=${() => { void handleClearToken() }}
           >Clear token</button>
         ` : null}
         <button type="button"
-          class="px-2 py-0.5 rounded-[var(--r-1)] text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+          class="px-2 py-0.5 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
           aria-label="Open auth panel"
           onClick=${openPopover}
         >Open auth</button>
         <button type="button"
-          class="flex size-6 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors"
+          class="flex size-6 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
           aria-label="Dismiss auth banner"
           onClick=${() => { bannerDismissed.value = true }}
-        ><${X} size=${13} /><//>
+        ><${X} size=${14} /><//>
       </div>
     </div>
   `

@@ -53,7 +53,7 @@ function HealthGrid({ allKeepers }: { allKeepers: Keeper[] }) {
 
   return html`
     <div class="overflow-x-auto" role="region" aria-label="키퍼 상태 그리드">
-      <table class="w-full text-xs" aria-label="키퍼 상태">
+      <table class="v2-monitoring-table w-full text-xs" aria-label="키퍼 상태">
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-left text-[var(--color-fg-muted)]">
             <th scope="col" class="pb-2 pr-3 font-normal">키퍼</th>
@@ -74,11 +74,11 @@ function HealthGrid({ allKeepers }: { allKeepers: Keeper[] }) {
             return html`
               <tr
                 key=${k.name}
-                class="group border-b border-[var(--color-border-default)]/40 hover:bg-[var(--color-bg-surface)]"
+                class="v2-monitoring-row group border-b border-[var(--color-border-default)]/40 hover:bg-[var(--color-bg-surface)]"
               >
                 <td class="py-2 pr-3 font-medium">
                   <button
-                    class="flex items-center gap-1 text-left text-[var(--color-fg-secondary)] group-hover:text-[var(--color-fg-primary)] hover:underline"
+                    class="v2-monitoring-action flex items-center gap-1 text-left text-[var(--color-fg-secondary)] group-hover:text-[var(--color-fg-primary)] hover:underline"
                     onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
                     aria-label="${k.name} 상세 보기"
                   >
@@ -143,7 +143,7 @@ function AutoPausePanel({ allKeepers }: { allKeepers: Keeper[] }) {
               return html`
                 <div
                   key=${k.name}
-                  class="flex flex-wrap items-center gap-3 rounded border border-[var(--paused-20)] bg-[var(--paused-10)] px-4 py-2.5"
+                  class="v2-monitoring-card flex flex-wrap items-center gap-3 rounded border border-[var(--paused-20)] bg-[var(--paused-10)] px-4 py-2.5"
                   role="listitem"
                 >
                   <div class="font-mono text-xs font-semibold text-[var(--paused)]">
@@ -156,7 +156,7 @@ function AutoPausePanel({ allKeepers }: { allKeepers: Keeper[] }) {
                       </span>
                     ` : null}
                     <button
-                      class="rounded bg-[var(--accent-10)] px-2 py-0.5 text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] transition-colors"
+                      class="v2-monitoring-action rounded bg-[var(--accent-10)] px-2 py-0.5 text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] transition-colors"
                       onClick=${(e: Event) => {
                         e.stopPropagation()
                         navigate('monitoring', { section: 'agents', keeper: k.name })
@@ -203,7 +203,7 @@ export function KeeperReactivityMonitor({ defaultView }: { defaultView?: Reactiv
   const allKeepers = keepers.value
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-monitoring-surface flex flex-col gap-4">
       <div class="flex items-center justify-between">
         <div class="flex flex-col gap-0.5">
           <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">키퍼 반응성 모니터</h3>

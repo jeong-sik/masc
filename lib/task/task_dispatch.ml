@@ -139,14 +139,28 @@ let update_status config ~task_id ~status =
                     version = backlog.version + 1;
                   }
                 in
-                Workspace.write_backlog config new_backlog;
+                let clear_stale () =
+                  if Task_cache_invariant.is_terminal status
+                  then
+                    Task_cache_invariant.clear_stale_agent_task_for_task
+                      config
+                      ~task_id
+                      ~status
+                      ~module_name:"task_dispatch.update_status"
+                in
+                Workspace.write_backlog ~after_commit:clear_stale config new_backlog;
                 Ok ()))
 
-(** Delete a task *)
+(** Delete a task.  Also clears any agent [current_task] cache that still
+    points to the deleted task id, so the backlog write and cache
+    invalidation happen in the same locked transaction. *)
 let delete_task config ~task_id =
   match backend () with
   | Jsonl ->
       with_locked_backlog config (fun backlog ->
+        let task_opt =
+          List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks
+        in
         let new_tasks =
           List.filter (fun (t : task) -> t.id <> task_id) backlog.tasks
         in
@@ -157,5 +171,17 @@ let delete_task config ~task_id =
             version = backlog.version + 1;
           }
         in
-        Workspace.write_backlog config new_backlog;
+        let status_for_clear =
+          match task_opt with
+          | Some t -> t.task_status
+          | None -> Masc_domain.Todo
+        in
+        let clear_stale () =
+          Task_cache_invariant.clear_stale_agent_task_for_task
+            config
+            ~task_id
+            ~status:status_for_clear
+            ~module_name:"task_dispatch.delete_task"
+        in
+        Workspace.write_backlog ~after_commit:clear_stale config new_backlog;
         Ok ())

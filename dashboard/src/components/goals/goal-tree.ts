@@ -27,6 +27,8 @@ import { ringFocusClasses } from '../common/ring'
 import { trustDispositionLabel } from '../fsm-hub-types'
 import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
+import { GoalDossier } from '../memory/goal-dossier'
+import type { GoalDossierProps, GoalDossierRelatedItem } from '../memory/goal-dossier'
 import type {
   DashboardGoalDetailResponse,
   DashboardWorkspaceFsmViolation,
@@ -75,6 +77,51 @@ const CARD_BOX = 'rounded-[var(--r-0)] border border-[var(--color-border-default
 const GOAL_PANEL = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
 const TREE_NODE_CARD_BASE = 'group flex items-start gap-3 rounded-[var(--r-1)] border p-3 transition-colors w-full text-left'
 const TREE_NODE_CARD_ACTIVE = `${TREE_NODE_CARD_BASE} border-[var(--color-state-active-border)] bg-[var(--color-state-active-bg)] shadow-[0_0_0_1px_var(--color-brass-border)]`
+
+const DOSSIER_NODE_TYPES: GoalDossierProps['nodeTypes'] = {
+  task: { kr: '태스크', g: '▣', c: 'var(--status-ok)' },
+  issue: { kr: '이슈', g: '⚠', c: 'var(--status-bad)' },
+  memory: { kr: '기억', g: '◆', c: 'var(--volt)' },
+  snapshot: { kr: '스냅샷', g: '◷', c: 'var(--accent-ice)' },
+}
+
+function taskStateForDossier(status: string, isTerminal: boolean): GoalDossierRelatedItem['state'] {
+  if (status === 'done' || isTerminal) return 'done'
+  if (status === 'blocked' || status === 'block') return 'block'
+  return 'open'
+}
+
+function buildGoalDossierProps(node: GoalTreeNode): GoalDossierProps {
+  return {
+    goal: {
+      title: node.title,
+      kp: node.linked_keeper_names[0] ?? '',
+      ns: 'goal',
+      pct: node.convergence_pct,
+      deadline: node.due_date ? `마감 ${node.due_date}` : undefined,
+    },
+    nodeTypes: DOSSIER_NODE_TYPES,
+    snaps: [
+      { t: 'now', pct: node.convergence_pct, note: 'current', now: true },
+    ],
+    related: {
+      task: node.tasks.map((task) => ({
+        title: task.title,
+        kp: task.assignee ?? 'unassigned',
+        meta: task.status,
+        state: taskStateForDossier(task.status, task.is_terminal),
+      })),
+    },
+    ledger: [
+      ['작업', `${node.task_done_count}/${node.task_count}`],
+      ['연결 키퍼', String(node.linked_keeper_names.length)],
+      ['승인 대기', String(node.pending_approval_count)],
+      ['검증 대기', String(node.pending_verification_count)],
+      ['인프라 위험', String(node.infra_risk_count)],
+      ['목표 달성', node.attainment.attainment_pct == null ? '미측정' : `${node.attainment.attainment_pct}%`],
+    ],
+  }
+}
 
 /**
  * Pure hierarchy filter for goal tree nodes.
@@ -955,7 +1002,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
     <div class="flex flex-col" style="margin-left:${indent}px">
       <button
         type="button"
-        class="${headerBase} ${hasContent ? 'cursor-pointer' : ''} ${ringFocusClasses()}"
+        class="v2-workspace-row ${headerBase} ${hasContent ? 'cursor-pointer' : ''} ${ringFocusClasses()}"
         onClick=${() => {
           selectGoal(node.id)
           if (hasContent) toggleNode(node.id)
@@ -1392,6 +1439,19 @@ function GoalDetailPanel({
       <${GoalCompletionStrip} node=${selectedNode} />
       <${GoalTaskRelationStrip} node=${selectedNode} />
       <${GoalLifecycleActionPanel} node=${selectedNode} />
+      ${(() => {
+        const dossierProps = buildGoalDossierProps(selectedNode)
+        return html`
+          <${GoalDossier}
+            goal=${dossierProps.goal}
+            nodeTypes=${dossierProps.nodeTypes}
+            snaps=${dossierProps.snaps}
+            related=${dossierProps.related}
+            ledger=${dossierProps.ledger}
+            testId="goal-dossier-card"
+          />
+        `
+      })()}
 
       <${DetailTabs} active=${activeTab} />
 
@@ -1642,8 +1702,8 @@ export function GoalTree() {
   const isFiltering = query.trim() !== '' || activePhaseFilter !== 'all'
 
   return html`
-    <div class="flex flex-col gap-5">
-      <section class=${GOAL_PANEL} aria-label="목표 관리자">
+    <div class="v2-workspace-surface flex flex-col gap-5">
+      <section class="${GOAL_PANEL} v2-workspace-panel" aria-label="목표 관리자">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
             <h3 class="text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 관리자</h3>
@@ -1658,16 +1718,17 @@ export function GoalTree() {
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
                 class="min-w-45 max-w-65 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent-fg"
               />
-              <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
+              <${ActionButton} variant="ghost" size="sm" class="v2-workspace-action" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기
               <//>
-              <${ActionButton} variant="ghost" size="sm" onClick=${collapseAll}>
+              <${ActionButton} variant="ghost" size="sm" class="v2-workspace-action" onClick=${collapseAll}>
                 모두 접기
               <//>
             ` : null}
             <${ActionButton}
               variant="ghost"
               size="md"
+              class="v2-workspace-action"
               disabled=${loading}
               onClick=${() => { void refreshTree() }}
             >

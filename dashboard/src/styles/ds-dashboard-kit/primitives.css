@@ -1,0 +1,244 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC · Dashboard v5 — primitives CSS
+   Styling for shared molecules: portrait, stateDot, keeperChip,
+   statCell, pill, empty. Name-prefixed .p-* so they never clash
+   with existing component classes.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ─── Portrait ────────────────────────────────────────────── */
+.p-portrait {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  filter: grayscale(0.08) contrast(1.02);
+}
+.p-portrait.p-xs { width: 16px; height: 16px; border-radius: 3px; }
+.p-portrait.p-sm { width: 20px; height: 20px; border-radius: 4px; }
+.p-portrait.p-md { width: 28px; height: 28px; border-radius: 5px; }
+.p-portrait.p-lg { width: 44px; height: 44px; border-radius: 6px; }
+.p-portrait.dead {
+  filter: grayscale(1) brightness(0.55) contrast(0.95);
+  opacity: 0.75;
+}
+
+/* Operator badge — text stand-in for portrait */
+.p-op {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
+  color: var(--accent-brass);
+  font-family: var(--font-display);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  border: 1px solid color-mix(in oklab, var(--accent-brass) 30%, transparent);
+}
+
+/* ─── State dot ───────────────────────────────────────────── */
+.p-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-dim);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--bg-base) 60%, transparent);
+}
+.p-dot.running    { background: var(--ok); }
+.p-dot.compacting { background: var(--warn); }
+.p-dot.paused     { background: color-mix(in oklab, var(--warn) 55%, var(--text-dim)); }
+.p-dot.dead       { background: var(--bad); }
+.p-dot.ok         { background: var(--ok); }
+.p-dot.warn       { background: var(--warn); }
+.p-dot.bad        { background: var(--bad); }
+.p-dot.op         { background: var(--accent-brass); }
+
+.p-dot[data-pulse="1"]::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: inherit;
+  opacity: 0.35;
+  animation: p-dot-pulse 1.6s ease-out infinite;
+}
+.p-dot[data-pulse="1"] { position: relative; }
+@keyframes p-dot-pulse {
+  0%   { transform: scale(1);   opacity: 0.35; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+/* ─── KeeperChip — portrait + name + sub + dot ────────────── */
+.p-keeperchip {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  min-width: 0;
+}
+.p-keeperchip:hover {
+  background: color-mix(in oklab, var(--surface-2) 55%, transparent);
+  border-color: var(--border);
+}
+.p-keeperchip.selected {
+  background: color-mix(in oklab, var(--accent-brass) 10%, transparent);
+  border-color: color-mix(in oklab, var(--accent-brass) 30%, transparent);
+}
+.p-keeperchip.dead .p-kc-name { color: var(--text-dim); }
+.p-kc-main { min-width: 0; }
+.p-kc-name {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-bright);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.p-kc-sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ─── StatCell — label · value · sub ──────────────────────── */
+.p-statcell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--surface-1) 55%, transparent);
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+.p-sc-lbl {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--text-dim);
+}
+.p-sc-val {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-bright);
+  line-height: 1.15;
+}
+.p-sc-val.mono { font-family: var(--font-mono); font-size: 12px; }
+.p-sc-val.ok   { color: var(--ok); }
+.p-sc-val.warn { color: var(--warn); }
+.p-sc-val.bad  { color: var(--bad); }
+.p-sc-sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-dim);
+}
+
+/* ─── Pill ────────────────────────────────────────────────── */
+.p-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--surface-2) 45%, transparent);
+  color: var(--text-dim);
+}
+.p-pill.ok   { color: var(--ok);   border-color: color-mix(in oklab, var(--ok)   40%, transparent); background: color-mix(in oklab, var(--ok)   12%, transparent); }
+.p-pill.warn { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 40%, transparent); background: color-mix(in oklab, var(--warn) 12%, transparent); }
+.p-pill.bad  { color: var(--bad);  border-color: color-mix(in oklab, var(--bad)  40%, transparent); background: color-mix(in oklab, var(--bad)  12%, transparent); }
+.p-pill.brass{ color: var(--accent-brass); border-color: color-mix(in oklab, var(--accent-brass) 40%, transparent); background: color-mix(in oklab, var(--accent-brass) 12%, transparent); }
+
+/* ─── Empty state — for list containers with zero rows ─────── */
+.p-empty {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  padding: 18px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--surface-1) 30%, transparent);
+  text-align: center;
+}
+.p-empty-g {
+  width: 20px;
+  height: 20px;
+  opacity: 0.4;
+  fill: var(--text-dim);
+}
+.p-empty-m {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--text-bright);
+  letter-spacing: 0.03em;
+}
+.p-empty-s {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-dim);
+  max-width: 240px;
+}
+
+/* ─── Skeleton shimmer — for loading states ───────────────── */
+.p-skel {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--surface-1) 70%, transparent);
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+.p-skel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--text-bright) 5%, transparent) 50%,
+    transparent 100%);
+  transform: translateX(-100%);
+  animation: p-skel-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes p-skel-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+/* ─── Error state — for failed-to-load sections ───────────── */
+.p-error {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklab, var(--bad) 40%, transparent);
+  background: color-mix(in oklab, var(--bad) 6%, transparent);
+  border-radius: 3px;
+  color: var(--text-bright);
+}
+.p-error-title {
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--bad);
+}
+.p-error-body {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}

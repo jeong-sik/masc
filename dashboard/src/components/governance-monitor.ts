@@ -132,7 +132,7 @@ export function GovernanceMonitor() {
 
   return html`
     <div class="v2-monitoring-surface flex flex-col gap-4">
-      <div class="flex items-center gap-3 flex-wrap">
+      <div class="v2-monitoring-toolbar flex items-center gap-3 flex-wrap">
         <${Select}
           class="px-2 py-1 text-xs"
           value=${String(windowMinutes.value)}
@@ -212,7 +212,7 @@ export function GovernanceMonitor() {
               ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
               : html`
                 <div class="overflow-x-auto">
-                  <table class="w-full text-xs" aria-label="도구 거부 현황">
+                  <table class="v2-monitoring-table w-full text-xs" aria-label="도구 거부 현황">
                     <thead>
                       <tr class="text-left text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
                         <th scope="col" class="py-1.5 pr-4 font-medium">도구</th>
@@ -222,7 +222,7 @@ export function GovernanceMonitor() {
                     </thead>
                     <tbody>
                       ${visibleRejections.map(r => html`
-                        <tr class="border-b border-[var(--color-border-default)]/30 text-[var(--color-fg-primary)]">
+                        <tr class="v2-monitoring-row border-b border-[var(--color-border-default)]/30 text-[var(--color-fg-primary)]">
                           <td class="py-1.5 pr-4 font-mono text-2xs">${r.tool}</td>
                           <td class="py-1.5 pr-4">
                             <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs bg-[var(--color-bg-hover)]">${r.reason}</span>

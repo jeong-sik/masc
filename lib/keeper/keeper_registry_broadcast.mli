@@ -2,8 +2,14 @@
 
     Pure side-effect wrappers — no registry state read or written. *)
 
-(** Broadcast a [keeper_composite_changed] SSE event on both the main
-    broadcast channel and the presence stream.
+(** Broadcast a signal-only [keeper_composite_changed] SSE event on both
+    the main broadcast channel and the presence stream.
+
+    The payload is intentionally minimal: keeper [name] + wall-clock
+    [ts_unix]. It is *not* the authoritative composite snapshot.
+    Consumers must re-fetch [/api/v1/keepers/:name/composite] to observe
+    the new state. See docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md
+    §Read Model Rules.
 
     Exceptions from [Sse.broadcast] are caught, counted on the
     [keeper_lifecycle_dispatch_rejections] Otel_metric_store counter (with

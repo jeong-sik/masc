@@ -49,22 +49,22 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
     : fields
 
   return html`
-    <div class="max-h-[460px] overflow-y-auto">
+    <div class="max-h-[460px] overflow-y-auto v2-monitoring-panel">
       <${TextInput}
         placeholder="필드 검색..."
         value=${fieldSearch.value}
         onInput=${(e: Event) => { fieldSearch.value = (e.target as HTMLInputElement).value }}
       />
-      <div class="flex flex-col">
+      <div class="flex flex-col v2-monitoring-row">
         ${filtered.map((f, i) => html`
-          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${i % 2 === 0 ? 'bg-[var(--color-bg-surface)]' : ''}">
+          <div class="grid grid-cols-[100px_80px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${i % 2 === 0 ? 'bg-[var(--color-bg-surface)]' : ''} v2-monitoring-row">
             <span class="font-semibold text-[var(--color-fg-primary)] truncate">${f.title}</span>
             <span class="font-mono text-[var(--cyan)] text-2xs truncate">${f.key}</span>
             <span class="text-right text-[var(--color-fg-primary)] truncate">${f.value}</span>
           </div>
         `)}
         ${extras.map((f, i) => html`
-          <div class="grid grid-cols-[100px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${(filtered.length + i) % 2 === 0 ? 'bg-[var(--color-bg-surface)]' : ''}">
+          <div class="grid grid-cols-[100px_1fr] gap-2 py-2 px-2 text-xs rounded-[var(--r-1)] ${(filtered.length + i) % 2 === 0 ? 'bg-[var(--color-bg-surface)]' : ''} v2-monitoring-row">
             <span class="font-semibold text-[var(--color-fg-primary)] truncate">${f.title}</span>
             <span class="text-right text-[var(--color-fg-primary)] truncate ${f.mono ? 'font-mono' : ''}">${f.value}</span>
           </div>

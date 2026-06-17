@@ -211,7 +211,7 @@ async function submitResolve(
 // for the cancel/reject actions in this panel. Btn default variant uses
 // fg-secondary, so this constant stays until a tone variant ships.
 const BTN_SECONDARY =
-  'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
+  'v2-workspace-action rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
 function RowActions({
   row,
@@ -238,6 +238,7 @@ function RowActions({
         <span class="text-2xs text-[var(--color-fg-secondary)]">승인 확정?</span>
         <${Btn}
           size="sm"
+          class="v2-workspace-action"
           onClick=${() => void submitResolve(row, 'approve', '', refresh)}
         >예<//>
         <button
@@ -274,6 +275,7 @@ function RowActions({
         />
         <${Btn}
           size="sm"
+          class="v2-workspace-action"
           disabled=${!canSubmit}
           onClick=${() => void submitResolve(row, 'reject', reason.trim(), refresh)}
         >확정<//>
@@ -290,6 +292,7 @@ function RowActions({
     <div class="flex items-center gap-1 flex-wrap">
       <${Btn}
         size="sm"
+        class="v2-workspace-action"
         onClick=${() => setRowAction(requestId, { kind: 'confirm-approve' })}
       >승인<//>
       <button
@@ -334,7 +337,7 @@ function VerificationRow({
   const actionState = rowActions.value.get(row.request_id) ?? { kind: 'idle' as const }
 
   return html`
-    <tr class="border-b border-[var(--color-border-default)] last:border-b-0 align-top">
+    <tr class="v2-workspace-row border-b border-[var(--color-border-default)] last:border-b-0 align-top">
       <td class="py-2 pr-2">
         <${StatusChip} tone=${statusToneForRow(row)}>
           ${statusLabel(row)}
@@ -388,7 +391,7 @@ function VerificationRow({
                 <summary class="cursor-pointer text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
                   자세히
                 </summary>
-                <div class="flex flex-col gap-2 mt-2 p-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
+                <div class="v2-workspace-detail flex flex-col gap-2 mt-2 p-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
                   ${hasTaskTitle
                     ? html`
                         <div>
@@ -478,7 +481,7 @@ function RequestsTable({
   }
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-xs" aria-label="검증 요청 목록">
+      <table class="v2-workspace-table w-full text-xs" aria-label="검증 요청 목록">
         <thead>
           <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
             <${ThLeft}>상태</${ThLeft}>
@@ -551,9 +554,9 @@ export function VerificationRequestsPanel() {
   const showNoPendingHint = rows.length > 0 && pendingCount === 0
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="v2-workspace-surface flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
-        <${Btn} onClick=${() => void loadData(resource)}>
+        <${Btn} class="v2-workspace-action" onClick=${() => void loadData(resource)}>
           새로고침
         <//>
         ${current.loading
@@ -605,7 +608,7 @@ export function VerificationRequestsPanel() {
         ? html`
             <div
               role="note"
-              class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
+              class="v2-workspace-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs text-[var(--color-fg-muted)]"
             >
               검증 대기(pending) 요청이 없어 액션 컬럼이 비어 있습니다. 승인/반려 버튼은
               <code class="text-[var(--color-fg-secondary)]">pending</code> 상태에서만 표시됩니다.

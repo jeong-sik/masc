@@ -46,5 +46,7 @@ describe('LabInspector', () => {
 
     expect(container.querySelector('.v2-command-surface')).not.toBeNull()
     expect(container.querySelector('.v2-command-panel')).not.toBeNull()
+    expect(container.querySelector('.v2-command-card')).not.toBeNull()
+    expect(container.querySelectorAll('.v2-command-action').length).toBeGreaterThanOrEqual(5)
   })
 })

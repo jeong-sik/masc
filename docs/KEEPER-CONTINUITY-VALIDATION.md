@@ -153,6 +153,5 @@ Typical causes:
 
 ## Related references
 
-- `docs/KEEPER-SOCIAL-EXPERIMENT-DESIGN.md`
 - `scripts/run_trpg_longplay_liveliness.sh`
 - `skills/masc-keeper-autonomy/SKILL.md`

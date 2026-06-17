@@ -278,11 +278,11 @@ let test_http_listener_state_json () =
    ============================================================ *)
 
 let test_agent_heartbeat_age () =
-  TM.set_agent_heartbeat_age ~agent_name:"dreamer" 42.5;
+  TM.set_agent_heartbeat_age ~agent_name:"alice" 42.5;
   let v = Otel_metric_store.metric_value_or_zero
     "masc_agent_heartbeat_age_seconds"
-    ~labels:[("agent_name", "dreamer")] () in
-  check (float 0.01) "dreamer heartbeat age" 42.5 v
+    ~labels:[("agent_name", "alice")] () in
+  check (float 0.01) "alice heartbeat age" 42.5 v
 
 let test_agent_stale_counter () =
   let before = Otel_metric_store.metric_value_or_zero

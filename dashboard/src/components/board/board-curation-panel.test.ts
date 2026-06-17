@@ -51,7 +51,7 @@ describe('BoardCurationPanel', () => {
   })
 
   it('renders the latest curation snapshot details', async () => {
-    render(h(BoardCurationPanel, null))
+    const { container } = render(h(BoardCurationPanel, null))
 
     expect(await screen.findByText('Two active incidents need review.')).toBeTruthy()
     expect(screen.getByText(/keeper-curator/)).toBeTruthy()
@@ -60,6 +60,8 @@ describe('BoardCurationPanel', () => {
     expect(screen.getByText('incident')).toBeTruthy()
     expect(screen.getByText('post-question')).toBeTruthy()
     expect(screen.getByText('answer_rate')).toBeTruthy()
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+    expect(container.querySelectorAll('.v2-workspace-row').length).toBeGreaterThanOrEqual(3)
   })
 
   it('renders an empty state when no curation snapshot exists', async () => {

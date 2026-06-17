@@ -20,7 +20,7 @@
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
-    Keepers,            \* Set of keeper names, e.g. {"dreamer", "coder"}
+    Keepers,            \* Set of keeper names, e.g. {"alice", "bob"}
     MaxTurns,           \* Maximum turn number per keeper (small for model checking)
     MaxTokens,          \* Token budget threshold
     CompactTarget,      \* Tokens remaining after compaction

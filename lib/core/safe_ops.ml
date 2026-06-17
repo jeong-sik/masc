@@ -201,18 +201,29 @@ let is_disallowed_control_char (c : char) : bool =
 
 let sanitize_text_utf8 (s : string) : string =
   let len = String.length s in
-  let rec has_invalid_or_control i =
-    if i >= len then false
+  let rec ascii_clean i =
+    if i >= len then true
     else
-      let dec = String.get_utf_8_uchar s i in
-      let dlen = Uchar.utf_decode_length dec in
-      if dlen > 0 && Uchar.utf_decode_is_valid dec then
-        if dlen = 1 && is_disallowed_control_char s.[i] then true
-        else has_invalid_or_control (i + dlen)
-      else true
+      let c = Char.code s.[i] in
+      if c >= 128 then false
+      else if c < 32 && c <> 9 && c <> 10 && c <> 13 then false
+      else if c = 127 then false
+      else ascii_clean (i + 1)
   in
-  if not (has_invalid_or_control 0) then s
+  if ascii_clean 0 then s
   else
+    let rec has_invalid_or_control i =
+      if i >= len then false
+      else
+        let dec = String.get_utf_8_uchar s i in
+        let dlen = Uchar.utf_decode_length dec in
+        if dlen > 0 && Uchar.utf_decode_is_valid dec then
+          if dlen = 1 && is_disallowed_control_char s.[i] then true
+          else has_invalid_or_control (i + dlen)
+        else true
+    in
+    if not (has_invalid_or_control 0) then s
+    else
     let buf = Buffer.create len in
     let rec loop i =
       if i >= len then ()

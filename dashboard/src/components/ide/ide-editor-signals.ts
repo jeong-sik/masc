@@ -191,12 +191,13 @@ export function EditorCurrentFileSignals({
 }) {
   return html`
     <ul
-      class="ide-editor-file-signals"
+      class="ide-editor-file-signals v2-ide-panel"
       role="list"
       aria-label="Current file operational signals"
     >
       ${signals.map(signal => html`
         <li
+          class="v2-ide-row"
           key=${signal.id}
           role="listitem"
           data-active=${signal.count > 0 ? 'true' : 'false'}

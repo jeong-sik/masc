@@ -45,7 +45,7 @@ export interface InputControlSummary {
 // primitives (TextInput/TextArea/NumberInput/Select) via these aliases.
 // `placeholder` color and `focus-visible` border color remain inline
 // pending follow-up token slots (input-placeholder, input-border-focus).
-const INPUT_BASE = `w-full rounded-[var(--r-1)] bg-[var(--input-bg)] border border-[var(--input-border)] text-[var(--input-fg)] placeholder:text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--input-bg-hover)] focus-visible:bg-[var(--input-bg-focus)] focus-visible:border-[var(--info-border)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`
+const INPUT_BASE = `w-full rounded-[var(--r-1)] bg-[var(--input-bg)] border border-[var(--input-border)] text-[var(--input-fg)] placeholder:text-[var(--input-placeholder)] font-medium transition-colors hover:bg-[var(--input-bg-hover)] focus-visible:bg-[var(--input-bg-focus)] focus-visible:border-[var(--info-border)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`
 
 function nonEmptyLength(value: string | undefined): number {
   return value?.length ?? 0
@@ -253,7 +253,7 @@ export function TextInput({
       ref=${inputRef}
       id=${id}
       type=${type}
-      class="${INPUT_BASE} px-3 py-2 text-sm ${cx ?? ''}"
+      class="${INPUT_BASE} px-3 py-2 text-sm font-medium ${cx ?? ''}"
       value=${value}
       placeholder=${placeholder}
       disabled=${disabled}
@@ -385,7 +385,7 @@ export function TextArea({
     <textarea
       ref=${inputRef}
       id=${id}
-      class="${INPUT_BASE} px-3 py-2 text-sm min-h-20 resize-y ${cx ?? ''}"
+      class="${INPUT_BASE} px-3 py-2 text-sm font-medium min-h-20 resize-y ${cx ?? ''}"
       placeholder=${placeholder}
       rows=${rows}
       name=${name}

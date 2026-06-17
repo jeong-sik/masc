@@ -1,0 +1,129 @@
+/* ─── Viewer state banners & inline notices ─────────────────
+   non-running keeper를 선택했을 때 tape 상단에 noticable banner.
+   색: paused → warn, dead → bad.
+   ─────────────────────────────────────────────────────────── */
+
+.v-banner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surf-raised);
+  color: var(--text-bright);
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  line-height: var(--lh-tight);
+}
+.v-banner .bn-glyph {
+  width: 24px; height: 24px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+}
+.v-banner .bn-glyph svg { width: 13px; height: 13px; fill: currentColor; }
+.v-banner .bn-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-4);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.v-banner .bn-body {
+  font-size: var(--fs-3);
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.v-banner .bn-body b { color: var(--text-bright); font-weight: 500; }
+.v-banner .bn-actions { display: flex; gap: var(--sp-1); }
+.v-banner .bn-btn {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid currentColor;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-display);
+  font-size: var(--fs-2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.12s;
+}
+.v-banner .bn-btn:hover {
+  background: color-mix(in oklab, currentColor 14%, transparent);
+}
+
+/* ─ Tone variants ─ */
+.v-banner.warn {
+  background: color-mix(in oklab, var(--warn) 10%, var(--surf-raised));
+  border-bottom-color: color-mix(in oklab, var(--warn) 35%, transparent);
+  color: var(--warn);
+}
+.v-banner.warn .bn-glyph {
+  border-color: color-mix(in oklab, var(--warn) 45%, transparent);
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+  color: var(--warn);
+}
+
+.v-banner.bad {
+  background: color-mix(in oklab, var(--bad) 10%, var(--surf-raised));
+  border-bottom-color: color-mix(in oklab, var(--bad) 35%, transparent);
+  color: var(--bad);
+}
+.v-banner.bad .bn-glyph {
+  border-color: color-mix(in oklab, var(--bad) 45%, transparent);
+  background: color-mix(in oklab, var(--bad) 18%, transparent);
+  color: var(--bad);
+}
+
+.v-banner.info {
+  background: color-mix(in oklab, var(--accent-brass) 8%, var(--surf-raised));
+  border-bottom-color: var(--line-accent);
+  color: var(--accent-brass);
+}
+.v-banner.info .bn-glyph {
+  border-color: var(--line-accent);
+  background: color-mix(in oklab, var(--accent-brass) 16%, transparent);
+  color: var(--accent-brass);
+}
+
+/* ─── Tape skeleton (loading / compact in-flight) ──────────── */
+.tape-sk-row {
+  display: grid;
+  grid-template-columns: 68px 16px 1fr;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+}
+.tape-sk-rail {
+  display: flex; justify-content: center; padding-top: 7px;
+}
+.tape-sk-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  border: 1.5px dashed var(--line-strong);
+}
+.tape-sk-line {
+  height: 8px;
+  background: color-mix(in oklab, var(--surf-raised) 100%, transparent);
+  border-radius: var(--r-1);
+  margin-bottom: var(--sp-1);
+  position: relative;
+  overflow: hidden;
+}
+.tape-sk-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--accent-brass) 12%, transparent) 50%,
+    transparent 100%);
+  animation: shimmer 1.6s linear infinite;
+}
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}

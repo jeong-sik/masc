@@ -33,6 +33,7 @@ describe('TaskCreateForm', () => {
   it('renders collapsed state with add button', () => {
     const container = document.createElement('div')
     render(html`<${TaskCreateForm} />`, container)
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
     expect(container.textContent).toContain('태스크 추가')
   })
 
@@ -55,6 +56,7 @@ describe('TaskCreateForm', () => {
     render(html`<${TaskCreateForm} />`, container)
     showTaskCreate.value = true
     await flush()
+    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
     expect(container.textContent).toContain('새 태스크')
     expect(container.textContent).toContain('backlog에 추가')
     expect(container.textContent).toContain('취소')

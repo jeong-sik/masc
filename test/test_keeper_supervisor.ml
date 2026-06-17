@@ -2185,6 +2185,70 @@ let test_persisted_blocker_survives_unregister () =
        | Ok None -> fail "meta missing after unregister"
        | Error err -> fail ("read_meta failed: " ^ err)))
 
+(* RFC-0250: assess_stale_run — pure stale-run window assessment. Covers the
+   [Idle_turn] variant's doc contract (Running + not-in-turn + last_turn_ts
+   older than threshold) and the negative cases that must NOT stamp it. *)
+let test_assess_stale_run () =
+  (* frozen: Running, not in a turn, last turn 200s ago, threshold 150s →
+     Some (Stale_turn_timeout (Idle_turn { stall_seconds = 200 })). *)
+  (match
+     Sup.assess_stale_run
+       ~phase:KSM.Running
+       ~in_turn:None
+       ~last_turn_ts:100.0
+       ~now:300.0
+       ~threshold:150.0
+   with
+   | Some (Reg.Stale_turn_timeout (Reg.Idle_turn { stall_seconds })) ->
+     check int "frozen stamps Idle_turn stall=200" 200
+       (int_of_float stall_seconds)
+   | _ -> check bool "frozen must stamp Idle_turn{200}" false true);
+  (* fresh: only 10s past last turn → None. *)
+  check bool "fresh → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:None
+          ~last_turn_ts:290.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* in-turn: a turn is live (Some _) → None — Idle_turn contract needs None. *)
+  check bool "in-turn → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:(Some ())
+          ~last_turn_ts:100.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* fresh-start: last_turn_ts = 0 → None — never mis-stamp a just-started keeper. *)
+  check bool "fresh-start (last_turn_ts=0) → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:None
+          ~last_turn_ts:0.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* not-running: Crashed → None. *)
+  check bool "crashed → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Crashed
+          ~in_turn:None
+          ~last_turn_ts:100.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* boundary: stall exactly == threshold → None (strict >). *)
+  check bool "boundary stall==threshold → None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:None
+          ~last_turn_ts:150.0
+          ~now:300.0
+          ~threshold:150.0))
+
 let () =
   run "keeper_supervisor" [
     "backoff", [
@@ -2336,5 +2400,10 @@ let () =
         test_initial_auto_resume_capped_at_max;
       test_case "persisted blocker survives unregister" `Quick
         test_persisted_blocker_survives_unregister;
+    ];
+    "stale_run_window", [
+      test_case
+        "assess_stale_run covers frozen/fresh/in-turn/fresh-start/not-running/boundary"
+        `Quick test_assess_stale_run;
     ];
   ]

@@ -559,6 +559,9 @@ let handle
       runtime = { updated_meta.runtime with last_turn_tool_calls = tool_call_summaries }
     }
   in
+  (* Single source of truth for success-path terminal FSM transitions.
+     [Keeper_unified_turn.handle] is the only caller; do not add another
+     Streaming -> Completing -> Done emitter on the success path. *)
   Keeper_turn_fsm.emit_transition
     ~keeper_name:meta.name
     ~turn_id:keeper_turn_id

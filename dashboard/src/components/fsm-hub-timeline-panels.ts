@@ -180,7 +180,7 @@ export function SwimlaneTimeline({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" data-fsm-swimlane-root="true">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" data-fsm-swimlane-root="true">
       <div class="mb-2 flex items-baseline justify-between gap-3 flex-wrap">
         <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           상태 타임라인
@@ -215,7 +215,7 @@ export function SwimlaneTimeline({
         ${SWIMLANE_LANES.map((lane, laneIndex) => {
           const segments = deriveSwimlaneSegments(observations, lane.key, spanEnd)
           return html`
-            <div class="flex items-center gap-2">
+            <div class="v2-monitoring-row flex items-center gap-2">
               <div class="w-11 shrink-0 text-3xs font-mono font-semibold text-[var(--color-fg-muted)]">
                 ${lane.short}
               </div>
@@ -237,7 +237,7 @@ export function SwimlaneTimeline({
                       data-lane-key=${lane.key}
                       data-lane-index=${laneIndex}
                       data-seg-index=${segIndex}
-                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-[filter,opacity,box-shadow] duration-[var(--t-med)] border-r border-[var(--color-border-default)] last:border-r-0 cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, inset: true })} ${isHovered ? 'ring-1 ring-[var(--color-accent-fg)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
+                      class=${`v2-monitoring-action ${swimlaneSegmentColor(seg.value)} h-full transition-[filter,opacity,box-shadow] duration-[var(--t-med)] border-r border-[var(--color-border-default)] last:border-r-0 cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, inset: true })} ${isHovered ? 'ring-1 ring-[var(--color-accent-fg)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
                       style=${`width: ${pct.toFixed(2)}%`}
                       title=${`${lane.label} (${lane.short}) · ${displayState(seg.value)} (${seg.value})\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · ${holdFor}`}
                       aria-label=${ariaLabel}
@@ -404,7 +404,7 @@ export function TransitionTrail({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="mb-1.5 flex items-center justify-between gap-2">
         <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           Transition History (${isFiltering ? `${visibleHistory.length}/${history.length}` : history.length})
@@ -419,7 +419,7 @@ export function TransitionTrail({
         />
       </div>
       ${isFiltering && visibleHistory.length === 0
-        ? html`<div class="py-3 text-center text-3xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${history.length} items)</div>`
+        ? html`<div class="v2-monitoring-row py-3 text-center text-3xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${history.length} items)</div>`
         : html`
       <div ref=${scrollRef} class="flex flex-col gap-0.5 max-h-30 overflow-y-auto">
         ${visibleHistory.map((entry, trailIndex) => {
@@ -438,7 +438,7 @@ export function TransitionTrail({
             <div
               data-trail-index=${trailIndex}
               title=${tooltip}
-              class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-[var(--t-med)] cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+              class=${`v2-monitoring-row flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-[var(--t-med)] cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
             >
               <span class="w-[52px] shrink-0 text-right text-[var(--color-fg-disabled)]">${ago} ago</span>
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
@@ -477,7 +477,7 @@ export function TopTransitionsPanel({
   const maxCount = transitions[0]?.count ?? 1
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         Top Transitions (${transitions.length})
       </div>
@@ -493,7 +493,7 @@ export function TopTransitionsPanel({
             : ''
           return html`
             <div
-              class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-[var(--t-med)] ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
+              class=${`v2-monitoring-row flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-[var(--t-med)] ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
               title=${`${entry.field}: ${entry.from} → ${entry.to} (관측 ${entry.count}회)`}
             >
               <span class=${`w-[28px] shrink-0 font-semibold ${color}`}>${entry.field}</span>
@@ -552,7 +552,7 @@ export function DwellHistogramPanel({
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
       <div class="mb-1.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
         State Dwell Time
       </div>
@@ -563,7 +563,7 @@ export function DwellHistogramPanel({
           const color = FIELD_COLOR[lane.field] ?? 'text-[var(--color-fg-primary)]'
           const barColor = BAR_COLOR[lane.field] ?? 'bg-[var(--color-accent-fg)]'
           return html`
-            <div class=${`transition-opacity duration-[var(--t-med)] ${dimmed ? 'opacity-40' : ''}`}>
+            <div class=${`v2-monitoring-row transition-opacity duration-[var(--t-med)] ${dimmed ? 'opacity-40' : ''}`}>
               <div class="flex items-center gap-1.5 mb-0.5">
                 <span class=${`text-3xs font-semibold ${color}`}>${lane.field}</span>
                 <span class="text-3xs text-[var(--color-fg-disabled)]">${fmtDuration(lane.totalSeconds)}</span>
@@ -578,7 +578,7 @@ export function DwellHistogramPanel({
                     : ''
                   return html`
                     <div
-                      class=${`flex items-center gap-1.5 text-3xs font-mono leading-tight ${rowCls}`}
+                      class=${`v2-monitoring-row flex items-center gap-1.5 text-3xs font-mono leading-tight ${rowCls}`}
                       title=${`${displayState(entry.value)}: ${fmtDuration(entry.seconds)} (${entry.pct.toFixed(1)}%)`}
                     >
                       <span class="w-15 shrink-0 text-[var(--color-fg-primary)] truncate">${displayState(entry.value)}</span>

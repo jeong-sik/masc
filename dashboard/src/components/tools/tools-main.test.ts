@@ -87,6 +87,8 @@ describe('Tools', () => {
     render(html`<${Tools} />`, container)
     await flush()
 
+    expect(container.querySelector('.v2-lab-surface')).not.toBeNull()
+    expect(container.querySelectorAll('.v2-lab-action')).toHaveLength(2)
     expect(mocks.loadTools).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('ConfigResolutionPanel')
     expect(container.textContent).toContain('예약 자동화 FSM')
@@ -141,6 +143,8 @@ describe('Tools', () => {
     expect(container.textContent).toContain('sched-1')
     expect(container.textContent).toContain('workspace write')
     expect(container.textContent).toContain('test.reminder')
+    expect(container.querySelector('.v2-lab-table')).not.toBeNull()
+    expect(container.querySelector('.v2-lab-row')).not.toBeNull()
   })
 
   it('renders tool usage coverage gap provenance', async () => {

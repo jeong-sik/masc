@@ -240,7 +240,7 @@ describe('normalizeOperatorSnapshot', () => {
           generation: 10,
           active_model: 'claude-sonnet',
         },
-        { name: 'dreamer', status: 'Idle' },
+        { name: 'alice', status: 'Idle' },
       ],
     })
     expect(result.keepers).toHaveLength(2)

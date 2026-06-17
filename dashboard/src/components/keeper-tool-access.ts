@@ -23,7 +23,7 @@ function ToolAccessRow({
 }) {
   const display: unknown = value === null || value === undefined || value === '' ? '—' : value
   return html`
-    <div class="grid grid-cols-[120px_1fr] items-baseline gap-3 py-1">
+    <div class="grid grid-cols-[120px_1fr] items-baseline gap-3 py-1 v2-monitoring-row">
       <dt class="text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">${label}</dt>
       <dd class="font-mono text-xs text-text-strong">${display}</dd>
     </div>
@@ -47,16 +47,16 @@ export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
 
   return html`
     <section
-      class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4"
+      class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] p-4 v2-monitoring-panel"
       aria-label="툴 / 실행 접근 요약 (read-only)"
     >
-      <header class="mb-2 flex items-baseline justify-between gap-2">
+      <header class="mb-2 flex items-baseline justify-between gap-2 v2-monitoring-toolbar">
         <h3 class="text-xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">
           툴 / 실행 접근 요약
         </h3>
         <span class="text-2xs text-text-disabled">read-only · 변경은 아래 편집 영역</span>
       </header>
-      <dl class="grid grid-cols-1 gap-x-6 md:grid-cols-2">
+      <dl class="grid grid-cols-1 gap-x-6 md:grid-cols-2 v2-monitoring-row">
         <${ToolAccessRow} label="runtime" value=${runtime} />
         <${ToolAccessRow} label="sandbox" value=${sandbox} />
         <${ToolAccessRow} label="network" value=${network} />

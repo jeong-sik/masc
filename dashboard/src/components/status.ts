@@ -105,7 +105,7 @@ export function Status() {
   const keeperParam = route.value.params.keeper
   if (section === 'agents' && typeof keeperParam === 'string' && keeperParam.trim() !== '') {
     return html`
-      <div class="h-full min-h-0">
+      <div class="v2-monitoring-surface h-full min-h-0">
         <${Suspense} fallback=${sectionFallback(sectionLabel('agents'))}>
           <${LazyAgentsUnified} />
         <//>
@@ -114,7 +114,7 @@ export function Status() {
   }
 
   return html`
-    <div class="flex flex-col gap-5">
+    <div class="v2-monitoring-surface flex flex-col gap-5">
       <div class="transition-opacity duration-[var(--t-slow)]">
         <${Suspense} fallback=${sectionFallback(sectionLabel(section))}>
           ${renderSection(section)}

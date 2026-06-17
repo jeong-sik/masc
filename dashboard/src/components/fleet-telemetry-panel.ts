@@ -138,7 +138,7 @@ function SummaryCard({
         : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
 
   return html`
-    <div class="rounded-[var(--r-1)] border ${toneClass} p-3">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border ${toneClass} p-3">
       <${Eyebrow} tone="disabled">${title}</${Eyebrow}>
       <div class="mt-1 text-xl font-semibold text-[var(--text)]">${value}</div>
       <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${detail}</div>
@@ -179,7 +179,7 @@ function attentionSeverityClass(severity: string | null | undefined): string {
 
 function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-center justify-between gap-3">
         <div class="text-2xs font-medium text-[var(--text)]">${pillar.label}</div>
         <div class="font-mono text-2xs ${readinessStatusClass(pillar.status)}">
@@ -201,7 +201,7 @@ function ReadinessPillarCard({ pillar }: { pillar: DashboardReadinessPillar }) {
 function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   if (events.length === 0) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No decision-needed or blocker events are active.
       </div>
     `
@@ -210,7 +210,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   return html`
     <div class="flex flex-col gap-2">
       ${events.slice(0, 6).map(event => html`
-        <div class="rounded-[var(--r-1)] border px-3 py-2 ${attentionSeverityClass(event.severity)}">
+        <div class="v2-monitoring-card rounded-[var(--r-1)] border px-3 py-2 ${attentionSeverityClass(event.severity)}">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="text-2xs font-medium">
@@ -305,16 +305,16 @@ function PressureWatchlist({ rows }: { rows: FleetRow[] }) {
 
   if (watchlist.length === 0) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         No keepers are near context pressure or stale activity thresholds.
       </div>
     `
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       ${watchlist.map(row => html`
-        <div class="flex items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-3 py-2 text-2xs last:border-b-0">
+        <div class="v2-monitoring-row flex items-center justify-between gap-3 border-b border-[var(--color-border-default)] px-3 py-2 text-2xs last:border-b-0">
           <div class="min-w-0">
             <div class="font-mono text-[var(--text)]">${row.name}</div>
             <div class="text-[var(--color-fg-disabled)]">
@@ -375,7 +375,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
 
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-2xs" aria-label="키퍼 텔레메트리 현황">
+      <table class="v2-monitoring-table w-full text-2xs" aria-label="키퍼 텔레메트리 현황">
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-disabled)]">
             <th scope="col" class="py-1 text-left font-normal">키퍼</th>
@@ -411,7 +411,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 ? 'text-[var(--bad-light)]'
                 : 'text-[var(--color-status-warn)]'
             return html`
-            <tr class="border-b border-[var(--color-border-default)] border-opacity-30 align-top">
+            <tr class="v2-monitoring-row border-b border-[var(--color-border-default)] border-opacity-30 align-top">
               <td class="py-1.5">
                 <div class="font-mono text-[var(--text)]">${row.name}</div>
                 ${rowHint
@@ -524,7 +524,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
               </td>
               <td class="py-1.5 text-center">
                 <button
-                  class="rounded-[var(--r-1)] min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors inline-flex items-center justify-center"
+                  class="v2-monitoring-action rounded-[var(--r-1)] min-w-6 min-h-6 p-1.5 text-[var(--color-fg-disabled)] hover:text-[var(--bad-light)] hover:bg-[var(--bad-10)] transition-colors inline-flex items-center justify-center"
                   onClick=${() => onReset(row.name)}
                   title="초기화"
                   aria-label=${`${row.name} 초기화`}
@@ -549,7 +549,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
   return html`
     <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
       ${sorted.map(source => html`
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+        <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
           <div class="flex items-center justify-between gap-3">
             <div class="text-2xs font-medium text-[var(--text)]">${telemetrySourceLabel(source.source)}</div>
             <div class="font-mono text-2xs ${sourceCountClass(source)}">
@@ -576,7 +576,7 @@ function ExecutionTrustSourcePanel({ trust }: { trust: DashboardExecutionTrustRe
   ].filter((row): row is [string, string] => row !== null)
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-center justify-between gap-3">
         <div>
           <div class="text-2xs font-medium text-[var(--text)]">Execution Trust</div>
@@ -817,7 +817,7 @@ export function FleetTelemetryPanel() {
             ${value.updated_at ? `${formatTimeAgo(value.updated_at)} 갱신` : ''}
           </span>
           <button
-            class="rounded-[var(--r-1)] bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
+            class="v2-monitoring-action rounded-[var(--r-1)] bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--text)]"
             onClick=${() => { void loadFleetTelemetry() }}
             aria-label="Keeper 텔레메트리 새로고침"
           >새로고침</button>

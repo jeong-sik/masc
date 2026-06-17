@@ -171,7 +171,7 @@ function FocusFrame({
   children: unknown
 }) {
   return html`
-    <section class="rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-3" aria-label=${title}>
+    <section class="v2-workspace-panel rounded-[var(--r-1)] border border-card-border/70 bg-[var(--color-bg-surface)] p-3" aria-label=${title}>
       <header class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">planning focus</div>
@@ -207,7 +207,7 @@ function StaleFocus({ entries }: { entries: StaleEntry[] }) {
       ` : html`
         <ul class="grid gap-2" data-testid="planning-focus-stale">
           ${entries.slice(0, 8).map(entry => html`
-            <li key=${entry.task.id} class="grid gap-2 rounded-[var(--r-1)] border border-warn/25 bg-warn/5 px-3 py-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+            <li key=${entry.task.id} class="v2-workspace-row grid gap-2 rounded-[var(--r-1)] border border-warn/25 bg-warn/5 px-3 py-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
               <div class="min-w-0">
                 <button
                   type="button"
@@ -256,7 +256,7 @@ function LedgerFocus({ rows }: { rows: AccountabilityRow[] }) {
       ` : html`
         <ul class="grid gap-2" data-testid="planning-focus-ledger">
           ${(activeRows.length > 0 ? activeRows : rows).slice(0, 8).map(row => html`
-            <li key=${row.principal} class="rounded-[var(--r-1)] border border-card-border/60 bg-black/10 p-3">
+            <li key=${row.principal} class="v2-workspace-row rounded-[var(--r-1)] border border-card-border/60 bg-black/10 p-3">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div class="min-w-0">
                   ${row.principal === 'unassigned' ? html`
@@ -336,7 +336,7 @@ function MatrixFocus({ rows }: { rows: AccountabilityRow[] }) {
             </thead>
             <tbody>
               ${rows.slice(0, 12).map(row => html`
-                <tr key=${row.principal}>
+                <tr key=${row.principal} class="v2-workspace-row">
                   <th class="border-t border-card-border/50 px-2 py-2 text-left font-mono text-2xs text-text-strong">${row.principal}</th>
                   ${STATUS_BUCKETS.map(status => html`<${MatrixCell} key=${status} value=${row.counts[status]} tone=${status} />`)}
                   <td class="border-t border-card-border/50 px-2 py-2 text-right font-mono text-2xs tabular-nums ${row.stale > 0 ? 'text-warn' : 'text-text-dim'}">${row.stale}</td>

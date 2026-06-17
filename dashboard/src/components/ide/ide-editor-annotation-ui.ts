@@ -26,7 +26,7 @@ export function EditorContextRouteLink(link: IdeContextRouteLink) {
     <button
       key=${link.id}
       type="button"
-      class="ide-editor-context-route-link"
+      class="ide-editor-context-route-link v2-ide-action"
       title=${link.evidence}
       aria-label=${`Open ${link.evidence}`}
       onClick=${() => openIdeContextRouteLink(link)}
@@ -82,7 +82,7 @@ export function AnnotationPopover({
 
   return html`
     <div
-      class="ide-annotation-popover"
+      class="ide-annotation-popover v2-ide-panel"
       role="dialog"
       aria-label="Annotation detail"
       style=${{
@@ -117,6 +117,7 @@ export function AnnotationPopover({
         </span>
         <button
           type="button"
+          class="v2-ide-action"
           aria-label="Close annotation"
           onClick=${onClose}
           style=${{

@@ -1,5 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useState, useCallback } from 'preact/hooks'
+import { MemoryLens } from '../memory/memory-lens'
+import type { MemoryLensProps } from '../memory/memory-lens'
 
 interface MemoryEntry {
   readonly id: string
@@ -43,6 +45,60 @@ function formatTimestamp(ms: number): string {
   return date.toLocaleDateString()
 }
 
+const LENS_NODE_TYPES: MemoryLensProps['nodeTypes'] = {
+  memory: { kr: '기억', g: '◆', c: 'var(--volt)' },
+  goal: { kr: '골', g: '◎', c: 'var(--accent-ice)' },
+  task: { kr: '태스크', g: '▣', c: 'var(--status-ok)' },
+  board: { kr: '보드', g: '◈', c: '#8a6cf0' },
+}
+
+function buildLensGraph(entries: ReadonlyArray<MemoryEntry>): {
+  nodes: MemoryLensProps['nodes']
+  edges: MemoryLensProps['edges']
+  start: string
+} {
+  const nodes: Record<string, MemoryLensProps['nodes'][string]> = {}
+  const edges: Array<{ source: string; target: string; rel: string }> = []
+
+  for (const entry of entries) {
+    nodes[entry.id] = {
+      type: 'memory',
+      title: entry.content.length > 80 ? `${entry.content.slice(0, 80)}...` : entry.content,
+      kp: entry.keeper_id || 'unknown',
+      meta: entry.kind,
+      ns: `${entry.file_path}:${entry.line_start}`,
+    }
+
+    if (entry.goal_id) {
+      if (!nodes[entry.goal_id]) {
+        nodes[entry.goal_id] = {
+          type: 'goal',
+          title: `Goal ${entry.goal_id}`,
+          kp: entry.keeper_id || 'unknown',
+          meta: 'linked',
+          ns: 'goal',
+        }
+      }
+      edges.push({ source: entry.id, target: entry.goal_id, rel: 'goal' })
+    }
+
+    if (entry.task_id) {
+      if (!nodes[entry.task_id]) {
+        nodes[entry.task_id] = {
+          type: 'task',
+          title: `Task ${entry.task_id}`,
+          kp: entry.keeper_id || 'unknown',
+          meta: 'linked',
+          ns: 'task',
+        }
+      }
+      edges.push({ source: entry.id, target: entry.task_id, rel: 'task' })
+    }
+  }
+
+  return { nodes, edges, start: entries[0]!.id }
+}
+
 export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
   const [entries, setEntries] = useState<ReadonlyArray<MemoryEntry>>([])
   const [total, setTotal] = useState(0)
@@ -73,12 +129,12 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
   }, [fetchMemory])
 
   return html`
-    <div class="ide-memory-panel" data-testid="ide-memory-panel">
+    <div class="ide-memory-panel v2-ide-panel" data-testid="ide-memory-panel">
       <div class="ide-memory-panel__header">
         <span class="ide-memory-panel__title">Memory</span>
         <span>
           <button
-            class="ide-memory-panel__refresh"
+            class="ide-memory-panel__refresh v2-ide-action"
             onClick=${fetchMemory}
             disabled=${loading}
             title="Refresh memory entries"
@@ -97,7 +153,7 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
                 ${entries.map(
                   (entry) => html`
                     <div
-                      class="ide-memory-panel__entry"
+                      class="ide-memory-panel__entry v2-ide-row"
                       key=${entry.id}
                       data-kind=${entry.kind}
                     >
@@ -130,6 +186,23 @@ export function IdeMemoryPanel({ keeperName }: IdeMemoryPanelProps) {
                   `,
                 )}
               </div>
+
+              ${(() => {
+                const { nodes, edges, start } = buildLensGraph(entries)
+                return html`
+                  <div class="ide-memory-panel__lens v2-ide-section" data-testid="ide-memory-lens">
+                    <${MemoryLens}
+                      nodes=${nodes}
+                      edges=${edges}
+                      nodeTypes=${LENS_NODE_TYPES}
+                      start=${start}
+                      W=${520}
+                      H=${360}
+                      ariaLabel="IDE 메모리 연결 렌즈"
+                    />
+                  </div>
+                `
+              })()}
             `}
     </div>
   `

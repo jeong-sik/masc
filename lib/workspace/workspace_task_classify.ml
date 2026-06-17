@@ -126,7 +126,7 @@ let update_local_agent_state config ~agent_name f =
 
 (** Tighter variant of [resolve_agent_name] for task ownership guards.
     Only accepts the resolved identity when it is the exact [-agent] suffix
-    form of the normalised input (e.g. "keeper-coder" -> "keeper-coder-agent").
+    form of the normalised input (e.g. "keeper-bob" -> "keeper-bob-agent").
     Arbitrary prefix matches from [resolve_agent_name] that do not conform to
     this pattern are silently discarded and the normalised input is returned
     unchanged, preventing one caller from being mistakenly mapped to a

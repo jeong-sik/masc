@@ -32,6 +32,20 @@ val clear_stale_agent_task :
   module_name:string ->
   unit
 
+(** Scan every on-disk agent record and clear [current_task] when it equals
+    [task_id].  Use this when the backlog no longer references the task
+    (terminal status or deletion) and the exact previous assignee is not
+    known.  Logs one [cache_desync.cleared] event per affected agent.
+
+    The read is best-effort and unlocked; {!clear_stale_agent_task}
+    re-checks the match under the per-agent file lock before writing. *)
+val clear_stale_agent_task_for_task :
+  Workspace_utils_backend_setup.config ->
+  task_id:string ->
+  status:Masc_domain.task_status ->
+  module_name:string ->
+  unit
+
 (** Core invariant wrapper.
 
     [with_fresh_task_status config ~agent_name ~task_id ~module_name f]

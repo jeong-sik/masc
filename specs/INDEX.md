@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-06-10T13:37:43Z (HEAD: 75c984bec)
+Generated: 2026-06-17T04:20:13Z (HEAD: 7d1674d788)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 91 |
-| Manual specs | 91 |
+| Total .tla files | 90 |
+| Manual specs | 90 |
 | TTrace (auto-generated) | 0 |
 | Directories | 19 |
-| Total .cfg files | 188 |
-| Buggy .cfg (bug-model pair) | 96 |
+| Total .cfg files | 186 |
+| Buggy .cfg (bug-model pair) | 95 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -43,14 +43,13 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | AutonomousLoop.tla | AutonomousLoop | manual | 2 | 1 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning, inv:AutoTickReadOnly} buggy={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning, inv:AutoTickReadOnly} | 11f25e8d37df |
 | AutonomousPhase.tla | AutonomousPhase | manual | 2 | 1 | clean={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} buggy={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} | 54e3dc0e6baa |
 
-### specs/boundary (15 specs)
+### specs/boundary (14 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | AuditLog.tla | AuditLog | manual | 2 | 1 | clean={inv:TypeOK, inv:CacheConsistency} buggy={inv:CacheConsistency} | a3c241509eb1 |
 | AuditLogAppendOrder.tla | AuditLogAppendOrder | manual | 2 | 1 | clean={inv:TypeOK, inv:MutexExclusion} buggy={inv:MutexExclusion} | 5cafd04c9e66 |
 | AuditLogDurableBeforeAck.tla | AuditLogDurableBeforeAck | manual | 2 | 1 | clean={inv:TypeOK, inv:Durability} buggy={inv:Durability} | 2e72a23b081e |
-| Bounded.tla | Bounded | manual | 2 | 1 | clean={inv:TypeOK, inv:Termination, inv:TokenBudget} buggy={inv:Termination, inv:TokenBudget} | d22f3d75f262 |
 | Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | bbed415483ac |
 | KeeperContinueGate.tla | KeeperContinueGate | manual | 2 | 1 | clean={inv:Safety, prop:PendingEventuallyResolves} buggy={inv:ApprovedResolutionClearsFailure} | 7f71fad0d4cb |
 | KeeperContractViolated.tla | KeeperContractViolated | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | ef2f8d4eb972 |
@@ -113,7 +112,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperCompactionLifecycle.tla | KeeperCompactionLifecycle | manual | 2 | 1 | clean={inv:Safety, prop:OverflowEventuallyLeavesOverflow, prop:CompactingEventuallyStops} buggy={inv:CompactingAlignsAll} | 004f6c25b9cc |
 | KeeperCompositeLifecycle.tla | KeeperCompositeLifecycle | manual | 5 | 4 | clean={inv:SafetyInvariant, inv:NoMidFlightTransitionToHandingOff, prop:EventualMeasurementResolves, prop:RecoveryEventuallyCompletes, prop:OverflowedEventuallyResolves} buggy-attempt={inv:ToolSurfaceFeedsAttempt} buggy-compaction={inv:CompactionAtomicity, inv:PhaseTurnAlignment} buggy-mid-flight-handoff={inv:NoMidFlightTransitionToHandingOff} buggy-post-turn={inv:PostTurnConsumesAttempt} | b6a56404aa81 |
 | KeeperConditionsGovernPhase.tla | KeeperConditionsGovernPhase | manual | 2 | 1 | clean={inv:Safety, prop:HandoffEventuallyAcknowledged} buggy={inv:TypeOK, prop:HandoffEventuallyAcknowledged} | 44cbd1093f09 |
-| KeeperContextLifecycle.tla | KeeperContextLifecycle | manual | 4 | 2 | clean={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction, prop:CompactionProgress, prop:EventualTurnCompletion, prop:AllKeepersTerminate} buggy={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} ci-buggy={inv:ContextIsolation, inv:ResumeIdentity} ci={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} | cce167c40ab7 |
+| KeeperContextLifecycle.tla | KeeperContextLifecycle | manual | 4 | 2 | clean={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction, prop:CompactionProgress, prop:EventualTurnCompletion, prop:AllKeepersTerminate} buggy={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} ci-buggy={inv:ContextIsolation, inv:ResumeIdentity} ci={inv:TypeOK, inv:ContextIsolation, inv:ResumeIdentity, inv:TurnMonotonicity, inv:CompactionPairIntegrity, inv:CheckpointConsistency, inv:BudgetAfterCompaction} | c2798612d26c |
 | KeeperCoreTriad.tla | KeeperCoreTriad | manual | 2 | 1 | clean={inv:SafetyInvariant, prop:RunningEventuallyCompletes CapabilityNeverDeadlocks} buggy={inv:SafetyInvariant} | 24fa34eea3a2 |
 | KeeperCounterCausality.tla | KeeperCounterCausality | manual | 2 | 1 | clean={inv:Safety} buggy={inv:CausePresentWhenCounted} | d023c2b8bff7 |
 | KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} | 241668542408 |

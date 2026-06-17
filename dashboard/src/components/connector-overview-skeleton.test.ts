@@ -37,6 +37,7 @@ describe('ConnectorOverviewSkeleton component', () => {
 
   it('renders exactly one tile per known connector', () => {
     render(html`<${ConnectorOverviewSkeleton} />`, container)
+    expect(container.querySelector('.v2-connector-overview-skeleton')).not.toBeNull()
     const tiles = container.querySelectorAll('[data-overview-skeleton-tile]')
     expect(tiles.length).toBe(KNOWN_CONNECTOR_IDS.length)
   })

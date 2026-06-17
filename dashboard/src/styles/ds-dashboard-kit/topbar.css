@@ -1,0 +1,69 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 · topbar
+   Brand · crumbs · roster-glance · clock · pills
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══ TOPBAR ═══ */
+.topbar {
+  grid-column: 1/-1; grid-row: 1 / 2;
+  display: flex; align-items: center; gap: 16px; padding: 0 18px;
+  background: linear-gradient(180deg, #1c140e, #14100c);
+  border-bottom: 1px solid var(--border-highlight);
+  box-shadow: 0 2px 0 rgba(0,0,0,0.4), inset 0 -1px 0 rgba(138,106,40,0.12);
+  position: relative; z-index: 3;
+}
+.brand { display: flex; align-items: center; gap: 10px; cursor: default; }
+.brand svg { width: 20px; height: 20px; color: var(--accent-brass); }
+.wm { font-family: 'Cinzel', 'Pretendard Variable', serif; font-size: 13px; letter-spacing: 0.28em; color: var(--text-bright); text-transform: uppercase; }
+.wm .blood { color: var(--accent-blood); text-shadow: 0 0 6px var(--accent-blood-glow); }
+
+.crumbs { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-dim); }
+.crumbs .sep { color: var(--border-highlight); }
+.crumbs strong { color: var(--accent-brass); font-weight: 400; }
+
+/* live roster glance inside topbar */
+.roster-glance {
+  margin-left: 12px; display: flex; align-items: center; gap: 14px;
+  padding: 0 14px; border-left: 1px solid var(--border-main); border-right: 1px solid var(--border-main);
+  height: 34px;
+}
+.rg-stat { display: flex; flex-direction: column; line-height: 1; }
+.rg-stat .lbl { font-size: 8px; letter-spacing: 0.24em; color: var(--text-dim); text-transform: uppercase; }
+.rg-stat .val { font-family: var(--font-mono); font-size: 13px; color: var(--text-bright); margin-top: 3px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.rg-stat .val.ok   { color: var(--ok); }
+.rg-stat .val.warn { color: var(--warn); }
+.rg-stat .val.bad  { color: var(--bad); }
+.rg-stat .val.brass{ color: var(--accent-brass); }
+
+.top-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.clock { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; letter-spacing: 0.08em; white-space: nowrap; }
+.clock b { color: var(--text-bright); font-weight: 400; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+  padding: 4px 9px; border: 1px solid var(--border-main);
+  background: rgba(14,10,8,0.6); color: var(--text-primary); cursor: default;
+  font-family: var(--font-ui);
+}
+.pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.pill.ok   { color: var(--ok);  border-color: color-mix(in oklab, var(--ok) 35%, transparent); }
+.pill.warn { color: var(--warn);border-color: color-mix(in oklab, var(--warn) 35%, transparent); }
+.pill.bad  { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 40%, transparent); }
+.pill.brass{ color: var(--accent-brass); border-color: var(--hair-brass); }
+
+.pill .k { color: var(--text-dim); letter-spacing: 0.15em; }
+.pill .v { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; text-transform: none; }
+
+/* v5 refinements */
+/* ─── Topbar refinements ─── */
+.topbar {
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-ink);
+}
+.topbar .crumbs,
+.topbar .crumbs strong { font-size: 11px; }
+.top-right .pill {
+  background: transparent;
+  border-color: var(--border);
+}

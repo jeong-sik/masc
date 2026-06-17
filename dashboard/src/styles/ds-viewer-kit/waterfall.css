@@ -1,0 +1,138 @@
+/* ─── Waterfall view — tool-call Gantt ───────────────────── */
+
+.wf {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wf-axis {
+  position: sticky;
+  top: 0;
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  background: color-mix(in oklab, var(--bg) 92%, transparent);
+  backdrop-filter: blur(4px);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 500;
+  padding: var(--sp-2) 0;
+  z-index: 2;
+}
+.wf-axis-name { padding: 0 var(--sp-3); }
+.wf-axis-ticks {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 var(--sp-2);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.wf-axis-ticks::before {
+  content: "";
+  position: absolute;
+  left: var(--sp-2); right: var(--sp-2);
+  bottom: -1px;
+  height: 1px;
+  background: var(--line);
+}
+
+.wf-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  align-items: center;
+  height: 30px;
+  border-bottom: 1px solid color-mix(in oklab, var(--line) 60%, transparent);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.wf-row:hover {
+  background: var(--surf-hover);
+}
+.wf-row.selected {
+  background: var(--surf-selected);
+  box-shadow: inset 2px 0 0 var(--accent-brass);
+}
+
+.wf-name {
+  padding: 0 var(--sp-3);
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  color: var(--text-bright);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+}
+.wf-name .wf-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: var(--sp-2);
+  flex: 0 0 auto;
+  background: var(--ok);
+  box-shadow: 0 0 0 1px var(--bg);
+}
+.wf-row[data-status="ok"]      .wf-status { background: var(--ok); }
+.wf-row[data-status="warn"]    .wf-status { background: var(--warn); }
+.wf-row[data-status="err"]     .wf-status { background: var(--bad); }
+.wf-row[data-status="timeout"] .wf-status { background: var(--bad); opacity: 0.6; }
+.wf-row[data-status="hilt"]    .wf-status { background: var(--warn); animation: wf-pulse 1.4s ease-in-out infinite; }
+.wf-row[data-status="run"]     .wf-status { background: var(--accent-brass); animation: wf-pulse 1.4s ease-in-out infinite; }
+@keyframes wf-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(1.25); }
+}
+
+.wf-track {
+  position: relative;
+  height: 100%;
+  padding: 0 var(--sp-2);
+}
+.wf-bar {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  min-width: 3px;
+  border-radius: var(--r-1);
+  background: color-mix(in oklab, var(--accent-brass) 60%, var(--surface-2));
+  border: 1px solid var(--line-accent);
+}
+.wf-row[data-status="warn"] .wf-bar {
+  background: color-mix(in oklab, var(--warn) 55%, var(--surface-2));
+  border-color: color-mix(in oklab, var(--warn) 60%, transparent);
+}
+.wf-row[data-status="err"] .wf-bar,
+.wf-row[data-status="timeout"] .wf-bar {
+  background: color-mix(in oklab, var(--bad) 50%, var(--surface-2));
+  border-color: color-mix(in oklab, var(--bad) 60%, transparent);
+}
+.wf-row[data-status="hilt"] .wf-bar {
+  background: repeating-linear-gradient(45deg,
+    color-mix(in oklab, var(--warn) 50%, var(--surface-2)) 0 6px,
+    color-mix(in oklab, var(--warn) 25%, var(--surface-2)) 6px 12px);
+  border-color: color-mix(in oklab, var(--warn) 65%, transparent);
+}
+
+.wf-bar-label {
+  position: absolute;
+  left: var(--sp-2);
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--text-bright);
+  white-space: nowrap;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+}

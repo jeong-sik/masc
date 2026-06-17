@@ -1,0 +1,28 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Cockpit — keeper-v2 design-system UI kit index
+   Cascade order: tokens → layout → chrome → zones → views → overlays.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* tokens first — everything else references these vars */
+@import url("tokens.css");
+
+/* shell / grid */
+@import url("layout.css");
+
+/* chrome */
+@import url("sidebar.css");
+@import url("rail.css");
+
+/* main content area */
+@import url("center.css");
+
+/* zone chrome */
+@import url("kpi.css");
+@import url("lifeline.css");
+@import url("ticker.css");
+
+/* views */
+@import url("swimlanes.css");
+
+/* overlays */
+@import url("drawer.css");

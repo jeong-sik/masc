@@ -1,0 +1,103 @@
+/* ─── Viewer keeper header (above tabs) ──────────────────── */
+
+.v-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-4);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--surf-panel);
+}
+
+.v-header .vh-portrait {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-3);
+  border: 1px solid var(--line-strong);
+  object-fit: cover;
+  box-shadow:
+    0 1px 3px rgba(0,0,0,0.5),
+    inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 15%, transparent);
+}
+.v-header .vh-portrait.dead {
+  filter: grayscale(1) brightness(0.55);
+}
+
+.v-header .vh-main { min-width: 0; overflow: hidden; }
+.v-header .vh-name {
+  font-family: var(--font-display);
+  font-size: var(--fs-6);
+  font-weight: 600;
+  color: var(--text-bright);
+  letter-spacing: 0.015em;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  line-height: var(--lh-tight);
+  min-width: 0;
+}
+.v-header .vh-name .nm {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.v-header .vh-sub {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
+  margin-top: var(--sp-1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+.v-header .vh-sub > span { min-width: 0; }
+.v-header .vh-sub .job {
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
+}
+.v-header .vh-sub .sep { opacity: 0.4; }
+.v-header .vh-sub b { color: var(--text-bright); font-weight: 500; }
+
+.v-header .vh-actions {
+  display: flex;
+  gap: var(--sp-1);
+}
+.v-header .vh-actions .btn {
+  font-family: var(--font-display);
+  font-size: var(--fs-3);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-2);
+  border: 1px solid var(--line);
+  background: var(--surf-raised);
+  color: var(--text-bright);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: all 0.12s;
+  line-height: 1.4;
+}
+.v-header .vh-actions .btn:hover {
+  border-color: var(--line-accent);
+  background: color-mix(in oklab, var(--accent-brass) 10%, var(--surf-raised));
+}
+.v-header .vh-actions .btn.danger {
+  color: var(--bad);
+  border-color: color-mix(in oklab, var(--bad) 35%, transparent);
+}
+.v-header .vh-actions .btn.danger:hover {
+  background: color-mix(in oklab, var(--bad) 12%, transparent);
+  border-color: color-mix(in oklab, var(--bad) 55%, transparent);
+}
+.v-header .vh-actions .btn.primary {
+  color: var(--accent-brass);
+  border-color: var(--line-accent);
+  background: color-mix(in oklab, var(--accent-brass) 10%, transparent);
+}

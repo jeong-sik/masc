@@ -1,0 +1,208 @@
+/* ─── Inspector (right rail) ───────────────────────────── */
+
+.v-inspector {
+  border-left: 1px solid var(--line);
+  background: var(--surf-rail);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ─ Tabs ─ */
+.v-insp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in oklab, var(--surface-2) 35%, transparent);
+  flex: 0 0 auto;
+}
+.v-insp-tab {
+  flex: 1;
+  padding: var(--sp-2) var(--sp-1);
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.12s, background 0.12s;
+}
+.v-insp-tab:hover {
+  color: var(--text-bright);
+  background: var(--surf-hover);
+}
+.v-insp-tab.on {
+  color: var(--accent-brass);
+  border-bottom-color: var(--accent-brass);
+}
+
+/* ─ Body ─ */
+.v-insp-body {
+  padding: var(--sp-4);
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  color: var(--text-bright);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  overflow-y: auto;
+}
+
+.v-insp-sec-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  font-weight: 500;
+  padding-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: var(--sp-2);
+}
+
+/* ─ Tool call detail ─ */
+.tc-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-2);
+  align-items: baseline;
+  min-width: 0;
+}
+.tc-row .l {
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: var(--fs-1);
+  font-family: var(--font-display);
+  font-weight: 500;
+}
+.tc-row .v {
+  min-width: 0;
+  color: var(--text-bright);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.tc-row .v.ok   { color: var(--ok); }
+.tc-row .v.warn { color: var(--warn); }
+.tc-row .v.bad  { color: var(--bad); }
+
+.tc-args {
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surf-sink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-bright);
+  line-height: 1.5;
+}
+
+/* ─ Judge scores ─ */
+.jd-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surf-raised);
+  align-items: center;
+}
+.jd-row.pass {
+  border-color: color-mix(in oklab, var(--ok) 35%, transparent);
+  background: color-mix(in oklab, var(--ok) 8%, transparent);
+}
+.jd-row.fail {
+  border-color: color-mix(in oklab, var(--bad) 35%, transparent);
+  background: color-mix(in oklab, var(--bad) 8%, transparent);
+}
+.jd-n {
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  color: var(--text-bright);
+}
+.jd-mark {
+  font-family: var(--font-display);
+  font-size: var(--fs-3);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.jd-row.pass .jd-mark { color: var(--ok); }
+.jd-row.fail .jd-mark { color: var(--bad); }
+
+/* ─ Siblings list ─ */
+.sib-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-2);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.sib-row:hover { background: var(--surf-hover); }
+.sib-row img {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-2);
+  object-fit: cover;
+  border: 1px solid var(--line);
+}
+.sib-row img.dead { filter: grayscale(1) brightness(0.5); }
+.sib-n {
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  color: var(--text-bright);
+}
+.sib-s {
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─ Thread (chain of consequences) ─ */
+.thr-step {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-3);
+  align-items: start;
+}
+.thr-step .dot {
+  margin-top: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-brass);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.thr-step.err .dot  { background: var(--bad); }
+.thr-step.warn .dot { background: var(--warn); }
+.thr-step .body {
+  color: var(--text-bright);
+  line-height: var(--lh-body);
+  font-family: var(--font-ui);
+}
+.thr-step .meta {
+  color: var(--text-dim);
+  font-size: var(--fs-1);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}

@@ -59,6 +59,55 @@ let find_write_escape (caps : Capability.t list) : Path_scope.t option =
   scan caps
 [@@warning "-4"]
 
+(* Scan for a binary that is catastrophic by identity — never legitimate for
+   a keeper regardless of arguments (currently [mkfs]).  Part of the
+   trust-independent floor (RFC-0254 §5.4).
+
+   Path-bearing destructive programs ([rm], [dd], [chmod], …) are
+   deliberately absent: their danger is a function of the *target path*, which
+   is jailed to the workspace by [Exec_policy.validate_shell_ir_paths]
+   downstream of the gate (a [rm -rf /] target fails the path whitelist there,
+   gate on or off).  This scan is only for binaries denied even with a
+   workspace-internal argument.
+
+   [@@warning "-4"] (on the function below): the [_ :: rest] arm and the
+   [Some _ | None] arm are a find-first scan that intentionally skips every
+   non-matching capability and every non-catastrophic binary, future ctors
+   included — RFC-0071 §3.4.1 nested find-first scan exemption (same rationale
+   as [find_destructive_git]).  A new catastrophic binary is added as a
+   positive arm beside [Some Exec_program.Mkfs]. *)
+let find_catastrophic_program (caps : Capability.t list) : Exec_program.t option =
+  let rec scan = function
+    | [] -> None
+    | Capability.Exec_program (bin, _) :: rest ->
+      (match Exec_program.known bin with
+       | Some Exec_program.Mkfs -> Some bin
+       | Some _ | None -> scan rest)
+    | Capability.Pipeline_fold inner :: rest ->
+      (match scan inner with
+       | Some _ as found -> found
+       | None -> scan rest)
+    | _ :: rest -> scan rest
+  in
+  scan caps
+[@@warning "-4"]
+
+(* Trust-INDEPENDENT catastrophic floor (RFC-0254 §5.3-5.4).  Evaluated
+   before any trust level, so loosening an overlay can never re-enable these.
+   This is now the {e only} place destructive git is decided: it is no longer
+   graded by [privileged_trust], which is the pre-RFC-0254 coupling that let a
+   loosened trust level allow [git push --force]. *)
+let catastrophic_floor (caps : Capability.t list) : Verdict.deny_reason option =
+  match find_destructive_git caps with
+  | Some g -> Some (Verdict.Destructive_git g)
+  | None ->
+    (match find_write_escape caps with
+     | Some ps -> Some (Verdict.Path_escape ps)
+     | None ->
+       (match find_catastrophic_program caps with
+        | Some bin -> Some (Verdict.Catastrophic_program bin)
+        | None -> None))
+
 (* Highest program risk observed in the full cap tree. *)
 let max_risk (caps : Capability.t list) : Exec_program.risk_class =
   let rec scan acc = function
@@ -103,33 +152,21 @@ let decide (policy : t)
     ~(overlay : Approval_config.agent_overlay)
     ~(caps : Capability.t list)
     ~(simple : Shell_ir.simple) : Verdict.t =
-  match find_destructive_git caps with
-  | Some g ->
-    (* Destructive git: trust level decides *)
-    (match overlay.privileged_trust with
-     | Approval_config.Enforced ->
-       Verdict.Deny { caps; reason = Destructive_git g }
-     | Approval_config.Auto_safe ->
-       Verdict.Allow (Verdict.trust ~caps simple)
-     | Approval_config.Suggest ->
-       let token : Verdict.confirm_token =
-         { risk_class = `Privileged; ttl_sec = 60.0 }
-       in
-       Verdict.Suggest_confirm (Verdict.trust ~caps simple, token)
-     | Approval_config.Observe ->
-       Verdict.Allow (Verdict.trust ~caps simple))
+  match catastrophic_floor caps with
+  | Some reason ->
+    (* Trust-independent: denied regardless of [overlay] (RFC-0254 §5.3). *)
+    Verdict.Deny { caps; reason }
   | None ->
-    match find_write_escape caps with
-    | Some ps ->
-      Verdict.Deny { caps; reason = Path_escape ps }
-    | None ->
-      match max_risk caps with
-      | `Privileged ->
-        trust_dispatch ~trust_level:overlay.privileged_trust
-          ~caps ~policy ~bin:simple.bin ~simple
-      | `Audited ->
-        trust_dispatch ~trust_level:overlay.audited_trust
-          ~caps ~policy ~bin:simple.bin ~simple
-      | `Safe ->
-        trust_dispatch ~trust_level:overlay.safe_trust
-          ~caps ~policy ~bin:simple.bin ~simple
+    (* Non-catastrophic: graded by the per-actor trust overlay.  Under the
+       autonomous overlay every level is [Observe] => [Allow] + telemetry;
+       under [enforced_all] every level is [Enforced] => [Ask]. *)
+    (match max_risk caps with
+     | `Privileged ->
+       trust_dispatch ~trust_level:overlay.privileged_trust
+         ~caps ~policy ~bin:simple.bin ~simple
+     | `Audited ->
+       trust_dispatch ~trust_level:overlay.audited_trust
+         ~caps ~policy ~bin:simple.bin ~simple
+     | `Safe ->
+       trust_dispatch ~trust_level:overlay.safe_trust
+         ~caps ~policy ~bin:simple.bin ~simple)

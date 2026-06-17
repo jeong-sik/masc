@@ -139,19 +139,6 @@ val guarded_dispatch
     fan-out. The dispatch return is typed [Tool_result.result option]; the old
     [dispatch]/[dispatch_structured] entry points are gone. *)
 
-val dispatch_many
-  :  ?max_concurrency:int
-  -> sw:Eio.Switch.t
-  -> (Tool_token.t * Yojson.Safe.t) list
-  -> (Tool_token.t * Tool_result.result option) list
-(** Run multiple independent tool calls concurrently.
-
-    Each call executes through {!guarded_dispatch} (pre-hooks, handler,
-    result transformer, observers) under the provided [sw]. The result list
-    preserves the input order. When [max_concurrency] is provided and
-    positive, a semaphore caps the number of calls running in parallel;
-    otherwise calls fan out with unbounded concurrency. *)
-
 (** {1 Introspection} *)
 
 (* RFC-0084 host-config-cleanup-J — [val v2_enabled] removed.

@@ -28,7 +28,8 @@ type agent_overlay = {
 
   privileged_trust : trust_level;
   (** Trust level for [Privileged] bins ([rm], [sudo]).
-      Also governs destructive git ops. *)
+      Destructive git ops are handled by the trust-independent catastrophic
+      floor, not by this trust level — RFC-0254 §5.3. *)
 }
 (** Per-agent knobs.  Each risk class has an independent trust level,
     allowing fine-grained escalation without all-or-nothing overrides. *)
@@ -48,6 +49,12 @@ val enforced_all : agent_overlay
 val permissive_default : agent_overlay
 (** [safe_trust = Auto_safe], audited/privileged at [Enforced].
     For well-trusted keeper agents in a dev worktree. *)
+
+val autonomous : agent_overlay
+(** All risk classes at [Observe] (allow + telemetry).  The overlay for an
+    autonomous keeper lane, where no human or resolver can answer an [Ask].
+    The trust-independent catastrophic floor in [Approval_policy.decide]
+    still applies above this overlay — RFC-0254 §5.5. *)
 
 val empty : t
 (** [empty] has [defaults = enforced_all] and no per-agent entries.

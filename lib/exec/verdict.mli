@@ -42,6 +42,10 @@ type deny_reason =
   | Unknown_bin of string
   | Path_escape of Path_scope.t
   | Destructive_git of Git_op.t
+  | Catastrophic_program of Exec_program.t
+      (** A binary that is never legitimate for a keeper regardless of its
+          arguments (e.g. [mkfs]).  Part of the trust-independent
+          catastrophic floor — RFC-0254 §5.4. *)
   | Policy_deny of { rule : string }
   | Parse_too_complex of Parsed.reason_too_complex
   | Parse_failed
@@ -63,3 +67,8 @@ val trust :
 (** The {i only} way to mint a [Trusted_argv.t].  Intended to be called
     from [Approval_policy.decide] after a capability list has been
     approved. *)
+
+val deny_reason_to_string : deny_reason -> string
+(** Render a [deny_reason] to a human-readable diagnostic.  Exhaustive over
+    every constructor so adding a new [deny_reason] is a compile error here
+    rather than a silent fallback to a generic string at the call site. *)

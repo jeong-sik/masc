@@ -37,6 +37,20 @@ let permissive_default : agent_overlay =
     privileged_trust = Enforced;
   }
 
+(* RFC-0254 §5.5: the overlay for an autonomous keeper lane.  Every risk
+   class is [Observe] (allow + telemetry) because there is no human or
+   resolver in the loop to answer an [Ask].  This does NOT loosen the
+   catastrophic floor: [Approval_policy.decide] checks the trust-independent
+   floor (destructive git, write-escape, catastrophic program) before
+   consulting any trust level, so [Observe] here never re-enables a floor
+   case. *)
+let autonomous : agent_overlay =
+  {
+    safe_trust = Observe;
+    audited_trust = Observe;
+    privileged_trust = Observe;
+  }
+
 let empty : t = { defaults = enforced_all; per_agent = [] }
 
 let lookup t ~actor =

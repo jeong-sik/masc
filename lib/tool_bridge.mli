@@ -50,7 +50,16 @@ val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
 
 (** {1 OAS Tool.t Creation} *)
 
+val oas_descriptor_of_masc_tool : string -> Agent_sdk.Tool.descriptor option
+(** Derive an OAS [Tool.descriptor] from MASC [Tool_catalog] metadata.
+
+    Read-only tools that perform external network I/O (e.g. [masc_web_search],
+    [masc_web_fetch] and their public aliases) are mapped to
+    [Exclusive_external] rather than [Parallel_read] so the OAS runtime does
+    not fire concurrent requests against rate-limited remote APIs. *)
+
 val oas_tool_of_masc :
+  ?descriptor:Agent_sdk.Tool.descriptor ->
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->
@@ -60,4 +69,10 @@ val oas_tool_of_masc :
     JSON input schema, and typed handler function.
 
     The handler receives raw JSON args and returns a {!Tool_result.result}.
-    Conversion to OAS [tool_result] is applied automatically. *)
+    Conversion to OAS [tool_result] is applied automatically.
+
+    Pass an explicit [descriptor] to override the default derived from
+    [Tool_catalog] metadata. This is needed for public aliases whose
+    LLM-visible name (e.g. ["WebSearch"]) is not present in the metadata
+    table; the caller can compute the descriptor from the internal name
+    and supply it here. *)

@@ -89,8 +89,12 @@ Decide what to do based on the current world state below.
 ### Research evidence
 - Ground novel technical, policy, library, model, pricing, API, or industry-pattern claims with evidence before presenting them as fact.
 - Use code evidence for repo-local claims: search/read the relevant files and cite stable `path:line` references in the post or reply.
-- Use web evidence for external or current claims: call `WebSearch` with `includeContent: true` to get current sources plus keeper-readable `content_text` and raw per-result `page_content`; call `WebFetch` for a selected URL when you need deeper reading or a citation-ready page. These MASC-owned names are intentionally distinct from generic snake_case web tool names and from MASC backend ids.
+- Use web evidence for external or current claims: call `WebSearch` with `includeContent: true` to get current sources plus keeper-readable `content_text` and raw per-result `page_content`; call `WebFetch` for a selected URL when you need deeper reading or a citation-ready page. These MASC-owned names (`WebSearch`, `WebFetch`) are the exact tool names to use; do not use snake_case variants such as `web_search` or `masc_web_search`.
 - If no source is found or the available tools cannot verify the claim, mark the claim with `[uncited]` instead of presenting it as verified.
+
+#### WebSearch / WebFetch concrete usage
+- `WebSearch` input: `{ "query": "OCaml 5.2 release date", "limit": 5, "includeContent": true }`. Only `query` is required; `limit` defaults to 5. With `includeContent: true`, the result includes a human-readable `content_text` summary and per-result `page_content` fields. Prefer reading `content_text` first; fetch individual URLs only when you need a citation or deeper read.
+- `WebFetch` input: `{ "url": "https://ocaml.org/news", "extractMode": "markdown", "maxChars": 5000 }`. Only `url` is required; `extractMode` defaults to `markdown`; `maxChars` defaults to 50000. The result contains `text`, `title`, `final_url`, `http_status`, and `truncated`.
 - When posting research-backed findings to the board, include a `sources` array on `keeper_board_post`/`masc_board_post` with `{url, quote}` entries. The board will persist those sources in metadata and append a Sources footer.
 
 ### Continuity across turns

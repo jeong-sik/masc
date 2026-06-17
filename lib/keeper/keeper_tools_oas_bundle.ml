@@ -181,7 +181,12 @@ let make_tool_bundle
                  ~failure_counts
                  ()
              in
+             (* Public aliases (e.g. WebSearch) are not present in
+                [Tool_catalog] metadata, so derive the descriptor from the
+                internal name and pass it explicitly. *)
+             let oas_descriptor = Tool_bridge.oas_descriptor_of_masc_tool internal in
              Tool_bridge.oas_tool_of_masc
+               ?descriptor:oas_descriptor
                ~name:public_name
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema

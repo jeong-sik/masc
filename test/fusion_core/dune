@@ -3,5 +3,5 @@
 ; main masc library — runs in seconds.
 
 (tests
- (names test_fusion)
+ (names test_fusion test_fusion_harness)
  (libraries alcotest otoml masc.fusion_core))

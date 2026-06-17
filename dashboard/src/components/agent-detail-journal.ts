@@ -1,15 +1,22 @@
 // Agent detail journal stream — real-time activity stream filtered by agent
 
 import { html } from 'htm/preact'
+import { useMemo } from 'preact/hooks'
 import { CollapsibleSection } from './common/collapsible'
 import { EmptyState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { agentJournalEntries, journalKindIcon } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
+import { journal } from '../sse'
 import type { JournalEntry } from '../types'
 
 export function AgentJournalStream({ agentName }: { agentName: string }) {
-  const entries = agentJournalEntries(agentName)
+  // agentJournalEntries scans the full MAX_JOURNAL_ENTRIES ring buffer (200) with
+  // 2x toLowerCase + up to 3x includes per entry. The parent AgentDetailOverlay
+  // re-renders on every mention-input keystroke (mentionText) and other unrelated
+  // signals; memoizing on [journal.value, agentName] skips the scan when neither
+  // the journal contents nor the target agent changed.
+  const entries = useMemo(() => agentJournalEntries(agentName), [agentName, journal.value])
   const title = entries.length > 0
     ? `실시간 활동 스트림 (${entries.length})`
     : '실시간 활동 스트림'

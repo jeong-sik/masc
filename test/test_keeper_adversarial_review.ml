@@ -63,12 +63,17 @@ let input ~author : AR.review_input =
 let pending base ~keeper =
   EA.pending_for_keeper ~base_path:base ~keeper_name:keeper ~limit:50 ()
 
+let check_ok = function
+  | Ok () -> ()
+  | Error msg -> Alcotest.fail msg
+
 let test_fail_wakes_author () =
   with_temp_base (fun base ->
       let author = "builder-keeper" in
       check int "no pending before" 0 (List.length (pending base ~keeper:author));
       AR.act_on_verdict ~base_path:base ~input:(input ~author)
-        (VC.Fail "unhandled error path at foo.ml:10");
+        (VC.Fail "unhandled error path at foo.ml:10")
+      |> check_ok;
       let items = pending base ~keeper:author in
       check int "one pending after fail" 1 (List.length items);
       let item = List.hd items in
@@ -78,14 +83,16 @@ let test_fail_wakes_author () =
 let test_pass_does_not_wake () =
   with_temp_base (fun base ->
       let author = "builder-keeper" in
-      AR.act_on_verdict ~base_path:base ~input:(input ~author) VC.Pass;
+      AR.act_on_verdict ~base_path:base ~input:(input ~author) VC.Pass
+      |> check_ok;
       check int "no pending after pass" 0
         (List.length (pending base ~keeper:author)))
 
 let test_warn_does_not_wake () =
   with_temp_base (fun base ->
       let author = "builder-keeper" in
-      AR.act_on_verdict ~base_path:base ~input:(input ~author) (VC.Warn "minor");
+      AR.act_on_verdict ~base_path:base ~input:(input ~author) (VC.Warn "minor")
+      |> check_ok;
       check int "no pending after warn" 0
         (List.length (pending base ~keeper:author)))
 
@@ -93,8 +100,8 @@ let test_fail_dedup_same_reason () =
   with_temp_base (fun base ->
       let author = "builder-keeper" in
       let v = VC.Fail "same reason" in
-      AR.act_on_verdict ~base_path:base ~input:(input ~author) v;
-      AR.act_on_verdict ~base_path:base ~input:(input ~author) v;
+      AR.act_on_verdict ~base_path:base ~input:(input ~author) v |> check_ok;
+      AR.act_on_verdict ~base_path:base ~input:(input ~author) v |> check_ok;
       check int "dedup: still one pending" 1
         (List.length (pending base ~keeper:author)))
 

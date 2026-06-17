@@ -64,6 +64,7 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
   ; blocks = None
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
   ; kind
+  ; audio
   }
 ;;
 

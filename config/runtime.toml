@@ -180,14 +180,15 @@ nick0cave = "ollama.gemma4-26b-a4b-qat"
 trigger_policy = "mention_or_thread"
 
 # ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
-# masc_fusion 도구의 out-of-band 심의 루프 설정. 기본 OFF (opt-in).
+# masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.
+# harness(RFC-0252 §11) 미검증 — 카나리 출력(panel 답 + judge 종합)으로 사후 판단.
 # [fusion] 섹션이 없거나 enabled=false면 masc_fusion 호출은 게이트에서
 # Deny로 즉시 반환되고 모델을 호출하지 않는다.
 #
 # 패널/심판 모델 문자열은 위의 <provider>.<model> 런타임 id를 그대로 쓴다.
 # 패널은 1..8개. 심판은 패널 답변을 종합한다.
 [fusion]
-enabled = false
+enabled = true
 default_preset = "trio"
 # 동시에 띄울 수 있는 패널 수 (Async_agent.all max_fibers 상한).
 max_concurrent_panels = 2

@@ -86,9 +86,11 @@ let test_normal_tool_output_returns_some () =
   Alcotest.(check bool) "normal tool returns Some" true
     (Option.is_some result)
 
-(* Regression: the 24+ alnum pattern used to eat the 64-hex sha256 in a blob
-   marker and produce "[masc:blob [REDACTED] bytes=... preview=..."
-   which [Tool_output.decode_from_oas] cannot parse back. *)
+(* Regression: the former generic 20+ alnum pattern used to eat the 64-hex
+   sha256 in a blob marker and produce "[masc:blob [REDACTED] bytes=... preview=..."
+   which [Tool_output.decode_from_oas] cannot parse back. That pattern is now
+   removed; decoding still scopes redaction to the preview body so the marker
+   structure is preserved either way. *)
 let test_blob_marker_preserves_structure () =
   let sha = String.make 64 'a' in
   let marker =
@@ -122,8 +124,9 @@ let test_blob_marker_redacts_preview_body () =
 (* Regression: a marker embedded inside a JSON string field used to be
    corrupted by callers that did [Yojson.Safe.to_string |> String.sub]
    because the top-level value looks like [{...}] not [\[masc:blob ...\]],
-   so [redact_preview] took the else-branch and the 24+ alnum scrubber
-   ate sha256. [preview_json_strings] walks leaves instead. *)
+   so [redact_preview] took the else-branch where the former 24+ alnum scrubber
+   ate sha256. [preview_json_strings] walks leaves instead. (That scrubber is
+   gone now, but leaf-walking remains the correct structural traversal.) *)
 let test_preview_json_strings_preserves_embedded_marker () =
   let sha = String.make 64 'c' in
   let marker =
@@ -168,7 +171,14 @@ let test_no_false_positive_on_task_ids () =
 
 let test_no_false_positive_on_keeper_identities () =
   let inputs =
-    [ "task-claim-bot"; "heartbeat-keeper"; "baghp_12"; "diagnostic-judge" ]
+    [ "task-claim-bot"; "heartbeat-keeper"; "baghp_12"; "diagnostic-judge"
+      (* 20+ char identities: these were redacted to [REDACTED] by the former
+         generic "20+ alphanumeric run" matcher (keeper-issue_king-agent=23,
+         keeper-ramarama-agent=21 chars) and are preserved now that the length
+         heuristic is removed. This is the regression the generic-matcher
+         removal targets. *)
+    ; "keeper-issue_king-agent"; "keeper-ramarama-agent"
+    ; "task-claim-bot-9a8b7c6d"; "heartbeat-keeper-2f4a1b" ]
   in
   List.iter
     (fun input ->
@@ -178,10 +188,11 @@ let test_no_false_positive_on_keeper_identities () =
     inputs
 
 (* Regression: the sk- body used to stop at the first '-', so modern keys with a
-   "-proj-" segment leaked the tail and were only caught by the generic 20+
-   fallback by luck. The body now allows '-' so the whole key matches in one
-   shot. Token literal is split so it is not mistaken for a real credential by
-   tooling; it is a synthetic test value, not a live secret. *)
+   "-proj-" segment leaked the tail. The body now allows '-' so the whole key
+   matches in one shot via the prefix matcher alone — the generic 20+ fallback
+   this case once leaned on has been removed, so the prefix match must be
+   complete on its own. Token literal is split so it is not mistaken for a real
+   credential by tooling; it is a synthetic test value, not a live secret. *)
 let test_sk_modern_key_fully_redacted () =
   let input = "sk-" ^ "proj-" ^ "0123456789abcdefghijklmnopqrstuv" in
   let r = Observability_redact.redact_text input in

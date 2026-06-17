@@ -11,6 +11,18 @@ type t =
 
 let has_flag args flag = List.mem flag args
 
+(* git short flags bundle: [git clean -fd] carries [-f] inside the [-fd]
+   cluster, and [git push -fv] carries [-f] inside [-fv]. [has_short_flag]
+   matches a single-letter flag whether standalone ([-f]) or bundled with
+   other short flags ([-fd], [-df], [-xfd]), but never inside a long flag
+   ([--force-with-lease] stays unmatched). Without this, [git clean -fd] —
+   the common force form — bypasses the destructive classifier. *)
+let has_short_flag args ch =
+  List.exists
+    (fun arg ->
+      String.length arg >= 2 && arg.[0] = '-' && arg.[1] <> '-' && String.contains arg ch)
+    args
+
 let rec strip_global_options = function
   | "-C" :: _path :: rest -> strip_global_options rest
   | "-c" :: _binding :: rest -> strip_global_options rest
@@ -52,12 +64,12 @@ let of_argv = function
             | "drop" :: _ -> Ok (Destructive `Stash_drop)
             | _ -> Ok (Mutating `Stash_push))
        | "push" ->
-           if has_flag rest "--force" || has_flag rest "-f" then
+           if has_flag rest "--force" || has_short_flag rest 'f' then
              Ok (Destructive `Push_force)
            else Ok (Mutating `Push)
        | "reset" when has_flag rest "--hard" ->
            Ok (Destructive `Reset_hard)
-       | "clean" when has_flag rest "-f" || has_flag rest "--force" ->
+       | "clean" when has_short_flag rest 'f' || has_flag rest "--force" ->
            Ok (Destructive `Clean_force)
        | "worktree" ->
            (match rest with

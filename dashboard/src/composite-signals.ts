@@ -2,9 +2,11 @@
 //
 // The SSE stream emits [keeper_composite_changed] with a name + wall-clock
 // envelope whenever a registry mutation may have changed the composite
-// snapshot. Subscribers observe [compositeTick] and re-fetch the full
-// payload from [/api/v1/keepers/:name/composite] — keeping the registry
-// as the single writer.
+// snapshot. This event is *signal-only freshness transport*; the payload is
+// intentionally not the authoritative read model. Subscribers observe
+// [compositeTick] and re-fetch the full payload from
+// [/api/v1/keepers/:name/composite] — keeping the registry as the single
+// writer. See docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md §Read Model Rules.
 
 import { signal } from '@preact/signals'
 

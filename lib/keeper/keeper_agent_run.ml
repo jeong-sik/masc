@@ -135,40 +135,48 @@ let run_turn
     ; duration_ms = None
     ; timestamp_ms = observation_timestamp_ms ()
     };
-  (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps finally
-     exceptions in [Fun.Finally_raised], masking the outer
-     [Eio.Cancel.Cancelled] raised by the turn body during fleet-wide
-     cancellation. Swallow Cancelled in the finally (the outer one is
-     already in flight) and log non-cancel exceptions instead of
-     propagating them. Mirrors the pattern used in
-     [keeper_unified_turn.ml] (#9747 iter 1). *)
+  (* Cancel-safe cleanup (#9747): [Eio_guard.protect] already uses
+     [Eio.Switch.on_release], so cleanup runs under cooperative cancellation
+     and does not mask the outer [Eio.Cancel.Cancelled]. We still need to
+     preserve the *terminal state* through the finally block: a cancelled
+     turn must emit phase="cancelled" in the observation event so receipts
+     and registry consumers agree with the FSM terminal [Cancelled _].
+     The [turn_cancelled] ref is set only when the turn body actually raises
+     [Eio.Cancel.Cancelled]; the finally block inspects it to pick the
+     observation phase. *)
   let turn_start_time = Unix.gettimeofday () in
-  let safe_emit_turn_end =
-    let emit_observation_turn_end () =
-      let duration_ms = int_of_float ((Unix.gettimeofday () -. turn_start_time) *. 1000.0) in
-      let turn_id = match meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "turn-" ^ meta.name in
-      Agent_observation.emit_turn_event
-        { base_path = config.base_path
-        ; turn_id
-        ; keeper_id = meta.name
-        ; phase = "completed"
-        ; model_used = None
-        ; tools_used = []
-        ; stop_reason = None
-        ; duration_ms = Some duration_ms
-        ; timestamp_ms = observation_timestamp_ms ()
-        }
+  let turn_cancelled = ref None in
+  let emit_observation_turn_end ~phase ~stop_reason () =
+    let duration_ms = int_of_float ((Unix.gettimeofday () -. turn_start_time) *. 1000.0) in
+    let turn_id = match meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "turn-" ^ meta.name in
+    Agent_observation.emit_turn_event
+      { base_path = config.base_path
+      ; turn_id
+      ; keeper_id = meta.name
+      ; phase
+      ; model_used = None
+      ; tools_used = []
+      ; stop_reason
+      ; duration_ms = Some duration_ms
+      ; timestamp_ms = observation_timestamp_ms ()
+      }
+  in
+  let safe_emit_turn_end () =
+    let phase, stop_reason =
+      match !turn_cancelled with
+      | Some exn -> "cancelled", Some (Printexc.to_string exn)
+      | None -> "completed", None
     in
-    fun () ->
-      (try emit_observation_turn_end ()
-       with Eio.Cancel.Cancelled _ as ce -> raise ce
-       | exn ->
-         Log.Keeper.warn "keeper:%s emit_observation_turn_end failed: %s"
-           meta.name (Printexc.to_string exn));
-      Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name ()
+    (try emit_observation_turn_end ~phase ~stop_reason ()
+     with Eio.Cancel.Cancelled _ as ce -> raise ce
+     | exn ->
+       Log.Keeper.warn "keeper:%s emit_observation_turn_end failed: %s"
+         meta.name (Printexc.to_string exn));
+    Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name ()
   in
   Eio_guard.protect ~finally:safe_emit_turn_end
   @@ fun () ->
+  try
   (* RFC-0107 §3.3 Phase C.1 wiring — turn-scoped Eio.Switch.
      Resources opened during a turn (HTTP connections, sandbox exec
      handles, retry sub-tasks via [Keeper_turn_driver_try_provider])
@@ -711,3 +719,7 @@ let run_turn
             ]
           ());
        receipt_result)
+with
+| Eio.Cancel.Cancelled _ as ce ->
+  turn_cancelled := Some ce;
+  raise ce

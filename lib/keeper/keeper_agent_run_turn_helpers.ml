@@ -251,15 +251,15 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
       ~event_kind
   in
   let yield_on_tool = Env_config.Slot.yield_enabled () in
+  (* SSOT-DRIFT-REMEDIATION: Streaming⇄Awaiting_tool_result FSM transitions
+     are now emitted from the turn-scoped OAS Event_bus observation in
+     [Keeper_unified_turn_event_bus], so they appear unconditionally even
+     when [yield_on_tool=false]. The yield/resume hooks below only handle
+     the optional slot-yield behaviour and its registry progress events. *)
   let on_yield =
     if yield_on_tool then
       Some
         (fun () ->
-          Keeper_turn_fsm.emit_transition
-            ~keeper_name
-            ~turn_id
-            ~prev:Keeper_turn_fsm.Streaming
-            Keeper_turn_fsm.Awaiting_tool_result;
           record_turn_progress "slot_yield";
           Log.Misc.debug "keeper %s: slot yielded (tool execution)" keeper_name)
     else None
@@ -268,11 +268,6 @@ let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
     if yield_on_tool then
       Some
         (fun () ->
-          Keeper_turn_fsm.emit_transition
-            ~keeper_name
-            ~turn_id
-            ~prev:Keeper_turn_fsm.Awaiting_tool_result
-            Keeper_turn_fsm.Streaming;
           record_turn_progress "slot_resume";
           Log.Misc.debug "keeper %s: slot resumed (next LLM turn)" keeper_name)
     else None

@@ -336,12 +336,18 @@ let run_keeper_cycle
 
          Uses the OAS Event_bus (ToolCalled + ToolCompleted) rather than
          MASC-side observers. The per-turn subscription is scoped by
-         [filter_agent meta.name], so no cross-keeper contamination. *)
+         [filter_agent meta.name], so no cross-keeper contamination.
+         The same events now drive Streaming⇄Awaiting_tool_result FSM
+         transitions unconditionally (see
+         [Keeper_unified_turn_event_bus.record_fsm_tool_transitions]). *)
                let turn_state =
                  { turn_state with last_execution = Some initial_execution }
                in
                let turn_event_bus_state =
-                 Keeper_unified_turn_event_bus.create ~keeper_name:meta.name ()
+                 Keeper_unified_turn_event_bus.create
+                   ~keeper_name:meta.name
+                   ~turn_id:keeper_turn_id
+                   ()
                in
                (* PR-J: [?site] labels the call-site so metric queries can attribute
          drain pressure to background polling vs unsubscribe vs the
@@ -899,6 +905,10 @@ dominant source of the observed CAS race exhaustion after
                     ~keeper_name:meta.name
                     trajectory_acc
                     Trajectory.Completed;
+                  (* SSOT: success-path terminal FSM transitions
+                     (Streaming -> Completing -> Done) are emitted once inside
+                     [Keeper_unified_turn_success.handle]. Do not duplicate them
+                     here; this is the sole caller of that function. *)
                   let updated_meta =
                     Keeper_unified_turn_success.handle
                       ~config

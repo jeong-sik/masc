@@ -39,6 +39,7 @@ const requestNamespaceTruthNow = vi.fn<() => void>()
 const requestNamespaceTruth = vi.fn<() => void>()
 const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) => void>()
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
+const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown) => void>()
@@ -86,7 +87,7 @@ async function loadSseStore() {
     applyOasRuntimeEvent: vi.fn(),
   }))
   vi.doMock('./composite-signals', () => ({
-    compositeTick: signal({ name: '', ts_unix: 0 }),
+    compositeTick,
     hydrateFleetCompositeSnapshot,
   }))
   vi.doMock('./goal-tree-state', () => ({
@@ -98,7 +99,7 @@ async function loadSseStore() {
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
   const sse = await import('./sse')
-  return { sseStore, sse }
+  return { sseStore, sse, compositeTick }
 }
 
 describe('setupSSEReaction reconnect hydration', () => {
@@ -137,6 +138,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     boardOffset.value = 0
     keeperHeartbeats.value = new Map()
     serverStatus.value = null
+    compositeTick.value = { name: '', ts_unix: 0 }
   })
 
   afterEach(() => {
@@ -355,6 +357,23 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', audio)
+  })
+
+  it('treats keeper_composite_changed as a signal-only tick and does not hydrate from the event payload', async () => {
+    const { sseStore, compositeTick } = await loadSseStore()
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_composite_changed',
+      name: 'qa-king',
+      ts_unix: 1710000000.123,
+      // Any payload-like fields must be ignored; the authoritative read is the
+      // per-keeper composite HTTP endpoint.
+      payload: { unexpected: true },
+    })
+    await flushAsyncWork()
+
+    expect(compositeTick.value).toEqual({ name: 'qa-king', ts_unix: 1710000000.123 })
+    expect(hydrateFleetCompositeSnapshot).not.toHaveBeenCalled()
   })
 
   it('routes board reaction changes through the board refresh budget', async () => {

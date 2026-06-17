@@ -197,6 +197,15 @@ describe('BoardSurface Component', () => {
     expect(container.querySelectorAll('.v2-workspace-panel').length).toBeGreaterThanOrEqual(1)
   })
 
+  it('applies StyleSeed surface/card classes', () => {
+    boardPosts.value = [
+      makePost({ id: 'post-1', title: '기술 탐색: test topic', body: 'content', author: 'keeper' }),
+    ]
+    const { container } = render(h(BoardSurface, null))
+    expect(container.querySelector('.v2-board-surface.ss-surface.bg-surface-page.text-text-primary')).not.toBeNull()
+    expect(container.querySelectorAll('.v2-workspace-panel.ss-card').length).toBeGreaterThanOrEqual(1)
+  })
+
   it('renders loading state when loading', () => {
     boardLoading.value = true
     render(h(BoardSurface, null))

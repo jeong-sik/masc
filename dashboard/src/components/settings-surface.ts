@@ -389,7 +389,7 @@ export function SettingsSurface() {
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
 
   return html`
-    <main class="v2-shell-surface settings-surf" data-screen-label="설정" data-testid="settings-surface">
+    <main class="v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary" data-screen-label="설정" data-testid="settings-surface">
       <div class="set-shell">
         <nav class="set-nav" aria-label="Settings categories">
           <div class="set-nav-h">
@@ -428,7 +428,7 @@ export function SettingsSurface() {
             <button type="button" class="act">Save changes</button>
           </header>
 
-          <div class="set-card-b">
+          <div class="set-card-b ss-card mx-6 my-6">
             ${sec === 'account' && html`
               <${SetRow} label="Operator" hint="Currently logged-in operator">
                 <span class="mono" style=${{ color: 'var(--text-bright)' }}>@operator</span>

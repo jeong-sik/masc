@@ -71,6 +71,37 @@
   &:hover { border-color: var(--color-border-strong); background: var(--color-bg-elevated); }
 }
 
+/* ── StyleSeed surface primitives ─────────────────────────────
+   Card-first layout utilities. These bridge to semantic tokens so
+   surfaces can use Tailwind classes like bg-card / text-text-primary
+   without hardcoding hex values. Values are overridden by the
+   [data-theme="styleseed"] block in ds-theme-tokens.css. */
+@utility ss-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+@utility bg-card { background-color: var(--bg-card); }
+@utility bg-surface-page { background-color: var(--bg-surface-page); }
+@utility bg-surface-subtle { background-color: var(--bg-surface-subtle); }
+@utility bg-surface-muted { background-color: var(--bg-surface-muted); }
+@utility bg-brand-tint { background-color: var(--bg-brand-tint); }
+
+@utility text-text-primary { color: var(--text-primary); }
+@utility text-text-secondary { color: var(--text-secondary); }
+@utility text-text-tertiary { color: var(--text-tertiary); }
+@utility text-text-disabled { color: var(--text-disabled); }
+@utility text-brand { color: var(--brand); }
+@utility text-success { color: var(--success); }
+@utility text-warning { color: var(--warning); }
+@utility text-destructive { color: var(--destructive); }
+@utility text-info { color: var(--info); }
+
+@utility border-border { border-color: var(--border-border); }
+@utility border-strong { border-color: var(--border-strong); }
+
 @utility monitor-headline {
   font: var(--type-title);
   font-weight: var(--fw-semi);

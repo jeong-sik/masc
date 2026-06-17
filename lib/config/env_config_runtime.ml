@@ -946,9 +946,10 @@ end
     so risk-class trust levels can auto-allow safe commands while
     requiring explicit approval for audited/privileged operations. *)
 module Shell_ir_approval_gate = struct
-  (** Enable the Shell IR approval policy gate. Default: false.
-      Re-readable within the process; set MASC_SHELL_IR_APPROVAL_GATE_ENABLED=true
-      to enable policy checks without recompilation. *)
+  (** Enable the Shell IR approval policy gate. Default: true (RFC-0254 — the
+      autonomous policy is a strict safety improvement over the no-gate path).
+      Re-readable within the process; set MASC_SHELL_IR_APPROVAL_GATE_ENABLED=false
+      to disable the gate (kill-switch) without recompilation. *)
   let enabled () =
     Feature_flag_registry.get_bool "MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
 end

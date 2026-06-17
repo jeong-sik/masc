@@ -203,9 +203,11 @@ P0 (typed argv path-scope) is **dropped** — see the §5.4 premise correction.
 
 ## 10. Rollout
 
-- Keep `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` default `false` through P0–P4.
-- Enable in a single keeper first; confirm via telemetry that the toolchain runs and only floor inputs are denied; then widen.
-- Because the autonomous policy is allow-by-default-with-floor, enabling it does not stop the lane (§2.2(3) resolved).
+- `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` is graduated to default `true` (lifecycle `Active`) once P1/P2/P4/P5 land (v0.19.45). The env var is retained as a **kill-switch**: set `=false` to disable the gate without a rebuild (re-readable per process).
+- This is a solo deployment and the gate has not run in production before, so the env var — not a code revert — is the first-line mitigation if the floor produces a false-deny.
+- Because the autonomous policy is allow-by-default-with-floor, enabling it does not stop the lane (§2.2(3) resolved). Net effect vs. the prior no-gate path: the same allows + a new catastrophic-floor `Deny` + per-command telemetry.
+- **Post-enable verification** (`.masc/logs/system_log_*.jsonl`): `rg 'shell_ir (policy_denied|path_reject|gate_reject)'` for denies (keeper/cmd/reason); `rg 'shell_ir dispatch'` for allows (status/risk_class/effects). Allows are `info`, denies are `warn`. No separate observability work is required — the keeper runtime already logs both (so the §5.6 telemetry relocation is cleanup, not a prerequisite).
+- If routine local destructive git (`reset --hard`, `clean -fd`, `branch -D`, `worktree remove`, `stash drop`) shows up as `policy_denied` and is unwanted, narrow the floor to remote-irreversible ops (`push --force`, `push --delete`) — §13.
 
 ## 11. Alternatives considered
 

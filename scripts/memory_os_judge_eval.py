@@ -18,9 +18,25 @@ Modes:
   relabel    — judge ALL facts, write relabelled JSONL (retroactive cleanup of the
                pre-#21257 legacy backlog the producer can no longer fix)
 
-Backend is pluggable (--judge-cmd, default "sb glm-text"); store dir is
---store-dir. Makes live LLM calls — run on demand. Deterministic given fixed model
-output, reproducible via the recorded label output.
+The judge model is chosen by the masc runtime config (NOT hardcoded): [memory_os]
+judge = "provider.model" if set, else the [runtime] default. The resolved provider's
+config (endpoint / credentials / model) is read from runtime.toml and called over
+openai-compatible HTTP. No external CLI fork — masc depends on its own runtime config,
+not on a Second Brain shell tool (`sb glm-text`). store dir is --store-dir. Makes live
+LLM calls — run on demand. Deterministic given fixed model output (temperature 0),
+reproducible via the recorded label output.
+
+This "judge" is the memory-os VALUE-EVAL judge (labels a fact durable/ephemeral). It
+is NOT the keeper `verifier` persona (a keeper that approves tasks), and NOT the
+[fusion] judge (RFC-0252, synthesizes a panel of model answers). Three distinct roles,
+three distinct config keys: [runtime.assignments] verifier / [fusion] judge /
+[memory_os] judge.
+
+NOTE (boundary): the ideal home for the live judge is the OCaml harness
+(test/eval_memory_os_value.ml) calling the OAS provider abstraction directly. This
+Python path resolves the provider from runtime.toml and speaks raw HTTP instead, so
+it does NOT inherit OAS transport (retry / stream). Acceptable for a 1-shot
+off-server batch eval; revisit if the judge ever moves onto a hot path.
 """
 
 from __future__ import annotations
@@ -28,8 +44,11 @@ import argparse
 import glob
 import json
 import os
-import subprocess
 import sys
+import tomllib
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
 
 # GOLD: the single irreducible HUMAN-anchored calibration set — the one manual
 # artifact left after moving all measurement to the LLM judge. It exists to keep the
@@ -70,6 +89,126 @@ JUDGE_SYSTEM = (
 )
 
 VALID = {"durable", "ephemeral", "uncertain"}
+
+# One-shot judge call; generous because the store can return a large batch.
+JUDGE_TIMEOUT_SEC = 180
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeBackend:
+    """Resolved openai-compatible endpoint for the judge model.
+
+    Built from a runtime.toml [providers.<name>] block — the same config the masc
+    runtime reads — so the judge cannot drift from the runtime's provider truth.
+    """
+
+    chat_url: str
+    api_key: str
+    model: str
+
+
+def load_runtime_cfg(runtime_config: str) -> dict:
+    try:
+        with open(runtime_config, "rb") as f:
+            return tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        sys.exit(f"cannot read runtime config {runtime_config!r}: {e}")
+
+
+def _split_runtime_id(runtime_id: str) -> tuple[str, str]:
+    """ "provider.model" -> (provider, model). Provider names contain no dot, so the
+    FIRST dot splits; the model keeps its own dashes/dots."""
+    if "." not in runtime_id:
+        sys.exit(f"runtime id {runtime_id!r} is not in 'provider.model' form")
+    provider, model = runtime_id.split(".", 1)
+    return provider, model
+
+
+def resolve_judge_target(cfg: dict) -> tuple[str, str, str]:
+    """Decide which (provider, model) judges, returning (provider, model, source).
+
+    Precedence (CLI override is applied by the caller, above this):
+      1. [memory_os] judge = "provider.model"  — the memory-os value-eval judge,
+         distinct from the keeper `verifier` persona and the [fusion] judge.
+      2. [runtime] default = "provider.model"  — fallback to the runtime's default.
+    Aborts if neither is set (no permissive guess about which model to trust)."""
+    mo = cfg.get("memory_os")
+    judge_id = mo.get("judge") if isinstance(mo, dict) else None
+    if isinstance(judge_id, str) and judge_id:
+        provider, model = _split_runtime_id(judge_id)
+        return provider, model, "memory_os.judge"
+
+    default_id = cfg.get("runtime", {}).get("default")
+    if isinstance(default_id, str) and default_id:
+        provider, model = _split_runtime_id(default_id)
+        return provider, model, "runtime.default (fallback)"
+
+    sys.exit(
+        "no judge target: set [memory_os] judge or [runtime] default in the runtime "
+        "config, or pass --judge-provider with --judge-model"
+    )
+
+
+def resolve_backend(cfg: dict, provider_name: str, model: str) -> JudgeBackend:
+    """Build a JudgeBackend from [providers.<provider_name>] in an already-loaded cfg.
+
+    Aborts (sys.exit) on any missing/incompatible config rather than falling back to
+    a permissive default — an unknown provider or empty credential must fail loudly,
+    not silently route somewhere unintended.
+    """
+    provider = cfg.get("providers", {}).get(provider_name)
+    if not isinstance(provider, dict):
+        sys.exit(f"runtime config has no [providers.{provider_name}]")
+
+    protocol = provider.get("protocol")
+    if protocol != "openai-compatible-http":
+        sys.exit(
+            f"provider {provider_name!r} protocol={protocol!r}; "
+            "judge needs an openai-compatible-http provider"
+        )
+
+    endpoint = str(provider.get("endpoint", "")).rstrip("/")
+    if not endpoint:
+        sys.exit(f"provider {provider_name!r} has no endpoint")
+
+    creds = provider.get("credentials", {})
+    if not isinstance(creds, dict) or creds.get("type") != "env":
+        sys.exit(f"provider {provider_name!r} credentials must be type=env")
+    key_env = creds.get("key", "")
+    api_key = os.environ.get(key_env, "")
+    if not api_key:
+        sys.exit(f"credential env {key_env!r} for provider {provider_name!r} is empty")
+
+    return JudgeBackend(
+        chat_url=f"{endpoint}/chat/completions", api_key=api_key, model=model
+    )
+
+
+def _chat(backend: JudgeBackend, system: str, user: str) -> str:
+    """Single openai-compatible chat completion; returns the message content text."""
+    body = json.dumps(
+        {
+            "model": backend.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0,
+            "stream": False,
+        }
+    ).encode()
+    req = urllib.request.Request(
+        backend.chat_url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {backend.api_key}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=JUDGE_TIMEOUT_SEC) as resp:
+        payload = json.loads(resp.read().decode())
+    return payload["choices"][0]["message"]["content"]
 
 
 def _extract_json_array(text: str) -> str | None:
@@ -130,15 +269,14 @@ def _parse_index(raw_i, n: int) -> int | None:
     return None
 
 
-def run_judge(claims: list[str], judge_cmd: str) -> list[str]:
+def run_judge(claims: list[str], backend: JudgeBackend) -> list[str]:
     """Label a batch of claims. Unparseable items default to 'uncertain' (never a
     silent durable/ephemeral guess)."""
     numbered = "\n".join(f"{i + 1}. {c}" for i, c in enumerate(claims))
     prompt = f"Classify these {len(claims)} claims:\n{numbered}"
-    argv = judge_cmd.split() + ["--no-thinking", "--system", JUDGE_SYSTEM, prompt]
     try:
-        out = subprocess.run(argv, capture_output=True, text=True, timeout=180).stdout
-    except Exception as e:
+        out = _chat(backend, JUDGE_SYSTEM, prompt)
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError) as e:
         print(f"  judge call failed: {e}", file=sys.stderr)
         return ["uncertain"] * len(claims)
     labels = ["uncertain"] * len(claims)
@@ -160,11 +298,11 @@ def run_judge(claims: list[str], judge_cmd: str) -> list[str]:
     return labels
 
 
-def judge_all(claims: list[str], judge_cmd: str, batch: int) -> list[str]:
+def judge_all(claims: list[str], backend: JudgeBackend, batch: int) -> list[str]:
     out: list[str] = []
     for i in range(0, len(claims), batch):
         chunk = claims[i : i + batch]
-        out.extend(run_judge(chunk, judge_cmd))
+        out.extend(run_judge(chunk, backend))
         print(f"  judged {min(i + batch, len(claims))}/{len(claims)}", file=sys.stderr)
     return out
 
@@ -175,9 +313,9 @@ def noise_rate(labels: list[str]) -> float:
     return eph / (eph + dur) if (eph + dur) else 0.0
 
 
-def calibrate(judge_cmd: str, min_acc: float) -> float:
+def calibrate(backend: JudgeBackend, min_acc: float) -> float:
     claims = [c for c, _ in GOLD]
-    got = run_judge(claims, judge_cmd)
+    got = run_judge(claims, backend)
     correct = sum(1 for (got_l, (_, exp)) in zip(got, GOLD) if got_l == exp)
     acc = correct / len(GOLD)
     print(
@@ -240,7 +378,27 @@ def main() -> int:
             "keepers",
         ),
     )
-    ap.add_argument("--judge-cmd", default="sb glm-text")
+    ap.add_argument(
+        "--runtime-config",
+        default=os.path.join(
+            os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
+            ".masc",
+            "config",
+            "runtime.toml",
+        ),
+        help="masc runtime.toml that defines the judge provider",
+    )
+    ap.add_argument(
+        "--judge-provider",
+        default=None,
+        help="override the runtime.toml [providers.<name>] used as judge "
+        "(default: [memory_os] judge, else [runtime] default). Requires --judge-model.",
+    )
+    ap.add_argument(
+        "--judge-model",
+        default=None,
+        help="override the judge model (use with --judge-provider)",
+    )
     ap.add_argument(
         "--sample", type=int, default=100, help="facts to judge in measure mode"
     )
@@ -249,7 +407,20 @@ def main() -> int:
     ap.add_argument("--out", default="", help="relabel mode: output JSONL path")
     args = ap.parse_args()
 
-    acc = calibrate(args.judge_cmd, args.min_accuracy)
+    cfg = load_runtime_cfg(args.runtime_config)
+    provider, model, source = resolve_judge_target(cfg)
+    if args.judge_provider or args.judge_model:
+        if not (args.judge_provider and args.judge_model):
+            sys.exit("--judge-provider and --judge-model must be given together")
+        provider, model, source = args.judge_provider, args.judge_model, "cli"
+    backend = resolve_backend(cfg, provider, model)
+    print(
+        f"judge: provider={provider} model={model} (source={source}) "
+        f"via {backend.chat_url}",
+        file=sys.stderr,
+    )
+
+    acc = calibrate(backend, args.min_accuracy)
     if acc < args.min_accuracy:
         return 2  # anti-rig: refuse to report live numbers with an untrustworthy judge
     if args.mode == "calibrate":
@@ -261,13 +432,13 @@ def main() -> int:
 
     if args.mode == "measure":
         if shared_only:
-            sl = judge_all([c for c, _ in shared_only], args.judge_cmd, args.batch)
+            sl = judge_all([c for c, _ in shared_only], backend, args.batch)
             print(
                 f"\n_shared tier ({len(shared_only)} facts): noise_rate = {noise_rate(sl):.0%} "
                 f"(eph {sl.count('ephemeral')} / dur {sl.count('durable')} / unc {sl.count('uncertain')})"
             )
         sample = deterministic_sample(keeper_facts, args.sample)
-        sl = judge_all([c for c, _ in sample], args.judge_cmd, args.batch)
+        sl = judge_all([c for c, _ in sample], backend, args.batch)
         print(
             f"\nkeeper store sample ({len(sample)} of {len(keeper_facts)}): "
             f"noise_rate = {noise_rate(sl):.0%} "
@@ -286,7 +457,7 @@ def main() -> int:
         return 0
 
     if args.mode == "relabel":
-        labels = judge_all([c for c, _ in keeper_facts], args.judge_cmd, args.batch)
+        labels = judge_all([c for c, _ in keeper_facts], backend, args.batch)
         out_path = args.out or "memory_os_relabel.jsonl"
         with open(out_path, "w") as f:
             for (claim, cat), lab in zip(keeper_facts, labels):

@@ -44,6 +44,7 @@ import './styles/copilot-dock.css'
 import './styles/memory-v2.css'
 import './styles/keeper-turn-inspector.css'
 import './styles/ide-v2.css'
+import './styles/work-v2.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

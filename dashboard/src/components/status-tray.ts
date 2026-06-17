@@ -93,8 +93,6 @@ interface DashboardStatusTrayProps {
   sideRailCollapsed?: boolean
 }
 
-const TRAY_ORDER: StatusTrayKey[] = ['transport', 'fleet', 'activity', 'attention']
-
 const ITEM_META = {
   transport: { icon: Radio, title: 'Transport' },
   fleet: { icon: Users, title: 'Fleet' },
@@ -469,12 +467,24 @@ function PopoverContent({
   `
 }
 
-export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStatusTrayProps) {
-  const [activeKey, setActiveKey] = useState<StatusTrayKey | null>(null)
-  const trayRef = useRef<HTMLElement>(null)
-  const wsOnly = dashboardWsOnlyEnabled()
-  const transportItem = computeTransportItem({
-    wsOnly,
+const FLEET_TRAY_KEYS = ['fleet', 'activity', 'attention'] as const
+
+const EMPTY_ITEM: StatusTrayItem = {
+  key: 'transport',
+  tone: 'muted',
+  label: '',
+  value: '',
+  detail: '',
+}
+
+// Phase 2: signal subscriptions are isolated per chip so a ws delta
+// (dashboardWsLastEventAt updates per WS event) re-renders only the transport
+// chip — not the parent, the bar, or the fleet/activity/attention buttons.
+
+// Reads only ws signals + now. ws deltas re-render this chip alone.
+function TransportChip({ active, onActivate }: { active: boolean; onActivate: () => void }) {
+  const transport = computeTransportItem({
+    wsOnly: dashboardWsOnlyEnabled(),
     sseConnected: connected.value,
     wsConnected: dashboardWsConnected.value,
     wsReady: dashboardWsReady.value,
@@ -489,10 +499,17 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     lastDisconnectedAt: lastDisconnectedAt.value,
     now: Date.now(),
   })
-  // Fleet/activity/attention depend only on these five signals — memoized so a
-  // burst of ws deltas (dashboardWsLastEventAt updates per event) re-renders the
-  // component but skips the O(N) fleet recompute (filter stale, countKeeperAttention,
-  // countPendingVerification) when none of these changed.
+  return html`<${TrayButton} item=${transport} active=${active} onClick=${onActivate} />`
+}
+
+// Reads only keepers/tasks/journal signals, memoized. ws deltas never reach it.
+function FleetChips({
+  activeKey,
+  onActivate,
+}: {
+  activeKey: StatusTrayKey | null
+  onActivate: (key: StatusTrayKey) => void
+}) {
   const fleet = useMemo(
     () =>
       computeFleetAttention({
@@ -504,18 +521,111 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
       }),
     [keepers.value, staleKeepers.value, tasks.value, journal.value, unacknowledgedCount.value],
   )
-  const summary: StatusTraySummary = {
-    latestJournalEntries: fleet.latestJournalEntries,
-    counts: {
-      ...fleet.counts,
-      reconnectCount: reconnectCount.value,
-      wsEventCount60s: dashboardWsEventCount60s.value,
-    },
-    items: {
-      transport: transportItem,
-      ...fleet.items,
-    },
+  return html`
+    ${FLEET_TRAY_KEYS.map(key => html`
+      <${TrayButton}
+        item=${fleet.items[key]}
+        active=${activeKey === key}
+        onClick=${() => onActivate(key)}
+      />
+    `)}
+  `
+}
+
+// Active-key popover. Reads only the signals the active key needs: ws signals
+// for transport, keepers/tasks/journal for fleet/activity/attention. Reuses
+// PopoverContent with a summary assembled for the active key (unused fields
+// are zeroed — PopoverContent's active branch only reads its own fields).
+function StatusTrayPopover({
+  activeKey,
+  onClose,
+}: {
+  activeKey: StatusTrayKey
+  onClose: () => void
+}) {
+  let summary: StatusTraySummary
+  if (activeKey === 'transport') {
+    summary = {
+      latestJournalEntries: [],
+      counts: {
+        totalKeepers: 0,
+        freshKeepers: 0,
+        staleKeepers: 0,
+        keeperAttention: 0,
+        pendingVerificationTasks: 0,
+        unacknowledgedErrors: 0,
+        reconnectCount: reconnectCount.value,
+        wsEventCount60s: dashboardWsEventCount60s.value,
+      },
+      items: {
+        transport: computeTransportItem({
+          wsOnly: dashboardWsOnlyEnabled(),
+          sseConnected: connected.value,
+          wsConnected: dashboardWsConnected.value,
+          wsReady: dashboardWsReady.value,
+          wsLastEventAt: dashboardWsLastEventAt.value,
+          wsEventCount60s: dashboardWsEventCount60s.value,
+          wsLastPongAt: dashboardWsLastPongAt.value,
+          wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
+          wsSseFallbackActive: dashboardWsSseFallbackActive.value,
+          wsSseFallbackReason: dashboardWsSseFallbackReason.value,
+          wsLastError: dashboardWsLastError.value,
+          reconnectCount: reconnectCount.value,
+          lastDisconnectedAt: lastDisconnectedAt.value,
+          now: Date.now(),
+        }),
+        fleet: EMPTY_ITEM,
+        activity: EMPTY_ITEM,
+        attention: EMPTY_ITEM,
+      },
+    }
+  } else {
+    const fleet = computeFleetAttention({
+      keepers: keepers.value,
+      staleKeeperNames: staleKeepers.value,
+      tasks: tasks.value,
+      journalEntries: journal.value,
+      unacknowledgedErrors: unacknowledgedCount.value,
+    })
+    summary = {
+      latestJournalEntries: fleet.latestJournalEntries,
+      counts: { ...fleet.counts, reconnectCount: 0, wsEventCount60s: 0 },
+      items: { transport: EMPTY_ITEM, ...fleet.items },
+    }
   }
+  const item = summary.items[activeKey]
+  return html`
+    <div
+      id="dashboard-status-tray-popover"
+      data-testid="dashboard-status-tray-popover"
+      role="dialog"
+      aria-label=${`${item.label} details`}
+      class=${`v2-shell-panel tray-popover tone-${item.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl max-[520px]:w-full`}
+    >
+      <div class="v2-shell-toolbar tray-popover-head mb-3 flex min-w-0 items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="tray-popover-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${item.label}</div>
+          <div class="tray-popover-detail mt-0.5 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${item.detail}</div>
+        </div>
+        <button
+          type="button"
+          class=${`v2-shell-action tray-popover-close inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
+          aria-label="Close status tray details"
+          onClick=${onClose}
+        >
+          <${X} size=${14} aria-hidden="true" />
+        </button>
+      </div>
+      <${PopoverContent} activeKey=${activeKey} summary=${summary} />
+    </div>
+  `
+}
+
+// Slim parent: owns activeKey + layout + outside-click only. Reads no ws/keepers
+// signals (only route.value.tab for the code offset), so ws deltas cannot reach it.
+export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStatusTrayProps) {
+  const [activeKey, setActiveKey] = useState<StatusTrayKey | null>(null)
+  const trayRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     if (!activeKey) return undefined
@@ -539,9 +649,10 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     }
   }, [activeKey])
 
-  const activeItem = activeKey ? summary.items[activeKey] : null
   const codeOffset = route.value.tab === 'code' ? 'bottom-16' : 'bottom-3 max-[520px]:bottom-2'
   const sideRailOffset = sideRailCollapsed ? 'left-[4.75rem]' : 'left-[14.75rem]'
+
+  const activate = (key: StatusTrayKey) => setActiveKey(activeKey === key ? null : key)
 
   return html`
     <aside
@@ -550,40 +661,11 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
       aria-label="Dashboard status tray"
       data-testid="dashboard-status-tray"
     >
-      ${activeItem ? html`
-        <div
-          id="dashboard-status-tray-popover"
-          data-testid="dashboard-status-tray-popover"
-          role="dialog"
-          aria-label=${`${activeItem.label} details`}
-          class=${`v2-shell-panel tray-popover tone-${activeItem.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl max-[520px]:w-full`}
-        >
-          <div class="v2-shell-toolbar tray-popover-head mb-3 flex min-w-0 items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="tray-popover-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${activeItem.label}</div>
-              <div class="tray-popover-detail mt-0.5 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${activeItem.detail}</div>
-            </div>
-            <button
-              type="button"
-              class=${`v2-shell-action tray-popover-close inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
-              aria-label="Close status tray details"
-              onClick=${() => { setActiveKey(null) }}
-            >
-              <${X} size=${14} aria-hidden="true" />
-            </button>
-          </div>
-          <${PopoverContent} activeKey=${activeKey} summary=${summary} />
-        </div>
-      ` : null}
+      ${activeKey ? html`<${StatusTrayPopover} activeKey=${activeKey} onClose=${() => setActiveKey(null)} />` : null}
 
       <div class="v2-tray-bar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-header-bg)] p-1 shadow-[var(--shadow-panel)] backdrop-blur-xl [scrollbar-width:none]">
-        ${TRAY_ORDER.map(key => html`
-          <${TrayButton}
-            item=${summary.items[key]}
-            active=${activeKey === key}
-            onClick=${() => { setActiveKey(activeKey === key ? null : key) }}
-          />
-        `)}
+        <${TransportChip} active=${activeKey === 'transport'} onActivate=${() => activate('transport')} />
+        <${FleetChips} activeKey=${activeKey} onActivate=${activate} />
       </div>
     </aside>
   `

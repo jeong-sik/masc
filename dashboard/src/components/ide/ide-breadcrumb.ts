@@ -85,7 +85,6 @@ export function IdeBreadcrumb() {
       role="navigation"
       aria-label="File breadcrumb"
       data-testid="ide-breadcrumb"
-<<<<<<< HEAD
       class="ide-breadcrumb v2-ide-toolbar ide-v2-crumb flex items-center gap-1.5 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] px-3 py-1 font-mono text-2xs"
     >
       <span aria-hidden="true" style=${{ fontSize: '12px', lineHeight: '16px' }}>${icon}</span>

@@ -36,6 +36,7 @@ describe('SettingsSurface', () => {
   it('renders the surface and category navigation', () => {
     render(html`<${SettingsSurface} />`, container)
 
+    expect(container.querySelector('.v2-shell-surface')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-surface"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-account"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-nav-runtime"]')).not.toBeNull()

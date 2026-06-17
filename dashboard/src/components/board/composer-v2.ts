@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useCallback, useEffect, useState } from 'preact/hooks'
 import { AtSign, Braces, Megaphone, Send, UserRound } from 'lucide-preact'
 import { currentDashboardActor, sendBroadcast } from '../../api'
 import {
@@ -98,8 +98,29 @@ export function buildComposerV2Request(input: {
   }
 }
 
-export function ComposerV2({ workspaceId }: { workspaceId?: string | null }) {
-  const [mode, setMode] = useState<ComposerV2Mode>('broadcast')
+interface ComposerV2Props {
+  workspaceId?: string | null
+  mode?: ComposerV2Mode
+  onModeChange?: (mode: ComposerV2Mode) => void
+  showModeSelector?: boolean
+  modeLabels?: Partial<Record<ComposerV2Mode, string>>
+}
+
+export function ComposerV2({
+  workspaceId,
+  mode: controlledMode,
+  onModeChange,
+  showModeSelector = true,
+  modeLabels = {},
+}: ComposerV2Props) {
+  const [internalMode, setInternalMode] = useState<ComposerV2Mode>(controlledMode ?? 'broadcast')
+  const mode = controlledMode ?? internalMode
+  const setMode = useCallback((next: ComposerV2Mode) => {
+    if (controlledMode === undefined) {
+      setInternalMode(next)
+    }
+    onModeChange?.(next)
+  }, [controlledMode, onModeChange])
   const [draft, setDraft] = useState('')
   const [keeperTarget, setKeeperTarget] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -197,27 +218,30 @@ export function ComposerV2({ workspaceId }: { workspaceId?: string | null }) {
   return html`
     <section class="v2-workspace-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3" aria-label="Composer v2">
       <div class="flex flex-wrap items-center gap-2">
-        <div class="inline-flex rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-0.5" role="group" aria-label="Composer v2 mode">
-          ${MODE_OPTIONS.map(option => {
-            const selected = mode === option.value
-            const Icon = modeIcon(option.value)
-            return html`
-              <${ActionButton}
-                variant="ghost"
-                size="sm"
-                pressed=${selected}
-                ariaLabel=${`${option.label} mode`}
-                title=${option.description}
-                onClick=${() => { chooseMode(option.value) }}
-                disabled=${busy}
-                class="inline-flex items-center gap-1.5"
-              >
-                <${Icon} size=${13} aria-hidden="true" />
-                ${option.label}
-              <//>
-            `
-          })}
-        </div>
+        ${showModeSelector ? html`
+          <div class="inline-flex rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-0.5" role="group" aria-label="Composer v2 mode">
+            ${MODE_OPTIONS.map(option => {
+              const selected = mode === option.value
+              const Icon = modeIcon(option.value)
+              const label = modeLabels[option.value] ?? option.label
+              return html`
+                <${ActionButton}
+                  variant="ghost"
+                  size="sm"
+                  pressed=${selected}
+                  ariaLabel=${`${label} mode`}
+                  title=${option.description}
+                  onClick=${() => { chooseMode(option.value) }}
+                  disabled=${busy}
+                  class="inline-flex items-center gap-1.5"
+                >
+                  <${Icon} size=${13} aria-hidden="true" />
+                  ${label}
+                <//>
+              `
+            })}
+          </div>
+        ` : null}
         <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-2xs font-medium text-[var(--color-fg-muted)]" aria-label=${`Target workspace: ${workspace}`}>
           #${workspace}
         </span>

@@ -233,3 +233,36 @@ export function MentionInbox() {
     </section>
   `
 }
+
+/** Compact mention inbox for the board v2 right-hand detail rail. */
+export function MentionInboxPanel() {
+  const actorName = currentDashboardActorName()
+  const targetCandidates = mentionTargetCandidates(shellAuthSummary.value, actorName)
+  const targetKey = targetCandidates.join('|')
+  const model = useMemo(
+    () => buildMentionInboxModel(messages.value, targetCandidates),
+    [targetKey, messages.value],
+  )
+  const total = model.forMe.length + model.others.length
+
+  if (total === 0) {
+    return html`<${EmptyState} message="멘션 메시지가 없습니다" compact />`
+  }
+
+  return html`
+    <div class="bd-mention-panel" data-testid="bd-mention-panel">
+      <div class="bd-mention-stats">
+        <div class="bd-mention-stat">
+          <div class="k">For me</div>
+          <div class="v">${model.forMe.length}</div>
+        </div>
+        <div class="bd-mention-stat">
+          <div class="k">Others</div>
+          <div class="v">${model.others.length}</div>
+        </div>
+      </div>
+      <${MentionLane} title="For me" rows=${model.forMe} emptyMessage="현재 actor 대상 멘션이 없습니다" />
+      <${MentionLane} title="Other mentions" rows=${model.others} emptyMessage="다른 대상 멘션이 없습니다" />
+    </div>
+  `
+}

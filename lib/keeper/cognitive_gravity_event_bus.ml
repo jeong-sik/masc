@@ -82,7 +82,7 @@ let dispatch () =
        let event =
          { trigger; target_fact_ids = target_ids; delta; applied_at_turn = turn }
        in
-       List.iter (fun h -> h event) handlers;
+       List.iter (fun h -> try h event with _ -> ()) handlers;
        results := event :: !results)
     registry;
   List.rev !results
@@ -95,7 +95,7 @@ let emit event =
     | hs -> hs
     | exception Not_found -> []
   in
-  List.iter (fun h -> h event) handlers
+  try List.iter (fun h -> h event) handlers with _ -> ()
 
 (* ── JSON helpers ─────────────────────────────────────────────── *)
 

@@ -30,6 +30,7 @@ type SurfaceSectionId =
   // ConnectorOverviewStrip rather than top-level navigation.
   | 'connector-status'      // all connectors with internal connector picker
   // workspace
+  | 'work'           // Goal/job breakdown surface
   | 'board'
   | 'sub-boards'     // Phase 2: SubBoard named spaces within the board
   | 'moderation'     // Board moderation queue and actions
@@ -123,9 +124,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'workspace',
     label: 'Workspace',
     icon: 'workspace',
-    description: 'Board, planning, repositories, and verification',
+    description: 'Work goals, board feed, planning, repositories, and verification',
     defaultTab: 'workspace',
-    defaultParams: { section: 'board' },
+    defaultParams: { section: 'work' },
     tabs: ['workspace'],
   },
   {
@@ -258,6 +259,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
   ],
   workspace: [
+    {
+      id: 'work',
+      label: 'Work',
+      description: 'Goal/job breakdown and keeper assignment board.',
+      params: { section: 'work' },
+    },
     {
       id: 'board',
       label: 'Board',

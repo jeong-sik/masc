@@ -7,6 +7,7 @@ import { useMemo, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers } from '../store'
 import { BoardModerationSurface } from './board/board-moderation-surface'
+import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
 import { PlanningPanel } from './planning-panel'
 import { VerificationRequestsPanel } from './verification-requests-panel'
@@ -15,14 +16,14 @@ import { LoadingState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
 import type { Goal, Task, Keeper } from '../types'
 
-type WorkSection = 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
+type WorkSection = 'work' | 'board' | 'sub-boards' | 'moderation' | 'planning' | 'repositories' | 'verification'
 
 const LazyRepositoryManagement = lazy(async () => ({
   default: (await import('./repository-management')).RepositoryManagement,
 }))
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'board' || v === 'sub-boards' || v === 'moderation' || v === 'planning' || v === 'repositories' || v === 'verification'
+  return v === 'work' || v === 'board' || v === 'sub-boards' || v === 'moderation' || v === 'planning' || v === 'repositories' || v === 'verification'
 }
 
 // ── Job state mapping ───────────────────────────────────────────────────────
@@ -334,13 +335,14 @@ function WorkSurfaceV2() {
 export function Work() {
   const current: WorkSection = isWorkSection(route.value.params.section)
     ? route.value.params.section
-    : 'board'
+    : 'work'
 
   return html`
     <div class="v2-workspace-surface flex min-w-0 flex-col gap-3">
       <div class="min-w-0 transition-opacity duration-[var(--t-slow)]">
         <${ErrorBoundary} label=${current}>
-          ${current === 'board' ? html`<${WorkSurfaceV2} />`
+          ${current === 'work' ? html`<${WorkSurfaceV2} />`
+            : current === 'board' ? html`<${BoardSurface} />`
             : current === 'sub-boards' ? html`<${SubBoardSurface} />`
             : current === 'moderation' ? html`<${BoardModerationSurface} />`
             : current === 'planning' ? html`<${PlanningPanel} />`

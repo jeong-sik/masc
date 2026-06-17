@@ -804,7 +804,7 @@ let start_container (t : t) ~timeout_sec =
                  container_name
              with
              | Ok () ->
-               set_state t Running { container_name };
+               set_state t (Running { container_name });
                Ok container_name
              | Error inspect_out ->
                (* Inspect failed after a successful `docker run`. Without an

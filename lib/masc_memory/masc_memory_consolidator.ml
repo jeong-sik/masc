@@ -25,7 +25,7 @@ let generate_consolidation_proposals t ~llm_client =
     
     if not proposal.approved then (
       let proposals_dir = Eio.Path.(t.env_fs / "proposals") in
-      (try Eio.Path.mkdir proposals_dir 0o700 with _ -> ());
+      (try Eio.Path.mkdir proposals_dir ~perm:0o700 with _ -> ());
       let file_path = Eio.Path.(proposals_dir / Printf.sprintf "proposal_%s.md" proposal.proposal_id) in
       let md_content = Printf.sprintf 
         "# Memory Consolidation Proposal [%s]\n- Rationale: %s\n- Action: Merge [mem_1, mem_2]" 

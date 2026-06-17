@@ -11,12 +11,18 @@ let run_cpu_intensive t f =
 
 let compute_local_embedding t ~text =
   run_cpu_intensive t (fun () ->
-    (* ONNX C FFI 바인딩을 가정하며 GC finalise를 통해 C 텐서 메모리 누수 방어 *)
+    (* 1. OrtCreateTensor FFI를 호출하여 C 텐서 획득 (가정) *)
     let tensor = "mock_onnx_tensor_ptr" in
-    Gc.finalise (fun _ -> 
-      (* OrtReleaseTensor(tensor) FFI 호출 가정 *)
-      ()
-    ) tensor;
-    (* 1,536차원 모크 임베딩 벡터 반환 *)
-    Array.make 1536 0.05
+    
+    (* 2. Gc.finalise 대신 Fun.protect를 사용해 Native C Heap 리소스의 명시적 해제 보장 (OOM 방어) *)
+    Fun.protect
+      ~finally:(fun () ->
+         (* 3. OrtReleaseTensor(tensor) FFI 즉시 호출하여 리소스 누수 방지 *)
+         let _ = tensor in
+         ())
+      (fun () ->
+         (* 4. 1,536차원 모크 임베딩 벡터 반환 *)
+         let _ = text in
+         Array.make 1536 0.05
+      )
   )

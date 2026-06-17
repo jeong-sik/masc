@@ -6,12 +6,12 @@ type t = {
   env_clock : float Eio.Time.clock_ty Eio.Resource.t;
   supabase_client : unit;
   neo4j_client : unit;
-  mutable speculative_cache : (string * float array) option;
+  speculative_cache : (string * float array) option Atomic.t;
   pre_embed_id : int Atomic.t;
 }
 
 let create ~worker ~env_clock ~supabase_client ~neo4j_client =
-  { worker; env_clock; supabase_client; neo4j_client; speculative_cache = None; pre_embed_id = Atomic.make 0 }
+  { worker; env_clock; supabase_client; neo4j_client; speculative_cache = Atomic.make None; pre_embed_id = Atomic.make 0 }
 
 let canonicalize_query s =
   let cleaned = String.map (fun c ->
@@ -32,7 +32,7 @@ let pre_embed_speculative t ~sw ~current_input_prefix =
     Eio.Time.sleep t.env_clock 0.8;
     if Atomic.get t.pre_embed_id = my_ticket && String.length clean_prefix > 5 then
       let vec = Masc_domain_worker.compute_local_embedding t.worker ~text:clean_prefix in
-      t.speculative_cache <- Some (clean_prefix, vec)
+      Atomic.set t.speculative_cache (Some (clean_prefix, vec))
   )
 
 let query_supabase_mock _client _vector _max =
@@ -54,7 +54,7 @@ let recall t ~query ~max_results =
   try
     let clean_query = canonicalize_query query in
     let query_vector =
-      match t.speculative_cache with
+      match Atomic.get t.speculative_cache with
       | Some (prefix, vec) when String.starts_with ~prefix clean_query -> vec
       | _ -> Masc_domain_worker.compute_local_embedding t.worker ~text:clean_query
     in

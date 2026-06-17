@@ -3,11 +3,33 @@ type horizon =
   | Mid_term
   | Long_term
 
+let horizon_to_string = function
+  | Short_term -> "Short_term"
+  | Mid_term -> "Mid_term"
+  | Long_term -> "Long_term"
+
+let horizon_of_string = function
+  | "Short_term" -> Short_term
+  | "Mid_term" -> Mid_term
+  | "Long_term" | _ -> Long_term
+
 type memory_kind =
   | User_profile
   | Feedback_rule
   | Project_context
   | External_ref
+
+let kind_to_string = function
+  | User_profile -> "User_profile"
+  | Feedback_rule -> "Feedback_rule"
+  | Project_context -> "Project_context"
+  | External_ref -> "External_ref"
+
+let kind_of_string = function
+  | "User_profile" -> User_profile
+  | "Feedback_rule" -> Feedback_rule
+  | "Project_context" -> Project_context
+  | "External_ref" | _ -> External_ref
 
 type memory_row = {
   id : string;
@@ -43,3 +65,4 @@ type consolidation_proposal = {
   rationale : string;
   approved : bool;
 }
+

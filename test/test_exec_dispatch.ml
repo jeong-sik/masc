@@ -1048,8 +1048,10 @@ let () =
       envelope
   with
   | Ok _ -> assert false
+  (* rm is Privileged; permissive_default sets privileged_trust = Enforced,
+     so the policy yields Verdict.Ask -> Approval_required deterministically.
+     A flip to Policy_denied (e.g. risk-class regression) must fail the test. *)
   | Error (Keeper_tool_execute_shell_ir.Approval_required _) -> ()
-  | Error (Keeper_tool_execute_shell_ir.Policy_denied _) -> ()
   | Error _ -> assert false
 
 let () =

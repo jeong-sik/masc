@@ -63,3 +63,8 @@ val trust :
 (** The {i only} way to mint a [Trusted_argv.t].  Intended to be called
     from [Approval_policy.decide] after a capability list has been
     approved. *)
+
+val deny_reason_to_string : deny_reason -> string
+(** Render a [deny_reason] to a human-readable diagnostic.  Exhaustive over
+    every constructor so adding a new [deny_reason] is a compile error here
+    rather than a silent fallback to a generic string at the call site. *)

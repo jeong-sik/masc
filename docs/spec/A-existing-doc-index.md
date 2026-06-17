@@ -72,7 +72,6 @@ code_refs:
 
 | Path | Status | Notes |
 |------|--------|-------|
-| `docs/archive/` | Archive | closed roadmaps and archived planning docs |
 | `docs/design/` | Archive | active design memos, not front-door docs |
 | `docs/research/` | Archive | research reference material |
 | `docs/qa/` | Archive | reverse-engineered and QA-oriented notes |
@@ -89,7 +88,9 @@ code_refs:
 | `docs/OCAML-NORTH-STAR.md` | Removed | duplicate of `docs/NORTH-STAR-OCAML.md`; deleted 2026-04-23 |
 | `docs/architecture-boundary.md` | Removed | superseded by `docs/OAS-MASC-BOUNDARY.md`; deleted 2026-04-23 |
 | `docs/rfc/RFC-0072-provider-adapter-sublib-extraction.md` | Removed | stale duplicate RFC number; provider adapter was deleted instead of extracted |
-| `docs/RELEASE-ROADMAP.md` | Not present | use `docs/VERSIONED-ROADMAP.md` and `docs/archive/RELEASE-ROADMAP-v287.md` |
+| `docs/RELEASE-ROADMAP.md` | Not present | use `docs/VERSIONED-ROADMAP.md` (archived `RELEASE-ROADMAP-v287.md` removed 2026-06-17; see git history) |
+| `docs/archive/` | Removed | 14 `audit/` reports + `RELEASE-ROADMAP-v287.md` deleted 2026-06-17; git history retains them |
+| `docs/rfc/withdrawn/` (11 RFCs) | Pruned | dead withdrawn RFCs with zero live refs removed 2026-06-17; RFC-0017/0018/0048 kept (live document-graph edges) |
 
 ## Notes
 

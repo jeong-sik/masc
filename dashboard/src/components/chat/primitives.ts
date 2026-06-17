@@ -338,7 +338,7 @@ function ChatArtifactPreview({
         <img
           src=${data}
           alt=${name}
-          class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+          class="max-h-[80vh] max-w-full rounded-md object-contain"
         />
       <//>
     `
@@ -415,16 +415,16 @@ function traceDur(trace: ChatTraceStep[]): string | null {
 }
 
 function ChatTextBlock({ html: htmlContent }: { html: string }) {
-  return html`<p class="mb-2 text-base leading-airy text-[var(--color-fg-primary)]" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
+  return html`<p class="mb-2 text-[14px] leading-airy text-text-primary" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
 }
 
 function ChatHeadingBlock({ html: htmlContent }: { html: string }) {
-  return html`<h4 class="mb-1 mt-2 text-sm font-semibold text-[var(--color-fg-secondary)]" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
+  return html`<h4 class="mb-1 mt-2 text-[14px] font-semibold text-text-secondary" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
 }
 
 function ChatListBlock({ items }: { items: string[] }) {
   return html`
-    <ul class="my-1 list-disc pl-5 text-base leading-airy text-[var(--color-fg-primary)]">
+    <ul class="my-1 list-disc pl-5 text-[14px] leading-airy text-text-primary">
       ${items.map((it, i) => html`<li key=${i} dangerouslySetInnerHTML=${renderInlineHtml(it)} />`)}
     </ul>
   `
@@ -492,14 +492,14 @@ function ChatPreviewModal({
       aria-label=${title}
     >
       <div
-        class="relative max-h-[90vh] max-w-[90vw] overflow-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-[var(--shadow-raised)]"
+        class="relative max-h-[90vh] max-w-[90vw] overflow-auto rounded-[var(--r-2)] border border-border bg-card p-4 shadow-[var(--shadow-raised)]"
         onClick=${(e: Event) => e.stopPropagation()}
       >
         <div class="mb-3 flex items-center justify-between gap-4">
-          <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${title}</span>
+          <span class="truncate text-[14px] font-semibold text-text-primary">${title}</span>
           <button
             type="button"
-            class="rounded-[var(--r-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+            class="rounded px-2 py-1 text-[12px] text-text-secondary hover:bg-surface-muted hover:text-text-primary"
             onClick=${onClose}
             aria-label="닫기"
           >
@@ -572,8 +572,8 @@ function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html:
         </button>
       </div>
       ${highlighted
-        ? html`<div class="m-0 overflow-x-auto p-0 text-2xs leading-relaxed" id=${codeId} dangerouslySetInnerHTML=${{ __html: highlighted }} />`
-        : html`<pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed" id=${codeId}><code dangerouslySetInnerHTML=${{ __html: htmlContent }} /></pre>`}
+        ? html`<div class="m-0 overflow-x-auto p-0 text-[11px] leading-relaxed" id=${codeId} dangerouslySetInnerHTML=${{ __html: highlighted }} />`
+        : html`<pre class="m-0 overflow-x-auto p-3 text-[11px] leading-relaxed" id=${codeId}><code dangerouslySetInnerHTML=${{ __html: htmlContent }} /></pre>`}
     </div>
   `
 }
@@ -587,7 +587,7 @@ function ChatShellBlock({ title, lines, exit, dur }: ChatShellBlock) {
         <span class="chat-block-shell-dot g"></span>
         <span class="chat-block-shell-title">${title || 'keeper@worktree'}</span>
       </div>
-      <pre class="m-0 p-3 text-2xs leading-relaxed">
+      <pre class="m-0 p-3 text-[11px] leading-relaxed">
         ${lines.map((ln, i) => html`
           <div key=${i} class="chat-block-shell-line ${ln.t || ''}">
             ${ln.t === 'cmd' ? html`<span class="chat-block-shell-prompt">$ </span>` : null}
@@ -764,7 +764,7 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
     <figure class="chat-block-media" data-chat-block="image">
       <div class="chat-block-media-frame ${src ? 'cursor-zoom-in' : ''}" onClick=${() => src && setOpen(true)}>
         ${src
-          ? html`<img src=${src} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
+          ? html`<img src=${src} alt=${cap || ''} class="max-h-52 w-full rounded-md object-contain" />`
           : html`<div class="chat-block-media-ph">${ph || '실행 화면'}</div>`}
       </div>
       ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
@@ -774,7 +774,7 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
               <img
                 src=${src}
                 alt=${cap || ''}
-                class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+                class="max-h-[80vh] max-w-full rounded-md object-contain"
               />
             <//>
           `
@@ -898,13 +898,13 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
                 ${step.args !== undefined
                   ? html`
                       <div class="chat-block-tool-label">args</div>
-                      <pre class="m-0 overflow-x-auto text-2xs" dangerouslySetInnerHTML=${{ __html: highlightJson(step.args) }} />
+                      <pre class="m-0 overflow-x-auto text-[11px]" dangerouslySetInnerHTML=${{ __html: highlightJson(step.args) }} />
                     `
                   : null}
                 ${step.result !== undefined
                   ? html`
                       <div class="chat-block-tool-label">result</div>
-                      <pre class="m-0 overflow-x-auto text-2xs" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.result) }} />
+                      <pre class="m-0 overflow-x-auto text-[11px]" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.result) }} />
                     `
                   : null}
               </div>
@@ -1036,14 +1036,14 @@ function ChatBlocks({ blocks }: { blocks: ChatBlock[] }) {
 function LiveMessagePlaceholder({ label }: { label: string }) {
   return html`
     <div
-      class="flex items-center gap-2 text-base leading-airy text-[var(--color-fg-secondary)]"
+      class="flex items-center gap-2 text-[14px] leading-airy text-text-secondary"
       data-chat-stream-placeholder
     >
       <span>${label}</span>
       <span class="inline-flex items-center gap-1" aria-hidden="true">
-        <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)] animate-pulse"></span>
-        <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)] animate-pulse"></span>
-        <span class="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-muted)] animate-pulse"></span>
+        <span class="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-pulse"></span>
+        <span class="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-pulse"></span>
+        <span class="h-1.5 w-1.5 rounded-full bg-text-tertiary animate-pulse"></span>
       </span>
     </div>
   `
@@ -1057,21 +1057,21 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
 
   return html`
     <div
-      class="overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      class="overflow-hidden rounded-md border border-border bg-card"
       data-chat-attachment-card=${attachment.id}
     >
       ${isImage
         ? html`
             <button
               type="button"
-              class="block w-full text-left hover:bg-[var(--color-bg-hover)]"
+              class="block w-full text-left hover:bg-surface-muted"
               onClick=${() => setOpen(true)}
               aria-label=${`${attachment.name} 미리보기`}
             >
               <img
                 src=${attachment.data}
                 alt=${attachment.name}
-                class="max-h-52 w-full rounded-[var(--r-1)] object-contain"
+                class="max-h-52 w-full rounded-md object-contain"
                 loading="lazy"
               />
             </button>
@@ -1081,35 +1081,35 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
               <a
                 href=${attachment.data}
                 download=${attachment.name}
-                class="block hover:bg-[var(--color-bg-hover)]"
+                class="block hover:bg-surface-muted"
                 aria-label=${`${attachment.name} 날려받기`}
               >
                 <div class="flex min-h-18 items-center gap-3 px-3 py-3">
-                  <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">
+                  <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded border border-border bg-surface-subtle text-[11px] font-bold uppercase tracking-[0.05em] text-text-secondary">
                     FILE
                   </span>
                   <div class="min-w-0">
-                    <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
-                    <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+                    <div class="truncate text-[14px] font-bold text-text-primary">${attachment.name}</div>
+                    <div class="mt-1 text-[12px] text-text-secondary">${meta}</div>
                   </div>
                 </div>
               </a>
             `
           : html`
               <div class="flex min-h-18 items-center gap-3 px-3 py-3">
-                <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">
+                <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded border border-border bg-surface-subtle text-[11px] font-bold uppercase tracking-[0.05em] text-text-secondary">
                   FILE
                 </span>
                 <div class="min-w-0">
-                  <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
-                  <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+                  <div class="truncate text-[14px] font-bold text-text-primary">${attachment.name}</div>
+                  <div class="mt-1 text-[12px] text-text-secondary">${meta}</div>
                 </div>
               </div>
             `}
-      <div class="flex items-center justify-between gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
+      <div class="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
         <div class="min-w-0">
-          <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
-          <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
+          <div class="truncate text-[14px] font-bold text-text-primary">${attachment.name}</div>
+          <div class="mt-1 text-[12px] text-text-secondary">${meta}</div>
         </div>
         ${canDownload
           ? html`
@@ -1130,7 +1130,7 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
               <img
                 src=${attachment.data}
                 alt=${attachment.name}
-                class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+                class="max-h-[80vh] max-w-full rounded-md object-contain"
               />
             <//>
           `
@@ -1220,7 +1220,7 @@ function ChatMessageBubble({
     <article
       class=${`chat-bubble ${tone} flex w-full flex-col backdrop-blur-sm ${
         isMessenger
-          ? 'max-w-[82%] gap-2.5 rounded-[var(--radius-xl)] px-4 py-3.5'
+          ? 'max-w-[82%] gap-2.5 rounded-2xl px-4 py-3.5'
           : 'max-w-[90%] gap-3 rounded-[var(--r-5)] px-4 py-3'
       }`}
       data-chat-variant=${variant}
@@ -1228,8 +1228,8 @@ function ChatMessageBubble({
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
-              isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-[var(--r-1)]'
+            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center whitespace-nowrap text-[12px] font-bold uppercase tracking-[0.05em] ${
+              isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-md'
             }`}
           >
             ${avatarMonogram(entry)}
@@ -1238,16 +1238,16 @@ function ChatMessageBubble({
             ${isMessenger
               ? html`
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">
+                    <span class="truncate text-[14px] font-semibold text-text-primary">
                       ${avatarLabel(entry)}
                     </span>
                     ${timestamp
-                      ? html`<span class="text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
+                      ? html`<span class="text-[11px] font-medium tabular-nums text-text-secondary">${timestamp}</span>`
                       : null}
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]"
+                            class="inline-flex items-center rounded border border-border bg-card px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.05em] text-text-secondary"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -1260,7 +1260,7 @@ function ChatMessageBubble({
                             href=${surfaceInfo.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}"
+                            class="inline-flex items-center gap-1 rounded border border-brand/20 bg-brand/10 px-2 py-0.5 text-[11px] font-semibold text-brand hover:bg-brand/20 ${CHAT_FOCUS_RING}"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -1270,7 +1270,7 @@ function ChatMessageBubble({
                       : surfaceInfo
                       ? html`
                           <span
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]"
+                            class="inline-flex items-center gap-1 rounded border border-border bg-card px-2 py-0.5 text-[11px] font-medium text-text-secondary"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -1283,14 +1283,14 @@ function ChatMessageBubble({
               : html`
                   <div class="flex flex-wrap items-center gap-1.5">
                     <span
-                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] px-2.5 py-1 text-2xs font-bold uppercase tracking-2`}
+                      class=${`chat-role-chip ${tone} inline-flex items-center rounded px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.05em]`}
                     >
                       ${entry.label}
                     </span>
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-secondary)]"
+                            class="inline-flex items-center rounded border border-border bg-card px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.05em] text-text-secondary"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -1299,7 +1299,7 @@ function ChatMessageBubble({
                       : null}
                     ${timestamp
                       ? html`
-                          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">
+                          <span class="inline-flex items-center rounded border border-border bg-surface-subtle px-2.5 py-1 text-[11px] font-medium tabular-nums text-text-secondary">
                             ${timestamp}
                           </span>
                         `
@@ -1310,7 +1310,7 @@ function ChatMessageBubble({
                             href=${surfaceInfo.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}"
+                            class="inline-flex items-center gap-1 rounded border border-brand/20 bg-brand/10 px-2.5 py-1 text-[11px] font-semibold text-brand hover:bg-brand/20 ${CHAT_FOCUS_RING}"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -1320,7 +1320,7 @@ function ChatMessageBubble({
                       : surfaceInfo
                       ? html`
                           <span
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]"
+                            class="inline-flex items-center gap-1 rounded border border-border bg-surface-subtle px-2.5 py-1 text-[11px] font-medium text-text-secondary"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -1329,7 +1329,7 @@ function ChatMessageBubble({
                         `
                       : null}
                   </div>
-                  <div class="mt-2 truncate text-sm font-bold text-[var(--color-fg-primary)]">
+                  <div class="mt-2 truncate text-[14px] font-bold text-text-primary">
                     ${avatarLabel(entry)}
                   </div>
                 `}
@@ -1339,8 +1339,8 @@ function ChatMessageBubble({
           ? html`
               <button
                 type="button"
-                class=${`border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING} ${
-                  isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
+                class=${`border border-border bg-card text-[12px] font-medium text-text-secondary transition-colors hover:bg-surface-muted hover:text-text-primary ${CHAT_FOCUS_RING} ${
+                  isMessenger ? 'rounded-md px-2.5 py-1' : 'rounded px-3 py-1'
                 }`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
                 aria-expanded=${expanded}
@@ -1354,7 +1354,7 @@ function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-fg-primary)]">
+              <span class="inline-flex items-center rounded border border-brand-tint bg-brand/10 px-2.5 py-1 text-[11px] font-semibold text-text-primary">
                 ${item}
               </span>
             `)}
@@ -1368,7 +1368,7 @@ function ChatMessageBubble({
               ? html`<${ChatBlocks} blocks=${effectiveBlocks} />`
               : html`
                   <div
-                    class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+                    class=${`markdown-body whitespace-pre-wrap break-words text-[14px] leading-airy text-text-primary ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
                     dangerouslySetInnerHTML=${{
                       __html: DOMPurify.sanitize(
                         marked.parse(messageText) as string,
@@ -1378,14 +1378,14 @@ function ChatMessageBubble({
                   />
                 `}
             ${entry.delivery === 'streaming'
-              ? html`<span class="inline-block ml-0.5 animate-pulse text-[var(--color-status-info)]" aria-hidden="true">▍</span>`
+              ? html`<span class="inline-block ml-0.5 animate-pulse text-info" aria-hidden="true">▍</span>`
               : null}
           `}
       ${isCollapsible
         ? html`
             <button
               type="button"
-              class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
+              class="self-start rounded border border-border bg-card px-3 py-1 text-[12px] font-medium text-text-secondary transition-colors hover:bg-surface-muted hover:text-text-primary ${CHAT_FOCUS_RING}"
               onClick=${() => { setMessageCollapsed(!messageCollapsed) }}
             >
               ${messageCollapsed ? '더 보기' : '접기'}
@@ -1404,7 +1404,7 @@ function ChatMessageBubble({
         : null}
       ${entry.error
         ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm font-medium leading-paragraph text-[var(--bad-light)]">
+            <div class="rounded-md border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-[14px] font-medium leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `
@@ -1412,14 +1412,14 @@ function ChatMessageBubble({
 
       ${expanded && entry.details
         ? html`
-            <div class="chat-detail-panel rounded-card border border-[var(--color-border-default)] px-3 py-3">
+            <div class="chat-detail-panel rounded-card border border-border px-3 py-3">
               ${overview.length > 0
                 ? html`
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
-                        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5">
-                          <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">${item.label}</div>
-                          <div class="mt-1 text-sm font-bold text-[var(--color-fg-primary)]">${item.value}</div>
+                        <div class="rounded-md border border-border bg-card px-3 py-2.5">
+                          <div class="text-[11px] font-bold uppercase tracking-[0.05em] text-text-secondary">${item.label}</div>
+                          <div class="mt-1 text-[14px] font-bold text-text-primary">${item.value}</div>
                         </div>
                       `)}
                     </div>
@@ -1427,11 +1427,11 @@ function ChatMessageBubble({
                 : null}
               ${entry.details.skillPrimary
                 ? html`
-                    <div class="chat-detail-callout rounded-[var(--r-1)] border border-[var(--ok-border)] px-3 py-3">
-                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--ok-fg)]">스킬 경로</div>
-                      <div class="mt-1 text-sm font-bold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
+                    <div class="chat-detail-callout rounded-md border border-[var(--ok-border)] px-3 py-3">
+                      <div class="text-[11px] font-bold uppercase tracking-[0.05em] text-[var(--ok-fg)]">스킬 경로</div>
+                      <div class="mt-1 text-[14px] font-bold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
-                        ? html`<div class="mt-1 text-sm leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
+                        ? html`<div class="mt-1 text-[14px] leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
                         : null}
                     </div>
                   `
@@ -1439,12 +1439,12 @@ function ChatMessageBubble({
               ${state.length > 0
                 ? html`
                     <div class="flex flex-col gap-2">
-                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">상태 스냅샷</div>
+                      <div class="text-[11px] font-bold uppercase tracking-[0.05em] text-text-secondary">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
-                          <div class="rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-6)] px-3 py-2.5">
-                            <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
-                            <div class="mt-1 text-sm leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
+                          <div class="rounded-md border border-brand-tint bg-[var(--accent-6)] px-3 py-2.5">
+                            <div class="text-[11px] font-bold uppercase tracking-[0.05em] text-brand">${item.label}</div>
+                            <div class="mt-1 text-[14px] leading-paragraph text-text-primary">${item.value}</div>
                           </div>
                         `)}
                       </div>
@@ -1456,7 +1456,7 @@ function ChatMessageBubble({
                     <div class="flex flex-col gap-2">
                       <button
                         type="button"
-                        class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
+                        class="self-start rounded border border-border bg-card px-3 py-1 text-[12px] font-medium text-text-secondary transition-colors hover:bg-surface-muted hover:text-text-primary ${CHAT_FOCUS_RING}"
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
@@ -1544,64 +1544,64 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
 
   return html`
     <article
-      class="chat-bubble tool flex w-full flex-col rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      class="chat-bubble tool flex w-full flex-col rounded-md border border-border bg-card"
       data-chat-variant="tool-call"
     >
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-bg-hover)] transition-colors ${CHAT_FOCUS_RING}"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-surface-muted transition-colors ${CHAT_FOCUS_RING}"
         onClick=${() => { setExpanded(!expanded) }}
         aria-expanded=${expanded}
       >
-        <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-mono font-bold text-[var(--color-fg-secondary)]">T</span>
-        <span class="font-mono text-sm font-semibold text-[var(--color-accent-fg)] truncate">${toolName}</span>
-        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]">입력</span>
+        <span class="inline-flex size-5 shrink-0 items-center justify-center rounded border border-border bg-surface-subtle text-[11px] font-mono font-bold text-text-secondary">T</span>
+        <span class="font-mono text-[14px] font-semibold text-brand truncate">${toolName}</span>
+        <span class="rounded border border-border px-1.5 py-0.5 text-[11px] font-semibold text-text-secondary">입력</span>
         ${outputEntry
           ? html`<span
-              class=${`text-xs font-semibold ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-[var(--color-status-err)]'}`}
+              class=${`text-[12px] font-semibold ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-destructive'}`}
               title=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
               aria-label=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
             >${outputEntry.success ? '✓' : '✗'}</span>`
           : null}
         ${timestamp
-          ? html`<span class="ml-auto text-xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
+          ? html`<span class="ml-auto text-[12px] font-medium tabular-nums text-text-secondary">${timestamp}</span>`
           : null}
-        <span class="ml-1 text-sm text-[var(--color-fg-secondary)]">${expanded ? '▾' : '▸'}</span>
+        <span class="ml-1 text-[14px] text-text-secondary">${expanded ? '▾' : '▸'}</span>
       </button>
       ${expanded
         ? html`
-            <div class="flex flex-col gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
+            <div class="flex flex-col gap-2 border-t border-border px-3 py-2">
               ${isEmptyArgs
-                ? html`<div class="text-xs font-mono text-[var(--color-fg-secondary)]">입력 없음 (매개변수가 없는 도구)</div>`
+                ? html`<div class="text-[12px] font-mono text-text-secondary">입력 없음 (매개변수가 없는 도구)</div>`
                 : html`
                     <div>
-                      <div class="mb-1 text-2xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">arguments</div>
-                      <pre class="text-xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-primary)] max-h-48 overflow-y-auto">${displayArgs}</pre>
+                      <div class="mb-1 text-[11px] font-bold uppercase tracking-4 text-text-secondary">arguments</div>
+                      <pre class="text-[12px] font-mono whitespace-pre-wrap break-all text-text-primary max-h-48 overflow-y-auto">${displayArgs}</pre>
                     </div>
                   `}
               ${hasOutput
                 ? html`
                     <div>
-                      <div class="mb-1 flex items-center gap-1 text-2xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">
+                      <div class="mb-1 flex items-center gap-1 text-[11px] font-bold uppercase tracking-4 text-text-secondary">
                         <span>output</span>
                         ${outputView.truncated
-                          ? html`<span class="font-normal normal-case text-[var(--color-fg-secondary)]">· truncated, see tool inspector</span>`
+                          ? html`<span class="font-normal normal-case text-text-secondary">· truncated, see tool inspector</span>`
                           : null}
                       </div>
-                      <pre class="text-xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-primary)] max-h-64 overflow-y-auto">${outputView.text}</pre>
+                      <pre class="text-[12px] font-mono whitespace-pre-wrap break-all text-text-primary max-h-64 overflow-y-auto">${outputView.text}</pre>
                     </div>
                   `
                 : null}
               ${!hasOutput
                 ? isEmptyArgs
-                  ? html`<div class="text-xs text-[var(--color-fg-secondary)]">출력 대기 중…</div>`
-                  : html`<div class="text-2xs text-[var(--color-fg-secondary)]">출력(결과)은 도구 실행 추적 패널에서 확인</div>`
+                  ? html`<div class="text-[12px] text-text-secondary">출력 대기 중…</div>`
+                  : html`<div class="text-[11px] text-text-secondary">출력(결과)은 도구 실행 추적 패널에서 확인</div>`
                 : null}
             </div>
           `
         : html`
             <div class="px-3 pb-2">
-              <div class="truncate text-xs font-mono text-[var(--color-fg-secondary)]">${preview}</div>
+              <div class="truncate text-[12px] font-mono text-text-secondary">${preview}</div>
             </div>
           `
       }
@@ -1676,8 +1676,8 @@ export function ChatTranscript({
           isPrimary
             ? 'gap-5 rounded-[var(--r-2)] border border-transparent px-0 py-2 shadow-none'
             : variant === 'messenger'
-            ? 'gap-4 rounded-[var(--radius-xl)] px-4 py-5 sm:px-5'
-            : 'gap-3 rounded-[var(--radius-xl)] px-3 py-4'
+            ? 'gap-4 rounded-2xl px-4 py-5 sm:px-5'
+            : 'gap-3 rounded-2xl px-3 py-4'
         }`}
         data-chat-variant=${variant}
         data-chat-size=${size}
@@ -1686,9 +1686,9 @@ export function ChatTranscript({
       >
         ${entries.length === 0
           ? html`
-              <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
-                <div class="text-xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">직접 메시지 없음</div>
-                <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">${emptyText}</div>
+              <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-border bg-card px-6 text-center">
+                <div class="text-[12px] font-bold uppercase tracking-4 text-text-secondary">직접 메시지 없음</div>
+                <div class="mt-3 max-w-[34rem] text-[14px] font-medium leading-airy text-text-primary">${emptyText}</div>
               </div>
             `
           : entries.map(entry => entry.role === 'tool'
@@ -1700,7 +1700,7 @@ export function ChatTranscript({
         ? html`
             <button
               type="button"
-              class="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] shadow-[var(--shadow-raised)] transition-colors hover:bg-[var(--color-bg-hover)] ${CHAT_FOCUS_RING}"
+              class="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-subtle px-3.5 py-1.5 text-[12px] font-semibold text-text-primary shadow-[var(--shadow-raised)] transition-colors hover:bg-surface-muted ${CHAT_FOCUS_RING}"
               onClick=${scrollToBottom}
               data-chat-jump-latest
             >
@@ -2045,8 +2045,8 @@ export function ChatComposer({
           ? null
           : html`
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="text-xs font-bold uppercase tracking-3 text-[var(--color-fg-secondary)]">메시지</div>
-                <div class="text-xs text-[var(--color-fg-secondary)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
+                <div class="text-[12px] font-bold uppercase tracking-3 text-text-secondary">메시지</div>
+                <div class="text-[12px] text-text-secondary">Enter로 전송, Shift+Enter로 줄바꿈</div>
               </div>
             `}
         ${attachments.length > 0 || voiceDraft
@@ -2075,8 +2075,8 @@ export function ChatComposer({
                 <textarea
                   ref=${textareaRef}
                   class=${(isPrimary
-                    ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-4 py-4 text-base leading-loose'
-                    : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose') + ` ${CHAT_FOCUS_RING}`}
+                    ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-border bg-surface-page px-4 py-4 text-[14px] leading-loose'
+                    : 'control-textarea min-h-24 rounded-card border border-border bg-surface-subtle px-3 py-3 text-[14px] leading-loose') + ` ${CHAT_FOCUS_RING}`}
                   placeholder=${placeholder}
                   aria-label="메시지 입력"
                   value=${draft}

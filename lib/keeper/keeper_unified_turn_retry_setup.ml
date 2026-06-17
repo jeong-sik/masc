@@ -3,9 +3,8 @@ type retry_setup =
   ; turn_started_at : float
   ; turn_deadline : float
   ; remaining_turn_budget_s : unit -> float
-  ; retry_phase_started_at : float option ref
   ; elapsed_ms : float -> int
-  ; current_turn_phase_elapsed_ms : unit -> int * int option
+  ; current_turn_phase_elapsed_ms : float option -> int * int option
   ; keeper_profile : Keeper_types_profile.keeper_profile_defaults
   ; max_idle_turns : int
   ; max_turns : int
@@ -16,11 +15,10 @@ let build ~now ~keeper_name ~channel ~turn_affordances =
   let turn_started_at = now () in
   let turn_deadline = turn_started_at +. timeout_sec in
   let remaining_turn_budget_s () = Float.max 0.0 (turn_deadline -. now ()) in
-  let retry_phase_started_at = ref None in
   let elapsed_ms seconds = int_of_float (Float.max 0.0 seconds *. 1000.0) in
-  let current_turn_phase_elapsed_ms () =
+  let current_turn_phase_elapsed_ms retry_phase_started_at =
     let now_s = now () in
-    match !retry_phase_started_at with
+    match retry_phase_started_at with
     | None -> elapsed_ms (now_s -. turn_started_at), Some 0
     | Some retry_started_at ->
       ( elapsed_ms (retry_started_at -. turn_started_at)
@@ -42,7 +40,6 @@ let build ~now ~keeper_name ~channel ~turn_affordances =
   ; turn_started_at
   ; turn_deadline
   ; remaining_turn_budget_s
-  ; retry_phase_started_at
   ; elapsed_ms
   ; current_turn_phase_elapsed_ms
   ; keeper_profile

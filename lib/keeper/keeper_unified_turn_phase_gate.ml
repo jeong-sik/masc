@@ -21,7 +21,10 @@ let decide_and_record
       ~(generation : int)
       ~(keeper_turn_id : int)
       ~(append_phase_gate_decision :
-         Keeper_unified_turn_phase_plan.turn_plan -> unit)
+         Keeper_unified_turn_phase_plan.turn_plan
+         -> Keeper_unified_turn_types.turn_state
+         -> Keeper_unified_turn_types.turn_state)
+      ~(turn_state : Keeper_unified_turn_types.turn_state)
       ~(registry_base_path : string)
   =
   let supervisor_stop_at_entry =
@@ -36,7 +39,7 @@ let decide_and_record
         ~keeper_turn_id
         ~supervisor_stop_at_entry:true None
     in
-    append_phase_gate_decision turn_plan;
+    let turn_state = append_phase_gate_decision turn_plan turn_state in
     Log.Keeper.info
       ~keeper_name:meta.name
       ~turn_id:keeper_turn_id
@@ -66,7 +69,7 @@ let decide_and_record
       ~turn_id:keeper_turn_id
       ~prev:Keeper_turn_fsm.Phase_gating
       (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop);
-    Phase_gate_terminal_ok meta)
+    Phase_gate_terminal_ok meta, turn_state)
   else (
     match
       Keeper_registry.get_phase ~base_path:registry_base_path meta.name
@@ -78,7 +81,7 @@ let decide_and_record
           ~supervisor_stop_at_entry:false (Some phase)
       in
       let phase_string = Keeper_state_machine.phase_to_string phase in
-      append_phase_gate_decision turn_plan;
+      let turn_state = append_phase_gate_decision turn_plan turn_state in
       Log.Keeper.info
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
@@ -105,7 +108,7 @@ let decide_and_record
         ~turn_id:keeper_turn_id
         ~prev:Keeper_turn_fsm.Phase_gating
         Keeper_turn_fsm.Done;
-      Phase_gate_terminal_ok meta
+      Phase_gate_terminal_ok meta, turn_state
     | None ->
       let turn_plan =
         Keeper_unified_turn_phase_plan.decide_turn_plan_at_phase_gate
@@ -118,7 +121,7 @@ let decide_and_record
           "%s: keeper registry phase lookup returned None before dispatch"
           meta.name
       in
-      append_phase_gate_decision turn_plan;
+      let turn_state = append_phase_gate_decision turn_plan turn_state in
       Log.Keeper.error
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
@@ -145,17 +148,17 @@ let decide_and_record
         ~prev:Keeper_turn_fsm.Phase_gating
         (Keeper_turn_fsm.Failed
            (Keeper_turn_fsm.Failure_runtime_error terminal_reason_code));
-      Phase_gate_terminal_error (Agent_sdk.Error.Internal error_message)
+      Phase_gate_terminal_error (Agent_sdk.Error.Internal error_message), turn_state
     | phase_opt ->
       let turn_plan =
         Keeper_unified_turn_phase_plan.decide_turn_plan_at_phase_gate
           ~keeper_turn_id
           ~supervisor_stop_at_entry:false phase_opt
       in
-      append_phase_gate_decision turn_plan;
+      let turn_state = append_phase_gate_decision turn_plan turn_state in
       Keeper_turn_fsm.emit_transition
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
         ~prev:Keeper_turn_fsm.Phase_gating
         Keeper_turn_fsm.Runtime_routing;
-      Phase_gate_proceed phase_opt)
+      Phase_gate_proceed phase_opt, turn_state)

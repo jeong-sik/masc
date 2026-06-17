@@ -211,7 +211,7 @@ function renderCategorySection(
   }
 
   return html`
-    <${SectionCard} label=${`${label} (${total})`} class="mb-4 v2-workspace-panel">
+    <${SectionCard} label=${`${label} (${total})`} class="mb-4 v2-workspace-panel" variant="standard">
       <div class="flex flex-col gap-2">
         ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>
@@ -720,7 +720,7 @@ function PostCard({ post }: { post: BoardPost }) {
       role="button"
       tabIndex=${0}
       aria-label=${`게시글 열기: ${stripInlineMarkdown(post.title)}`}
-      class=${`board-post v2-workspace-row group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--accent-20)] transition-[background-color,border-color] duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
+      class=${`board-post v2-workspace-row group w-full flex gap-3 rounded-[var(--r-1)] p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] hover:bg-[var(--color-bg-hover)] hover:border-[var(--color-border-strong)] transition-[background-color,border-color] duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
       onClick=${openPost}
       onKeyDown=${handlePostKeyDown}
     >
@@ -746,7 +746,7 @@ function PostCard({ post }: { post: BoardPost }) {
         <span
           class=${post.vote_blind
             ? 'max-w-14 text-center text-[10px] font-medium leading-tight text-[var(--color-fg-muted)]'
-            : 'text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]'}
+            : 'text-sm font-bold tabular-nums text-[var(--color-fg-primary)]'}
           aria-label=${voteScoreAria}
           title=${voteScoreLabel}
         >${voteScoreLabel}</span>
@@ -762,20 +762,20 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Post body -->
       <div class="flex-1 min-w-0">
         <!-- Title -->
-        <div class="text-md font-semibold text-[var(--color-fg-secondary)] leading-snug mb-1.5 group-hover:text-[var(--color-accent-fg)] transition-colors">${stripInlineMarkdown(post.title)}</div>
+        <div class="text-md font-bold text-[var(--color-fg-primary)] leading-snug mb-1.5 group-hover:text-[var(--color-accent-fg)] transition-colors">${stripInlineMarkdown(post.title)}</div>
 
         <!-- Content preview: rendered markdown, height-capped -->
         <div class="board-post-preview text-sm text-[var(--color-fg-primary)] leading-paragraph mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
           <${RichContent} text=${previewBody} class="board-post-preview__content" previewLimit=${1} />
-          <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--color-bg-surface)] to-transparent pointer-events-none" />
+          <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--color-bg-elevated)] to-transparent pointer-events-none" />
         </div>
 
         <!-- Footer: author + meta + badges -->
         <div class="flex items-center gap-2 flex-wrap">
           <!-- Author line -->
-          <span class="text-xs text-[var(--color-fg-muted)]">${authorAvatar(authorAvatarKey)}</span>
+          <span class="text-xs text-[var(--color-fg-secondary)]">${authorAvatar(authorAvatarKey)}</span>
           <a
-            class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer"
+            class="text-xs font-medium text-[var(--color-fg-secondary)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer"
             href=${`#monitoring/agents/${encodeURIComponent(post.author_identity?.raw ?? post.author)}`}
             title=${authorTitle}
             onClick=${(e: Event) => {
@@ -783,28 +783,28 @@ function PostCard({ post }: { post: BoardPost }) {
               navigateToAuthor(post.author, e, post.author_identity)
             }}
           >${authorLabel}</a>
-          <span class="text-2xs text-[var(--color-fg-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
-          ${isUpdated(post) ? html`<span class="text-3xs text-[var(--color-fg-muted)] opacity-50">(수정됨)</span>` : null}
+          <span class="text-2xs text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
+          ${isUpdated(post) ? html`<span class="text-2xs text-[var(--color-fg-disabled)]">(수정됨)</span>` : null}
 
           <!-- Separator -->
-          <span class="text-[var(--color-fg-muted)] opacity-30">|</span>
+          <span class="text-[var(--color-fg-disabled)]">|</span>
 
           <!-- Counts -->
-          <span class="text-2xs text-[var(--color-fg-muted)]">댓글 ${post.comment_count}</span>
+          <span class="text-2xs text-[var(--color-fg-secondary)]">댓글 ${post.comment_count}</span>
 
           <!-- Category badges -->
-          ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
-          ${post.flair ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
+          ${post.pinned ? html`<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]" title="고정된 게시글">📌 고정</span>` : null}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${categoryBadgeColor(cat)}">${categoryLabel(cat)}</span>
+          ${post.flair ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--cyan-16)] text-[var(--color-accent-fg)] border-[var(--cyan-16)]">flair:${post.flair}</span>` : null}
           ${qualityPercent !== null ? html`
             <span
-              class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
+              class=${`inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${contributorQualityBadgeClass(post.contributor_quality)}`}
               aria-label=${qualityTitle}
               title=${qualityTitle}
             >품질 ${qualityPercent}</span>
           ` : null}
-          ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
-          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
+          ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
+          ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] text-2xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
           <${ModerationBadge} status=${post.moderation_status} reportCount=${post.report_count} targetLabel="게시글" />
 
           <!-- Pin toggle (owner-gated server-side) + delete — reveal on row hover -->
@@ -831,13 +831,13 @@ function PostCard({ post }: { post: BoardPost }) {
           <//>
         </div>
         <div
-          class="mt-2 flex items-center gap-1.5 flex-wrap text-2xs text-[var(--color-fg-muted)]"
+          class="mt-2 flex items-center gap-1.5 flex-wrap text-2xs text-[var(--color-fg-secondary)]"
           aria-label=${`게시글 표시 감사: ${auditLabel}; 현재 정렬 ${sortLabel}`}
           title=${`${auditLabel} · 현재 정렬 ${sortLabel}`}
         >
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-[var(--r-1)] border border-[var(--ok-30)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] font-medium">표시 중</span>
           <span>${auditDetails}</span>
-          <span class="opacity-60">· 정렬 ${sortLabel}</span>
+          <span class="text-[var(--color-fg-muted)]">· 정렬 ${sortLabel}</span>
         </div>
         <div
           class=${reactionPreview ? 'mt-2' : 'mt-2 opacity-75 transition-opacity group-hover:opacity-100'}

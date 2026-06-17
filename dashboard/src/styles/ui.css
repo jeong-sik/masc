@@ -92,6 +92,7 @@ button.agent,
 button.agent-card {
   cursor: pointer;
   &:hover { background: var(--color-bg-elevated); }
+  &:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 }
 
 /* button.monitor-alert/row: element+class selector, kept as raw CSS */
@@ -99,6 +100,7 @@ button.monitor-alert,
 button.monitor-row {
   transition: border-color var(--t-med) var(--ease), transform var(--t-med) var(--ease), background var(--t-med) var(--ease);
   &:hover { transform: translateY(-1px); border-color: var(--color-border-strong); background: var(--color-bg-hover); }
+  &:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   &.ok { border-color: rgb(var(--ok-glow) / .18); }
   &.warn { border-color: rgb(var(--warn-glow) / .28); }
   &.bad { border-color: rgb(var(--err-glow) / .34); }
@@ -129,14 +131,14 @@ button.monitor-row {
 /* ── Live Timeline ─────────────────── */
 
 /* Event kind badge variants */
-@utility agent-event-badge--heartbeat { background: rgb(var(--ok-glow) / .12); color: var(--ok); }
-@utility agent-event-badge--lifecycle { background: rgb(var(--brass-glow) / .12); color: var(--brass-1); }
-@utility agent-event-badge--keeper { background: rgb(var(--brass-glow) / .15); color: var(--brass-1); }
-@utility agent-event-badge--error { background: rgb(var(--err-glow) / .15); color: var(--err); }
-@utility agent-event-badge--broadcast { background: var(--purple-12); color: var(--color-purple); }
-@utility agent-event-badge--task { background: rgb(var(--warn-glow) / .12); color: var(--warn); }
-@utility agent-event-badge--board { background: var(--info-soft); color: var(--info-fg); }
-@utility agent-event-badge--default { background: var(--color-border-default); color: var(--color-fg-muted); }
+@utility agent-event-badge--heartbeat { background: rgb(var(--ok-glow) / .14); color: var(--ok-fg); font-weight: var(--fw-semi); letter-spacing: .02em; }
+@utility agent-event-badge--lifecycle { background: rgb(var(--brass-glow) / .14); color: var(--brass-fg); font-weight: var(--fw-semi); letter-spacing: .02em; }
+@utility agent-event-badge--keeper { background: rgb(var(--brass-glow) / .16); color: var(--brass-fg); font-weight: var(--fw-semi); letter-spacing: .02em; }
+@utility agent-event-badge--error { background: rgb(var(--err-glow) / .16); color: var(--err-fg); font-weight: var(--fw-semi); letter-spacing: .02em; }
+@utility agent-event-badge--broadcast { background: var(--purple-12); color: var(--color-purple); font-weight: var(--fw-semi); letter-spacing: .02em; }
+@utility agent-event-badge--task { background: rgb(var(--warn-glow) / .14); color: var(--warn-fg); font-weight: var(--fw-semi); letter-spacing: .02em; }
+@utility agent-event-badge--board { background: var(--info-soft); color: var(--info-fg); font-weight: var(--fw-semi); letter-spacing: .02em; }
+@utility agent-event-badge--default { background: var(--color-border-default); color: var(--color-fg-secondary); font-weight: var(--fw-semi); letter-spacing: .02em; }
 
 /* ── Micro-Interactions (Task 289) ── */
 @utility pressable {

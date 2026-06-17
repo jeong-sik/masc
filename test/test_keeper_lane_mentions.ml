@@ -2,9 +2,9 @@
 
    Pinned here:
    1. Parser goldens — the boundary tokenizer keeps the legacy
-      token-equality contract (@dreamerx / email@dreamer.com never hit
-      "@dreamer") and adds canonical minting ("@keeper-dreamer"
-      reaches "dreamer": the documented widening).
+      token-equality contract (@alicex / email@alice.com never hit
+      "@alice") and adds canonical minting ("@keeper-alice"
+      reaches "alice": the documented widening).
    2. Legacy decision equivalence — the deleted read-time
       [line_mentions] is replicated verbatim as an oracle; over a
       corpus of contents and target sets, parse-then-match must agree
@@ -30,20 +30,20 @@ let parse content =
 (* ── 1. Parser goldens ── *)
 
 let test_parser_goldens () =
-  check ids "plain mention" [ "dreamer" ] (parse "hey @dreamer look");
-  check ids "different token" [ "dreamerx" ] (parse "ping @dreamerx now");
-  check ids "email is one token" [] (parse "send to email@dreamer.com");
-  check ids "case folded" [ "dreamer" ] (parse "PING @DREAMER NOW");
-  check ids "trailing punctuation" [ "dreamer" ] (parse "ok @dreamer, thanks");
+  check ids "plain mention" [ "alice" ] (parse "hey @alice look");
+  check ids "different token" [ "alicex" ] (parse "ping @alicex now");
+  check ids "email is one token" [] (parse "send to email@alice.com");
+  check ids "case folded" [ "alice" ] (parse "PING @DREAMER NOW");
+  check ids "trailing punctuation" [ "alice" ] (parse "ok @alice, thanks");
   check ids "no mention" [] (parse "just chatting here");
-  check ids "newline separated" [ "dreamer" ] (parse "line one\n@dreamer two");
-  check ids "deduplicated" [ "dreamer" ] (parse "@dreamer and @dreamer again");
+  check ids "newline separated" [ "alice" ] (parse "line one\n@alice two");
+  check ids "deduplicated" [ "alice" ] (parse "@alice and @alice again");
   check ids "two distinct"
-    [ "dreamer"; "sangsu" ]
-    (parse "@sangsu and @dreamer please");
+    [ "alice"; "sangsu" ]
+    (parse "@sangsu and @alice please");
   check ids "keeper-shaped form canonicalizes (documented widening)"
-    [ "dreamer" ]
-    (parse "cc @keeper-dreamer");
+    [ "alice" ]
+    (parse "cc @keeper-alice");
   (* Apostrophe is an internal (kept) character — "@sangsu's" is its own
      token and never reaches "sangsu"; same as the legacy tokenizer. *)
   check ids "possessive stays distinct" [ "sangsu's" ] (parse "@sangsu's note")
@@ -92,30 +92,30 @@ let legacy_line_mentions ~targets content =
     |> List.exists (fun token -> List.mem (legacy_trim_token_edges token) needles))
 
 let corpus_contents =
-  [ "hey @dreamer look"
-  ; "ping @dreamerx now"
-  ; "send to email@dreamer.com"
+  [ "hey @alice look"
+  ; "ping @alicex now"
+  ; "send to email@alice.com"
   ; "PING @DREAMER NOW"
-  ; "ok @dreamer, thanks"
+  ; "ok @alice, thanks"
   ; "just chatting here"
-  ; "@sangsu and @dreamer please"
+  ; "@sangsu and @alice please"
   ; "@analyst: status?"
-  ; "tab\t@dreamer\tseparated"
-  ; "(@dreamer)"
-  ; "@@dreamer double at"
+  ; "tab\t@alice\tseparated"
+  ; "(@alice)"
+  ; "@@alice double at"
   ; "@ bare at"
   ; ""
   ; "   "
   ; "@vincent are you there"
-  ; "mid@dreamer token"
-  ; "@dreamer."
+  ; "mid@alice token"
+  ; "@alice."
   ; "...@sangsu..."
   ]
 
 let corpus_target_sets =
-  [ [ "dreamer" ]
+  [ [ "alice" ]
   ; [ "sangsu" ]
-  ; [ "dreamer"; "sangsu" ]
+  ; [ "alice"; "sangsu" ]
   ; [ "analyst" ]
   ; [ "vincent" ]
   ; []
@@ -167,15 +167,15 @@ let message_mentions (m : Store.chat_message) =
 
 let test_append_persists_mentions () =
   with_base "lane-mentions-append" (fun base ->
-      Store.append_user_message ~base_dir:base ~keeper_name:"dreamer"
-        ~content:"@dreamer please look at @sangsu note" ();
-      Store.append_turn ~base_dir:base ~keeper_name:"dreamer"
+      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
+        ~content:"@alice please look at @sangsu note" ();
+      Store.append_turn ~base_dir:base ~keeper_name:"alice"
         ~user_content:"thanks @analyst" ~user_attachments:[]
         ~assistant_content:"done" ();
-      match Store.load ~base_dir:base ~keeper_name:"dreamer" with
+      match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ first; second; third ] ->
           check ids "user message mentions"
-            [ "dreamer"; "sangsu" ]
+            [ "alice"; "sangsu" ]
             (message_mentions first);
           check ids "turn user line mentions" [ "analyst" ]
             (message_mentions second);
@@ -185,12 +185,12 @@ let test_append_persists_mentions () =
 
 let test_extra_mentions_merge () =
   with_base "lane-mentions-extra" (fun base ->
-      let extra = Option.to_list (Kid.of_string "dreamer") in
-      Store.append_user_message ~base_dir:base ~keeper_name:"dreamer"
+      let extra = Option.to_list (Kid.of_string "alice") in
+      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"no at-token here" ~extra_mentions:extra ();
-      match Store.load ~base_dir:base ~keeper_name:"dreamer" with
+      match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ only ] ->
-          check ids "connector-provided mention persisted" [ "dreamer" ]
+          check ids "connector-provided mention persisted" [ "alice" ]
             (message_mentions only)
       | other -> failf "expected 1 lane line, got %d" (List.length other))
 
@@ -198,19 +198,19 @@ let test_pre_p4_row_reads_empty () =
   with_base "lane-mentions-prep4" (fun base ->
       (* A pre-P4 row: no [mentions] field even though the content has
          an @-token.  Reads as [] — exactly the gap the backfill closes. *)
-      Store.append_user_message ~base_dir:base ~keeper_name:"dreamer"
+      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"seed" ();
       let dir =
         Filename.concat
           (Filename.concat base ".masc")
           "keeper_chat"
       in
-      let path = Filename.concat dir "dreamer.jsonl" in
+      let path = Filename.concat dir "alice.jsonl" in
       let oc = open_out_gen [ Open_append ] 0o644 path in
       output_string oc
-        "{\"role\":\"user\",\"content\":\"@dreamer legacy row\",\"ts\":2.0}\n";
+        "{\"role\":\"user\",\"content\":\"@alice legacy row\",\"ts\":2.0}\n";
       close_out oc;
-      match Store.load ~base_dir:base ~keeper_name:"dreamer" with
+      match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ _seed; legacy ] ->
           check ids "absent field decodes as no mentions" []
             (message_mentions legacy)
@@ -221,32 +221,32 @@ let test_pre_p4_row_reads_empty () =
 let test_backfill_line () =
   check (option string) "legacy user row with mention is stamped"
     (Some
-       "{\"role\":\"user\",\"content\":\"@dreamer legacy\",\"ts\":2.0,\"mentions\":[\"dreamer\"]}")
+       "{\"role\":\"user\",\"content\":\"@alice legacy\",\"ts\":2.0,\"mentions\":[\"alice\"]}")
     (Backfill.backfill_line
-       "{\"role\":\"user\",\"content\":\"@dreamer legacy\",\"ts\":2.0}");
+       "{\"role\":\"user\",\"content\":\"@alice legacy\",\"ts\":2.0}");
   check (option string) "mention-free row untouched" None
     (Backfill.backfill_line
        "{\"role\":\"user\",\"content\":\"no tokens\",\"ts\":2.0}");
   check (option string) "already-stamped row untouched" None
     (Backfill.backfill_line
-       "{\"role\":\"user\",\"content\":\"@dreamer x\",\"ts\":2.0,\"mentions\":[]}");
+       "{\"role\":\"user\",\"content\":\"@alice x\",\"ts\":2.0,\"mentions\":[]}");
   check (option string) "assistant row untouched" None
     (Backfill.backfill_line
-       "{\"role\":\"assistant\",\"content\":\"@dreamer x\",\"ts\":2.0}");
+       "{\"role\":\"assistant\",\"content\":\"@alice x\",\"ts\":2.0}");
   check (option string) "garbage line untouched" None
     (Backfill.backfill_line "not json at all")
 
 let test_backfill_file_idempotent () =
   with_base "lane-mentions-backfill" (fun base ->
-      Store.append_user_message ~base_dir:base ~keeper_name:"dreamer"
+      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"seed" ();
       let dir =
         Filename.concat (Filename.concat base ".masc") "keeper_chat"
       in
-      let path = Filename.concat dir "dreamer.jsonl" in
+      let path = Filename.concat dir "alice.jsonl" in
       let oc = open_out_gen [ Open_append ] 0o644 path in
       output_string oc
-        "{\"role\":\"user\",\"content\":\"@dreamer legacy row\",\"ts\":2.0}\n";
+        "{\"role\":\"user\",\"content\":\"@alice legacy row\",\"ts\":2.0}\n";
       output_string oc "{\"role\":\"assistant\",\"content\":\"hi\",\"ts\":3.0}\n";
       close_out oc;
       let dry = Backfill.backfill_file ~dry_run:true path in
@@ -255,9 +255,9 @@ let test_backfill_file_idempotent () =
       check int "stamped" 1 wet.rewritten;
       (* The stamped row now registers as a pending mention through the
          normal load path. *)
-      (match Store.load ~base_dir:base ~keeper_name:"dreamer" with
+      (match Store.load ~base_dir:base ~keeper_name:"alice" with
        | [ _seed; legacy; _assistant ] ->
-           check ids "stamped row reads back" [ "dreamer" ]
+           check ids "stamped row reads back" [ "alice" ]
              (message_mentions legacy)
        | other -> failf "expected 3 lane lines, got %d" (List.length other));
       let again = Backfill.backfill_file ~dry_run:false path in

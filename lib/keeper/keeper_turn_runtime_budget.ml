@@ -10,6 +10,7 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_context_runtime
 module EC = Keeper_error_classify
+module StringMap = Set_util.StringMap
 
 type runtime_execution = {
   runtime_id : string;
@@ -526,9 +527,9 @@ let make_post_turn_resilience_executor
 let post_turn_resilience_handles
     ~(config : Workspace.config)
     ~(meta : keeper_meta) : post_turn_resilience_handles =
-  let paused_meta = ref None in
+  let paused_meta = Atomic.make None in
   let sync_lifecycle_meta lifecycle =
-    match !paused_meta with
+    match Atomic.get paused_meta with
     | None -> lifecycle
     | Some paused ->
         { lifecycle with
@@ -571,7 +572,7 @@ let post_turn_resilience_handles
     | Ok audit_store ->
         let executor =
           make_post_turn_resilience_executor ~config ~meta
-            ~on_paused:(fun meta -> paused_meta := Some meta)
+            ~on_paused:(fun meta -> Atomic.set paused_meta (Some meta))
         in
         {
           resilience_audit_store = Some audit_store;
@@ -644,26 +645,40 @@ let enqueue_partial_commit_continue_gate
    per (keeper_name, primary_budget, runtime_budget) because runtime config
    is static at startup.  Logging per turn produces 15-20 duplicates per
    keeper per minute under load. Track the same tuple we've already
-   announced and skip subsequent identical log lines. Keeper turns run on
-   concurrent Eio fibers, so the Hashtbl is protected by an [Eio.Mutex.t]. *)
-let runtime_budget_logged : (string * int * int, unit) Hashtbl.t =
-  Hashtbl.create 16
+   announced and skip subsequent identical log lines. The cache is an
+   immutable [StringMap] under an [Atomic.t] so concurrent turns can update
+   it without an Eio mutex. *)
+let runtime_budget_logged : unit StringMap.t Atomic.t =
+  Atomic.make StringMap.empty
 
-let runtime_budget_logged_mu = Eio.Mutex.create ()
+let runtime_budget_log_key ~keeper_name ~primary_budget ~runtime_budget =
+  Printf.sprintf "%s|%d|%d" keeper_name primary_budget runtime_budget
 
 let resolved_max_context_for_turn ~(meta : keeper_meta) : int =
   let resolution =
     Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
   in
   if resolution.primary_budget < resolution.runtime_budget then begin
-    let key = (meta.name, resolution.primary_budget, resolution.runtime_budget) in
-    Eio.Mutex.use_rw ~protect:true runtime_budget_logged_mu (fun () ->
-      if not (Hashtbl.mem runtime_budget_logged key) then begin
-        Hashtbl.add runtime_budget_logged key ();
-        Log.Keeper.info
-          "%s: mixed runtime context budget primary=%d runtime_max=%d; using primary for initial turn budget"
-          meta.name resolution.primary_budget resolution.runtime_budget
-      end)
+    let key =
+      runtime_budget_log_key
+        ~keeper_name:meta.name
+        ~primary_budget:resolution.primary_budget
+        ~runtime_budget:resolution.runtime_budget
+    in
+    let rec log_once () =
+      let old = Atomic.get runtime_budget_logged in
+      if StringMap.mem key old
+      then ()
+      else
+        let new_map = StringMap.add key () old in
+        if Atomic.compare_and_set runtime_budget_logged old new_map
+        then
+          Log.Keeper.info
+            "%s: mixed runtime context budget primary=%d runtime_max=%d; using primary for initial turn budget"
+            meta.name resolution.primary_budget resolution.runtime_budget
+        else log_once ()
+    in
+    log_once ()
   end;
    (match resolution.requested_override with
     | Some requested ->

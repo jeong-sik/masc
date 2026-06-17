@@ -8,27 +8,29 @@
    anchored badges. Density over drama. */
 .chip {
   display: inline-flex; align-items: center; gap: var(--sp-1);
-  height: 18px; padding: 0 7px;
+  height: 18px; padding: 0 8px;
   font-family: var(--font-mono);
-  font-size: var(--fs-10);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-med);
+  letter-spacing: .02em;
   line-height: 1;
-  color: var(--color-fg-secondary);
-  background: var(--color-bg-hover);
-  border: 1px solid var(--color-border-default);
+  color: var(--color-fg-primary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--r-1);
   white-space: nowrap;
 }
-.chip.is-brass { color: var(--brass-1); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
-.chip.is-ok    { color: var(--ok);    border-color: rgb(var(--ok-glow) / .35); background: rgb(var(--ok-glow) / .08); }
-.chip.is-warn  { color: var(--warn);  border-color: rgb(var(--warn-glow) / .35); background: rgb(var(--warn-glow) / .08); }
-.chip.is-err   { color: var(--err);   border-color: rgb(var(--err-glow) / .35); background: rgb(var(--err-glow) / .08); }
-.chip.is-info  { color: var(--info);  border-color: rgb(var(--info-glow) / .35); background: rgb(var(--info-glow) / .08); }
-.chip.is-stalled { color: var(--stalled); border-color: rgb(var(--stalled-glow) / .35); background: rgb(var(--stalled-glow) / .08); }
-.chip.is-ghost { background: transparent; border-color: var(--color-border-strong); }
+.chip.is-brass { color: var(--brass-fg); border-color: var(--brass-border); background: var(--brass-soft); }
+.chip.is-ok    { color: var(--ok-fg);    border-color: var(--ok-border); background: var(--ok-soft); }
+.chip.is-warn  { color: var(--warn-fg);  border-color: var(--warn-border); background: var(--warn-soft); }
+.chip.is-err   { color: var(--err-fg);   border-color: var(--err-border); background: var(--err-soft); }
+.chip.is-info  { color: var(--info-fg);  border-color: var(--info-border); background: var(--info-soft); }
+.chip.is-stalled { color: var(--stalled-fg); border-color: var(--stalled-border); background: var(--stalled-soft); }
+.chip.is-ghost { background: transparent; border-color: var(--color-border-strong); color: var(--color-fg-secondary); }
 
 /* chip size variants */
-.chip.sm { height: 14px; padding: 0 5px; font-size: var(--fs-9); }
-.chip.lg { height: 22px; padding: 0 9px; font-size: var(--fs-11); }
+.chip.sm { height: 16px; padding: 0 5px; font-size: var(--fs-10); }
+.chip.lg { height: 22px; padding: 0 10px; font-size: var(--fs-12); }
 
 /* chip with leading dot */
 .chip .dot { width: 5px; height: 5px; }
@@ -37,22 +39,22 @@
    Like chip but rounder; used in state-y contexts (running, paused). */
 .pill {
   display: inline-flex; align-items: center; gap: var(--sp-1);
-  height: 16px; padding: 0 var(--sp-2);
-  font-size: var(--fs-10);
-  font-weight: var(--fw-med);
-  letter-spacing: .04em;
-  color: var(--color-fg-secondary);
-  background: var(--color-bg-hover);
+  height: 16px; padding: 0 8px;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semi);
+  letter-spacing: .03em;
+  color: var(--color-fg-primary);
+  background: var(--color-bg-elevated);
   border-radius: var(--radius-pill);
   white-space: nowrap;
 }
-.pill.is-running { color: var(--brass-1); background: rgb(var(--brass-glow) / .12); }
-.pill.is-paused  { color: var(--color-fg-muted);    background: var(--color-bg-hover); }
-.pill.is-ok      { color: var(--ok);      background: rgb(var(--ok-glow) / .12); }
-.pill.is-err     { color: var(--err);     background: rgb(var(--err-glow) / .12); }
-.pill.is-warn    { color: var(--warn);    background: rgb(var(--warn-glow) / .12); }
-.pill.is-info    { color: var(--info);    background: rgb(var(--info-glow) / .12); }
-.pill.is-stalled { color: var(--stalled); background: rgb(var(--stalled-glow) / .12); }
+.pill.is-running { color: var(--brass-fg); background: var(--brass-soft); }
+.pill.is-paused  { color: var(--color-fg-muted); background: var(--color-bg-hover); }
+.pill.is-ok      { color: var(--ok-fg);      background: var(--ok-soft); }
+.pill.is-err     { color: var(--err-fg);     background: var(--err-soft); }
+.pill.is-warn    { color: var(--warn-fg);    background: var(--warn-soft); }
+.pill.is-info    { color: var(--info-fg);    background: var(--info-soft); }
+.pill.is-stalled { color: var(--stalled-fg); background: var(--stalled-soft); }
 
 /* ════════ BAR ════════
    Progress bar — fill inside track. Used in tasks, goals, budgets. */
@@ -111,11 +113,11 @@
   min-height: 28px; padding: 0 var(--sp-3);
   border-bottom: 1px solid var(--color-border-default);
   background: var(--color-bg-surface);
-  font-size: var(--fs-11);
-  font-weight: var(--fw-semi);
-  letter-spacing: .08em;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-bold);
+  letter-spacing: .07em;
   text-transform: uppercase;
-  color: var(--color-fg-muted);
+  color: var(--color-fg-secondary);
   flex-shrink: 0;
 }
 .section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--color-fg-disabled); font-weight: var(--fw-med); }
@@ -128,16 +130,17 @@
   grid-template-columns: 80px 1fr;
   gap: var(--sp-3);
   padding: var(--sp-1) 0;
-  font-size: var(--fs-11);
+  font-size: var(--fs-12);
   align-items: baseline;
 }
 .kv-row > .k {
-  color: var(--color-fg-muted);
-  font-size: var(--fs-10);
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semi);
   text-transform: uppercase;
   letter-spacing: .06em;
 }
-.kv-row > .v { color: var(--color-fg-primary); font-family: var(--font-mono); font-size: var(--fs-11); }
+.kv-row > .v { color: var(--color-fg-primary); font-family: var(--font-mono); font-size: var(--fs-12); font-weight: var(--fw-med); }
 
 .kv-row.is-wide { grid-template-columns: 120px 1fr; }
 
@@ -154,14 +157,15 @@
 .btn.danger {
   border-color: rgb(var(--err-glow) / .4);
   color: var(--err);
+  font-weight: var(--fw-med);
 }
 .btn.danger:hover { background: rgb(var(--err-glow) / .1); color: var(--err); }
 
-.btn.ghost { border-color: transparent; color: var(--color-fg-muted); }
+.btn.ghost { border-color: transparent; color: var(--color-fg-muted); font-weight: var(--fw-med); }
 .btn.ghost:hover { background: var(--color-bg-elevated); color: var(--color-fg-primary); }
 
-.btn.sm { height: 20px; padding: 0 var(--sp-2); font-size: var(--fs-10); }
-.btn.xs { height: 18px; padding: 0 6px; font-size: var(--fs-9); letter-spacing: .06em; }
+.btn.sm { height: 20px; padding: 0 var(--sp-2); font-size: var(--fs-11); }
+.btn.xs { height: 18px; padding: 0 6px; font-size: var(--fs-10); letter-spacing: .06em; }
 
 /* icon-only button — square */
 .btn.icon {
@@ -170,12 +174,21 @@
   display: inline-flex; align-items: center; justify-content: center;
 }
 
+/* Focus rings — make keyboard focus unmistakable on dark surfaces. */
+.btn:focus-visible,
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.btn.primary:focus-visible { box-shadow: 0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .35); }
+.btn.danger:focus-visible { box-shadow: var(--focus-ring-err); }
+
 /* ════════ KEY CAPS ════════ */
 .kbd {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 16px; height: 16px; padding: 0 var(--sp-1);
-  font-family: var(--font-mono); font-size: var(--fs-10);
-  color: var(--color-fg-muted);
+  font-family: var(--font-mono); font-size: var(--fs-11); font-weight: var(--fw-semi);
+  color: var(--color-fg-secondary);
   background: var(--color-bg-hover);
   border: 1px solid var(--color-border-strong);
   border-bottom-width: 2px;

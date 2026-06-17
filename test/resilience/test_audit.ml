@@ -73,7 +73,7 @@ let test_make_entry_with_keeper_and_session () =
   let e =
     A.make_entry
       ~category:A.RecoveryAttempted
-      ~keeper_name:"dreamer"
+      ~keeper_name:"alice"
       ~session_id:"sess-001"
       ~payload:(`Assoc [ "strategy", `String "Retry" ])
       ~prev_hash:(Some "abc123")
@@ -84,7 +84,7 @@ let test_make_entry_with_keeper_and_session () =
   match e.E.payload with
   | `Assoc kvs ->
       (match List.assoc_opt "_keeper_name" kvs with
-       | Some (`String "dreamer") -> ()
+       | Some (`String "alice") -> ()
        | _ -> assert false);
       (match List.assoc_opt "_session_id" kvs with
        | Some (`String "sess-001") -> ()

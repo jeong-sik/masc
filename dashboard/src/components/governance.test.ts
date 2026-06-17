@@ -229,8 +229,8 @@ describe('Governance surface', () => {
         {
           judgment_id: 'j-1',
           target_kind: 'agent_health',
-          target_id: 'dreamer',
-          summary: 'Agent dreamer has been zombie for 30 minutes.',
+          target_id: 'alice',
+          summary: 'Agent alice has been zombie for 30 minutes.',
           confidence: 0.85,
           generated_at: '2026-03-30T00:00:00Z',
           recommended_action: { action_kind: 'recover', resolved_tool: 'masc_operator_confirm', reason: 'zombie agent detected' },
@@ -254,7 +254,7 @@ describe('Governance surface', () => {
 
     expect(container.textContent).toContain('AI Judge')
     expect(container.textContent).toContain('agent_health')
-    expect(container.textContent).toContain('dreamer')
+    expect(container.textContent).toContain('alice')
     expect(container.textContent).toContain('85%')
     expect(container.textContent).toContain('recover')
     expect(container.textContent).toContain('masc_operator_confirm')

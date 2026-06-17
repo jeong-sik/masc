@@ -900,7 +900,7 @@ function EntryRow({ entry, routeFocused = false }: { entry: TelemetryEntry; rout
   const ts = entryTimestamp(entry)
   const success = entry.success as boolean | undefined
   const scopeBadges = telemetryScopeBadges(entry)
-  const rawJson = JSON.stringify(entry, null, 2)
+  const rawJson = useMemo(() => JSON.stringify(entry, null, 2), [entry])
   const focusedClasses = routeFocused
     ? 'border-l-2 border-l-[var(--color-brass-1)] bg-[var(--color-brass-soft)]'
     : ''
@@ -980,7 +980,7 @@ function GroupRow({ item, routeFocused = false }: { item: Extract<TelemetryDispl
   const latestPreview = entryPreview(item.entries[0] as TelemetryEntry)
   const sourceIcons = uniqueStrings(item.sourceKeys.map(source => sourceMeta(source).icon))
   const contentId = `telemetry-group-${item.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`
-  const rawJson = JSON.stringify(item.entries, null, 2)
+  const rawJson = useMemo(() => JSON.stringify(item.entries, null, 2), [item.entries])
   const focusedClasses = routeFocused
     ? 'border-l-2 border-l-[var(--color-brass-1)] bg-[var(--color-brass-soft)]'
     : 'bg-[var(--color-bg-panel-alt)]'

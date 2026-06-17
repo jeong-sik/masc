@@ -27,6 +27,7 @@ import './styles/keyframes.css'
 import './styles/global.css'
 import './styles/chat-blocks-v2.css'
 import './styles/surfaces-v2.css'
+import './styles/cockpit-v2.css'
 
 // Component-specific styles
 import './styles/ui.css'

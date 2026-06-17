@@ -1,16 +1,12 @@
 import { html } from 'htm/preact'
 import { capitalize } from '../../lib/format-string'
-import { Activity, ArrowUpRight, Brain, Code2, GitBranch, MessageSquare } from 'lucide-preact'
+import { Activity, Brain, Code2, GitBranch, MessageSquare } from 'lucide-preact'
 import type { ComponentChildren } from 'preact'
 import {
   COCKPIT_ENTRYPOINTS,
   type CockpitEntrypoint,
   type CockpitMode,
 } from '../../cockpit-entrypoints'
-import {
-  CognitiveDisclosure,
-  type CognitiveDisclosureItem,
-} from '../common/cognitive-disclosure'
 import { RouteLink } from '../common/route-link'
 import { WorldVisualizer } from '../world-visualizer'
 
@@ -19,6 +15,13 @@ type CockpitPlane = Extract<CockpitMode, 'work' | 'comms' | 'observe' | 'cogniti
 interface PlaneMeta {
   label: string
   summary: string
+}
+
+interface DisclosureItem {
+  level: 'perceive' | 'comprehend' | 'project'
+  title: string
+  summary: string
+  metric: string
 }
 
 const PLANE_ORDER = ['work', 'comms', 'observe', 'cognition', 'ide'] as const satisfies readonly CockpitPlane[]
@@ -57,7 +60,6 @@ const ENTRIES_PER_PLANE: ReadonlyMap<CockpitPlane, CockpitEntrypoint[]> = (() =>
   return map
 })()
 
-const COCKPIT_COVERED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'covered').length
 const COCKPIT_BLOCKED_ROUTES = COCKPIT_ENTRYPOINTS.filter(entry => entry.coverage === 'backend-blocked').length
 
 // tie-break: strict `>` keeps the initial accumulator, so PLANE_ORDER[0] (first listed plane) wins on equal counts.
@@ -73,18 +75,12 @@ const PLANE_WITH_MOST_GAPS = PLANE_ORDER.reduce((top, plane) => {
   return gaps > topGaps ? plane : top
 }, PLANE_ORDER[0])
 
-const COCKPIT_DISCLOSURE_ITEMS: CognitiveDisclosureItem[] = [
+const COCKPIT_DISCLOSURE_ITEMS: DisclosureItem[] = [
   {
     level: 'perceive',
     title: 'Route coverage',
     summary: `${COCKPIT_ENTRYPOINTS.length} routes across ${PLANE_ORDER.length} planes`,
     metric: `${COCKPIT_ENTRYPOINTS.length} routes`,
-    defaultOpen: true,
-    detail: html`
-      <span class="font-mono text-3xs text-[var(--color-status-ok)]">${COCKPIT_COVERED_ROUTES} covered</span>
-      <span class="mx-2 text-[var(--color-fg-disabled)]">/</span>
-      <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${COCKPIT_BLOCKED_ROUTES} backend-blocked</span>
-    `,
   },
   {
     level: 'comprehend',
@@ -139,9 +135,9 @@ function routeCaption(entrypoint: CockpitEntrypoint): string {
 function coverageClass(coverage: CockpitEntrypoint['coverage']): string {
   switch (coverage) {
     case 'covered':
-      return 'border-[var(--ok-30)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+      return 'ok'
     case 'backend-blocked':
-      return 'border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
+      return 'blk'
   }
 }
 
@@ -152,50 +148,44 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
 
   return html`
     <section
-      class="v2-cockpit-plane min-w-0 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      class="cp-plane"
       data-cockpit-plane=${plane}
       aria-label=${`${meta.label} cockpit routes`}
     >
-      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-3">
-        <div class="flex min-w-0 items-start gap-2">
-          <span class="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] text-[var(--color-fg-secondary)]">
-            ${planeIcon(plane)}
-          </span>
-          <div class="min-w-0">
-            <h2 class="text-sm font-semibold text-[var(--color-fg-primary)]">${meta.label}</h2>
-            <p class="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">${meta.summary}</p>
+      <div class="cp-plane-h">
+        <div class="lft">
+          <div class="cp-plane-ico">${planeIcon(plane)}</div>
+          <div>
+            <h2>${meta.label}</h2>
+            <div class="sum">${meta.summary}</div>
           </div>
         </div>
-        <div class="flex shrink-0 flex-wrap justify-end gap-1.5 font-mono text-3xs">
-          <span class="rounded-[var(--r-0)] border border-[var(--ok-30)] bg-[var(--ok-10)] px-1.5 py-0.5 text-[var(--color-status-ok)]">${covered} covered</span>
+        <div class="chips">
+          <span class="cp-cov ok">${covered} covered</span>
           ${blocked > 0
-            ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5 text-[var(--color-fg-muted)]">${blocked} blocked</span>`
+            ? html`<span class="cp-cov blk">${blocked} blocked</span>`
             : null}
         </div>
       </div>
 
-      <div class="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-3">
+      <div class="cp-routes">
         ${entries.map(entrypoint => html`
           <${RouteLink}
             key=${`${entrypoint.mode}:${entrypoint.aliases[0]}`}
             tab=${entrypoint.target.tab}
             params=${entrypoint.target.params}
-            class="v2-cockpit-route group flex min-h-24 min-w-0 flex-col justify-between gap-3 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2.5 text-left no-underline transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-elevated)]"
+            class="cp-route"
             title=${routeCaption(entrypoint)}
             aria-label=${`Open ${displayLabel(entrypoint)} in ${routeCaption(entrypoint)}`}
           >
-            <span class="flex min-w-0 items-start justify-between gap-2">
+            <div class="cp-route-top">
               <span class="min-w-0">
-                <span class="block truncate text-xs font-semibold text-[var(--color-fg-primary)]">
-                  ${displayLabel(entrypoint)}
-                </span>
-                <span class="mt-1 block truncate font-mono text-3xs text-[var(--color-fg-disabled)]">
-                  ${routeCaption(entrypoint)}
-                </span>
+                <span class="rl">${displayLabel(entrypoint)}</span>
+                <span class="rc">${routeCaption(entrypoint)}</span>
               </span>
-              <${ArrowUpRight} class="mt-0.5 shrink-0 text-[var(--color-fg-muted)] transition-colors group-hover:text-[var(--color-fg-primary)]" size=${14} aria-hidden="true" />
-            </span>
-            <span class=${`rounded-[var(--r-0)] border px-1.5 py-0.5 font-mono text-3xs ${coverageClass(entrypoint.coverage)}`}>
+              <span class="arr" aria-hidden="true">↗</span>
+            </div>
+            <span class=${`cp-cov ${coverageClass(entrypoint.coverage)}`}>
               ${entrypoint.coverage}
             </span>
           <//>
@@ -207,43 +197,54 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
 
 export function Cockpit() {
   return html`
-    <div class="v2-cockpit-surface flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg-page)]">
-      <div class="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(18rem,26rem)_minmax(0,1fr)]">
-        <aside class="min-h-70 border-b border-[var(--color-border-default)] bg-black xl:border-r xl:border-b-0">
-          <${WorldVisualizer} />
-        </aside>
+    <div class="cp-body" data-testid="cockpit-command-map">
+      <aside class="cp-world">
+        <${WorldVisualizer} />
+      </aside>
 
-        <main class="min-h-0 overflow-y-auto" data-testid="cockpit-command-map">
-          <div class="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:px-5">
-            <section class="v2-cockpit-header border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3">
-              <div class="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p class="font-mono text-3xs text-[var(--color-fg-muted)]">MASC Cockpit</p>
-                  <h1 class="mt-1 text-lg font-semibold text-[var(--color-fg-primary)]">Command Map</h1>
+      <main class="cp-main">
+        <div class="cp-inner">
+          <header class="cp-head">
+            <div>
+              <p class="cp-eyebrow">Command Map</p>
+              <h1 class="cp-title">Cockpit</h1>
+            </div>
+            <p class="cp-sub">
+              ${COCKPIT_ENTRYPOINTS.length} routes across ${PLANE_ORDER.length} planes
+            </p>
+          </header>
+
+          <section
+            class="cp-disc"
+            aria-label="Progressive disclosure"
+            data-testid="cockpit-disclosure"
+          >
+            <div class="cp-disc-h"><h3>Progressive Disclosure</h3></div>
+            <div class="cp-disc-rows">
+              ${COCKPIT_DISCLOSURE_ITEMS.map(item => html`
+                <div
+                  key=${item.level}
+                  class="cp-disc-row"
+                  data-cockpit-disclosure-level=${item.level}
+                >
+                  <div class="lvl">${item.level}</div>
+                  <div class="ttl">${item.title}</div>
+                  <div class="sum">${item.summary}</div>
+                  <span class="mtr">${item.metric}</span>
                 </div>
-                <p class="font-mono text-3xs text-[var(--color-fg-muted)]">
-                  ${COCKPIT_ENTRYPOINTS.length} routes across ${PLANE_ORDER.length} planes
-                </p>
-              </div>
-            </section>
+              `)}
+            </div>
+          </section>
 
-            <${CognitiveDisclosure}
-              title="Progressive Disclosure"
-              class="v2-cockpit-disclosure"
-              items=${COCKPIT_DISCLOSURE_ITEMS}
-              testId="cockpit-disclosure"
+          ${PLANE_ORDER.map(plane => html`
+            <${PlaneSection}
+              key=${plane}
+              plane=${plane}
+              entries=${ENTRIES_PER_PLANE.get(plane) ?? []}
             />
-
-            ${PLANE_ORDER.map(plane => html`
-              <${PlaneSection}
-                key=${plane}
-                plane=${plane}
-                entries=${ENTRIES_PER_PLANE.get(plane) ?? []}
-              />
-            `)}
-          </div>
-        </main>
-      </div>
+          `)}
+        </div>
+      </main>
     </div>
   `
 }

@@ -48,28 +48,6 @@ describe('surfaces-v2 CSS classes', () => {
     expect(card.querySelector('.ov-card-h')).not.toBeNull()
   })
 
-  it('cockpit body markup uses cp-body, cp-world and cp-main classes', () => {
-    container.innerHTML =
-      '<div class="cp-body"><div class="cp-world"></div><div class="cp-main"></div></div>'
-    const body = container.querySelector('.cp-body') as HTMLElement
-    const world = container.querySelector('.cp-world') as HTMLElement
-    const main = container.querySelector('.cp-main') as HTMLElement
-    expect(body).not.toBeNull()
-    expect(world).not.toBeNull()
-    expect(main).not.toBeNull()
-    expect(body.classList.contains('cp-body')).toBe(true)
-    expect(world.classList.contains('cp-world')).toBe(true)
-    expect(main.classList.contains('cp-main')).toBe(true)
-  })
-
-  it('cockpit route renders', () => {
-    container.innerHTML = '<button class="cp-route"><span class="rl">Route</span></button>'
-    const route = container.querySelector('.cp-route') as HTMLElement
-    expect(route).not.toBeNull()
-    expect(route.classList.contains('cp-route')).toBe(true)
-    expect(route.querySelector('.rl')).not.toBeNull()
-  })
-
   it('type ladder selector targets ov-head h1', () => {
     container.innerHTML = '<div class="ov-head"><h1>Overview</h1></div>'
     const h1 = container.querySelector('.ov-head h1') as HTMLElement

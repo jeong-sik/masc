@@ -260,27 +260,60 @@ let last_namespace_truth_snapshot_hash : Digestif.SHA256.t option ref =
 
 let namespace_truth_snapshot_hash_mu = Eio.Mutex.create ()
 
-let rec normalize_namespace_truth_snapshot_for_hash (json : Yojson.Safe.t) :
-    Yojson.Safe.t =
-  match json with
-  | `Assoc fields ->
-      `Assoc
-        (fields
-        |> List.filter_map (fun (key, value) ->
-               if
-                 String.equal key "generated_at"
-                 || String.equal key "generated_at_iso"
-               then None
-               else Some (key, normalize_namespace_truth_snapshot_for_hash value)))
-  | `List values ->
-      `List (List.map normalize_namespace_truth_snapshot_for_hash values)
-  | other -> other
+let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Digestif.SHA256.t =
+  (* Incremental SHA256 over the snapshot structure, skipping the volatile
+     [generated_at]/[generated_at_iso] fields (they change every compose but
+     must not trigger a broadcast). Replaces the prior normalize-copy +
+     [Yojson.Safe.to_string] + [digest_string], which allocated a normalized
+     Yojson tree AND a full serialized string on every broadcast check. This
+     walks the structure once, feeding [Digestif.SHA256.feed_string] directly:
+     one O(n) pass, no intermediate Yojson or string allocation.
+
+     The hash value differs from the old string-hash (different bytes fed),
+     but it is deterministic for a given structure and is used only for change
+     detection (compare current to previous, both via this walker), so the
+     broadcast semantics are preserved. Type tags (S/I/F/...) prevent prefix
+     collisions between scalar kinds. *)
+  let rec walk (ctx : Digestif.SHA256.ctx) (json : Yojson.Safe.t) :
+      Digestif.SHA256.ctx =
+    match json with
+    | `Assoc fields ->
+        let ctx = Digestif.SHA256.feed_string ctx "{" in
+        let ctx =
+          List.fold_left
+            (fun ctx (key, value) ->
+               if String.equal key "generated_at" || String.equal key "generated_at_iso"
+               then ctx
+               else
+                 let ctx = Digestif.SHA256.feed_string ctx key in
+                 let ctx = Digestif.SHA256.feed_string ctx ":" in
+                 walk ctx value)
+            ctx fields
+        in
+        Digestif.SHA256.feed_string ctx "}"
+    | `List values ->
+        let ctx = Digestif.SHA256.feed_string ctx "[" in
+        let ctx = List.fold_left walk ctx values in
+        Digestif.SHA256.feed_string ctx "]"
+    | `String s ->
+        let ctx = Digestif.SHA256.feed_string ctx "S" in
+        Digestif.SHA256.feed_string ctx s
+    | `Int n ->
+        let ctx = Digestif.SHA256.feed_string ctx "I" in
+        Digestif.SHA256.feed_string ctx (string_of_int n)
+    | `Intlit s ->
+        let ctx = Digestif.SHA256.feed_string ctx "L" in
+        Digestif.SHA256.feed_string ctx s
+    | `Float f ->
+        let ctx = Digestif.SHA256.feed_string ctx "F" in
+        Digestif.SHA256.feed_string ctx (string_of_float f)
+    | `Bool b -> Digestif.SHA256.feed_string ctx (if b then "Bt" else "Bf")
+    | `Null -> Digestif.SHA256.feed_string ctx "N"
+  in
+  Digestif.SHA256.get (walk Digestif.SHA256.empty snapshot)
 
 let should_broadcast_namespace_truth_snapshot (snapshot : Yojson.Safe.t) =
-  let serialized =
-    snapshot |> normalize_namespace_truth_snapshot_for_hash |> Yojson.Safe.to_string
-  in
-  let hash = Digestif.SHA256.digest_string serialized in
+  let hash = hash_namespace_truth_snapshot snapshot in
   Eio.Mutex.use_rw ~protect:true namespace_truth_snapshot_hash_mu (fun () ->
       match !last_namespace_truth_snapshot_hash with
       | Some prev when Digestif.SHA256.equal prev hash -> false

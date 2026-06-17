@@ -270,7 +270,7 @@
 (executable
  (name masc_shell_ir_probe)
  (modules masc_shell_ir_probe)
- (libraries masc.masc_exec masc.exec_policy))
+ (libraries masc.masc_exec masc.exec_policy masc.masc_exec_command_gate))
 
 ; RFC-0054 PR-3 — production codegen for lib/exec/shell_ir_typed.ml.
 ; Hardcoded 9-constructor spec mirrors shell_ir_typed.{ml,mli} order.

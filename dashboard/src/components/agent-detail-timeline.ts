@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useMemo } from 'preact/hooks'
 import { CollapsibleSection } from './common/collapsible'
 import { EmptyState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
@@ -136,14 +137,22 @@ function ToolCallEventRow({ evt, idx }: { evt: AgentTimelineEvent; idx: number }
 
 export function AgentTimelineSection() {
   const timeline = agentTimeline.value
-  if (!timeline) return null
-
-  const events = timeline.events ?? []
-  const summary = timeline.summary
-  const counts = timelineCategoryCounts(events)
+  // Derive + memoize above the early return so hooks are always called in the
+  // same order. [events] falls back to [] when timeline is null (we return
+  // null below); the aggregations are cheap on an empty array and their result
+  // is discarded. When timeline is present [events] is ref-stable, so the
+  // category count + filter skip on re-renders driven by unrelated signals.
+  const events = timeline?.events ?? []
   const activeCategory = timelineCategoryFilter.value
   const query = timelineSearchQuery.value
-  const filtered = filterTimelineEvents(events, activeCategory, query)
+  const counts = useMemo(() => timelineCategoryCounts(events), [events])
+  const filtered = useMemo(
+    () => filterTimelineEvents(events, activeCategory, query),
+    [events, activeCategory, query],
+  )
+  if (!timeline) return null
+
+  const summary = timeline.summary
   const filterActive = activeCategory !== 'all' || query.trim() !== ''
 
   return html`

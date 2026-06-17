@@ -10,6 +10,8 @@ import type { Keeper } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { KeeperLifecycleButtons } from '../keeper-detail-lifecycle'
 import { KeeperTurnInspector } from '../keeper-turn-inspector'
+import { ChatArtifactPanel } from '../chat/artifact-panel'
+import { keeperThreads } from '../../keeper-state'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import {
   WorkspaceSigil,
@@ -26,12 +28,16 @@ function ChatHeader({
   onToggleDetail,
   onClear,
   onOpenTurnInspector,
+  artifactsOpen,
+  onToggleArtifacts,
 }: {
   keeper: Keeper
   detailOpen: boolean
   onToggleDetail: () => void
   onClear: () => void
   onOpenTurnInspector: () => void
+  artifactsOpen: boolean
+  onToggleArtifacts: () => void
 }): VNode {
   const bucket = keeperBucket(keeper)
   const tone = keeperStatusTone(keeper)
@@ -63,6 +69,14 @@ function ChatHeader({
           data-testid="kw-chat-turn-inspector-btn"
         >턴 검사</button>
         <button type="button" class="kw-act danger v2-monitoring-action" title="컨텍스트 비우기" onClick=${onClear}>비우기</button>
+        <button
+          type="button"
+          class="kw-act v2-monitoring-action"
+          aria-pressed=${artifactsOpen ? 'true' : 'false'}
+          title="대화 아티팩트"
+          onClick=${onToggleArtifacts}
+          data-testid="kw-chat-artifacts-toggle"
+        >${artifactsOpen ? '아티팩트 숨김' : '아티팩트'}</button>
         <button
           type="button"
           class="kw-act v2-monitoring-action"
@@ -129,6 +143,8 @@ export function KeeperWorkspaceChat({
   onClear: () => void
 }): VNode {
   const [turnInspectorOpen, setTurnInspectorOpen] = useState(false)
+  const [artifactsOpen, setArtifactsOpen] = useState(false)
+  const entries = keeperThreads.value[keeper.name] ?? []
 
   return html`
     <section class="kw-chat v2-monitoring-surface" role="region" aria-label=${`${keeper.name} 대화`}>
@@ -138,12 +154,19 @@ export function KeeperWorkspaceChat({
         onToggleDetail=${onToggleDetail}
         onClear=${onClear}
         onOpenTurnInspector=${() => setTurnInspectorOpen(true)}
+        artifactsOpen=${artifactsOpen}
+        onToggleArtifacts=${() => setArtifactsOpen((o) => !o)}
       />
-      <${KeeperConversationPanel}
-        keeperName=${keeper.name}
-        placeholder=${`${keeper.name} 에게 메시지…  (⌘+Enter 전송)`}
-        layout="workspace"
-      />
+      <div class="kw-chat-body">
+        <${KeeperConversationPanel}
+          keeperName=${keeper.name}
+          placeholder=${`${keeper.name} 에게 메시지…  (⌘+Enter 전송)`}
+          layout="workspace"
+        />
+        ${artifactsOpen
+          ? html`<${ChatArtifactPanel} entries=${entries} />`
+          : null}
+      </div>
       <${TurnInspectorDrawer}
         keeperName=${keeper.name}
         open=${turnInspectorOpen}

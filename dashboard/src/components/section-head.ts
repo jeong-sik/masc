@@ -101,6 +101,7 @@ export function SectionHead(props: SectionHeadProps): VNode {
 
   return html`
     <div
+      data-section-head
       data-testid=${props.testId}
       aria-label=${props.ariaLabel}
       style=${containerStyle}

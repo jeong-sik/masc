@@ -214,10 +214,10 @@ export function healthStatusColor(status: string | undefined): string {
 }
 
 export function successClass(rate: number | null): string {
-  if (rate == null || !Number.isFinite(rate)) return 'text-[var(--color-fg-disabled)]'
-  if (rate >= 97) return 'text-[var(--color-status-ok)]'
-  if (rate >= 90) return 'text-[var(--color-status-warn)]'
-  return 'text-[var(--bad-light)]'
+  if (rate == null || !Number.isFinite(rate)) return 'text-text-disabled'
+  if (rate >= 97) return 'text-success'
+  if (rate >= 90) return 'text-warning'
+  return 'text-destructive'
 }
 
 function keeperMetricsWindowTools(keeper: Keeper): string[] {
@@ -495,9 +495,9 @@ export function toneForPressure(hot: number, warn: number): 'neutral' | 'ok' | '
 }
 
 export function pressureClass(ratio: number): string {
-  if (ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--bad-light)]'
-  if (ratio >= PRESSURE_WARN_RATIO) return 'text-[var(--color-status-warn)]'
-  return 'text-[var(--color-status-ok)]'
+  if (ratio >= PRESSURE_HOT_RATIO) return 'text-destructive'
+  if (ratio >= PRESSURE_WARN_RATIO) return 'text-warning'
+  return 'text-success'
 }
 
 export function statusClass(row: FleetRow): string {
@@ -508,7 +508,7 @@ export function statusClass(row: FleetRow): string {
     || isOfflineDiagnosticHealthState(diagnosticHealthState)
     || FLEET_OFFLINE_STATUSES.has(normalizedStatus)
   ) {
-    return 'text-[var(--bad-light)]'
+    return 'text-destructive'
   }
   if (
     isAttentionDiagnosticHealthState(diagnosticHealthState)
@@ -517,10 +517,10 @@ export function statusClass(row: FleetRow): string {
     || row.runtime_trust_attention === true
     || row.terminal_reason_severity === 'bad'
   ) {
-    return 'text-[var(--color-status-warn)]'
+    return 'text-warning'
   }
-  if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-[var(--color-status-warn)]'
-  return 'text-[var(--color-status-ok)]'
+  if (row.context_ratio >= PRESSURE_HOT_RATIO) return 'text-warning'
+  return 'text-success'
 }
 
 export function formatPercent(value: number | null, digits = 0): string {
@@ -558,18 +558,18 @@ function formatSourceAge(seconds: number | null | undefined): string | null {
 export function sourceCountClass(source: TelemetrySourceSummary): string {
   switch ((source.health ?? '').toLowerCase()) {
     case 'missing':
-      return 'text-[var(--bad-light)]'
+      return 'text-destructive'
     case 'stale':
     case 'coverage_gap':
-      return 'text-[var(--color-status-warn)]'
+      return 'text-warning'
     case 'ok':
-      return 'text-[var(--color-status-ok)]'
+      return 'text-success'
   }
-  if (source.exists === false) return 'text-[var(--bad-light)]'
-  if (source.entry_count <= 0) return 'text-[var(--color-fg-disabled)]'
+  if (source.exists === false) return 'text-destructive'
+  if (source.entry_count <= 0) return 'text-text-disabled'
   const age = numericAge(source.latest_age_s)
-  if (age != null && age >= TELEMETRY_SOURCE_STALE_SEC) return 'text-[var(--color-status-warn)]'
-  return 'text-[var(--color-status-ok)]'
+  if (age != null && age >= TELEMETRY_SOURCE_STALE_SEC) return 'text-warning'
+  return 'text-success'
 }
 
 export function sourceDetail(source: TelemetrySourceSummary): string {

@@ -4,7 +4,7 @@ import { coverageGapDisplay, freshnessText, sourceHealthClass } from './source-h
 
 describe('sourceHealthClass', () => {
   it('maps coverage_gap to warning tone', () => {
-    expect(sourceHealthClass('coverage_gap')).toBe('text-[var(--color-status-warn)]')
+    expect(sourceHealthClass('coverage_gap')).toBe('text-warning')
   })
 })
 

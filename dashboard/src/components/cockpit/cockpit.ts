@@ -148,7 +148,7 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
 
   return html`
     <section
-      class="cp-plane"
+      class="cp-plane ss-card"
       data-cockpit-plane=${plane}
       aria-label=${`${meta.label} cockpit routes`}
     >
@@ -197,7 +197,7 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
 
 export function Cockpit() {
   return html`
-    <div class="cp-body" data-testid="cockpit-command-map">
+    <div class="cp-body ss-surface" data-testid="cockpit-command-map">
       <aside class="cp-world">
         <${WorldVisualizer} />
       </aside>
@@ -215,7 +215,7 @@ export function Cockpit() {
           </header>
 
           <section
-            class="cp-disc"
+            class="cp-disc ss-card"
             aria-label="Progressive disclosure"
             data-testid="cockpit-disclosure"
           >

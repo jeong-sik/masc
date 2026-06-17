@@ -94,6 +94,16 @@
    semantic tokens. Cards already carry .ss-card via SurfaceCard; this
    bridges the remaining v2-scoped panels, rows, and tables. */
 
+[data-theme="styleseed"] .v2-lab-surface,
+[data-theme="styleseed"] .v2-lab-panel,
+[data-theme="styleseed"] .v2-lab-card,
+[data-theme="styleseed"] .v2-lab-row,
+[data-theme="styleseed"] .v2-lab-action,
+[data-theme="styleseed"] .v2-lab-table,
+[data-theme="styleseed"] .v2-lab-detail {
+  --v2-lab-top-glow: color-mix(in srgb, var(--brand) 4%, transparent);
+}
+
 [data-theme="styleseed"] .v2-lab-surface {
   background-color: var(--surface-page);
   color: var(--text-primary);

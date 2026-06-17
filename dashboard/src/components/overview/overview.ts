@@ -394,11 +394,10 @@ function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
   if (events.length === 0) return null
   return html`
     <${SectionCard}
-      title="Fleet Ticker"
-      class="v2-overview-ticker ss-card mx-6"
+      label="Fleet Ticker"
       variant="standard"
-      right=${html`<span class="text-[12px] text-text-tertiary">latest ${events.length}</span>`}
-      data-testid="overview-fleet-ticker"
+      class="v2-overview-ticker mx-6"
+      right=${html`<span class="text-[12px] text-text-tertiary">latest ${events.length}</span>`}      data-testid="overview-fleet-ticker"
     >
       <div
         role="list"
@@ -409,16 +408,13 @@ function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
           <div
             key=${event.id}
             role="listitem"
-            class="v2-overview-ticker-card grid min-w-[15rem] max-w-[22rem] max-[768px]:min-w-[12rem] flex-[0_0_auto] gap-1 rounded-md border border-border bg-card px-3 py-2"
-          >
-            <div class="flex min-w-0 items-center gap-2 font-mono text-[10px] uppercase tracking-wider">
-              <span class=${tickerToneClass(event.tone)}>${event.kind}</span>
+            class="v2-overview-ticker-card ss-card grid min-w-[15rem] max-w-[22rem] max-[768px]:min-w-[12rem] flex-[0_0_auto] gap-1 border border-border px-3 py-2"          >
+            <div class="flex min-w-0 items-center gap-2 font-mono text-[11px] uppercase tracking-wider">              <span class=${tickerToneClass(event.tone)}>${event.kind}</span>
               <span class="truncate text-text-tertiary">${event.actor}</span>
               <${TimeAgo} timestamp=${event.timestamp} class="ml-auto shrink-0 text-text-disabled" />
             </div>
-            <div class="truncate text-[13px] font-semibold text-text-primary">${event.text}</div>
-            <div class="truncate font-mono text-[10px] uppercase tracking-wider text-text-disabled">${event.label}</div>
-          </div>
+            <div class="truncate text-[14px] font-semibold text-text-primary">${event.text}</div>
+            <div class="truncate font-mono text-[11px] uppercase tracking-wider text-text-disabled">${event.label}</div>          </div>
         `)}
       </div>
     <//>
@@ -434,12 +430,11 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
 
   return html`
     <${SectionCard}
-      title="Alerts"
-      class="v2-overview-alerts ss-card mx-6"
+      label="Alerts"
       variant="standard"
-      tone=${hasCritical ? 'border-destructive' : 'border-warning'}
-      right=${html`<${StatusDot} class=${hasCritical ? 'bg-destructive' : 'bg-warning'} />`}
-      data-testid="overview-alerts"
+      class="v2-overview-alerts mx-6"
+      tone=${hasCritical ? 'border-destructive/45' : 'border-warning/45'}
+      right=${html`<${StatusDot} class=${hasCritical ? 'bg-destructive' : 'bg-warning'} />`}      data-testid="overview-alerts"
     >
       <div class="mb-4">
         <${KpiStripIsland}
@@ -461,9 +456,8 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
               }}
             >
               <div class="flex-1 min-w-0">
-                <p class="text-[13px] font-semibold truncate text-text-primary">${'name' in a ? a.display : a.title}</p>
-                <p class="text-[11px] text-text-tertiary truncate">${'reason' in a ? a.reason : a.status}</p>
-              </div>
+                <p class="text-[14px] font-semibold truncate text-text-primary">${'name' in a ? a.display : a.title}</p>
+                <p class="text-[12px] text-text-tertiary truncate">${'reason' in a ? a.reason : a.status}</p>              </div>
               <span class=${`chip sm shrink-0 ${a.severity === 'critical' ? 'is-err' : 'is-warn'}`}>
                 ${a.severity.toUpperCase()}
               </span>
@@ -543,14 +537,7 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
   const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
   const segPct = (n: number) => total > 0 ? (n / total) * 100 : 0
   return html`
-    <${SectionCard}
-      label="Today"
-      class="v2-overview-funnel ss-card mx-6"
-      variant="standard"
-      right=${html`<span class="text-[12px] text-text-tertiary">task basis</span>`}
-      data-testid="overview-funnel"
-    >
-      <${KpiStripIsland}
+    <${SectionCard} label="Today" variant="standard" class="v2-overview-funnel mx-6" right=${html`<span class="text-[12px] text-text-tertiary">task basis</span>`} data-testid="overview-funnel">      <${KpiStripIsland}
         ariaLabel="Today funnel"
         cols=${5}
         cells=${[
@@ -586,9 +573,8 @@ export function progressPct(session: DashboardMissionSessionCard | null): number
 function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | null }) {
   if (!active) {
     return html`
-      <${SectionCard} label="Active mission" class="v2-overview-party ss-card mx-6" variant="standard" data-testid="overview-party-empty">
-        <p class="text-[11px] text-text-tertiary italic">No active mission</p>
-      <//>
+      <${SectionCard} label="Active mission" variant="standard" class="v2-overview-party mx-6" data-testid="overview-party-empty">
+        <p class="text-[12px] text-text-tertiary italic">No active mission</p>      <//>
     `
   }
 
@@ -597,15 +583,12 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
   const members = active.member_names
 
   return html`
-    <${SectionCard} label="Active Mission" class="v2-overview-party ss-card mx-6" variant="standard" data-testid="overview-party">
-      <div class="space-y-4">
+    <${SectionCard} label="Active Mission" variant="standard" class="v2-overview-party mx-6" data-testid="overview-party">      <div class="space-y-4">
         <div class="flex items-center justify-between">
-           <p class="text-[13px] font-semibold text-text-primary truncate flex-1 mr-4">
-             ${active.goal}
+           <p class="text-[14px] font-semibold text-text-primary truncate flex-1 mr-4">             ${active.goal}
            </p>
            <div class="flex -space-x-1.5">
-             ${members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--bg-surface-page)]" />`)}
-           </div>
+             ${members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-surface-page" />`)}           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
@@ -651,6 +634,7 @@ function keeperPillClass(status?: string | null): string {
   }
 }
 
+
 function keeperStatusLabel(status?: string | null): string {
   switch ((status ?? '').toLowerCase()) {
     case 'active': case 'live': return 'Active'
@@ -681,28 +665,23 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
 
   if (activeKeepers.length === 0) {
     return html`
-      <${SectionCard} label="Active Keepers" class="v2-overview-keepers ss-card mx-6" variant="standard" data-testid="overview-keepers-empty">
-        <p class="text-[11px] text-text-tertiary italic">No active keepers</p>
-      <//>
+      <${SectionCard} label="Active Keepers" variant="standard" class="v2-overview-keepers mx-6" data-testid="overview-keepers-empty">
+        <p class="text-[12px] text-text-tertiary italic">No active keepers</p>      <//>
     `
   }
 
   return html`
-    <${SectionCard} label="Active Keepers" class="v2-overview-keepers ss-card mx-6" variant="standard" data-testid="overview-keepers">
-      <ul class="flex flex-wrap gap-x-6 gap-y-2">
+    <${SectionCard} label="Active Keepers" variant="standard" class="v2-overview-keepers mx-6" data-testid="overview-keepers">      <ul class="flex flex-wrap gap-x-6 gap-y-2">
         ${activeKeepers.map(
           k => {
             const displayStatus = keeperDisplayStatus(k)
             return html`
             <li key=${k.name} class="flex items-center gap-2">
               <div class="min-w-0">
-                <p class="text-[13px] font-medium truncate text-text-primary">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
-                ${k.last_heartbeat !== undefined
-                  ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-[10px] text-text-tertiary" />`
-                  : null}
+                <p class="text-[14px] font-medium truncate text-text-primary">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>                ${k.last_heartbeat !== undefined
+                  ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-[11px] text-text-tertiary" />`                  : null}
               </div>
-              <span class="${keeperPillClass(displayStatus)} text-[10px] shrink-0">${keeperStatusLabel(displayStatus)}</span>
-            </li>
+              <span class="${keeperPillClass(displayStatus)} text-[11px] shrink-0">${keeperStatusLabel(displayStatus)}</span>            </li>
             `
           },
         )}
@@ -737,13 +716,7 @@ function SurfaceReadinessSummary() {
 
   const summary = summarizeSurfaceReadiness(state.data)
   return html`
-    <${SectionCard}
-      label="Surface Readiness"
-      class="v2-overview-readiness ss-card mx-6"
-      variant="standard"
-      data-testid="overview-surface-readiness"
-    >
-      <${KpiStripIsland}
+    <${SectionCard} label="Surface Readiness" variant="standard" class="v2-overview-readiness mx-6" data-testid="overview-surface-readiness">      <${KpiStripIsland}
         ariaLabel="Surface readiness summary"
         cols=${3}
         cells=${[
@@ -768,13 +741,12 @@ function OverviewHeader({ stats }: { stats: OverviewStats }) {
   useNowSecondsTicker()
   const clock = nowHMKst()
   return html`
-    <header class="v2-overview-head flex flex-wrap items-end justify-between gap-3" data-testid="overview-head">
+    <header class="v2-overview-head flex flex-wrap items-end justify-between gap-3 px-6" data-testid="overview-head">
       <div>
-        <h1 class="text-[18px] font-bold tracking-normal text-text-secondary">운영 개요</h1>
+        <h1 class="text-[20px] font-semibold tracking-normal text-text-secondary">운영 개요</h1>
         <p class="m-0 mt-1 text-[12px] text-text-tertiary">
           <span title="최상위 조정 범위 — 모든 room/keeper를 담는 root namespace">namespace <span class="font-mono text-text-secondary">masc-mcp</span></span>
-          <span class="mx-1 text-text-disabled">·</span>
-          <span title="등록된 keeper 총 수">Keeper ${stats.total}</span>
+          <span class="mx-1 text-text-disabled">·</span>          <span title="등록된 keeper 총 수">Keeper ${stats.total}</span>
           <span class="mx-1 text-text-disabled">·</span>
           <span title="현재 토큰으로 로그인한 운영자">operator <b class="text-text-secondary">@operator</b></span>
         </p>
@@ -788,13 +760,7 @@ function OverviewHeader({ stats }: { stats: OverviewStats }) {
 
 function OverviewKpiStrip({ stats }: { stats: OverviewStats }) {
   return html`
-    <${SectionCard}
-      label="Fleet KPIs"
-      class="v2-overview-kpis ss-card mx-6"
-      variant="standard"
-      data-testid="overview-kpis"
-    >
-      <${KpiStripIsland}
+    <${SectionCard} label="Fleet KPIs" variant="standard" class="v2-overview-kpis mx-6" data-testid="overview-kpis">      <${KpiStripIsland}
         ariaLabel="Fleet KPIs"
         cols=${6}
         cells=${[
@@ -828,19 +794,17 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
 
   if (attn.length === 0) {
     return html`
-      <${SectionCard} label="주의 필요" class="v2-overview-attention ss-card" variant="standard" data-testid="overview-attention">
-        <p class="text-[11px] text-text-tertiary italic">모든 keeper 정상</p>
-      <//>
+      <${SectionCard} label="주의 필요" variant="standard" class="v2-overview-attention mx-6" data-testid="overview-attention">
+        <p class="text-[12px] text-text-tertiary italic">모든 keeper 정상</p>      <//>
     `
   }
 
   return html`
     <${SectionCard}
       label="주의 필요"
-      class="v2-overview-attention ss-card"
       variant="standard"
-      right=${html`<span class="text-[12px] text-text-tertiary">${attn.length}</span>`}
-      data-testid="overview-attention"
+      class="v2-overview-attention mx-6"
+      right=${html`<span class="text-[12px] text-text-tertiary">${attn.length}</span>`}      data-testid="overview-attention"
     >
       <div class="v2-overview-attention-list flex flex-col gap-2">
         ${attn.map(k => {
@@ -849,25 +813,20 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
           return html`
             <div
               key=${k.name}
-              class="v2-overview-attention-row flex cursor-pointer items-center gap-3 rounded-md border border-border bg-card p-2 transition-colors hover:border-strong hover:bg-surface-subtle"
-              onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
+              class="v2-overview-attention-row flex cursor-pointer items-center gap-3 rounded-[var(--r-1)] border border-border bg-card p-2 transition-colors hover:border-border hover:bg-surface-subtle"              onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
               data-testid=${`attention-row-${k.name}`}
             >
               <${AgentAvatar} name=${k.name} size="sm" status=${keeperDisplayStatus(k)} />
               <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
-                  ${displayName}
-                  <span class="font-mono text-[11px] text-text-tertiary">${k.name}</span>
-                </div>
-                <div class="flex items-center gap-1.5 text-[11px] text-text-tertiary">
-                  <span class="inline-block size-1.5 rounded-full ${attentionToneClass(reason.sev)}"></span>
+                <div class="flex items-center gap-2 text-[14px] font-semibold text-text-primary">                  ${displayName}
+                  <span class="font-mono text-[12px] text-text-tertiary">${k.name}</span>                </div>
+                <div class="flex items-center gap-1.5 text-[12px] text-text-tertiary">                  <span class="inline-block size-1.5 rounded-full ${attentionToneClass(reason.sev)}"></span>
                   <span class=${reason.sev === 'bad' ? 'text-destructive' : 'text-warning'}>${reason.text}</span>
                 </div>
               </div>
               <button
                 type="button"
-                class="text-[11px] font-medium text-brand hover:underline"
-                onClick=${(e: MouseEvent) => {
+                class="text-[12px] font-medium text-brand hover:underline min-h-11 px-2"                onClick=${(e: MouseEvent) => {
                   e.stopPropagation()
                   navigate('monitoring', { section: 'agents', keeper: k.name })
                 }}
@@ -886,10 +845,9 @@ function OverviewTelemetry({ bars }: { bars: number[] }) {
   return html`
     <${SectionCard}
       label="텔레메트리"
-      class="v2-overview-telemetry ss-card"
       variant="standard"
-      right=${html`<span class="text-[12px] font-mono text-text-tertiary">trace / 5m · last 140m</span>`}
-      data-testid="overview-telemetry"
+      class="v2-overview-telemetry mx-6"
+      right=${html`<span class="text-[12px] font-mono text-text-tertiary">trace / 5m · last 140m</span>`}      data-testid="overview-telemetry"
     >
       <div class="v2-overview-bars flex h-24 items-end gap-0.5" role="img" aria-label="Trace telemetry histogram">
         ${bars.map((b, i) => html`
@@ -900,12 +858,11 @@ function OverviewTelemetry({ bars }: { bars: number[] }) {
           ></span>
         `)}
       </div>
-      <div class="mt-3 grid grid-cols-4 gap-2 text-[11px]">
+      <div class="mt-3 grid grid-cols-4 gap-2 text-[12px]">
         <div><span class="text-text-tertiary">피크</span><span class="ml-2 font-mono text-text-secondary">112/5m</span></div>
         <div><span class="text-text-tertiary">평균</span><span class="ml-2 font-mono text-text-secondary">47/5m</span></div>
         <div><span class="text-text-tertiary">오류율</span><span class="ml-2 font-mono text-success">0.4%</span></div>
-        <div><span class="text-text-tertiary">p95 지연</span><span class="ml-2 font-mono text-text-secondary">1.8s</span></div>
-      </div>
+        <div><span class="text-text-tertiary">p95 지연</span><span class="ml-2 font-mono text-text-secondary">1.8s</span></div>      </div>
     <//>
   `
 }
@@ -913,9 +870,8 @@ function OverviewTelemetry({ bars }: { bars: number[] }) {
 function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
   if (keeperList.length === 0) {
     return html`
-      <${SectionCard} label="Keeper 전체" class="v2-overview-fleet ss-card mx-6" variant="standard" data-testid="overview-fleet">
-        <p class="text-[11px] text-text-tertiary italic">No keepers</p>
-      <//>
+      <${SectionCard} label="Keeper 전체" variant="standard" class="v2-overview-fleet mx-6" data-testid="overview-fleet">
+        <p class="text-[12px] text-text-tertiary italic">No keepers</p>      <//>
     `
   }
 
@@ -934,13 +890,11 @@ function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
   return html`
     <${SectionCard}
       label="Keeper 전체"
-      class="v2-overview-fleet ss-card mx-6"
       variant="standard"
-      right=${html`
+      class="v2-overview-fleet mx-6"      right=${html`
         <button
           type="button"
-          class="text-[11px] text-brand hover:underline"
-          onClick=${() => navigate('monitoring', { section: 'agents' })}
+          class="text-[12px] text-brand hover:underline min-h-11 px-2"          onClick=${() => navigate('monitoring', { section: 'agents' })}
         >
           전체 대화 보기 →
         </button>
@@ -958,26 +912,22 @@ function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
             <button
               key=${k.name}
               type="button"
-              class="v2-overview-keeper text-left rounded-md border border-border bg-card p-3 transition-colors hover:border-strong hover:bg-surface-subtle"
-              onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
+              class="v2-overview-keeper ss-card text-left border border-border bg-card p-3 transition-colors hover:border-border hover:bg-surface-subtle"              onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
               data-testid=${`overview-keeper-${k.name}`}
             >
               <div class="flex items-center gap-2">
                 <${AgentAvatar} name=${k.name} size="sm" status=${displayStatus} />
                 <div class="min-w-0 flex-1">
-                  <div class="truncate text-[13px] font-semibold text-text-primary">${displayName}</div>
-                  <div class="flex items-center gap-1.5 text-[11px] text-text-tertiary">
-                    <${StatusDot} class=${isRunning ? 'bg-success' : 'bg-text-disabled'} />
-                    <span class="truncate">${k.phase ?? k.lifecycle_phase ?? displayStatus}</span>
+                  <div class="truncate text-[14px] font-semibold text-text-primary">${displayName}</div>
+                  <div class="flex items-center gap-1.5 text-[12px] text-text-tertiary">
+                    <${StatusDot} class=${isRunning ? 'bg-success' : 'bg-text-disabled'} />                    <span class="truncate">${k.phase ?? k.lifecycle_phase ?? displayStatus}</span>
                   </div>
                 </div>
                 ${pickAttentionKeepers([k]).length > 0
-                  ? html`<span class="v2-overview-keeper-att inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[11px] font-semibold text-white">!</span>`
-                  : null}
+                  ? html`<span class="v2-overview-keeper-att inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[12px] font-semibold text-white">!</span>`                  : null}
               </div>
-              <div class="mt-2 flex items-center justify-between gap-2 text-[11px]">
-                <span class="font-mono text-text-tertiary">${keeperModelLabel(k)}</span>
-                <div class="flex flex-1 items-center gap-2">
+              <div class="mt-2 flex items-center justify-between gap-2 text-[12px]">
+                <span class="font-mono text-text-tertiary">${keeperModelLabel(k)}</span>                <div class="flex flex-1 items-center gap-2">
                   <div class="v2-overview-mini-meter h-1 flex-1 rounded-full bg-surface-muted">
                     <span class="block h-full rounded-full ${ctx >= 0.85 ? 'bg-destructive' : ctx >= 0.6 ? 'bg-warning' : 'bg-success'}" style=${{ width: `${Math.min(100, ctxPct)}%` }}></span>
                   </div>
@@ -1015,8 +965,7 @@ export function Overview() {
   const bars = useMemo(() => telemetryBars(keeperList), [keeperList])
 
   return html`
-    <div class="v2-overview-surface ss-surface flex flex-col space-y-6 bg-surface-page text-text-primary">
-      <${OverviewHeader} stats=${stats} />
+    <div class="v2-overview-surface ss-surface flex flex-col space-y-6 py-6">      <${OverviewHeader} stats=${stats} />
       <${OverviewKpiStrip} stats=${stats} />
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
       <div class="grid gap-6 px-6 lg:grid-cols-2">

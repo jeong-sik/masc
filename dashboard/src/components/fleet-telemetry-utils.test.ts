@@ -262,24 +262,24 @@ describe('uniqueStrings', () => {
 })
 
 describe('successClass', () => {
-  it('returns ok for >=97', () => {
-    expect(successClass(97)).toContain('var(--color-status-ok)')
-    expect(successClass(100)).toContain('var(--color-status-ok)')
+  it('returns success for >=97', () => {
+    expect(successClass(97)).toBe('text-success')
+    expect(successClass(100)).toBe('text-success')
   })
 
-  it('returns warn for 90-96', () => {
-    expect(successClass(90)).toContain('var(--color-status-warn)')
-    expect(successClass(96)).toContain('var(--color-status-warn)')
+  it('returns warning for 90-96', () => {
+    expect(successClass(90)).toBe('text-warning')
+    expect(successClass(96)).toBe('text-warning')
   })
 
-  it('returns bad-light for <90', () => {
-    expect(successClass(89)).toContain('var(--bad-light)')
-    expect(successClass(50)).toContain('var(--bad-light)')
+  it('returns destructive for <90', () => {
+    expect(successClass(89)).toBe('text-destructive')
+    expect(successClass(50)).toBe('text-destructive')
   })
 
   it('returns disabled for null/non-finite', () => {
-    expect(successClass(null)).toContain('color-fg-disabled')
-    expect(successClass(NaN)).toContain('color-fg-disabled')
+    expect(successClass(null)).toBe('text-text-disabled')
+    expect(successClass(NaN)).toBe('text-text-disabled')
   })
 })
 
@@ -384,27 +384,24 @@ describe('compareFleetRows', () => {
 })
 
 describe('pressureClass', () => {
-  // After the Anyang Sleepers token migration, pressureClass returns
-  // semantic design-system tokens (--bad-light / --warn / --ok)
-  // rather than hardcoded Tailwind colors, so the chip recolors
-  // automatically under [data-theme="paper"].
-  it('returns bad-light for hot ratio', () => {
-    expect(pressureClass(PRESSURE_HOT_RATIO)).toContain('var(--bad-light)')
+  // StyleSeed semantic tokens
+  it('returns destructive for hot ratio', () => {
+    expect(pressureClass(PRESSURE_HOT_RATIO)).toBe('text-destructive')
   })
 
-  it('returns warn for warn ratio', () => {
-    expect(pressureClass(PRESSURE_WARN_RATIO)).toContain('var(--color-status-warn)')
+  it('returns warning for warn ratio', () => {
+    expect(pressureClass(PRESSURE_WARN_RATIO)).toBe('text-warning')
   })
 
-  it('returns ok for low ratio', () => {
-    expect(pressureClass(0.1)).toContain('var(--color-status-ok)')
+  it('returns success for low ratio', () => {
+    expect(pressureClass(0.1)).toBe('text-success')
   })
 })
 
 describe('statusClass', () => {
-  it('returns bad-light for offline/stopped', () => {
-    expect(statusClass(makeRow({ keepalive_running: false }))).toContain('var(--bad-light)')
-    expect(statusClass(makeRow({ status: 'stopped' }))).toContain('var(--bad-light)')
+  it('returns destructive for offline/stopped', () => {
+    expect(statusClass(makeRow({ keepalive_running: false }))).toBe('text-destructive')
+    expect(statusClass(makeRow({ status: 'stopped' }))).toBe('text-destructive')
   })
 
   // Lock the remaining offline-trigger status strings in statusClass.
@@ -416,24 +413,24 @@ describe('statusClass', () => {
     'unbooted',
     'dead',
     'crashed',
-  ])('returns bad-light for status=%s', (status) => {
-    expect(statusClass(makeRow({ status }))).toContain('var(--bad-light)')
+  ])('returns destructive for status=%s', (status) => {
+    expect(statusClass(makeRow({ status }))).toBe('text-destructive')
   })
 
-  it('returns warn for runtime blocker', () => {
-    expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toContain('var(--color-status-warn)')
+  it('returns warning for runtime blocker', () => {
+    expect(statusClass(makeRow({ runtime_blocker_class: 'turn_timeout' }))).toBe('text-warning')
   })
 
-  it('returns warn for stale diagnostic health state', () => {
-    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toContain('var(--color-status-warn)')
+  it('returns warning for stale diagnostic health state', () => {
+    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'stale' }))).toBe('text-warning')
   })
 
-  it('returns bad-light for offline diagnostic health state', () => {
-    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'offline' }))).toContain('var(--bad-light)')
+  it('returns destructive for offline diagnostic health state', () => {
+    expect(statusClass(makeRow({ status: 'inactive', diagnostic_health_state: 'offline' }))).toBe('text-destructive')
   })
 
-  it('returns ok for healthy', () => {
-    expect(statusClass(makeRow())).toContain('var(--color-status-ok)')
+  it('returns success for healthy', () => {
+    expect(statusClass(makeRow())).toBe('text-success')
   })
 })
 

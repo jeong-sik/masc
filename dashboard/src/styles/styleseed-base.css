@@ -64,6 +64,167 @@
   border: var(--card-border);
 }
 
+/* Section head strip inside StyleSeed cards */
+[data-theme="styleseed"] [data-section-head] {
+  background-color: var(--surface-subtle) !important;
+  border-bottom-color: var(--border) !important;
+  color: var(--text-secondary) !important;
+}
+
+/* Primitive colour bridges for migrated surfaces */
+[data-theme="styleseed"] .bar {
+  background-color: var(--surface-muted);
+}
+[data-theme="styleseed"] .bar > .fill {
+  background-color: var(--brand);
+}
+[data-theme="styleseed"] .bar.is-ok > .fill,
+[data-theme="styleseed"] .bar-seg .seg-ok {
+  background-color: var(--success);
+}
+[data-theme="styleseed"] .bar.is-warn > .fill,
+[data-theme="styleseed"] .bar-seg .seg-warn {
+  background-color: var(--warning);
+}
+[data-theme="styleseed"] .bar.is-err > .fill,
+[data-theme="styleseed"] .bar-seg .seg-err {
+  background-color: var(--destructive);
+}
+[data-theme="styleseed"] .bar-seg {
+  background-color: var(--surface-muted);
+}
+[data-theme="styleseed"] .bar-seg .seg-idle {
+  background-color: var(--surface-muted);
+}
+
+[data-theme="styleseed"] .chip.is-ok,
+[data-theme="styleseed"] .pill.is-ok {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  background-color: color-mix(in srgb, var(--success) 10%, transparent);
+}
+[data-theme="styleseed"] .chip.is-warn,
+[data-theme="styleseed"] .pill.is-warn {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 35%, transparent);
+  background-color: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+[data-theme="styleseed"] .chip.is-err,
+[data-theme="styleseed"] .pill.is-err {
+  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--destructive) 35%, transparent);
+  background-color: color-mix(in srgb, var(--destructive) 10%, transparent);
+}
+[data-theme="styleseed"] .pill.is-running {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
+  background-color: color-mix(in srgb, var(--brand) 10%, transparent);
+}
+[data-theme="styleseed"] .pill.is-paused {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background-color: var(--surface-subtle);
+}
+
+/* Cockpit command-map bridge */
+[data-theme="styleseed"] .cp-main {
+  background-color: var(--surface-page);
+}
+[data-theme="styleseed"] .cp-head .cp-eyebrow {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+[data-theme="styleseed"] .cp-head .cp-title {
+  color: var(--text-primary);
+  font-size: 20px;
+}
+[data-theme="styleseed"] .cp-head .cp-sub {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+[data-theme="styleseed"] .cp-disc,
+[data-theme="styleseed"] .cp-plane {
+  background-color: var(--card);
+  border-color: var(--border);
+}
+[data-theme="styleseed"] .cp-disc-h {
+  border-bottom-color: var(--border);
+}
+[data-theme="styleseed"] .cp-disc-h h3 {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+[data-theme="styleseed"] .cp-disc-row .lvl {
+  color: var(--brand);
+}
+[data-theme="styleseed"] .cp-disc-row .ttl {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+[data-theme="styleseed"] .cp-disc-row .sum {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+[data-theme="styleseed"] .cp-disc-row .mtr {
+  color: var(--text-secondary);
+  background-color: var(--surface-subtle);
+  border-color: var(--border);
+}
+[data-theme="styleseed"] .cp-plane-h {
+  background-color: var(--surface-subtle);
+  border-bottom-color: var(--border);
+}
+[data-theme="styleseed"] .cp-plane-ico {
+  color: var(--brand);
+  background-color: var(--surface-subtle);
+  border-color: var(--border);
+}
+[data-theme="styleseed"] .cp-plane-h h2 {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 700;
+}
+[data-theme="styleseed"] .cp-plane-h .sum {
+  color: var(--text-tertiary);
+}
+[data-theme="styleseed"] .cp-cov.ok {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  background-color: color-mix(in srgb, var(--success) 10%, transparent);
+}
+[data-theme="styleseed"] .cp-cov.blk {
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background-color: var(--surface-subtle);
+}
+[data-theme="styleseed"] .cp-route {
+  background-color: var(--surface-subtle);
+  border-color: var(--border);
+}
+[data-theme="styleseed"] .cp-route:hover {
+  background-color: var(--surface-muted);
+  border-color: var(--border);
+}
+[data-theme="styleseed"] .cp-route .rl {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+[data-theme="styleseed"] .cp-route .rc {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+[data-theme="styleseed"] .cp-route .arr {
+  color: var(--text-tertiary);
+}
+[data-theme="styleseed"] .cp-route:hover .arr {
+  color: var(--brand);
+}
+
+/* Inline eyebrow / caption bridges */
+[data-theme="styleseed"] [data-eyebrow] {
+  color: var(--text-tertiary) !important;
+}
+
 /* Mobile safe-area helpers */
 [data-theme="styleseed"] .ss-safe-bottom {
   padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));

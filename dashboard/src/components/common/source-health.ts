@@ -15,15 +15,15 @@ import type { TelemetryCoverageGap, TelemetryFreshnessMetadata } from '../../api
 export function sourceHealthClass(health?: string | null): string {
   switch ((health ?? '').toLowerCase()) {
     case 'ok':
-      return 'text-[var(--color-status-ok)]'
+      return 'text-success'
     case 'stale':
     case 'coverage_gap':
     case 'empty':
-      return 'text-[var(--color-status-warn)]'
+      return 'text-warning'
     case 'missing':
-      return 'text-[var(--bad-light)]'
+      return 'text-destructive'
     default:
-      return 'text-[var(--color-fg-disabled)]'
+      return 'text-text-disabled'
   }
 }
 

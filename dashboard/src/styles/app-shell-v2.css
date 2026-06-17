@@ -1,26 +1,68 @@
-/* MASC Dashboard — v2 App Shell port
+/* MASC Dashboard — StyleSeed app shell layout
  *
- * Ports the structural shell/layout patterns from keeper-v2/app.jsx into the
- * dashboard's Preact/htm/TS surface while preserving the existing routing and
- * accessibility contracts.
- *
- * Scope:
- *   - .v2-app wrapper and data-density / data-motion / data-bubble attributes
- *   - header chrome alignment with v2 TopBar (crumb, status chips)
- *   - stage/body transitions when surfaces change
- *   - focus-mode chrome
- *
- * Source reference: /Users/dancer/Downloads/v2 (7)/keeper-v2/app.jsx
+ * Ports the dashboard chrome to the StyleSeed design system:
+ *   - Light page background (#FAFAFA) with white cards
+ *   - Semantic tokens only (no hardcoded hex in shell components)
+ *   - Cards: rounded-2xl, shadow-card (<= 8% opacity)
+ *   - Spacing: space-y-6 between sections, mx-6 for single cards, px-6 for grids
+ *   - Touch targets >= 44x44; CJK word-break: keep-all
+ *   - Preserves mobile drawer behavior and focus-mode chrome.
  */
+
+/* ═══════════════════════════════════════════════════════════════
+   STYLESEED SEMANTIC TOKENS (shell scope)
+   Defined at :root so v2-shell.css and shell components can share them.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Surfaces */
+  --ss-page: #FAFAFA;
+  --ss-card: #FFFFFF;
+  --ss-surface: #F5F5F5;
+  --ss-surface-subtle: #FAFAFA;
+  --ss-surface-muted: #E8E8E8;
+
+  /* Text hierarchy (darkest is #2A2A2A, never pure black) */
+  --ss-text-primary: #2A2A2A;
+  --ss-text-secondary: #6A6A6A;
+  --ss-text-tertiary: #7A7A7A;
+  --ss-text-disabled: #9B9B9B;
+
+  /* Hairlines */
+  --ss-border: rgba(0, 0, 0, 0.08);
+  --ss-border-subtle: rgba(0, 0, 0, 0.05);
+  --ss-border-strong: rgba(0, 0, 0, 0.12);
+
+  /* Single accent (--brand) */
+  --ss-brand: #721FE5;
+  --ss-brand-tint: rgba(114, 31, 229, 0.10);
+  --ss-brand-dim: rgba(114, 31, 229, 0.06);
+  --ss-brand-glow: 114 31 229;
+
+  /* Status */
+  --ss-success: #6B9B7A;
+  --ss-warning: #D97706;
+  --ss-destructive: #d4183d;
+
+  /* Shadows (<= 8% opacity) */
+  --ss-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --ss-shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --ss-shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --ss-shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+  /* Shape */
+  --ss-radius-card: 1rem;       /* 16px = rounded-2xl */
+  --ss-radius-input: 0.375rem;  /* 6px */
+}
 
 /* ═══════════════════════════════════════════════════════════════
    APP WRAPPER
    ═══════════════════════════════════════════════════════════════ */
 
 .v2-app {
-  /* Bridge to the generated Cockpit token stack. */
-  --v2-app-bg: var(--color-bg-page);
-  --v2-app-fg: var(--color-fg-primary);
+  /* Bridge to StyleSeed tokens. */
+  --v2-app-bg: var(--ss-page);
+  --v2-app-fg: var(--ss-text-primary);
   --v2-app-font: var(--font-sans);
 
   /* Density scale defaults (mirrors v2 TWEAK_DEFAULTS). */
@@ -30,6 +72,10 @@
 
   /* Layout timing — used by rail/stage transitions. */
   --v2-shell-transition: var(--t-slow) var(--ease);
+
+  background-color: var(--ss-page);
+  color: var(--ss-text-primary);
+  word-break: keep-all;
 }
 
 .v2-app,
@@ -37,8 +83,7 @@
   box-sizing: border-box;
 }
 
-/* Subtle radial depth — matches v2 app background treatment but using the
-   dashboard's brass-glow token instead of v2's hard-coded oranges. */
+/* Subtle page depth — StyleSeed uses very light, barely visible gradients. */
 .v2-app::before {
   content: "";
   position: fixed;
@@ -46,8 +91,8 @@
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(1200px 600px at 80% -10%, rgb(var(--brass-glow) / .04), transparent 60%),
-    radial-gradient(900px 500px at -5% 110%, rgb(var(--warn-glow) / .03), transparent 60%);
+    radial-gradient(1200px 600px at 80% -10%, rgba(114, 31, 229, 0.025), transparent 60%),
+    radial-gradient(900px 500px at -5% 110%, rgba(0, 0, 0, 0.02), transparent 60%);
 }
 
 /* Ensure shell children render above the decorative background. */
@@ -58,18 +103,18 @@
 
 /* Density variants (data-density mirrors v2 tweak panel). */
 .v2-app[data-density="spacious"] {
+  --v2-app-padding: 24px;
+  --v2-app-gap: 16px;
+}
+
+.v2-app[data-density="regular"] {
   --v2-app-padding: 16px;
   --v2-app-gap: 12px;
 }
 
-.v2-app[data-density="regular"] {
+.v2-app[data-density="compact"] {
   --v2-app-padding: 12px;
   --v2-app-gap: 8px;
-}
-
-.v2-app[data-density="compact"] {
-  --v2-app-padding: 8px;
-  --v2-app-gap: 6px;
 }
 
 /* Motion variants — gate transitions/animations (a11y.css handles
@@ -87,43 +132,42 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   HEADER — v2 TopBar alignment
+   HEADER — StyleSeed TopBar
    ═══════════════════════════════════════════════════════════════ */
 
 .v2-app .v2-shell-header {
-  /* v2 topbar is a single horizontal band; keep the dashboard's multi-row
-     responsive behavior but tighten it to the v2 palette when space allows. */
-  background: linear-gradient(180deg, var(--shell-header-bg), color-mix(in srgb, var(--shell-header-bg) 92%, black));
+  /* TopBar is a single horizontal band on a white card. */
+  background: var(--ss-card);
+  border-bottom: 1px solid var(--ss-border);
+  box-shadow: var(--ss-shadow-card);
 }
 
-/* Crumb treatment from v2 TopBar: uppercase, wide tracking, muted. */
+/* Crumb treatment from StyleSeed: uppercase, wide tracking, muted. */
 .v2-app .v2-header-crumb {
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   font-size: 10px;
   font-weight: 500;
 }
 
 .v2-app .v2-header-crumb > span:first-child {
-  color: var(--color-fg-muted);
+  color: var(--ss-text-tertiary);
 }
 
 .v2-app .v2-header-crumb > span:not(:first-child) {
-  color: var(--brass-1);
+  color: var(--ss-brand);
 }
 
-/* v2-style status chips in the header actions area. These are intentionally
-   generic — callers populate them with live data; the shell only supplies the
-   pill shape and tone variants. */
+/* StyleSeed status chips in the header actions area. */
 .v2-app .v2-header-actions .v2-statchip {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 4px 10px;
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-pill, 9999px);
-  background: var(--color-bg-elevated);
-  color: var(--color-fg-muted);
+  border: 1px solid var(--ss-border);
+  border-radius: 9999px;
+  background: var(--ss-surface-subtle);
+  color: var(--ss-text-secondary);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.03em;
@@ -131,24 +175,24 @@
 }
 
 .v2-app .v2-header-actions .v2-statchip b {
-  color: var(--color-fg-primary);
+  color: var(--ss-text-primary);
   font-weight: 600;
 }
 
 .v2-app .v2-header-actions .v2-statchip.live {
-  color: var(--color-status-ok);
-  border-color: color-mix(in oklab, var(--color-status-ok) 40%, transparent);
-  background: var(--ok-soft);
+  color: var(--ss-success);
+  border-color: color-mix(in oklab, var(--ss-success) 35%, transparent);
+  background: color-mix(in oklab, var(--ss-success) 8%, transparent);
 }
 
 .v2-app .v2-header-actions .v2-statchip.warn {
-  color: var(--color-status-warn);
-  border-color: color-mix(in oklab, var(--color-status-warn) 40%, transparent);
-  background: var(--warn-soft);
+  color: var(--ss-warning);
+  border-color: color-mix(in oklab, var(--ss-warning) 35%, transparent);
+  background: color-mix(in oklab, var(--ss-warning) 8%, transparent);
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   STAGE / BODY — surface transitions
+   STAGE / BODY — StyleSeed card-based surface
    ═══════════════════════════════════════════════════════════════ */
 
 .v2-app .v2-stage {
@@ -160,6 +204,12 @@
 }
 
 .v2-app .v2-body {
+  /* White card stage with rounded-2xl and soft shadow. */
+  background: var(--ss-card);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius-card);
+  box-shadow: var(--ss-shadow-card);
+
   /* Smooth transitions for the main surface as rails collapse/expand or the
      viewport changes. */
   transition:
@@ -200,12 +250,12 @@
 
 /* Bubble style variants (data-bubble mirrors v2 tweak panel). */
 .v2-app[data-bubble="card"] .v2-body {
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / .015), var(--shadow-panel);
+  box-shadow: var(--ss-shadow-card);
 }
 
 .v2-app[data-bubble="flat"] .v2-body {
   box-shadow: none;
-  border-color: var(--color-border-default);
+  border-color: var(--ss-border);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -213,8 +263,6 @@
    ═══════════════════════════════════════════════════════════════ */
 
 .v2-app[data-focus-mode="true"] {
-  /* Pull the main stage forward visually; header/rail are already hidden by
-     app.ts compactChromeMode, so this styles the remaining chrome. */
   --v2-shell-transition: 220ms var(--ease);
 }
 
@@ -227,18 +275,18 @@
   border-color: transparent;
   border-radius: 0;
   box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, var(--brass-1) 18%, transparent),
-    inset 0 0 24px rgb(var(--brass-glow) / .04);
+    inset 0 0 0 1px color-mix(in oklab, var(--ss-brand) 18%, transparent),
+    inset 0 0 24px rgb(var(--ss-brand-glow) / .04);
 }
 
-/* A subdued accent indicator along the top edge so focus mode is still
+/* A subdued brand indicator along the top edge so focus mode is still
    legible when the header is hidden. */
 .v2-app[data-focus-mode="true"] .v2-body::before {
   content: "";
   position: absolute;
   inset: 0 0 auto 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--brass-1), transparent);
+  background: linear-gradient(90deg, transparent, var(--ss-brand), transparent);
   opacity: 0.35;
   pointer-events: none;
 }
@@ -246,8 +294,9 @@
 /* When focus mode is active, the focus-mode toggle is the only persistent
    chrome; make it more prominent. */
 .v2-app[data-focus-mode="true"] .dashboard-focus-mode-toggle {
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--brass-1) 30%, transparent),
-              0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--ss-brand) 30%, transparent),
+    0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 /* ═══════════════════════════════════════════════════════════════

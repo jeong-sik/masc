@@ -177,7 +177,6 @@
  * Provide the spacious rhythm + centered max-width column here. */
 .kw-thread {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
-  overflow-y: auto;
   padding: 0;
 }
 .kw-thread-inner {

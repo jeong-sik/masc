@@ -16,8 +16,30 @@ type t =
   ; uid : int
   ; gid : int
   ; network_mode : network_mode
-  ; mutable state : state
+  ; state : state Atomic.t
   }
+
+let get_state t = Atomic.get t.state
+let set_state t state = Atomic.set t.state state
+
+module For_testing = struct
+  let create_minimal ~state =
+    { config = Obj.magic ()
+    ; meta = Obj.magic ()
+    ; turn_id = 0
+    ; raw_host_root = ""
+    ; host_root = ""
+    ; container_root = ""
+    ; uid = 0
+    ; gid = 0
+    ; network_mode = Network_none
+    ; state = Atomic.make state
+    }
+  ;;
+
+  let get_state = get_state
+  let set_state = set_state
+end
 
 let turn_id t = t.turn_id
 let host_root t = t.host_root
@@ -45,7 +67,7 @@ let create
   ; uid = Unix.getuid ()
   ; gid = Unix.getgid ()
   ; network_mode
-  ; state = Not_started
+  ; state = Atomic.make Not_started
   }
 ;;
 
@@ -782,7 +804,7 @@ let start_container (t : t) ~timeout_sec =
                  container_name
              with
              | Ok () ->
-               t.state <- Running { container_name };
+               set_state t Running { container_name };
                Ok container_name
              | Error inspect_out ->
                (* Inspect failed after a successful `docker run`. Without an
@@ -831,7 +853,7 @@ let start_container (t : t) ~timeout_sec =
 ;;
 
 let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
-  match t.state with
+  match get_state t with
   | Running { container_name } ->
     if not validate_running
     then Ok container_name
@@ -843,7 +865,7 @@ let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
       with
       | Ok () -> Ok container_name
       | Error _ ->
-        t.state <- Not_started;
+        set_state t Not_started;
         start_container t ~timeout_sec)
   | Not_started -> start_container t ~timeout_sec
 ;;
@@ -945,7 +967,7 @@ let run_exec_with_status_split
   | Error _ as err -> err
   | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
     when container_missing_error (output_for_status ~stdout ~stderr) ->
-    t.state <- Not_started;
+    set_state t Not_started;
     (match
        run_exec_with_status_split_once
          ?stdin_content
@@ -1064,7 +1086,7 @@ let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ~timeout_sec
   | Error _ as err -> err
   | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
     when container_missing_error (output_for_status ~stdout ~stderr) ->
-    t.state <- Not_started;
+    set_state t Not_started;
     (match
        run_exec_pipeline_with_status_once
          t
@@ -1149,7 +1171,7 @@ let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
     then (
       match st with
       | Unix.WEXITED (126 | 127) ->
-        t.state <- Not_started;
+        set_state t Not_started;
         (match ensure_started t ~timeout_sec with
          | Error _ as err -> err
          | Ok container_name ->
@@ -1201,10 +1223,10 @@ let append_file ~timeout_sec t ~host_path ~content () =
 ;;
 
 let cleanup (t : t) =
-  match t.state with
+  match get_state t with
   | Not_started -> ()
   | Running { container_name } ->
-    t.state <- Not_started;
+    set_state t Not_started;
     let rm_timeout =
       Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
     in

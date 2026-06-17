@@ -70,7 +70,7 @@ val make_append_manifest :
   generation:int ->
   runtime_id:string ->
   turn_start:Mtime.t ->
-  seq_ref:int ref ->
+  seq_ref:int Atomic.t ->
   Keeper_agent_run_sidecar.append_manifest_fn
 
 val turn_progress_callbacks :

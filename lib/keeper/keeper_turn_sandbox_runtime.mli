@@ -6,6 +6,10 @@
 
 type t
 
+type state =
+  | Not_started
+  | Running of { container_name : string }
+
 val create :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
@@ -19,6 +23,12 @@ val host_root : t -> string
 
 val cleanup : t -> unit
 (** Best-effort teardown. Safe to call multiple times. *)
+
+module For_testing : sig
+  val create_minimal : state:state -> t
+  val get_state : t -> state
+  val set_state : t -> state -> unit
+end
 
 val container_path_of_host :
   t -> host_path:string -> (string, string) result

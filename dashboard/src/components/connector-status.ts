@@ -1938,7 +1938,7 @@ export function ConnectorStatusPanel() {
   const activeCount = allConnectors.filter(c => connectorStateLabel(c) === 'connected').length
 
   return html`
-    <div class="contain-content v2-connector-status v2-connectors-surface">
+    <div class="contain-content v2-connector-status v2-connectors-surface ss-surface bg-surface-page">
       <${ConnectorsSurfaceHeader}
         filterId=${filterId as KnownConnectorId | null}
         connectorCount=${connectorCount}

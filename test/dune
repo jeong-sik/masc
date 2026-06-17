@@ -148,6 +148,7 @@
   test_keeper_timing
   test_keeper_token_count
   test_keeper_chat_store
+  test_keeper_chat_blocks
   test_keeper_external_attention
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
@@ -438,6 +439,7 @@
   test_keeper_timing
   test_keeper_token_count
   test_keeper_chat_store
+  test_keeper_chat_blocks
   test_keeper_external_attention
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot

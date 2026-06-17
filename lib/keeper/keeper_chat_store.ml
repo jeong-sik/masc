@@ -129,6 +129,8 @@ let authority_of_label = function
   | "external" -> Some External
   | _ -> None
 
+type chat_block = Keeper_chat_blocks.chat_block
+
 type audio_clip = {
   token : string;
   audio_url : string option;
@@ -136,6 +138,7 @@ type audio_clip = {
   duration_sec : float option;
   message_text : string;
   device_id : string option;
+  expired : bool;
 }
 
 type speaker = {
@@ -169,6 +172,11 @@ type chat_message = {
   external_message_id : string option;
   speaker : speaker option;
   audio : audio_clip option;
+  blocks : Keeper_chat_blocks.chat_block list option;
+      (* RFC-0235 P3: rich chat blocks parsed from assistant reply text.
+         Persisted server-side so the dashboard can prefer backend blocks
+         over its local parser. [None] on rows written before this field
+         and on non-assistant rows. *)
   mentions : Keeper_identity.Keeper_id.t list;
       (* RFC-0232 §3.3: parsed once at append from the persisted content
          (plus connector-provided explicit mentions); [] = none.  Rows
@@ -213,7 +221,10 @@ let speaker_fields = function
 
 (* RFC-0235 P1: nested ["audio"] assoc so the clip stays one unit on the
    JSONL row. Absent on rows written before voice transport; reads as
-   [None] (the dashboard renders text-only, matching any non-voice turn). *)
+   [None] (the dashboard renders text-only, matching any non-voice turn).
+   [expired] is written only when true so fresh clips stay byte-identical
+   to rows written before this field existed; the history endpoint stamps
+   it when the underlying MP3 has been reaped. *)
 let audio_to_json a =
   let base =
     [ ("token", `String a.token)
@@ -221,13 +232,21 @@ let audio_to_json a =
     ; ("message_text", `String a.message_text)
     ]
   in
-  match a.duration_sec with
-  | None -> base
-  | Some d -> base @ [ ("duration_sec", `Float d) ]
+  let with_duration =
+    match a.duration_sec with
+    | None -> base
+    | Some d -> base @ [ ("duration_sec", `Float d) ]
+  in
+  if a.expired then with_duration @ [ ("expired", `Bool true) ] else with_duration
 
 let audio_fields = function
   | None -> []
   | Some a -> [ ("audio", `Assoc (audio_to_json a)) ]
+
+let blocks_fields = function
+  | None | Some [] -> []
+  | Some blocks -> [ ("blocks", Keeper_chat_blocks.blocks_to_yojson blocks) ]
+;;
 
 (* R3: producer-assigned message id.  [encode_line] is the sole writer, so
    minting here makes it impossible to persist a row without an id.  The
@@ -258,7 +277,7 @@ let legacy_message_id ~ts ~content =
 
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
-    ?audio ?(mentions = []) ?(kind = Row_kind.Utterance) ()
+    ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ()
     : string =
   (* RFC-0232 P5: the label is a derivation of the typed surface — the
      single site that turns a [Surface_ref.t] into the legacy [source]
@@ -275,6 +294,17 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ("content", `String content);
     ("ts", `Float ts);
   ] in
+  (* Backend-driven chat blocks: assistant rows get a default parse unless
+     the caller already supplied blocks (e.g., a future rich-content path).
+     Tool and user rows carry no blocks. *)
+  let blocks =
+    match blocks with
+    | Some _ -> blocks
+    | None ->
+      if Role.equal role Role.Assistant && String.trim content <> ""
+      then Some (Keeper_chat_blocks.parse_text_to_blocks content)
+      else None
+  in
   let mention_fields =
     match mentions with
     | [] -> []
@@ -324,6 +354,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     @ opt_string_field "external_message_id" external_message_id
     @ speaker_fields speaker
     @ audio_fields audio
+    @ blocks_fields blocks
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
@@ -348,6 +379,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
     ?(assistant_kind = Row_kind.Utterance)
+    ?blocks
     ~(assistant_content : string)
     () =
   try
@@ -386,7 +418,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     in
     let asst_line =
       encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?surface
-        ?conversation_id ~kind:assistant_kind ()
+        ?conversation_id ~kind:assistant_kind ?blocks ()
     in
     let payload =
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
@@ -405,7 +437,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio () =
+    ?surface ?conversation_id ?audio ?blocks () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -413,7 +445,7 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ?audio ()
+      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ?audio ?blocks ()
     in
     Fs_compat.append_file path (line ^ "\n")
   with
@@ -536,7 +568,12 @@ let parse_line ~file_path (line : string) : chat_message option =
                let message_text = Option.value (get "message_text") ~default:"" in
                let audio_url = get "audio_url" in
                let device_id = get "device_id" in
-               Some { token; audio_url; mime; duration_sec; message_text; device_id }
+               let expired =
+                 match List.assoc_opt "expired" fields with
+                 | Some (`Bool b) -> b
+                 | _ -> false
+               in
+               Some { token; audio_url; mime; duration_sec; message_text; device_id; expired }
            | _ ->
                (* audio without token+mime is malformed; drop the field but
                   keep the row (text-only render). *)
@@ -606,6 +643,19 @@ let parse_line ~file_path (line : string) : chat_message option =
             ~detail:"mentions field is not a list";
           []
     in
+    let blocks =
+      match Json_util.assoc_member_opt "blocks" json with
+      | None -> None
+      | Some blocks_json -> (
+          match Keeper_chat_blocks.blocks_of_yojson blocks_json with
+          | Some _ as blocks -> blocks
+          | None ->
+              report_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path:file_path
+                ~detail:"invalid blocks field";
+              None)
+    in
     let kind =
       (* Absent field = every row written before [kind] existed; all of
          those are utterances. Unknown labels are surfaced and read as
@@ -656,7 +706,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           Some
             { id; role; content; ts; attachments; tool_call_id; tool_call_name;
               source; surface; conversation_id; external_message_id; speaker;
-              audio; mentions; kind }
+              audio; blocks; mentions; kind }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -821,7 +871,28 @@ let load_page ~base_dir ~keeper_name ?before () : page =
 let load ~base_dir ~keeper_name : chat_message list =
   (load_page ~base_dir ~keeper_name ()).messages
 
-let to_json_array (messages : chat_message list) : Yojson.Safe.t =
+(* RFC-0235 P3: the history endpoint can tell the dashboard that a clip
+   has been reaped by checking the same audio directory the synthesis side
+   writes to. This keeps the TTL reaper simple while avoiding a broken
+   native player on reload. *)
+let audio_clip_file_path ~base_dir token =
+  Filename.concat
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "audio")
+    (token ^ ".mp3")
+
+let audio_fields_with_expired ~base_dir audio =
+  match audio with
+  | None -> []
+  | Some a ->
+      let expired =
+        match base_dir with
+        | None -> a.expired
+        | Some base_dir ->
+            a.expired || not (Sys.file_exists (audio_clip_file_path ~base_dir a.token))
+      in
+      [ ("audio", `Assoc (audio_to_json { a with expired })) ]
+
+let to_json_array ?base_dir (messages : chat_message list) : Yojson.Safe.t =
   `List
     (List.map
        (fun m ->
@@ -859,5 +930,6 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
                        ]
                      ) atts in
                      [("attachments", `List att_json)])
-              @ audio_fields m.audio))
+              @ audio_fields_with_expired ~base_dir m.audio
+              @ blocks_fields m.blocks))
        messages)

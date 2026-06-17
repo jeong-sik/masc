@@ -83,6 +83,11 @@ type speaker_authority =
 val authority_label : speaker_authority -> string
 val authority_of_label : string -> speaker_authority option
 
+(** Rich chat block produced by the backend parser. Mirrors the dashboard's
+    [ChatBlock] union so the server can own parsing and the dashboard can
+    render server-provided blocks verbatim. *)
+type chat_block = Keeper_chat_blocks.chat_block
+
 (** Identity of the user-line author. [speaker_id] / [speaker_name] are
     absent when the route supplies none (the dashboard is a single
     authenticated operator and carries no per-user identity). *)
@@ -93,12 +98,15 @@ type audio_clip = {
   duration_sec : float option;
   message_text : string;
   device_id : string option;
+  expired : bool;
 }
 (** Persistable audio clip (RFC-0235 P1). Written on an assistant line
     when the keeper synthesized a voice utterance; [token] is the
     [/api/v1/voice/audio/:token] capability, [message_text] doubles as
     the caption. [audio_url] and [device_id] carry transport routing hints
-    so the dashboard can fetch and route the clip. Same shape as
+    so the dashboard can fetch and route the clip. [expired] is true when
+    the underlying MP3 has been reaped; the history endpoint stamps it by
+    checking the audio directory. Same shape as
     {!Keeper_chat_broadcast}'s SSE payload so the two never drift. *)
 
 type speaker = {
@@ -141,6 +149,11 @@ type chat_message = {
           voice utterance (keeper_voice_speak). [None] on every other
           line and on rows written before voice transport; the dashboard
           renders a play button when present. *)
+  blocks : chat_block list option;
+      (** RFC-0235 P3: rich chat blocks parsed from assistant reply text.
+          Persisted server-side so the dashboard can prefer backend blocks
+          over its local parser. [None] on rows written before this field
+          and on non-assistant rows. *)
   mentions : Keeper_identity.Keeper_id.t list;
       (** RFC-0232 §3.3: mention ids parsed once at append from the
           persisted user content (plus connector-supplied explicit
@@ -182,6 +195,7 @@ val append_turn :
   ?speaker:speaker ->
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   ?assistant_kind:Row_kind.t ->
+  ?blocks:chat_block list ->
   assistant_content:string ->
   unit ->
   unit
@@ -198,6 +212,7 @@ val append_assistant_message :
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?audio:audio_clip ->
+  ?blocks:chat_block list ->
   unit ->
   unit
 
@@ -246,5 +261,6 @@ val load_page :
     [ts] field; [tool_call_id] / [tool_call_name] / [source] /
     [conversation_id] / [external_message_id] /
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
-    when present. *)
-val to_json_array : chat_message list -> Yojson.Safe.t
+    when present. When [base_dir] is supplied, the history endpoint marks
+    audio clips as [expired] when the underlying MP3 file is gone. *)
+val to_json_array : ?base_dir:string -> chat_message list -> Yojson.Safe.t

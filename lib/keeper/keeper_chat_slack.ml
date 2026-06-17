@@ -89,6 +89,86 @@ let tool_context_block_json ~name ~args_summary ~result_summary =
     ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
     ]
 
+(* ── Content → Slack blocks ──────────────────────────────────────── *)
+
+let image_extensions = [ ".png"; ".jpg"; ".jpeg"; ".gif"; ".webp"; ".svg" ]
+
+let is_image_url url =
+  try
+    let ext = String.lowercase_ascii (Filename.extension (Uri.of_string url |> Uri.path)) in
+    List.mem ext image_extensions
+  with _ -> false
+
+let hostname_of_url url =
+  try
+    match Uri.of_string url |> Uri.host with
+    | Some "" | None -> url
+    | Some host ->
+        let len = String.length host in
+        if len > 4 && String.sub host 0 4 = "www." then
+          String.sub host 4 (len - 4)
+        else host
+  with _ -> url
+
+let standalone_url_re = Str.regexp "^https?://[^ \t\r\n]+$"
+let markdown_image_re = Str.regexp "!\\[\\([^]]*\\)\\](\\([^)]+\\))"
+
+let is_standalone_url line =
+  try Str.string_match standalone_url_re (String.trim line) 0
+  with _ -> false
+
+let line_to_block line =
+  let trimmed = String.trim line in
+  if trimmed = "" then None
+  else if is_standalone_url trimmed then
+    if is_image_url trimmed then
+      Some (image_block_json ~url:trimmed ~caption:None)
+    else
+      let title = hostname_of_url trimmed in
+      Some (link_block_json ~url:trimmed ~title ~description:None)
+  else None
+
+let content_blocks_of_text text =
+  let rec scan_images acc pos =
+    if pos >= String.length text then List.rev acc
+    else
+      try
+        let _ = Str.search_forward markdown_image_re text pos in
+        let before = String.sub text pos (Str.match_beginning () - pos) in
+        let alt = Str.matched_group 1 text in
+        let url = Str.matched_group 2 text in
+        let next = Str.match_end () in
+        scan_images ((before, Some url, Some alt) :: acc) next
+      with Not_found ->
+        let rest = String.sub text pos (String.length text - pos) in
+        List.rev ((rest, None, None) :: acc)
+  in
+  let fragments = scan_images [] 0 in
+  List.fold_left
+    (fun blocks (fragment, image_url, image_alt) ->
+      let blocks =
+        match image_url with
+        | Some url ->
+            let caption =
+              match image_alt with
+              | Some "" | None -> None
+              | Some alt -> Some alt
+            in
+            image_block_json ~url ~caption :: blocks
+        | None -> blocks
+      in
+      let lines = String.split_on_char '\n' fragment in
+      List.fold_left
+        (fun blocks line ->
+          match line_to_block line with
+          | Some block -> block :: blocks
+          | None -> blocks)
+        blocks
+        lines)
+    []
+    fragments
+  |> List.rev
+
 (* ── HTTP delivery ───────────────────────────────────────────────── *)
 
 let send_message_with_blocks ~token ~channel ~content ~blocks =
@@ -187,4 +267,5 @@ module For_testing = struct
   let image_block_json = image_block_json
   let audio_block_json = audio_block_json
   let tool_context_block_json = tool_context_block_json
+  let content_blocks_of_text = content_blocks_of_text
 end

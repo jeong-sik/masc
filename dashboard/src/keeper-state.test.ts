@@ -224,6 +224,38 @@ describe('thread history merge & persistence', () => {
     expect(ok[0]?.delivery).toBe('history')
   })
 
+  it('prefers server-provided rich blocks for assistant rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'hello', ts: 1_780_000_000, blocks: [{ t: 'image', src: 'https://x.com/a.png' }] },
+    ])
+    expect(entries[0]?.blocks).toEqual([{ t: 'image', src: 'https://x.com/a.png' }])
+  })
+
+  it('falls back to the local parser when server blocks are missing or empty', () => {
+    const withMissing = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'https://x.com/post', ts: 1_780_000_000 },
+    ])
+    expect(withMissing[0]?.blocks).toEqual([{ t: 'link', url: 'https://x.com/post', title: 'x.com', meta: 'x.com' }])
+    const withEmpty = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'https://x.com/post', ts: 1_780_000_000, blocks: [] },
+    ])
+    expect(withEmpty[0]?.blocks).toEqual([{ t: 'link', url: 'https://x.com/post', title: 'x.com', meta: 'x.com' }])
+  })
+
+  it('drops malformed server blocks and falls back to the local parser', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'hello', ts: 1_780_000_000, blocks: [{ t: 'unknown' }] as any },
+    ])
+    expect(entries[0]?.blocks).toEqual([{ t: 'p', html: 'hello' }])
+  })
+
+  it('does not attach blocks to non-assistant rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'https://x.com/post', ts: 1_780_000_000, blocks: [{ t: 'image', src: 'https://x.com/a.png' }] },
+    ])
+    expect(entries[0]?.blocks).toBeUndefined()
+  })
+
   it('drops tool rows that lack id or name and keeps the rest of the turn', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'hi', ts: 1_780_000_000 },
@@ -375,6 +407,25 @@ describe('RFC-0235 audio clip normalization', () => {
       durationSec: 7.5,
       messageText: 'hello',
       deviceId: 'living-room',
+      expired: null,
+    })
+  })
+
+  it('carries the expired flag from the backend', () => {
+    const clip = normalizeAudioClip({
+      token: 'clip-expired',
+      mime: 'audio/mpeg',
+      message_text: 'hello',
+      expired: true,
+    })
+    expect(clip).toEqual({
+      token: 'clip-expired',
+      audioUrl: '/api/v1/voice/audio/clip-expired',
+      mime: 'audio/mpeg',
+      durationSec: null,
+      messageText: 'hello',
+      deviceId: null,
+      expired: true,
     })
   })
 

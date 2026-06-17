@@ -334,6 +334,7 @@ let test_recent_direct_context_omits_voice_audio_self_echo () =
           ; duration_sec = None
           ; message_text = "I will say this out loud now."
           ; device_id = None
+          ; expired = false
           }
         ();
       let lines =
@@ -888,6 +889,152 @@ let test_unknown_kind_reported_reads_utterance () =
       | messages ->
           Alcotest.failf "expected 1 row, got %d" (List.length messages))
 
+let audio_path ~base_dir token =
+  Filename.concat
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "audio")
+    (token ^ ".mp3")
+
+let json_audio_expired = function
+  | `Assoc fields -> (
+      match List.assoc_opt "audio" fields with
+      | Some (`Assoc audio_fields) -> (
+          match List.assoc_opt "expired" audio_fields with
+          | Some (`Bool b) -> b
+          | _ -> false)
+      | _ -> false)
+  | _ -> false
+
+(* RFC-0235 P3: the history endpoint marks audio clips as expired when the
+   underlying MP3 has been reaped, so the dashboard can show a fallback
+   instead of a broken native player. *)
+let test_audio_clip_marked_expired_when_file_missing () =
+  let base_dir = temp_base_path "keeper-chat-store-audio-expired" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-audio-expired" in
+      let token = "voice-token-missing" in
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:"I will say this out loud now."
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~audio:
+          { K.token
+          ; audio_url = None
+          ; mime = "audio/mpeg"
+          ; duration_sec = None
+          ; message_text = "I will say this out loud now."
+          ; device_id = None
+          ; expired = false
+          }
+        ();
+      let messages = K.load ~base_dir ~keeper_name in
+      let rows = Yojson.Safe.Util.to_list (K.to_json_array ~base_dir messages) in
+      Alcotest.(check int) "one json row" 1 (List.length rows);
+      Alcotest.(check bool) "missing file marks clip expired" true
+        (json_audio_expired (List.hd rows));
+      (* Create the file and reload: the clip is no longer expired. *)
+      let path = audio_path ~base_dir token in
+      mkdir_p (Filename.dirname path);
+      write_file path "mp3-bytes";
+      let rows_present = Yojson.Safe.Util.to_list (K.to_json_array ~base_dir messages) in
+      Alcotest.(check bool) "present file does not mark expired" false
+        (json_audio_expired (List.hd rows_present)))
+
+let test_audio_clip_expired_persists_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-store-audio-expired-rt" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-audio-expired-rt" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"role":"assistant","content":"hello","ts":1.0,"audio":{|}
+        ^ {|"token":"voice-token-rt","mime":"audio/mpeg","message_text":"hello","expired":true}|}
+        ^ "}\n");
+      match K.load ~base_dir ~keeper_name with
+      | [ msg ] -> (
+          match msg.K.audio with
+          | Some a ->
+              Alcotest.(check bool) "expired flag round-trips" true a.K.expired
+          | None -> Alcotest.fail "audio field missing")
+      | messages ->
+          Alcotest.failf "expected 1 row, got %d" (List.length messages))
+
+(* RFC-0235 P3: backend-driven rich chat blocks. *)
+
+let json_blocks = function
+  | `Assoc fields -> (
+      match List.assoc_opt "blocks" fields with
+      | Some (`List items) -> Some items
+      | _ -> None)
+  | _ -> None
+
+let test_assistant_row_gets_backend_blocks () =
+  let base_dir = temp_base_path "keeper-chat-store-blocks" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-blocks" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"show me"
+        ~user_attachments:[]
+        ~assistant_content:"Here is the shot.\n\n![shot](https://x.com/screen.png)\n\nSee https://x.com/post for context."
+        ();
+      let messages = K.load ~base_dir ~keeper_name in
+      let asst = List.find (fun (m : K.chat_message) -> K.Role.equal m.role K.Role.Assistant) messages in
+      Alcotest.(check bool) "assistant has blocks" true
+        (Option.is_some asst.K.blocks);
+      let rows = Yojson.Safe.Util.to_list (K.to_json_array messages) in
+      let asst_json = List.find (fun row ->
+        match row with
+        | `Assoc fields -> (
+            match List.assoc_opt "role" fields with
+            | Some (`String "assistant") -> true
+            | _ -> false)
+        | _ -> false) rows in
+      match json_blocks asst_json with
+      | Some items -> Alcotest.(check int) "blocks serialized" 3 (List.length items)
+      | None -> Alcotest.fail "assistant json missing blocks")
+
+let test_user_and_tool_rows_have_no_blocks () =
+  let base_dir = temp_base_path "keeper-chat-store-blocks-no-user" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-blocks-no-user" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"https://x.com/post"
+        ~user_attachments:[]
+        ~tool_calls:[ { K.call_id = "t1"; call_name = "Read"; args = "{}" } ]
+        ~assistant_content:"done"
+        ();
+      let messages = K.load ~base_dir ~keeper_name in
+      let user = List.find (fun (m : K.chat_message) -> K.Role.equal m.role K.Role.User) messages in
+      let tool = List.find (fun (m : K.chat_message) -> K.Role.equal m.role K.Role.Tool) messages in
+      Alcotest.(check bool) "user row has no blocks" true (user.K.blocks = None);
+      Alcotest.(check bool) "tool row has no blocks" true (tool.K.blocks = None))
+
+let test_blocks_roundtrip_and_drop_malformed () =
+  let base_dir = temp_base_path "keeper-chat-store-blocks-rt" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-blocks-rt" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"role":"assistant","content":"hello","ts":1.0,"blocks":[{|}
+        ^ {|"t":"p","html":"hello"},{"t":"image","src":"https://x.com/a.png","cap":"a"},{|}
+        ^ {|"t":"link","url":"https://x.com","title":"x.com","meta":"x.com"},{|}
+        ^ {|"t":"unknown","x":1}]}|}
+        ^ "\n");
+      let messages = K.load ~base_dir ~keeper_name in
+      match messages with
+      | [ msg ] -> (
+          match msg.K.blocks with
+          | Some blocks -> Alcotest.(check int) "valid blocks kept, malformed dropped" 3 (List.length blocks)
+          | None -> Alcotest.fail "blocks missing")
+      | messages -> Alcotest.failf "expected 1 row, got %d" (List.length messages))
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -906,6 +1053,22 @@ let () =
             test_tool_row_missing_name_dropped;
           Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick
             test_unknown_role_row_dropped;
+        ] );
+      ( "audio_expiry (RFC-0235 P3)",
+        [
+          Alcotest.test_case "missing file marks clip expired" `Quick
+            test_audio_clip_marked_expired_when_file_missing;
+          Alcotest.test_case "expired flag round-trips" `Quick
+            test_audio_clip_expired_persists_roundtrip;
+        ] );
+      ( "backend_blocks (RFC-0235 P3)",
+        [
+          Alcotest.test_case "assistant row gets backend blocks" `Quick
+            test_assistant_row_gets_backend_blocks;
+          Alcotest.test_case "user and tool rows have no blocks" `Quick
+            test_user_and_tool_rows_have_no_blocks;
+          Alcotest.test_case "blocks roundtrip and malformed dropped" `Quick
+            test_blocks_roundtrip_and_drop_malformed;
         ] );
       ( "row_kind",
         [

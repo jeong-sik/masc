@@ -514,6 +514,39 @@ describe('ChatTranscript', () => {
     expect(container.textContent).toContain('음성을 불러올 수 없습니다')
   })
 
+  it('shows an expired placeholder instead of the native player', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'hello operator',
+            audio: {
+              token: 'clip-expired',
+              audioUrl: '/api/v1/voice/audio/clip-expired',
+              mime: 'audio/mpeg',
+              durationSec: 5,
+              messageText: 'hello operator',
+              deviceId: null,
+              expired: true,
+            },
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const player = container.querySelector('[data-chat-audio-clip]')
+    expect(player).not.toBeNull()
+    expect(container.querySelector('audio')).toBeNull()
+    expect(container.textContent).toContain('음성이 만료되었습니다.')
+    expect(container.textContent).toContain('hello operator')
+  })
+
   it('renders a real audio element inside a voice block when src is provided', () => {
     render(
       html`<${ChatTranscript}

@@ -168,6 +168,7 @@ let handle_speak
                  ; duration_sec
                  ; message_text = message
                  ; device_id = audio_device
+                 ; expired = false
                  }
              | None -> None
            in
@@ -185,10 +186,15 @@ let handle_speak
                   ; duration_sec = c.duration_sec
                   ; message_text = c.message_text
                   ; device_id = c.device_id
+                  ; expired = c.expired
                   }
+                ~content:message
+                ()
             | None ->
               Keeper_chat_broadcast.chat_appended
-                ~keeper_name:meta.name ~source:"agent");
+                ~keeper_name:meta.name ~source:"agent"
+                ~content:message
+                ());
            let memory_status =
              record_voice_output
                ~config

@@ -484,7 +484,7 @@ let handle_ambient ~base_dir
           ; speaker_authority = Keeper_chat_store.External
           }
         ();
-      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel;
+      Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
       Discord_observability.record_ambient
         Discord_observability.Ambient_recorded
     end

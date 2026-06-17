@@ -123,7 +123,7 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
     let surface = Surface_ref.Gate { label = source; address = [] } in
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
       ~content ~surface ?conversation_id ();
-    Keeper_chat_broadcast.chat_appended ~keeper_name ~source
+    Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ()
   end
 
 let dispatch ~sw ~clock ~proc_mgr ~net ~config
@@ -187,7 +187,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
     ~extra_mentions
     ();
   Keeper_chat_broadcast.chat_appended
-    ~keeper_name ~source:lane;
+    ~keeper_name ~source:lane ();
   let args =
     `Assoc [
       ("name", `String keeper_name);

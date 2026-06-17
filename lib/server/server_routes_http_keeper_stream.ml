@@ -797,6 +797,8 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       ();
     Keeper_chat_broadcast.chat_appended
       ~keeper_name:payload.name ~source:chat_source
+      ~content:(persisted_error_reply err)
+      ()
   in
   let timeout_sec = Option.map float_of_int payload.timeout_sec in
   let request_id =
@@ -843,7 +845,9 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~assistant_content:visible_reply
                 ();
               Keeper_chat_broadcast.chat_appended
-                ~keeper_name:payload.name ~source:chat_source);
+                ~keeper_name:payload.name ~source:chat_source
+                ~content:visible_reply
+                ());
             push_worker_event (Stream_terminal (true, body));
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->

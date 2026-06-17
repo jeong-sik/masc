@@ -1,7 +1,9 @@
+type rich_block = Yojson.Safe.t
+
 type post_target =
   | To_dashboard
   | To_discord of { channel_id : string }
-  | To_slack of { channel_id : string }
+  | To_slack of { channel_id : string; blocks : rich_block list option }
 
 let dashboard_label = "dashboard"
 let discord_label = "discord"
@@ -42,7 +44,7 @@ let resolve_target ~surface ~channel_id ?(bound_discord_channels = [])
         Error
           "this keeper has no Slack channel binding; bind a channel first \
            (posting to an unbound surface is an error, not a no-op)"
-    | None, [ only ] -> Ok (To_slack { channel_id = only })
+    | None, [ only ] -> Ok (To_slack { channel_id = only; blocks = None })
     | None, _ :: _ :: _ ->
         Error
           (Printf.sprintf
@@ -52,7 +54,7 @@ let resolve_target ~surface ~channel_id ?(bound_discord_channels = [])
     | Some requested, bound ->
         let requested = String.trim requested in
         if List.exists (String.equal requested) bound then
-          Ok (To_slack { channel_id = requested })
+          Ok (To_slack { channel_id = requested; blocks = None })
         else
           Error
             (Printf.sprintf
@@ -65,6 +67,11 @@ let resolve_target ~surface ~channel_id ?(bound_discord_channels = [])
          "posting to %S is not supported: discord, dashboard, and slack only \
           in this phase (generic gate connectors have no send surface yet)"
          surface)
+
+let set_blocks target blocks_opt =
+  match target with
+  | To_slack s -> To_slack { s with blocks = blocks_opt }
+  | other -> other
 
 let ok_json ~surface ?message_id () =
   let fields =

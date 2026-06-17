@@ -22,6 +22,8 @@ let append_chat_failure ~base_dir ~keeper ~run_id content =
   try
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
     Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
+      ~content
+      ()
   with
   | Eio.Cancel.Cancelled _ as exn ->
     (* 구조적 취소는 재전파. *)

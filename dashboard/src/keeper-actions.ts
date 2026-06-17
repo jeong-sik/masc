@@ -421,8 +421,13 @@ export async function resumePendingKeeperChatRequests(name: string): Promise<voi
  *  If the event carries an RFC-0235 audio clip, we first try to attach
  *  it to the matching assistant bubble that is already streaming. A
  *  failed match still falls back to the history re-merge (the clip is
- *  persisted server-side too). */
-export function noteKeeperChatAppended(name: string, audio?: unknown): void {
+ *  persisted server-side too).
+ *
+ *  [blocks] is accepted so the live SSE path can carry server-parsed
+ *  rich blocks; the current implementation refreshes history (which now
+ *  persists blocks) so the dashboard's normalizeHistoryEntry path prefers
+ *  them automatically. */
+export function noteKeeperChatAppended(name: string, audio?: unknown, _blocks?: unknown): void {
   const keeperName = name.trim()
   if (!keeperName) return
   if (!hydratedChatKeepers.has(keeperName)) return

@@ -13,6 +13,7 @@ type audio_clip = {
   duration_sec : float option;
   message_text : string;
   device_id : string option;
+  expired : bool;
 }
 
 (** Broadcast a [keeper_chat_appended] SSE event after a completed turn
@@ -29,7 +30,8 @@ type audio_clip = {
     Exceptions from [Sse.broadcast] are counted on the
     [keeper_sse_broadcast_failures] counter (site [chat_appended]) and
     logged at WARN. {!Eio.Cancel.Cancelled} propagates. *)
-val chat_appended : keeper_name:string -> source:string -> unit
+val chat_appended :
+  keeper_name:string -> source:string -> ?content:string -> unit -> unit
 
 (** Like {!chat_appended} but attaches a synthesized audio clip
     (RFC-0235 P1) so the dashboard can render a play button instead of
@@ -37,6 +39,6 @@ val chat_appended : keeper_name:string -> source:string -> unit
     ([Voice_bridge_transport.make_audio_file] token) calls this; every
     other caller keeps using {!chat_appended}. The [audio] field is
     decoded into a typed record at the SSE edge, never string-sniffed
-    downstream. *)
+    downstream. [content] is used to derive rich blocks for the event. *)
 val chat_appended_with_audio :
-  keeper_name:string -> source:string -> audio:audio_clip -> unit
+  keeper_name:string -> source:string -> audio:audio_clip -> ?content:string -> unit -> unit

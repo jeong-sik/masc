@@ -67,6 +67,16 @@ import './styles/telemetry-v2.css'
 import './styles/craft-v2.css'
 import './styles/states.css'
 
+// v2 skin — cool-charcoal palette + voltage accent (brass/blood/ice) +
+// Space Grotesk display, for the --color-* surfaces. Activated by
+// data-skin="v2" on <html> (index.html), scoped to yield to paper/styleseed.
+import './styles/skin-v2.css'
+// StyleSeed → keeper-v2 Dark Fantasy bridge. Re-points the StyleSeed token
+// VALUES (--ss-* / --background / --card / --brand, defined LIGHT by
+// app-shell-v2.css) at the Dark Fantasy spine, so the migrated surfaces render
+// dark under the default theme while StyleSeed's readable sizing is kept.
+import './styles/ss-keeper-v2-bridge.css'
+
 /*
  * EXPERIMENTAL: keeper-v2 DS UI kits — may conflict with existing v2-* styles; enable after review
  * import './styles/ds-ui-kits.css'
@@ -128,7 +138,9 @@ function resolveTheme(): ThemeId {
       if (stored) return normalizeTheme(stored)
     }
   } catch { /* access denied */ }
-  return 'styleseed'
+  // Default: keeper-v2 Dark Fantasy (null = no data-theme). StyleSeed / paper
+  // are opt-in via ThemeSwitch or ?theme= and persist in localStorage.
+  return null
 }
 
 function applyTheme(theme: ThemeId): void {

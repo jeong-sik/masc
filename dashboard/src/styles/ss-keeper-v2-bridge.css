@@ -1,0 +1,95 @@
+/* ════════════════════════════════════════════════════════════════
+   StyleSeed → keeper-v2 Dark Fantasy bridge
+   ----------------------------------------------------------------
+   The keeper-v2 surfaces were migrated onto StyleSeed's token layer
+   (app-shell-v2.css defines the full --ss-* set at :root with LIGHT
+   values; styleseed-theme.css adds the --background/--card/--text-*
+   semantic mirror). The dashboard's canonical design system is
+   keeper-v2 Dark Fantasy (RFC-0253), not StyleSeed light, so this file
+   re-points the token VALUES at the Dark Fantasy spine: every migrated
+   surface renders charcoal + ice voltage + bone without touching
+   component code.
+
+   Borrowed from StyleSeed (reference, not migration): the readable
+   sizing/spacing AND the rounded cards (--ss-radius-* left untouched) —
+   the "큼지막 / readable" look the rest of the system keeps.
+
+   Scoped to the DEFAULT case (html with no opt-in light theme): the
+   migrated surfaces read --ss-* unconditionally, so this must outrank the
+   app-shell-v2.css :root defaults — html:not(...) is (0,2,1) > :root
+   (0,1,0). The :not() guards let the styleseed / paper light themes still
+   win when explicitly selected. Voltage = ice (matches data-volt).
+   ════════════════════════════════════════════════════════════════ */
+html:not([data-theme="styleseed"]):not([data-theme="paper"]) {
+  color-scheme: dark;
+
+  /* ── StyleSeed --ss-* token layer → Dark Fantasy (full set) ── */
+  /* Surfaces — cool charcoal ramp */
+  --ss-page:           #08090d;
+  --ss-card:           #15161d;
+  --ss-card-raised:    #1b1c25;
+  --ss-card-hover:     #23242f;
+  --ss-surface:        #0f1015;
+  --ss-surface-subtle: #1b1c25;
+  --ss-surface-muted:  #23242f;
+  --ss-sunken:         #0a0b0f;
+
+  /* Text — bone, pushed bright for reading on near-black */
+  --ss-text-strong:    #f7f1e6;
+  --ss-text-primary:   #e3dacb;
+  --ss-text-secondary: #c0b7a6;
+  --ss-text-tertiary:  #968fa1;
+  --ss-text-disabled:  #6b6478;
+
+  /* Borders — cool hairlines (the light rgba(0,0,0,…) edges vanish on dark) */
+  --ss-border:        #282a36;
+  --ss-border-subtle: #1e1f29;
+  --ss-border-strong: #3b3d4e;
+  --ss-border-1:      #1e1f29;
+  --ss-border-2:      #282a36;
+  --ss-border-3:      #3b3d4e;
+
+  /* Accent — ice voltage */
+  --ss-brand:      #46c6f0;
+  --ss-brand-tint: rgba(70, 198, 240, 0.14);
+  --ss-brand-dim:  rgba(70, 198, 240, 0.08);
+  --ss-brand-glow: 70 198 240;
+
+  /* Status — keeper-v2 triad */
+  --ss-success:     #46c66a;
+  --ss-warning:     #e0a02a;
+  --ss-destructive: #e8472f;
+
+  /* Shadows — off in dark (edges rely on borders); keep modal depth only */
+  --ss-shadow-card:       none;
+  --ss-shadow-card-hover: none;
+  --ss-shadow-elevated:   none;
+  --ss-shadow-modal:      0 8px 24px rgba(0, 0, 0, 0.6);
+  /* --ss-radius-card / --ss-radius-input intentionally NOT overridden:
+     the rounded cards are part of the readable look we keep. */
+
+  /* ── Non-ss semantic mirror (styleseed-theme.css maps these only under
+        [data-theme=styleseed]; supply Dark Fantasy for the default case) ── */
+  --background:     #08090d;
+  --surface-page:   #08090d;
+  --card:           #15161d;
+  --surface-subtle: #1b1c25;
+  --surface-muted:  #23242f;
+  --text-primary:   #e3dacb;
+  --text-secondary: #c0b7a6;
+  --text-tertiary:  #968fa1;
+  --text-disabled:  #6b6478;
+  --icon-default:   #c0b7a6;
+  --border:         #282a36;
+  --brand:          #46c6f0;
+  --brand-dim:      #1c6b86;
+  --brand-wash:     rgba(70, 198, 240, 0.10);
+  --brand-tint:     rgba(70, 198, 240, 0.14);
+  --success:        #46c66a;
+  --warning:        #e0a02a;
+  --destructive:    #e8472f;
+  --info:           #46c6f0;
+
+  /* Type → keeper-v2 grotesque (fonts @imported by skin-v2.css) */
+  --font-sans: 'Space Grotesk', 'Noto Sans KR', system-ui, sans-serif;
+}

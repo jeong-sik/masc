@@ -24,21 +24,24 @@ describe('App v2 header chrome', () => {
     render(h(App, {}), container)
   }
 
-  it('renders v2 app shell wrapper with StyleSeed theme and tweak attributes', () => {
+  it('renders v2 app shell wrapper with tweak attributes (v2 dark default, no data-theme)', () => {
     renderApp()
     const app = container.querySelector('.v2-app')
     expect(app).not.toBeNull()
-    expect(app?.getAttribute('data-theme')).toBe('styleseed')
+    expect(app?.hasAttribute('data-theme')).toBe(false)
     expect(app?.getAttribute('data-density')).toBe('regular')
     expect(app?.getAttribute('data-motion')).toBe('subtle')
     expect(app?.getAttribute('data-bubble')).toBe('card')
     expect(app?.hasAttribute('data-surface')).toBe(true)
   })
 
-  it('sets the default StyleSeed theme on the dashboard root', () => {
+  it('defaults to the v2 dark skin (no data-theme on the dashboard root)', () => {
+    // Theme ownership lives on <html> (bootstrapped by main.ts, toggled by
+    // ThemeSwitch). The app root no longer hard-codes a theme, so the default
+    // is the keeper-v2 dark skin; paper / styleseed are opt-in light themes.
     renderApp()
     const app = container.querySelector('.v2-app')
-    expect(app?.getAttribute('data-theme')).toBe('styleseed')
+    expect(app?.hasAttribute('data-theme')).toBe(false)
   })
 
   it('renders v2 shell header and health strip scopes', () => {

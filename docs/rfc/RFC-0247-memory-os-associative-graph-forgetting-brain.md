@@ -25,7 +25,7 @@ was **closed** as the concrete instance of the error. This section re-aims the R
 spreading-activation as the recall decision) is reclassified here.
 
 **Verified evidence the scoring layer is unproven** (live store
-`~/me/.masc/config/keepers/`, 2026-06-16):
+`<base-path>/.masc/config/keepers/`, 2026-06-16):
 - **Value never measured.** No eval/harness scores memory *quality* (recall
   precision, keeper outcome). `test_keeper_memory_os.ml` tests *mechanism*
   (noisy-OR is monotone) — "the code does what the code says," not "memory got

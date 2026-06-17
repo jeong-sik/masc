@@ -154,7 +154,11 @@ def deterministic_sample(items: list, n: int) -> list:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", choices=["calibrate", "measure", "relabel"], default="calibrate")
-    ap.add_argument("--store-dir", default=os.path.expanduser("~/me/.masc/config/keepers"))
+    ap.add_argument(
+        "--store-dir",
+        default=os.path.join(
+            os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
+            ".masc", "config", "keepers"))
     ap.add_argument("--judge-cmd", default="sb glm-text")
     ap.add_argument("--sample", type=int, default=100, help="facts to judge in measure mode")
     ap.add_argument("--batch", type=int, default=20)

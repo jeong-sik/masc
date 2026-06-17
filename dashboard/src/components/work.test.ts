@@ -27,6 +27,10 @@ vi.mock('./board/board-moderation-surface', () => ({
   BoardModerationSurface: () => html`<div data-testid="board-moderation-surface">Moderation</div>`,
 }))
 
+vi.mock('./board/board-surface', () => ({
+  BoardSurface: () => html`<div data-testid="board-surface">Board</div>`,
+}))
+
 vi.mock('./board/sub-board-surface', () => ({
   SubBoardSurface: () => html`<div data-testid="sub-board-surface">Sub-Boards</div>`,
 }))
@@ -81,6 +85,19 @@ describe('Work', () => {
     render(html`<${Work} />`)
 
     expect(screen.getByTestId('board-moderation-surface')).toBeTruthy()
+    expect(screen.queryByTestId('work-kpis')).toBeNull()
+  })
+
+  it('renders the board feed surface for the workspace board section', () => {
+    routeSignal.value = {
+      tab: 'workspace',
+      params: { section: 'board' },
+      postId: null,
+    }
+
+    render(html`<${Work} />`)
+
+    expect(screen.getByTestId('board-surface')).toBeTruthy()
     expect(screen.queryByTestId('work-kpis')).toBeNull()
   })
 

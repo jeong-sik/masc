@@ -41,6 +41,8 @@ export type DesignCanvasCategory =
   | 'organisms'
   | 'surfaces'
   | 'motion'
+  | 'craft'
+  | 'states'
   | 'fixtures'
 
 const CATEGORIES: { id: DesignCanvasCategory; label: string }[] = [
@@ -49,6 +51,8 @@ const CATEGORIES: { id: DesignCanvasCategory; label: string }[] = [
   { id: 'organisms', label: 'Organisms' },
   { id: 'surfaces', label: 'Surfaces' },
   { id: 'motion', label: 'Motion' },
+  { id: 'craft', label: 'Craft' },
+  { id: 'states', label: 'States' },
   { id: 'fixtures', label: 'Fixtures' },
 ]
 
@@ -355,6 +359,84 @@ function MotionGallery() {
   `
 }
 
+function CraftsGallery() {
+  return html`
+    <${Section} title="Craft">
+      <${Artboard} title="Workbench card">
+        <div data-design-canvas-organism="craft-card">
+          <${PanelCard} title="craft-surface">
+            <div class="dc-stat-row">
+              <${StatCell} label="Drafted" value="12" tone="ok" />
+              <${StatCell} label="Review" value="3" tone="warn" />
+              <${StatCell} label="Blocked" value="1" tone="bad" />
+            </div>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <${StatusChip} tone="info">prompt<//>
+              <${StatusChip} tone="neutral">fixture<//>
+              <${CountBadge} tone="accent">v2<//>
+            </div>
+          <//>
+        </div>
+      <//>
+
+      <${Artboard} title="Tool-call card">
+        <${SurfaceCard} variant="compact" data-design-canvas-organism="tool-call-card">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="size-5 inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-mono font-bold text-[var(--color-fg-secondary)]">T</span>
+            <span class="font-mono text-sm font-semibold text-[var(--color-accent-fg)]">edit_file</span>
+          </div>
+          <div class="text-2xs font-mono text-[var(--color-fg-secondary)] truncate">{"path":"src/components/lab.ts"}</div>
+          <div class="mt-2 flex items-center gap-2">
+            <${StatusChip} tone="ok" uppercase=${false}>success<//>
+            <span class="text-3xs text-[var(--color-fg-disabled)]">240 ms</span>
+          </div>
+        <//>
+      <//>
+
+      <${Artboard} title="Inspector row">
+        <div class="dc-surface-rail">
+          <div class="dc-rail-dot ok"></div>
+          <div class="dc-rail-dot warn"></div>
+          <div class="dc-rail-dot bad"></div>
+          <div class="dc-rail-dot info"></div>
+        </div>
+      <//>
+    <//>
+  `
+}
+
+function StatesGallery() {
+  return html`
+    <${Section} title="States">
+      <${Artboard} title="Keeper lifecycle pills">
+        <div class="dc-row-wrap">
+          <${StatusChip} tone="ok">active<//>
+          <${StatusChip} tone="warn">degraded<//>
+          <${StatusChip} tone="bad">crashed<//>
+          <${StatusChip} tone="info">paused<//>
+          <${StatusChip} tone="neutral">offline<//>
+        </div>
+      <//>
+
+      <${Artboard} title="Delivery badges">
+        <div class="dc-row-wrap">
+          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-secondary)]">delivered</span>
+          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold uppercase tracking-2 text-[var(--color-status-warn)]">sending</span>
+          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold uppercase tracking-2 text-[var(--color-status-err)]">error</span>
+        </div>
+      <//>
+
+      <${Artboard} title="Meter thresholds">
+        <div class="dc-stack-v">
+          <${Meter} pct=${24} />
+          <${Meter} pct=${68} />
+          <${Meter} pct=${94} hot=${true} />
+        </div>
+      <//>
+    <//>
+  `
+}
+
 function SectionStack({ title, children }: { title: string; children: unknown }) {
   return html`
     <div class="dc-section" data-design-canvas-section>
@@ -626,6 +708,8 @@ export function DesignCanvas() {
         ${category === 'organisms' ? html`<${OrganismsGallery} />` : null}
         ${category === 'surfaces' ? html`<${SurfacesGallery} />` : null}
         ${category === 'motion' ? html`<${MotionGallery} />` : null}
+        ${category === 'craft' ? html`<${CraftsGallery} />` : null}
+        ${category === 'states' ? html`<${StatesGallery} />` : null}
         ${category === 'fixtures' ? html`<${FixturesGallery} />` : null}
       </div>
     </div>

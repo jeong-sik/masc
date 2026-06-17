@@ -49,12 +49,16 @@ describe('lab navigation', () => {
       'tools',
       'harness',
       'design-canvas',
+      'performance',
+      'memory-explore',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
       'Tools',
       'Safety Harness',
       'Design Canvas',
+      'Performance',
+      'Memory Explore',
     ])
   })
 })

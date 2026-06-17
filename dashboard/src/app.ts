@@ -52,6 +52,7 @@ import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
 import { useKeeperPinShortcuts } from './components/ide/use-keeper-pin-shortcuts'
+import { useIsMobile } from './hooks/use-is-mobile'
 import { isWidgetSoloRoute } from './components/widget-solo'
 import {
   CopilotDock,
@@ -251,6 +252,8 @@ export function App() {
   const dock = useCopilotDock()
   useCopilotDockShortcuts(dock)
 
+  const isMobile = useIsMobile()
+
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
@@ -270,6 +273,7 @@ export function App() {
       data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
       data-focus-mode=${focusMode ? 'true' : 'false'}
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
+      data-mobile=${isMobile ? 'true' : 'false'}
       data-density=${tweaksDensity.value}
       data-motion=${tweaksMotion.value}
       data-bubble=${tweaksBubble.value}
@@ -386,7 +390,7 @@ export function App() {
           ${dock.state.value.open ? html`<${CopilotDock} dock=${dock} />` : null}
         </div>
       </div>
-      ${!compactChromeMode ? html`<${MobileBottomBar} currentTab=${currentTab} onMenuToggle=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }} />` : null}
+      ${!compactChromeMode && !mobileMenuOpen.value && !keeperDetailMode ? html`<${MobileBottomBar} currentTab=${currentTab} onMenuToggle=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }} />` : null}
       ${!dock.state.value.open && !compactChromeMode ? html`<${CopilotDockFab} dock=${dock} />` : null}
 
       ${selectedAgentName.value

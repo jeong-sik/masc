@@ -30,6 +30,7 @@ type SurfaceSectionId =
   // ConnectorOverviewStrip rather than top-level navigation.
   | 'connector-status'      // all connectors with internal connector picker
   // workspace
+  | 'work'           // Goal/job breakdown surface
   | 'board'
   | 'sub-boards'     // Phase 2: SubBoard named spaces within the board
   | 'moderation'     // Board moderation queue and actions
@@ -40,6 +41,8 @@ type SurfaceSectionId =
   | 'tools'
   | 'harness'
   | 'design-canvas'
+  | 'performance'
+  | 'memory-explore'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
@@ -123,9 +126,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'workspace',
     label: 'Workspace',
     icon: 'workspace',
-    description: 'Board, planning, repositories, and verification',
+    description: 'Work goals, board feed, planning, repositories, and verification',
     defaultTab: 'workspace',
-    defaultParams: { section: 'board' },
+    defaultParams: { section: 'work' },
     tabs: ['workspace'],
   },
   {
@@ -259,6 +262,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   ],
   workspace: [
     {
+      id: 'work',
+      label: 'Work',
+      description: 'Goal/job breakdown and keeper assignment board.',
+      params: { section: 'work' },
+    },
+    {
       id: 'board',
       label: 'Board',
       description: 'Human, agent, automation, and system posts.',
@@ -311,8 +320,20 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'design-canvas',
       label: 'Design Canvas',
-      description: 'keeper-v2 design-system preview surface for primitives, molecules, organisms, surfaces, and motion.',
+      description: 'keeper-v2 design-system preview surface for primitives, molecules, organisms, surfaces, motion, craft, and states.',
       params: { section: 'design-canvas' },
+    },
+    {
+      id: 'performance',
+      label: 'Performance',
+      description: 'FPS meter and VirtualList windowing demo.',
+      params: { section: 'performance' },
+    },
+    {
+      id: 'memory-explore',
+      label: 'Memory Explore',
+      description: 'Memory Lens, Lineage Rail, and Goal Dossier composition.',
+      params: { section: 'memory-explore' },
     },
   ],
   code: [

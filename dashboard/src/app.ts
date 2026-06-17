@@ -120,13 +120,11 @@ function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
 export function shouldUseCompactDashboardChrome({
   widgetSoloMode,
   focusMode,
-  keeperDetailMode,
 }: {
   widgetSoloMode: boolean
   focusMode: boolean
-  keeperDetailMode: boolean
 }): boolean {
-  return widgetSoloMode || focusMode || keeperDetailMode
+  return widgetSoloMode || focusMode
 }
 
 export function App() {
@@ -264,7 +262,6 @@ export function App() {
   const compactChromeMode = shouldUseCompactDashboardChrome({
     widgetSoloMode,
     focusMode,
-    keeperDetailMode,
   })
 
   return html`
@@ -381,7 +378,7 @@ export function App() {
 
         <div class="v2-stage min-h-0 flex-1">
           <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg'}>
-            <div class=${isCodeSurface || widgetSoloMode || keeperDetailMode ? 'h-full overflow-hidden p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
+            <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>
                 <${DashboardMain} />
               </div>

@@ -240,13 +240,13 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
           <div class="flex flex-wrap items-center justify-start gap-2 sm:justify-end v2-monitoring-toolbar">
             <button
               type="button"
-              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors v2-monitoring-action"
+              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)] hover:bg-[var(--bad-soft)] transition-colors v2-monitoring-action"
               onClick=${() => setClearDialogOpen(true)}
             >비우기</button>
             <button
               type="button"
               disabled=${purgePending}
-              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed v2-monitoring-action"
+              class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)] hover:bg-[var(--bad-soft)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed v2-monitoring-action"
               onClick=${submitPurgeKeeper}
             >${purgePending ? '삭제 중...' : '완전 삭제'}</button>
             <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${effectiveStatus} />

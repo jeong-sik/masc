@@ -39,7 +39,29 @@ let default_timeout_sec () =
 
 let provider_slot_busy = "librarian provider slot busy"
 
-let provider_slot = Eio.Semaphore.make 1
+(* Per-keeper librarian provider slot (Lane Per Keeper, RFC-0225).
+   A single global slot would let one keeper's librarian block every other
+   keeper's memory ingestion. Keeping the slot per-keeper still bounds each
+   keeper to one concurrent librarian call while removing cross-keeper
+   starvation.
+
+   The integer passed to [Hashtbl.create] is only the initial bucket count;
+   it is not a capacity limit. The registry grows as new keepers are seen. *)
+let provider_slot_registry : (string, Eio.Semaphore.t) Hashtbl.t =
+  Hashtbl.create 1
+;;
+
+let provider_slot_mutex = Eio.Mutex.create ()
+
+let provider_slot_for keeper_id =
+  Eio.Mutex.use_rw ~protect:true provider_slot_mutex (fun () ->
+    match Hashtbl.find_opt provider_slot_registry keeper_id with
+    | Some sem -> sem
+    | None ->
+      let sem = Eio.Semaphore.make 1 in
+      Hashtbl.replace provider_slot_registry keeper_id sem;
+      sem)
+;;
 
 let provider_slot_wait_sec () =
   Keeper_memory_bank_env.memory_env_float_logged
@@ -194,16 +216,17 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> None)
 ;;
 
-let with_provider_slot ?clock f =
+let with_provider_slot ~keeper_id ?clock f =
+  let slot = provider_slot_for keeper_id in
   match
     with_timeout ?clock ~timeout_sec:(provider_slot_wait_sec ()) (fun () ->
-      Eio.Semaphore.acquire provider_slot)
+      Eio.Semaphore.acquire slot)
   with
   | None -> Error provider_slot_busy
   | Some () ->
     (* fun-protect-finally-ok: [Eio.Semaphore.release] only returns the
        provider slot; it does not wait, acquire, or perform I/O. *)
-    Fun.protect ~finally:(fun () -> Eio.Semaphore.release provider_slot) f
+    Fun.protect ~finally:(fun () -> Eio.Semaphore.release slot) f
 ;;
 
 let extract_with_provider
@@ -212,6 +235,7 @@ let extract_with_provider
     ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
     ~sw
     ~net
+    ~keeper_id
     ~provider_cfg
     (inp : Keeper_librarian.input)
   =
@@ -219,7 +243,7 @@ let extract_with_provider
   | Error _ as e -> e
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
-    with_provider_slot ?clock (fun () ->
+    with_provider_slot ~keeper_id ?clock (fun () ->
       let attempt messages =
         match
           with_timeout ?clock ~timeout_sec (fun () ->
@@ -252,7 +276,9 @@ let extract_and_append_with_provider
     ~provider_cfg
     inp
   =
-  match extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg inp with
+  match
+    extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~keeper_id ~provider_cfg inp
+  with
   | Error _ as e -> e
   | Ok episode ->
     let now = episode.Keeper_memory_os_types.created_at in

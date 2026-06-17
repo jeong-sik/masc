@@ -153,6 +153,26 @@ let test_state_pending_count_integrity_under_concurrent_updates () =
   check int "concurrent pure computation leaves count at zero" 0 state.pending_tool_count
 ;;
 
+let test_take_drain_cancel_clears_active_without_spin () =
+  let open EB.For_testing in
+  let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
+  set_drain_cancel t (Active (Obj.magic 42));
+  (* The previous [unsubscribe] reconstructed [Active cc] as the CAS [seen]
+     value; physical inequality made the CAS fail forever and the close loop
+     busy-spun at 100% CPU (server-wide hang, regression from #21447).
+     [take_drain_cancel] uses [Atomic.exchange] — it takes the handle and
+     closes the lifecycle in one step that cannot spin. *)
+  check bool "take returns the displaced active handle" true
+    (match take_drain_cancel t with Some _ -> true | None -> false);
+  check bool "lifecycle is Closed after take" true
+    (match get_drain_cancel t with Closed -> true | _ -> false);
+  (* idempotent: a second take observes [Closed] and yields nothing. *)
+  check bool "second take returns None" true
+    (match take_drain_cancel t with None -> true | Some _ -> false);
+  check bool "lifecycle stays Closed" true
+    (match get_drain_cancel t with Closed -> true | _ -> false)
+;;
+
 let () =
   Alcotest.run
     "keeper-unified-turn-event-bus"
@@ -165,6 +185,8 @@ let () =
       , [ test_case "atomic exchange" `Quick test_drain_cancel_exchange
         ; test_case "unsubscribe closes lifecycle" `Quick
             test_unsubscribe_closes_lifecycle_before_fiber_claims
+        ; test_case "take_drain_cancel clears active without spin" `Quick
+            test_take_drain_cancel_clears_active_without_spin
         ] )
     ; ( "concurrency"
       , [ test_case "pure transitions under concurrent domains" `Quick

@@ -227,27 +227,33 @@ let start_background_drain ~clock t =
   | _ -> ()
 ;;
 
+(* Atomically claim the [Closed] state and hand back any background drain
+   handle the caller must cancel. [Atomic.exchange] takes no [seen] argument,
+   so unlike a [compare_and_set] retry loop it cannot spin: the previous value
+   is taken in a single step. The earlier loop compared against a freshly
+   reconstructed [Active cc], which is never PHYSICALLY equal to the stored box
+   (OCaml [Atomic.compare_and_set] uses [==]), so on [Active] the CAS failed
+   forever and the loop busy-spun at 100% CPU, starving the Eio scheduler
+   (server-wide hang — regression from #21447). Cancellation is left to the
+   caller, keeping this a pure state transition (testable without a live
+   cancel context). *)
+let take_drain_cancel t : Eio.Cancel.t option =
+  match Atomic.exchange t.drain_cancel Closed with
+  | Closed | Inactive -> None
+  | Active cc -> Some cc
+;;
+
 let unsubscribe t =
-  let rec close_drain () =
-    match Atomic.get t.drain_cancel with
-    | Closed -> ()
-    | Inactive ->
-      if Atomic.compare_and_set t.drain_cancel Inactive Closed
-      then ()
-      else close_drain ()
-    | Active cc ->
-      if Atomic.compare_and_set t.drain_cancel (Active cc) Closed
-      then (
-        try Eio.Cancel.cancel cc (Failure "event_bus_unsubscribed") with
-        | Eio.Cancel.Cancelled _ -> ()
-        | Invalid_argument msg ->
-          Log.Keeper.debug
-            "%s: event bus drain cancel ignored after context finish: %s"
-            t.keeper_name
-            msg)
-      else close_drain ()
-  in
-  close_drain ();
+  (match take_drain_cancel t with
+   | None -> ()
+   | Some cc -> (
+     try Eio.Cancel.cancel cc (Failure "event_bus_unsubscribed") with
+     | Eio.Cancel.Cancelled _ -> ()
+     | Invalid_argument msg ->
+       Log.Keeper.debug
+         "%s: event bus drain cancel ignored after context finish: %s"
+         t.keeper_name
+         msg));
   ignore (drain ~site:"unsubscribe_final" t);
   match t.event_bus_sub, Keeper_event_bus.get () with
   | Some sub, Some bus -> Agent_sdk_metrics_bridge.unsubscribe bus sub
@@ -283,4 +289,9 @@ module For_testing = struct
   (** Test-only write accessor. No production caller; exposed only so unit
       tests can exercise the take-and-close race path used by [unsubscribe]. *)
   let exchange_drain_cancel t v = Atomic.exchange t.drain_cancel v
+
+  (** The exact take-and-close step [unsubscribe] runs: claims [Closed] and
+      returns the displaced background drain handle (if any). Exposed so a
+      unit test can assert it terminates and is idempotent on [Active]. *)
+  let take_drain_cancel = take_drain_cancel
 end

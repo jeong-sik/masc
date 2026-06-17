@@ -69,6 +69,45 @@ let test_tool_context_block_renders_tool () =
   check bool "args" true (contains s "args: path: foo.txt");
   check bool "result" true (contains s "result: contents")
 
+(* ── content_blocks_of_text ─────────────────────────────────────── *)
+
+let test_content_blocks_empty_for_plain_text () =
+  let blocks = S.content_blocks_of_text "just plain text" in
+  check int "no blocks" 0 (List.length blocks)
+
+let test_content_blocks_detects_markdown_image () =
+  let blocks =
+    S.content_blocks_of_text "Hello ![alt text](https://example.com/img.png) world"
+  in
+  check int "one block" 1 (List.length blocks);
+  let s = json_string (List.hd blocks) in
+  check bool "type image" true (contains s "\"type\":\"image\"");
+  check bool "image_url" true
+    (contains s "\"image_url\":\"https://example.com/img.png\"");
+  check bool "alt_text" true (contains s "\"alt_text\":\"alt text\"")
+
+let test_content_blocks_detects_bare_image_url () =
+  let blocks = S.content_blocks_of_text "https://example.com/photo.jpg" in
+  check int "one block" 1 (List.length blocks);
+  let s = json_string (List.hd blocks) in
+  check bool "type image" true (contains s "\"type\":\"image\"");
+  check bool "image_url" true
+    (contains s "\"image_url\":\"https://example.com/photo.jpg\"")
+
+let test_content_blocks_detects_link () =
+  let blocks = S.content_blocks_of_text "https://example.com/page" in
+  check int "one block" 1 (List.length blocks);
+  let s = json_string (List.hd blocks) in
+  check bool "type section" true (contains s "\"type\":\"section\"");
+  check bool "link syntax" true (contains s "*<https://example.com/page|example.com>*")
+
+let test_content_blocks_mixed_content () =
+  let blocks =
+    S.content_blocks_of_text
+      "Check this out\nhttps://example.com/page\n![diagram](https://example.com/diagram.png)\nignore me"
+  in
+  check int "two blocks" 2 (List.length blocks)
+
 let () =
   run "keeper_chat_slack"
     [
@@ -84,5 +123,15 @@ let () =
             test_audio_block_renders_voice_link
         ; test_case "tool context block renders tool" `Quick
             test_tool_context_block_renders_tool
+        ] )
+    ; ( "content-blocks"
+      , [ test_case "empty for plain text" `Quick
+            test_content_blocks_empty_for_plain_text
+        ; test_case "detects markdown image" `Quick
+            test_content_blocks_detects_markdown_image
+        ; test_case "detects bare image URL" `Quick
+            test_content_blocks_detects_bare_image_url
+        ; test_case "detects link" `Quick test_content_blocks_detects_link
+        ; test_case "mixed content" `Quick test_content_blocks_mixed_content
         ] )
     ]

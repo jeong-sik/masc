@@ -7,12 +7,17 @@
     no-op (RFC-0223 §4 P4). All transport I/O stays in the runtime
     handler. *)
 
+type rich_block = Yojson.Safe.t
+(** Slack Block Kit block rendered as a JSON value. *)
+
 type post_target =
   | To_dashboard
       (** Persist an assistant line + broadcast [keeper_chat_appended];
           the dashboard is always present. *)
   | To_discord of { channel_id : string }
-  | To_slack of { channel_id : string }
+  | To_slack of { channel_id : string; blocks : rich_block list option }
+      (** Post to a bound Slack channel. [blocks] may carry Slack Block Kit
+          rich blocks to render alongside the plain-text fallback. *)
 
 val resolve_target :
   surface:string ->
@@ -32,6 +37,10 @@ val resolve_target :
     - ["slack"] → same semantics against [bound_slack_channels].
     - any other label → error: P4 ships discord + dashboard + slack
       (generic gate connectors have no send surface yet). *)
+
+val set_blocks : post_target -> rich_block list option -> post_target
+(** [set_blocks target blocks] attaches [blocks] to a [To_slack] target and
+    returns any other target unchanged. *)
 
 val ok_json : surface:string -> ?message_id:string -> unit -> string
 val error_json : string -> string

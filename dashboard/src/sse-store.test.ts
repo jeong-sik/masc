@@ -42,7 +42,7 @@ const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
-const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown) => void>()
+const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -336,7 +336,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     })
     await flushAsyncWork()
 
-    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined)
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, undefined)
   })
 
   it('forwards RFC-0235 audio clips on keeper_chat_appended to the chat handler', async () => {
@@ -356,7 +356,22 @@ describe('setupSSEReaction reconnect hydration', () => {
     })
     await flushAsyncWork()
 
-    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', audio)
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', audio, undefined)
+  })
+
+  it('forwards rich blocks on keeper_chat_appended to the chat handler', async () => {
+    const { sseStore } = await loadSseStore()
+    const blocks = [{ t: 'p', html: 'hello' }]
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_chat_appended',
+      name: 'echo',
+      connector: 'dashboard',
+      blocks,
+    } as any)
+    await flushAsyncWork()
+
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo', undefined, blocks)
   })
 
   it('treats keeper_composite_changed as a signal-only tick and does not hydrate from the event payload', async () => {

@@ -746,6 +746,7 @@ export interface KeeperConversationAudioClip {
   durationSec?: number | null
   messageText: string
   deviceId?: string | null
+  expired?: boolean | null
 }
 
 // --- Keeper v2 rich chat blocks (optional; when present the bubble renderer

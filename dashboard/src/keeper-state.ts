@@ -15,6 +15,7 @@ import type {
   KeeperRecoverResult,
   KeeperStatusDetail,
   SurfaceRef,
+  ChatBlock,
 } from './types'
 
 // --- Signals ---
@@ -133,6 +134,7 @@ export function normalizeAudioClip(raw: unknown): KeeperConversationAudioClip | 
   const duration = asNumber(raw.duration_sec) ?? asNumber(raw.durationSec)
   const messageText = asString(raw.message_text) ?? asString(raw.messageText) ?? ''
   const deviceId = asString(raw.device_id) ?? asString(raw.deviceId)
+  const expired = asBoolean(raw.expired) ?? null
   return {
     token,
     audioUrl,
@@ -140,6 +142,7 @@ export function normalizeAudioClip(raw: unknown): KeeperConversationAudioClip | 
     durationSec: duration ?? null,
     messageText,
     deviceId: deviceId ?? null,
+    expired,
   }
 }
 
@@ -168,6 +171,42 @@ function normalizeAttachments(raw: unknown): KeeperConversationAttachment[] | un
     .map(normalizeAttachment)
     .filter((a): a is KeeperConversationAttachment => a !== null)
   return atts.length > 0 ? atts : undefined
+}
+
+/** Normalize server-provided rich chat blocks. Only the block types the
+ *  backend currently emits (text, image, link) are accepted; unknown
+ *  shapes are dropped so the caller can fall back to the local parser. */
+function normalizeBlocks(raw: unknown): ChatBlock[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const blocks = raw
+    .map((item): ChatBlock | null => {
+      if (!isRecord(item)) return null
+      const t = asString(item.t)
+      if (t === 'p') {
+        const html = asString(item.html)
+        return html ? { t: 'p', html } : null
+      }
+      if (t === 'image') {
+        const src = asString(item.src)
+        return src ? { t: 'image', src, cap: asString(item.cap) ?? undefined } : null
+      }
+      if (t === 'link') {
+        const url = asString(item.url)
+        const title = asString(item.title)
+        return url && title
+          ? {
+              t: 'link',
+              url,
+              title,
+              desc: asString(item.desc) ?? undefined,
+              meta: asString(item.meta) ?? undefined,
+            }
+          : null
+      }
+      return null
+    })
+    .filter((b): b is ChatBlock => b !== null)
+  return blocks.length > 0 ? blocks : undefined
 }
 
 /** Try to attach an audio clip to the most recent assistant entry whose
@@ -343,7 +382,10 @@ function normalizeHistoryEntry(
   // the bubble renders the error label/styling instead of a saved reply.
   const delivery: KeeperConversationDelivery =
     asString(raw.kind) === 'transport_failure' ? 'error' : 'history'
-  const blocks = role === 'assistant' ? parseTextToChatBlocks(text) : undefined
+  const blocks =
+    role === 'assistant'
+      ? (normalizeBlocks(raw.blocks) ?? parseTextToChatBlocks(text))
+      : undefined
   return {
     // R3: key off the producer-assigned server id when present so the
     // render key is stable across history-page merges (the former
@@ -554,6 +596,9 @@ interface RestChatHistoryMessage {
   }>
   // Row kind; 'transport_failure' distinguishes a persisted failed request.
   kind?: string
+  // RFC-0235 P3: backend-parsed rich chat blocks. When present the dashboard
+  // prefers them over its local parser.
+  blocks?: ChatBlock[]
 }
 
 /** Convert a persisted tool-call row into the same entry shape the live
@@ -605,6 +650,7 @@ export function chatHistoryEntriesFromRest(
         audio: message.audio,
         attachments: message.attachments,
         kind: message.kind,
+        blocks: message.blocks,
       },
       keeperName,
       previousSource,

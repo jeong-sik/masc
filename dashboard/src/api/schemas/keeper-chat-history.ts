@@ -18,6 +18,7 @@
 
 import {
   array,
+  boolean,
   number,
   object,
   optional,
@@ -72,6 +73,7 @@ export const KeeperChatHistoryAudioClipSchema = object({
   messageText: optional(string()),
   device_id: optional(string()),
   deviceId: optional(string()),
+  expired: optional(boolean()),
 })
 
 export type KeeperChatHistoryAudioClip = InferOutput<typeof KeeperChatHistoryAudioClipSchema>

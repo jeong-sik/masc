@@ -148,7 +148,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Keeper_chat_store.load ~base_dir ~keeper_name:name
       in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-        (Keeper_chat_store.to_json_array messages)
+        (Keeper_chat_store.to_json_array ~base_dir messages)
   else if ends_with "/person-notes" then
     (* RFC-0229 P2: keeper-authored person notes for the roster pane.
        Read-only fold over the notes store; same shape as the tool

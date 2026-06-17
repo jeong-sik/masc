@@ -19,6 +19,19 @@ val send_message :
 (** [send_message ~token ~channel ~content] posts to
     [chat.postMessage]. Logs errors via [Log.Keeper.warn]. *)
 
+val send_message_with_blocks :
+  token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> unit
+(** [send_message_with_blocks ~token ~channel ~content ~blocks] posts to
+    [chat.postMessage] with the given Block Kit [blocks]. Logs errors via
+    [Log.Keeper.warn]. *)
+
+val content_blocks_of_text : string -> Yojson.Safe.t list
+(** [content_blocks_of_text text] extracts rich Slack blocks from plain text:
+    - Markdown images [![alt](url)] become image blocks.
+    - Standalone image URLs (png/jpg/gif/webp/svg) become image blocks.
+    - Other standalone URLs become link blocks with a hostname-derived title.
+    Non-URL text is omitted because it is delivered via the [content] field. *)
+
 val adapter_loop :
   token:string ->
   channel:string ->
@@ -55,4 +68,7 @@ module For_testing : sig
 
   val tool_context_block_json :
     name:string -> args_summary:string -> result_summary:string option -> Yojson.Safe.t
+
+  val content_blocks_of_text : string -> Yojson.Safe.t list
+  (** Same as {!content_blocks_of_text}; exposed for unit testing. *)
 end

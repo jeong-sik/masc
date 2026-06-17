@@ -1178,6 +1178,25 @@ function formatAudioDuration(seconds?: number | null): string {
 // voice clips. Uses the native `<audio controls>` element (no autoplay).
 function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
   const [loadError, setLoadError] = useState(false)
+  if (clip.expired) {
+    return html`
+      <div class="chat-audio-clip" data-chat-audio-clip>
+        <div class="chat-audio-wave" aria-hidden="true">
+          ${Array.from({ length: 24 }, (_, i) => html`
+            <span
+              key=${i}
+              class="chat-audio-bar"
+              style=${{ height: `${6 + (i % 7) * 3}px` }}
+            />
+          `)}
+        </div>
+        <span class="chat-audio-error">음성이 만료되었습니다.</span>
+        ${clip.messageText
+          ? html`<span class="chat-audio-caption">${clip.messageText}</span>`
+          : null}
+      </div>
+    `
+  }
   const fallbackPath = `/api/v1/voice/audio/${encodeURIComponent(clip.token)}`
   const fallbackSrc = typeof window !== 'undefined'
     ? new URL(fallbackPath, window.location.href).href

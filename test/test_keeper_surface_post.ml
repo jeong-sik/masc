@@ -15,8 +15,11 @@ let target_pp fmt = function
   | SP.To_dashboard -> Format.fprintf fmt "To_dashboard"
   | SP.To_discord { channel_id } ->
       Format.fprintf fmt "To_discord{%s}" channel_id
-  | SP.To_slack { channel_id } ->
-      Format.fprintf fmt "To_slack{%s}" channel_id
+  | SP.To_slack { channel_id; blocks } ->
+      let blocks_label =
+        match blocks with None -> "no-blocks" | Some [] -> "empty" | Some _ -> "blocks"
+      in
+      Format.fprintf fmt "To_slack{%s,%s}" channel_id blocks_label
 
 let target : SP.post_target testable = testable target_pp ( = )
 
@@ -77,7 +80,7 @@ let test_slack_unbound_is_error () =
 
 let test_slack_single_binding_resolves_implicitly () =
   check (result target string) "single slack binding"
-    (Ok (SP.To_slack { channel_id = "C123456" }))
+    (Ok (SP.To_slack { channel_id = "C123456"; blocks = None }))
     (resolve ~surface:"slack" ~channel_id:None
        ~bound_discord_channels:[] ~bound_slack_channels:[ "C123456" ] ())
 
@@ -91,7 +94,7 @@ let test_slack_multiple_bindings_require_channel_id () =
         (Astring.String.is_infix ~affix:"AAA, BBB" message)
   | Ok _ -> fail "ambiguous slack binding must not resolve");
   check (result target string) "explicit channel_id picks one"
-    (Ok (SP.To_slack { channel_id = "BBB" }))
+    (Ok (SP.To_slack { channel_id = "BBB"; blocks = None }))
     (resolve ~surface:"slack" ~channel_id:(Some "BBB")
        ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ())
 
@@ -114,6 +117,25 @@ let test_unsupported_surface_is_error () =
             (Astring.String.is_infix ~affix:"not supported" message)
       | Ok _ -> fail (surface ^ " must not resolve in P4"))
     [ "telegram"; "openclaw" ]
+
+(* ── set_blocks ─────────────────────────────────────────────────── *)
+
+let test_set_blocks_attaches_to_slack () =
+  let block = `Assoc [ ("type", `String "section") ] in
+  let resolved =
+    SP.set_blocks (SP.To_slack { channel_id = "C1"; blocks = None }) (Some [ block ])
+  in
+  check (result target string) "blocks attached"
+    (Ok (SP.To_slack { channel_id = "C1"; blocks = Some [ block ] }))
+    (Ok resolved)
+
+let test_set_blocks_ignores_other_targets () =
+  let block = `Assoc [ ("type", `String "section") ] in
+  check target "dashboard unchanged" SP.To_dashboard
+    (SP.set_blocks SP.To_dashboard (Some [ block ]));
+  check target "discord unchanged"
+    (SP.To_discord { channel_id = "D1" })
+    (SP.set_blocks (SP.To_discord { channel_id = "D1" }) (Some [ block ]))
 
 (* ── append_assistant_message ───────────────────────────────────── *)
 
@@ -180,6 +202,13 @@ let () =
             test_slack_foreign_channel_id_is_error;
           test_case "unsupported surfaces are errors" `Quick
             test_unsupported_surface_is_error;
+        ] );
+      ( "set_blocks",
+        [
+          test_case "attaches blocks to slack target" `Quick
+            test_set_blocks_attaches_to_slack;
+          test_case "ignores non-slack targets" `Quick
+            test_set_blocks_ignores_other_targets;
         ] );
       ( "assistant append",
         [

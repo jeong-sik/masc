@@ -122,12 +122,16 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
        오염시키지 않으려 결론을 남기지 않는다(board에는 실패도 증거로 남는다). *)
     (match judge with
      | Ok j ->
+       let content =
+         Printf.sprintf "Fusion deliberation (run %s) — %s\n\n%s" run_id
+           (render_decision j.Fusion_types.decision) j.Fusion_types.resolved_answer
+       in
        Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper
-         ~content:
-           (Printf.sprintf "Fusion deliberation (run %s) — %s\n\n%s" run_id
-              (render_decision j.Fusion_types.decision) j.Fusion_types.resolved_answer)
+         ~content
          ();
        Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
+         ~content
+         ()
      | Error _ -> ());
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
        남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
@@ -171,7 +175,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
          ~ttl_hours:board_post_ttl_hours ()
      with
-     | Ok () -> Ok ()
+     | Ok _post -> Ok ()
      | Error e -> Error (Board.show_board_error e))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

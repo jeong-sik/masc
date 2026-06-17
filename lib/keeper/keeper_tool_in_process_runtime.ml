@@ -182,7 +182,9 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
           ~surface:(Surface_ref.Dashboard { session_id = None })
           ();
         Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
-          ~source:"dashboard";
+          ~source:"dashboard"
+          ~content:safe_content
+          ();
         Keeper_surface_post.ok_json ~surface ()
     | Ok (Keeper_surface_post.To_discord { channel_id }) -> (
         match Channel_gate_discord_state.send_message ~channel_id ~content:safe_content () with
@@ -205,16 +207,26 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
                    })
               ();
             Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
-              ~source:"discord";
+              ~source:"discord"
+              ~content:safe_content
+              ();
             Keeper_surface_post.ok_json ~surface ~message_id ())
-    | Ok (Keeper_surface_post.To_slack { channel_id }) -> (
+    | Ok (Keeper_surface_post.To_slack { channel_id; blocks = _ }) -> (
+        let slack_blocks =
+          Keeper_chat_slack.content_blocks_of_text safe_content
+        in
+        let (_ : Keeper_surface_post.post_target) =
+          Keeper_surface_post.set_blocks
+            (Keeper_surface_post.To_slack { channel_id; blocks = None })
+            (Some slack_blocks)
+        in
         match slack_token_opt () with
         | None ->
             Keeper_surface_post.error_json
               "MASC_SLACK_BOT_TOKEN is unset or empty"
         | Some token ->
-            Keeper_chat_slack.send_message ~token ~channel:channel_id
-              ~content:safe_content;
+            Keeper_chat_slack.send_message_with_blocks ~token
+              ~channel:channel_id ~content:safe_content ~blocks:slack_blocks;
             Keeper_chat_store.append_assistant_message
               ~base_dir:config.Workspace.base_path
               ~keeper_name:meta.name
@@ -224,7 +236,9 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
                    { team_id = None; channel_id; thread_ts = None })
               ();
             Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
-              ~source:"slack";
+              ~source:"slack"
+              ~content:safe_content
+              ();
             Keeper_surface_post.ok_json ~surface ())
 ;;
 

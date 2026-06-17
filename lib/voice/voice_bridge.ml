@@ -77,6 +77,38 @@ let available_tts_endpoints ?provider () =
   | Ok config -> Voice_runtime_overlay.select_endpoints ?provider config.tts.endpoints
 ;;
 
+(** Synthesize a dashboard-playable MP3 via any HTTP TTS endpoint.
+    This is used as a parallel fallback when the active transport is
+    [Voice_mcp], which produces audio through a local/MCP path but does not
+    write a browser-fetchable file. *)
+let try_http_tts_for_dashboard ~agent_id ~message ~voice ~model ~audio_device () =
+  let endpoints = available_tts_endpoints () in
+  let rec try_endpoint = function
+    | [] -> None
+    | endpoint :: rest ->
+      let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
+      if Voice_runtime_overlay.transport_supports_http_tts adapter
+      then (
+        let audio_file = make_audio_file () in
+        match
+          speak_via_http_tts_to_file
+            endpoint
+            ~agent_id
+            ~message
+            ~voice
+            ~model
+            ~output_file:audio_file
+        with
+        | Ok file_size -> Some (audio_file, file_size)
+        | Error _ ->
+          (try Sys.remove audio_file with
+           | Sys_error _ -> ());
+          try_endpoint rest)
+      else try_endpoint rest
+  in
+  try_endpoint endpoints
+;;
+
 let public_config_json () =
   match load_voice_config () with
   | Ok config -> Ok (Voice_config.public_json config)
@@ -166,27 +198,62 @@ let tts_preview_bytes_from_request_json json =
   try_endpoints [] endpoints
 ;;
 
-(** Clean up old audio files (>1 hour). Call from heartbeat. *)
+(** Clean up old audio files (>24 hours) and enforce a size cap.
+    Call from heartbeat. Older files are removed first; if the total
+    size still exceeds the cap, the oldest files are removed until the
+    cap is satisfied. *)
 let cleanup_old_audio_files () =
   let dir = Filename.concat (masc_base_dir ()) "audio" in
   if Sys.file_exists dir && Sys.is_directory dir
   then (
     let now = Time_compat.now () in
-    let cutoff = now -. Masc_time_constants.hour in
+    let cutoff = now -. Masc_time_constants.day in
     let entries = Sys.readdir dir in
+    let with_stats =
+      Array.to_list entries
+      |> List.filter_map (fun entry ->
+           let path = Filename.concat dir entry in
+           try
+             let stat = Unix.stat path in
+             Some (path, stat.st_mtime, stat.st_size)
+           with
+           | Unix.Unix_error _ | Sys_error _ -> None)
+    in
+    let by_age = List.sort (fun (_, m1, _) (_, m2, _) -> Float.compare m1 m2) with_stats in
     let removed = ref 0 in
-    Array.iter
-      (fun entry ->
-         let path = Filename.concat dir entry in
-         try
-           let stat = Unix.stat path in
-           if stat.st_mtime < cutoff
+    let remove path =
+      try
+        Sys.remove path;
+        incr removed
+      with
+      | Unix.Unix_error _ | Sys_error _ -> ()
+    in
+    (* First pass: remove files older than 24h. *)
+    let remaining =
+      List.filter
+        (fun (path, mtime, _size) ->
+           if mtime < cutoff
            then (
-             Sys.remove path;
-             incr removed)
-         with
-         | Unix.Unix_error _ | Sys_error _ -> ())
-      entries;
+             remove path;
+             false)
+           else true)
+        by_age
+    in
+    (* Second pass: enforce size cap by removing oldest files first. *)
+    let max_size_bytes = 500 * 1024 * 1024 in
+    let total_size = List.fold_left (fun acc (_, _, size) -> acc + size) 0 remaining in
+    if total_size > max_size_bytes
+    then
+      ignore
+        (List.fold_left
+           (fun acc (path, _mtime, size) ->
+              if acc <= max_size_bytes
+              then acc
+              else (
+                remove path;
+                acc - size))
+           total_size
+           remaining);
     if !removed > 0
     then log_info (Printf.sprintf "Cleaned up %d old audio files" !removed))
 ;;
@@ -490,7 +557,33 @@ let attempt_tts_endpoint
       with
       | Ok json ->
         (match extract_mcp_result json with
-         | Ok data -> Ok (append_provider_metadata data endpoint)
+         | Ok data ->
+           (* Voice_mcp plays audio locally but does not expose a file for the
+              dashboard. Try to synthesize a parallel HTTP TTS clip so the
+              browser can also play it. *)
+           let data =
+             match
+               try_http_tts_for_dashboard
+                 ~agent_id
+                 ~message
+                 ~voice
+                 ~model
+                 ~audio_device
+                 ()
+             with
+             | Some (audio_file, file_size) ->
+               let audio_fields =
+                 [ "audio_file", `String audio_file
+                 ; "audio_size", `Int file_size
+                 ]
+                 @ audio_payload_fields ~audio_file ~audio_device
+               in
+               (match data with
+                | `Assoc fields -> `Assoc (fields @ audio_fields)
+                | other -> other)
+             | None -> data
+           in
+           Ok (append_provider_metadata data endpoint)
          | Error error -> Error error)
       | Error error -> Error error)
 ;;
@@ -638,9 +731,70 @@ let end_voice_session ~sw ~clock ~net ~agent_id =
     call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_end" ~arguments:args)
 ;;
 
+(** Try HTTP TTS endpoints to synthesize a browser-playable MP3 clip.
+    Used when the winning endpoint is [Voice_mcp] so the dashboard still
+    has an audio clip even though the MCP server owns local playback.
+    Returns [None] when no HTTP endpoint is configured or all fail. *)
+let try_http_tts_for_browser_audio
+      ~sw
+      ~clock
+      ~net
+      ~agent_id
+      ~message
+      ~voice
+      ~model
+      ~priority
+      ?audio_device
+      endpoints
+  =
+  let http_endpoints =
+    List.filter Voice_runtime_overlay.endpoint_supports_http_tts endpoints
+  in
+  let rec try_endpoints = function
+    | [] -> None
+    | endpoint :: rest ->
+      let audio_file = make_audio_file () in
+      (match
+         speak_via_http_tts_to_file
+           endpoint
+           ~message
+           ~voice
+           ~model
+           ~agent_id
+           ~output_file:audio_file
+       with
+       | Ok file_size -> Some (audio_file, file_size)
+       | Error _ ->
+         (try Sys.remove audio_file with
+          | Sys_error _ -> ());
+         try_endpoints rest)
+  in
+  try_endpoints http_endpoints
+;;
+
+let result_has_audio_file = function
+  | `Assoc fields -> List.assoc_opt "audio_file" fields <> None
+  | _ -> false
+;;
+
+let merge_browser_audio_fields ~audio_file ~file_size ?audio_device json =
+  match json with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       @ [ ("audio_file", `String audio_file); ("audio_size", `Int file_size) ]
+       @ audio_payload_fields ~audio_file ~audio_device)
+  | other -> other
+;;
+
 (** Request speaking turn.
     Ordered endpoint chain from voice_config.json. Fails explicitly when no
-    real backend accepts the request. *)
+    real backend accepts the request.
+
+    RFC-0235 P3: when the winning endpoint is [Voice_mcp] and a separate
+    HTTP TTS endpoint is also configured, synthesize a parallel browser
+    clip so the dashboard can play the utterance. The MCP server still
+    owns local playback; the HTTP clip is dashboard-only. *)
 let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) ?audio_device () =
   if is_dedup_hit ~agent_id ~message
   then (
@@ -698,7 +852,40 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) ?au
     in
     if endpoints = []
     then Error "no configured TTS endpoint"
-    else try_endpoints [] endpoints)
+    else
+      match try_endpoints [] endpoints with
+      | Ok result when not (result_has_audio_file result) ->
+        (* The winning endpoint was [Voice_mcp]. Try a dashboard-playable
+           HTTP TTS clip in parallel so the dashboard has audio playback.
+           If no HTTP endpoint is available or all fail, the MCP result
+           still stands and the dashboard simply shows no audio player. *)
+        (match
+           try_http_tts_for_browser_audio
+             ~sw
+             ~clock
+             ~net
+             ~agent_id
+             ~message
+             ~voice
+             ~model
+             ~priority
+             ?audio_device
+             endpoints
+         with
+         | Some (audio_file, file_size) ->
+           log_info
+             (Printf.sprintf
+                "Voice MCP: synthesized parallel browser audio clip for agent=%s file=%s"
+                agent_id
+                audio_file);
+           Ok (merge_browser_audio_fields ~audio_file ~file_size ?audio_device result)
+         | None ->
+           log_info
+             (Printf.sprintf
+                "Voice MCP path used for agent=%s; no browser audio clip available (no HTTP TTS endpoint)."
+                agent_id);
+           Ok result)
+      | other -> other)
 ;;
 
 (** List active voice sessions *)

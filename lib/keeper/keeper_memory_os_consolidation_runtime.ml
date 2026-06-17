@@ -67,6 +67,16 @@ type outcome =
       ; after : int
       }
 
+(* Serialize consolidation passes against the per-keeper facts file so the
+   read -> plan -> write-back sequence does not race with another rewrite.
+   The lock is held across the LLM call, which is acceptable for the
+   infrequent consolidation pass; a future slice can shorten the window by
+   snapshotting before the LLM and validating before write. *)
+let with_facts_lock ?clock ~keeper_id f =
+  try File_lock_eio.with_lock ?clock (Io.facts_path ~keeper_id) f with
+  | Failure msg -> Transport_failed ("consolidation lock timeout: " ^ msg)
+;;
+
 let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
@@ -114,30 +124,33 @@ let consolidate_keeper
       ~keeper_id
       ()
   =
-  let facts = Io.read_facts_all ~keeper_id in
-  let before = List.length facts in
-  if before < min_facts_to_consolidate
-  then Skipped_too_few before
-  else (
-    match messages_for_consolidation facts with
-    | Error msg -> Unparseable msg
-    | Ok messages ->
-      let config = provider_for_consolidation provider_cfg in
-      (match
-         with_timeout ?clock ~timeout_sec (fun () ->
-           complete ~sw ~net ?clock ~config ~messages ())
-       with
-       | None -> Transport_failed "consolidation provider timed out"
-       | Some (Error _) -> Transport_failed "consolidation provider transport error"
-       | Some (Ok response) ->
-         (match response_text response with
-          | None -> Unparseable "consolidation provider returned empty response"
-          | Some raw ->
-            (match Consolidation.plan_of_string raw with
-             | None -> Unparseable "consolidation provider returned invalid plan JSON"
-             | Some plan ->
-               let survivors = Consolidation.apply_plan ~now ~facts plan in
-               let after = List.length survivors in
-               if not dry_run then Io.rewrite_facts_atomically ~keeper_id survivors;
-               Consolidated { before; after }))))
+  let run () =
+    let facts = Io.read_facts_all ~keeper_id in
+    let before = List.length facts in
+    if before < min_facts_to_consolidate
+    then Skipped_too_few before
+    else (
+      match messages_for_consolidation facts with
+      | Error msg -> Unparseable msg
+      | Ok messages ->
+        let config = provider_for_consolidation provider_cfg in
+        (match
+           with_timeout ?clock ~timeout_sec (fun () ->
+             complete ~sw ~net ?clock ~config ~messages ())
+         with
+         | None -> Transport_failed "consolidation provider timed out"
+         | Some (Error _) -> Transport_failed "consolidation provider transport error"
+         | Some (Ok response) ->
+           (match response_text response with
+            | None -> Unparseable "consolidation provider returned empty response"
+            | Some raw ->
+              (match Consolidation.plan_of_string raw with
+               | None -> Unparseable "consolidation provider returned invalid plan JSON"
+               | Some plan ->
+                 let survivors = Consolidation.apply_plan ~now ~facts plan in
+                 let after = List.length survivors in
+                 if not dry_run then Io.rewrite_facts_atomically ~keeper_id survivors;
+                 Consolidated { before; after }))))
+  in
+  with_facts_lock ?clock ~keeper_id run
 ;;

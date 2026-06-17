@@ -22,8 +22,14 @@ Backend is pluggable (--judge-cmd, default "sb glm-text"); store dir is
 --store-dir. Makes live LLM calls — run on demand. Deterministic given fixed model
 output, reproducible via the recorded label output.
 """
+
 from __future__ import annotations
-import argparse, glob, json, os, subprocess, sys, re
+import argparse
+import glob
+import json
+import os
+import subprocess
+import sys
 
 # GOLD: the single irreducible HUMAN-anchored calibration set — the one manual
 # artifact left after moving all measurement to the LLM judge. It exists to keep the
@@ -35,8 +41,14 @@ GOLD: list[tuple[str, str]] = [
     ("The rondo sandbox blocks Write/Read tools on the masc repo", "durable"),
     ("The Write tool has a destructive guard that blocks ${} expansion", "durable"),
     ("sed -i does not persist across Docker turn containers", "durable"),
-    ("DUNE_CACHE=disabled is required to rebuild after cross-lib .mli changes", "durable"),
-    ("A continuation checkpoint was saved and the keeper remains scheduled", "ephemeral"),
+    (
+        "DUNE_CACHE=disabled is required to rebuild after cross-lib .mli changes",
+        "durable",
+    ),
+    (
+        "A continuation checkpoint was saved and the keeper remains scheduled",
+        "ephemeral",
+    ),
     ("No claimable or unclaimed tasks remain", "ephemeral"),
     ("Board curation was submitted", "ephemeral"),
     ("desire, intention, blocker, and need are all none", "ephemeral"),
@@ -60,6 +72,64 @@ JUDGE_SYSTEM = (
 VALID = {"durable", "ephemeral", "uncertain"}
 
 
+def _extract_json_array(text: str) -> str | None:
+    """Return the first well-balanced top-level JSON array in [text].
+
+    Mirrors a strict parser enough to avoid the greedy-regex trap that would
+    match from an opening '[' all the way to the last ']' in the response.
+    """
+    start = text.find("[")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i, ch in enumerate(text[start:], start):
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+def _parse_index(raw_i, n: int) -> int | None:
+    """Convert a judge index to a 0-based int position, or None if unusable.
+
+    Accepts integers and whole-number floats (e.g. 1.0). Rejects booleans,
+    non-numeric strings, and fractional floats so a malformed index never
+    crashes the run.
+    """
+    if isinstance(raw_i, bool):
+        return None
+    if isinstance(raw_i, float):
+        if not raw_i.is_integer():
+            return None
+        idx = int(raw_i) - 1
+    elif isinstance(raw_i, int):
+        idx = raw_i - 1
+    else:
+        try:
+            idx = int(raw_i) - 1
+        except Exception:
+            return None
+    if 0 <= idx < n:
+        return idx
+    return None
+
+
 def run_judge(claims: list[str], judge_cmd: str) -> list[str]:
     """Label a batch of claims. Unparseable items default to 'uncertain' (never a
     silent durable/ephemeral guess)."""
@@ -72,18 +142,20 @@ def run_judge(claims: list[str], judge_cmd: str) -> list[str]:
         print(f"  judge call failed: {e}", file=sys.stderr)
         return ["uncertain"] * len(claims)
     labels = ["uncertain"] * len(claims)
-    m = re.search(r"\[.*\]", out, re.S)
-    if not m:
+    arr_text = _extract_json_array(out)
+    if arr_text is None:
         return labels
     try:
-        arr = json.loads(m.group(0))
+        arr = json.loads(arr_text)
     except Exception:
+        return labels
+    if not isinstance(arr, list):
         return labels
     for obj in arr:
         if isinstance(obj, dict) and "i" in obj:
-            idx = obj["i"] - 1
+            idx = _parse_index(obj["i"], len(labels))
             lab = str(obj.get("label", "")).strip().lower()
-            if 0 <= idx < len(labels) and lab in VALID:
+            if idx is not None and lab in VALID:
                 labels[idx] = lab
     return labels
 
@@ -108,7 +180,9 @@ def calibrate(judge_cmd: str, min_acc: float) -> float:
     got = run_judge(claims, judge_cmd)
     correct = sum(1 for (got_l, (_, exp)) in zip(got, GOLD) if got_l == exp)
     acc = correct / len(GOLD)
-    print(f"calibration: judge agreed with {correct}/{len(GOLD)} gold labels = {acc:.0%}")
+    print(
+        f"calibration: judge agreed with {correct}/{len(GOLD)} gold labels = {acc:.0%}"
+    )
     for (claim, exp), g in zip(GOLD, got):
         flag = "ok" if g == exp else "MISS"
         print(f"  [{flag}] gold={exp:9} judge={g:9} | {claim[:70]}")
@@ -127,19 +201,20 @@ def load_facts(store_dir: str, include_shared: bool) -> list[tuple[str, str]]:
     for path in sorted(glob.glob(os.path.join(store_dir, "*.facts.jsonl"))):
         if not include_shared and os.path.basename(path).startswith("_shared"):
             continue
-        for line in open(path):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                o = json.loads(line)
-            except Exception:
-                continue
-            claim = o.get("claim", "")
-            cat = o.get("category")
-            cat = cat if isinstance(cat, str) else (cat or {}).get("kind", "?")
-            if claim:
-                facts.append((claim, cat))
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                claim = o.get("claim", "")
+                cat = o.get("category")
+                cat = cat if isinstance(cat, str) else (cat or {}).get("kind", "?")
+                if claim:
+                    facts.append((claim, cat))
     return facts
 
 
@@ -153,14 +228,22 @@ def deterministic_sample(items: list, n: int) -> list:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["calibrate", "measure", "relabel"], default="calibrate")
+    ap.add_argument(
+        "--mode", choices=["calibrate", "measure", "relabel"], default="calibrate"
+    )
     ap.add_argument(
         "--store-dir",
         default=os.path.join(
             os.environ.get("MASC_BASE_PATH") or os.path.expanduser("~/me"),
-            ".masc", "config", "keepers"))
+            ".masc",
+            "config",
+            "keepers",
+        ),
+    )
     ap.add_argument("--judge-cmd", default="sb glm-text")
-    ap.add_argument("--sample", type=int, default=100, help="facts to judge in measure mode")
+    ap.add_argument(
+        "--sample", type=int, default=100, help="facts to judge in measure mode"
+    )
     ap.add_argument("--batch", type=int, default=20)
     ap.add_argument("--min-accuracy", type=float, default=0.78)
     ap.add_argument("--out", default="", help="relabel mode: output JSONL path")
@@ -179,19 +262,27 @@ def main() -> int:
     if args.mode == "measure":
         if shared_only:
             sl = judge_all([c for c, _ in shared_only], args.judge_cmd, args.batch)
-            print(f"\n_shared tier ({len(shared_only)} facts): noise_rate = {noise_rate(sl):.0%} "
-                  f"(eph {sl.count('ephemeral')} / dur {sl.count('durable')} / unc {sl.count('uncertain')})")
+            print(
+                f"\n_shared tier ({len(shared_only)} facts): noise_rate = {noise_rate(sl):.0%} "
+                f"(eph {sl.count('ephemeral')} / dur {sl.count('durable')} / unc {sl.count('uncertain')})"
+            )
         sample = deterministic_sample(keeper_facts, args.sample)
         sl = judge_all([c for c, _ in sample], args.judge_cmd, args.batch)
-        print(f"\nkeeper store sample ({len(sample)} of {len(keeper_facts)}): "
-              f"noise_rate = {noise_rate(sl):.0%} "
-              f"(eph {sl.count('ephemeral')} / dur {sl.count('durable')} / unc {sl.count('uncertain')})")
+        print(
+            f"\nkeeper store sample ({len(sample)} of {len(keeper_facts)}): "
+            f"noise_rate = {noise_rate(sl):.0%} "
+            f"(eph {sl.count('ephemeral')} / dur {sl.count('durable')} / unc {sl.count('uncertain')})"
+        )
         # producer-disagreement: how often the producer's category=fact is judged ephemeral
-        mis = sum(1 for (_, cat), j in zip(sample, sl) if cat == "fact" and j == "ephemeral")
+        mis = sum(
+            1 for (_, cat), j in zip(sample, sl) if cat == "fact" and j == "ephemeral"
+        )
         nfact = sum(1 for _, cat in sample if cat == "fact")
         if nfact:
-            print(f"producer mislabel: {mis}/{nfact} of category=fact are judged ephemeral "
-                  f"= {mis / nfact:.0%}")
+            print(
+                f"producer mislabel: {mis}/{nfact} of category=fact are judged ephemeral "
+                f"= {mis / nfact:.0%}"
+            )
         return 0
 
     if args.mode == "relabel":
@@ -199,9 +290,16 @@ def main() -> int:
         out_path = args.out or "memory_os_relabel.jsonl"
         with open(out_path, "w") as f:
             for (claim, cat), lab in zip(keeper_facts, labels):
-                f.write(json.dumps({"claim": claim, "producer_category": cat, "judge_label": lab}) + "\n")
-        print(f"\nwrote {len(labels)} relabelled rows -> {out_path}; "
-              f"store noise_rate = {noise_rate(labels):.0%}")
+                f.write(
+                    json.dumps(
+                        {"claim": claim, "producer_category": cat, "judge_label": lab}
+                    )
+                    + "\n"
+                )
+        print(
+            f"\nwrote {len(labels)} relabelled rows -> {out_path}; "
+            f"store noise_rate = {noise_rate(labels):.0%}"
+        )
         return 0
     return 0
 

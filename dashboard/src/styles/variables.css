@@ -440,6 +440,13 @@
 
   --color-focus-ring: var(--brass-1);
 
+  /* Keeper-v2 indicators.css token bridge.
+     --font-ui and --radius-pill are already defined in tokens.generated.css. */
+  --volt:      var(--color-accent-fg);
+  --bg-sunken: var(--color-bg-elevated);
+  --border-soft: var(--color-border-divider);
+  --text-mid:  var(--color-fg-secondary);
+
   /* SPEC v0.1 §3 — Typography & spacing scale (Phase G Step 2).
      Numeric scale matches dashboard/design-system/source_styles/tokens.css.
      Coexists with the t-shirt --fs-xs/sm/... above; new components should

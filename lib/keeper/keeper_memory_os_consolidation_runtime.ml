@@ -71,7 +71,7 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
     | Some n when n > 0 -> Some (max n consolidation_max_tokens)
-    | _ -> Some consolidation_max_tokens
+    | Some _ | None -> Some consolidation_max_tokens
   in
   { provider_cfg with
     Llm_provider.Provider_config.max_tokens

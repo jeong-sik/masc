@@ -919,6 +919,48 @@ let keeper_repair_body ~(config : Workspace.config) ~(agent_name : string) args 
 let handle_keeper_repair ctx args : tool_result =
   keeper_repair_body ~config:ctx.config ~agent_name:ctx.agent_name args
 
+let adversarial_review_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
+  ignore config;
+  let diff = get_string args "diff" "" in
+  if String.equal (String.trim diff) ""
+  then tool_result_error {|{"error":"diff is required"}|}
+  else
+    let inputs =
+      match get_string_opt args "path" with
+      | Some path -> [ Adversarial_eval.Changed_file { path; content = diff } ]
+      | None -> [ Adversarial_eval.Diff diff ]
+    in
+    match Adversarial_eval.validate_inputs inputs with
+    | Error (path, kind) ->
+        let kind_str =
+          match (kind : Adversarial_eval.banned_input_kind) with
+          | Readme -> "readme"
+          | Design_doc -> "design_doc"
+          | State_history -> "state_history"
+          | Task_history -> "task_history"
+          | Governance_history -> "governance_history"
+        in
+        tool_result_error
+          (Printf.sprintf
+             {|{"error":"banned input: %s (%s)"}|}
+             path
+             kind_str)
+    | Ok valid_inputs ->
+        let session_id =
+          Printf.sprintf "%s-%s-%.0f"
+            agent_name
+            "adversarial-review"
+            (Time_compat.now ())
+        in
+        let ctx =
+          Adversarial_eval.create_context ~session_id ~inputs:valid_inputs
+        in
+        let result = Adversarial_eval.evaluate ctx in
+        tool_result_ok (Yojson.Safe.to_string (Adversarial_eval.result_to_yojson result))
+
+let handle_keeper_adversarial_review ctx args : tool_result =
+  adversarial_review_body ~config:ctx.config ~agent_name:ctx.agent_name args
+
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
   invalidate_status_cache (get_string args "name" "");

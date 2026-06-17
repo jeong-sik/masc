@@ -40,6 +40,9 @@ let registered_tool_name_set () =
   |> add_names (registered_tool_names ())
 
 let validate () : validation_result =
+  Log.Server.warn
+    "tool_registration_check.validate is a placeholder; policy-driven startup \
+     validation is disabled";
   { orphan_toml = []; uncovered = [] }
 
 let log_validation_result (r : validation_result) =

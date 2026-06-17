@@ -276,10 +276,6 @@ lib/dashboard/dashboard_workspaces.ml:28
 lib/dashboard/dashboard_workspaces.ml:53
 lib/dashboard/dashboard_verification.ml:47
 lib/dashboard/dashboard_verification.ml:85
-lib/dashboard/dashboard_worktree_status.ml:104
-lib/dashboard/dashboard_worktree_status.ml:109
-lib/dashboard/dashboard_worktree_status.ml:132
-lib/dashboard/dashboard_worktree_status.ml:218
 lib/dashboard/judge_json_recovery.ml:36
 lib/drift_guard.ml:50
 lib/drift_guard.ml:108

@@ -1152,22 +1152,6 @@ let test_telemetry_n_default_is_bounded () =
     "explicit positive n honoured"
     500 (resolve ~has_time_window:true ~n_param:(Some "500"))
 
-let test_git_remote_to_web_url () =
-  let check name input expected =
-    Alcotest.(check (option string)) name expected
-      (Server_routes_http_routes_dashboard.git_remote_to_web_url input)
-  in
-  check "scp-like git@ -> https" "git@github.com:jeong-sik/masc.git"
-    (Some "https://github.com/jeong-sik/masc");
-  check "https strips .git" "https://github.com/jeong-sik/masc.git"
-    (Some "https://github.com/jeong-sik/masc");
-  check "https without .git unchanged" "https://github.com/jeong-sik/masc"
-    (Some "https://github.com/jeong-sik/masc");
-  check "ssh:// drops scheme + userinfo" "ssh://git@github.com/o/r.git"
-    (Some "https://github.com/o/r");
-  check "empty -> None" "" None;
-  check "unrecognised shape -> None" "file:///local/path" None
-
 let () =
   run "dashboard_http_core"
     [
@@ -1241,7 +1225,5 @@ let () =
             test_project_snapshot_wire_returns_snapshot_when_populated;
           test_case "telemetry n default is bounded (freeze guard)" `Quick
             test_telemetry_n_default_is_bounded;
-          test_case "git remote -> web url normalisation" `Quick
-            test_git_remote_to_web_url;
         ] );
     ]

@@ -1,9 +1,8 @@
 (** Playground repository readiness.
 
-    This module owns repository clone/worktree readiness for playground repo
-    lanes. Keeper callers may ask whether a cwd-backed repo/worktree is usable,
-    but clone/fetch/worktree provisioning policy lives here instead of in
-    keeper execution code. *)
+    This module owns repository clone readiness for playground repo lanes.
+    Keeper callers may ask whether a cwd-backed repo is usable, but clone/fetch
+    provisioning policy lives here instead of keeper execution code. *)
 
 open Keeper_types
 open Keeper_meta_contract

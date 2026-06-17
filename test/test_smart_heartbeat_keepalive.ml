@@ -157,7 +157,8 @@ let test_visibility_gate_delays_unobserved_idle_emit () =
       ~last_heartbeat_cycle_ts:(now -. 60.0)
       HS.Emit
   in
-  check bool "unobserved idle remains emit because visibility gate backoff is disabled" true (decision = HS.Emit)
+  check bool "unobserved idle becomes skip_idle" true
+    (match decision with HS.Skip_idle _ -> true | _ -> false)
 
 let test_visibility_gate_allows_pending_signal () =
   let decision =

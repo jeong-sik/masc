@@ -270,63 +270,6 @@ let cache_desync_cleared_fn
      module_name:string -> task_id:string -> status:string -> unit) Atomic.t
   = Atomic.make (fun _config ~module_name:_ ~task_id:_ ~status:_ -> ())
 
-(** task-103: Auto-provision a sandbox worktree on successful task claim.
-
-    [Workspace_task.claim_task_r] flips a task to [Claimed] but does not create
-    the per-task git worktree the keeper subprocess will need (the LLM is
-    expected to create repo-local worktrees explicitly, but in practice
-    keepers often skip that step and immediately try to [cd] into the
-    worktree path inside docker, which fails with [fatal: not a git
-    repository: .../keeper-<agent>-<task>]).
-
-    This hook is called best-effort right after a successful claim. The
-    consumer (lib/keeper) decides whether to actually provision based on
-    keeper [sandbox_profile] (only [Docker] keepers benefit; local-host
-    keepers operate on the project root directly). Failures are logged but
-    do not block the claim — claim semantics stay independent of sandbox
-    state.
-
-    Wired in [lib/keeper/keeper_runtime.ml] at startup; the default no-op
-    keeps [masc_workspace] free of a direct dependency on [masc]. *)
-let claim_post_provision_fn
-  : (Workspace_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit) Atomic.t
-  = Atomic.make (fun _ ~agent_name:_ ~task_id:_ -> ())
-
-let claim_post_provision_failed_fn
-  : (site:string ->
-     agent_name:string ->
-     task_id:string ->
-     error:string ->
-     unit) Atomic.t
-  = Atomic.make
-      (fun ~site:_ ~agent_name:_ ~task_id:_ ~error:_ -> ())
-
-let observe_claim_post_provision_failure ~site ~agent_name ~task_id exn =
-  let error = Printexc.to_string exn in
-  (* This is the failure-observation path; we suppress secondary
-     exceptions from the callback and log so the original [exn] is
-     not masked by an instrumentation failure.  [Safe_ops.protect]
-     re-raises [Eio.Cancel.Cancelled] so a cancel racing with the
-     surrounding fiber still propagates instead of being silently
-     swallowed by [with _ -> ()]. *)
-  Safe_ops.protect ~default:() (fun () ->
-    (Atomic.get claim_post_provision_failed_fn)
-      ~site ~agent_name ~task_id ~error);
-  Safe_ops.protect ~default:() (fun () ->
-    Log.TaskState.warn
-      "claim_post_provision failed site=%s agent=%s task=%s err=%s"
-      site agent_name task_id error)
-
-let run_claim_post_provision_best_effort
-      config
-      ~site
-      ~agent_name
-      ~task_id
-  =
-  try (Atomic.get claim_post_provision_fn) config ~agent_name ~task_id with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> observe_claim_post_provision_failure ~site ~agent_name ~task_id exn
-
 let workspace_telemetry_drop_fn
   : (Workspace_telemetry_drop_event.t -> unit) Atomic.t
   = Atomic.make (fun _ -> ())

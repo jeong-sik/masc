@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { persistentSignal } from '../lib/persistent-signal'
 import { globalShortcutManager } from '../lib/global-shortcut-manager'
@@ -372,7 +372,10 @@ function DockMessageRow({ m, keeper, onPick }: { m: DockMessage; keeper: DockKee
 }
 
 export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
-  const keeperRows = deriveDockKeepers(keepers.value)
+  // deriveDockKeepers/getSurfaceContext are pure derivations of keepers + route.
+  // Memoized so the 40ms streaming-animation re-renders (dockStreaming.value)
+  // skip the O(N) keeper map/merge and the surface-context rebuild.
+  const keeperRows = useMemo(() => deriveDockKeepers(keepers.value), [keepers.value])
   const keeper = keeperRows.find(k => k.id === dock.state.value.keeperId) ?? keeperRows[0] ?? {
     id: 'masc-improver',
     kr: 'MASC Improver',
@@ -380,7 +383,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
     phase: 'Running',
     status: 'run',
   }
-  const ctx = getSurfaceContext()
+  const ctx = useMemo(() => getSurfaceContext(), [route.value, keepers.value])
   const msgs = dock.threads.value[keeper.id] ?? []
   const streaming = dock.streaming.value && dock.streaming.value.keeperId === keeper.id ? dock.streaming.value : null
   const [val, setVal] = useState('')

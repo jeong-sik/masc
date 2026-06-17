@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { App, shouldUseCompactDashboardChrome } from './app'
+import { currentTheme } from './lib/theme'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
   const originalHash = window.location.hash
 
   beforeEach(() => {
+    currentTheme.value = 'styleseed'
     container = document.createElement('div')
     document.body.appendChild(container)
     window.location.hash = originalHash

@@ -30,6 +30,7 @@ import {
   SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
+import { currentTheme } from './lib/theme'
 import { EmergencyStopControl } from './components/emergency-stop-control'
 import { TransportBeacon } from './components/transport-beacon'
 import { DashboardSurfaceTabs } from './components/dashboard-surface-tabs'
@@ -267,7 +268,7 @@ export function App() {
   return html`
     <div
       class="v2-app flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
-      data-theme="styleseed"
+      data-theme=${currentTheme.value === 'styleseed' ? 'styleseed' : currentTheme.value === 'paper' ? 'paper' : null}
       data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
       data-focus-mode=${focusMode ? 'true' : 'false'}
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}

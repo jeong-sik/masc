@@ -12,8 +12,25 @@
  * their signatures diverge: main.ts only persists, theme-switch.ts also
  * mirrors a signal and the URL query string.
  */
+import { signal } from '@preact/signals'
+
 export const THEME_STORAGE_KEYS = ['dashboardTheme', 'masc-theme-v2'] as const
 
 export const THEME_SEARCH_PARAM = 'theme'
 
 export type ThemeId = 'styleseed' | 'paper' | null
+
+export function readDomTheme(): ThemeId {
+  const attr = document.documentElement.dataset.theme
+  if (attr === 'styleseed') return 'styleseed'
+  if (attr === 'paper') return 'paper'
+  return null
+}
+
+// Single source of truth for the active dashboard theme.  The default is
+// StyleSeed; main.ts seeds the value from URL/localStorage/DOM on boot and
+// ThemeSwitch keeps it in sync with the DOM attribute so external changes
+// are reflected without mutating state during render.
+export const currentTheme = signal<ThemeId>(
+  typeof document === 'undefined' ? 'styleseed' : (readDomTheme() ?? 'styleseed'),
+)

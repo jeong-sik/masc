@@ -12,22 +12,14 @@
 // runtime handles rerender.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { ringFocusClasses } from './common/ring'
-import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from '../lib/theme'
-
-function readDomTheme(): ThemeId {
-  const attr = document.documentElement.dataset.theme
-  if (attr === 'styleseed') return 'styleseed'
-  if (attr === 'paper') return 'paper'
-  return null
-}
-
-// Single source of truth: mirrors the DOM attribute so Preact renders
-// the button label in sync with however main.ts initialised the theme.
-const currentTheme = signal<ThemeId>(
-  typeof document === 'undefined' ? null : readDomTheme(),
-)
+import {
+  THEME_STORAGE_KEYS,
+  THEME_SEARCH_PARAM,
+  currentTheme,
+  readDomTheme,
+  type ThemeId,
+} from '../lib/theme'
 
 function applyTheme(next: ThemeId): void {
   if (next === null) {
@@ -60,7 +52,7 @@ function syncThemeSearchParam(next: ThemeId): void {
 }
 
 function toggleTheme(): void {
-  applyTheme(currentTheme.value === 'styleseed' ? null : 'styleseed')
+  applyTheme(readDomTheme() === 'styleseed' ? null : 'styleseed')
 }
 
 const LABEL: Record<'default' | 'styleseed' | 'paper', string> = {
@@ -76,14 +68,10 @@ const TITLE: Record<'default' | 'styleseed' | 'paper', string> = {
 }
 
 export function ThemeSwitch() {
-  // Re-sync with the DOM on every render so external bootstrapping (main.ts)
-  // and tests that set dataset.theme after module load see the correct label.
+  // Read directly from the DOM so the label is always coupled to the
+  // runtime theme state without mutating the signal during render.
   const domTheme = readDomTheme()
-  if (currentTheme.value !== domTheme) {
-    currentTheme.value = domTheme
-  }
-
-  const key = currentTheme.value === 'styleseed' ? 'styleseed' : currentTheme.value === 'paper' ? 'paper' : 'default'
+  const key = domTheme === 'styleseed' ? 'styleseed' : domTheme === 'paper' ? 'paper' : 'default'
   return html`
     <button
       type="button"

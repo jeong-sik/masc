@@ -88,7 +88,7 @@ import { App } from './app'
 import { performanceMonitor } from './lib/performance-monitor'
 import { startWebVitalsCapture } from './utils/performance-metrics'
 import { startNavTelemetry } from './lib/nav-telemetry'
-import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from './lib/theme'
+import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, currentTheme, type ThemeId } from './lib/theme'
 
 function normalizeTheme(raw: string | null): ThemeId {
   if (raw === 'styleseed' || raw === 'light') {
@@ -143,6 +143,7 @@ function applyTheme(theme: ThemeId): void {
 
 const theme = resolveTheme()
 applyTheme(theme)
+currentTheme.value = theme
 
 const root = document.getElementById('app')
 if (root) {

@@ -364,20 +364,20 @@ export function App() {
         <${DashboardHealthStrip} />
       `}
 
-      <div class=${compactChromeMode ? 'flex flex-1 overflow-hidden p-0' : 'flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col'}>
+      <div class=${compactChromeMode ? 'v2-shell-stage flex flex-1 overflow-hidden p-0' : 'v2-shell-stage flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col'}>
         ${compactChromeMode
           ? null
           : html`
             ${mobileMenuOpen.value ? html`
               <button type="button" aria-label="Close navigation" tabindex=${-1} class="hidden max-[768px]:block fixed inset-0 z-40 cursor-pointer bg-black/50" onClick=${() => { mobileMenuOpen.value = false }}></button>
             ` : null}
-            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="v2-shell-rail ${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 max-[768px]:fixed max-[768px]:inset-y-0 max-[768px]:left-0 max-[768px]:z-50 max-[768px]:m-0 max-[768px]:w-72 max-[768px]:max-h-none max-[768px]:rounded-none max-[768px]:border-r ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="v2-shell-rail ${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:hidden max-[768px]:fixed max-[768px]:inset-y-0 max-[768px]:left-0 max-[768px]:z-50 max-[768px]:m-0 max-[768px]:w-72 max-[768px]:max-h-none max-[768px]:rounded-none max-[768px]:border-r ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
               <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
             </aside>
           `}
 
-        <div class="v2-stage">
-          <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0'}>
+        <div class="v2-stage min-h-0 flex-1">
+          <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg'}>
             <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>
                 <${DashboardMain} />
@@ -410,3 +410,8 @@ export function App() {
     </div>
   `
 }
+
+// Re-export the keeper-v2 v8 config panel + state surfaces from the app root
+// so downstream consumers have a single import surface.
+export { KeeperConfigPanel } from './components/keeper-config-panel-v2'
+export { EmptyState, ErrorState, LoadingState } from './components/state-surfaces'

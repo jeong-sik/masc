@@ -32,6 +32,28 @@ describe('Sigil', () => {
     const el = container.querySelector('.sigil')
     expect(el?.classList.contains('heartbeat')).toBe(true)
   })
+
+  it('supports title and uses it for aria-label', () => {
+    const container = document.createElement('div')
+    render(html`<${Sigil} title="iron-claw" fontScale=${0.46}>IC<//>`, container)
+    const el = container.querySelector('.sigil') as HTMLElement
+    expect(el?.getAttribute('title')).toBe('iron-claw')
+    expect(el?.getAttribute('aria-label')).toBe('iron-claw')
+  })
+
+  it('applies custom fontScale', () => {
+    const container = document.createElement('div')
+    render(html`<${Sigil} size=${50} fontScale=${0.5}>AB<//>`, container)
+    const el = container.querySelector('.sigil') as HTMLElement
+    expect(el?.style.fontSize).toBe('25px')
+  })
+
+  it('merges custom style', () => {
+    const container = document.createElement('div')
+    render(html`<${Sigil} style=${{ borderRadius: '8px' }}>AB<//>`, container)
+    const el = container.querySelector('.sigil') as HTMLElement
+    expect(el?.style.borderRadius).toBe('8px')
+  })
 })
 
 describe('SigilChip', () => {

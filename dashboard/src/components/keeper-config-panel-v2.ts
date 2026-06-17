@@ -26,7 +26,7 @@ interface InheritRow {
   txt: string
 }
 
-interface KeeperConfigPanelProps {
+export interface KeeperConfigPanelProps {
   keeper?: KeeperIdentity
   base?: KeeperBase
   inherit?: InheritRow[]

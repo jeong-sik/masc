@@ -6,7 +6,7 @@
 // dashboard's generated keeper palette.
 
 import { html } from 'htm/preact'
-import type { ComponentChildren, VNode } from 'preact'
+import type { ComponentChildren, JSX, VNode } from 'preact'
 
 export interface SigilProps {
   /** Keeper slot 1–12 or a raw CSS color value. */
@@ -15,6 +15,12 @@ export interface SigilProps {
   size?: number
   /** Pulse glow animation. */
   heartbeat?: boolean
+  /** Tooltip / accessible name override. */
+  title?: string
+  /** Scale factor applied to the size to compute font-size. */
+  fontScale?: number
+  /** Additional inline styles merged after the base sigil styles. */
+  style?: JSX.CSSProperties
   children?: ComponentChildren
 }
 
@@ -33,9 +39,18 @@ function slotGlowVar(slot: number | string): string {
   return typeof slot === 'number' ? `var(--kp${slot}-glow)` : slot
 }
 
-export function Sigil({ slot = 1, size = 32, heartbeat = false, children }: SigilProps): VNode {
+export function Sigil({
+  slot = 1,
+  size = 32,
+  heartbeat = false,
+  title,
+  fontScale = 0.4,
+  style,
+  children,
+}: SigilProps): VNode {
   const kc = slotVar(slot)
   const kcGlow = slotGlowVar(slot)
+  const label = title ?? (typeof children === 'string' ? children : undefined)
   return html`
     <span
       class=${`sigil${heartbeat ? ' heartbeat' : ''}`}
@@ -44,10 +59,12 @@ export function Sigil({ slot = 1, size = 32, heartbeat = false, children }: Sigi
         '--kc-glow': kcGlow,
         width: size,
         height: size,
-        fontSize: Math.round(size * 0.4),
+        fontSize: Math.round(size * fontScale),
+        ...style,
       }}
-      aria-label=${typeof children === 'string' ? children : undefined}
-      aria-hidden=${typeof children === 'string' ? undefined : 'true'}
+      title=${title}
+      aria-label=${label}
+      aria-hidden=${label ? undefined : 'true'}
     >${children}</span>
   `
 }

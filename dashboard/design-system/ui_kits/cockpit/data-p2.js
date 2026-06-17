@@ -255,7 +255,7 @@ window.MASC_P2 = (function () {
       short_goal:"지금 필요한 코드 변경을 바로 만들고 결과를 확인한다.",
       mid_goal:"세션 전반에서 계획보다 실행과 검증의 비중을 높인다.",
       long_goal:"작업이 항상 재현, 수정, 검증의 짧은 루프로 끝나게 만든다.",
-      runtime:"descriptor-strict", tools_preset:"coding", mention:["sangsu","코딩","developer","coder"],
+      runtime:"descriptor-strict", tools_preset:"coding", mention:["sangsu","코딩","developer","bob"],
       sandbox:"docker", network:"inherit", auto_handoff:true, handoff_threshold:0.85,
       tokens:{in:966400, out:29800}, last_handoff:"15:51:27Z", workspace_seq:296,
       proactive_idle_sec:120, social_model:"bdi_speech_v1",

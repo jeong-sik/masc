@@ -71,6 +71,7 @@ const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab 
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
 const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
+const LazySettingsSurface = lazy(async () => ({ default: (await import('./settings-surface')).SettingsSurface }))
 
 function lazyTabFallback(label: string) {
   return html`<${LoadingState}>Loading ${label}...<//>`
@@ -705,7 +706,7 @@ export function DashboardHealthStrip() {
 
   return html`
     <div
-      class="v2-health-strip flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-1.5 text-2xs"
+      class="v2-health-strip flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-1.5 text-xs"
       role="status"
       aria-label="Dashboard runtime health"
       data-testid="dashboard-health-strip"
@@ -847,7 +848,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+        class=${`cursor-pointer rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-[5px] text-2xs text-[var(--color-fg-muted)] transition-colors duration-[var(--t-med)] hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`Server build ${label}`}
         title=${hoverTitle}
@@ -1005,7 +1006,7 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   return html`
     <div class="flex items-center gap-2 px-1" role="status" aria-label=${label} title=${titleText}>
       ${dot}
-      <span class="text-2xs text-[var(--color-fg-muted)] truncate">${label}</span>
+      <span class="text-[var(--color-fg-muted)] truncate">${label}</span>
     </div>
   `
 }
@@ -1163,6 +1164,12 @@ function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('System Logs')}>
           <${LazyLogViewer} />
+        <//>
+      `
+    case 'settings':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Settings')}>
+          <${LazySettingsSurface} />
         <//>
       `
     default:

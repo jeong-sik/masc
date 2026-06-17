@@ -230,16 +230,16 @@ export function AgentDetailMemory({ agentName }: Props) {
                               ? 'text-[var(--color-status-warn)]'
                               : 'text-[var(--bad-light)]'
                         return html`
-                          <div class="v2-monitoring-row border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1.5 text-xs">
+                          <div class="v2-monitoring-row border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2.5 py-2 text-xs bg-[var(--color-bg-elevated)] hover:bg-[var(--color-bg-hover)] transition-colors">
                             <div class="flex items-center justify-between gap-2">
                               <div class="flex items-center gap-2 min-w-0">
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
-                                <span class="truncate text-[var(--color-fg-muted)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
+                                <span class="truncate text-[var(--color-fg-primary)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
-                              <span class="text-3xs text-[var(--color-fg-muted)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+                              <span class="text-2xs text-[var(--color-fg-secondary)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
-                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--color-border-default)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
+                              ? html`<div class="mt-1 text-2xs text-[var(--color-fg-secondary)] pl-3 border-l border-[var(--color-border-default)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`
                               : null}
                           </div>
                         `

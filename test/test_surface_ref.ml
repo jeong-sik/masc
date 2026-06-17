@@ -86,7 +86,7 @@ let with_base prefix f =
 let lane_path base =
   Filename.concat
     (Filename.concat (Filename.concat base ".masc") "keeper_chat")
-    "dreamer.jsonl"
+    "alice.jsonl"
 
 let test_typed_write_round_trips () =
   with_base "surface-ref-write" (fun base ->
@@ -94,9 +94,9 @@ let test_typed_write_round_trips () =
         S.Discord
           { guild_id = Some "g1"; channel_id = "c1"; parent_channel_id = None; thread_id = None }
       in
-      Store.append_user_message ~base_dir:base ~keeper_name:"dreamer"
+      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"hello" ~surface:ref_ ();
-      match Store.load ~base_dir:base ~keeper_name:"dreamer" with
+      match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ m ] ->
           check (option surface) "typed surface read back" (Some ref_)
             m.surface;
@@ -106,13 +106,13 @@ let test_typed_write_round_trips () =
 
 let test_legacy_label_row_reads_back () =
   with_base "surface-ref-legacy" (fun base ->
-      Store.append_user_message ~base_dir:base ~keeper_name:"dreamer"
+      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"seed" ();
       let oc = open_out_gen [ Open_append ] 0o644 (lane_path base) in
       output_string oc
         "{\"role\":\"user\",\"content\":\"old row\",\"ts\":2.0,\"source\":\"discord\"}\n";
       close_out oc;
-      match Store.load ~base_dir:base ~keeper_name:"dreamer" with
+      match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ _seed; legacy ] ->
           check (option surface) "no typed surface on pre-P5 row" None
             legacy.surface;
@@ -122,13 +122,13 @@ let test_legacy_label_row_reads_back () =
 
 let test_invalid_surface_payload_keeps_row () =
   with_base "surface-ref-invalid" (fun base ->
-      Store.append_user_message ~base_dir:base ~keeper_name:"dreamer"
+      Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"seed" ();
       let oc = open_out_gen [ Open_append ] 0o644 (lane_path base) in
       output_string oc
         "{\"role\":\"user\",\"content\":\"bad surface\",\"ts\":2.0,\"surface\":{\"kind\":\"telepathy\"}}\n";
       close_out oc;
-      match Store.load ~base_dir:base ~keeper_name:"dreamer" with
+      match Store.load ~base_dir:base ~keeper_name:"alice" with
       | [ _seed; bad ] ->
           check (option surface) "invalid payload reported, decoded as None"
             None bad.surface;

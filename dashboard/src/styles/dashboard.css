@@ -147,7 +147,18 @@
 
 /* ── SPA Refresh ─────────────────────────────────────────── */
 
-/* ── Card Subtle Hover Lift ── */
+/* ── Card surface (readability pass) ──
+   Gives SurfaceCard / SectionCard standard variant a default panel
+   treatment. The light variant (`!bg-transparent`) keeps its transparent
+   background so it can sit flush on a parent surface; hover still lifts
+   it slightly. Padding is left to callers. */
+/* Low-specificity (:where) so explicit caller utilities can override
+   background/border without fighting important flags. */
+:where(.card):not([class*="!bg-transparent"]) {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+}
+
 .card {
   transition: border-color var(--t-fast), background var(--t-fast);
 }

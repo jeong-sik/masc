@@ -1584,27 +1584,27 @@ let test_heartbeat_concurrent_start_stop () =
   Alcotest.(check int) "list empty after cleanup" 0 (List.length (Heartbeat.list ()))
 
 (** BUG-006: Task transitions should succeed when the caller uses the unsuffixed
-    keeper name (e.g. "keeper-coder") but the task was claimed under the
-    canonical "-agent" form (e.g. "keeper-coder-agent").  Reproduces the
+    keeper name (e.g. "keeper-bob") but the task was claimed under the
+    canonical "-agent" form (e.g. "keeper-bob-agent").  Reproduces the
     identity mismatch: "claimed by 'keeper-X-agent', caller is 'keeper-X'". *)
 let test_bug006_transition_with_unsuffixed_name () =
   with_test_env (fun config ->
     (* Join with canonical agent name to establish the identity recorded at claim time *)
-    let _ = Workspace.bind_session config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Workspace.bind_session config ~agent_name:"keeper-bob-agent" ~capabilities:["code"] () in
     let _ = Workspace.add_task config ~title:"BUG-006 Task" ~priority:1 ~description:"" in
-    (* Claim using the canonical name — assignee is recorded as "keeper-coder-agent" *)
-    (match Workspace.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
+    (* Claim using the canonical name — assignee is recorded as "keeper-bob-agent" *)
+    (match Workspace.claim_task_r config ~agent_name:"keeper-bob-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
-    (* Transition (start) using the unsuffixed name — should resolve to "keeper-coder-agent" *)
-    (match Workspace.transition_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (* Transition (start) using the unsuffixed name — should resolve to "keeper-bob-agent" *)
+    (match Workspace.transition_task_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
              ~action:Masc_domain.Start () with
      | Ok _ -> ()
      | Error e ->
          Alcotest.failf "start with unsuffixed name failed (BUG-006): %s"
            (Masc_domain.show_masc_error e));
     (* Complete using the unsuffixed name — same resolution path *)
-    (match transition_done_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (match transition_done_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
              ~notes:"done" with
      | Ok _ -> ()
      | Error e ->
@@ -1614,13 +1614,13 @@ let test_bug006_transition_with_unsuffixed_name () =
 
 let test_bug006_cancel_with_unsuffixed_name () =
   with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:"keeper-coder-agent" ~capabilities:["code"] () in
+    let _ = Workspace.bind_session config ~agent_name:"keeper-bob-agent" ~capabilities:["code"] () in
     let _ = Workspace.add_task config ~title:"BUG-006 Cancel Task" ~priority:1 ~description:"" in
-    (match Workspace.claim_task_r config ~agent_name:"keeper-coder-agent" ~task_id:"task-001" () with
+    (match Workspace.claim_task_r config ~agent_name:"keeper-bob-agent" ~task_id:"task-001" () with
      | Ok _ -> ()
      | Error e -> Alcotest.failf "claim failed: %s" (Masc_domain.show_masc_error e));
-    (* Cancel using the unsuffixed name — should resolve to "keeper-coder-agent" *)
-    (match Workspace.cancel_task_r config ~agent_name:"keeper-coder" ~task_id:"task-001"
+    (* Cancel using the unsuffixed name — should resolve to "keeper-bob-agent" *)
+    (match Workspace.cancel_task_r config ~agent_name:"keeper-bob" ~task_id:"task-001"
              ~reason:"test" with
      | Ok _ -> ()
      | Error e ->

@@ -171,15 +171,15 @@ let post_empty_queue_sleep ~(any_pending : bool) ~(channel : string) =
 
 (* TurnComplete (KeeperTaskAcquisition.tla, Cycle 45 follow-up to
    PR #11716): the [run_keeper_cycle] body has produced an [Ok meta]
-   for this cycle. The post-action invariant pins that the
-   [cycle_completed] ref was actually toggled before the result is
-   returned -- catches a regression where a future refactor splits
-   the bottom of [run_keeper_cycle] into branches that forget to
-   record completion. The ref is single-fiber by construction: each
-   [run_keeper_cycle] invocation runs in its own fiber, and the ref
+   for this cycle. The post-action invariant pins that
+   [cycle_completed] is true before the result is returned -- catches
+   a regression where a future refactor splits the bottom of
+   [run_keeper_cycle] into branches that forget to record completion.
+   The immutable [turn_state] is single-fiber by construction: each
+   [run_keeper_cycle] invocation runs in its own fiber, and the state
    is allocated fresh inside the function. *)
-let post_turn_complete_task ~(cycle_completed : bool ref) = ignore cycle_completed
-[@@fsm_guard "!cycle_completed = true"]
+let post_turn_complete_task ~(cycle_completed : bool) = ignore cycle_completed
+[@@fsm_guard "cycle_completed = true"]
 ;;
 
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =

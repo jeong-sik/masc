@@ -124,17 +124,17 @@ function MessageRow({ row }: { row: MentionInboxRow }) {
   const preview = previewBoardMessage(row.message)
   const hasState = row.message.content.includes('[STATE]')
   return html`
-    <article class="v2-workspace-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3.5 py-3">
+    <article class="v2-workspace-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-3 hover:border-[var(--color-border-strong)] transition-colors">
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
+        <span class="text-xs font-bold text-[var(--color-fg-primary)]">${row.message.from ?? SYSTEM_MESSAGE_FROM}</span>
         ${row.message.timestamp
-          ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
+          ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-secondary)]"><${TimeAgo} timestamp=${row.message.timestamp} /></span>`
           : null}
         ${row.message.type
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-3xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${row.message.type}</span>`
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.type}</span>`
           : null}
         ${hasState
-          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-[var(--color-accent-fg)]">STATE</span>`
+          ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-accent-fg)]">STATE</span>`
           : null}
       </div>
       <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">
@@ -144,7 +144,7 @@ function MessageRow({ row }: { row: MentionInboxRow }) {
         ? html`
             <div class="mt-2 flex flex-wrap gap-1.5">
               ${row.mentionTargets.map(target => html`
-                <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]" key=${target}>
+                <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]" key=${target}>
                   <${AtSign} size=${11} aria-hidden="true" />
                   @${target}
                 </span>
@@ -168,8 +168,8 @@ function MentionLane({
   return html`
     <section class="min-w-0" aria-label=${title}>
       <div class="mb-2 flex items-center justify-between gap-2">
-        <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">${title}</h3>
-        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">${rows.length}</span>
+        <h3 class="text-sm font-bold text-[var(--color-fg-primary)]">${title}</h3>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${rows.length}</span>
       </div>
       ${rows.length === 0
         ? html`<${EmptyState} message=${emptyMessage} compact />`
@@ -192,8 +192,8 @@ export function MentionInbox() {
     <section class="grid gap-4" aria-labelledby="mention-inbox-heading">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Messages</div>
-          <h2 id="mention-inbox-heading" class="mt-1 text-xl font-semibold text-[var(--color-fg-primary)]">Mention inbox</h2>
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Messages</div>
+          <h2 id="mention-inbox-heading" class="mt-1 text-xl font-bold text-[var(--color-fg-primary)]">Mention inbox</h2>
         </div>
         <${ActionButton}
           variant="ghost"
@@ -208,17 +208,17 @@ export function MentionInbox() {
       </div>
 
       <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2">
-        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">For me</div>
-          <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.forMe.length}</div>
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">For me</div>
+          <div class="mt-1 text-lg font-bold tabular-nums text-[var(--color-fg-primary)]">${model.forMe.length}</div>
         </div>
-        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Other mentions</div>
-          <div class="mt-1 text-lg font-semibold tabular-nums text-[var(--color-fg-primary)]">${model.others.length}</div>
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Other mentions</div>
+          <div class="mt-1 text-lg font-bold tabular-nums text-[var(--color-fg-primary)]">${model.others.length}</div>
         </div>
-        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Targets</div>
-          <div class="mt-1 truncate text-sm font-semibold text-[var(--color-fg-primary)]">${targetCandidates.map(target => `@${target}`).join(', ')}</div>
+        <div class="v2-workspace-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+          <div class="text-2xs font-bold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">Targets</div>
+          <div class="mt-1 truncate text-sm font-bold text-[var(--color-fg-primary)]">${targetCandidates.map(target => `@${target}`).join(', ')}</div>
         </div>
       </div>
 

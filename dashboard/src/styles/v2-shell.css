@@ -65,7 +65,7 @@
 #dashboard-side-rail.v2-shell-rail .nav-brand .nb-title {
   font-family: var(--v2-font-display);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--v2-text-bright);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -73,9 +73,9 @@
 
 #dashboard-side-rail.v2-shell-rail .nav-brand .nb-sub {
   font-family: var(--v2-font-mono);
-  font-size: 9.5px;
-  color: var(--v2-text-faint);
-  letter-spacing: 0.14em;
+  font-size: 10px;
+  color: var(--v2-text-dim);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   margin-top: 2px;
 }
@@ -107,9 +107,9 @@
   gap: 8px;
   padding: 10px 16px 4px;
   font-family: var(--v2-font-mono);
-  font-size: 9.5px;
-  color: var(--v2-text-faint);
-  letter-spacing: 0.14em;
+  font-size: 10px;
+  color: var(--v2-text-dim);
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   user-select: none;
 }
@@ -146,7 +146,8 @@
   color: var(--v2-text);
   font-family: var(--v2-font-ui);
   font-size: 12px;
-  letter-spacing: 0.04em;
+  font-weight: 500;
+  letter-spacing: 0.03em;
   text-decoration: none;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
@@ -213,8 +214,8 @@
   border: 1px solid transparent;
   color: var(--v2-text-dim);
   font-family: var(--v2-font-ui);
-  font-size: 11px;
-  letter-spacing: 0.03em;
+  font-size: 12px;
+  letter-spacing: 0.02em;
   text-decoration: none;
   text-align: left;
   cursor: pointer;
@@ -270,7 +271,7 @@
   padding: 8px 12px;
   color: var(--v2-text-dim);
   font-family: var(--v2-font-mono);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -317,15 +318,16 @@ aside.v2-status-tray .tray-button:focus-visible {
 
 aside.v2-status-tray .tray-button .tray-button-label {
   font-family: var(--v2-font-mono);
-  font-size: 8.5px;
-  letter-spacing: 0.12em;
+  font-size: 10px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 aside.v2-status-tray .tray-button .tray-button-value {
   font-family: var(--v2-font-mono);
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--v2-text-bright);
 }
@@ -640,55 +642,68 @@ aside.v2-status-tray .tray-action-link:hover {
 }
 
 .v2-shell-header .v2-header-brand {
-  border-color: var(--v2-border);
-  background: var(--v2-card);
+  border-color: var(--v2-border-strong);
+  background: var(--v2-card-soft);
 }
 
 .v2-shell-header .v2-header-mark {
   border-color: var(--v2-border);
-  background: rgba(138, 106, 40, 0.10);
+  background: rgba(138, 106, 40, 0.12);
   color: var(--brass-1);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
 }
 
 .v2-shell-header .v2-header-crumb {
   color: var(--v2-text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
 }
 
 .v2-shell-header .v2-header-crumb .text-\[var\(--color-warn\)\] {
-  color: var(--v2-warn);
+  color: var(--brass-1);
 }
 
 .v2-shell-header .v2-header-title {
-  color: var(--v2-text);
+  color: var(--v2-text-bright);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 /* Surface tabs inside the header */
 .v2-shell-tabs [role="tablist"] {
   border-color: var(--v2-border);
-  background: var(--v2-card-soft);
+  background: var(--v2-card);
 }
 
 .v2-shell-tabs [role="tab"] {
   border-color: transparent;
   color: var(--v2-text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
 }
 
 .v2-shell-tabs [role="tab"]:hover {
   border-color: var(--v2-border);
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--v2-text);
 }
 
 .v2-shell-tabs [role="tab"][aria-selected="true"] {
   border-color: var(--v2-accent-brass-dim);
-  background: rgba(196, 162, 101, 0.12);
+  background: rgba(196, 162, 101, 0.14);
   color: var(--brass-1);
+  font-weight: 600;
   box-shadow: inset 0 -1px 0 var(--v2-accent-brass-dim);
 }
 
 /* Header action area (emergency stop, auth, connection, theme, build) */
 .v2-shell-header .v2-header-actions {
-  color: var(--v2-text-dim);
+  color: var(--v2-text);
 }
 
 /* ── Health strip chrome ── */
@@ -699,6 +714,7 @@ aside.v2-status-tray .tray-action-link:hover {
 
 .v2-health-strip .dashboard-health-chip {
   font-family: var(--v2-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
 }

@@ -186,6 +186,31 @@ let test_runtime_toml_reserves_web_search_namespace () =
     check (option string) "default runtime" (Some "local.sample")
       cfg.Runtime_schema.default_runtime_id
 
+(** The runtime singletons were migrated from plain [ref]s to [Atomic.t] so
+    that reads from worker domains on OCaml 5 see published writes.  This test
+    exercises the public getter surface after [init_default] to ensure the
+    atomic reads return consistent, repeatable values. *)
+let test_runtime_atomic_getters_are_consistent_after_init () =
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime.init_default ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should init: %s" msg
+  | Ok () ->
+    let default1 = Runtime.get_default_runtime () in
+    let default2 = Runtime.get_default_runtime () in
+    check
+      (option string)
+      "get_default_runtime is stable"
+      (Option.map (fun (rt : Runtime.t) -> rt.id) default1)
+      (Option.map (fun (rt : Runtime.t) -> rt.id) default2);
+    let ids1 = Runtime.get_runtime_ids () in
+    let ids2 = Runtime.get_runtime_ids () in
+    check (list string) "get_runtime_ids is stable" ids1 ids2;
+    check bool "runtime_id_for_keeper resolves through atomic cache"
+      true
+      (match Runtime.runtime_id_for_keeper "nick0cave" with
+       | Some id -> Option.is_some (Runtime.get_runtime_by_id id)
+       | None -> false)
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -200,5 +225,7 @@ let () =
             "web_search TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_web_search_keys;
           test_case "web_search is a reserved runtime TOML namespace" `Quick
-            test_runtime_toml_reserves_web_search_namespace ] )
+            test_runtime_toml_reserves_web_search_namespace;
+          test_case "atomic runtime getters are consistent after init" `Quick
+            test_runtime_atomic_getters_are_consistent_after_init ] )
     ]

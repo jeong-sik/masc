@@ -43,42 +43,6 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
 
-let startup_prune_auth_archive (state : Mcp_server.server_state) =
-  (try
-     let days =
-       Safe_ops.get_env_int_logged
-         "MASC_AUTH_ARCHIVE_RETENTION_DAYS"
-         ~default:30
-     in
-     let min_keep =
-       Safe_ops.get_env_int_logged
-         "MASC_AUTH_ARCHIVE_MIN_KEEP"
-         ~default:20
-     in
-     let kept, pruned =
-       Auth.prune_archive
-         ~base_path:(Mcp_server.workspace_config state).base_path
-         ~retention_days:days
-         ~min_keep
-     in
-     Otel_metric_store.set_gauge Otel_metric_store.metric_auth_archive_epochs
-       (float_of_int kept);
-     if pruned > 0 then (
-       Otel_metric_store.inc_counter Otel_metric_store.metric_auth_archive_pruned_total
-         ~delta:(float_of_int pruned)
-         ();
-       Log.Misc.info
-         "startup auth archive prune: pruned=%d kept=%d (retention=%dd \
-          min_keep=%d)"
-         pruned kept days min_keep)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Misc.warn
-       "startup auth archive prune failed: %s (next boot retries; disk \
-        impact bounded by retention)"
-       (Printexc.to_string exn))
-
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
   (try
      let traces_dir =

@@ -5,6 +5,24 @@
     Re-included from Keeper_unified_turn so existing callers continue to
     use [Keeper_unified_turn.<name>] unchanged. *)
 
+module StringMap = Set_util.StringMap
+
+(** Immutable per-turn accumulator that replaces the casual [ref] cells
+    previously threaded through [run_keeper_cycle] and the retry loop. *)
+type turn_state =
+  { cycle_completed : bool
+  ; manifest_seq : int
+  ; post_commit_failure_reason : Keeper_registry.failure_reason option
+  ; paused_meta_override : Keeper_meta_contract.keeper_meta option
+  ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
+  ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
+  ; last_provider_timeout_budget : Keeper_turn_runtime_budget.provider_timeout_budget option
+  ; degraded_retry_info : Keeper_error_classify.degraded_retry option
+  ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
+  ; failure_reason : Keeper_turn_fsm.failure_reason option
+  ; retry_phase_started_at : float option
+  }
+
 let turn_event_bus_manifest_decision
       (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =
@@ -189,16 +207,17 @@ let registry_failure_reason_of_terminal_reason
 ;;
 
 (** Tracker for matching ToolCalled/ToolCompleted event pairs within a
-    single keeper turn. Internal mutability ([Hashtbl] + [Queue] + mutable
-    fields); external API is pure-ish (push/pop are O(1) imperative). *)
+    single keeper turn. Pure immutable accumulator: a map from tool name to
+    the FIFO list of pending inputs, a list of committed mutating tools, and
+    the first integrity error observed while matching events. *)
 type turn_tool_event_tracker =
-  { pending_tool_inputs : (string, Yojson.Safe.t Queue.t) Hashtbl.t
-  ; mutable mutating_tools_committed : string list
-  ; mutable integrity_error : Agent_sdk.Error.sdk_error option
+  { pending_tool_inputs : Yojson.Safe.t list StringMap.t
+  ; mutating_tools_committed : string list
+  ; integrity_error : Agent_sdk.Error.sdk_error option
   }
 
 let create_turn_tool_event_tracker () =
-  { pending_tool_inputs = Hashtbl.create 8
+  { pending_tool_inputs = StringMap.empty
   ; mutating_tools_committed = []
   ; integrity_error = None
   }
@@ -211,21 +230,24 @@ let committed_mutating_tools_from_events tracker =
 ;;
 
 let push_turn_tool_input tracker tool_name input =
-  let q =
-    match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
-    | Some q -> q
-    | None ->
-      let q = Queue.create () in
-      Hashtbl.add tracker.pending_tool_inputs tool_name q;
-      q
+  let inputs =
+    match StringMap.find_opt tool_name tracker.pending_tool_inputs with
+    | Some inputs -> inputs @ [ input ]
+    | None -> [ input ]
   in
-  Queue.add input q
+  { tracker with pending_tool_inputs = StringMap.add tool_name inputs tracker.pending_tool_inputs }
 ;;
 
 let pop_turn_tool_input tracker tool_name =
-  match Hashtbl.find_opt tracker.pending_tool_inputs tool_name with
-  | Some q when not (Queue.is_empty q) -> Some (Queue.pop q)
-  | _ -> None
+  match StringMap.find_opt tool_name tracker.pending_tool_inputs with
+  | Some (input :: rest) ->
+    let pending =
+      match rest with
+      | [] -> StringMap.remove tool_name tracker.pending_tool_inputs
+      | _ -> StringMap.add tool_name rest tracker.pending_tool_inputs
+    in
+    Some input, { tracker with pending_tool_inputs = pending }
+  | _ -> None, tracker
 ;;
 
 let record_unmatched_tool_completed
@@ -247,10 +269,13 @@ let record_unmatched_tool_completed
   let mutating_tool_committed =
     tool_committed && Keeper_tool_dispatch_runtime.has_mutating_side_effect tool_name
   in
-  if mutating_tool_committed
-  then tracker.mutating_tools_committed <- tool_name :: tracker.mutating_tools_committed;
+  let tracker =
+    if mutating_tool_committed
+    then { tracker with mutating_tools_committed = tool_name :: tracker.mutating_tools_committed }
+    else tracker
+  in
   match tracker.integrity_error with
-  | Some _ -> ()
+  | Some _ -> tracker
   | None ->
     let base_error = Agent_sdk.Error.Internal message in
     let error =
@@ -258,7 +283,7 @@ let record_unmatched_tool_completed
       then Keeper_error_classify.reclassify_error_after_side_effect ~tool_names:[ tool_name ] base_error
       else base_error
     in
-    tracker.integrity_error <- Some error
+    { tracker with integrity_error = Some error }
 ;;
 
 let record_turn_tool_events
@@ -267,21 +292,20 @@ let record_turn_tool_events
       ~(keeper_name : string)
       (tracker : turn_tool_event_tracker)
       (events : Agent_sdk.Event_bus.event list)
-  : unit
+  : turn_tool_event_tracker
   =
-  List.iter
-    (fun (evt : Agent_sdk.Event_bus.event) ->
+  List.fold_left
+    (fun tracker (evt : Agent_sdk.Event_bus.event) ->
        match evt.payload with
        | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
          push_turn_tool_input tracker tool_name input
        | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
          (match pop_turn_tool_input tracker tool_name with
-          | Some input ->
+          | Some input, tracker ->
             if has_mutating_side_effect_with_input ~tool_name ~input
-            then
-              tracker.mutating_tools_committed
-              <- tool_name :: tracker.mutating_tools_committed
-          | None ->
+            then { tracker with mutating_tools_committed = tool_name :: tracker.mutating_tools_committed }
+            else tracker
+          | None, tracker ->
             record_unmatched_tool_completed
               tracker
               ~keeper_name
@@ -290,15 +314,16 @@ let record_turn_tool_events
               ~tool_committed:true)
        | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
          (match pop_turn_tool_input tracker tool_name with
-          | Some _ -> ()
-          | None ->
+          | Some _, tracker -> tracker
+          | None, tracker ->
             record_unmatched_tool_completed
               tracker
               ~keeper_name
               ~tool_name
               ~outcome:"error"
               ~tool_committed:false)
-       | _ -> ())
+       | _ -> tracker)
+    tracker
     events
 ;;
 

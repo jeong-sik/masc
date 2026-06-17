@@ -41,6 +41,23 @@ describe("Btn", () => {
     expect(btn!.style.height).toBe("28px")
   })
 
+  it("uses readable font sizes and weight for all button sizes", () => {
+    const cases = [
+      { size: "xs" as const, fontSize: "10px" },
+      { size: "sm" as const, fontSize: "11px" },
+      { size: "default" as const, fontSize: "12px" },
+      { size: "lg" as const, fontSize: "14px" },
+    ]
+    for (const { size, fontSize } of cases) {
+      const container = document.createElement("div")
+      render(h(Btn, { size }, size), container)
+      const btn = container.querySelector("button")!
+      expect(btn.getAttribute("data-size")).toBe(size)
+      expect(btn.style.fontSize).toBe(fontSize)
+      expect(btn.style.fontWeight).toBe("500")
+    }
+  })
+
   it("renders icon mode as 22x22 square", () => {
     const container = document.createElement("div")
     render(h(Btn, { icon: true }, "X"), container)

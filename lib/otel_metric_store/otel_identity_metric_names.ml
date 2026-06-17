@@ -17,22 +17,6 @@ let metric_auth_credential_token_rotated =
   Otel_metric_store_core.declare_counter "masc_auth_credential_token_rotated_total"
 ;;
 
-let metric_config_credential_archived_starvation =
-  Otel_metric_store_core.declare_counter "masc_config_credential_archived_starvation_total"
-;;
-
-let metric_auth_bare_alias = "masc_auth_bare_alias"
-let metric_auth_archive_epochs = "masc_auth_archive_epochs"
-let metric_auth_archive_pruned_total = Otel_metric_store_core.declare_counter "masc_auth_archive_pruned_total"
-
-let metric_auth_bare_alias_outcome_total =
-  Otel_metric_store_core.declare_counter "masc_auth_bare_alias_outcome_total"
-;;
-
-let metric_auth_bare_alias_audit_ticks_total =
-  Otel_metric_store_core.declare_counter "masc_auth_bare_alias_audit_ticks_total"
-;;
-
 let metric_auth_credential_ambiguous_lookup =
   Otel_metric_store_core.declare_counter "masc_auth_credential_ambiguous_lookup_total"
 ;;

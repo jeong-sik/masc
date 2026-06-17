@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
@@ -127,5 +126,195 @@ describe('VirtualList', () => {
     )
     const child = container.querySelector('[data-vl-key]')
     expect(child).not.toBeNull()
+  })
+
+  it('applies content-visibility to fallback rows using fixed itemHeight', () => {
+    const container = document.createElement('div')
+    const few = items.slice(0, 5)
+    render(
+      h(VirtualList<Item>, {
+        items: few,
+        itemHeight: 40,
+        renderItem: (item) => h('div', { key: item.id }, item.name),
+        getKey: (item) => item.id,
+      }),
+      container,
+    )
+    const rows = container.querySelectorAll('.virtual-list-fallback-row')
+    expect(rows.length).toBe(5)
+    for (const row of rows) {
+      const style = (row as HTMLElement).style
+      expect(style.contentVisibility).toBe('auto')
+      expect(style.containIntrinsicSize).toBe('auto 40px')
+    }
+  })
+
+  it('applies content-visibility to fallback rows using estimatedItemHeight', () => {
+    const container = document.createElement('div')
+    const few = items.slice(0, 5)
+    render(
+      h(VirtualList<Item>, {
+        items: few,
+        estimatedItemHeight: 48,
+        renderItem: (item) => h('div', { key: item.id }, item.name),
+        getKey: (item) => item.id,
+      }),
+      container,
+    )
+    const row = container.querySelector('.virtual-list-fallback-row') as HTMLElement
+    expect(row.style.contentVisibility).toBe('auto')
+    expect(row.style.containIntrinsicSize).toBe('auto 48px')
+  })
+
+  it('calls onEndReached once when scrolled near the bottom in fixed-height mode', async () => {
+    const container = document.createElement('div')
+    const onEndReached = vi.fn()
+    render(
+      h(VirtualList<Item>, {
+        items,
+        itemHeight: 40,
+        renderItem: (item) => h('div', { key: item.id }, item.name),
+        getKey: (item) => item.id,
+        onEndReached,
+      }),
+      container,
+    )
+    const el = container.querySelector('.virtual-list-spacer')?.parentElement as HTMLElement
+    Object.defineProperty(el, 'scrollHeight', { value: 2000, configurable: true })
+    Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true })
+    el.scrollTop = 1700
+    el.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => { setTimeout(resolve, 30) })
+    expect(onEndReached).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls onEndReached once when scrolled near the bottom in dynamic mode', async () => {
+    const container = document.createElement('div')
+    const onEndReached = vi.fn()
+    render(
+      h(VirtualList<Item>, {
+        items,
+        estimatedItemHeight: 40,
+        renderItem: (item) => h('div', { key: item.id }, item.name),
+        getKey: (item) => item.id,
+        onEndReached,
+      }),
+      container,
+    )
+    const el = container.querySelector('.virtual-list-spacer')?.parentElement as HTMLElement
+    Object.defineProperty(el, 'scrollHeight', { value: 2000, configurable: true })
+    Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true })
+    el.scrollTop = 1550
+    el.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => { setTimeout(resolve, 30) })
+    expect(onEndReached).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not call onEndReached when not near the bottom', async () => {
+    const container = document.createElement('div')
+    const onEndReached = vi.fn()
+    render(
+      h(VirtualList<Item>, {
+        items,
+        itemHeight: 40,
+        renderItem: (item) => h('div', { key: item.id }, item.name),
+        getKey: (item) => item.id,
+        onEndReached,
+      }),
+      container,
+    )
+    const el = container.querySelector('.virtual-list-spacer')?.parentElement as HTMLElement
+    Object.defineProperty(el, 'scrollHeight', { value: 2000, configurable: true })
+    Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true })
+    el.scrollTop = 1000
+    el.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => { setTimeout(resolve, 30) })
+    expect(onEndReached).not.toHaveBeenCalled()
+  })
+
+  it('resets onEndReached after scrolling away from bottom so it can fire again', async () => {
+    const container = document.createElement('div')
+    const onEndReached = vi.fn()
+    render(
+      h(VirtualList<Item>, {
+        items,
+        itemHeight: 40,
+        renderItem: (item) => h('div', { key: item.id }, item.name),
+        getKey: (item) => item.id,
+        onEndReached,
+      }),
+      container,
+    )
+    const el = container.querySelector('.virtual-list-spacer')?.parentElement as HTMLElement
+    Object.defineProperty(el, 'scrollHeight', { value: 2000, configurable: true })
+    Object.defineProperty(el, 'clientHeight', { value: 300, configurable: true })
+
+    el.scrollTop = 1700
+    el.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => { setTimeout(resolve, 30) })
+    expect(onEndReached).toHaveBeenCalledTimes(1)
+
+    el.scrollTop = 1000
+    el.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => { setTimeout(resolve, 30) })
+
+    el.scrollTop = 1700
+    el.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => { setTimeout(resolve, 30) })
+    expect(onEndReached).toHaveBeenCalledTimes(2)
+  })
+
+  it('updates measured heights via ResizeObserver in dynamic mode', async () => {
+    const OriginalResizeObserver = global.ResizeObserver
+    const callbacks: Array<(entries: ResizeObserverEntry[]) => void> = []
+    const observed = new Set<Element>()
+    global.ResizeObserver = class MockResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        callbacks.push(callback as (entries: ResizeObserverEntry[]) => void)
+      }
+
+      observe(target: Element) {
+        observed.add(target)
+      }
+
+      disconnect() {
+        observed.clear()
+      }
+    } as unknown as typeof ResizeObserver
+
+    const container = document.createElement('div')
+    render(
+      h(VirtualList<Item>, {
+        items,
+        estimatedItemHeight: 40,
+        renderItem: (item) => h('div', { key: item.id }, item.name),
+        getKey: (item) => item.id,
+      }),
+      container,
+    )
+
+    await new Promise((resolve) => { setTimeout(resolve, 30) })
+
+    const child = container.querySelector('[data-vl-key]') as HTMLElement
+    expect(child).not.toBeNull()
+    expect(observed.has(child)).toBe(true)
+    expect(callbacks.length).toBeGreaterThan(0)
+
+    const mockEntry = {
+      target: child,
+      borderBoxSize: [{ blockSize: 88 }],
+      contentRect: { height: 88 },
+    } as unknown as ResizeObserverEntry
+    for (const cb of callbacks) {
+      cb([mockEntry])
+    }
+
+    const spacer = container.querySelector('.virtual-list-spacer') as HTMLElement
+    await vi.waitFor(() => {
+      const height = parseInt(spacer.style.height, 10)
+      return height > 2000
+    }, { timeout: 1000 })
+
+    global.ResizeObserver = OriginalResizeObserver
   })
 })

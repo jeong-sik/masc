@@ -440,6 +440,13 @@
 
   --color-focus-ring: var(--brass-1);
 
+  /* Keeper-v2 indicators.css token bridge.
+     --font-ui and --radius-pill are already defined in tokens.generated.css. */
+  --volt:      var(--color-accent-fg);
+  --bg-sunken: var(--color-bg-elevated);
+  --border-soft: var(--color-border-divider);
+  --text-mid:  var(--color-fg-secondary);
+
   /* SPEC v0.1 §3 — Typography & spacing scale (Phase G Step 2).
      Numeric scale matches dashboard/design-system/source_styles/tokens.css.
      Coexists with the t-shirt --fs-xs/sm/... above; new components should
@@ -481,4 +488,89 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
+
+  /* Keeper v2 token bridge — aliases for importing v2 stylesheets.
+     Maps the v2 surface vocabulary to the existing dashboard semantic
+     token ladder. Tokens that already exist in tokens.generated.css /
+     tokens.css (e.g. --font-*, --shadow-card, --radius-pill) are
+     intentionally not duplicated. */
+  --bg-deep: var(--bg-root);
+  --bg-panel-alt: var(--color-bg-panel-alt);
+  --bg-card: var(--color-bg-elevated);
+  --bg-card-hover: var(--color-bg-hover);
+  --bg-sunken: var(--bg-deepest);
+  --border-main: var(--border-base);
+  --border-soft: var(--border-subtle);
+  --text-bright: var(--text-strong);
+  --text-primary: var(--text-body);
+  --text-mid: var(--text-muted);
+  --volt: var(--accent);
+  --volt-strong: var(--color-accent-fg);
+  --volt-dim: var(--color-accent-fg-dim);
+  --volt-wash: var(--accent-10);
+  --volt-glow: rgb(var(--brass-glow) / .22);
+  --volt-ink: var(--bg-root);
+  --status-ok: var(--ok);
+  --status-warn: var(--warn);
+  --status-bad: var(--bad);
+  --status-idle: var(--idle);
+  --status-busy: var(--info);
+  --sp-9: var(--space-5);
+  --sp-10: var(--space-6);
+  --radius-2xs: var(--radius-xs);
+  --shadow-pop: var(--shadow-cmd-palette);
+}
+
+/* Readability lift for the v2 dark-fantasy muted tone: the mapped
+   generated value (#5a6a88 on navy surfaces) is below WCAG AA for small
+   labels. Raise it while keeping it clearly subordinate to
+   --color-fg-secondary. Paper theme is left untouched. */
+html:not([data-theme="paper"]) {
+  --color-fg-muted: #7a8aa8;
+}
+
+/* ── Keeper-v2 token bridge aliases ───────────────────────────
+   The keeper-v2 Settings surface was authored against a v2 skin
+   token ladder that is not part of the dashboard foundation.
+   These aliases map the missing v2 names to dashboard tokens so
+   the ported surface renders without a full token rewrite.
+   Aliases that already exist (--bg-panel, --text-dim, etc.) are
+   intentionally omitted to avoid clobbering dashboard semantics. */
+:root {
+  --bg-deep: var(--bg-0);
+  --bg-card: var(--bg-2);
+  --bg-card-hover: var(--bg-3);
+  --bg-sunken: var(--bg-0);
+
+  --border-main: var(--line-1);
+  --border-soft: var(--line-3);
+  --border-highlight: var(--line-2);
+
+  --text-bright: var(--fg-1);
+  --text-primary: var(--fg-2);
+  --text-mid: var(--fg-3);
+
+  --font-display: var(--font-sans);
+  --font-ui: var(--font-sans);
+  --font-body: var(--font-sans);
+
+  --pad-surface: 22px 26px 40px;
+  --pad-card: 12px 14px;
+  --gap-card: 14px;
+
+  --radius-pill: 9999px;
+  --radius-xs: var(--r-0);
+
+  --volt: var(--brass-1);
+  --volt-strong: var(--brass-1);
+  --volt-dim: var(--brass-3);
+  --volt-ink: #0b0c10;
+  --volt-glow: rgb(var(--brass-glow) / .22);
+  --volt-wash: rgb(var(--brass-glow) / .10);
+
+  --status-ok: var(--ok);
+  --status-warn: var(--warn);
+  --status-bad: var(--err);
+
+  --accent-bone: var(--color-accent-fg);
 }

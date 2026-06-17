@@ -6,6 +6,7 @@ import './styles/tokens.generated.css'
 import './styles/tokens.css'
 import './styles/variables.css'
 import './styles/primitives.css'
+import './styles/indicators-v2.css'
 import './styles/layout.css'
 import './styles/layers.css'
 import './styles/kpi.css'
@@ -23,6 +24,7 @@ import './styles/keyframes.css'
 
 // Global utilities and layout
 import './styles/global.css'
+import './styles/chat-blocks-v2.css'
 
 // Component-specific styles
 import './styles/ui.css'
@@ -36,6 +38,7 @@ import './styles/tools.css'
 import './styles/provider-matrix.css'
 import './styles/paper-theme.css'
 import './styles/keeper-workspace.css'
+import './styles/copilot-dock.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

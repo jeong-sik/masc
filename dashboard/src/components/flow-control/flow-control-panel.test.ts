@@ -99,6 +99,7 @@ describe('FlowControlPanel', () => {
     render(html`<${FlowControlPanel} />`, container)
     await flushUi()
 
+    expect(container.querySelector('.v2-command-surface')).not.toBeNull()
     expect(container.textContent).toContain('Flow Control')
     expect(container.textContent).toContain('Pause')
     expect(container.textContent).toContain('Resume')

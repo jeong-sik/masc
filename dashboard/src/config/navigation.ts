@@ -39,6 +39,7 @@ type SurfaceSectionId =
   // lab
   | 'tools'
   | 'harness'
+  | 'design-canvas'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
@@ -306,6 +307,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Safety Harness',
       description: 'Evaluation model, pre-compaction state, and generation handoff monitoring.',
       params: { section: 'harness' },
+    },
+    {
+      id: 'design-canvas',
+      label: 'Design Canvas',
+      description: 'keeper-v2 design-system preview surface for primitives, molecules, organisms, surfaces, and motion.',
+      params: { section: 'design-canvas' },
     },
   ],
   code: [

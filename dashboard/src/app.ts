@@ -14,7 +14,7 @@ import {
 } from './sse'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
-import { refreshShell } from './store'
+import { refreshShell, serverStatus, shellCounts } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/dev-token'
 import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
@@ -60,6 +60,14 @@ import {
   useCopilotDock,
   useCopilotDockShortcuts,
 } from './components/copilot-dock'
+import {
+  TweaksPanel,
+  TweaksPanelToggle,
+  tweaksDensity,
+  tweaksFontScale,
+  tweaksMotion,
+  tweaksBubble,
+} from './components/tweaks-panel'
 
 // Sidebar collapsed state persists across reloads — a user who picks
 // the dense layout keeps it. Namespaced key avoids clashing with any
@@ -258,10 +266,16 @@ export function App() {
 
   return html`
     <div
-      class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
+      class="v2-app flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
       data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
       data-focus-mode=${focusMode ? 'true' : 'false'}
       data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
+      data-density=${tweaksDensity.value}
+      data-motion=${tweaksMotion.value}
+      data-bubble=${tweaksBubble.value}
+      data-font-scale=${tweaksFontScale.value}
+      data-surface=${currentTab}
+      style=${{ '--twk-font-scale': String(tweaksFontScale.value) }}
     >
       <${SkipLink} />
       <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5">
@@ -303,6 +317,15 @@ export function App() {
           </div>
 
           <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
+            <div class="v2-app-header-status hidden items-center gap-2 max-[900px]:hidden" aria-label="Dashboard summary">
+              <span class="v2-statchip live" title="Live keepers reported by the shell snapshot">
+                <span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]"></span>
+                ${shellCounts.value?.keepers ?? 0} running
+              </span>
+              <span class="v2-statchip" title="Scheduler health inferred from server status">
+                scheduler <b>${serverStatus.value ? 'healthy' : '—'}</b>
+              </span>
+            </div>
             <${EmergencyStopControl} />
             <${CopilotDockTopBarButton} dock=${dock} />
             <${Suspense} fallback=${authStatusFallback()}>
@@ -312,6 +335,7 @@ export function App() {
             <${ErrorCounterBadge} />
             <div class="max-[768px]:hidden"><${TransportBeacon} /></div>
             <div class="max-[768px]:hidden"><${ThemeSwitch} /></div>
+            <div class="max-[768px]:hidden"><${TweaksPanelToggle} /></div>
             <div class="max-[768px]:hidden"><${BuildIdentityBadge} /></div>
           </div>
         </div>
@@ -354,7 +378,9 @@ export function App() {
         <div class="v2-stage">
           <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0'}>
             <div class=${isCodeSurface || widgetSoloMode || keeperDetailMode ? 'h-full overflow-hidden p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
-              <${DashboardMain} />
+              <div class="v2-surface" key=${currentTab}>
+                <${DashboardMain} />
+              </div>
             </div>
           </main>
           ${dock.state.value.open ? html`<${CopilotDock} dock=${dock} />` : null}
@@ -376,6 +402,7 @@ export function App() {
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
       <${BundleStalenessBanner} />
+      <${TweaksPanel} />
       <${Suspense} fallback=${null}>
         <${LazyCommandPalette} />
       <//>

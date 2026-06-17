@@ -196,6 +196,7 @@ let record_keeper_tool_duration_metric
     ; label_provider, summary.provider
     ; label_tool, summary.tool_name
     ; label_outcome, summary.outcome
+    ; "tool_type", Tool_telemetry.tool_type_of_name summary.tool_name
     ]
   in
   let duration_seconds = summary.duration_ms /. ms_per_second in

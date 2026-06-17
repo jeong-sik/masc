@@ -2,12 +2,13 @@ import { html } from 'htm/preact'
 import { route } from '../router'
 import { Tools } from './tools/tools-main'
 import { HarnessHealth } from './harness-health'
+import { DesignCanvas } from './design-canvas'
 
-type LabSection = 'tools' | 'harness'
+type LabSection = 'tools' | 'harness' | 'design-canvas'
 
 function currentSection(): LabSection {
   const section = route.value.params.section
-  if (section === 'harness') {
+  if (section === 'harness' || section === 'design-canvas') {
     return section
   }
   return 'tools'
@@ -24,6 +25,10 @@ export function Lab() {
 
       ${section === 'harness' ? html`
         <${HarnessHealth} />
+      ` : null}
+
+      ${section === 'design-canvas' ? html`
+        <${DesignCanvas} />
       ` : null}
     </div>
   `

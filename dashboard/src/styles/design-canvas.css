@@ -1,0 +1,268 @@
+/* DesignCanvas — keeper-v2 design-system preview surface styles.
+   Scoped to .dc-* so the preview surface doesn't leak into the rest
+   of the dashboard. Uses dashboard semantic tokens for dark/paper. */
+
+.dc-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  color: var(--color-fg-primary);
+}
+
+.dc-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.dc-title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-fg-secondary);
+}
+
+.dc-subtitle {
+  margin: var(--space-1) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--color-fg-muted);
+}
+
+.dc-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+}
+
+.dc-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-fg-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--r-0);
+  cursor: pointer;
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+
+.dc-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg-secondary);
+}
+
+.dc-tab.active {
+  background: var(--color-bg-surface);
+  border-color: var(--color-border-strong);
+  color: var(--color-fg-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.dc-stage {
+  min-height: 0;
+}
+
+.dc-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.dc-section-title {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--track-caps);
+  color: var(--color-fg-muted);
+}
+
+.dc-section-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
+.dc-artboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dc-artboard-label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--color-fg-secondary);
+}
+
+.dc-artboard-well {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 80px;
+  padding: var(--space-3);
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  box-shadow: var(--shadow-sm);
+}
+
+.dc-stack-v {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dc-row-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dc-vitals-narrow {
+  max-width: 220px;
+}
+
+.dc-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: var(--space-2);
+}
+
+.dc-molecule-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.dc-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dc-organism-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.dc-organism-card {
+  width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+}
+
+.dc-organism-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.dc-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--color-fg-secondary);
+}
+
+.dc-telemetry-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.dc-spark-box {
+  grid-column: 1 / -1;
+  height: 48px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.dc-composite-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-3);
+}
+
+.dc-surface-sample {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.dc-surface-panel,
+.dc-surface-card {
+  min-height: 120px;
+  padding: var(--space-2);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+}
+
+.dc-surface-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
+.dc-rail-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+}
+
+.dc-rail-dot.ok { background: var(--color-status-ok); box-shadow: var(--ok-ring); }
+.dc-rail-dot.warn { background: var(--color-status-warn); box-shadow: var(--warn-ring); }
+.dc-rail-dot.bad { background: var(--color-status-err); box-shadow: var(--err-ring); }
+.dc-rail-dot.info { background: var(--color-status-info); box-shadow: var(--info-ring); }
+
+.dc-pulse-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-pill);
+}
+
+.dc-motion-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dc-motion-card {
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  font-size: var(--fs-xs);
+  color: var(--color-fg-secondary);
+}
+
+/* Paper theme adjustments for the preview surface.
+   The dashboard paper theme already remaps the semantic tokens,
+   so we only tweak surface-specific accents here. */
+html[data-theme="paper"] .dc-tab.active {
+  border-color: var(--color-border-strong);
+}

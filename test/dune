@@ -2161,6 +2161,7 @@
  (libraries alcotest masc.masc_exec masc.exec_policy))
 
 ; Coverage regression tests for keeper/runtime immutable-state refactor (P9-P12).
+
 (test
  (name test_keeper_immutable_state_refactor)
  (modules test_keeper_immutable_state_refactor)

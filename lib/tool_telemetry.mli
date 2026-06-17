@@ -19,10 +19,14 @@
 
 type trace_id = string
 
+(** [tool_type_of_name name] returns a low-cardinality category for [name]
+    based on known tool prefixes/names. *)
+val tool_type_of_name : string -> string
+
 (** [with_span ~tool_name f] opens an OTel span named
     {v tool_dispatch.<tool_name> v}, invokes [f] inside the span, and
-    increments [tool_dispatch_total] with labels [tool = tool_name] and
-    [outcome = <outcome returned by f>].
+    increments [tool_dispatch_total] with labels [tool = tool_name],
+    [outcome = <outcome returned by f>], [surface], and [tool_type].
 
     [f] receives a thunk that returns [Some (trace_id_hex, span_id_hex)] when an
     OTel span is active, [None] otherwise (e.g. when the exporter is disabled).
@@ -32,11 +36,12 @@ type trace_id = string
     [Dispatch_outcome.t]. *)
 val with_span
   :  ?force_new_trace_id:bool
+  -> ?surface:string
   -> tool_name:string
   -> ((unit -> (trace_id * trace_id) option) -> 'a * string)
   -> 'a * string
 
 (** Register the [tool_dispatch_total] Otel_metric_store counter with labels
-    [tool] and [outcome]. Call once at server startup. Subsequent calls
-    are idempotent (no-op). *)
+    [tool], [outcome], [surface], and [tool_type]. Call once at server
+    startup. Subsequent calls are idempotent (no-op). *)
 val register_metrics : unit -> unit

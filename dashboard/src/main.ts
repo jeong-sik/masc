@@ -26,6 +26,7 @@ import './styles/keyframes.css'
 // Global utilities and layout
 import './styles/global.css'
 import './styles/chat-blocks-v2.css'
+import './styles/surfaces-v2.css'
 
 // Component-specific styles
 import './styles/ui.css'
@@ -44,6 +45,11 @@ import './styles/copilot-dock.css'
 import './styles/memory-v2.css'
 import './styles/keeper-turn-inspector.css'
 import './styles/ide-v2.css'
+import './styles/work-v2.css'
+import './styles/design-canvas.css'
+import './styles/connectors-v2.css'
+import './styles/telemetry-v2.css'
+import './styles/craft-v2.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

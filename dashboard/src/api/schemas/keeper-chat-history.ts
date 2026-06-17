@@ -19,12 +19,14 @@
 import {
   array,
   boolean,
+  literal,
   number,
   object,
   optional,
   record,
   safeParse,
   string,
+  union,
   unknown,
   type InferOutput,
 } from 'valibot'
@@ -78,6 +80,31 @@ export const KeeperChatHistoryAudioClipSchema = object({
 
 export type KeeperChatHistoryAudioClip = InferOutput<typeof KeeperChatHistoryAudioClipSchema>
 
+// RFC-0235 P3: server-parsed rich chat blocks carried on persisted history
+// rows. Only the block types the backend currently emits are accepted at the
+// boundary; malformed block arrays cause the whole row to be dropped by
+// safeParseKeeperChatHistoryMessage so the transcript stays clean.
+export const KeeperChatBlockSchema = union([
+  object({
+    t: literal('p'),
+    html: string(),
+  }),
+  object({
+    t: literal('image'),
+    src: string(),
+    cap: optional(string()),
+  }),
+  object({
+    t: literal('link'),
+    url: string(),
+    title: string(),
+    desc: optional(string()),
+    meta: optional(string()),
+  }),
+])
+
+export type KeeperChatBlock = InferOutput<typeof KeeperChatBlockSchema>
+
 export const KeeperChatHistoryMessageSchema = object({
   // R3: producer-assigned stable message id (keeper_chat_store.ml mints it
   // at append and the read boundary stamps legacy rows, so the backend now
@@ -119,6 +146,9 @@ export const KeeperChatHistoryMessageSchema = object({
   // :848-861). Without decoding these, a user's upload appears live but
   // vanishes on reload even though it is on disk.
   attachments: optional(array(KeeperChatHistoryAttachmentSchema)),
+  // RFC-0235 P3: server-parsed rich chat blocks. Carried on history rows so
+  // reloads preserve the structured render instead of re-parsing plain text.
+  blocks: optional(array(KeeperChatBlockSchema)),
   // Row kind (keeper_chat_store.ml :838-841). `transport_failure` is minted
   // so a reload can tell a failed request apart from a real keeper reply;
   // open string() per the same deploy-window rationale as `role`.

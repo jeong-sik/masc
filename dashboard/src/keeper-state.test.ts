@@ -320,6 +320,43 @@ describe('thread history merge & persistence', () => {
     expect(keeperThreads.value.echo).toHaveLength(THREAD_ENTRY_CAP)
     expect(keeperThreads.value.echo?.[0]?.id).toBe('e-5')
   })
+
+  it('keeps local entries at the end when server history plus locals exceed the cap', () => {
+    const history = Array.from({ length: THREAD_ENTRY_CAP }, (_, i) =>
+      entry({ id: `hist-${i}`, text: `h${i}`, delivery: 'history' }),
+    )
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'live1' }))
+    appendThreadEntry('echo', entry({ id: 'optimistic-1', text: 'live2' }))
+    mergeServerHistoryEntries('echo', history)
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread).toHaveLength(THREAD_ENTRY_CAP)
+    expect(thread.at(-1)?.id).toBe('optimistic-1')
+    expect(thread.at(-2)?.id).toBe('local-1')
+  })
+
+  it('accepts attachment-only history rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: '',
+        ts: 1_780_000_000,
+        attachments: [
+          { id: 'att1', type: 'image', name: 'shot.png', size: 1234, mime_type: 'image/png', data: 'BASE64' },
+        ],
+      },
+    ])
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.text).toBe('')
+    expect(entries[0]?.attachments).toHaveLength(1)
+  })
+
+  it('still drops rows that have no content and no attachments', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: '', ts: 1_780_000_000 },
+    ])
+    expect(entries).toHaveLength(0)
+  })
 })
 
 describe('R3 producer-assigned message id', () => {

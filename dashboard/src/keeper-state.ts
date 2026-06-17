@@ -366,16 +366,19 @@ function normalizeHistoryEntry(
 ): KeeperConversationEntry | null {
   if (!isRecord(raw)) return null
   const role = normalizeRole(raw.role)
-  const rawText = asString(raw.content) ?? asString(raw.preview)
-  if (!rawText) return null
+  const rawText = asString(raw.content) ?? asString(raw.preview) ?? ''
+  const attachments = normalizeAttachments(raw.attachments)
+  // Accept attachment-only rows: a user may send a file/image with no text.
+  // Without this guard the entry is dropped on reload even though it is
+  // persisted server-side.
+  if (!rawText && !attachments?.length) return null
   const source = normalizeConversationSource(raw.source, role, rawText, previousSource)
   const text = formatKeeperVisibleReply(rawText)
-  if (!text) return null
+  if (!text && !attachments?.length) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
   const audio = normalizeAudioClip(raw.audio) ?? null
-  const attachments = normalizeAttachments(raw.attachments)
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
   // apart from a real reply. Map it to the existing error delivery state so
@@ -384,7 +387,7 @@ function normalizeHistoryEntry(
     asString(raw.kind) === 'transport_failure' ? 'error' : 'history'
   const blocks =
     role === 'assistant'
-      ? (normalizeBlocks(raw.blocks) ?? parseTextToChatBlocks(text))
+      ? (normalizeBlocks(raw.blocks) ?? (text ? parseTextToChatBlocks(text) : []))
       : undefined
   return {
     // R3: key off the producer-assigned server id when present so the
@@ -557,9 +560,25 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       entry.delivery !== 'history'
       && !entries.some(historyEntry => sameConversationEntry(entry, historyEntry)),
   )
+  // When the merged list exceeds the cap, prefer to keep locally-created
+  // entries (optimistic/pending/live) at the end rather than trimming the
+  // newest messages. Server history beyond the cap is still available via
+  // the history endpoint.
+  const isLocalEntry = (entry: KeeperConversationEntry): boolean =>
+    entry.id.startsWith('local-')
+    || entry.id.startsWith('optimistic-')
+    || entry.delivery !== 'history'
+  const merged = [...entries, ...localEntries]
+  let kept = merged
+  if (merged.length > THREAD_ENTRY_CAP) {
+    const locals = merged.filter(isLocalEntry)
+    const history = merged.filter(entry => !isLocalEntry(entry))
+    const historyCap = Math.max(0, THREAD_ENTRY_CAP - locals.length)
+    kept = [...history.slice(-historyCap), ...locals]
+  }
   keeperThreads.value = {
     ...keeperThreads.value,
-    [name]: [...entries, ...localEntries].slice(-THREAD_ENTRY_CAP),
+    [name]: kept,
   }
 }
 

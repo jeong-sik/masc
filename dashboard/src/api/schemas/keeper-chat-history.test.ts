@@ -168,4 +168,32 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     // clips without dropping the whole history row.
     expect(out?.audio).toEqual({ token: 'only-token' })
   })
+
+  it('passes RFC-0235 rich blocks through when they match the known shapes', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        blocks: [
+          { t: 'p', html: 'hello' },
+          { t: 'image', src: 'https://cdn.example/x.png', cap: 'screen' },
+          { t: 'link', url: 'https://example.com', title: 'Example' },
+        ],
+      }),
+    )
+    expect(out?.blocks).toEqual([
+      { t: 'p', html: 'hello' },
+      { t: 'image', src: 'https://cdn.example/x.png', cap: 'screen' },
+      { t: 'link', url: 'https://example.com', title: 'Example' },
+    ])
+  })
+
+  it('drops the whole row when blocks contain an unknown shape', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        blocks: [{ t: 'unknown', src: 'x' }],
+      }),
+    )
+    expect(out).toBeNull()
+  })
 })

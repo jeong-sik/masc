@@ -458,6 +458,28 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshHearths).toHaveBeenCalledTimes(1)
   })
 
+  it('does not mutate boardOffset when optimistically prepending a post', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardExcludeSystem.value = false
+    boardOffset.value = 10
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Note',
+      content: 'body',
+      author: 'agent-a',
+      post_kind: 'direct',
+      hearth: 'ops',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value[0]?.id).toBe('post-1')
+    expect(boardOffset.value).toBe(10)
+  })
+
   it('falls back to board refresh when post_kind is missing under kind exclusions', async () => {
     const { sseStore } = await loadSseStore()
     const refreshHearths = vi.fn()

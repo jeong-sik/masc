@@ -111,6 +111,25 @@ describe('noteKeeperChatAppended', () => {
     // (force) and despite three push events (debounce).
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
   })
+
+  it('still refreshes history when an audio clip is attached', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([
+      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { role: 'assistant', content: 'hello there', ts: 1_780_000_000 },
+    ])
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+
+    noteKeeperChatAppended('echo', {
+      token: 'live-clip',
+      mime: 'audio/mpeg',
+      message_text: 'hello there',
+      duration_sec: 3,
+    })
+    await vi.runAllTimersAsync()
+
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('hydrateKeeperChatHistory', () => {
@@ -224,6 +243,23 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+
+  it('mints deterministic non-colliding optimistic entry ids', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TEXT_MESSAGE_END' },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', 'hi')
+
+    const thread = keeperThreads.value.echo ?? []
+    const user = thread.find(entry => entry.role === 'user')
+    const assistant = thread.find(entry => entry.role === 'assistant')
+    expect(user?.id).toMatch(/^local-\d+-\d+$/)
+    expect(assistant?.id).toMatch(/^reply-\d+-\d+$/)
+    expect(user?.id).not.toBe(assistant?.id)
   })
 
   it('polls a queued request immediately when the stream cuts before terminal', async () => {

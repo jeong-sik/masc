@@ -845,6 +845,38 @@ describe('Keeper v2 chat blocks', () => {
     expect(attach?.querySelector('svg')).not.toBeNull()
   })
 
+  it('renders a safe attach image src', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'screen.png',
+        dims: '100×100',
+        src: 'https://example.com/screen.png',
+        via: 'vision',
+        size: '12 KB',
+      },
+    ])
+
+    const img = container.querySelector('[data-chat-block="attach"] img')
+    expect(img?.getAttribute('src')).toBe('https://example.com/screen.png')
+  })
+
+  it('blocks unsafe attach image src and falls back to placeholder', () => {
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'bad.png',
+        dims: '100×100',
+        src: 'javascript:alert(1)',
+        via: 'vision',
+        size: '12 KB',
+      },
+    ])
+
+    expect(container.querySelector('[data-chat-block="attach"] img')).toBeNull()
+    expect(container.textContent).toContain('unsafe URL')
+  })
+
   it('renders a voice memo with waveform bars and transcript', () => {
     renderBlocks([
       {

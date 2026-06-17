@@ -39,9 +39,9 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
 const BASE =
-  'inline-flex items-center text-3xs font-medium py-1 px-2.5 rounded-[var(--r-1)] whitespace-nowrap shadow-1 border'
+  'inline-flex items-center text-[12px] font-medium py-1 px-2.5 rounded-md whitespace-nowrap shadow-[var(--shadow-button)] border'
 const TONE_ACCENT =
-  'border-[var(--accent-20)] bg-[var(--accent-10)] text-accent-fg'
+  'border-brand/20 bg-brand/10 text-brand'
 const MONO_CLASS = 'font-mono'
 
 /** Pure: class string for an IdPill, with optional monospace and

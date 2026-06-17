@@ -177,7 +177,7 @@ let append_decision_record
               ("pending_scope_messages", `Int (List.length observation.pending_scope_messages));
               ("active_goals", `Int (List.length observation.active_goals));
               ("idle_seconds", `Int observation.idle_seconds);
-              ("context_ratio", `Float observation.context_ratio);
+              ("context_ratio", `Float (Lazy.force observation.context_ratio));
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("claimable_task_count", `Int observation.claimable_task_count);
               ( "provider_capacity_blocked_task_count",

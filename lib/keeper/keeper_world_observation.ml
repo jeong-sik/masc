@@ -55,7 +55,7 @@ type world_observation =
   ; idle_seconds : int
   ; active_goals : string list
   ; continuity_summary : string
-  ; context_ratio : float
+  ; context_ratio : float Lazy.t
   ; unclaimed_task_count : int
   ; claimable_task_count : int
   ; provider_capacity_blocked_task_count : int
@@ -508,7 +508,13 @@ let observe
   in
   let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
-  let context_ratio = read_context_ratio ~config ~meta in
+  (* Defer the checkpoint load (file read + Yojson parse + sanitize + O(n)
+     tool-pair repair) out of [observe]. Most cycles are no-op skips where
+     the gate decides not to run; on those, [context_ratio] is never forced
+     so the checkpoint is not loaded. The post-gate Run-path consumers
+     (build_prompt, append_decision_record) force it exactly once per run
+     cycle. Verified the gate never reads it. *)
+  let context_ratio = Lazy.from_fun (fun () -> read_context_ratio ~config ~meta) in
   let continuity_summary = read_continuity_summary ~config ~meta in
   let pending_board_events =
     match pending_board_events with
@@ -558,7 +564,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
   ; continuity_summary = read_continuity_summary ~config ~meta
-  ; context_ratio = read_context_ratio ~config ~meta
+  ; context_ratio = Lazy.from_fun (fun () -> read_context_ratio ~config ~meta)
   ; unclaimed_task_count
   ; claimable_task_count
   ; provider_capacity_blocked_task_count

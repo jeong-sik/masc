@@ -295,9 +295,10 @@ describe('KeeperConversationPanel', () => {
     )
     await Promise.resolve()
 
-    // The former secondary KeeperChatPanel owned search + attachments;
-    // after unification the shared panel must expose both.
-    expect(container.querySelector('[data-chat-attach-button]')).not.toBeNull()
+    // The shared panel exposes search and the new multimodal composer
+    // (file attachment + voice input) inside ChatComposer.
+    expect(container.querySelector('[title="이미지·파일 첨부"]')).not.toBeNull()
+    expect(container.querySelector('input[type="file"]')).not.toBeNull()
     expect(container.querySelector('input[name="keeper_chat_search"]')).not.toBeNull()
   })
 

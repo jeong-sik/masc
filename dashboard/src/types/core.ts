@@ -731,6 +731,8 @@ export interface KeeperConversationAttachment {
   size: number
   mimeType: string
   data: string
+  /** Optional image dimensions (e.g. "1920×1080") computed for composer blocks. */
+  dims?: string
 }
 
 // RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
@@ -767,7 +769,22 @@ export type ChatShellBlock = { t: 'shell'; title?: string; lines: ChatShellLine[
 
 export type ChatArtifactBlock = { t: 'artifact'; kind?: string; name: string; size?: string; note?: string }
 
-export type ChatAttachBlock = { t: 'attach'; name: string; dims?: string; svg?: string; ph?: string; via?: string; size?: string }
+export type ChatAttachBlock = {
+  t: 'attach'
+  name: string
+  dims?: string
+  src?: string
+  svg?: string
+  ph?: string
+  via?: string
+  size?: string
+  /** Optional source data carried so the parent can forward attachments to the API. */
+  data?: string
+  mimeType?: string
+  sizeBytes?: number
+  id?: string
+  kind?: string
+}
 
 export type ChatVoiceBlock = { t: 'voice'; secs?: number; wave?: number[]; via?: string; size?: string; transcript?: string }
 

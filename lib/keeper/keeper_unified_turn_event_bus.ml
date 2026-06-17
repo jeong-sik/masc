@@ -3,15 +3,15 @@
 type event_bus_state =
   { summary : Keeper_turn_runtime_budget.turn_event_bus_summary
   ; tracker : Keeper_unified_turn_types.turn_tool_event_tracker
+  ; pending_tool_count : int
   }
 
 type t =
   { keeper_name : string
   ; turn_id : int
   ; event_bus_sub : Agent_sdk_metrics_bridge.handle option
-  ; drain_cancel : Eio.Cancel.t option ref
+  ; drain_cancel : Eio.Cancel.t option Atomic.t
   ; state : event_bus_state Atomic.t
-  ; pending_tool_count : int ref
   }
 
 let create ~keeper_name ~turn_id () =
@@ -28,62 +28,75 @@ let create ~keeper_name ~turn_id () =
   { keeper_name
   ; turn_id
   ; event_bus_sub
-  ; drain_cancel = ref None
+  ; drain_cancel = Atomic.make None
   ; state =
       Atomic.make
         { summary = Keeper_turn_runtime_budget.empty_turn_event_bus_summary
         ; tracker = Keeper_unified_turn_types.create_turn_tool_event_tracker ()
+        ; pending_tool_count = 0
         }
-  ; pending_tool_count = ref 0
   }
 ;;
 
-(* Emit Streaming⇄Awaiting_tool_result FSM transitions from OAS Event_bus
-   ToolCalled/ToolCompleted pairs. A pending-tool counter lets the FSM
-   reflect concurrent tool calls (we stay in Awaiting_tool_result until
-   the last pending call completes). The transition is guarded with
-   [Keeper_turn_fsm.assert_transition_allowed] so a late event that
-   arrives after the turn has already moved to a terminal state is
-   ignored rather than raising. *)
-let record_fsm_tool_transitions t events =
-  let safe_emit ~prev state =
-    match
-      Keeper_turn_fsm.assert_transition_allowed
-        ~from_state:prev
-        ~to_state:state
-        ()
-    with
-    | Ok _ ->
-      Keeper_turn_fsm.emit_transition
-        ~keeper_name:t.keeper_name
-        ~turn_id:t.turn_id
-        ~prev
-        state
-    | Error _ -> ()
-  in
+type fsm_transition =
+  | Enter_awaiting
+  | Leave_awaiting
+
+(* Compute the new pending-tool count and any Streaming⇄Awaiting_tool_result
+   FSM transitions implied by [events]. The transitions are returned as a list
+   so the caller can emit them only after the new count has been committed
+   atomically with the rest of the event-bus state. *)
+let record_fsm_tool_transitions ~keeper_name ~turn_id old_count events =
+  let count = ref old_count in
+  let transitions = ref [] in
   List.iter
     (fun (evt : Agent_sdk.Event_bus.event) ->
        match evt.payload with
        | Agent_sdk.Event_bus.ToolCalled _ ->
-         let prev = !(t.pending_tool_count) in
-         t.pending_tool_count := prev + 1;
-         if prev = 0
-         then
-           safe_emit
-             ~prev:Keeper_turn_fsm.Streaming
-             Keeper_turn_fsm.Awaiting_tool_result
+         let prev = !count in
+         count := prev + 1;
+         if prev = 0 then transitions := Enter_awaiting :: !transitions
        | Agent_sdk.Event_bus.ToolCompleted _ ->
-         let prev = !(t.pending_tool_count) in
+         let prev = !count in
          if prev > 0
          then (
-           t.pending_tool_count := prev - 1;
-           if prev = 1
-           then
-             safe_emit
-               ~prev:Keeper_turn_fsm.Awaiting_tool_result
-               Keeper_turn_fsm.Streaming)
+           count := prev - 1;
+           if prev = 1 then transitions := Leave_awaiting :: !transitions)
        | _ -> ())
-    events
+    events;
+  !count, List.rev !transitions
+;;
+
+let emit_fsm_transition ~keeper_name ~turn_id transition =
+  match transition with
+  | Enter_awaiting ->
+    (match
+       Keeper_turn_fsm.assert_transition_allowed
+         ~from_state:Keeper_turn_fsm.Streaming
+         ~to_state:Keeper_turn_fsm.Awaiting_tool_result
+         ()
+     with
+     | Ok _ ->
+       Keeper_turn_fsm.emit_transition
+         ~keeper_name
+         ~turn_id
+         ~prev:Keeper_turn_fsm.Streaming
+         Keeper_turn_fsm.Awaiting_tool_result
+     | Error _ -> ())
+  | Leave_awaiting ->
+    (match
+       Keeper_turn_fsm.assert_transition_allowed
+         ~from_state:Keeper_turn_fsm.Awaiting_tool_result
+         ~to_state:Keeper_turn_fsm.Streaming
+         ()
+     with
+     | Ok _ ->
+       Keeper_turn_fsm.emit_transition
+         ~keeper_name
+         ~turn_id
+         ~prev:Keeper_turn_fsm.Awaiting_tool_result
+         Keeper_turn_fsm.Streaming
+     | Error _ -> ())
 ;;
 
 let drain ?(site = "unspecified") t =
@@ -97,9 +110,15 @@ let drain ?(site = "unspecified") t =
     Keeper_metrics.(to_string EventBusDrain)
     ~labels:[ "site", site; "outcome", outcome ]
     ();
-  record_fsm_tool_transitions t events;
   let rec update () =
     let old = Atomic.get t.state in
+    let new_pending_tool_count, transitions =
+      record_fsm_tool_transitions
+        ~keeper_name:t.keeper_name
+        ~turn_id:t.turn_id
+        old.pending_tool_count
+        events
+    in
     let new_tracker =
       Keeper_unified_turn_types.record_turn_tool_events
         ~keeper_name:t.keeper_name
@@ -111,9 +130,18 @@ let drain ?(site = "unspecified") t =
         old.summary
         (Keeper_turn_runtime_budget.summarize_turn_event_bus events)
     in
-    let new_state = { summary = new_summary; tracker = new_tracker } in
+    let new_state =
+      { summary = new_summary
+      ; tracker = new_tracker
+      ; pending_tool_count = new_pending_tool_count
+      }
+    in
     if Atomic.compare_and_set t.state old new_state
-    then new_summary
+    then (
+      List.iter
+        (emit_fsm_transition ~keeper_name:t.keeper_name ~turn_id:t.turn_id)
+        transitions;
+      new_summary)
     else update ()
   in
   update ()
@@ -134,7 +162,7 @@ let start_background_drain ~clock t =
   | Some _, Some sw ->
     Eio.Fiber.fork ~sw (fun () ->
       Eio.Cancel.sub (fun cc ->
-        t.drain_cancel := Some cc;
+        Atomic.set t.drain_cancel (Some cc);
         let rec loop () =
           try
             let _summary = drain ~site:"background_poll" t in
@@ -162,9 +190,8 @@ let start_background_drain ~clock t =
 ;;
 
 let unsubscribe t =
-  (match !(t.drain_cancel) with
+  (match Atomic.exchange t.drain_cancel None with
    | Some cc ->
-     t.drain_cancel := None;
      (try Eio.Cancel.cancel cc (Failure "event_bus_unsubscribed") with
       | Eio.Cancel.Cancelled _ -> ()
       | Invalid_argument msg ->
@@ -178,3 +205,18 @@ let unsubscribe t =
   | Some sub, Some bus -> Agent_sdk_metrics_bridge.unsubscribe bus sub
   | _ -> ()
 ;;
+
+module For_testing = struct
+  type nonrec fsm_transition = fsm_transition = Enter_awaiting | Leave_awaiting
+  type nonrec event_bus_state = event_bus_state =
+    { summary : Keeper_turn_runtime_budget.turn_event_bus_summary
+    ; tracker : Keeper_unified_turn_types.turn_tool_event_tracker
+    ; pending_tool_count : int
+    }
+
+  let record_fsm_tool_transitions = record_fsm_tool_transitions
+  let get_state t = Atomic.get t.state
+  let get_drain_cancel t = Atomic.get t.drain_cancel
+  let set_drain_cancel t v = Atomic.set t.drain_cancel v
+  let exchange_drain_cancel t v = Atomic.exchange t.drain_cancel v
+end

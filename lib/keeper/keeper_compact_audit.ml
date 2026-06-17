@@ -507,6 +507,9 @@ let spawn_subscriber
          parsed as %d, outside [%d, %d]; using default %d days"
         raw parsed retention_min_days retention_max_days default_used
   in
+  (* Phase4 GC trigger wiring: register default cognitive gravity event triggers
+     so dispatch/emit/run_gc fires during compaction-loops. *)
+  Cognitive_gravity_event_bus.Default_triggers.setup ~store_base_path:base_path;
   let sub =
     Agent_sdk_metrics_bridge.subscribe
       ~purpose:"compact_audit"

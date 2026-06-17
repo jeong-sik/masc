@@ -73,6 +73,7 @@
   keeper_context_core
   keeper_compact_policy
   keeper_compact_audit
+  cognitive_gravity_event_bus
   keeper_rollover
   keeper_approval_queue
   keeper_post_turn

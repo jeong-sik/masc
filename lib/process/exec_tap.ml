@@ -286,12 +286,7 @@ let install_from_env () =
                | n -> write_all fd buf (off + n) (remaining - n)
            in
            let writer line =
-             Mutex.lock mu;
-             Fun.protect
-               ~finally:(fun () -> Mutex.unlock mu)
-               (fun () ->
-                  let len = String.length line in
-                  write_all fd line 0 len)
+             Mutex.protect mu (fun () -> let len = String.length line in write_all fd line 0 len)
            in
            enable ~writer;
            Log.Exec_tap.info "exec_tap enabled: %s" out_path

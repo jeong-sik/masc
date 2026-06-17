@@ -193,11 +193,7 @@ let id_counter = ref 0
 let pending_spawn_global = ref 0
 let pending_spawn_by_keeper : (string, int) Hashtbl.t = Hashtbl.create 16
 
-let with_reg f =
-  Mutex.lock registry_mu;
-  match f () with
-  | v -> Mutex.unlock registry_mu; v
-  | exception e -> Mutex.unlock registry_mu; raise e
+let with_reg f = Mutex.protect registry_mu f
 
 let default_exit_watcher_thread_create f =
   let _watcher = Thread.create f () in

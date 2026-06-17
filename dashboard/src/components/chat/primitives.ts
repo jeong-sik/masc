@@ -3,7 +3,7 @@ import type { ComponentChildren, VNode } from 'preact'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
 import { showToast } from '../common/toast'
@@ -236,7 +236,7 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
 
-function formatAttachmentSize(bytes: number): string {
+export function formatAttachmentSize(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
   if (bytes < 1024) return `${Math.round(bytes)} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
@@ -834,7 +834,7 @@ function ChatMessageBubble({
 
   return html`
     <article
-      class=${`chat-bubble ${tone} flex w-full flex-col border backdrop-blur-sm ${
+      class=${`chat-bubble ${tone} flex w-full flex-col backdrop-blur-sm ${
         isMessenger
           ? 'max-w-[82%] gap-2.5 rounded-[var(--radius-xl)] px-4 py-3.5'
           : 'max-w-[90%] gap-3 rounded-[var(--r-5)] px-4 py-3'
@@ -844,7 +844,7 @@ function ChatMessageBubble({
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-xs font-bold uppercase tracking-[var(--track-caps)] ${
+            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center whitespace-nowrap text-xs font-bold uppercase tracking-[var(--track-caps)] ${
               isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-[var(--r-1)]'
             }`}
           >
@@ -899,7 +899,7 @@ function ChatMessageBubble({
               : html`
                   <div class="flex flex-wrap items-center gap-1.5">
                     <span
-                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] border px-2.5 py-1 text-2xs font-bold uppercase tracking-2`}
+                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] px-2.5 py-1 text-2xs font-bold uppercase tracking-2`}
                     >
                       ${entry.label}
                     </span>
@@ -1268,11 +1268,13 @@ export function ChatTranscript({
     if (pinned) setUnread(false)
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scrollerRef.current
     if (!el) return
     if (pinnedRef.current) {
-      el.scrollTop = el.scrollHeight
+      const snap = () => { el.scrollTop = el.scrollHeight }
+      snap()
+      requestAnimationFrame(snap)
     } else {
       setUnread(true)
     }
@@ -1351,7 +1353,7 @@ function randomWave(n: number): number[] {
   return Array.from({ length: n }, () => 0.22 + Math.random() * 0.74)
 }
 
-function AttachDraftChip({
+export function AttachDraftChip({
   attachment,
   onRemove,
 }: {

@@ -53,6 +53,36 @@ export function enqueueInput(
   return msg
 }
 
+/** Return all queued items for a keeper (newest last). */
+export function getQueuedMessages(keeperName: string): QueuedMessage[] {
+  const q = _queues.get(keeperName)
+  return q ? q.items.slice() : []
+}
+
+/** Update the content/attachments of a queued message. */
+export function updateQueuedMessage(
+  keeperName: string,
+  id: string,
+  updates: Partial<Pick<QueuedMessage, 'content' | 'attachments'>>,
+): QueuedMessage | null {
+  const q = _queues.get(keeperName)
+  if (!q) return null
+  const item = q.items.find(i => i.id === id)
+  if (!item) return null
+  if (typeof updates.content === 'string') item.content = updates.content
+  if (updates.attachments) item.attachments = updates.attachments
+  return item
+}
+
+/** Remove a specific queued message. */
+export function removeQueuedMessage(keeperName: string, id: string): boolean {
+  const q = _queues.get(keeperName)
+  if (!q) return false
+  const before = q.items.length
+  q.items = q.items.filter(i => i.id !== id)
+  return q.items.length < before
+}
+
 /** Pop the front queued message. Returns null if empty or already sending. */
 export function dequeueInput(keeperName: string): QueuedMessage | null {
   const q = _queues.get(keeperName)

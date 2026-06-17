@@ -35,8 +35,6 @@ import {
 import { isVisibleDirectConversationEntry } from '../keeper-state'
 import {
   enqueueInput,
-  dequeueInput,
-  markInputSent,
   clearInputQueue,
   getQueueLength,
   getQueuedMessages,

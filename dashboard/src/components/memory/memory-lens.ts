@@ -62,12 +62,12 @@ export function MemoryLens({
   if (nodeIds.length === 0 || !nodes[anchor]) {
     return html`
       <div
-        class="mg-board"
+        class="mg-board ss-card"
         data-testid=${testId}
         aria-label=${ariaLabel}
       >
         <${MgEntry} extra="1-hop 렌즈 · 노드 클릭 = 재중심" />
-        <div class="flex items-center justify-center text-xs text-[var(--color-fg-muted)]" style=${{ height: `${H}px` }}>
+        <div class="flex items-center justify-center text-[12px] text-text-tertiary" style=${{ height: `${H}px` }}>
           연결할 메모리 노드가 없습니다.
         </div>
       </div>
@@ -101,7 +101,7 @@ export function MemoryLens({
   }
 
   return html`
-    <div class="mg-board" data-testid=${testId} aria-label=${ariaLabel}>
+    <div class="mg-board ss-card" data-testid=${testId} aria-label=${ariaLabel}>
       <${MgEntry} extra="1-hop 렌즈 · 노드 클릭 = 재중심" />
       <div class="mg-lens" style=${{ width: W, height: H }}>
         <svg

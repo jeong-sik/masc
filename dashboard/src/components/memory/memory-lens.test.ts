@@ -35,6 +35,8 @@ describe('MemoryLens', () => {
   it('renders the anchor node and satellite nodes from props', () => {
     render(html`<${MemoryLens} nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes} start="mem" testId="lens" />`)
     const board = screen.getByTestId('lens')
+    expect(board.classList.contains('ss-card')).toBe(true)
+    expect(board.querySelectorAll('.mg-node.ss-card').length).toBeGreaterThan(0)
     expect(board.textContent).toContain('insight checkpoint')
     expect(board.textContent).toContain('isolate compact() call')
     expect(board.textContent).toContain('add regression test')

@@ -1,6 +1,6 @@
-/* MASC Dashboard — keeper-v2 memory visualization surfaces (Memory Lens,
-   Lineage Rail, Goal Dossier). Imported after variables.css so the keeper
-   token bridge aliases are available. */
+/* MASC Dashboard — StyleSeed memory visualization surfaces
+   (Memory Lens, Lineage Rail, Goal Dossier). Active when
+   [data-theme="styleseed"] is set on <html>. */
 
 /* ── shared primitives ── */
 .memory-v2 .mono,
@@ -9,16 +9,14 @@
   font-family: var(--font-mono);
 }
 
-.mg-board {
+.mg-board,
+.gd-board {
   box-sizing: border-box;
   height: 100%;
-  padding: 14px 16px 16px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background:
-    radial-gradient(ellipse at 30% 0%, rgba(224, 176, 87, 0.05), transparent 60%),
-    var(--bg-deep);
   color: var(--text-primary);
 }
 
@@ -29,32 +27,32 @@
   gap: 9px;
   flex-wrap: wrap;
   font-size: 11px;
-  color: var(--text-mid);
+  color: var(--text-secondary);
   padding: 7px 11px;
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-sm);
-  background: var(--bg-panel-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
 }
 
 .mg-entry-g {
-  color: var(--volt);
+  color: var(--brand);
   font-size: 12px;
 }
 
 .mg-entry .dim {
-  color: var(--text-dim);
-  font-size: 10.5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
 }
 
 .mg-entry-x {
   margin-left: auto;
   font-size: 10px;
   letter-spacing: 0.04em;
-  color: var(--volt-strong);
-  background: var(--volt-wash);
-  border: 1px solid color-mix(in oklab, var(--volt) 32%, transparent);
+  color: var(--brand);
+  background: var(--brand-tint);
+  border: 1px solid var(--border);
   padding: 2px 8px;
-  border-radius: var(--radius-pill);
+  border-radius: 999px;
   white-space: nowrap;
 }
 
@@ -62,12 +60,9 @@
 .mg-node {
   box-sizing: border-box;
   width: 152px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-main);
+  border: 1px solid var(--border);
   border-left: 2.5px solid var(--nc);
-  border-radius: var(--radius-md);
   padding: 8px 10px 9px;
-  box-shadow: var(--shadow-card);
   transition: 0.16s;
 }
 
@@ -85,7 +80,7 @@
   gap: 4px;
   flex: none;
   white-space: nowrap;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: 0.06em;
   color: var(--nc);
   font-weight: 600;
@@ -97,7 +92,7 @@
 
 .mg-meta {
   font-size: 9px;
-  color: var(--text-dim);
+  color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -105,11 +100,10 @@
 }
 
 .mg-title {
-  font-family: var(--font-display);
   font-weight: 500;
   font-size: 12px;
   line-height: 1.32;
-  color: var(--text-bright);
+  color: var(--text-primary);
   text-wrap: pretty;
   margin-bottom: 7px;
 }
@@ -121,14 +115,14 @@
 }
 
 .mg-node-foot .ns {
-  font-size: 9.5px;
-  color: var(--text-dim);
+  font-size: 10px;
+  color: var(--text-tertiary);
   white-space: nowrap;
 }
 
 .mg-node-foot .meta2 {
   font-size: 9px;
-  color: var(--text-mid);
+  color: var(--text-secondary);
   margin-left: auto;
   white-space: nowrap;
 }
@@ -140,9 +134,9 @@
   flex: none;
   font-family: var(--font-mono);
   font-weight: 700;
-  color: var(--color-bg-page);
+  color: var(--card);
   background: var(--kc);
-  border-radius: var(--radius-xs);
+  border-radius: 4px;
 }
 
 /* ── A · Memory Lens ── */
@@ -169,23 +163,23 @@
   transform: translate(-50%, -50%);
   font-size: 9px;
   letter-spacing: 0.04em;
-  color: var(--text-mid);
-  background: var(--bg-deep);
-  border: 1px solid var(--border-soft);
+  color: var(--text-secondary);
+  background: var(--surface-page);
+  border: 1px solid var(--border);
   padding: 1px 6px;
-  border-radius: var(--radius-pill);
+  border-radius: 999px;
   white-space: nowrap;
   pointer-events: none;
 }
 
 .mg-node.is-anchor {
   width: 180px;
-  border-color: color-mix(in oklab, var(--nc) 55%, var(--border-main));
+  border-color: color-mix(in oklab, var(--nc) 55%, var(--border));
   border-left-width: 3px;
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--nc) 30%, transparent),
     0 0 26px color-mix(in oklab, var(--nc) 16%, transparent);
-  background: var(--bg-card-hover);
+  background: var(--surface-subtle);
 }
 
 .mg-node.is-anchor .mg-title {
@@ -198,8 +192,8 @@
 
 .mg-node.is-sat:hover {
   transform: translateY(-2px);
-  border-color: color-mix(in oklab, var(--nc) 50%, var(--border-main));
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+  border-color: color-mix(in oklab, var(--nc) 50%, var(--border));
+  box-shadow: var(--shadow-elevated);
 }
 
 /* ── B · Lineage Rail ── */
@@ -224,8 +218,8 @@
 }
 
 .mg-time {
-  font-size: 9.5px;
-  color: var(--text-dim);
+  font-size: 10px;
+  color: var(--text-tertiary);
   margin-bottom: 4px;
 }
 
@@ -238,7 +232,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-card);
+  background: var(--card);
   border: 1.5px solid var(--nc);
   color: var(--nc);
 }
@@ -251,7 +245,7 @@
 .mg-wire {
   flex: 1;
   width: 1.5px;
-  background: linear-gradient(var(--nc), var(--border-main));
+  background: linear-gradient(var(--nc), var(--border));
   margin: 2px 0 -2px;
   opacity: 0.5;
   min-height: 16px;
@@ -264,35 +258,33 @@
 
 .mg-rel {
   font-size: 10px;
-  color: var(--text-mid);
+  color: var(--text-secondary);
   margin: 1px 0 6px;
 }
 
 .mg-step-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-main);
+  border: 1px solid var(--border);
   border-left: 2.5px solid var(--nc);
-  border-radius: var(--radius-md);
   padding: 9px 11px;
 }
 
 .mg-step.is-anchor .mg-step-card {
-  background: var(--bg-card-hover);
+  background: var(--surface-subtle);
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--nc) 30%, transparent);
 }
 
 .mg-step-card .mg-title {
-  font-size: 12.5px;
+  font-size: 12px;
   margin-bottom: 7px;
 }
 
 .mg-anchor-tag {
   font-size: 9px;
-  color: var(--volt-strong);
-  background: var(--volt-wash);
-  border: 1px solid color-mix(in oklab, var(--volt) 32%, transparent);
+  color: var(--brand);
+  background: var(--brand-tint);
+  border: 1px solid var(--border);
   padding: 1px 7px;
-  border-radius: var(--radius-pill);
+  border-radius: 999px;
 }
 
 /* legend */
@@ -302,9 +294,9 @@
   gap: 12px;
   flex-wrap: wrap;
   padding-top: 10px;
-  border-top: 1px solid var(--border-soft);
-  font-size: 10.5px;
-  color: var(--text-mid);
+  border-top: 1px solid var(--border);
+  font-size: 10px;
+  color: var(--text-secondary);
 }
 
 .mg-leg {
@@ -321,12 +313,12 @@
 }
 
 .mg-leg-sep {
-  color: var(--text-dim);
+  color: var(--text-tertiary);
 }
 
 .mg-leg-note {
-  font-size: 9.5px;
-  color: var(--text-dim);
+  font-size: 9px;
+  color: var(--text-tertiary);
 }
 
 /* ── C · Goal Dossier ── */
@@ -346,27 +338,25 @@
 
 .gd-glyph {
   font-size: 22px;
-  color: var(--accent-ice);
+  color: var(--brand);
   line-height: 1;
   margin-top: 2px;
   flex: none;
-  text-shadow: 0 0 16px color-mix(in oklab, var(--accent-ice) 30%, transparent);
 }
 
 .gd-ey {
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--text-tertiary);
   margin-bottom: 3px;
 }
 
 .gd-title {
-  font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: 700;
   font-size: 17px;
   line-height: 1.25;
-  color: var(--text-bright);
+  color: var(--text-primary);
   text-wrap: pretty;
 }
 
@@ -375,12 +365,12 @@
   align-items: center;
   gap: 8px;
   margin-top: 6px;
-  font-size: 10.5px;
-  color: var(--text-mid);
+  font-size: 10px;
+  color: var(--text-secondary);
 }
 
 .gd-sub .dimd {
-  color: var(--text-dim);
+  color: var(--text-tertiary);
 }
 
 .gd-ring {
@@ -397,7 +387,7 @@
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: var(--bg-panel);
+  background: var(--surface-subtle);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -408,7 +398,7 @@
 .gd-ring-in b {
   font-family: var(--font-mono);
   font-size: 16px;
-  color: var(--volt-strong);
+  color: var(--brand);
   font-weight: 700;
 }
 
@@ -416,7 +406,7 @@
   font-size: 8px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--text-tertiary);
 }
 
 /* snapshot trend */
@@ -428,16 +418,16 @@
 
 .gd-prog {
   height: 8px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-sunken);
-  border: 1px solid var(--border-main);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
   overflow: hidden;
 }
 
 .gd-prog-fill {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, color-mix(in oklab, var(--accent-ice) 60%, transparent), var(--volt));
+  background: linear-gradient(90deg, color-mix(in oklab, var(--brand) 60%, transparent), var(--brand));
 }
 
 .gd-snaps {
@@ -451,14 +441,14 @@
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--text-tertiary);
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
 
 .gd-snaparr {
-  color: var(--text-dim);
+  color: var(--text-tertiary);
   font-size: 11px;
 }
 
@@ -467,62 +457,62 @@
   align-items: baseline;
   gap: 6px;
   padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-card);
-  border: 1px solid var(--border-main);
+  border-radius: var(--radius);
+  background: var(--card);
+  border: 1px solid var(--border);
 }
 
 .gd-snap.now {
-  border-color: color-mix(in oklab, var(--accent-ice) 45%, var(--border-main));
-  background: var(--bg-card-hover);
+  border-color: color-mix(in oklab, var(--brand) 45%, var(--border));
+  background: var(--brand-tint);
 }
 
 .gd-snap b {
-  font-size: 12.5px;
-  color: var(--text-bright);
+  font-size: 12px;
+  color: var(--text-primary);
 }
 
 .gd-snap.now b {
-  color: var(--accent-ice);
+  color: var(--brand);
 }
 
 .gd-snap .dt {
   font-size: 9px;
-  color: var(--text-dim);
+  color: var(--text-tertiary);
 }
 
 .gd-snap .nt {
-  font-size: 9.5px;
-  color: var(--text-mid);
+  font-size: 10px;
+  color: var(--text-secondary);
 }
 
 .gd-ledger {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 1px;
-  background: var(--border-soft);
-  border: 1px solid var(--border-main);
-  border-radius: var(--radius-sm);
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
 .gd-cell {
-  background: var(--bg-panel-alt);
+  background: var(--surface-subtle);
   padding: 9px 8px;
   text-align: center;
 }
 
 .gd-cv {
   font-size: 14px;
-  color: var(--text-bright);
+  color: var(--text-primary);
   font-weight: 600;
 }
 
 .gd-ck {
-  font-size: 8.5px;
+  font-size: 8px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-dim);
+  color: var(--text-tertiary);
   margin-top: 3px;
 }
 
@@ -554,22 +544,20 @@
 
 .gd-group-h .cnt {
   margin-left: 2px;
-  font-size: 9.5px;
-  color: var(--text-dim);
-  background: var(--bg-card);
-  border: 1px solid var(--border-main);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--card);
+  border: 1px solid var(--border);
   padding: 0 6px;
-  border-radius: var(--radius-pill);
+  border-radius: 999px;
 }
 
 .gd-crow {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--bg-card);
-  border: 1px solid var(--border-main);
+  border: 1px solid var(--border);
   border-left: 2.5px solid var(--nc);
-  border-radius: var(--radius-sm);
   padding: 8px 11px;
 }
 
@@ -583,10 +571,9 @@
 }
 
 .gd-ctitle {
-  font-family: var(--font-display);
   font-weight: 500;
-  font-size: 12.5px;
-  color: var(--text-bright);
+  font-size: 12px;
+  color: var(--text-primary);
   line-height: 1.3;
 }
 
@@ -596,7 +583,7 @@
   gap: 7px;
   margin-top: 4px;
   font-size: 10px;
-  color: var(--text-mid);
+  color: var(--text-secondary);
 }
 
 .gd-state {
@@ -604,29 +591,29 @@
   letter-spacing: 0.08em;
   flex: none;
   padding: 2px 8px;
-  border-radius: var(--radius-pill);
+  border-radius: 999px;
   border: 1px solid transparent;
 }
 
 .gd-state.st-done {
-  color: var(--status-ok);
-  background: color-mix(in oklab, var(--status-ok) 14%, transparent);
-  border-color: color-mix(in oklab, var(--status-ok) 34%, transparent);
+  color: var(--success);
+  background: color-mix(in oklab, var(--success) 14%, transparent);
+  border-color: color-mix(in oklab, var(--success) 34%, transparent);
 }
 
 .gd-state.st-open {
-  color: var(--volt-strong);
-  background: var(--volt-wash);
-  border-color: color-mix(in oklab, var(--volt) 32%, transparent);
+  color: var(--brand);
+  background: var(--brand-tint);
+  border-color: color-mix(in oklab, var(--brand) 32%, transparent);
 }
 
 .gd-state.st-block {
-  color: var(--status-bad);
-  background: color-mix(in oklab, var(--status-bad) 14%, transparent);
-  border-color: color-mix(in oklab, var(--status-bad) 34%, transparent);
+  color: var(--destructive);
+  background: color-mix(in oklab, var(--destructive) 14%, transparent);
+  border-color: color-mix(in oklab, var(--destructive) 34%, transparent);
 }
 
 .gd-state.st-ctx {
-  color: var(--text-dim);
-  border-color: var(--border-main);
+  color: var(--text-tertiary);
+  border-color: var(--border);
 }

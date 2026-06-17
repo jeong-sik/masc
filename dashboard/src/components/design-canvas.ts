@@ -94,7 +94,7 @@ function Artboard({ title, h, children }: { title: string; h?: number; children:
   return html`
     <div class="dc-artboard" data-design-canvas-artboard>
       <div class="dc-artboard-label">${title}</div>
-      <div class="dc-artboard-well" style=${h !== undefined ? { height: `${h}px` } : undefined}>${children}</div>
+      <div class="dc-artboard-well ss-card" style=${h !== undefined ? { height: `${h}px` } : undefined}>${children}</div>
     </div>
   `
 }
@@ -258,7 +258,7 @@ function KeeperCard({ name, state, qps, latency }: {
   latency: string
 }) {
   return html`
-    <div class="dc-organism-card" data-design-canvas-organism="keeper-card">
+    <div class="dc-organism-card ss-card" data-design-canvas-organism="keeper-card">
       <div class="dc-organism-header">
         <span class="dc-mono">${name}</span>
         <${StatusChip} tone=${state === 'active' ? 'ok' : state === 'warn' ? 'warn' : 'paused'}>${state}<//>
@@ -359,8 +359,8 @@ function SurfacesGallery() {
   return html`
     <${Section} title="Surfaces">
       <${Artboard} title="Lab surface sample">
-        <div class="dc-surface-sample v2-lab-surface">
-          <div class="v2-lab-panel dc-surface-panel">
+        <div class="dc-surface-sample">
+          <div class="v2-lab-panel dc-surface-panel ss-card">
             <div class="section-head">Panel</div>
             <div class="p-3">
               <${Vitals}
@@ -371,8 +371,8 @@ function SurfacesGallery() {
               />
             </div>
           </div>
-          <div class="v2-lab-card dc-surface-card">
-            <p class="m-0 text-xs text-[var(--color-fg-muted)]">Card content area</p>
+          <div class="v2-lab-card dc-surface-card ss-card">
+            <p class="m-0 text-[13px] text-text-tertiary">Card content area</p>
             <${ActionButton} variant="primary" size="sm" class="mt-2">Action<//>
           </div>
         </div>
@@ -412,9 +412,9 @@ function MotionGallery() {
 
       <${Artboard} title="Enter animation">
         <div class="dc-motion-stack">
-          <div class="dc-motion-card anim-slide-up">slide-up</div>
-          <div class="dc-motion-card anim-fade-in">fade-in</div>
-          <div class="dc-motion-card anim-pop">pop</div>
+          <div class="dc-motion-card ss-card anim-slide-up">slide-up</div>
+          <div class="dc-motion-card ss-card anim-fade-in">fade-in</div>
+          <div class="dc-motion-card ss-card anim-pop">pop</div>
         </div>
       <//>
     <//>
@@ -731,7 +731,7 @@ export function DesignCanvas() {
   const { theme, toggle } = useDesignCanvasTheme()
 
   return html`
-    <div class="dc-root" data-design-canvas>
+    <div class="dc-root ss-surface bg-surface-page" data-design-canvas>
       <div class="dc-header">
         <div>
           <h2 class="dc-title">Design Canvas</h2>

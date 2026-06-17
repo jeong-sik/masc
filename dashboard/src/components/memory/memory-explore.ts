@@ -130,16 +130,16 @@ const LEDGER = [
 
 export function MemoryExplore() {
   return html`
-    <div class="v2-lab-surface flex flex-col gap-6" data-testid="memory-explore-surface">
-      <div class="flex items-center justify-between gap-4 v2-monitoring-toolbar">
+    <div class="ss-surface bg-surface-page flex flex-col gap-6 px-6 py-6" data-testid="memory-explore-surface">
+      <div class="flex items-center justify-between gap-4">
         <div>
-          <h2 class="text-base font-semibold text-[var(--color-fg-primary)]">Memory Linkage Explore</h2>
-          <p class="text-2xs text-[var(--color-fg-muted)]">메모리 체크포인트 → 골 → 태스크 → 보드 연결망</p>
+          <h2 class="text-[18px] font-bold text-text-primary">Memory Linkage Explore</h2>
+          <p class="text-[13px] text-text-tertiary">메모리 체크포인트 → 골 → 태스크 → 보드 연결망</p>
         </div>
       </div>
 
       <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div class="v2-monitoring-panel rounded-[var(--r-2)] border border-[var(--color-border-default)] overflow-hidden">
+        <div class="ss-card overflow-hidden">
           <${MemoryLens}
             nodes=${NODES}
             edges=${EDGES}
@@ -150,7 +150,7 @@ export function MemoryExplore() {
           />
         </div>
 
-        <div class="v2-monitoring-panel rounded-[var(--r-2)] border border-[var(--color-border-default)] overflow-hidden">
+        <div class="ss-card overflow-hidden">
           <${MemoryLineageRail}
             steps=${LINEAGE_STEPS}
             nodes=${NODES}
@@ -161,7 +161,7 @@ export function MemoryExplore() {
         </div>
       </div>
 
-      <div class="v2-monitoring-panel rounded-[var(--r-2)] border border-[var(--color-border-default)] overflow-hidden">
+      <div class="ss-card overflow-hidden">
         <${GoalDossier}
           goal=${GOAL}
           nodeTypes=${NODE_TYPES}

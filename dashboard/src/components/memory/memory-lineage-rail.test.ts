@@ -32,6 +32,8 @@ describe('MemoryLineageRail', () => {
   it('renders step times, relations, and node titles', () => {
     render(html`<${MemoryLineageRail} steps=${steps} nodes=${nodes} nodeTypes=${nodeTypes} testId="rail" />`)
     const rail = screen.getByTestId('rail')
+    expect(rail.classList.contains('ss-card')).toBe(true)
+    expect(rail.querySelectorAll('.mg-step-card.ss-card').length).toBeGreaterThan(0)
     expect(rail.textContent).toContain('13:18')
     expect(rail.textContent).toContain('13:49')
     expect(rail.textContent).toContain('13:50')

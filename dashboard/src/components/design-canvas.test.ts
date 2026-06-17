@@ -24,7 +24,10 @@ describe('DesignCanvas', () => {
       render(html`<${DesignCanvas} />`, container)
     })
 
-    expect(container.querySelector('[data-design-canvas]')).not.toBeNull()
+    const root = container.querySelector('[data-design-canvas]')
+    expect(root).not.toBeNull()
+    expect(root!.classList.contains('ss-surface')).toBe(true)
+    expect(root!.classList.contains('bg-surface-page')).toBe(true)
     expect(container.querySelector('[data-testid="design-canvas-tab-primitives"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="design-canvas-tab-molecules"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="design-canvas-tab-organisms"]')).not.toBeNull()
@@ -42,7 +45,9 @@ describe('DesignCanvas', () => {
 
     const stage = container.querySelector('[data-testid="design-canvas-stage"]')
     expect(stage).not.toBeNull()
-    expect(stage!.querySelectorAll('[data-design-canvas-artboard]').length).toBeGreaterThanOrEqual(6)
+    const artboards = stage!.querySelectorAll('[data-design-canvas-artboard]')
+    expect(artboards.length).toBeGreaterThanOrEqual(6)
+    expect(artboards[0]!.querySelector('.ss-card')).not.toBeNull()
     expect(stage!.querySelectorAll('[role="progressbar"]').length).toBeGreaterThan(0)
   })
 

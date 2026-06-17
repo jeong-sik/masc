@@ -68,7 +68,7 @@ export function GoalDossier({
   const snapshotType = nodeTypes.snapshot ?? { kr: '스냅샷', g: '◷', c: 'var(--accent-ice)' }
 
   return html`
-    <div class="mg-board gd-board" data-testid=${testId} aria-label=${ariaLabel}>
+    <div class="mg-board gd-board ss-card" data-testid=${testId} aria-label=${ariaLabel}>
       <${MgEntry} extra="목표 중심 · 얼만큼 일했나" />
       <div class="gd-head">
         <div class="gd-head-l">
@@ -138,7 +138,7 @@ export function GoalDossier({
                 <span class="cnt mono">${items.length}</span>
               </div>
               ${items.map((it, j) => html`
-                <div key=${j} class=${cx('gd-crow', `st-${it.state}`)}>
+                <div key=${j} class=${cx('gd-crow ss-card', `st-${it.state}`)}>
                   <div class="gd-cmain">
                     <div class="gd-ctitle">${it.title}</div>
                     <div class="gd-cmeta">

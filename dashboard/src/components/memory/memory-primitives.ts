@@ -98,7 +98,7 @@ export function MgNodeCard({
 }: NodeCardProps) {
   return html`
     <div
-      class=${cx('mg-node', anchor && 'is-anchor', satellite && 'is-sat')}
+      class=${cx('mg-node ss-card', anchor && 'is-anchor', satellite && 'is-sat')}
       style=${{ '--nc': type.c }}
       onClick=${onClick}
       title=${node.title}

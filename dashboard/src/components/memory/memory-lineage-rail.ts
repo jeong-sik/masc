@@ -35,9 +35,9 @@ export function MemoryLineageRail({
 }: MemoryLineageRailProps) {
   if (steps.length === 0) {
     return html`
-      <div class="mg-board" data-testid=${testId} aria-label=${ariaLabel}>
+      <div class="mg-board ss-card" data-testid=${testId} aria-label=${ariaLabel}>
         <${MgEntry} extra="lineage · 위→아래 인과 흐름" />
-        <div class="flex items-center justify-center text-xs text-[var(--color-fg-muted)]" style=${{ minHeight: '160px' }}>
+        <div class="flex items-center justify-center text-[12px] text-text-tertiary" style=${{ minHeight: '160px' }}>
           인과 단계가 없습니다.
         </div>
       </div>
@@ -45,7 +45,7 @@ export function MemoryLineageRail({
   }
 
   return html`
-    <div class="mg-board" data-testid=${testId} aria-label=${ariaLabel}>
+    <div class="mg-board ss-card" data-testid=${testId} aria-label=${ariaLabel}>
       <${MgEntry} extra="lineage · 위→아래 인과 흐름" />
       <div class="mg-rail" role="list" aria-label=${ariaLabel}>
         ${steps.map((step, i) => {
@@ -66,7 +66,7 @@ export function MemoryLineageRail({
               </div>
               <div class="mg-step-body">
                 <div class="mg-rel mono">${step.rel}</div>
-                <div class="mg-step-card">
+                <div class="mg-step-card ss-card">
                   <div class="mg-node-top">
                     <span class="mg-type"><span class="g">${t.g}</span>${t.kr}</span>
                     ${step.anchor ? html`<span class="mg-anchor-tag mono">진입 지점</span>` : null}

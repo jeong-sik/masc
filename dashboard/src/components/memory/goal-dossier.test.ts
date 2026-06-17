@@ -58,6 +58,8 @@ describe('GoalDossier', () => {
       testId="dossier"
     />`)
     const dossier = screen.getByTestId('dossier')
+    expect(dossier.classList.contains('ss-card')).toBe(true)
+    expect(dossier.querySelectorAll('.gd-crow.ss-card').length).toBeGreaterThan(0)
     expect(dossier.textContent).toContain('scheduler p95 round-jitter < 50ms')
     expect(dossier.textContent).toContain('47%')
     expect(dossier.textContent).toContain('D-3 마감')

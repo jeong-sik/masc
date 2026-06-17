@@ -510,7 +510,7 @@ let execute_tool_eio
                the keeper turn migration in PR-7. *)
             let dispatch_internal_with_telemetry () =
               let result, _outcome =
-                Tool_telemetry.with_span ~force_new_trace_id:true ~tool_name:name (fun _trace_id_thunk ->
+                Tool_telemetry.with_span ~force_new_trace_id:true ~surface:"mcp" ~tool_name:name (fun _trace_id_thunk ->
                   let r = dispatch_internal_keeper_runtime_tool () in
                   (* Route through the shared dispatch finalizer so MCP
                      internal-keeper-runtime calls run the same result
@@ -547,7 +547,7 @@ let execute_tool_eio
                     Tool_telemetry.with_span for 4-tuple emission. *)
                  let dispatch_tag_with_telemetry tag =
                    let result, _outcome =
-                     Tool_telemetry.with_span ~force_new_trace_id:true ~tool_name:name (fun _trace_id_thunk ->
+                     Tool_telemetry.with_span ~force_new_trace_id:true ~surface:"mcp" ~tool_name:name (fun _trace_id_thunk ->
                        let r = dispatch_by_tag tag in
                        (* Keep external MCP tools/call on the same
                           post-dispatch contract as internal keeper calls. *)

@@ -17,3 +17,11 @@ val handle_keeper_down_config :
 val register_remove_pending_confirms_by_target :
   (Workspace.config -> target_type:string -> target_id:string option -> int) ->
   unit
+
+(** Test-only hooks for the Atomic-backed callback. *)
+module For_testing : sig
+  val remove_pending_confirms_by_target
+    : config:Workspace.config -> target_type:string -> target_id:string option -> int
+
+  val reset_remove_pending_confirms_by_target : unit -> unit
+end

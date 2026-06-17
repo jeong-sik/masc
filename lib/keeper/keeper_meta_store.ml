@@ -15,7 +15,8 @@ let runtime_meta_write_sync_hook_atomic
   Atomic.make (fun _ _ -> ())
 ;;
 
-let runtime_meta_write_sync_hook = Atomic.get runtime_meta_write_sync_hook_atomic
+let runtime_meta_write_sync_hook config meta =
+  Atomic.get runtime_meta_write_sync_hook_atomic config meta
 
 let register_runtime_meta_write_sync f =
   Atomic.set runtime_meta_write_sync_hook_atomic f

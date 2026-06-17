@@ -113,3 +113,11 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
       tool_result_ok (Yojson.Safe.to_string json)
 
 let handle_keeper_down (ctx : _ context) args = handle_keeper_down_config ~config:ctx.config args
+
+module For_testing = struct
+  let remove_pending_confirms_by_target ~config ~target_type ~target_id =
+    Atomic.get remove_pending_confirms_by_target_callback config ~target_type ~target_id
+
+  let reset_remove_pending_confirms_by_target () =
+    Atomic.set remove_pending_confirms_by_target_callback (fun _config ~target_type:_ ~target_id:_ -> 0)
+end

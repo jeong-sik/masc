@@ -79,6 +79,20 @@ val is_core_always_tool : string -> bool
 (** Deduplicate tool names, preserving order. *)
 val dedupe_tool_names : string list -> string list
 
+(** Test-only hooks for the global recorder/searcher refs converted to Atomic.t. *)
+module For_testing : sig
+  val set_on_keeper_tool_call
+    : (tool_name:string -> success:bool -> duration_ms:int -> unit) -> unit
+
+  val record_keeper_tool_call
+    : tool_name:string -> success:bool -> duration_ms:int -> unit
+
+  val set_tool_search_fn
+    : (query:string -> max_results:int -> Yojson.Safe.t) -> unit
+
+  val search_tools : query:string -> max_results:int -> Yojson.Safe.t
+end
+
 (** Inject all masc_* schemas for keeper descriptor/registry surface filtering.
     Must be called once during server initialization. *)
 val inject_masc_schemas : Masc_domain.tool_schema list -> unit

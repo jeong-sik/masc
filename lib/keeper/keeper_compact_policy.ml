@@ -30,7 +30,25 @@ let record_pre_compact_callback_atomic
     (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
 ;;
 
-let record_pre_compact_callback = Atomic.get record_pre_compact_callback_atomic
+let record_pre_compact_callback
+    ~keeper_name
+    ~context_ratio
+    ~message_count
+    ~token_count
+    ~strategies
+    ~context_window
+    ~is_local_model
+    ~trigger
+  =
+  Atomic.get record_pre_compact_callback_atomic
+    ~keeper_name
+    ~context_ratio
+    ~message_count
+    ~token_count
+    ~strategies
+    ~context_window
+    ~is_local_model
+    ~trigger
 
 let register_record_pre_compact
     (f :

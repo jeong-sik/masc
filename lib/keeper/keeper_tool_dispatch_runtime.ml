@@ -738,3 +738,10 @@ let execute_keeper_tool_call
   in
   result.raw_output
 ;;
+
+module For_testing = struct
+  let set_on_keeper_tool_call = set_on_keeper_tool_call
+  let record_keeper_tool_call = record_keeper_tool_call
+  let set_tool_search_fn = set_tool_search_fn
+  let search_tools = search_tools
+end

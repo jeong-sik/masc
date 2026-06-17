@@ -173,7 +173,9 @@ let set_keeper_paused_state ~agent_name paused =
           else Keeper_state_machine.Operator_resume);
        if not paused
        then (
-         Keeper_turn_livelock.reset_keeper_livelock ~keeper:entry.name;
+         Keeper_turn_livelock.reset_keeper_livelock
+           ~base_path:entry.base_path
+           ~keeper:entry.name;
          (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;
          (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
@@ -259,7 +261,12 @@ let process_directive ~agent_name directive =
          | Some meta -> meta.paused
          | None -> false)
     in
-    Keeper_turn_livelock.reset_keeper_livelock ~keeper:agent_name;
+    (match Keeper_registry_lookup.find_by_agent_name agent_name with
+     | Some e ->
+       Keeper_turn_livelock.reset_keeper_livelock
+         ~base_path:e.base_path
+         ~keeper:agent_name
+     | None -> ());
     if entry_paused
     then (
       Log.Keeper.emit

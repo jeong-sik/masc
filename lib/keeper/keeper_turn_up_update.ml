@@ -227,7 +227,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
      recorded a `pause_human` receipt, while current guards may persist
      [meta.paused = true].  A follow-up `masc_keeper_up` should clear the
      stale in-memory counter in both cases. *)
-  Keeper_turn_livelock.reset_keeper_livelock ~keeper:old.name;
+  Keeper_turn_livelock.reset_keeper_livelock
+    ~base_path:ctx.config.base_path
+    ~keeper:old.name;
   (* ETA-LIVELOCK: align typed-escalation classifier with the
      livelock counter reset so an operator-triggered keeper_up
      restores the next block to ERROR (not silent DEBUG demotion

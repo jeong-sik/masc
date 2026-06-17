@@ -602,7 +602,9 @@ let sweep_and_recover (ctx : _ context) =
                 resumed_meta
             with
             | Ok () ->
-              Keeper_turn_livelock.reset_keeper_livelock ~keeper:name;
+              Keeper_turn_livelock.reset_keeper_livelock
+                ~base_path:ctx.config.base_path
+                ~keeper:name;
               (match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
                | Some _ ->
                  Keeper_registry.dispatch_event_unit

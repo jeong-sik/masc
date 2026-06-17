@@ -72,7 +72,9 @@ let resume_keeper_after_reconcile_gate
     resumed_meta.name
     None;
   Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path resumed_meta.name;
-  Keeper_turn_livelock.reset_keeper_livelock ~keeper:resumed_meta.name;
+  Keeper_turn_livelock.reset_keeper_livelock
+    ~base_path:ctx.config.base_path
+    ~keeper:resumed_meta.name;
   (* ETA-LIVELOCK: keep typed-escalation classifier aligned with the
      resume path so the resumed keeper's first livelock block emits at
      ERROR (not silently demoted to DEBUG from a previous lifetime). *)

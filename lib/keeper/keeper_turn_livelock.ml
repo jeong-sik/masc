@@ -8,44 +8,18 @@
     keeper has tried turn 91 twelve times" until an operator greps
     log lines.
 
-    Per-keeper in-memory state tracks the most recent turn id seen and
-    the attempt count for that id.  When the same id starts again we emit
-    a re-attempt counter.  When the id moves strictly backwards we emit a
-    regression counter (rare; indicative of the write_meta race).  When
-    the id advances normally we reset the per-keeper bookkeeping.  The
-    guarded entrypoint enforces a per-turn retry/age budget before the
-    dispatcher marks the turn live.
+    Per-keeper state is stored in the registry entry
+    ([Keeper_registry_types.livelock_attempt_state option Atomic.t])
+    and updated via CAS on that per-entry atomic so a keeper's retry
+    history is part of the SSOT.  The previous separate [Hashtbl] +
+    [Eio.Mutex.t] has been removed. *)
 
-    State is process-local: a server restart resets the counters,
-    which is intentional — the issue's fleet-wide signal comes from
-    in-process retry storms, not cross-restart divergence. *)
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_registry_types
 
-type attempt_state = {
-  turn_id : int;
-  attempts : int;
-  first_started_at : float;
-}
-
-(* Eio.Mutex: keeper turn lifecycle is invoked from Eio fibers in a single
-   domain. Stdlib.Mutex is PTHREAD_MUTEX_ERRORCHECK on OCaml 5 and raises
-   "Resource deadlock avoided" the moment two fibers on the same OS thread
-   contend (memory: feedback_eio-mutex-vs-stdlib). All callbacks below are
-   pure Hashtbl ops with no yielding effects, so use_rw is a drop-in. *)
-let mu = Eio.Mutex.create ()
-let state : (string, attempt_state) Hashtbl.t = Hashtbl.create 16
-
-(** Reset for tests so each test starts clean.  Public so the test
-    harness can call it without poking at internals. *)
-let reset_for_tests () =
-  Eio.Mutex.use_rw ~protect:true mu (fun () -> Hashtbl.clear state)
-
-(** Remove the attempt state for a single keeper.  Called by the
-    supervisor when a keeper fiber is cleaned up after a crash so
-    that the next restart begins with a fresh counter rather than
-    inheriting the previous stuck turn's exhaustion. *)
-let reset_keeper_livelock ~(keeper : string) : unit =
-  Eio.Mutex.use_rw ~protect:true mu (fun () ->
-    Hashtbl.remove state keeper)
+type attempt_state = Keeper_registry_types.livelock_attempt_state
 
 (** [start_outcome] records what happened on a [record_turn_start]
     call.  Returned so callers (tests, future gating logic) don't
@@ -107,93 +81,156 @@ let gate_reason_kind = function
 
 let gate_reason_to_string = function
   | Attempts_exhausted { attempts; max_attempts; _ } ->
-      Printf.sprintf "attempts_exhausted attempts=%d max_attempts=%d"
-        attempts max_attempts
+    Printf.sprintf
+      "attempts_exhausted attempts=%d max_attempts=%d"
+      attempts
+      max_attempts
   | Stuck_age_exceeded { attempts; age_sec; threshold_sec; _ } ->
-      Printf.sprintf
-        "stuck_age_exceeded attempts=%d age_sec=%.1f threshold_sec=%.1f"
-        attempts age_sec threshold_sec
+    Printf.sprintf
+      "stuck_age_exceeded attempts=%d age_sec=%.1f threshold_sec=%.1f"
+      attempts
+      age_sec
+      threshold_sec
 
-let classify_and_update_start ~now ~(keeper : string) ~(turn_id : int)
-    : start_outcome =
-  match Hashtbl.find_opt state keeper with
+let classify_and_update_start ~now ~(turn_id : int) (prev : attempt_state option)
+  : attempt_state option * start_outcome
+  =
+  match prev with
   | None ->
-    Hashtbl.replace state keeper
-      { turn_id; attempts = 1; first_started_at = now };
-    Fresh
-  | Some prev when prev.turn_id < turn_id ->
-    Hashtbl.replace state keeper
-      { turn_id; attempts = 1; first_started_at = now };
-    Fresh
-  | Some prev when prev.turn_id = turn_id ->
-    let attempts = prev.attempts + 1 in
-    Hashtbl.replace state keeper { prev with attempts };
-    Reattempt
-      { previous_attempts = prev.attempts;
-        first_started_at = prev.first_started_at }
-  | Some prev (* prev.turn_id > turn_id *) ->
+    Some { turn_id; attempts = 1; first_started_at = now }, Fresh
+  | Some p when p.turn_id < turn_id ->
+    Some { turn_id; attempts = 1; first_started_at = now }, Fresh
+  | Some p when p.turn_id = turn_id ->
+    let attempts = p.attempts + 1 in
+    ( Some { p with attempts }
+    , Reattempt
+        { previous_attempts = p.attempts; first_started_at = p.first_started_at } )
+  | Some p (* p.turn_id > turn_id *) ->
     (* Strictly backwards.  Reset bookkeeping so the next start
        at this lower id counts as Fresh, not Reattempt. *)
-    Hashtbl.replace state keeper
-      { turn_id; attempts = 1; first_started_at = now };
-    Regression { previous_turn_id = prev.turn_id }
+    ( Some { turn_id; attempts = 1; first_started_at = now }
+    , Regression { previous_turn_id = p.turn_id } )
 
-let record_turn_start ~(keeper : string) ~(turn_id : int) : start_outcome =
+let with_registered_entry ~base_path ~keeper f =
+  match Keeper_registry.get ~base_path keeper with
+  | None -> None
+  | Some entry -> Some (f entry)
+
+(** Read the current livelock state for [keeper] without modifying it. *)
+let current_state_opt ~base_path ~keeper : attempt_state option =
+  with_registered_entry ~base_path ~keeper (fun entry ->
+    Atomic.get entry.livelock_state)
+  |> Option.join
+
+(** Apply [f] to the current livelock state of a registered keeper and
+    write back the result via CAS on the per-entry atomic.  Returns
+    [Some result] when the keeper is registered, [None] otherwise. *)
+let update_state ~base_path ~keeper f =
+  with_registered_entry ~base_path ~keeper (fun entry ->
+    let rec loop () =
+      let old_state = Atomic.get entry.livelock_state in
+      let new_state, result = f old_state in
+      if Atomic.compare_and_set entry.livelock_state old_state new_state
+      then result
+      else loop ()
+    in
+    loop ())
+
+let record_turn_start ~base_path ~keeper ~turn_id : start_outcome =
   let outcome =
-    Eio.Mutex.use_rw ~protect:true mu (fun () ->
-      classify_and_update_start ~now:(now_unix ()) ~keeper ~turn_id)
+    match
+      update_state ~base_path ~keeper (fun prev ->
+        classify_and_update_start ~now:(now_unix ()) ~turn_id prev)
+    with
+    | Some outcome -> outcome
+    | None -> Fresh
   in
-  (* Counter emissions outside the lock — Otel_metric_store calls allocate
-     and can recurse; minimise critical-section scope. *)
   record_started_metrics ~keeper outcome
 
-let guard_and_record_turn_start ?(now = now_unix) ~(keeper : string)
-    ~(turn_id : int) ~(max_attempts : int) ~(stuck_after_sec : float) () :
-    guarded_start_outcome =
+let guard_and_record_turn_start
+      ?(now = now_unix)
+      ~base_path
+      ~keeper
+      ~turn_id
+      ~max_attempts
+      ~stuck_after_sec
+      ()
+  : guarded_start_outcome
+  =
   let max_attempts = Int.max 1 max_attempts in
   let stuck_after_sec = Float.max 0.0 stuck_after_sec in
   let now_value = now () in
   let outcome =
-    Eio.Mutex.use_rw ~protect:true mu (fun () ->
-      match Hashtbl.find_opt state keeper with
+    match
+      update_state ~base_path ~keeper (fun current ->
+        match current with
         | Some prev when prev.turn_id = turn_id ->
           let age_sec = now_value -. prev.first_started_at in
-          if prev.attempts >= max_attempts then
-            Blocked
-              (Attempts_exhausted
-                 { attempts = prev.attempts;
-                   max_attempts;
-                   first_started_at = prev.first_started_at })
-          else if age_sec >= stuck_after_sec then
-            Blocked
-              (Stuck_age_exceeded
-                 { attempts = prev.attempts;
-                   age_sec;
-                   threshold_sec = stuck_after_sec;
-                   first_started_at = prev.first_started_at })
+          if prev.attempts >= max_attempts
+          then (
+            current
+            , Blocked
+                (Attempts_exhausted
+                   { attempts = prev.attempts
+                   ; max_attempts
+                   ; first_started_at = prev.first_started_at }))
+          else if age_sec >= stuck_after_sec
+          then (
+            current
+            , Blocked
+                (Stuck_age_exceeded
+                   { attempts = prev.attempts
+                   ; age_sec
+                   ; threshold_sec = stuck_after_sec
+                   ; first_started_at = prev.first_started_at }))
           else
-            Started
-              (classify_and_update_start ~now:now_value ~keeper ~turn_id)
+            let new_state, started =
+              classify_and_update_start ~now:now_value ~turn_id current
+            in
+            new_state, Started started
         | _ ->
-          Started (classify_and_update_start ~now:now_value ~keeper ~turn_id))
+          let new_state, started =
+            classify_and_update_start ~now:now_value ~turn_id current
+          in
+          new_state, Started started)
+    with
+    | Some outcome -> outcome
+    | None -> Started Fresh
   in
   (match outcome with
    | Started started -> ignore (record_started_metrics ~keeper started)
    | Blocked reason ->
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string TurnLivelockBlocks)
-       ~labels:[ ("keeper", keeper); ("reason", gate_reason_kind reason) ] ());
+       ~labels:[ ("keeper", keeper); ("reason", gate_reason_kind reason) ]
+       ());
   outcome
 
 (** Read current attempt state for [keeper] without modifying it.
     Useful for diagnostics and future gating logic that wants to
     decide BEFORE incrementing. *)
-let current_state ~(keeper : string) : attempt_state option =
-  Eio.Mutex.use_rw ~protect:true mu (fun () -> Hashtbl.find_opt state keeper)
+let current_state ~base_path ~keeper : attempt_state option =
+  current_state_opt ~base_path ~keeper
 
 (** [seconds_since_first_attempt ~keeper] returns the age of the
     current turn's FIRST attempt for [keeper], or [None] if no state
     exists.  Pure read. *)
-let seconds_since_first_attempt ~(keeper : string) : float option =
-  current_state ~keeper
+let seconds_since_first_attempt ~base_path ~keeper : float option =
+  current_state_opt ~base_path ~keeper
   |> Option.map (fun s -> now_unix () -. s.first_started_at)
+
+(** Reset for tests so each test starts clean.  Public so the test
+    harness can call it without poking at internals. *)
+let reset_for_tests () =
+  List.iter
+    (fun entry -> Atomic.set entry.livelock_state None)
+    (Keeper_registry.all ())
+
+(** Remove the attempt state for a single keeper.  Called by the
+    supervisor when a keeper fiber is cleaned up after a crash so
+    that the next restart begins with a fresh counter rather than
+    inheriting the previous stuck turn's exhaustion. *)
+let reset_keeper_livelock ~base_path ~keeper : unit =
+  match Keeper_registry.get ~base_path keeper with
+  | Some entry -> Atomic.set entry.livelock_state None
+  | None -> ()

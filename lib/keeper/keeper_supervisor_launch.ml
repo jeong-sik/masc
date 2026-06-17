@@ -385,7 +385,9 @@ let launch_supervised_fiber
              fresh restart, making recovery impossible.  Clear the
              per-keeper livelock bookkeeping during cleanup so the next
              restart starts with a fresh counter. *)
-            Keeper_turn_livelock.reset_keeper_livelock ~keeper:meta.name;
+            Keeper_turn_livelock.reset_keeper_livelock
+              ~base_path
+              ~keeper:meta.name;
             (* ETA-LIVELOCK: keep the typed-escalation classifier in
                lock-step with the upstream livelock bookkeeping so a
                restarted keeper sees the first block at ERROR again.

@@ -149,5 +149,6 @@ data/harness-pre-compact/
 data/verdicts/
 data/bench/
 memory/
+!dashboard/src/components/memory/
 
 # End of .gitignore

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
 import { isKeeperCrashed } from '../lib/keeper-predicates'
@@ -144,20 +144,37 @@ function latestEntries(entries: readonly JournalEntry[]): JournalEntry[] {
   return entries.slice(0, 5)
 }
 
-export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
-  const latest = latestEntries(input.journalEntries)
-  const latestEntry = latest[0]
-  const totalKeepers = input.keepers.length
-  const staleCount = input.keepers.filter(keeper => input.staleKeeperNames.has(keeper.name)).length
-  const keeperAttention = countKeeperAttention(input.keepers)
-  const freshKeepers = Math.max(0, totalKeepers - staleCount)
-  const pendingVerificationTasks = countPendingVerification(input.tasks)
+type TransportInput = Pick<StatusTrayInput,
+  | 'wsOnly' | 'sseConnected' | 'wsConnected' | 'wsReady'
+  | 'wsLastEventAt' | 'wsEventCount60s' | 'wsLastPongAt' | 'wsLastPongLatencyMs'
+  | 'wsSseFallbackActive' | 'wsSseFallbackReason' | 'wsLastError'
+  | 'reconnectCount' | 'lastDisconnectedAt' | 'now'>
 
-  let transport: StatusTrayItem
+type FleetInput = Pick<StatusTrayInput,
+  'keepers' | 'staleKeeperNames' | 'tasks' | 'journalEntries' | 'unacknowledgedErrors'>
+
+interface FleetSummary {
+  items: { fleet: StatusTrayItem; activity: StatusTrayItem; attention: StatusTrayItem }
+  counts: {
+    totalKeepers: number
+    freshKeepers: number
+    staleKeepers: number
+    keeperAttention: number
+    pendingVerificationTasks: number
+    unacknowledgedErrors: number
+  }
+  latestJournalEntries: JournalEntry[]
+}
+
+// Transport item depends only on ws signals + `now` (Date.now()). Separated from
+// the fleet/activity/attention cone so the latter can be memoized and skipped on
+// ws deltas — dashboardWsLastEventAt updates on every WS event (very frequent),
+// but transport is the only item that reads it.
+function computeTransportItem(input: TransportInput): StatusTrayItem {
   if (input.wsOnly) {
     if (!input.wsConnected || !input.wsReady) {
       if (input.wsSseFallbackActive && input.sseConnected) {
-        transport = {
+        return {
           key: 'transport',
           tone: 'warn',
           label: 'Client',
@@ -166,56 +183,65 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
             ? `client WS degraded; ${clip(input.wsSseFallbackReason)}`
             : 'client WS degraded; SSE fallback is live',
         }
-      } else {
-        transport = {
-          key: 'transport',
-          tone: 'err',
-          label: 'Client',
-          value: 'closed',
-          detail: input.wsLastError
-            ? clip(input.wsLastError)
-            : 'client WS channel is not ready; server transport truth is in Diagnostics > Transport',
-        }
       }
-    } else {
-      const silentMs = input.wsLastEventAt === 0
-        ? Number.POSITIVE_INFINITY
-        : input.now - input.wsLastEventAt
-      const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
-      const pongAgeMs = input.wsLastPongAt === 0
-        ? Number.POSITIVE_INFINITY
-        : input.now - input.wsLastPongAt
-      const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
-      const pongLatency = input.wsLastPongLatencyMs == null
-        ? 'pong'
-        : `${input.wsLastPongLatencyMs}ms`
-      transport = {
+      return {
         key: 'transport',
-        tone: silent && !heartbeatFresh ? 'warn' : 'ok',
+        tone: 'err',
         label: 'Client',
-        value: silent
-          ? heartbeatFresh ? pongLatency : 'silent'
-          : `${input.wsEventCount60s} deltas/min`,
-        detail: silent
-          ? heartbeatFresh
-            ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
-            : 'client WS channel is open but no recent event or heartbeat pong has arrived'
-          : `last applied route delta ${Math.floor(silentMs / 1000)}s ago`,
+        value: 'closed',
+        detail: input.wsLastError
+          ? clip(input.wsLastError)
+          : 'client WS channel is not ready; server transport truth is in Diagnostics > Transport',
       }
     }
-  } else {
-    transport = {
+    const silentMs = input.wsLastEventAt === 0
+      ? Number.POSITIVE_INFINITY
+      : input.now - input.wsLastEventAt
+    const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
+    const pongAgeMs = input.wsLastPongAt === 0
+      ? Number.POSITIVE_INFINITY
+      : input.now - input.wsLastPongAt
+    const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
+    const pongLatency = input.wsLastPongLatencyMs == null
+      ? 'pong'
+      : `${input.wsLastPongLatencyMs}ms`
+    return {
       key: 'transport',
-      tone: input.sseConnected ? 'ok' : 'err',
+      tone: silent && !heartbeatFresh ? 'warn' : 'ok',
       label: 'Client',
-      value: input.sseConnected ? 'live' : 'offline',
-      detail: input.sseConnected
-        ? input.wsConnected
-          ? 'client SSE is live with WS mirror connected'
-          : 'client SSE is live'
-        : formatDisconnectedDetail(input),
+      value: silent
+        ? heartbeatFresh ? pongLatency : 'silent'
+        : `${input.wsEventCount60s} deltas/min`,
+      detail: silent
+        ? heartbeatFresh
+          ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
+          : 'client WS channel is open but no recent event or heartbeat pong has arrived'
+        : `last applied route delta ${Math.floor(silentMs / 1000)}s ago`,
     }
   }
+  return {
+    key: 'transport',
+    tone: input.sseConnected ? 'ok' : 'err',
+    label: 'Client',
+    value: input.sseConnected ? 'live' : 'offline',
+    detail: input.sseConnected
+      ? input.wsConnected
+        ? 'client SSE is live with WS mirror connected'
+        : 'client SSE is live'
+      : formatDisconnectedDetail(input),
+  }
+}
+
+// Fleet/activity/attention items + their counts. `now`-independent and ws-independent —
+// memoizable on [keepers, staleKeeperNames, tasks, journalEntries, unacknowledgedErrors].
+function computeFleetAttention(input: FleetInput): FleetSummary {
+  const latest = latestEntries(input.journalEntries)
+  const latestEntry = latest[0]
+  const totalKeepers = input.keepers.length
+  const staleCount = input.keepers.filter(keeper => input.staleKeeperNames.has(keeper.name)).length
+  const keeperAttention = countKeeperAttention(input.keepers)
+  const freshKeepers = Math.max(0, totalKeepers - staleCount)
+  const pendingVerificationTasks = countPendingVerification(input.tasks)
 
   const fleetTone: StatusTrayTone = totalKeepers === 0
     ? 'muted'
@@ -249,11 +275,8 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
       keeperAttention,
       pendingVerificationTasks,
       unacknowledgedErrors: input.unacknowledgedErrors,
-      reconnectCount: input.reconnectCount,
-      wsEventCount60s: input.wsEventCount60s,
     },
     items: {
-      transport,
       fleet: {
         key: 'fleet',
         tone: fleetTone,
@@ -281,6 +304,26 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
           ? 'no operator attention queued'
           : `${input.unacknowledgedErrors} errors - ${keeperAttention} keepers - ${pendingVerificationTasks} verify`,
       },
+    },
+  }
+}
+
+// Thin combiner preserving the original StatusTraySummary shape — tests call this
+// directly and assert on items.* / counts.*, so the output must be byte-identical
+// to the pre-split implementation.
+export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
+  const transport = computeTransportItem(input)
+  const fleet = computeFleetAttention(input)
+  return {
+    latestJournalEntries: fleet.latestJournalEntries,
+    counts: {
+      ...fleet.counts,
+      reconnectCount: input.reconnectCount,
+      wsEventCount60s: input.wsEventCount60s,
+    },
+    items: {
+      transport,
+      ...fleet.items,
     },
   }
 }
@@ -430,7 +473,7 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
   const [activeKey, setActiveKey] = useState<StatusTrayKey | null>(null)
   const trayRef = useRef<HTMLElement>(null)
   const wsOnly = dashboardWsOnlyEnabled()
-  const summary = summarizeStatusTray({
+  const transportItem = computeTransportItem({
     wsOnly,
     sseConnected: connected.value,
     wsConnected: dashboardWsConnected.value,
@@ -444,13 +487,35 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     wsLastError: dashboardWsLastError.value,
     reconnectCount: reconnectCount.value,
     lastDisconnectedAt: lastDisconnectedAt.value,
-    keepers: keepers.value,
-    staleKeeperNames: staleKeepers.value,
-    tasks: tasks.value,
-    journalEntries: journal.value,
-    unacknowledgedErrors: unacknowledgedCount.value,
     now: Date.now(),
   })
+  // Fleet/activity/attention depend only on these five signals — memoized so a
+  // burst of ws deltas (dashboardWsLastEventAt updates per event) re-renders the
+  // component but skips the O(N) fleet recompute (filter stale, countKeeperAttention,
+  // countPendingVerification) when none of these changed.
+  const fleet = useMemo(
+    () =>
+      computeFleetAttention({
+        keepers: keepers.value,
+        staleKeeperNames: staleKeepers.value,
+        tasks: tasks.value,
+        journalEntries: journal.value,
+        unacknowledgedErrors: unacknowledgedCount.value,
+      }),
+    [keepers.value, staleKeepers.value, tasks.value, journal.value, unacknowledgedCount.value],
+  )
+  const summary: StatusTraySummary = {
+    latestJournalEntries: fleet.latestJournalEntries,
+    counts: {
+      ...fleet.counts,
+      reconnectCount: reconnectCount.value,
+      wsEventCount60s: dashboardWsEventCount60s.value,
+    },
+    items: {
+      transport: transportItem,
+      ...fleet.items,
+    },
+  }
 
   useEffect(() => {
     if (!activeKey) return undefined

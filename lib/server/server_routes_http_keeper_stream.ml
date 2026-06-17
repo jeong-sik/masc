@@ -1075,12 +1075,18 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                     Text_message_start)
             then loop ()
         | Text_delta text ->
+            (* [text] is already redacted at ingest — streaming tokens via
+               [Keeper_stream_text_accum.on_delta ~redact:redact_text] and
+               terminal-reply chunks split from a whole-redacted
+               [visible_reply].  Re-redacting here doubled the per-token
+               regex cost with no effect (redact is idempotent on already-
+               redacted text).  Do not re-redact. *)
             if
               keeper_stream_send_event writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~message_id:!current_message_id
-                    ~delta:(Some (redact_text text))
+                    ~delta:(Some text)
                     Text_message_content)
             then loop ()
         | Text_message_end ->
@@ -1108,12 +1114,14 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                     Tool_call_start)
             then loop ()
         | Tool_call_args { tool_call_id; delta } ->
+            (* [delta] is already redacted at publish
+               ([Tool_call_args { delta = redact_text args; _ }]).  *)
             if
               keeper_stream_send_event writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~tool_call_id:(Some tool_call_id)
-                    ~delta:(Some (redact_text delta))
+                    ~delta:(Some delta)
                     Tool_call_args)
             then loop ()
         | Tool_call_end { tool_call_id } ->

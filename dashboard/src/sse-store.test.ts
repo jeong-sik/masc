@@ -458,7 +458,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshHearths).toHaveBeenCalledTimes(1)
   })
 
-  it('does not mutate boardOffset when optimistically prepending a post', async () => {
+  it('advances boardOffset when a real server post is prepended', async () => {
     const { sseStore } = await loadSseStore()
     route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
     boardExcludeSystem.value = false
@@ -477,7 +477,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(boardPosts.value[0]?.id).toBe('post-1')
-    expect(boardOffset.value).toBe(10)
+    expect(boardOffset.value).toBe(11)
   })
 
   it('falls back to board refresh when post_kind is missing under kind exclusions', async () => {

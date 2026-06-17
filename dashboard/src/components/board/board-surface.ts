@@ -483,7 +483,7 @@ function BdRail({ activeSub, onSub, onMentions }: {
 }) {
   const hearths = boardHearths.value
   const allCount = boardPosts.value.length
-  const modCount = boardPosts.value.filter(p => p.moderation_status && p.moderation_status !== 'none' && p.moderation_status !== 'approved').length
+  const modCount = useMemo(() => boardPosts.value.filter(p => p.moderation_status && p.moderation_status !== 'none' && p.moderation_status !== 'approved').length, [boardPosts.value])
 
   return html`
     <nav class="bd-rail" aria-label="서브보드">
@@ -734,17 +734,17 @@ function BdFeed({ posts }: { posts: BoardPost[] }) {
     [posts, contentQuery],
   )
   const isFiltering = contentQuery.trim() !== ''
-  const visibleGroups = splitVisiblePosts(filteredPosts)
+  const visibleGroups = useMemo(() => splitVisiblePosts(filteredPosts), [filteredPosts])
 
-  const modeFilteredGroups = visibleGroups.groups.map(g => ({
+  const modeFilteredGroups = useMemo(() => visibleGroups.groups.map(g => ({
     ...g,
     posts: g.posts.filter(post => {
       if (boardFilterMode.value === 'state') return postHasStateBlock(post)
       if (boardFilterMode.value === 'mod') return post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved'
       return true
     }),
-  }))
-  const filteredByMode = modeFilteredGroups.flatMap(g => g.posts)
+  })), [visibleGroups, boardFilterMode.value])
+  const filteredByMode = useMemo(() => modeFilteredGroups.flatMap(g => g.posts), [modeFilteredGroups])
 
   return html`
     <section class="bd-feed">

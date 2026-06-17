@@ -57,7 +57,7 @@ val with_cleanups_on_release :
 val serve :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   addr_label:string ->
   request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
   unit
@@ -72,7 +72,7 @@ val serve :
 val serve_h2 :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   addr_label:string ->
   h2_request_handler:(Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:
@@ -85,7 +85,7 @@ val serve_h2 :
 val serve_auto :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  socket:[> [> `Generic ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
+  socket:[> [> `Generic | `Unix ] Eio.Net.listening_socket_ty ] Eio.Resource.t ->
   addr_label:string ->
   request_handler:(Eio.Net.Sockaddr.stream -> Httpun.Reqd.t Gluten.Reqd.t -> unit) ->
   h2_request_handler:(Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->

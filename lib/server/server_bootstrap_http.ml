@@ -118,6 +118,21 @@ let register_listener_lifecycle ~sw ~mode =
   mark_stopped
 ;;
 
+let disable_nagle flow =
+  (* TCP_NODELAY on accepted connections: small SSE frames (keeper token
+     deltas, dashboard broadcasts) are not held for Nagle coalescing (~up to
+     40ms/frame under Nagle + delayed ACK). Set per-connection after accept,
+     not on the listen socket, because TCP_NODELAY inheritance from a
+     listening socket is Linux-only and is NOT inherited on macOS. Graceful
+     degradation: if [setsockopt] fails on an unusual socket the connection
+     still works (just with Nagle enabled). *)
+  try
+    Eio_unix.Fd.use_exn "TCP_NODELAY" (Eio_unix.Net.fd flow) (fun ufd ->
+      Unix.setsockopt ufd Unix.TCP_NODELAY true)
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> ()
+
 let serve ~sw ~clock ~socket ~addr_label ~request_handler =
   let mode = "h1" in
   (* Stable listener identity. Mirrors the [h1 host:port]/[h2 host:port]
@@ -135,6 +150,7 @@ let serve ~sw ~clock ~socket ~addr_label ~request_handler =
     try
       let accept_start = Unix.gettimeofday () in
       let flow, client_addr = Eio.Net.accept ~sw socket in
+      disable_nagle flow;
       let accept_latency = Unix.gettimeofday () -. accept_start in
       Transport_metrics.record_http_accept ~mode;
       Transport_metrics.record_http_accept_latency ~mode accept_latency;
@@ -202,6 +218,7 @@ let serve_h2 ~sw ~clock ~socket ~addr_label ~h2_request_handler ~h2_error_handle
     try
       let accept_start = Unix.gettimeofday () in
       let flow, client_addr = Eio.Net.accept ~sw socket in
+      disable_nagle flow;
       let accept_latency = Unix.gettimeofday () -. accept_start in
       Transport_metrics.record_http_accept ~mode;
       Transport_metrics.record_http_accept_latency ~mode accept_latency;
@@ -270,6 +287,7 @@ let serve_auto ~sw ~clock ~socket ~addr_label ~request_handler ~h2_request_handl
     try
       let accept_start = Unix.gettimeofday () in
       let flow, client_addr = Eio.Net.accept ~sw socket in
+      disable_nagle flow;
       let accept_latency = Unix.gettimeofday () -. accept_start in
       Transport_metrics.record_http_accept ~mode;
       Transport_metrics.record_http_accept_latency ~mode accept_latency;

@@ -127,4 +127,22 @@ describe('KeeperWorkspaceRoster', () => {
     expect(work?.textContent).toBe('최근 작업 요약 없음')
     expect(work?.getAttribute('title')).toBe('')
   })
+
+  it('uses content-visibility:auto on plain-list rows below the virtualization threshold', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    expect(host.querySelector('.virtual-list-spacer')).toBeNull()
+    const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.every(r => r.style.contentVisibility === 'auto')).toBe(true)
+  })
+
+  it('switches to VirtualList once the flattened roster exceeds the threshold', () => {
+    // 60 rows plus 1 group header = 61 items, which is over WINDOW_AT (60).
+    keepers.value = Array.from({ length: 60 }, (_, i) =>
+      mk({ name: `keeper-${i}`, status: 'running', lifecycle_phase: 'Running' }),
+    )
+    render(html`<${KeeperWorkspaceRoster} activeName="keeper-0" />`, host)
+    expect(host.querySelector('.virtual-list-spacer')).not.toBeNull()
+    expect(host.querySelector('.kw-roster-list')).not.toBeNull()
+  })
 })

@@ -306,6 +306,7 @@
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_cognitive_gravity
+  test_cognitive_gravity_event_bus
   test_intentional_projection
   test_chronicle_event
   test_chronicle_librarian
@@ -601,6 +602,7 @@
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
   test_cognitive_gravity
+  test_cognitive_gravity_event_bus
   test_intentional_projection
   test_chronicle_event
   test_chronicle_librarian

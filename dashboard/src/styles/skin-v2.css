@@ -307,7 +307,6 @@ html[data-skin="v2"][data-theme="paper"] {
   --color-bg-hover: var(--bg-card-hover);
   --bg-root: var(--bg-deep);
   --bg-deepest: var(--bg-sunken);
-  --panel-dark: var(--bg-panel-alt);
   --bg-panel-hover: var(--bg-card-hover);
   --shell-header-bg: var(--bg-panel);
   --shell-rail-bg: var(--bg-panel);

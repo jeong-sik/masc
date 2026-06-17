@@ -41,6 +41,7 @@ import './styles/paper-theme.css'
 import './styles/keeper-workspace.css'
 import './styles/copilot-dock.css'
 import './styles/memory-v2.css'
+import './styles/keeper-turn-inspector.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

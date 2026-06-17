@@ -1,8 +1,7 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { useSignalValue, useStoreSubscription } from './use-signal-value'
-import { authHeaders, fetchWithTimeout, get } from '../../api/core'
-import { DEFAULT_GET_TIMEOUT_MS } from '../../config/constants'
+import { get } from '../../api/core'
 import { KeeperBadge } from '../keeper-badge'
 import {
   createKeeperPresenceStore,
@@ -31,22 +30,6 @@ export interface ApiStatus {
   readonly paused?: boolean
 }
 
-/** One entry from GET /api/dashboard/worktree-status SSE stream. */
-export interface WorktreeEntry {
-  readonly worktree_path: string
-  readonly branch: string
-  readonly changed_count: number
-  readonly staged_count: number
-  readonly head_sha: string
-  readonly pr_number: number | null
-  readonly pr_state: string | null
-  readonly keeper_attached: boolean
-  /** Raw git remote (for clone/display); null when the worktree has no origin. */
-  readonly origin_url?: string | null
-  /** Browsable https URL derived from origin_url; null when unconvertible. */
-  readonly web_url?: string | null
-}
-
 interface PresenceContextSummary {
   readonly label: string
   readonly title: string
@@ -62,25 +45,6 @@ function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {
   return parsed === 'active' || parsed === 'busy' ? 'active' : 'idle'
 }
 
-/**
- * Derive the short workspace label for a keeper chip from the worktree entries.
- * Matches by branch prefix: a MASC worktree branch is "<agentName>/<taskId>".
- * Returns the task-id segment (after the first "/") as the label.
- * Falls back to the agent name itself when no worktree is found.
- */
-export function workspaceLabelForAgent(
-  agentName: string,
-  worktrees: ReadonlyArray<WorktreeEntry>,
-): string {
-  const prefix = agentName + '/'
-  const match = worktrees.find(wt => wt.branch.startsWith(prefix))
-  if (match) {
-    const taskPart = match.branch.slice(prefix.length)
-    return taskPart || agentName
-  }
-  return agentName
-}
-
 /** @internal — exported only so {@link ./ide-presence-strip.test.ts}
     can pin the disconnected/live branch behaviour against runtime
     payloads where [cluster] may arrive as [null] (the JSON wire form
@@ -88,7 +52,6 @@ export function workspaceLabelForAgent(
 export function agentsToPresence(
   agents: ReadonlyArray<ApiAgent>,
   status: ApiStatus,
-  worktrees: ReadonlyArray<WorktreeEntry>,
 ): KeeperPresenceSnapshot {
   const cluster = status.cluster?.trim() ?? ''
   if (cluster === '') {
@@ -103,7 +66,7 @@ export function agentsToPresence(
     runtime_id: cluster,
     entries: agents.map((agent, idx) => ({
       keeper_id: agent.name,
-      workspace_label: workspaceLabelForAgent(agent.name, worktrees),
+      workspace_label: agent.name,
       role: 'agent',
       status: mapAgentStatus(agent.status),
       last_seen_ms: now - idx * 1000,
@@ -111,81 +74,16 @@ export function agentsToPresence(
   }
 }
 
-/** Parse SSE text/event-stream body into an array of WorktreeEntry objects. */
-/** Type predicate that validates all required WorktreeEntry fields. */
-function isWorktreeEntry(value: unknown): value is WorktreeEntry {
-  if (typeof value !== 'object' || value === null) return false
-  const obj = value as Record<string, unknown>
-  return (
-    typeof obj['worktree_path'] === 'string' &&
-    typeof obj['branch'] === 'string' &&
-    typeof obj['changed_count'] === 'number' &&
-    typeof obj['staged_count'] === 'number' &&
-    typeof obj['head_sha'] === 'string' &&
-    (obj['pr_number'] === null || typeof obj['pr_number'] === 'number') &&
-    (obj['pr_state'] === null || typeof obj['pr_state'] === 'string') &&
-    typeof obj['keeper_attached'] === 'boolean' &&
-    // origin_url / web_url are newer optional fields: tolerate absent (old
-    // server), null (no remote / unconvertible), or string.
-    (obj['origin_url'] === undefined || obj['origin_url'] === null || typeof obj['origin_url'] === 'string') &&
-    (obj['web_url'] === undefined || obj['web_url'] === null || typeof obj['web_url'] === 'string')
-  )
-}
-
-export function parseWorktreeSSE(body: string): WorktreeEntry[] {
-  const entries: WorktreeEntry[] = []
-  for (const line of body.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed.startsWith('data:')) continue
-    const json = trimmed.slice('data:'.length).trim()
-    if (!json || json === '{}') continue
-    try {
-      const obj = JSON.parse(json) as unknown
-      if (isWorktreeEntry(obj)) {
-        entries.push(obj)
-      }
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return entries
-}
-
-/** Fetch worktree status from the SSE endpoint. Returns [] on failure.
- *  Uses fetchWithTimeout directly because the endpoint returns SSE-formatted
- *  text (data: lines), not JSON — get<T>() would fail at JSON.parse. */
-async function fetchWorktreeEntries(): Promise<WorktreeEntry[]> {
+async function fetchPresence(): Promise<KeeperPresenceSnapshot> {
   try {
-    const res = await fetchWithTimeout(
-      '/api/dashboard/worktree-status',
-      { headers: authHeaders() },
-      DEFAULT_GET_TIMEOUT_MS,
-    )
-    if (!res.ok) return []
-    const text = await res.text()
-    return parseWorktreeSSE(text)
-  } catch {
-    return []
-  }
-}
-
-interface PresenceData {
-  readonly snapshot: KeeperPresenceSnapshot
-  readonly worktrees: ReadonlyArray<WorktreeEntry>
-}
-
-async function fetchPresence(): Promise<PresenceData> {
-  try {
-    const [agentsData, statusData, worktrees] = await Promise.all([
+    const [agentsData, statusData] = await Promise.all([
       get<{ agents: ApiAgent[] }>('/api/v1/agents?limit=20'),
       get<ApiStatus>('/api/v1/status'),
-      fetchWorktreeEntries(),
     ])
     const agents: ApiAgent[] = Array.isArray(agentsData.agents) ? agentsData.agents : []
-    const snapshot = agentsToPresence(agents, statusData, worktrees)
-    return { snapshot, worktrees }
+    return agentsToPresence(agents, statusData)
   } catch {
-    return { snapshot: disconnectedSnapshot('fetch_failed'), worktrees: [] }
+    return disconnectedSnapshot('fetch_failed')
   }
 }
 
@@ -216,14 +114,12 @@ function presenceHeader(snap: KeeperPresenceSnapshot) {
 
 export function IdePresenceStrip() {
   const presenceStore = useMemo(() => createKeeperPresenceStore(LOADING_SNAPSHOT), [])
-  const [worktrees, setWorktrees] = useState<ReadonlyArray<WorktreeEntry>>([])
 
   useEffect(() => {
     let cancelled = false
-    fetchPresence().then(data => {
+    fetchPresence().then(snapshot => {
       if (!cancelled) {
-        presenceStore.seed(data.snapshot)
-        setWorktrees(data.worktrees)
+        presenceStore.seed(snapshot)
       }
     })
     return () => { cancelled = true }
@@ -268,7 +164,7 @@ export function IdePresenceStrip() {
           overflow: 'hidden',
         }}
       >
-        ${entries.map(entry => html`<${PresenceChip} entry=${entry} worktrees=${worktrees} />`)}
+        ${entries.map(entry => html`<${PresenceChip} entry=${entry} />`)}
       </ul>
     </div>
   `
@@ -276,22 +172,18 @@ export function IdePresenceStrip() {
 
 interface PresenceChipProps {
   readonly entry: KeeperPresenceEntry
-  readonly worktrees: ReadonlyArray<WorktreeEntry>
 }
 
 interface PresenceContextAnchorInput {
   readonly entry: KeeperPresenceEntry
-  readonly worktree: WorktreeEntry | null
   readonly cursor: KeeperCursor | undefined
 }
 
 export function presenceContextAnchor({
   entry,
-  worktree,
   cursor,
 }: PresenceContextAnchorInput): Omit<IdeContextFocus, 'activated_at_ms'> | null {
   if (!cursor?.file_path) return null
-  const prId = worktree?.pr_number != null ? String(worktree.pr_number) : undefined
   const label = `${entry.keeper_id}@${entry.workspace_label}`
   const sourceId = `presence:${entry.keeper_id}`
   return {
@@ -307,8 +199,6 @@ export function presenceContextAnchor({
       surface: 'Keeper',
       label,
       sourceId,
-      prId,
-      gitRef: worktree?.branch,
       telemetry: true,
       telemetryQuery: entry.keeper_id,
       keeperId: entry.keeper_id,
@@ -327,24 +217,15 @@ export function presenceContextSummary(
   }
 }
 
-function PresenceChip({ entry, worktrees }: PresenceChipProps) {
+function PresenceChip({ entry }: PresenceChipProps) {
   const isActive = entry.status === 'active'
   const cursor = cursorOverlaySignal.value.cursors.get(entry.keeper_id)
-  const wt = worktrees.find(w => w.branch.startsWith(entry.keeper_id + '/'))
-  const contextAnchor = presenceContextAnchor({ entry, worktree: wt ?? null, cursor })
+  const contextAnchor = presenceContextAnchor({ entry, cursor })
   const contextSummary = presenceContextSummary(contextAnchor)
 
   const focusLabel = cursor?.file_path
     ? `${cursor.file_path.split('/').pop()}:${cursor.line}`
     : null
-
-  const prBadge = wt?.pr_number != null && wt.pr_state != null
-    ? prLabel(wt.pr_number, wt.pr_state)
-    : null
-
-  const dirtyCount = (wt?.changed_count ?? 0) + (wt?.staged_count ?? 0)
-  const webUrl = wt?.web_url ?? null
-  const originUrl = wt?.origin_url ?? null
 
   const canNavigate = contextAnchor !== null
   const navigate = (): void => {
@@ -357,7 +238,7 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
   return html`
     <li
       class="ide-presence-chip v2-ide-row"
-      title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}${prBadge ? ` · ${prBadge}` : ''}${originUrl ? ` · ${originUrl}` : ''}${dirtyCount > 0 ? ` · ${dirtyCount} dirty` : ''}`}
+      title=${`${entry.keeper_id} · ${entry.role} · ${focusLabel ?? 'no file focus'}`}
       aria-label=${`${entry.keeper_id} ${entry.status} in ${entry.workspace_label}${focusLabel ? ` editing ${focusLabel}` : ''}`}
       role=${canNavigate ? 'button' : undefined}
       aria-disabled=${canNavigate ? undefined : 'true'}
@@ -392,41 +273,6 @@ function PresenceChip({ entry, worktrees }: PresenceChipProps) {
       ` : null}
       ${contextSummary ? html`
         <span style=${CONTEXT_BADGE_STYLE} title=${contextSummary.title}>${contextSummary.label}</span>
-      ` : null}
-      ${prBadge ? html`
-        <span style=${{
-          fontSize: 'var(--fs-9)',
-          padding: '0 3px',
-          borderRadius: 'var(--r-0)',
-          background: wt?.pr_state === 'open' ? 'var(--color-status-ok)' : 'var(--color-bg-muted)',
-          color: wt?.pr_state === 'open' ? 'var(--color-bg-page)' : 'var(--color-fg-muted)',
-        }}>${prBadge}</span>
-      ` : null}
-      ${dirtyCount > 0 ? html`
-        <span
-          title=${`${wt?.changed_count ?? 0} changed, ${wt?.staged_count ?? 0} staged`}
-          style=${{
-            fontSize: 'var(--fs-9)',
-            padding: '0 3px',
-            borderRadius: 'var(--r-0)',
-            background: 'var(--warn-10)',
-            color: 'var(--warn-bright)',
-          }}
-        >●${dirtyCount}</span>
-      ` : null}
-      ${webUrl ? html`
-        <a
-          href=${webUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          title=${`Open ${originUrl ?? webUrl}`}
-          onClick=${(e: Event) => e.stopPropagation()}
-          style=${{
-            fontSize: 'var(--fs-10)',
-            color: 'var(--color-accent-fg)',
-            textDecoration: 'none',
-          }}
-        >↗</a>
       ` : null}
       <span
         style=${{

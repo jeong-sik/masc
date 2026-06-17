@@ -53,6 +53,11 @@ import './styles/telemetry-v2.css'
 import './styles/craft-v2.css'
 import './styles/states.css'
 
+/*
+ * EXPERIMENTAL: keeper-v2 DS UI kits — may conflict with existing v2-* styles; enable after review
+ * import './styles/ds-ui-kits.css'
+ */
+
 // Keeper-v2 surface stylesheets are auto-imported by filename convention:
 // every dashboard/src/styles/*-v2.css is injected here at build time. A new v2
 // surface adds only its own stylesheet file — it must NOT add a per-surface

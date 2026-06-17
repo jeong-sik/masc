@@ -1,0 +1,24 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 · focus
+   Focused keeper card — portrait + stats + vials
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Focus keeper */
+.focus { position: relative; padding: 12px; background: linear-gradient(180deg, #241a12, #14100a); border: 1px solid var(--hair-brass); }
+.focus::before { content: ""; position: absolute; inset: 3px; border: 1px solid var(--border-highlight); pointer-events: none; }
+.focus-in { position: relative; z-index: 1; }
+.focus .who { display: flex; align-items: center; gap: 10px; }
+.focus .who img { width: 24px; height: 24px; object-fit: cover; border: 1px solid var(--accent-brass-dim); filter: sepia(0.15) contrast(1.05) brightness(0.92); opacity: 0.92; }
+.focus .fn { font-family: var(--font-display); font-size: 14px; color: var(--accent-brass); letter-spacing: 0.06em; font-weight: 600; text-transform: none; line-height: 1.05; }
+.focus .fr { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-top: 2px; letter-spacing: 0.04em; }
+.focus .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-top: 10px; }
+.focus .stat .l { font-size: 8px; letter-spacing: 0.2em; color: var(--text-dim); text-transform: uppercase; }
+.focus .stat .v { font-family: var(--font-mono); font-size: 11px; color: var(--text-bright); margin-top: 1px; font-variant-numeric: tabular-nums; }
+.focus .stat .v.bad { color: var(--bad); }
+.focus .stat .v.ok  { color: var(--ok); }
+.focus .stat .v.warn{ color: var(--warn); }
+.vial { height: 6px; background: #0a0604; border: 1px solid var(--border-main); position: relative; overflow: hidden; margin-top: 3px; }
+.vial > span { display: block; height: 100%; background: linear-gradient(90deg, #3d5a28, #6a9a44); transition: width 300ms ease; }
+.vial.warn > span { background: linear-gradient(90deg, #6a5218, #c4922a); }
+.vial.bad  > span { background: linear-gradient(90deg, #5a0f0f, #a01818); }
+.vial::after { content: ""; position: absolute; inset: 0; background-image: repeating-linear-gradient(90deg, transparent 0 19px, rgba(0,0,0,0.45) 19px 20px); pointer-events: none; }

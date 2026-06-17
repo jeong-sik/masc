@@ -1,0 +1,31 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC · Viewer v5 — stylesheet index
+   Cascade: base (shared) → shell → chrome → views → overlays
+   ═══════════════════════════════════════════════════════════════ */
+
+/* tokens first — everything else references these vars */
+@import url("tokens.css");
+
+/* shell + chrome */
+@import url("shell.css");
+@import url("topbar.css");
+@import url("sidebar.css");
+@import url("header.css");
+@import url("tabs.css");
+
+/* views */
+@import url("tape.css");
+@import url("context.css");
+@import url("waterfall.css");
+
+/* right rail */
+@import url("inspector.css");
+
+/* footer + overlays */
+@import url("composer.css");
+@import url("tweaks.css");
+@import url("split.css");
+@import url("states.css");
+
+/* themes (applied via [data-theme="…"] on <html>) */
+@import url("theme-paper.css");

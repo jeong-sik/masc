@@ -1,0 +1,52 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 · aside
+   Right rail container + shared h4 heading + v5 card softening
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══ RIGHT ASIDE ═══ */
+.aside {
+  background: linear-gradient(180deg, #16100a, #0e0806);
+  border-left: 1px solid var(--border-main);
+  padding: 14px 14px 30px; overflow: auto;
+  display: flex; flex-direction: column; gap: 16px;
+  grid-column: 3 / 4; grid-row: 2 / 5;
+  min-width: 0; min-height: 0;
+}
+.aside h4 {
+  font-family: var(--font-display); font-size: 10.5px; letter-spacing: 0.22em; font-weight: 600;
+  color: var(--accent-brass); text-transform: uppercase; margin: 0 0 8px;
+  display: flex; align-items: center; gap: 9px;
+  position: relative; z-index: 2;
+  background: linear-gradient(180deg, #16100a 70%, rgba(22,16,10,0));
+  padding-bottom: 4px;
+}
+.aside h4::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border-highlight), transparent); }
+.aside h4 svg { width: 12px; height: 12px; color: var(--accent-brass); }
+.aside h4 .r {
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+  margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; text-transform: none;
+}
+
+/* ═══ v5 refinements — aside-wide softer cards ═══ */
+/* ─── Focus/Approvals/Systems/Chronicle — softer ─── */
+.aside h4 {
+  font-family: var(--font-display);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+  border-bottom: 1px solid var(--border-soft);
+}
+.approval {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.approval.critical { border-left: 3px solid var(--bad); }
+.approval.destructive { border-left: 3px solid var(--warn); }
+.focus, .sys-list, .evs { background: transparent; }
+.focus-in {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}

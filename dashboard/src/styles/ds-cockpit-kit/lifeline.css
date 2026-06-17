@@ -1,0 +1,53 @@
+/* lifeline.css */
+.zone-lifeline {
+  grid-area: lifeline;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-1);
+  display: grid;
+  grid-template-columns: var(--w-sidebar) minmax(0, 1fr) auto;
+  align-items: center;
+  overflow: hidden;
+}
+.lifeline-label {
+  padding: 0 var(--sp-3);
+  border-right: 1px solid var(--line-1);
+  height: 100%;
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-11); color: var(--fg-3);
+  letter-spacing: .08em; text-transform: uppercase; font-weight: 600;
+  overflow: hidden; min-width: 0;
+}
+.lifeline-label .active-name {
+  color: var(--brass-1); text-transform: none;
+  font-family: var(--font-mono); letter-spacing: 0; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lifeline-cells {
+  display: flex; gap: 1px;
+  padding: 4px var(--sp-3);
+  height: 100%; align-items: center;
+  overflow-x: auto; overflow-y: hidden; white-space: nowrap; min-width: 0;
+}
+.ll-cell {
+  display: inline-block; flex: 0 0 auto;
+  width: 10px; height: 16px; border-radius: 1px;
+  background: var(--bg-3); cursor: pointer;
+  transition: transform var(--t-fast) var(--ease), outline-color var(--t-fast);
+  outline: 1px solid transparent;
+}
+.ll-cell:hover { transform: scaleY(1.25); outline-color: var(--fg-2); }
+.ll-cell.is-active { outline-color: var(--brass-1); transform: scaleY(1.25); }
+.ll-cell.k-tool { background: var(--brass-2); }
+.ll-cell.k-claim { background: var(--ok); }
+.ll-cell.k-text { background: var(--info); }
+.ll-cell.k-noop { background: var(--idle); opacity: .5; }
+.ll-cell.k-error { background: var(--err); }
+.ll-gap { width: 4px; height: 16px; flex: 0 0 auto; border-left: 1px dashed var(--line-2); opacity: .4; }
+.lifeline-legend {
+  display: flex; gap: var(--sp-3);
+  padding: 0 var(--sp-3); border-left: 1px solid var(--line-1);
+  height: 100%; align-items: center;
+  font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); flex-shrink: 0;
+}
+.lifeline-legend .lg { display: flex; align-items: center; gap: 4px; }
+.lifeline-legend .sw { width: 8px; height: 8px; border-radius: 1px; }

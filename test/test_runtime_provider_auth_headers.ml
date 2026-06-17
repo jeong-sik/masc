@@ -412,7 +412,7 @@ let test_runtime_adapter_materializes_deepseek_openai_compat () =
     check string "base_url" "https://api.deepseek.com" provider_cfg.base_url;
     check string "request_path" "/chat/completions" provider_cfg.request_path;
     check string "model_id" "deepseek-v4-pro" provider_cfg.model_id;
-    check string "api key" "ds-test-key" provider_cfg.api_key;
+    check string "api key" "ds-test-key" (Llm_provider.Secret.header_value provider_cfg.api_key);
     check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
     check (option int) "max_tokens" (Some 384000) provider_cfg.max_tokens;
     check int "Authorization header count" 0
@@ -441,7 +441,7 @@ let test_runtime_adapter_materializes_glm_coding_provider () =
       provider_cfg.base_url;
     check string "request_path" "/chat/completions" provider_cfg.request_path;
     check string "model_id" "glm-4.7" provider_cfg.model_id;
-    check string "api key uses coding lane" "coding-key" provider_cfg.api_key;
+    check string "api key uses coding lane" "coding-key" (Llm_provider.Secret.header_value provider_cfg.api_key);
     check (option int) "max_context" (Some 200000) provider_cfg.max_context;
     check (option int) "max_tokens" (Some 128000) provider_cfg.max_tokens;
     check (option bool) "tool choice override" (Some false)
@@ -461,7 +461,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
   | Error msg -> failf "unexpected adapter error: %s" msg
   | Ok provider_cfg ->
-    check string "api key" "rp-test-token" provider_cfg.api_key;
+    check string "api key" "rp-test-token" (Llm_provider.Secret.header_value provider_cfg.api_key);
     check int "Authorization header count" 0
       (header_count "Authorization" provider_cfg.headers);
     check int "Content-Type header count" 1
@@ -490,7 +490,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
   | Error msg -> failf "unexpected adapter error: %s" msg
   | Ok provider_cfg ->
-    check string "api key" "rp-test-token" provider_cfg.api_key;
+    check string "api key" "rp-test-token" (Llm_provider.Secret.header_value provider_cfg.api_key);
     check int "Authorization header count" 0
       (normalized_header_count "Authorization" provider_cfg.headers);
     check int "x-api-key header count" 0

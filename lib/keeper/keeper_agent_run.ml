@@ -249,7 +249,7 @@ let run_turn
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let manifest_keeper_turn_id = meta.runtime.usage.total_turns + 1 in
   let turn_start = Mtime_clock.now () in
-  let seq_ref = ref 0 in
+  let seq_ref = Atomic.make 0 in
   let runtime_manifest_context =
     Turn_helpers.runtime_manifest_context
       ~keeper_name:meta.name

@@ -44,9 +44,9 @@ let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
 let publish_phase_lifecycle = Keeper_supervisor_publish_lifecycle.publish_phase_lifecycle
 (* ── Supervised fiber launch ─────────────────────────────── *)
 
-let global_switch : Eio.Switch.t option ref = ref None
-let set_global_switch sw = global_switch := Some sw
-let get_global_switch () = !global_switch
+let global_switch : Eio.Switch.t option Atomic.t = Atomic.make None
+let set_global_switch sw = Atomic.set global_switch (Some sw)
+let get_global_switch () = Atomic.get global_switch
 
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
 let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enabled
@@ -121,7 +121,9 @@ let launch_supervised_fiber
           "keeper supervise domain pool ignored: keepalive body requires the owning \
            Eio domain (first_keeper=%s)"
           meta.name;
-      let sw = Option.value !global_switch ~default:ctx.sw in
+      (* determinism-contract: allow — ctx.sw fallback is the same deterministic
+         default used before the ref -> Atomic conversion. *)
+      let sw = Option.value (Atomic.get global_switch) ~default:ctx.sw in
       Eio.Fiber.fork ~sw body
     in
     fork_body (fun () ->

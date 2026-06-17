@@ -234,7 +234,7 @@ let make_append_manifest
     ~generation
     ~runtime_id
     ~(turn_start : Mtime.t)
-    ~(seq_ref : int ref)
+    ~(seq_ref : int Atomic.t)
   : Keeper_agent_run_sidecar.append_manifest_fn
   =
   fun ?elapsed_ms ?logical_seq ?status ?decision ?keeper_turn_id ->
@@ -252,8 +252,8 @@ let make_append_manifest
     match logical_seq with
     | Some _ -> logical_seq
     | None ->
-      seq_ref := !seq_ref + 1;
-      Some !seq_ref
+      let n = Atomic.fetch_and_add seq_ref 1 in
+      Some (n + 1)
   in
   append_runtime_manifest
     ~config

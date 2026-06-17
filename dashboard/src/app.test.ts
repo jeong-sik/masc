@@ -86,22 +86,104 @@ describe('App v2 header chrome', () => {
     const bottomNav = container.querySelector('nav[aria-label="Primary mobile navigation"]')
     expect(bottomNav).toBeNull()
   })
+
+  it('renders the left side rail on desktop', () => {
+    window.innerWidth = 1280
+    renderApp()
+
+    const rail = container.querySelector('#dashboard-side-rail')
+    expect(rail).not.toBeNull()
+    expect(rail?.classList.contains('v2-shell-rail')).toBe(true)
+    expect(rail?.classList.contains('max-[1100px]:hidden')).toBe(true)
+  })
+
+  it('does not collapse the left rail out of view on desktop', () => {
+    window.innerWidth = 1280
+    renderApp()
+
+    const rail = container.querySelector('#dashboard-side-rail') as HTMLElement
+    expect(rail).not.toBeNull()
+    const cls = Array.from(rail.classList).join(' ')
+    // The desktop rail must carry a fixed width (w-14 or w-55), not w-full.
+    expect(cls).toMatch(/\bw-14\b|\bw-55\b/)
+    expect(cls).not.toMatch(/\bmax-h-75\b/)
+  })
+
+  it('keeps main content scrollable', () => {
+    window.innerWidth = 1280
+    renderApp()
+
+    const main = container.querySelector('#main-content')
+    expect(main).not.toBeNull()
+    expect(main?.classList.contains('overflow-hidden')).toBe(true)
+
+    const scroll = main?.querySelector('.dashboard-main-scroll')
+    expect(scroll).not.toBeNull()
+    expect(scroll?.classList.contains('overflow-y-auto')).toBe(true)
+    expect(scroll?.classList.contains('h-full')).toBe(true)
+  })
+
+  it('toggles the mobile side-rail drawer', async () => {
+    window.innerWidth = 760
+    renderApp()
+
+    const rail = container.querySelector('#dashboard-side-rail') as HTMLElement | null
+    expect(rail).not.toBeNull()
+
+    const menuButton = container.querySelector('button[aria-controls="dashboard-side-rail"]') as HTMLElement | null
+    expect(menuButton).not.toBeNull()
+    menuButton!.click()
+
+    await waitFor(() => {
+      expect(rail?.classList.contains('max-[768px]:hidden')).toBe(false)
+    })
+  })
+
+  it('focus mode does not permanently hide the rail', async () => {
+    window.innerWidth = 1280
+    window.location.hash = '#overview'
+    renderApp()
+
+    // Rail should be visible initially.
+    expect(container.querySelector('#dashboard-side-rail')).not.toBeNull()
+
+    const focusButton = container.querySelector('[data-testid="dashboard-focus-mode-toggle"]') as HTMLElement | null
+    expect(focusButton).not.toBeNull()
+    focusButton!.click()
+
+    // Wait for Preact to re-render after the persistent signal update.
+    await waitFor(() => {
+      expect(container.querySelector('#dashboard-side-rail')).toBeNull()
+    })
+    expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).not.toBeNull()
+
+    // Toggling back restores the rail.
+    focusButton!.click()
+    await waitFor(() => {
+      expect(container.querySelector('#dashboard-side-rail')).not.toBeNull()
+    })
+  })
 })
 
 describe('shouldUseCompactDashboardChrome', () => {
-  it('uses compact chrome for keeper detail routes', () => {
+  it('keeps the standard shell for keeper detail routes', () => {
     expect(shouldUseCompactDashboardChrome({
       widgetSoloMode: false,
       focusMode: false,
-      keeperDetailMode: true,
+    })).toBe(false)
+  })
+
+  it('uses compact chrome for widget solo routes', () => {
+    expect(shouldUseCompactDashboardChrome({
+      widgetSoloMode: true,
+      focusMode: false,
     })).toBe(true)
   })
 
-  it('keeps the standard shell for normal dashboard routes', () => {
+  it('uses compact chrome for focus mode', () => {
     expect(shouldUseCompactDashboardChrome({
       widgetSoloMode: false,
-      focusMode: false,
-      keeperDetailMode: false,
-    })).toBe(false)
+      focusMode: true,
+    })).toBe(true)
   })
 })

@@ -2,6 +2,10 @@
 // Mounts the root <App /> component into the DOM
 
 // Foundation styles (load first)
+// Keeper-v2 design-system tokens are loaded earliest so the v2 vocabulary is
+// available to the dashboard token ladder; dashboard-specific tokens loaded
+// below override any name collisions.
+import './styles/ds-theme-tokens.css'
 import './styles/tokens.generated.css'
 import './styles/tokens.css'
 import './styles/variables.css'
@@ -20,6 +24,15 @@ import './styles/code.css'
 import './styles/center.css'
 import './styles/base.css'
 import './styles/keyframes.css'
+
+/*
+ * EXPERIMENTAL: StyleSeed light theme — opt-in via data-theme='styleseed' on html
+ * These files define a self-contained StyleSeed-inspired token layer. Rules are
+ * scoped to [data-theme="styleseed"] so they have no effect on the default
+ * dark-fantasy / v2 surfaces unless the attribute is explicitly set.
+ */
+import './styles/styleseed-theme.css'
+import './styles/styleseed-base.css'
 
 // Global utilities and layout
 import './styles/global.css'
@@ -44,10 +57,16 @@ import './styles/keeper-turn-inspector.css'
 import './styles/ide-v2.css'
 import './styles/work-v2.css'
 import './styles/design-canvas.css'
+import './styles/states.css'
 import './styles/connectors-v2.css'
 import './styles/telemetry-v2.css'
 import './styles/craft-v2.css'
 import './styles/states.css'
+
+/*
+ * EXPERIMENTAL: keeper-v2 DS UI kits — may conflict with existing v2-* styles; enable after review
+ * import './styles/ds-ui-kits.css'
+ */
 
 // Keeper-v2 surface stylesheets are auto-imported by filename convention:
 // every dashboard/src/styles/*-v2.css is injected here at build time. A new v2

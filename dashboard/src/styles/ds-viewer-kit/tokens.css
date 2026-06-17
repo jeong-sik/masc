@@ -1,0 +1,117 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC · Viewer v5 — design tokens
+   하나의 스케일로 모든 간격 · 라디우스 · 폰트크기를 통제한다.
+   의도적으로 작은 수의 토큰만 노출 — 선택지가 적을수록 일관된다.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ─── Spacing — 4px baseline (0 1 2 3 4 5 6 7 8) ───
+     UI 컴포넌트는 이 스케일 밖의 값을 쓰지 않는다. */
+  --sp-0:  0;
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-7:  32px;
+  --sp-8:  40px;
+
+  /* ─── Radius ───
+     전체적으로 작게. 이 디자인은 고딕 · 정확함이 주제. */
+  --r-1: 2px;   /* pills, chips, small buttons */
+  --r-2: 3px;   /* cards, inputs, main buttons */
+  --r-3: 5px;   /* portrait, larger panels */
+
+  /* ─── Font sizes ───
+     밀도 높은 작업도구 기준. 본문 12px, 보조 10.5px, UI 캡션 9.5px.
+     더 작은 값 금지 — 이하는 의미를 잃는다. */
+  --fs-1:  9.5px;   /* section labels, micro-meta */
+  --fs-2:  10.5px;  /* chips, counts, secondary meta */
+  --fs-3:  11.5px;  /* button labels, tabs, sidebar rows */
+  --fs-4:  12.5px;  /* body text, tape content (up from 11.5) */
+  --fs-5:  14px;    /* sub-header */
+  --fs-6:  17px;    /* header name */
+
+  --lh-tight: 1.35;
+  --lh-body:  1.55;
+
+  /* ─── Surface depth ───
+     바닥(bg) ↓ surface-panel ↓ surface-raised ↑ surface-sink(↓).
+     대비를 기존보다 살짝 벌려 zone 구분이 한눈에 보이게. */
+  --bg:              var(--bg-base);
+  --surf-rail:       color-mix(in oklab, var(--surface-1) 92%, black 8%);
+  --surf-panel:      color-mix(in oklab, var(--surface-1) 75%, transparent);
+  --surf-raised:     color-mix(in oklab, var(--surface-2) 65%, transparent);
+  --surf-sink:       color-mix(in oklab, var(--bg-base) 92%, black 8%);
+  --surf-hover:      color-mix(in oklab, var(--surface-2) 50%, transparent);
+  --surf-selected:   color-mix(in oklab, var(--accent-brass) 10%, transparent);
+
+  /* ─── Border rhythm ─── */
+  --line:            var(--border);
+  --line-strong:     color-mix(in oklab, var(--border) 60%, white 40%);
+  --line-accent:     color-mix(in oklab, var(--accent-brass) 45%, transparent);
+
+  /* ─── Phase colors ───
+     다이얼의 밝기를 통일해 한 화면에 섞여도 소음이 적게. */
+  --ph-think:  var(--accent-brass);
+  --ph-tool:   #6a8aae;
+  --ph-fs:     #8a7a5a;
+  --ph-net:    #5a8a6e;
+  --ph-db:     #8a5a7a;
+  --ph-judge:  var(--ok);
+  --ph-hilt:   var(--warn);
+  --ph-fail:   var(--bad);
+  --ph-meta:   var(--text-dim);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Text overflow 공통 유틸 — 어떤 컴포넌트든 동일 규칙.
+
+     .tx-trunc       한 줄 말줄임. 부모에 min-width:0 필수.
+     .tx-trunc-2     두 줄 말줄임.
+     .tx-wrap        break-word + text-wrap:pretty + hyphens auto.
+     .tx-mono-path   긴 경로/URL — 한 줄 유지하되 왼쪽 말줄임 (꼬리가 중요).
+     .tx-break-any   마지막 수단: 어느 문자든 줄바꿈 허용.
+
+   부모 컨테이너가 grid/flex일 때 `min-width:0`을 꼭 주어야 한다.
+   이게 없으면 truncate가 터진다.
+   ════════════════════════════════════════════════════════════ */
+.tx-trunc {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tx-trunc-2 {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.tx-wrap {
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.tx-mono-path {
+  min-width: 0;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+}
+.tx-break-any {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* grid/flex 자식이 자동으로 축소 가능하도록 — 유틸 클래스 */
+.min-w-0 { min-width: 0; }

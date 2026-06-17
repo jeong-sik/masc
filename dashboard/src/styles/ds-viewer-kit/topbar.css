@@ -1,0 +1,150 @@
+/* ─── Viewer topbar ──────────────────────────────────────── */
+
+.v-topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--surface-2) 96%, transparent) 0%,
+    color-mix(in oklab, var(--surface-1) 96%, transparent) 100%);
+  position: relative;
+}
+.v-topbar::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent, color-mix(in oklab, var(--accent-brass) 40%, transparent) 50%, transparent);
+}
+
+.v-topbar .brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  text-decoration: none;
+  color: var(--text-bright);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-2);
+  transition: background 0.12s;
+}
+.v-topbar .brand:hover {
+  background: var(--surf-hover);
+}
+.v-topbar .brand svg {
+  width: 22px; height: 22px; color: var(--accent-brass);
+}
+.v-topbar .wm {
+  font-family: var(--font-display);
+  font-size: var(--fs-5);
+  letter-spacing: 0.14em;
+  font-weight: 600;
+}
+.v-topbar .wm .blood {
+  color: var(--bad);
+  font-style: italic;
+}
+
+.v-topbar .crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  color: var(--text-dim);
+}
+.v-topbar .crumbs a {
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.12s;
+}
+.v-topbar .crumbs a:hover {
+  color: var(--accent-brass);
+}
+.v-topbar .crumbs .sep { opacity: 0.5; font-family: var(--font-mono); }
+.v-topbar .crumbs strong {
+  color: var(--text-bright);
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.v-topbar .top-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.v-topbar .clock {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
+  padding: 0 var(--sp-1);
+  letter-spacing: 0.04em;
+}
+.v-topbar .clock b {
+  color: var(--text-bright);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Reuse dashboard .pill look */
+.v-topbar .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--line);
+  background: var(--surf-raised);
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.v-topbar .pill.ok {
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 40%, transparent);
+  background: color-mix(in oklab, var(--ok) 10%, transparent);
+}
+.v-topbar .pill .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 5px currentColor;
+}
+.v-topbar .pill .k { opacity: 0.75; }
+.v-topbar .pill .v { color: var(--text-bright); }
+
+/* Split-view toggle */
+.v-split-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 4px var(--sp-2);
+  border-radius: var(--r-2);
+  border: 1px solid var(--line);
+  background: var(--surf-raised);
+  color: var(--text-dim);
+  cursor: pointer;
+  font-family: var(--font-display);
+  font-size: var(--fs-2);
+  letter-spacing: 0.06em;
+  transition: all 0.12s;
+  font-weight: 500;
+}
+.v-split-toggle:hover {
+  color: var(--accent-brass);
+  border-color: var(--line-accent);
+}
+.v-split-toggle.on {
+  color: var(--accent-brass);
+  background: color-mix(in oklab, var(--accent-brass) 14%, transparent);
+  border-color: var(--line-accent);
+}
+.v-split-toggle svg {
+  width: 13px; height: 13px;
+}

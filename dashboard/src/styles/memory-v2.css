@@ -140,7 +140,7 @@
   flex: none;
   font-family: var(--font-mono);
   font-weight: 700;
-  color: #0b0c10;
+  color: var(--color-bg-page);
   background: var(--kc);
   border-radius: var(--radius-xs);
 }

@@ -1,0 +1,9 @@
+/* ═══════════════════════════════════════════════════════════════
+   EXPERIMENTAL: keeper-v2 design-system UI kits
+   These stylesheets are delivered as an opt-in, experimental layer.
+   They may conflict with existing v2-* styles; enable only after review.
+   ═══════════════════════════════════════════════════════════════ */
+
+@import url("./ds-dashboard-kit/index.css");
+@import url("./ds-cockpit-kit/index.css");
+@import url("./ds-viewer-kit/index.css");

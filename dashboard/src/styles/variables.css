@@ -578,9 +578,10 @@ html:not([data-theme="paper"]) {
   --text-primary: var(--fg-2);
   --text-mid: var(--fg-3);
 
-  --font-display: var(--font-sans);
-  --font-ui: var(--font-sans);
-  --font-body: var(--font-sans);
+  /* Font bridge removed (dark-fantasy migration): these previously forced
+     --font-display/ui/body to plain --font-sans, erasing the brand voice.
+     The real stacks now resolve from ds-theme-tokens.css / tokens.generated.css:
+     display = Cinzel, body = EB Garamond, ui = Noto Sans KR. */
 
   --pad-surface: 22px 26px 40px;
   --pad-card: 12px 14px;
@@ -634,4 +635,20 @@ html:not([data-theme="paper"]) {
   --text-mid: var(--color-fg-secondary);
   --text-dim: var(--color-fg-muted);
   --text-bright: var(--color-fg-primary);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DARK FANTASY type restore (foundation sweep, 2026-06)
+
+   The surface/text/accent palette is owned by v2-theme.css (the last-loading
+   theme bridge); this block only restores the engraved display / warm book
+   body type stacks that the v5 "Pretendard neutral sans" default (tokens.css)
+   and a keeper-v2 font bridge had erased. Chrome/UI stays sans (--font-sans,
+   --font-ui) for data density; headings/KPIs opt into --font-display (Cinzel),
+   narrative into --font-body (EB Garamond). Placed last so it wins over
+   tokens.css's --font-display: var(--font-sans).
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  --font-display: "Cinzel", "Noto Sans KR", "EB Garamond", serif;
+  --font-body: "EB Garamond", "Noto Sans KR", Georgia, serif;
 }

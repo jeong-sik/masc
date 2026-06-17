@@ -1,0 +1,235 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC Keeper-v2 Design-System Theme Tokens
+   Source: _ds/masc-design-system-a925c77f-042a-40f5-ac15-0675a4a58d3f/colors_and_type.css
+
+   This file is intentionally loaded BEFORE the dashboard's generated
+   token ladder (see main.ts) so the v2 vocabulary is available as an
+   additive foundation. Existing dashboard tokens that share a name are
+   overridden later by tokens.generated.css / tokens.css / variables.css,
+   preserving the live dashboard's canonical surface semantics.
+
+   New v2-only tokens (e.g. --accent-blood, --accent-viscera, --bg-deep)
+   are consumed either directly by v2 surfaces or via the keeper-v2
+   bridge aliases in variables.css.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Webfonts used by the v2 type stacks. Loaded first so local @font-face
+   rules below can layer on top. */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;600;700;900&family=Share+Tech+Mono&display=swap');
+
+/* Local fonts — served from dashboard/public/assets/fonts via Vite.
+   Cinzel-Regular.ttf is present; NotoSansKR-Regular.ttf should be added
+   to the same directory when available (the Google import above keeps
+   Noto Sans KR working until then). */
+@font-face {
+  font-family: 'Cinzel';
+  src: url('/assets/fonts/Cinzel-Regular.ttf') format('truetype');
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Noto Sans KR';
+  src: url('/assets/fonts/NotoSansKR-Regular.ttf') format('truetype');
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+/* ── Dark Fantasy (default) — Visceral · decay-forward ── */
+:root,
+[data-theme="dark-fantasy"] {
+  /* Base surfaces — wet stone, blood-soaked wood */
+  --bg-deep:        #0a0706;
+  --bg-panel:       #14100d;
+  --bg-panel-alt:   #1b1612;
+  --bg-card:        #221815;
+  --bg-card-hover:  #2e211c;
+
+  /* Borders — scabbed, stitched leather */
+  --border-main:      #2a1a14;
+  --border-highlight: #5a3028;
+
+  /* Text — bone and bandage */
+  --text-bright:  #e8d8b8;
+  --text-primary: #b8a488;
+  --text-dim:     #6a5848;
+
+  /* Accents — blood is primary now; brass demoted to warning */
+  --accent-blood:    #a01818;
+  --accent-blood-dim:#5a0f0f;
+  --accent-viscera:  #c94a3a;
+  --accent-bile:     #6a7a3a;
+  --accent-mold:     #3a5a48;
+  --accent-brass:    #8a6a28;
+  --accent-brass-dim:#5a4618;
+  --accent-bone:     #d8c8a0;
+  --accent-ink:      #3a2a5a;
+  --accent-ember:    #c4461a;
+  --accent-glow:     rgba(160, 24, 24, 0.28);
+  --accent-blood-glow: rgba(201, 74, 58, 0.32);
+
+  /* Status — blood, bile, mold */
+  --status-ok:    #5a7a3a;
+  --status-warn:  #a06a1a;
+  --status-bad:   #a01818;
+  --status-idle:  #4a3a32;
+
+  /* Type stacks */
+  --font-display: 'Cinzel', 'Noto Sans KR', 'EB Garamond', serif;
+  --font-body:    'EB Garamond', 'Noto Sans KR', Georgia, serif;
+  --font-ui:      'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* Shape */
+  --radius-xs:   2px;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   12px;
+  --radius-pill: 999px;
+
+  /* Shadows */
+  --shadow-panel:  0 2px 12px rgba(0, 0, 0, 0.6);
+  --shadow-card:   0 1px 4px rgba(0, 0, 0, 0.5);
+  --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
+  --shadow-glow:   0 0 20px var(--accent-glow);
+  --shadow-inset:  inset 0 0 0 1px rgba(196, 162, 101, 0.25);
+
+  /* Spacing (4px grid) */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  24px;
+  --space-6:  32px;
+  --space-7:  48px;
+  --space-8:  64px;
+
+  /* Scrollbar */
+  --scrollbar-thumb:       #2a1f1a;
+  --scrollbar-thumb-hover: #3d2e22;
+}
+
+/* ── Cyberpunk ─────────────────────────────────────────── */
+[data-theme="cyberpunk"] {
+  --bg-deep:      #05000f;
+  --bg-panel:     #0d0821;
+  --bg-panel-alt: #130e2a;
+  --bg-card:      #1a1235;
+  --bg-card-hover:#221a42;
+  --border-main:      #2a1a4a;
+  --border-highlight: #6a2fd6;
+  --text-bright:  #f5f0ff;
+  --text-primary: #e0d4ff;
+  --text-dim:     #6a5d8d;
+  --accent-brass: #00ffcc;
+  --accent-brass-dim: #008866;
+  --accent-blood: #ff2266;
+  --accent-ink:   #6a2fd6;
+  --accent-glow:  rgba(0, 255, 204, 0.12);
+  --status-ok:   #00ffcc;
+  --status-warn: #ffaa00;
+  --status-bad:  #ff2266;
+  --font-display: 'Share Tech Mono', 'Noto Sans KR', monospace;
+  --font-body:    'Noto Sans KR', sans-serif;
+  --font-ui:      'Share Tech Mono', 'Noto Sans KR', monospace;
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --shadow-panel: 0 0 16px rgba(106, 47, 214, 0.3);
+  --shadow-glow:  0 0 24px rgba(0, 255, 204, 0.2), 0 0 48px rgba(0, 255, 204, 0.05);
+}
+
+/* ── Terminal ──────────────────────────────────────────── */
+[data-theme="terminal"] {
+  --bg-deep:      #000800;
+  --bg-panel:     #001200;
+  --bg-panel-alt: #001a00;
+  --bg-card:      #002200;
+  --bg-card-hover:#003000;
+  --border-main:      #0a3a0a;
+  --border-highlight: #00aa00;
+  --text-bright:  #00ff00;
+  --text-primary: #00cc00;
+  --text-dim:     #006600;
+  --accent-brass: #00ff00;
+  --accent-brass-dim: #009900;
+  --accent-blood: #ffcc00;
+  --accent-ink:   #00aaaa;
+  --accent-glow:  rgba(0, 255, 0, 0.08);
+  --status-ok:   #00ff00;
+  --status-warn: #ffcc00;
+  --status-bad:  #ff4400;
+  --font-display: 'JetBrains Mono', 'Noto Sans KR', monospace;
+  --font-body:    'JetBrains Mono', 'Noto Sans KR', monospace;
+  --font-ui:      'JetBrains Mono', 'Noto Sans KR', monospace;
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --shadow-panel: 0 0 8px rgba(0, 255, 0, 0.1);
+  --shadow-glow:  0 0 16px rgba(0, 255, 0, 0.15);
+}
+
+/* ── Parchment (in-app warm theme) ─────────────────────── */
+[data-theme="parchment"] {
+  --bg-deep:      #1a1610;
+  --bg-panel:     #241f18;
+  --bg-panel-alt: #2e2820;
+  --bg-card:      #332d24;
+  --bg-card-hover:#3d362c;
+  --border-main:      #4a3f30;
+  --border-highlight: #6a5d48;
+  --text-bright:  #f0e4cc;
+  --text-primary: #d4c4a0;
+  --text-dim:     #8a7d68;
+  --accent-brass: #c4a050;
+  --accent-brass-dim: #8a7035;
+  --accent-blood: #8b4513;
+  --accent-ink:   #556b2f;
+  --accent-glow:  rgba(196, 160, 80, 0.1);
+}
+
+/* ── Paper / Ink (docs + light-surface inversion) ──────── */
+[data-theme="paper"] {
+  color-scheme: light;
+  --paper:   #F5F2EA;
+  --paper-2: #EFEBE0;
+  --paper-3: #E5E0D1;
+  --paper-4: #D8D2BF;
+  --ink:     #151515;
+  --ink-2:   #2E2E2C;
+  --ink-3:   #515049;
+  --ink-4:   #74726A;
+  --ink-5:   #9A978D;
+  --ink-6:   #BCB8AC;
+
+  --forest:  #2D5F4E;  --forest-fill:#CFDFD7;
+  --brass:   #8C6A1E;  --brass-fill: #E9DDB8;
+  --brick:   #8B3A3A;  --brick-fill: #E8CFCB;
+  --ember:   #B35A1F;  --ember-fill: #ECD5BD;
+  --slate:   #3E4A5C;  --slate-fill: #D6DBE2;
+  --plum:    #5C3E56;  --plum-fill:  #E0D4DE;
+  --teal:    #236874;  --teal-fill:  #CEDEE2;
+
+  --bg-deep:      var(--paper);
+  --bg-panel:     var(--paper-2);
+  --bg-panel-alt: var(--paper-3);
+  --bg-card:      var(--paper-2);
+  --bg-card-hover:var(--paper-3);
+  --border-main:      rgba(21,21,21,0.22);
+  --border-highlight: rgba(21,21,21,0.48);
+  --text-bright:  var(--ink);
+  --text-primary: var(--ink-2);
+  --text-dim:     var(--ink-4);
+  --accent-brass: var(--brass);
+  --accent-brass-dim: var(--brass-fill);
+  --accent-blood: var(--brick);
+  --accent-ink:   var(--slate);
+  --accent-glow:  rgba(140,106,30,0.12);
+  --status-ok:   var(--forest);
+  --status-warn: var(--ember);
+  --status-bad:  var(--brick);
+  --status-idle: var(--ink-5);
+  --shadow-panel: 0 1px 2px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.06);
+  --shadow-card:  0 1px 0 rgba(0,0,0,0.04);
+  --shadow-glow:  none;
+}

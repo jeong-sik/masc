@@ -1,0 +1,84 @@
+/* ─── Split view — 2 keepers side-by-side ──────────────────
+   Inspector zone is replaced by `.v-main-2`, a second
+   tape column with its own header + keeper picker.
+   Both columns share the tape timestamp axis via CSS var.
+   ─────────────────────────────────────────────────────────── */
+
+.v-main-2 {
+  grid-template-rows: auto 1fr;
+  min-height: 0; min-width: 0;
+  border-left: 1px solid var(--line);
+  background: var(--surf-panel);
+}
+
+.sp2-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--surf-raised);
+}
+.sp2-head img {
+  width: 32px; height: 32px;
+  border-radius: var(--r-2);
+  border: 1px solid var(--line-strong);
+  object-fit: cover;
+}
+.sp2-head img.dead { filter: grayscale(1) brightness(0.55); }
+.sp2-head .nm {
+  font-family: var(--font-display);
+  font-size: var(--fs-5);
+  font-weight: 600;
+  color: var(--text-bright);
+  line-height: var(--lh-tight);
+}
+.sp2-head .sub {
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--text-dim);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.sp2-head select {
+  background: var(--surf-sink);
+  color: var(--text-bright);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: var(--sp-1) var(--sp-2);
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  cursor: pointer;
+}
+.sp2-head select:focus {
+  outline: none;
+  border-color: var(--line-accent);
+}
+
+.sp2-body {
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+  min-height: 0;
+}
+
+/* Shared timeline marker — brass rule across both columns */
+.sp-marker {
+  height: 1px;
+  background: color-mix(in oklab, var(--accent-brass) 30%, transparent);
+  margin: var(--sp-2) calc(-1 * var(--sp-5));
+  position: relative;
+}
+.sp-marker::after {
+  content: attr(data-t);
+  position: absolute;
+  right: var(--sp-5);
+  top: -7px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--accent-brass);
+  background: var(--surf-panel);
+  padding: 0 var(--sp-1);
+  letter-spacing: 0.04em;
+}

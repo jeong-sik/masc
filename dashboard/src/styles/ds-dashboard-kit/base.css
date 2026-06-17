@@ -1,0 +1,76 @@
+/* ═══════════════════════════════════════════════════════════════
+   MASC Observatory v5 · base
+   CSS vars, reset, scrollbar, body noise bg
+   ═══════════════════════════════════════════════════════════════ */
+
+
+:root {
+  /* Override global type stacks: use normal/neutral fonts for this dashboard.
+     Keep Cinzel only on the brand wordmark (scoped below). */
+  --font-ui:      'Pretendard Variable', Pretendard, 'Noto Sans KR', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Pretendard Variable', Pretendard, 'Noto Sans KR', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-body:    'Pretendard Variable', Pretendard, 'Noto Sans KR', -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --hair:        rgba(120, 100, 80, 0.14);
+  --hair-strong: rgba(160, 140, 110, 0.28);
+  --hair-brass:  rgba(138, 106, 40, 0.35);
+  --ok:   var(--status-ok);
+  --warn: var(--status-warn);
+  --bad:  var(--status-bad);
+
+  /* Tool frame palette — desaturated for info-density */
+  --t-llm:   #4a5a7a;
+  --t-tool:  #8a6a28;
+  --t-fs:    #6a5a40;
+  --t-net:   #3a5a48;
+  --t-db:    #6a3a5a;
+  --t-think: #3a3a48;
+  --t-err:   #a01818;
+  --t-judge: #c4922a;
+  --t-hilt:  #c94a3a;
+
+  --nav-w:   220px;
+  --aside-w: 340px;
+  --head-h:  52px;
+  --hud-h:   60px;
+  --alert-h: 34px;
+}
+
+/* ─── Base ─────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  background:
+    radial-gradient(ellipse 50% 40% at 8% 6%, rgba(138,106,40,0.05), transparent 55%),
+    radial-gradient(ellipse 35% 50% at 94% 96%, rgba(160,24,24,0.06), transparent 60%),
+    linear-gradient(170deg, #0e0806 0%, #14100c 60%, #080504 100%);
+  overflow: hidden; /* shell manages scrolling */
+}
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='5'/><feColorMatrix values='0 0 0 0 0.1  0 0 0 0 0.08  0 0 0 0 0.06  0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.3'/></svg>");
+  mix-blend-mode: multiply; opacity: 0.8;
+}
+
+/* Scroll chrome */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* ═══ v5 overrides ═══ */
+
+:root[data-theme="dark-fantasy"] {
+  /* softened neutrals — v5 is calmer */
+  --bg-ink:         #0a0e18;
+  --bg-velvet:      #0f1524;
+  --bg-card:        #131a2a;
+  --bg-card-soft:   #161d30;
+  --bg-raised:      #1a2238;
+  --border-soft:    rgba(120,140,180,0.09);
+  --border:         rgba(120,140,180,0.13);
+  --border-strong:  rgba(140,160,200,0.18);
+  --hilt-show:      block;
+}

@@ -501,10 +501,11 @@ let make_extended_handler routes =
 let run_server ~sw ~env ~host ~port ~base_path =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
-     dashboard refresh, etc.) are children of this switch.  When
-     Eio.Fiber.first cancels the run_server fiber on SIGTERM, the
-     switch is cancelled too, which propagates Cancel to every
-     child fiber — preventing the 10s force-exit timeout. *)
+     dashboard refresh, etc.) are children of this switch.  Graceful
+     shutdown explicitly fails this switch after the signal handler
+     finishes its phases (see [Graceful_shutdown] below); failing the
+     switch propagates cancellation to every child fiber, preventing
+     the 10s force-exit timeout. *)
   try
     Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path ~make_routes
       ~make_request_handler:make_extended_handler
@@ -582,9 +583,14 @@ let login_no_expiry =
   in
   Arg.(value & flag & info ["no-expiry"] ~doc)
 
-(** Graceful shutdown exception *)
-(* Shutdown exception removed: graceful shutdown returns normally from
-   await_shutdown_signal, letting Eio.Fiber.first cancel run_server. *)
+(** Graceful shutdown exception.
+
+    Raised from the main [Switch.run] fiber after shutdown phases complete.
+    This causes [Eio.Switch.run] to fail the switch, which cancels every
+    remaining background fiber and waits for them to finish.  Returning
+    normally would leave non-daemon background fibers running and make
+    [Switch.run] wait forever. *)
+exception Graceful_shutdown
 
 let acquire_pid_lock port =
   match Server_startup_takeover.acquire_pid_lock port with
@@ -863,9 +869,15 @@ let run_cmd host port base_path =
                   (Printexc.to_string exn));
             Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
             (Server_mcp_transport_http_sse.active_session_count ())
-            (Server_mcp_transport_ws.session_count ())
+            (Server_mcp_transport_ws.session_count ());
+            (* Failing the switch cancels all remaining background fibers.
+               Returning normally would leave non-daemon background loops
+               running and make [Eio.Switch.run] wait forever. *)
+            raise Graceful_shutdown
 
     with
+    | Graceful_shutdown ->
+        Log.Server.info "MASC MCP: Background fibers finished, shutdown complete."
     | Eio.Cancel.Cancelled _ ->
         Log.Server.info "MASC MCP: Server cancelled, waiting for background fibers..."
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->

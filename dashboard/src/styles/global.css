@@ -17,6 +17,7 @@
 @import "./tokens.generated.css";
 @import "./variables.css";
 @import "./base.css";
+@import "./fonts.css";
 @import "./keyframes.css";
 
 /* ── Feature imports (alphabetical, a11y.css last for runtime) ── */

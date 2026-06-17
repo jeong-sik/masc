@@ -172,7 +172,9 @@ export function keeperActivityDisplay(
 export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
   if (keeper && isKeeperPaused(keeper)) return 'paused'
   const lifecycleStatus = keeperLifecycleStatus(keeper?.lifecycle_phase)
-  if (lifecycleStatus && lifecycleStatus !== 'running') return lifecycleStatus
+  // Honor the FSM phase first: a Running keeper whose status field says
+  // 'idle' should still read as running, not collapse to idle.
+  if (lifecycleStatus) return lifecycleStatus
   const status = keeper?.status ?? fallbackStatus
   const normalized = (status ?? '').trim().toLowerCase()
 

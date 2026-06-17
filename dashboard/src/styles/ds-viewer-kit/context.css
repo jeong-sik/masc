@@ -1,0 +1,150 @@
+/* ─── Context stack view — system/user/tool prompt hierarchy ── */
+
+.ctx-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+/* Budget bar at top */
+.ctx-budget {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surf-raised);
+  margin-bottom: var(--sp-3);
+}
+.ctx-budget-label {
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.ctx-budget-bar {
+  position: relative;
+  height: 8px;
+  border-radius: var(--r-1);
+  background: var(--surf-sink);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.ctx-budget-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg,
+    var(--accent-brass) 0%,
+    color-mix(in oklab, var(--accent-brass) 70%, var(--warn)) 80%,
+    var(--warn) 100%);
+  transition: width 0.5s ease-out;
+}
+.ctx-budget-bar .tick {
+  position: absolute;
+  top: -2px; bottom: -2px;
+  width: 1px;
+  background: var(--warn);
+}
+.ctx-budget-val {
+  font-family: var(--font-mono);
+  font-size: var(--fs-3);
+  color: var(--text-bright);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.ctx-budget-val b { color: var(--accent-brass); font-weight: 500; }
+
+/* ─ Context slot rows ─ */
+.ctx-slot {
+  display: grid;
+  grid-template-columns: 66px 16px 1fr auto;
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surf-raised);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.ctx-slot:hover {
+  background: var(--surf-hover);
+  border-color: var(--line-strong);
+}
+.ctx-slot.selected {
+  background: var(--surf-selected);
+  border-color: var(--line-accent);
+  box-shadow: inset 2px 0 0 var(--accent-brass);
+}
+
+.ctx-role {
+  font-family: var(--font-display);
+  font-size: var(--fs-1);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 500;
+  padding: 2px var(--sp-2);
+  border-radius: var(--r-1);
+  text-align: center;
+}
+.ctx-slot[data-role="system"]    .ctx-role { color: var(--accent-brass); background: color-mix(in oklab, var(--accent-brass) 14%, transparent); }
+.ctx-slot[data-role="user"]      .ctx-role { color: var(--text-bright); background: color-mix(in oklab, var(--surface-2) 65%, transparent); }
+.ctx-slot[data-role="assistant"] .ctx-role { color: var(--ok); background: color-mix(in oklab, var(--ok) 12%, transparent); }
+.ctx-slot[data-role="tool"]      .ctx-role { color: var(--ph-tool); background: color-mix(in oklab, var(--ph-tool) 18%, transparent); }
+
+.ctx-badge {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surf-sink);
+  border: 1px solid var(--line);
+}
+.ctx-slot.pinned .ctx-badge {
+  background: color-mix(in oklab, var(--accent-brass) 30%, transparent);
+  color: var(--accent-brass);
+  border-color: var(--line-accent);
+}
+.ctx-slot.pinned .ctx-badge::before { content: "●"; }
+.ctx-slot.warn .ctx-badge           { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 40%, transparent); background: color-mix(in oklab, var(--warn) 15%, transparent); }
+.ctx-slot.warn .ctx-badge::before   { content: "!"; }
+.ctx-slot.block .ctx-badge          { color: var(--bad); border-color: color-mix(in oklab, var(--bad) 40%, transparent); background: color-mix(in oklab, var(--bad) 15%, transparent); }
+.ctx-slot.block .ctx-badge::before  { content: "×"; }
+.ctx-slot.old                       { opacity: 0.55; }
+
+.ctx-main { min-width: 0; }
+.ctx-kind {
+  font-family: var(--font-ui);
+  font-size: var(--fs-3);
+  color: var(--text-bright);
+  letter-spacing: 0.01em;
+  line-height: var(--lh-tight);
+}
+.ctx-note {
+  font-family: var(--font-mono);
+  font-size: var(--fs-1);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.ctx-tokens {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  letter-spacing: 0.02em;
+}
+.ctx-tokens b {
+  color: var(--text-bright);
+  font-weight: 500;
+}

@@ -37,6 +37,12 @@
   --color-warning: var(--color-status-warn);
   --color-info: var(--color-status-info);
 
+  /* Glow triplets for rgb() alpha composition under the default theme */
+  --color-destructive-glow: var(--color-status-err-glow);
+  --color-success-glow: var(--color-status-ok-glow);
+  --color-warning-glow: var(--color-status-warn-glow);
+  --color-info-glow: var(--color-status-info-glow);
+
   /* Borders & form */
   --color-border: var(--color-border-default);
   --color-border-subtle: var(--color-border-divider);

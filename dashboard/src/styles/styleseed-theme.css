@@ -166,6 +166,15 @@
   --accent-20: rgba(107, 92, 231, 0.20);
   --accent-soft: var(--brand-wash);
 
+  /* Legacy variables still referenced by components not yet on StyleSeed tokens */
+  --ok-fg: #6b9b7a;
+  --paused: #d97706;
+  --paused-10: rgba(217, 119, 6, 0.10);
+  --paused-20: rgba(217, 119, 6, 0.22);
+  --select: #721fe5;
+  --select-10: rgba(114, 31, 229, 0.10);
+  --select-20: rgba(114, 31, 229, 0.22);
+
   --color-card: var(--ss-card);
   --color-card-border: var(--ss-border-2);
 }
@@ -213,6 +222,15 @@
   --shadow-elevated: none;
   --shadow-modal: none;
   --shadow-button: none;
+
+  /* Legacy variables referenced by components not yet on StyleSeed tokens */
+  --ok-fg: #8fbf9a;
+  --paused: #ffb347;
+  --paused-10: rgba(255, 179, 71, 0.10);
+  --paused-20: rgba(255, 179, 71, 0.22);
+  --select: #9b5fff;
+  --select-10: rgba(155, 95, 255, 0.10);
+  --select-20: rgba(155, 95, 255, 0.22);
 }
 
 /* v2 shell chrome overrides — v2-shell.css pins hardcoded dark-fantasy

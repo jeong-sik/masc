@@ -72,8 +72,8 @@ const SEMANTIC_TONE: Record<StatusChipTone, string> = {
   bad: 'border-destructive/20 bg-destructive/10 text-destructive',
   info: 'border-brand/20 bg-brand/10 text-brand',
   neutral: 'border-border bg-surface-subtle text-text-tertiary',
-  paused: 'border-[var(--paused-20)] bg-[var(--paused-10)] text-[var(--paused)]',
-  select: 'border-[var(--select-20)] bg-[var(--select-10)] text-[var(--select)]',
+  paused: 'border-warning/20 bg-warning/10 text-warning',
+  select: 'border-brand/20 bg-brand/10 text-brand',
   '': 'border-border bg-surface-subtle text-text-tertiary',
 }
 

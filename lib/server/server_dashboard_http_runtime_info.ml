@@ -61,68 +61,93 @@ let clear_dashboard_runtime_probe_cache_for_tests () =
    off the 5 s git-probe budget on the hot path. *)
 let git_rev_parse_short_ttl_sec = 60.0
 
-let git_rev_parse_short_cache : (string, string option * float) Hashtbl.t =
-  Hashtbl.create 4
-;;
+(** Per-directory, mutex-guarded single-flight cache backing a background
+    refresh probe.
 
-let git_rev_parse_short_in_flight : (string, unit) Hashtbl.t = Hashtbl.create 4
-let git_rev_parse_short_mu = Stdlib.Mutex.create ()
+    Extracted from the structurally identical bookkeeping that
+    {!git_rev_parse_short} and {!git_upstream_status} each inlined
+    (2026-06-17). The cache owns only state plus lookup/guard/store
+    bookkeeping; the caller-driven background refresh orchestration and
+    the domain-fork-aware fiber fork stay in the enclosing module and
+    call [try_begin_refresh] / [finish_refresh] / [cancel_refresh].
 
-let git_rev_parse_short_probe_hook_for_tests : (string -> string option) option Atomic.t =
-  Atomic.make None
-;;
+    Concurrency model is unchanged from the previous inlined code:
+    [mu] guards [cache] and [in_flight] together; [try_begin_refresh]
+    is the single-flight gate (one refresh per key); [finish_refresh] /
+    [cancel_refresh] release it. *)
+module Make_probe_cache (C : sig
+  type value
 
-let set_git_rev_parse_short_probe_hook_for_tests hook =
-  Atomic.set git_rev_parse_short_probe_hook_for_tests (Some hook)
-;;
+  val ttl_sec : float
+end) = struct
+  let cache : (string, C.value * float) Hashtbl.t = Hashtbl.create 4
 
-let clear_git_rev_parse_short_probe_hook_for_tests () =
-  Atomic.set git_rev_parse_short_probe_hook_for_tests None
-;;
+  let in_flight : (string, unit) Hashtbl.t = Hashtbl.create 4
 
-let git_rev_parse_short_cached_lookup dir ~now =
-  Stdlib.Mutex.lock git_rev_parse_short_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
-    (fun () ->
-       match Hashtbl.find_opt git_rev_parse_short_cache dir with
-       | Some (value, ts) when now -. ts <= git_rev_parse_short_ttl_sec -> Some value
-       | _ -> None)
-;;
+  let mu = Stdlib.Mutex.create ()
 
-let git_rev_parse_short_cached_any dir =
-  Stdlib.Mutex.lock git_rev_parse_short_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
-    (fun () -> Hashtbl.find_opt git_rev_parse_short_cache dir |> Option.map fst)
-;;
+  let probe_hook_for_tests : (string -> C.value) option Atomic.t =
+    Atomic.make None
 
-let git_rev_parse_short_try_begin_refresh dir =
-  Stdlib.Mutex.lock git_rev_parse_short_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
-    (fun () ->
-       if Hashtbl.mem git_rev_parse_short_in_flight dir
-       then false
-       else (
-         Hashtbl.replace git_rev_parse_short_in_flight dir ();
-         true))
-;;
+  (** [Mutex.protect] (OCaml >= 5.1) is the manual-recommended primitive for a
+      mutex-bracketed critical section. Unlike the hand-rolled
+      [Mutex.lock; Fun.protect ~finally:unlock] form, it guarantees [unlock]
+      even when an asynchronous exception (e.g. [Sys.Break]) is raised, so the
+      mutex can never be left locked. *)
+  let with_lock f = Stdlib.Mutex.protect mu f
 
-let git_rev_parse_short_finish_refresh dir value ~now =
-  Stdlib.Mutex.lock git_rev_parse_short_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
-    (fun () ->
-       Hashtbl.replace git_rev_parse_short_cache dir (value, now);
-       Hashtbl.remove git_rev_parse_short_in_flight dir)
-;;
+  let cached_lookup dir ~now =
+    with_lock (fun () ->
+        match Hashtbl.find_opt cache dir with
+        | Some (value, ts) when now -. ts <= C.ttl_sec -> Some value
+        | _ -> None)
 
-let git_rev_parse_short_cancel_refresh dir =
-  Stdlib.Mutex.lock git_rev_parse_short_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
-    (fun () -> Hashtbl.remove git_rev_parse_short_in_flight dir)
+  let cached_any dir =
+    with_lock (fun () -> Hashtbl.find_opt cache dir |> Option.map fst)
+
+  let try_begin_refresh dir =
+    with_lock (fun () ->
+        if Hashtbl.mem in_flight dir then false
+        else (
+          Hashtbl.replace in_flight dir ();
+          true))
+
+  let finish_refresh dir value ~now =
+    with_lock (fun () ->
+        Hashtbl.replace cache dir (value, now);
+        Hashtbl.remove in_flight dir)
+
+  let cancel_refresh dir =
+    with_lock (fun () -> Hashtbl.remove in_flight dir)
+
+  let clear_cache_for_tests () =
+    with_lock (fun () ->
+        Hashtbl.clear cache;
+        Hashtbl.clear in_flight)
+
+  let seed_cache_for_tests dir value ~refreshed_at =
+    with_lock (fun () ->
+        Hashtbl.replace cache dir (value, refreshed_at);
+        Hashtbl.remove in_flight dir)
+
+  let set_probe_hook_for_tests hook =
+    Atomic.set probe_hook_for_tests (Some hook)
+
+  let clear_probe_hook_for_tests () = Atomic.set probe_hook_for_tests None
+end
+
+module Rev_parse_cache =
+  Make_probe_cache (struct
+    type value = string option
+
+    let ttl_sec = git_rev_parse_short_ttl_sec
+  end)
+
+let set_git_rev_parse_short_probe_hook_for_tests =
+  Rev_parse_cache.set_probe_hook_for_tests
+
+let clear_git_rev_parse_short_probe_hook_for_tests =
+  Rev_parse_cache.clear_probe_hook_for_tests
 ;;
 
 let eio_switch_fork_unavailable = function
@@ -191,7 +216,7 @@ let git_rev_parse_short_probe_argv dir =
 let git_rev_parse_short_probe_timeout_sec = 15.0
 
 let git_rev_parse_short_probe dir =
-  match Atomic.get git_rev_parse_short_probe_hook_for_tests with
+  match Atomic.get Rev_parse_cache.probe_hook_for_tests with
   | Some hook -> hook dir
   | None ->
     let argv = git_rev_parse_short_probe_argv dir in
@@ -211,21 +236,21 @@ let git_rev_parse_short_probe dir =
 let git_rev_parse_short_refresh dir =
   try
     let value = git_rev_parse_short_probe dir in
-    git_rev_parse_short_finish_refresh dir value ~now:(Time_compat.now ());
+    Rev_parse_cache.finish_refresh dir value ~now:(Time_compat.now ());
     value
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    git_rev_parse_short_cancel_refresh dir;
+    Rev_parse_cache.cancel_refresh dir;
     raise exn
 ;;
 
 let maybe_refresh_git_rev_parse_short_in_background dir =
-  if git_rev_parse_short_try_begin_refresh dir
+  if Rev_parse_cache.try_begin_refresh dir
   then
     fork_background_refresh_or_cancel
       ~dir
-      ~cancel_refresh:git_rev_parse_short_cancel_refresh
+      ~cancel_refresh:Rev_parse_cache.cancel_refresh
       (fun () ->
         try
           let _ = git_rev_parse_short_refresh dir in
@@ -245,17 +270,17 @@ let git_rev_parse_short path =
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
     let now = Time_compat.now () in
-    (match git_rev_parse_short_cached_lookup dir ~now with
+    (match Rev_parse_cache.cached_lookup dir ~now with
      | Some value -> value
      | None ->
-       (match git_rev_parse_short_cached_any dir with
+       (match Rev_parse_cache.cached_any dir with
         | Some stale ->
           maybe_refresh_git_rev_parse_short_in_background dir;
           stale
         | None ->
-          if git_rev_parse_short_try_begin_refresh dir
+          if Rev_parse_cache.try_begin_refresh dir
           then git_rev_parse_short_refresh dir
-          else git_rev_parse_short_cached_any dir |> Option.value ~default:None))
+          else Option.join (Rev_parse_cache.cached_any dir)))
 ;;
 
 let opt_string_json = Server_dashboard_http_runtime_info_json.opt_string_json
@@ -277,70 +302,18 @@ let empty_git_upstream_status =
 
 let git_upstream_status_ttl_sec = 60.0
 
-let git_upstream_status_cache : (string, git_upstream_status option * float) Hashtbl.t =
-  Hashtbl.create 4
-;;
+module Upstream_status_cache =
+  Make_probe_cache (struct
+    type value = git_upstream_status option
 
-let git_upstream_status_in_flight : (string, unit) Hashtbl.t = Hashtbl.create 4
-let git_upstream_status_mu = Stdlib.Mutex.create ()
+    let ttl_sec = git_upstream_status_ttl_sec
+  end)
 
-let git_upstream_status_probe_hook_for_tests :
-  (string -> git_upstream_status option) option Atomic.t
-  =
-  Atomic.make None
-;;
+let set_git_upstream_status_probe_hook_for_tests =
+  Upstream_status_cache.set_probe_hook_for_tests
 
-let set_git_upstream_status_probe_hook_for_tests hook =
-  Atomic.set git_upstream_status_probe_hook_for_tests (Some hook)
-;;
-
-let clear_git_upstream_status_probe_hook_for_tests () =
-  Atomic.set git_upstream_status_probe_hook_for_tests None
-;;
-
-let git_upstream_status_cached_lookup dir ~now =
-  Stdlib.Mutex.lock git_upstream_status_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
-    (fun () ->
-       match Hashtbl.find_opt git_upstream_status_cache dir with
-       | Some (value, ts) when now -. ts <= git_upstream_status_ttl_sec -> Some value
-       | _ -> None)
-;;
-
-let git_upstream_status_cached_any dir =
-  Stdlib.Mutex.lock git_upstream_status_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
-    (fun () -> Hashtbl.find_opt git_upstream_status_cache dir |> Option.map fst)
-;;
-
-let git_upstream_status_try_begin_refresh dir =
-  Stdlib.Mutex.lock git_upstream_status_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
-    (fun () ->
-       if Hashtbl.mem git_upstream_status_in_flight dir
-       then false
-       else (
-         Hashtbl.replace git_upstream_status_in_flight dir ();
-         true))
-;;
-
-let git_upstream_status_finish_refresh dir value ~now =
-  Stdlib.Mutex.lock git_upstream_status_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
-    (fun () ->
-       Hashtbl.replace git_upstream_status_cache dir (value, now);
-       Hashtbl.remove git_upstream_status_in_flight dir)
-;;
-
-let git_upstream_status_cancel_refresh dir =
-  Stdlib.Mutex.lock git_upstream_status_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
-    (fun () -> Hashtbl.remove git_upstream_status_in_flight dir)
+let clear_git_upstream_status_probe_hook_for_tests =
+  Upstream_status_cache.clear_probe_hook_for_tests
 ;;
 
 let git_probe_trimmed dir args =
@@ -378,7 +351,7 @@ let git_default_origin_head dir =
 ;;
 
 let git_upstream_status_probe dir =
-  match Atomic.get git_upstream_status_probe_hook_for_tests with
+  match Atomic.get Upstream_status_cache.probe_hook_for_tests with
   | Some hook -> hook dir
   | None ->
     let branch = git_probe_trimmed dir [ "rev-parse"; "--abbrev-ref"; "HEAD" ] in
@@ -422,21 +395,21 @@ let git_upstream_status_probe dir =
 let git_upstream_status_refresh dir =
   try
     let value = git_upstream_status_probe dir in
-    git_upstream_status_finish_refresh dir value ~now:(Time_compat.now ());
+    Upstream_status_cache.finish_refresh dir value ~now:(Time_compat.now ());
     value
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    git_upstream_status_cancel_refresh dir;
+    Upstream_status_cache.cancel_refresh dir;
     raise exn
 ;;
 
 let maybe_refresh_git_upstream_status_in_background dir =
-  if git_upstream_status_try_begin_refresh dir
+  if Upstream_status_cache.try_begin_refresh dir
   then
     fork_background_refresh_or_cancel
       ~dir
-      ~cancel_refresh:git_upstream_status_cancel_refresh
+      ~cancel_refresh:Upstream_status_cache.cancel_refresh
       (fun () ->
         try
           let _ = git_upstream_status_refresh dir in
@@ -456,17 +429,17 @@ let git_upstream_status path =
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
     let now = Time_compat.now () in
-    (match git_upstream_status_cached_lookup dir ~now with
+    (match Upstream_status_cache.cached_lookup dir ~now with
      | Some value -> value
      | None ->
-       (match git_upstream_status_cached_any dir with
+       (match Upstream_status_cache.cached_any dir with
         | Some stale ->
           maybe_refresh_git_upstream_status_in_background dir;
           stale
         | None ->
-          if git_upstream_status_try_begin_refresh dir
+          if Upstream_status_cache.try_begin_refresh dir
           then git_upstream_status_refresh dir
-          else git_upstream_status_cached_any dir |> Option.value ~default:None))
+          else Option.join (Upstream_status_cache.cached_any dir)))
 ;;
 
 let deployment_state_json
@@ -600,40 +573,19 @@ let deployment_state_json
 
 let clear_git_rev_parse_short_cache_for_tests () =
   background_refresh_clear_unavailable_domains_for_tests ();
-  Stdlib.Mutex.lock git_rev_parse_short_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
-    (fun () ->
-       Hashtbl.clear git_rev_parse_short_cache;
-       Hashtbl.clear git_rev_parse_short_in_flight)
+  Rev_parse_cache.clear_cache_for_tests ()
 ;;
 
-let seed_git_rev_parse_short_cache_for_tests dir value ~refreshed_at =
-  Stdlib.Mutex.lock git_rev_parse_short_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
-    (fun () ->
-       Hashtbl.replace git_rev_parse_short_cache dir (value, refreshed_at);
-       Hashtbl.remove git_rev_parse_short_in_flight dir)
-;;
+let seed_git_rev_parse_short_cache_for_tests =
+  Rev_parse_cache.seed_cache_for_tests
 
 let clear_git_upstream_status_cache_for_tests () =
   background_refresh_clear_unavailable_domains_for_tests ();
-  Stdlib.Mutex.lock git_upstream_status_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
-    (fun () ->
-       Hashtbl.clear git_upstream_status_cache;
-       Hashtbl.clear git_upstream_status_in_flight)
+  Upstream_status_cache.clear_cache_for_tests ()
 ;;
 
-let seed_git_upstream_status_cache_for_tests dir value ~refreshed_at =
-  Stdlib.Mutex.lock git_upstream_status_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
-    (fun () ->
-       Hashtbl.replace git_upstream_status_cache dir (value, refreshed_at);
-       Hashtbl.remove git_upstream_status_in_flight dir)
+let seed_git_upstream_status_cache_for_tests =
+  Upstream_status_cache.seed_cache_for_tests
 ;;
 
 let path_item_json ~source path =

@@ -155,9 +155,7 @@ let compile_target_pattern target =
   ]))
 
 let target_re target =
-  Stdlib.Mutex.lock is_mentioned_cache_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock is_mentioned_cache_mu)
+  Stdlib.Mutex.protect is_mentioned_cache_mu
     (fun () ->
       match Hashtbl.find_opt is_mentioned_cache target with
       | Some re -> re

@@ -47,11 +47,7 @@ type accumulator = {
 let metrics : accumulator StringMap.t ref = ref StringMap.empty
 let metrics_mu = Stdlib.Mutex.create ()
 
-let with_lock f =
-  Stdlib.Mutex.lock metrics_mu;
-  Stdlib.Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mu)
-    f
+let with_lock f = Stdlib.Mutex.protect metrics_mu f
 
 let record (result : Tool_result.result) =
   let tool_name, duration_ms, is_success =

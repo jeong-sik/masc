@@ -25,10 +25,7 @@ let cache_update_std_mu = Stdlib.Mutex.create ()
    Eio mutex in fibers so same-domain concurrent updates queue cooperatively;
    keep a Stdlib fallback for direct non-Eio test/helper calls. *)
 let with_cache_update_lock f =
-  let with_stdlib_lock () =
-    Stdlib.Mutex.lock cache_update_std_mu;
-    Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock cache_update_std_mu) f
-  in
+  let with_stdlib_lock () = Stdlib.Mutex.protect cache_update_std_mu f in
   let inside_eio =
     try
       Eio.Fiber.check ();

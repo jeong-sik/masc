@@ -30,6 +30,7 @@ import './styles/chat-blocks-v2.css'
 // Component-specific styles
 import './styles/ui.css'
 import './styles/board.css'
+import './styles/board-v2.css'
 /* chat.css: styles merged into global.css @utility blocks (#3915) */
 import './styles/dashboard.css'
 import './styles/governance.css'

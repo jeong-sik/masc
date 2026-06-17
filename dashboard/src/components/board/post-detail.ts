@@ -489,7 +489,7 @@ function CommentRouteFocusPanel({
 }
 
 // ── Comment form ───────────────────────────────────────────────────
-function CommentForm({ postId }: { postId: string }) {
+export function CommentForm({ postId }: { postId: string }) {
   return html`
     <div class="mt-4">
       <${RichComposer}

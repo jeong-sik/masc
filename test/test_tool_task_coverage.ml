@@ -342,6 +342,9 @@ let () = test "dispatch_transition_claim" (fun () ->
 (* Test dispatch claim_next *)
 let () = test "dispatch_claim_next" (fun () ->
   let ctx = make_test_ctx () in
+  (* Set up a task so claim_next has something to claim *)
+  let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+    (`Assoc [("title", `String "Claim next test task")]) in
   let args = `Assoc [] in
   match Task.Tool.dispatch ctx ~name:"keeper_task_claim" ~args with
   | Some _ -> ()

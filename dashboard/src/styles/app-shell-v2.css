@@ -251,12 +251,53 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   SHELL LAYOUT — rail + main content scroll contracts
+   ═══════════════════════════════════════════════════════════════ */
+
+.v2-app .v2-shell-stage {
+  /* Row layout by default: fixed-width rail + flex main content. */
+  flex-direction: row;
+}
+
+.v2-app .v2-stage {
+  /* Ensure the stage itself can shrink below its content size so the
+     inner scroll container receives a definite height. */
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Main content is a scrollport: outer <main> clips, inner div scrolls.
+   The outer overflow-hidden keeps the rounded border/box-shadow intact;
+   the inner .dashboard-main-scroll owns the scrollbar. */
+.v2-app .v2-body {
+  overflow: hidden;
+}
+
+.v2-app .dashboard-main-scroll {
+  /* Defensive: ensure the scroll container actually has a scrollable
+     overflow axis. The app.ts template already adds overflow-y-auto,
+     but this guarantees it even if utility classes are stripped. */
+  overflow-y: auto;
+  /* Keep long unbroken content from blowing out the flex item. */
+  min-width: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════════════════════════════ */
 
 @media (max-width: 1100px) {
-  .v2-app .v2-stage {
+  .v2-app .v2-shell-stage {
     flex-direction: column;
+  }
+
+  /* Keep the rail collapsed to a compact top strip on tablet so the main
+     content still has room. The rail becomes a horizontal band with its
+     own internal vertical scroll if the nav list is tall. */
+  .v2-app #dashboard-side-rail.v2-shell-rail {
+    width: auto;
+    max-height: 260px;
+    overflow-y: auto;
   }
 }
 

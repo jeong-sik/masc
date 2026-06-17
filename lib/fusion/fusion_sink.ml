@@ -139,6 +139,21 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) resu
     (match judge with
      | Ok j -> append (render_judge j)
      | Error e -> append (Printf.sprintf "**[judge]** _(failed: %s)_" e));
+    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기").
+       위의 상세 트랜스크립트는 "fusion/<run>" thread(사용자 가시 증거)에 두고, judge
+       결론 한 줄을 키퍼의 *메인* conversation(conversation_id 생략)에 남긴다. 그러면
+       (1) 키퍼가 다음 턴 observation(recent_direct_conversation)으로 결론을 수령하고,
+       (2) librarian이 메인 chat에서 이를 fact로 추출한다 — fusion이 memory-os fact
+       타입에 직접 의존하지 않으므로 강결합 없이 기존 memory 파이프라인에 흡수된다.
+       judge 실패 시에는 메인 흐름을 오염시키지 않으려 결론을 남기지 않는다. *)
+    (match judge with
+     | Ok j ->
+       Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper
+         ~content:
+           (Printf.sprintf "Fusion deliberation (run %s) — %s" run_id
+              (render_decision j.Fusion_types.decision))
+         ()
+     | Error _ -> ());
     (* 모든 append 후 한 번 브로드캐스트 — 대시보드가 키퍼 chat을 재조회해 전체 표시. *)
     Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion";
     (* board post — 구조화 증거(meta_json). chat lane은 사람이 읽는 *서사*,

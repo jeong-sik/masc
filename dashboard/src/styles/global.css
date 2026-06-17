@@ -83,6 +83,11 @@
   box-shadow: var(--shadow-card);
 }
 
+@utility ss-surface {
+  background-color: var(--bg-surface-page);
+  color: var(--text-primary);
+}
+
 @utility bg-card { background-color: var(--bg-card); }
 @utility bg-surface-page { background-color: var(--bg-surface-page); }
 @utility bg-surface-subtle { background-color: var(--bg-surface-subtle); }

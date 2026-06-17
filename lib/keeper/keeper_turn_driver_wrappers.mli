@@ -18,8 +18,6 @@ val run_model_by_label :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_input_tokens:int ->
-  ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
@@ -48,8 +46,6 @@ val run_named_with_masc_tools :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_input_tokens:int ->
-  ?max_cost_usd:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
@@ -78,8 +74,6 @@ val run_model_with_masc_tools :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_input_tokens:int ->
-  ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->

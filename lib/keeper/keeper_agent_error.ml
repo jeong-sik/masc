@@ -44,12 +44,6 @@ let sdk_termination_semantics = function
     Oas_idle_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) ->
     Oas_exit_condition_reached
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.TokenBudgetExceeded _) ->
-    Oas_token_budget_exhausted
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetExceeded _) ->
-    Oas_cost_budget_exhausted
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetUnenforceable _) ->
-    Oas_cost_budget_unenforceable
   | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
     Oas_guardrail_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
@@ -191,21 +185,6 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf "agent_error_exit_condition_met:turn=%d" turn
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
     Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
-  | Agent_sdk.Error.TokenBudgetExceeded { kind; used; limit } ->
-    Printf.sprintf
-      "agent_error_token_budget_exceeded:kind=%s,used=%d,limit=%d"
-      kind
-      used
-      limit
-  | Agent_sdk.Error.CostBudgetExceeded { spent_usd; limit_usd } ->
-    Printf.sprintf
-      "agent_error_cost_budget_exceeded:spent_usd=%.2f,limit_usd=%.2f"
-      spent_usd
-      limit_usd
-  | Agent_sdk.Error.CostBudgetUnenforceable { model_id = _; limit_usd } ->
-    Printf.sprintf
-      "agent_error_cost_budget_unenforceable:runtime=runtime,limit_usd=%.2f"
-      limit_usd
   | Agent_sdk.Error.IdleDetected { consecutive_idle_turns } ->
     Printf.sprintf
       "agent_error_idle_detected:consecutive_idle_turns=%d"

@@ -66,7 +66,6 @@ val per_provider_timeout_for_turn
     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature MODEL temperature override
     @param max_tokens Maximum output tokens override
-    @param max_cost_usd Maximum cost per turn in USD
     @param on_event Optional event callback
     @param trajectory_acc Optional trajectory accumulator for recording
     @param tool_overlay Optional mutable tool overlay for dynamic tools
@@ -102,7 +101,6 @@ val run_turn
   -> ?max_tokens:int
   -> ?oas_timeout_s:float
   -> ?oas_timeout_is_explicit:bool
-  -> ?max_cost_usd:float
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?tool_overlay:Agent_sdk.Tool_op.t ref

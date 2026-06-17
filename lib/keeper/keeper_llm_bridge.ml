@@ -281,6 +281,7 @@ let run_with_timeout_and_fallback
            (Timeout
               { message =
                   Printf.sprintf "Timeout after %.1fs (budget=%.0fs)" wall timeout_s
+              ; phase = None
               }))
     in
     (try Eio.Time.with_timeout_exn clock timeout_s fn with

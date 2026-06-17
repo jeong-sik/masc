@@ -488,7 +488,6 @@
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
-
   /* Keeper v2 token bridge — aliases for importing v2 stylesheets.
      Maps the v2 surface vocabulary to the existing dashboard semantic
      token ladder. Tokens that already exist in tokens.generated.css /
@@ -573,4 +572,37 @@ html:not([data-theme="paper"]) {
   --status-bad: var(--err);
 
   --accent-bone: var(--color-accent-fg);
+}
+
+/* Keeper-v2 memory surface token bridge.
+   Scoped to memory boards so the memory graph surfaces keep their
+   warn/ice semantics without overriding the dashboard keeper-v2
+   brass token bridges above. */
+.mg-board,
+.gd-board {
+  --font-display: ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --radius-xs: 2px;
+  --radius-pill: 9999px;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.35);
+
+  --volt: var(--color-status-warn);
+  --volt-strong: var(--color-status-warn);
+  --volt-wash: color-mix(in srgb, var(--color-status-warn) 14%, transparent);
+  --accent-ice: var(--color-info);
+  --status-ok: var(--color-status-ok);
+  --status-bad: var(--color-status-err);
+  --status-warn: var(--color-status-warn);
+
+  --bg-deep: var(--color-bg-page);
+  --bg-card: var(--color-bg-surface);
+  --bg-card-hover: var(--color-bg-elevated);
+  --bg-panel-alt: var(--color-bg-panel-alt);
+  --bg-sunken: var(--color-bg-page);
+  --border-main: var(--color-border-default);
+  --border-soft: var(--color-border-divider);
+  --text-primary: var(--color-fg-primary);
+  --text-mid: var(--color-fg-secondary);
+  --text-dim: var(--color-fg-muted);
+  --text-bright: var(--color-fg-primary);
 }

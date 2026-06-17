@@ -65,9 +65,6 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
        Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> Some Sdk_max_turns_exceeded
-     | Agent_sdk.Error.Agent (TokenBudgetExceeded _) -> Some Sdk_token_budget_exceeded
-     | Agent_sdk.Error.Agent (CostBudgetExceeded _)
-     | Agent_sdk.Error.Agent (CostBudgetUnenforceable _) -> Some Sdk_cost_budget_exceeded
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
      | Agent_sdk.Error.Agent (IdleDetected _) -> Some Sdk_idle_detected

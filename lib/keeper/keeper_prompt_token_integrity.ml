@@ -26,6 +26,11 @@ let kind_to_string = function
   | Keeper -> "keeper"
   | Masc -> "masc"
 
+let keeper_prefix = "keeper_"
+let masc_prefix = "masc_"
+let keeper_prefix_len = String.length keeper_prefix
+let masc_prefix_len = String.length masc_prefix
+
 (* ── Token extraction ─────────────────────────────────────────────── *)
 
 let is_tool_token_char = function
@@ -40,7 +45,7 @@ let is_tool_token_char = function
 let token_kind_at pos text len :
     token_kind option =
   let lc offset = Char.lowercase_ascii text.[pos + offset] in
-  if pos + 7 <= len
+  if pos + keeper_prefix_len <= len
      && lc 0 = 'k'
      && lc 1 = 'e'
      && lc 2 = 'e'
@@ -50,7 +55,7 @@ let token_kind_at pos text len :
      && lc 6 = '_'
   then Some Keeper
   else if
-    pos + 5 <= len
+    pos + masc_prefix_len <= len
     && lc 0 = 'm'
     && lc 1 = 'a'
     && lc 2 = 's'
@@ -71,9 +76,10 @@ let is_env_var_shaped name =
   not !has_lower
 
 (** Find all keeper_*/masc_* tokens in [text]. Each token is returned as
-    [(kind, raw_name, position)]. The scan is linear in the length of the
-    input. *)
-let find_tokens text : (token_kind * string) list =
+    [(kind, raw_name, start, end_excl)]. The scan is linear in the length of
+    the input and is shared by both verification and sanitization so the two
+    passes cannot drift on prefix/boundary semantics. *)
+let find_tokens text : (token_kind * string * int * int) list =
   let len = String.length text in
   let tokens = ref [] in
   let i = ref 0 in
@@ -82,15 +88,15 @@ let find_tokens text : (token_kind * string) list =
     | Some kind when is_token_start !i text ->
         let prefix_len =
           match kind with
-          | Keeper -> 7
-          | Masc -> 5
+          | Keeper -> keeper_prefix_len
+          | Masc -> masc_prefix_len
         in
         let j = ref (!i + prefix_len) in
         while !j < len && is_tool_token_char text.[!j] do
           incr j
         done;
         let name = String.sub text !i (!j - !i) in
-        tokens := (kind, name) :: !tokens;
+        tokens := (kind, name, !i, !j) :: !tokens;
         i := !j
     | _ -> incr i
   done;
@@ -139,6 +145,7 @@ let verify_token ~keeper_name ~source (kind, name) : string option =
 
 let scan_text ~keeper_name ~source text : string list =
   find_tokens text
+  |> List.map (fun (kind, name, _, _) -> kind, name)
   |> dedup_tokens
   |> List.filter_map (verify_token ~keeper_name ~source)
   |> dedup_strings
@@ -157,50 +164,67 @@ let scan_rendered_prompt
 
 (* ── Registry-driven sanitization ─────────────────────────────────── *)
 
-(** Remove keeper_*/masc_* tokens that do not resolve to a live tool, driven
+let stale_tool_token_placeholder = "<stale_tool_token>"
+
+(** Sanitize keeper_*/masc_* tokens that do not resolve to a live tool, driven
     by [Keeper_tool_resolution] (the same source of truth the scanner uses).
 
-    Root fix for stale tool names leaking into prompts: the legacy
+    This is a presentation-layer band-aid for stale tool names that have
+    already leaked into prompt/continuity text. The legacy
     [Keeper_unified_prompt.sanitize_retired_tool_names] is a hardcoded
     retired-prefix list that must be hand-edited on every tool rename and
     silently misses renames it does not enumerate (e.g. masc_board_get ->
     masc_board_post_get). This pass instead asks the registry: any
     lowercase masc_/keeper_ token that resolves is kept; one that does not
     (a removed/renamed tool, or a hallucinated name frozen in an injected
-    episode) is dropped so the model never sees it as a callable tool.
+    episode) is replaced with [stale_tool_token_placeholder] so the model
+    never sees it as a callable tool while the surrounding sentence stays
+    grammatically intact.
 
     Env-var-shaped tokens (all-uppercase, e.g. MASC_BASE_PATH) are kept —
     they are not tool invocations and stripping them would mangle legitimate
-    configuration prose. A resolved alias is also kept. *)
-let strip_unresolved_tool_tokens text : string =
+    configuration prose. A resolved alias is also kept.
+
+    When [~keeper_name] is provided, every replacement emits a counter on
+    [masc_keeper_prompt_token_stripped_total] and a warning log so the
+    producer-side alarm is not lost. *)
+let strip_unresolved_tool_tokens ?keeper_name text : string =
+  let tokens = find_tokens text in
   let len = String.length text in
   let buf = Buffer.create len in
-  let i = ref 0 in
-  while !i < len do
-    match token_kind_at !i text len with
-    | Some kind when is_token_start !i text ->
-        let prefix_len =
-          match kind with
-          | Keeper -> 7
-          | Masc -> 5
-        in
-        let j = ref (!i + prefix_len) in
-        while !j < len && is_tool_token_char text.[!j] do
-          incr j
-        done;
-        let name = String.sub text !i (!j - !i) in
-        let keep =
-          is_env_var_shaped name
-          ||
-          match Keeper_tool_resolution.resolve (String.lowercase_ascii name) with
-          | Keeper_tool_resolution.Resolved _ | Keeper_tool_resolution.Alias_to _ ->
-              true
-          | Keeper_tool_resolution.Unknown _ -> false
-        in
-        if keep then Buffer.add_string buf name;
-        i := !j
-    | _ ->
-        Buffer.add_char buf text.[!i];
-        incr i
-  done;
+  let pos = ref 0 in
+  List.iter
+    (fun (kind, name, start, end_excl) ->
+       Buffer.add_substring buf text !pos (start - !pos);
+       let keep =
+         is_env_var_shaped name
+         ||
+         match Keeper_tool_resolution.resolve (String.lowercase_ascii name) with
+         | Keeper_tool_resolution.Resolved _ | Keeper_tool_resolution.Alias_to _ ->
+             true
+         | Keeper_tool_resolution.Unknown _ -> false
+       in
+       if keep then
+         Buffer.add_substring buf text start (end_excl - start)
+       else (
+         (match keeper_name with
+          | Some keeper ->
+              Otel_metric_store.inc_counter
+                (Keeper_metrics.to_string PromptTokenStripped)
+                ~labels:
+                  [ ("keeper", keeper)
+                  ; ("kind", kind_to_string kind)
+                  ; ("tool", String.lowercase_ascii name)
+                  ]
+                ();
+              Log.Keeper.warn
+                "keeper_prompt_token_integrity: stripped %s token %S from prompt for keeper %s"
+                (kind_to_string kind)
+                name
+                keeper
+          | None -> ());
+         Buffer.add_string buf stale_tool_token_placeholder);
+       pos := end_excl)
+    tokens;
+  Buffer.add_substring buf text !pos (len - !pos);
   Buffer.contents buf

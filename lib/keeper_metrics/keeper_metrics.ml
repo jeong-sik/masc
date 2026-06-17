@@ -122,6 +122,7 @@ type t =
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
   | PromptUnknownToolTokens
+  | PromptTokenStripped
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
@@ -352,6 +353,8 @@ let to_string = function
     "masc_keeper_state_snapshot_skipped_no_state_total"
   | PromptUnknownToolTokens ->
     "masc_keeper_prompt_unknown_tool_tokens_total"
+  | PromptTokenStripped ->
+    "masc_keeper_prompt_token_stripped_total"
   | ProgressUpdatedLineFailures -> "masc_keeper_progress_updated_line_failures_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | WorkspaceHeartbeatFailures -> "masc_keeper_workspace_heartbeat_failures_total"
@@ -499,6 +502,7 @@ let all : t list =
     ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
     PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
     CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; PromptUnknownToolTokens;
+    PromptTokenStripped;
     ProgressUpdatedLineFailures;
     SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;
     EpisodeCreateFailures; MemoryActivityEmitFailures; SupervisorSweepFailures; TomlReconcileSweepFailures;

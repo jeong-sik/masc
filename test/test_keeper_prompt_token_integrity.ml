@@ -8,9 +8,11 @@ module Scanner = Masc.Keeper_prompt_token_integrity
 module Metrics = Masc.Otel_metric_store
 
 let metric_name = Keeper_metrics.(to_string PromptUnknownToolTokens)
+let stripped_metric_name = Keeper_metrics.(to_string PromptTokenStripped)
 let keeper = "test-keeper-p0-3"
 
 let total_unknown () = Metrics.metric_total metric_name
+let total_stripped () = Metrics.metric_total stripped_metric_name
 
 let test_known_tokens_are_not_reported () =
   let prompt =
@@ -133,13 +135,13 @@ let test_case_insensitive_resolution () =
 (* ── strip_unresolved_tool_tokens (registry-driven sanitization) ── *)
 
 let test_strip_removes_unresolved_lowercase_token () =
-  (* A stale/removed lowercase tool name is dropped (its chars removed,
-     surrounding text untouched) so the model never sees it as a callable
-     tool; a resolving tool in the same text is preserved. *)
+  (* A stale/removed lowercase tool name is replaced with a placeholder so
+     the model never sees it as a callable tool and the sentence keeps its
+     shape; a resolving tool in the same text is preserved. *)
   let text = "First call masc_p0_3_dead_gadget then keeper_board_post." in
   Alcotest.(check string)
-    "dead token removed, resolved tool kept"
-    "First call  then keeper_board_post."
+    "dead token replaced, resolved tool kept"
+    "First call <stale_tool_token> then keeper_board_post."
     (Scanner.strip_unresolved_tool_tokens text)
 
 let test_strip_keeps_env_var_shaped_token () =
@@ -155,6 +157,18 @@ let test_strip_is_identity_when_all_resolve () =
   Alcotest.(check string)
     "no change when every token resolves" text
     (Scanner.strip_unresolved_tool_tokens text)
+
+let test_strip_emits_stripped_metric () =
+  (* When [~keeper_name] is supplied, each replaced token increments
+     [masc_keeper_prompt_token_stripped_total] with the tool dimension so
+     the strip action remains observable even though the text was sanitized. *)
+  let text = "Run masc_p0_3_dead_gadget and keeper_p0_3_dead_tool now." in
+  let before = total_stripped () in
+  let _ = Scanner.strip_unresolved_tool_tokens ~keeper_name:keeper text in
+  Alcotest.(check (float 0.0001))
+    "stripped metric +2 for two distinct dead tools"
+    (before +. 2.0)
+    (total_stripped ())
 
 let () =
   Alcotest.run "keeper_prompt_token_integrity_p0_3"
@@ -179,11 +193,13 @@ let () =
         ] );
       ( "sanitization",
         [
-          Alcotest.test_case "strip removes unresolved lowercase token" `Quick
+          Alcotest.test_case "strip replaces unresolved lowercase token" `Quick
             test_strip_removes_unresolved_lowercase_token;
           Alcotest.test_case "strip keeps env-var-shaped token" `Quick
             test_strip_keeps_env_var_shaped_token;
           Alcotest.test_case "strip is identity when all resolve" `Quick
             test_strip_is_identity_when_all_resolve;
+          Alcotest.test_case "strip emits stripped metric" `Quick
+            test_strip_emits_stripped_metric;
         ] );
     ]

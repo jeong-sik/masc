@@ -3,6 +3,7 @@ import type { ComponentChildren, VNode } from 'preact'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
+import { highlightCodeHtml } from '../common/shiki-highlighter'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
@@ -387,6 +388,10 @@ function sanitizeHtml(raw: string): string {
   return DOMPurify.sanitize(raw)
 }
 
+function sanitizeSvg(raw: string): string {
+  return DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true } })
+}
+
 function renderInlineHtml(raw: string): { __html: string } {
   return { __html: sanitizeHtml(linkifyHtml(raw)) }
 }
@@ -540,12 +545,8 @@ function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html:
     let cancelled = false
     const run = async () => {
       try {
-        const shiki = await import('shiki')
         const text = codeBlockText(htmlContent, source)
-        const next = await shiki.codeToHtml(text, {
-          lang: cap && cap.trim() ? cap.trim() : 'text',
-          theme: 'github-dark',
-        })
+        const next = await highlightCodeHtml(text, cap && cap.trim() ? cap.trim() : 'text')
         if (!cancelled) setHighlighted(next)
       } catch {
         if (!cancelled) setFailed(true)
@@ -785,7 +786,7 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
 
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
   const [open, setOpen] = useState(false)
-  const clean = useMemo(() => sanitizeHtml(svg), [svg])
+  const clean = useMemo(() => sanitizeSvg(svg), [svg])
   return html`
     <figure class="chat-block-media" data-chat-block="svg">
       <div
@@ -837,7 +838,7 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
     <figure class="chat-block-media" data-chat-block="mermaid">
       <div class="chat-block-mermaid">
         ${svg
-          ? html`<div dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
+          ? html`<div dangerouslySetInnerHTML=${{ __html: sanitizeSvg(svg) }} />`
           : html`<div class="chat-block-media-ph">다이어그램 렌더링 중…</div>`}
       </div>
       ${caption ? html`<figcaption class="chat-block-media-cap">${caption}</figcaption>` : null}

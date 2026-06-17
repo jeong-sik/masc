@@ -11,12 +11,15 @@ import { tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
 import { KeeperWorkspaceRecentTools } from './keeper-workspace-tool-calls'
+import { callMcpTool } from '../../api/mcp'
+import { showToast } from '../common/toast'
+import { asNumber, asString, isRecord } from '../common/normalize'
+import { formatDuration } from '../../lib/format-time'
 
 const COMPACT_AT = 85 // auto-compaction threshold (%) — matches runtime default
 
-function contextPercent(keeper: Keeper, liveOverride: number | null): number {
-  const base = keeper.context_ratio ?? keeper.context?.context_ratio ?? 0
-  const ratio = liveOverride ?? base
+function contextPercent(keeper: Keeper): number {
+  const ratio = keeper.context_ratio ?? keeper.context?.context_ratio ?? 0
   return Math.max(0, Math.min(100, Math.round(ratio * 100)))
 }
 
@@ -80,26 +83,23 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   `
 }
 
-type CompactionCounts = { tok: number; msgs: number; traces: number }
-
 type CompactionSnapshot = {
   id: string
   at: string
   trigger: string
-  runtime: string | null
-  before: CompactionCounts
-  after: CompactionCounts
-  kept: string[]
-  summarized: string[]
-  dropped: string[]
+  phase: string | null
+  beforeTokens: number
+  afterTokens: number
+  savedTokens: number
 }
-
-const DEFAULT_KEPT = ['활성 태스크 소유권·상태', '직전 3턴 원문', 'namespace 스냅샷']
-const DEFAULT_SUMMARIZED = ['초기 분석 turn → 핵심 결론 1줄 요약', '도구 호출 로그 → 성공/실패 집계만 보존']
-const DEFAULT_DROPPED = ['중복된 사고(thinking) 블록', '취소된 후보 경로 trace']
 
 function nowHM(): string {
   return new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+function formatAgo(seconds: number | null | undefined): string | null {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return null
+  return `${formatDuration(seconds)} 전`
 }
 
 type CompactButtonState = 'idle' | 'busy' | 'done'
@@ -120,24 +120,21 @@ function SnapshotList({ snapshots }: { snapshots: CompactionSnapshot[] }): VNode
     <div class="kw-cmp-list">
       <h5>컴팩션 스냅샷</h5>
       ${snapshots.map(s => {
-        const reduction = Math.round((1 - s.after.tok / s.before.tok) * 100)
+        const reduction = s.beforeTokens > 0
+          ? Math.round((1 - s.afterTokens / s.beforeTokens) * 100)
+          : 0
         return html`
           <div class="kw-cmp-snap" key=${s.id}>
             <div class="kw-cmp-snap-h">
-              <span class="kw-cmp-snap-id">${s.id}</span>
-              <span class="kw-cmp-snap-at">${s.at}</span>
+              <span class="kw-cmp-snap-id">${s.at}</span>
+              ${s.phase ? html`<span class="kw-cmp-snap-phase">${s.phase}</span>` : null}
               <span class="kw-cmp-snap-reduction">-${reduction}%</span>
             </div>
             <div class="kw-cmp-snap-stats">
-              <span>tok ${formatK(s.before.tok)}→${formatK(s.after.tok)}</span>
-              <span>msg ${s.before.msgs}→${s.after.msgs}</span>
-              <span>trace ${s.before.traces}→${s.after.traces}</span>
+              <span>${formatK(s.beforeTokens) ?? '—'} → ${formatK(s.afterTokens) ?? '—'} tok</span>
+              <span>절약 ${formatK(s.savedTokens) ?? '—'} tok</span>
             </div>
-            <div class="kw-cmp-snap-lists">
-              <div><b>유지</b> ${s.kept.join(', ')}</div>
-              <div><b>요약</b> ${s.summarized.join(', ')}</div>
-              <div><b>폐기</b> ${s.dropped.join(', ')}</div>
-            </div>
+            <div class="kw-cmp-snap-trigger text-2xs text-[var(--color-fg-muted)]">${s.trigger}</div>
           </div>
         `
       })}
@@ -146,54 +143,60 @@ function SnapshotList({ snapshots }: { snapshots: CompactionSnapshot[] }): VNode
 }
 
 function ContextSection({ keeper }: { keeper: Keeper }): VNode {
-  const [liveRatio, setLiveRatio] = useState<number | null>(null)
   const [snapshots, setSnapshots] = useState<CompactionSnapshot[]>([])
   const [compactState, setCompactState] = useState<CompactButtonState>('idle')
 
   useEffect(() => {
-    setLiveRatio(null)
     setSnapshots([])
     setCompactState('idle')
   }, [keeper.name])
 
-  const pct = contextPercent(keeper, liveRatio)
+  const pct = contextPercent(keeper)
   const hot = pct >= COMPACT_AT
   const max = contextMax(keeper)
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
-  const effTokens = liveRatio != null && max != null ? Math.round(liveRatio * max) : baseTokens
-  const tokens = formatK(effTokens)
+  const tokens = formatK(baseTokens)
   const maxLabel = formatK(max)
+  const msgCount = keeper.context?.message_count ?? null
+  const hasCheckpoint = keeper.context?.has_checkpoint ?? null
+  const contextSource = keeper.context_source ?? keeper.context?.source ?? null
+  const compactionCount = keeper.compaction_count ?? null
+  const lastCompactionAgo = formatAgo(keeper.last_compaction_ago_s)
+  const lastCompactionSaved = formatK(keeper.last_compaction_saved_tokens)
 
-  const runCompact = useCallback(() => {
+  const runCompact = useCallback(async () => {
     if (compactState === 'busy') return
     setCompactState('busy')
-    window.setTimeout(() => {
-      const currentRatio = liveRatio ?? (keeper.context_ratio ?? keeper.context?.context_ratio ?? 0)
-      const afterRatio = Math.max(0.16, +(currentRatio * (0.36 + Math.random() * 0.1)).toFixed(3))
-      const contextMaxValue = max ?? 200_000
-      const bTok = Math.round(currentRatio * contextMaxValue)
-      const aTok = Math.round(afterRatio * contextMaxValue)
-      const bMsg = Math.max(8, Math.round(currentRatio * 120))
-      const aMsg = Math.max(4, Math.round(bMsg * 0.45))
-      const bTr = Math.max(3, Math.round(currentRatio * 24))
-      const aTr = Math.max(1, Math.round(bTr * 0.4))
+    try {
+      const text = await callMcpTool('masc_keeper_compact', { name: keeper.name })
+      let parsed: unknown = null
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        parsed = null
+      }
+      const record = isRecord(parsed) ? parsed : null
+      const beforeTokens = asNumber(record?.before_tokens) ?? 0
+      const afterTokens = asNumber(record?.after_tokens) ?? 0
+      const savedTokens = asNumber(record?.saved_tokens) ?? Math.max(0, beforeTokens - afterTokens)
       const snapshot: CompactionSnapshot = {
         id: `cmp-${Date.now()}`,
         at: nowHM(),
-        trigger: '수동 — operator 요청 (지금 컴팩트)',
-        runtime: keeper.runtime_canonical ?? null,
-        before: { tok: bTok, msgs: bMsg, traces: bTr },
-        after: { tok: aTok, msgs: aMsg, traces: aTr },
-        kept: [...DEFAULT_KEPT],
-        summarized: [...DEFAULT_SUMMARIZED],
-        dropped: [...DEFAULT_DROPPED],
+        trigger: asString(record?.trigger) ?? '수동 컴팩트',
+        phase: asString(record?.phase) ?? null,
+        beforeTokens,
+        afterTokens,
+        savedTokens,
       }
       setSnapshots(prev => [snapshot, ...prev])
-      setLiveRatio(afterRatio)
       setCompactState('done')
       window.setTimeout(() => setCompactState('idle'), 2600)
-    }, 1500)
-  }, [compactState, keeper.context_ratio, keeper.context?.context_ratio, keeper.runtime_canonical, liveRatio, max])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '컴팩트 요청 실패'
+      showToast(message, 'error')
+      setCompactState('idle')
+    }
+  }, [compactState, keeper.name])
 
   return html`
     <div class="kw-sec v2-monitoring-panel">
@@ -217,8 +220,16 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
               <span class="lbl">사용 / 전체 윈도우</span>
             </div>`
           : null}
+        <div class="mt-2 grid grid-cols-2 gap-2 text-2xs text-[var(--color-fg-secondary)]">
+          ${msgCount !== null ? html`<span>메시지 ${msgCount}개</span>` : null}
+          ${hasCheckpoint === true ? html`<span>체크포인트 보유</span>` : null}
+          ${contextSource ? html`<span>출처 ${contextSource}</span>` : null}
+          ${compactionCount !== null ? html`<span>누적 컴팩트 ${compactionCount}회</span>` : null}
+          ${lastCompactionAgo ? html`<span>마지막 컴팩트 ${lastCompactionAgo}</span>` : null}
+          ${lastCompactionSaved ? html`<span>절약 ${lastCompactionSaved} tok</span>` : null}
+        </div>
         <div class="kw-cmp-actions">
-          <${CompactButton} state=${compactState} onClick=${runCompact} />
+          <${CompactButton} state=${compactState} onClick=${() => { void runCompact() }} />
         </div>
         <${SnapshotList} snapshots=${snapshots} />
       </div>

@@ -371,7 +371,7 @@ let handle_tool_execute_typed
           if stream_dispatch
           then (
             try
-              !Keeper_keepalive_signal.record_execute_stream_start_callback
+              Keeper_keepalive_signal.record_execute_stream_start
                 ~keeper_name:meta.name
                 ~task_id
             with
@@ -390,7 +390,7 @@ let handle_tool_execute_typed
                 | `Stderr s -> `Stderr, s
               in
               try
-                !Keeper_keepalive_signal.record_execute_stream_chunk_callback
+                Keeper_keepalive_signal.record_execute_stream_chunk
                   ~keeper_name:meta.name
                   ~stream
                   data
@@ -532,7 +532,7 @@ let handle_tool_execute_typed
             if stream_dispatch
             then (
               try
-                !Keeper_keepalive_signal.record_execute_stream_end_callback
+                Keeper_keepalive_signal.record_execute_stream_end
                   ~keeper_name:meta.name
                   ~task_id
                   ~status:status_json
@@ -544,7 +544,7 @@ let handle_tool_execute_typed
                   meta.name
                   (Printexc.to_string exn));
             (try
-               !Keeper_keepalive_signal.record_execute_output_callback
+               Keeper_keepalive_signal.record_execute_output
                  ~keeper_name:meta.name
                  ~task_id
                  ~stdout:result.stdout

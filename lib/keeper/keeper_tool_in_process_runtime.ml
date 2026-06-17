@@ -415,8 +415,12 @@ let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
 
    TEL-OK: descriptor projection — telemetry lives in [Tool_shard.execute]
    and the upstream [Keeper_tool_dispatch_runtime] dispatch wrapper. *)
-let dashboard_surface_readiness_callback = ref (fun ?surface_id:_ () -> `Assoc [])
-let register_dashboard_surface_readiness fn = dashboard_surface_readiness_callback := fn
+let dashboard_surface_readiness_callback
+    : (?surface_id:string -> unit -> Yojson.Safe.t) Atomic.t
+  =
+  Atomic.make (fun ?surface_id:_ () -> `Assoc [])
+
+let register_dashboard_surface_readiness fn = Atomic.set dashboard_surface_readiness_callback fn
 
 (* RFC-0182 §3.1 — masc_surface_audit singleton.  Body is pure
    ([Dashboard_surface_readiness.json ?surface_id ()]) with no ctx
@@ -426,7 +430,7 @@ let register_dashboard_surface_readiness fn = dashboard_surface_readiness_callba
    [Dashboard_surface_readiness]. *)
 let handle_masc_surface_audit ~args =
   let surface_id = Safe_ops.json_string_opt "surface_id" args in
-  Yojson.Safe.to_string (!dashboard_surface_readiness_callback ?surface_id ())
+  Yojson.Safe.to_string (Atomic.get dashboard_surface_readiness_callback ?surface_id ())
 ;;
 
 (* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/

@@ -11,11 +11,13 @@ open Keeper_keepalive
 
 type tool_result = Keeper_types_profile.tool_result
 
-let remove_pending_confirms_by_target_callback =
-  ref (fun _config ~target_type:_ ~target_id:_ -> 0)
+let remove_pending_confirms_by_target_callback
+    : (Workspace.config -> target_type:string -> target_id:string option -> int) Atomic.t
+  =
+  Atomic.make (fun _config ~target_type:_ ~target_id:_ -> 0)
 
 let register_remove_pending_confirms_by_target fn =
-  remove_pending_confirms_by_target_callback := fn
+  Atomic.set remove_pending_confirms_by_target_callback fn
 
 let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
@@ -34,7 +36,7 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
     | Ok None -> tool_result_ok (Printf.sprintf "keeper already absent: %s" requested_name)
     | Ok (Some (name, m)) ->
       let pending_confirms_removed =
-        (!remove_pending_confirms_by_target_callback) config
+        Atomic.get remove_pending_confirms_by_target_callback config
           ~target_type:"keeper" ~target_id:(Some name)
       in
       Log.Misc.info

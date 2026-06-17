@@ -65,16 +65,21 @@ type pair_result =
 let store_base_dir base_path =
   Filename.concat base_path "data/harness-compact"
 
-(* One store per process. Keeps Dated_jsonl's mutex alive for append safety. *)
-let store_ref : Dated_jsonl.t option ref = ref None
+(* One store per process. Keeps Dated_jsonl's mutex alive for append safety.
+   Stored under Atomic.t so concurrent fibers/domains do not race on the lazy
+   initialisation of the store handle. *)
+let store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 
 let get_store base_path =
-  match !store_ref with
-  | Some s when String.equal (Dated_jsonl.base_dir s) (store_base_dir base_path) -> s
-  | _ ->
-    let s = Dated_jsonl.create ~base_dir:(store_base_dir base_path) () in
-    store_ref := Some s;
-    s
+  let expected_dir = store_base_dir base_path in
+  let rec ensure () =
+    match Atomic.get store_ref with
+    | Some s when String.equal (Dated_jsonl.base_dir s) expected_dir -> s
+    | old ->
+      let s = Dated_jsonl.create ~base_dir:expected_dir () in
+      if Atomic.compare_and_set store_ref old (Some s) then s else ensure ()
+  in
+  ensure ()
 
 (* ── ID synthesis ──────────────────────────────────────────────── *)
 

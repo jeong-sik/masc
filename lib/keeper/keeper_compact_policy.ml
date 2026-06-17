@@ -22,11 +22,29 @@ type pre_compact_event = {
   trigger : Compaction_trigger.t;
 }
 
-let record_pre_compact_callback : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option) ref =
-  ref (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
+let record_pre_compact_callback_atomic
+    : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option)
+      Atomic.t
+  =
+  Atomic.make
+    (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
+;;
 
-let register_record_pre_compact (f : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option)) =
-  record_pre_compact_callback := f
+let record_pre_compact_callback = Atomic.get record_pre_compact_callback_atomic
+
+let register_record_pre_compact
+    (f :
+       keeper_name:string
+       -> context_ratio:float
+       -> message_count:int
+       -> token_count:int
+       -> strategies:string list
+       -> context_window:int
+       -> is_local_model:bool
+       -> trigger:Compaction_trigger.t
+       -> pre_compact_event option)
+  =
+  Atomic.set record_pre_compact_callback_atomic f
 ;;
 
 (** Fraction of context window at which compaction is treated as an
@@ -260,7 +278,7 @@ let compact_if_needed_typed
        future revision adds throwing observability calls here, wrap them. *)
     let pre_compact_event =
       try
-        !record_pre_compact_callback
+        Atomic.get record_pre_compact_callback_atomic
           ~keeper_name:meta.name
           ~context_ratio:ratio
           ~message_count:msg_count

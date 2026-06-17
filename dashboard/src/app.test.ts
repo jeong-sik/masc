@@ -28,7 +28,7 @@ describe('App v2 header chrome', () => {
     renderApp()
     const app = container.querySelector('.v2-app')
     expect(app).not.toBeNull()
-    expect(app?.getAttribute('data-shell-theme')).toBe('styleseed')
+    expect(app?.getAttribute('data-theme')).toBe('styleseed')
     expect(app?.getAttribute('data-density')).toBe('regular')
     expect(app?.getAttribute('data-motion')).toBe('subtle')
     expect(app?.getAttribute('data-bubble')).toBe('card')

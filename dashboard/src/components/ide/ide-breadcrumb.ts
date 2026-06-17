@@ -85,7 +85,8 @@ export function IdeBreadcrumb() {
       role="navigation"
       aria-label="File breadcrumb"
       data-testid="ide-breadcrumb"
-      class="ide-breadcrumb v2-ide-toolbar flex items-center gap-1.5 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] px-3 py-1 font-mono text-2xs"
+<<<<<<< HEAD
+      class="ide-breadcrumb v2-ide-toolbar ide-v2-crumb flex items-center gap-1.5 border-b border-[var(--color-border-divider)] bg-[var(--color-bg-elevated)] px-3 py-1 font-mono text-2xs"
     >
       <span aria-hidden="true" style=${{ fontSize: '12px', lineHeight: '16px' }}>${icon}</span>
       <span
@@ -95,7 +96,7 @@ export function IdeBreadcrumb() {
         ${segments.map((seg, i) => html`
           ${i > 0 ? html`<span class="text-[var(--color-fg-disabled)]">/</span>` : null}
           <span
-            class=${i === segments.length - 1 ? 'text-[var(--color-fg-primary)]' : ''}
+            class=${`seg ${i === segments.length - 1 ? 'last' : ''} ${i === segments.length - 1 ? 'text-[var(--color-fg-primary)]' : ''}`}
             style=${{ whiteSpace: 'nowrap' }}
           >${seg}</span>
         `)}

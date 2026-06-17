@@ -352,6 +352,14 @@ let of_string raw =
     match known_of_string name with
     | Some k ->
       Ok { name; risk = risk_of_known k; kind = kind_of_known k; known = Some k }
+    | None when String.starts_with ~prefix:"mkfs." name ->
+      (* The [mkfs.<fstype>] family (mkfs.ext4, mkfs.xfs, mkfs.vfat, ...) is the
+         util-linux / fs-tools naming convention for filesystem-format helpers.
+         Every member is catastrophic-by-identity like bare [mkfs] (RFC-0254
+         §5.3 floor), so recognize the family structurally: an enumerated set
+         would let a new fstype helper silently bypass the floor. The recorded
+         [name] stays the real binary so the deny diagnostic is accurate. *)
+      Ok { name; risk = risk_of_known Mkfs; kind = kind_of_known Mkfs; known = Some Mkfs }
     | None ->
       (* Unknown binary -> Privileged per RFC v5 fail-closed rule. *)
       Ok { name; risk = `Privileged; kind = `Privileged_program; known = None })

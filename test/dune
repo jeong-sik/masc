@@ -109,6 +109,7 @@
   test_tool_assignment_telemetry
   test_dashboard_link_preview
   test_gate_keeper_backend
+  test_copilot_dock_channel_wiring
   test_transport_read_model
   test_multi_workspace
   test_worktree_detection
@@ -399,6 +400,7 @@
   test_tool_assignment_telemetry
   test_dashboard_link_preview
   test_gate_keeper_backend
+  test_copilot_dock_channel_wiring
   test_transport_read_model
   test_multi_workspace
   test_worktree_detection
@@ -1434,6 +1436,8 @@
 
 (include stanzas/test_exec_policy_path_arg_descriptor.inc)
 
+(include stanzas/test_exec_policy_gh_endpoint_jail.inc)
+
 (include stanzas/test_export_symbol_graph.inc)
 
 (include stanzas/test_feature_flag_registry.inc)
@@ -2171,4 +2175,11 @@
 (test
  (name test_keeper_immutable_state_refactor)
  (modules test_keeper_immutable_state_refactor)
+ (libraries masc_test_deps masc.runtime))
+
+; Event-bus concurrency regression tests (S1–S3).
+
+(test
+ (name test_keeper_unified_turn_event_bus)
+ (modules test_keeper_unified_turn_event_bus)
  (libraries masc_test_deps masc.runtime))

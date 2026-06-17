@@ -168,6 +168,50 @@ describe('streamKeeperMessage', () => {
     expect(events).toEqual(['RUN_FINISHED'])
   })
 
+  it('forwards copilot context fields to the stream endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const events: string[] = []
+    await streamKeeperMessage('sangsu', 'ping', {
+      onEvent: event => {
+        events.push(event.type)
+      },
+      channel: 'copilot',
+      channelWorkspaceId: 'session-7',
+      turnInstructions: 'focus on overview',
+      surfaceContext: {
+        label: 'Overview',
+        route: '/overview',
+        scene: 'fleet view',
+        fields: [{ k: 'run', v: '2/5' }],
+      },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({
+      name: 'sangsu',
+      message: 'ping',
+      direct_reply: true,
+      channel: 'copilot',
+      channel_workspace_id: 'session-7',
+      turn_instructions: 'focus on overview',
+      surface_context: {
+        label: 'Overview',
+        route: '/overview',
+        scene: 'fleet view',
+        fields: [{ k: 'run', v: '2/5' }],
+      },
+    })
+    expect(events).toEqual(['RUN_FINISHED'])
+  })
+
   const stubStaleToken = () => {
     window.sessionStorage.setItem('masc_bearer_token', 'stale-token')
     window.sessionStorage.setItem(

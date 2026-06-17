@@ -696,3 +696,32 @@ html:not([data-theme="paper"]) {
   --font-display: "Cinzel", "Noto Sans KR", "EB Garamond", serif;
   --font-body: "EB Garamond", "Noto Sans KR", Georgia, serif;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   Desktop type-scale bump (approved 2026-06-17)
+
+   The canonical @theme scale (tokens.generated.css) tops out at base 14px /
+   sm 13px, which reads too small on the keeper-v2 surfaces. The token
+   generator (design-system/tokens/build.ts) is absent, so the generated file
+   can't be regenerated — bump the scale here at :root instead (variables.css
+   loads after tokens.generated.css). Scoped to desktop so the mobile
+   scale-down in responsive.css stays authoritative on small screens. The
+   --fs-* aliases above follow --font-size-* via var(); --type-* composites
+   use the numeric --fs-9..56 ladder, bumped in parallel. Aligns with RFC-0253
+   (dashboard keeper-v2 token scale).
+   ══════════════════════════════════════════════════════════════ */
+@media (min-width: 769px) {
+  :root {
+    --font-size-3xs: 12px;
+    --font-size-2xs: 13px;
+    --font-size-xs:  14px;
+    --font-size-sm:  15px;
+    --font-size-base: 16px;
+    --font-size-md:  17px;
+    --font-size-lg:  18px;
+
+    --fs-9:  11px; --fs-10: 12px; --fs-11: 13px; --fs-12: 14px;
+    --fs-13: 15px; --fs-14: 16px; --fs-16: 18px; --fs-20: 22px;
+    --fs-28: 30px; --fs-36: 38px; --fs-56: 58px;
+  }
+}

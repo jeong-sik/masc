@@ -264,6 +264,14 @@
  (name poc_shell_ir_gen)
  (modules poc_shell_ir_gen))
 
+;; Offline Shell IR pipeline probe — read-only. Feeds a command string through
+;; parse / command-gate / capabilities / approval verdict / path-jail and prints
+;; each layer's outcome. Dev/test tool: run via `dune exec bin/masc_shell_ir_probe.exe`.
+(executable
+ (name masc_shell_ir_probe)
+ (modules masc_shell_ir_probe)
+ (libraries masc.masc_exec masc.exec_policy masc.masc_exec_command_gate))
+
 ; RFC-0054 PR-3 — production codegen for lib/exec/shell_ir_typed.ml.
 ; Hardcoded 9-constructor spec mirrors shell_ir_typed.{ml,mli} order.
 ; Stdlib-only — no ppxlib, no AST manipulation. Output goes through

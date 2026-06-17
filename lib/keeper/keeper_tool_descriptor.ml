@@ -792,10 +792,10 @@ let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = fals
 ;;
 
 let write_in_process_policy ?(retryable = false) ?(inline_safe = false)
-      ?(maintenance_only = false) ()
+      ?(maintenance_only = false) ?(visibility = Tool_catalog.Hidden) ()
   =
   policy
-    ~visibility:Tool_catalog.Hidden
+    ~visibility
     ~readonly:false
     ~effect_domain:Tool_catalog.Playground_write
     ~approval:No_approval
@@ -1176,7 +1176,12 @@ let internal_descriptors : t list =
          chat lane (also visible in the dashboard). Returns a status with a \
          run_id. Gated by runtime.toml [fusion] (disabled by default)."
       ~input_schema:masc_fusion_schema
-      ~policy:(write_in_process_policy ())
+      (* RFC-0252 §159/§177: 심의 가치는 키퍼(이미 LLM)가 스스로 판단해
+         masc_fusion 을 직접 호출하는 것으로 표현된다. 따라서 키퍼가 LLM 도구
+         목록에서 이 도구를 볼 수 있어야 한다 → visibility=Default. 다른
+         in-process write 도구의 기본값(Hidden, playground_write 공통)을 그대로
+         쓰면 키퍼가 도구를 못 봐 자율 호출이 불가능해 RFC 의도와 모순된다. *)
+      ~policy:(write_in_process_policy ~visibility:Tool_catalog.Default ())
       ~handler:Tool_masc_fusion_dispatch
     (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
   ; voice_descriptor

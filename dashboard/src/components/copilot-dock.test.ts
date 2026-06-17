@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor, fireEvent } from '@testing-library/preact'
 import {
@@ -34,6 +34,8 @@ describe('CopilotDock', () => {
     container.remove()
     globalShortcutManager.unregisterAll('copilot-dock.')
     try { window.localStorage.removeItem('dashboard:copilot-dock') } catch { /* noop */ }
+    vi.unstubAllGlobals()
+    vi.clearAllMocks()
   })
 
   function DockHarness({ dock }: { dock: ReturnType<typeof useCopilotDock> }) {
@@ -142,7 +144,36 @@ describe('CopilotDock', () => {
     expect(coview?.textContent).toContain('/connectors/connector-status')
   })
 
+  function sseResponse(events: unknown[]) {
+    const encoder = new TextEncoder()
+    const payload = events
+      .map(e => `data: ${JSON.stringify(e)}\n\n`)
+      .join('')
+    return new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(payload))
+          controller.close()
+        },
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      },
+    )
+  }
+
   it('sends a message and shows a streaming reply', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        { type: 'TEXT_MESSAGE_START', role: 'Assistant', messageId: 'm1' },
+        { type: 'TEXT_MESSAGE_CONTENT', delta: '안녕하세요' },
+        { type: 'TEXT_MESSAGE_END' },
+        { type: 'RUN_FINISHED' },
+      ]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
     const dock = renderDock()
     dock.open()
     await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-textarea"]')).not.toBeNull())
@@ -155,6 +186,39 @@ describe('CopilotDock', () => {
 
     await waitFor(() => expect(container.querySelectorAll('[data-dock-message="user"]').length).toBe(1))
     await waitFor(() => expect(container.querySelectorAll('[data-dock-message="assistant"]').length).toBe(1), { timeout: 3000 })
+
+    const assistant = container.querySelector('[data-dock-message="assistant"]')
+    expect(assistant?.textContent).toContain('안녕하세요')
+  })
+
+  it('posts copilot channel and surface context to the keeper stream', async () => {
+    window.history.replaceState({}, '', '/?agent=dashboard-eager-manta')
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([{ type: 'RUN_FINISHED' }]),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-textarea"]')).not.toBeNull())
+
+    const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: '요약해줘' } })
+
+    const sendBtn = container.querySelector('.dock-send') as HTMLButtonElement
+    sendBtn.click()
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(String(init.body))
+    expect(body.channel).toBe('copilot')
+    expect(body.channel_workspace_id).toBe('dashboard-eager-manta')
+    expect(body.surface_context).toMatchObject({
+      label: expect.any(String),
+      route: '/overview',
+      scene: expect.any(String),
+      fields: expect.any(Array),
+    })
   })
 
   it('switches keeper via picker', async () => {

@@ -473,6 +473,68 @@ describe('ChatTranscript', () => {
     expect(audio?.getAttribute('src')).toBe('/api/v1/voice/audio/clip-1')
     expect(container.textContent).toContain('0:05')
   })
+
+  it('shows the audio caption and a load-error fallback', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'hello operator',
+            audio: {
+              token: 'clip-1',
+              audioUrl: null,
+              mime: 'audio/mpeg',
+              durationSec: null,
+              messageText: 'hello operator',
+              deviceId: null,
+            },
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const audio = container.querySelector('audio') as HTMLAudioElement | null
+    expect(audio).not.toBeNull()
+    expect(audio?.getAttribute('src')).toContain('/api/v1/voice/audio/clip-1')
+    expect(container.textContent).toContain('hello operator')
+    audio?.dispatchEvent(new Event('error', { bubbles: true }))
+    await flushUi()
+    expect(container.textContent).toContain('음성을 불러올 수 없습니다')
+  })
+
+  it('renders a real audio element inside a voice block when src is provided', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            blocks: [
+              { t: 'voice', secs: 5, wave: [0.2, 0.5], src: 'https://example.com/voice.mp3', transcript: 'note' },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const voice = container.querySelector('[data-chat-block="voice"]')
+    expect(voice).not.toBeNull()
+    const audio = voice?.querySelector('audio')
+    expect(audio).not.toBeNull()
+    expect(audio?.getAttribute('src')).toBe('https://example.com/voice.mp3')
+    expect(voice?.querySelectorAll('.chat-block-vbar').length).toBe(2)
+  })
 })
 
 describe('ChatComposer queue & stall', () => {

@@ -403,9 +403,21 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
   return html`
     <div class="chat-block-voice" data-chat-block="voice">
       <div class="chat-block-voice-row">
-        <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
-          ${playing ? '❙❙' : '▶'}
-        </button>
+        ${b.src
+          ? html`
+              <audio
+                controls
+                preload="none"
+                src=${b.src}
+                class="h-8 max-w-[16rem]"
+                aria-label=${b.transcript || '음성 메시지'}
+              />
+            `
+          : html`
+              <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
+                ${playing ? '❙❙' : '▶'}
+              </button>
+            `}
         <div class="chat-block-voice-wave">
           ${bars.map((h, i) => html`
             <span
@@ -628,7 +640,7 @@ function ChatBlock({ block }: { block: ChatBlock }) {
     case 'shell': return html`<${ChatShellBlock} title=${block.title} lines=${block.lines} exit=${block.exit} dur=${block.dur} />`
     case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} />`
     case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
-    case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} />`
+    case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} src=${block.src} />`
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
     case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
@@ -723,24 +735,37 @@ function formatAudioDuration(seconds?: number | null): string {
 // RFC-0235 P1/P3: user-gesture play button for synthesized assistant
 // voice clips. Uses the native `<audio controls>` element (no autoplay).
 function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
+  const [loadError, setLoadError] = useState(false)
+  const fallbackPath = `/api/v1/voice/audio/${encodeURIComponent(clip.token)}`
+  const fallbackSrc = typeof window !== 'undefined'
+    ? new URL(fallbackPath, window.location.href).href
+    : fallbackPath
+  const audioSrc = clip.audioUrl ?? fallbackSrc
   const duration = formatAudioDuration(clip.durationSec)
   return html`
     <div
-      class="flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5"
+      class="flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1.5"
       data-chat-audio-clip
     >
       <audio
         controls
         preload="none"
-        src=${clip.audioUrl ?? `/api/v1/voice/audio/${encodeURIComponent(clip.token)}`}
+        src=${audioSrc}
         class="h-8 max-w-[16rem]"
         aria-label=${clip.messageText || '음성 메시지'}
+        onError=${() => { setLoadError(true) }}
       />
       ${duration
         ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${duration}</span>`
         : null}
       ${clip.deviceId
         ? html`<span class="text-2xs text-[var(--color-fg-muted)]" title=${`device: ${clip.deviceId}`}>🔊</span>`
+        : null}
+      ${clip.messageText
+        ? html`<span class="text-2xs text-[var(--color-fg-secondary)]">${clip.messageText}</span>`
+        : null}
+      ${loadError
+        ? html`<span class="text-2xs text-[var(--color-status-err)]">음성을 불러올 수 없습니다.</span>`
         : null}
     </div>
   `

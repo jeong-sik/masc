@@ -35,12 +35,14 @@ import {
 import { isVisibleDirectConversationEntry } from '../keeper-state'
 import {
   enqueueInput,
-  dequeueInput,
-  markInputSent,
   clearInputQueue,
   getQueueLength,
+  getQueuedMessages,
+  updateQueuedMessage,
+  removeQueuedMessage,
+  type QueuedMessage,
 } from '../keeper-chat-store'
-import { ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S } from './chat/primitives'
+import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
@@ -324,6 +326,91 @@ export function KeeperDiagnosticSummary({
   `
 }
 
+// ── Queued message editor (rendered inside the conversation panel) ──
+
+interface QueueItemCardProps {
+  keeperName: string
+  msg: QueuedMessage
+  onMutate: () => void
+}
+
+function QueueItemCard({ keeperName, msg, onMutate }: QueueItemCardProps) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(msg.content)
+  const [attachments, setAttachments] = useState(msg.attachments ?? [])
+
+  const save = () => {
+    updateQueuedMessage(keeperName, msg.id, {
+      content: text.trim(),
+      attachments: attachments.length > 0 ? attachments : undefined,
+    })
+    setEditing(false)
+    onMutate()
+  }
+
+  const cancel = () => {
+    setText(msg.content)
+    setAttachments(msg.attachments ?? [])
+    setEditing(false)
+  }
+
+  const removeAttachment = (id: string) => {
+    setAttachments(prev => prev.filter(a => a.id !== id))
+  }
+
+  return html`
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-2.5" data-chat-queue-item=${msg.id}>
+      ${editing
+        ? html`
+            <textarea
+              class="w-full min-h-[3.5rem] rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2.5 py-2 text-sm leading-relaxed text-[var(--color-fg-primary)] outline-none focus:border-[var(--color-accent-fg-dim)]"
+              value=${text}
+              onInput=${(e: Event) => { setText((e.target as HTMLTextAreaElement).value) }}
+            />
+            ${attachments.length > 0
+              ? html`
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    ${attachments.map(att => html`
+                      <${AttachDraftChip}
+                        key=${att.id}
+                        attachment=${att}
+                        onRemove=${() => { removeAttachment(att.id) }}
+                      />
+                    `)}
+                  </div>
+                `
+              : null}
+            <div class="mt-2 flex items-center justify-end gap-2">
+              <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${cancel}>취소</button>
+              <button type="button" class="rounded-[var(--r-0)] bg-[var(--color-accent-fg)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-bg-page)]" onClick=${save}>저장</button>
+            </div>
+          `
+        : html`
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm text-[var(--color-fg-primary)] whitespace-pre-wrap break-words">${msg.content}</div>
+                ${attachments.length > 0
+                  ? html`<div class="mt-1.5 flex flex-wrap gap-1.5">
+                      ${attachments.map(att => html`
+                        <span class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-1.5 py-0.5 text-2xs text-[var(--color-fg-secondary)]">
+                          <span>${att.type === 'image' ? '▣' : '◫'}</span>
+                          <span class="truncate max-w-[12rem]">${att.name}</span>
+                          <span class="tabular-nums">${formatAttachmentSize(att.size)}</span>
+                        </span>
+                      `)}
+                    </div>`
+                  : null}
+              </div>
+              <div class="flex items-center gap-1.5 flex-none">
+                <button type="button" class="text-2xs text-[var(--color-fg-secondary)] hover:text-[var(--color-fg-primary)]" onClick=${() => { setEditing(true) }}>수정</button>
+                <button type="button" class="text-2xs text-[var(--color-status-err)] hover:text-[var(--color-status-err)]" onClick=${() => { removeQueuedMessage(keeperName, msg.id); onMutate() }}>삭제</button>
+              </div>
+            </div>
+          `}
+    </div>
+  `
+}
+
 // ── Conversation Panel ───────────────────────────────────
 
 export function KeeperConversationPanel({
@@ -411,22 +498,23 @@ export function KeeperConversationPanel({
   }
 
   const drainQueue = async () => {
-    for (;;) {
-      const next = dequeueInput(keeperName)
-      if (!next) break
-      bumpQueue()
-      try {
-        await sendKeeperThreadMessage(keeperName, next.content, { attachments: next.attachments })
-      } catch (err) {
-        markInputSent(keeperName)
-        bumpQueue()
-        if (isAbortError(err)) return
-        const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
-        showToast(message, 'error')
-        return
-      }
-      markInputSent(keeperName)
-      bumpQueue()
+    const queued = getQueuedMessages(keeperName)
+    if (queued.length === 0) return
+    clearInputQueue(keeperName)
+    bumpQueue()
+
+    const batchedContent = queued.map(q => q.content.trim()).filter(Boolean).join('\n\n---\n\n')
+    const batchedAttachments = queued.flatMap(q => q.attachments ?? [])
+    if (!batchedContent && batchedAttachments.length === 0) return
+
+    try {
+      await sendKeeperThreadMessage(keeperName, batchedContent, {
+        attachments: batchedAttachments.length > 0 ? batchedAttachments : undefined,
+      })
+    } catch (err) {
+      if (isAbortError(err)) return
+      const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
+      showToast(message, 'error')
     }
   }
 
@@ -542,9 +630,19 @@ export function KeeperConversationPanel({
           <div class="kw-composer-inner v2-monitoring-panel">
             ${queueCount > 0
               ? html`
-                  <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
-                    <span>${queueCount}개 메시지 대기 중</span>
-                    <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
+                  <div class="mb-3 flex flex-col gap-2" data-chat-queue-list>
+                    <div class="flex items-center justify-between gap-2 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row" data-chat-queue-row>
+                      <span>${queueCount}개 메시지 대기 중</span>
+                      <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
+                    </div>
+                    ${getQueuedMessages(keeperName).map(msg => html`
+                      <${QueueItemCard}
+                        key=${msg.id}
+                        keeperName=${keeperName}
+                        msg=${msg}
+                        onMutate=${bumpQueue}
+                      />
+                    `)}
                   </div>
                 `
               : null}

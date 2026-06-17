@@ -25,6 +25,15 @@ import './styles/center.css'
 import './styles/base.css'
 import './styles/keyframes.css'
 
+/*
+ * EXPERIMENTAL: StyleSeed light theme — opt-in via data-theme='styleseed' on html
+ * These files define a self-contained StyleSeed-inspired token layer. Rules are
+ * scoped to [data-theme="styleseed"] so they have no effect on the default
+ * dark-fantasy / v2 surfaces unless the attribute is explicitly set.
+ */
+import './styles/styleseed-theme.css'
+import './styles/styleseed-base.css'
+
 // Global utilities and layout
 import './styles/global.css'
 import './styles/chat-blocks-v2.css'

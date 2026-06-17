@@ -1,30 +1,38 @@
 /* MASC Dashboard v2 — global theme bridge.
  *
- * Maps the legacy dashboard token ladder to the v5 Observatory dark-fantasy
- * palette so existing components pick up new colors without a full rewrite.
- * Paper theme remains opt-in via data-theme="paper".
+ * Maps the legacy dashboard token ladder to the _ds Dark-Fantasy palette so
+ * existing components pick up new colors without a full rewrite. This file is
+ * the LAST-loading theme layer (global.css), so its base values below are the
+ * effective surface/text/accent palette for the whole dashboard; everything
+ * else (--color-bg-page, --fg-*, soft/alpha slots, component tokens) derives
+ * from them via var(). Paper theme remains opt-in via data-theme="paper".
  *
- * Source: /Users/dancer/Downloads/v2/_ds/masc-design-system-a925c77f-042a-40f5-ac15-0675a4a58d3f/ui_kits/dashboard/styles/base.css
- *         /Users/dancer/Downloads/v2/_ds/masc-design-system-a925c77f-042a-40f5-ac15-0675a4a58d3f/colors_and_type.css
+ * Palette: _ds Dark Fantasy (visceral / decay-forward) — wet stone, blood-
+ * soaked wood, bone & bandage text. Status keeps the muted bile/ember/blood
+ * triad. Brass is the rare interactive/selection accent; blood (--accent-blood
+ * from ds-theme-tokens.css) carries emphasis/danger.
+ * Source: _ds .../colors_and_type.css + ui_kits/dashboard/styles/base.css
  */
 
 :root,
 [data-theme="dark-fantasy"] {
-  /* v5 dashboard surfaces */
-  --bg-ink:        #0a0e18;
-  --bg-velvet:     #0f1524;
-  --bg-card:       #131a2a;
-  --bg-card-soft:  #161d30;
-  --bg-raised:     #1a2238;
+  /* Dark-fantasy dashboard surfaces — 5-step warm-dark ramp */
+  --bg-ink:        #0a0706;   /* page — pitch with a red undertone */
+  --bg-velvet:     #14100d;   /* topbar / composer — rotted wood */
+  --bg-card:       #1b1612;   /* panel surface — card base */
+  --bg-card-soft:  #221815;   /* elevated card — bruised meat */
+  --bg-raised:     #2e211c;   /* hover / active row */
 
-  --border-soft:   rgba(120, 140, 180, 0.09);
-  --border:        rgba(120, 140, 180, 0.13);
-  --border-strong: rgba(140, 160, 200, 0.18);
+  /* Hairlines — scabbed, stitched leather (warm red-brown) */
+  --border-soft:   rgba(122, 70, 54, 0.14);
+  --border:        rgba(122, 70, 54, 0.24);
+  --border-strong: rgba(150, 90, 70, 0.36);
 
-  --text-bright:   #e8eef8;
-  --text-primary:  #b8c4dc;
-  --text-dim:      #5a6a88;
-  --text-faint:    #4a5a78;
+  /* Text — bone and bandage */
+  --text-bright:   #e8d8b8;   /* clean bone */
+  --text-primary:  #b8a488;   /* dirty bandage */
+  --text-dim:      #8a7560;   /* mold dust (lifted for WCAG on near-black) */
+  --text-faint:    #5a4a3c;
 
   --accent-brass:     #c4a265;
   --accent-brass-dim: #5a4618;

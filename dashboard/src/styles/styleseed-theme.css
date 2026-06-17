@@ -1,0 +1,99 @@
+/* ════════════════════════════════════════════════════════════════
+   StyleSeed light theme foundation
+   Opt-in only: set data-theme="styleseed" on <html>.
+   Does NOT override existing dark-fantasy / v2 tokens unless active.
+   ════════════════════════════════════════════════════════════════ */
+
+[data-theme="styleseed"] {
+  /* Brand accent — single key color; everything else grayscale */
+  --brand: #721FE5;
+
+  /* Background & surfaces */
+  --background: #FAFAFA;
+  --surface-page: #FAFAFA;
+  --card: #FFFFFF;
+  --surface-subtle: #FAFAF9;
+  --surface-muted: #E8E6E1;
+
+  /* Text hierarchy — no pure black */
+  --text-primary: #3C3C3C;
+  --text-secondary: #6B6B6B;
+  --text-tertiary: #9B9B9B;
+  --text-disabled: #BDBDBD;
+  --icon-default: #6B6B6B;
+
+  /* Status / UI colors */
+  --success: #6B9B7A;
+  --destructive: #D4183D;
+  --warning: #D97706;
+  --info: #3B82F6;
+
+  /* Borders */
+  --border: #E8E6E1;
+  --card-border: none;
+
+  /* Brand tint for selected rows / active surfaces */
+  --brand-tint: #F0E8FF;
+
+  /* Alert badge */
+  --alert-badge: #FF4444;
+
+  /* Shadows — low opacity, barely visible */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.08);
+  --shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-button: 0 1px 3px rgba(0, 0, 0, 0.06);
+
+  /* Shape */
+  --radius: 0.625rem;
+
+  /* Type stack — Inter for Latin, Pretendard for CJK */
+  --font-sans:
+    'Inter', 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ── Dark mode mapping ───────────────────────────────────────────
+   Card must be brighter than the page background.
+   Shadows are invisible in dark mode, so they are removed and card
+   edges rely on a subtle border instead. */
+[data-theme="styleseed"].dark,
+.dark [data-theme="styleseed"] {
+  /* Background levels */
+  --background: #121212;
+  --surface-page: #121212;
+  --card: #1E1E1E;
+  --surface-subtle: #252525;
+  --surface-muted: rgba(255, 255, 255, 0.08);
+
+  /* Text hierarchy — inverted */
+  --text-primary: #E0E0E0;
+  --text-secondary: #A0A0A0;
+  --text-tertiary: #808080;
+  --text-disabled: #555555;
+  --icon-default: #909090;
+
+  /* Brand & status — brightened */
+  --brand: #9B5FFF;
+  --success: #8FBF9A;
+  --destructive: #FF5C5C;
+  --warning: #FFB347;
+  --info: #64B5F6;
+
+  /* Border — subtle for dark card edges */
+  --border: rgba(255, 255, 255, 0.08);
+  --card-border: 1px solid rgba(255, 255, 255, 0.06);
+
+  /* Brand tint */
+  --brand-tint: rgba(155, 95, 255, 0.15);
+
+  /* Alert badge */
+  --alert-badge: #FF5C5C;
+
+  /* Shadows removed in dark mode */
+  --shadow-card: none;
+  --shadow-card-hover: none;
+  --shadow-elevated: none;
+  --shadow-modal: none;
+  --shadow-button: none;
+}

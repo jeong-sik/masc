@@ -86,12 +86,48 @@ let test_record_fsm_tool_transitions_is_pure () =
 let test_drain_cancel_exchange () =
   let open EB.For_testing in
   let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
-  check bool "cancel starts None" true (Option.is_none (get_drain_cancel t));
-  set_drain_cancel t (Some (Obj.magic 42));
-  check bool "cancel set" true (Option.is_some (get_drain_cancel t));
-  let taken = exchange_drain_cancel t None in
-  check bool "exchange returned old" true (Option.is_some taken);
-  check bool "cancel cleared" true (Option.is_none (get_drain_cancel t))
+  check
+    bool
+    "cancel starts Inactive"
+    true
+    (match get_drain_cancel t with Inactive -> true | _ -> false);
+  set_drain_cancel t (Active (Obj.magic 42));
+  check
+    bool
+    "cancel set"
+    true
+    (match get_drain_cancel t with Active _ -> true | _ -> false);
+  let taken = exchange_drain_cancel t Inactive in
+  check
+    bool
+    "exchange returned old Active"
+    true
+    (match taken with Active _ -> true | _ -> false);
+  check
+    bool
+    "cancel cleared to Inactive"
+    true
+    (match get_drain_cancel t with Inactive -> true | _ -> false)
+;;
+
+let test_unsubscribe_closes_lifecycle_before_fiber_claims () =
+  let open EB.For_testing in
+  let t = EB.create ~keeper_name:"k" ~turn_id:1 () in
+  (* Simulate [unsubscribe] running before a freshly-forked background fiber
+     reaches [Atomic.compare_and_set]. The lifecycle must be [Closed] so the
+     late fiber sees it and exits instead of leaking a polling loop. *)
+  set_drain_cancel t Closed;
+  check
+    bool
+    "lifecycle is Closed after unsubscribe"
+    true
+    (match get_drain_cancel t with Closed -> true | _ -> false);
+  let attempt = exchange_drain_cancel t (Active (Obj.magic 42)) in
+  check
+    bool
+    "late fiber exchange fails against Closed"
+    true
+    (match attempt with Closed -> true | _ -> false)
 ;;
 
 let test_state_pending_count_integrity_under_concurrent_updates () =
@@ -127,6 +163,8 @@ let () =
         ] )
     ; ( "drain-cancel"
       , [ test_case "atomic exchange" `Quick test_drain_cancel_exchange
+        ; test_case "unsubscribe closes lifecycle" `Quick
+            test_unsubscribe_closes_lifecycle_before_fiber_claims
         ] )
     ; ( "concurrency"
       , [ test_case "pure transitions under concurrent domains" `Quick

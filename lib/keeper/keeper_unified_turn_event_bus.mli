@@ -35,6 +35,11 @@ module For_testing : sig
     ; pending_tool_count : int
     }
 
+  type drain_cancel_state =
+    | Inactive
+    | Active of Eio.Cancel.t
+    | Closed
+
   val record_fsm_tool_transitions
     :  keeper_name:string
     -> turn_id:int
@@ -42,8 +47,15 @@ module For_testing : sig
     -> Agent_sdk.Event_bus.event list
     -> int * fsm_transition list
 
+  (** Test-only read accessor. *)
   val get_state : t -> event_bus_state
-  val get_drain_cancel : t -> Eio.Cancel.t option
-  val set_drain_cancel : t -> Eio.Cancel.t option -> unit
-  val exchange_drain_cancel : t -> Eio.Cancel.t option -> Eio.Cancel.t option
+
+  (** Test-only read accessor. *)
+  val get_drain_cancel : t -> drain_cancel_state
+
+  (** Test-only write accessor. No production caller. *)
+  val set_drain_cancel : t -> drain_cancel_state -> unit
+
+  (** Test-only write accessor. No production caller. *)
+  val exchange_drain_cancel : t -> drain_cancel_state -> drain_cancel_state
 end

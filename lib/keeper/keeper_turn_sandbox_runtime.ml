@@ -233,18 +233,27 @@ let retryable_eintr_status ~attempts_left st ~stdout ~stderr =
   | _ -> false
 ;;
 
+type chunk = [ `Stdout of string | `Stderr of string ]
+
+type guard_state = {
+  held_chunks : chunk list;
+  saw_retry_marker : bool;
+  pass_through : bool;
+  visible_flushed : bool;
+  marker_scan_tail : string;
+  release_scheduled : bool;
+  prefix_release_deferrals : int;
+  closed : bool;
+}
+
+type action =
+  | Emit of chunk
+  | Schedule_release
+
 type retry_stream_guard = {
   on_stdout_chunk : (string -> unit) option;
   on_stderr_chunk : (string -> unit) option;
-  held_chunks : [ `Stdout of string | `Stderr of string ] list ref;
-  mutable saw_retry_marker : bool;
-  mutable pass_through : bool;
-  mutable visible_flushed : bool;
-  mutable marker_scan_tail : string;
-  mutable release_scheduled : bool;
-  mutable prefix_release_deferrals : int;
-  mutable closed : bool;
-  mu : Stdlib.Mutex.t;
+  state : guard_state Atomic.t;
 }
 
 let retry_eintr_marker = "interrupted system call"
@@ -252,10 +261,16 @@ let retry_stream_guard_release_delay_sec = 0.2
 let retry_stream_guard_prefix_deferral_limit = 1
 let retry_eintr_marker_lower = String.lowercase_ascii retry_eintr_marker
 
-let with_retry_guard_lock guard f =
-  Stdlib.Mutex.lock guard.mu;
-  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock guard.mu) f
-;;
+let initial_guard_state = {
+  held_chunks = [];
+  saw_retry_marker = false;
+  pass_through = false;
+  visible_flushed = false;
+  marker_scan_tail = "";
+  release_scheduled = false;
+  prefix_release_deferrals = 0;
+  closed = false;
+}
 
 let retry_marker_tail text =
   let max_len = max 0 (String.length retry_eintr_marker - 1) in
@@ -279,11 +294,13 @@ let retry_marker_prefix_pending tail =
   loop max_len
 ;;
 
-let update_retry_marker_scan guard chunk =
-  let scan_text = guard.marker_scan_tail ^ chunk in
-  if String_util.contains_substring_ci scan_text retry_eintr_marker
-  then guard.saw_retry_marker <- true;
-  guard.marker_scan_tail <- retry_marker_tail scan_text
+let update_retry_marker_scan state chunk =
+  let scan_text = state.marker_scan_tail ^ chunk in
+  let saw_marker = String_util.contains_substring_ci scan_text retry_eintr_marker in
+  { state with
+    saw_retry_marker = state.saw_retry_marker || saw_marker;
+    marker_scan_tail = retry_marker_tail scan_text
+  }
 ;;
 
 let invoke_guard_output_callback f chunk =
@@ -298,57 +315,102 @@ let invoke_guard_output_callback f chunk =
       (Printexc.to_string exn)
 ;;
 
-let mark_guard_visible guard =
-  with_retry_guard_lock guard (fun () -> guard.visible_flushed <- true)
+let chunk_has_visible_callback ~on_stdout_chunk ~on_stderr_chunk = function
+  | `Stdout _ -> Option.is_some on_stdout_chunk
+  | `Stderr _ -> Option.is_some on_stderr_chunk
 ;;
 
 let emit_guard_chunk guard = function
   | `Stdout chunk ->
     (match guard.on_stdout_chunk with
      | None -> ()
-     | Some f ->
-       mark_guard_visible guard;
-       invoke_guard_output_callback f chunk)
+     | Some f -> invoke_guard_output_callback f chunk)
   | `Stderr chunk ->
     (match guard.on_stderr_chunk with
      | None -> ()
-     | Some f ->
-       mark_guard_visible guard;
-       invoke_guard_output_callback f chunk)
+     | Some f -> invoke_guard_output_callback f chunk)
 ;;
 
-let take_guard_held_chunks_locked guard =
-  let chunks = List.rev !(guard.held_chunks) in
-  guard.held_chunks := [];
-  chunks
+let perform_action guard = function
+  | Emit chunk -> emit_guard_chunk guard chunk
+  | Schedule_release -> ()
 ;;
 
-let emit_guard_chunks guard chunks = List.iter (emit_guard_chunk guard) chunks
-
-let guard_chunk_has_visible_callback guard = function
-  | `Stdout _ -> Option.is_some guard.on_stdout_chunk
-  | `Stderr _ -> Option.is_some guard.on_stderr_chunk
+let transition ~on_stdout_chunk ~on_stderr_chunk state chunk =
+  let text =
+    match chunk with
+    | `Stdout s -> s
+    | `Stderr s -> s
+  in
+  let state = update_retry_marker_scan state text in
+  if
+    state.pass_through
+    && not state.saw_retry_marker
+    && not (retry_marker_prefix_pending state.marker_scan_tail)
+  then
+    let visible_flushed =
+      state.visible_flushed
+      || chunk_has_visible_callback ~on_stdout_chunk ~on_stderr_chunk chunk
+    in
+    { state with visible_flushed }, [ Emit chunk ]
+  else
+    let held_chunks = chunk :: state.held_chunks in
+    let should_schedule =
+      (not state.release_scheduled)
+      && not state.closed
+      && not state.saw_retry_marker
+    in
+    let state =
+      { state with
+        held_chunks;
+        release_scheduled = state.release_scheduled || should_schedule
+      }
+    in
+    let actions = if should_schedule then [ Schedule_release ] else [] in
+    state, actions
 ;;
 
-let guard_release_chunks guard =
-  with_retry_guard_lock guard (fun () ->
-    guard.release_scheduled <- false;
-    if guard.closed || guard.saw_retry_marker
-    then [], false
-    else if
-      retry_marker_prefix_pending guard.marker_scan_tail
-      && guard.prefix_release_deferrals < retry_stream_guard_prefix_deferral_limit
-    then (
-      guard.prefix_release_deferrals <- guard.prefix_release_deferrals + 1;
-      guard.release_scheduled <- true;
-      [], true)
-    else (
-      guard.pass_through <- true;
-      guard.prefix_release_deferrals <- 0;
-      let chunks = take_guard_held_chunks_locked guard in
-      if List.exists (guard_chunk_has_visible_callback guard) chunks
-      then guard.visible_flushed <- true;
-      chunks, false))
+let release_transition ~on_stdout_chunk ~on_stderr_chunk state =
+  if state.closed || state.saw_retry_marker
+  then { state with release_scheduled = false }, []
+  else if
+    retry_marker_prefix_pending state.marker_scan_tail
+    && state.prefix_release_deferrals < retry_stream_guard_prefix_deferral_limit
+  then
+    ( { state with
+        prefix_release_deferrals = state.prefix_release_deferrals + 1;
+        release_scheduled = true }
+    , [] )
+  else
+    let chunks = List.rev state.held_chunks in
+    let visible_flushed =
+      state.visible_flushed
+      || List.exists (chunk_has_visible_callback ~on_stdout_chunk ~on_stderr_chunk) chunks
+    in
+    let state =
+      { state with
+        pass_through = true;
+        prefix_release_deferrals = 0;
+        held_chunks = [];
+        visible_flushed;
+        release_scheduled = false
+      }
+    in
+    let actions = List.map (fun chunk -> Emit chunk) chunks in
+    state, actions
+;;
+
+let close_transition ~on_stdout_chunk ~on_stderr_chunk ~retryable state =
+  let state = { state with closed = true; release_scheduled = false } in
+  if retryable
+  then { state with held_chunks = [] }, []
+  else
+    let chunks = List.rev state.held_chunks in
+    let visible_flushed =
+      state.visible_flushed
+      || List.exists (chunk_has_visible_callback ~on_stdout_chunk ~on_stderr_chunk) chunks
+    in
+    { state with held_chunks = []; visible_flushed }, List.map (fun chunk -> Emit chunk) chunks
 ;;
 
 (* Docker EINTR retry output arrives as a short burst. Release ordinary held
@@ -359,37 +421,44 @@ let rec schedule_guard_release guard =
   | Some sw, Some clock ->
     Eio.Fiber.fork ~sw (fun () ->
       Eio.Time.sleep clock retry_stream_guard_release_delay_sec;
-      let chunks, reschedule = guard_release_chunks guard in
-      emit_guard_chunks guard chunks;
-      if reschedule then schedule_guard_release guard)
+      let rec apply () =
+        let old_state = Atomic.get guard.state in
+        let new_state, actions =
+          release_transition
+            ~on_stdout_chunk:guard.on_stdout_chunk
+            ~on_stderr_chunk:guard.on_stderr_chunk
+            old_state
+        in
+        if Atomic.compare_and_set guard.state old_state new_state
+        then actions
+        else apply ()
+      in
+      let actions = apply () in
+      List.iter (perform_action guard) actions;
+      if List.memq Schedule_release actions then schedule_guard_release guard)
   | _ ->
     (* Without Eio context there is no safe live timer surface for user
        callbacks. Held chunks are emitted when the attempt completes. *)
     ()
 ;;
 
-let guard_attempt_callback guard stream chunk =
-  let item = stream chunk in
-  let chunks, should_schedule_release =
-    with_retry_guard_lock guard (fun () ->
-      update_retry_marker_scan guard chunk;
-      if
-        guard.pass_through
-        && not guard.saw_retry_marker
-        && not (retry_marker_prefix_pending guard.marker_scan_tail)
-      then [ item ], false
-      else (
-        guard.held_chunks := item :: !(guard.held_chunks);
-        let should_schedule_release =
-          (not guard.release_scheduled)
-          && not guard.closed
-          && not guard.saw_retry_marker
-        in
-        if should_schedule_release then guard.release_scheduled <- true;
-        [], should_schedule_release))
+let guard_attempt_callback guard chunk =
+  let rec apply () =
+    let old_state = Atomic.get guard.state in
+    let new_state, actions =
+      transition
+        ~on_stdout_chunk:guard.on_stdout_chunk
+        ~on_stderr_chunk:guard.on_stderr_chunk
+        old_state
+        chunk
+    in
+    if Atomic.compare_and_set guard.state old_state new_state
+    then actions
+    else apply ()
   in
-  emit_guard_chunks guard chunks;
-  if should_schedule_release then schedule_guard_release guard
+  let actions = apply () in
+  List.iter (perform_action guard) actions;
+  if List.memq Schedule_release actions then schedule_guard_release guard
 ;;
 
 let run_split_retry_eintr_with_live_callbacks
@@ -402,15 +471,7 @@ let run_split_retry_eintr_with_live_callbacks
     let guard =
       { on_stdout_chunk
       ; on_stderr_chunk
-      ; held_chunks = ref []
-      ; saw_retry_marker = false
-      ; pass_through = false
-      ; visible_flushed = false
-      ; marker_scan_tail = ""
-      ; release_scheduled = false
-      ; prefix_release_deferrals = 0
-      ; closed = false
-      ; mu = Stdlib.Mutex.create ()
+      ; state = Atomic.make initial_guard_state
       }
     in
     let has_output_callback =
@@ -418,12 +479,12 @@ let run_split_retry_eintr_with_live_callbacks
     in
     let attempt_on_stdout_chunk =
       if has_output_callback
-      then Some (guard_attempt_callback guard (fun chunk -> `Stdout chunk))
+      then Some (fun chunk -> guard_attempt_callback guard (`Stdout chunk))
       else None
     in
     let attempt_on_stderr_chunk =
       if has_output_callback
-      then Some (guard_attempt_callback guard (fun chunk -> `Stderr chunk))
+      then Some (fun chunk -> guard_attempt_callback guard (`Stderr chunk))
       else None
     in
     let st, stdout, stderr =
@@ -433,19 +494,26 @@ let run_split_retry_eintr_with_live_callbacks
         ()
     in
     let retryable = retryable_eintr_status ~attempts_left st ~stdout ~stderr in
-    let should_retry, chunks =
-      with_retry_guard_lock guard (fun () ->
-        guard.closed <- true;
-        if retryable
-        then (
-          let _dropped_retry_prefix = take_guard_held_chunks_locked guard in
-          true, [])
-        else false, take_guard_held_chunks_locked guard)
+    let actions =
+      let rec apply () =
+        let old_state = Atomic.get guard.state in
+        let new_state, actions =
+          close_transition
+            ~on_stdout_chunk:guard.on_stdout_chunk
+            ~on_stderr_chunk:guard.on_stderr_chunk
+            ~retryable
+            old_state
+        in
+        if Atomic.compare_and_set guard.state old_state new_state
+        then actions
+        else apply ()
+      in
+      apply ()
     in
-    if should_retry
+    if retryable
     then loop (attempts_left - 1)
     else (
-      emit_guard_chunks guard chunks;
+      List.iter (perform_action guard) actions;
       st, stdout, stderr)
   in
   loop max_eintr_retries

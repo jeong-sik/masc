@@ -245,6 +245,7 @@ let run_keeper_cycle
             let turn_id = keeper_turn_id in
             (match
                Keeper_turn_livelock.guard_and_record_turn_start
+                 ~base_path:registry_base_path
                  ~keeper:meta.name
                  ~turn_id
                  ~max_attempts:(turn_livelock_max_attempts ())

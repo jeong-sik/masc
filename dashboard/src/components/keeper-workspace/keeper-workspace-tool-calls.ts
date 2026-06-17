@@ -121,7 +121,7 @@ export function KeeperWorkspaceRecentTools({ keeperName }: { keeperName: string 
   if (entries.length === 0) return null
 
   return html`
-    <div class="kw-sec v2-monitoring-panel">
+    <div class="ss-card bg-card rounded-2xl shadow-card kw-sec v2-monitoring-panel">
       <h4>최근 도구 호출</h4>
       <${RecentToolList}
         entries=${entries}

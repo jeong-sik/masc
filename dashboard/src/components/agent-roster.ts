@@ -983,8 +983,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     : null
 
   return html`
-    <div class="v2-monitoring-surface agent-page flex w-full flex-col gap-5 px-0 py-1">
-      <section class="monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="에이전트 디렉터리">
+    <div class="ss-surface bg-surface-page styleseed-scope v2-monitoring-surface agent-page flex w-full flex-col gap-5 px-0 py-1">
+      <section class="ss-card bg-card rounded-2xl shadow-card monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="에이전트 디렉터리">
         <div class="flex flex-col gap-5">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
             <div class="flex min-w-0 flex-col gap-2">
@@ -1040,7 +1040,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       </section>
 
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section class="monitor-surface-card monitor-surface-card-medium v2-monitoring-panel overflow-hidden" aria-label="Keeper operations list">
+        <section class="ss-card bg-card rounded-2xl shadow-card monitor-surface-card monitor-surface-card-medium v2-monitoring-panel overflow-hidden" aria-label="Keeper operations list">
           <!--
             2026-05-27 KEEPER OPERATIONS row redesign:
             - 현재 단계 column was almost always "-" for stuck keepers (the
@@ -1167,7 +1167,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </div>
         </section>
 
-        <aside class="monitor-surface-card monitor-surface-card-medium v2-monitoring-panel p-4" aria-label="Selected keeper detail">
+        <aside class="ss-card bg-card rounded-2xl shadow-card monitor-surface-card monitor-surface-card-medium v2-monitoring-panel p-4" aria-label="Selected keeper detail">
           ${selectedRow ? html`
             <div class="flex h-full flex-col gap-4">
               <div class="flex items-start justify-between gap-3">

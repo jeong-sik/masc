@@ -147,7 +147,7 @@ export function KeeperWorkspaceChat({
   const entries = keeperThreads.value[keeper.name] ?? []
 
   return html`
-    <section class="kw-chat v2-monitoring-surface" role="region" aria-label=${`${keeper.name} 대화`}>
+    <section class="ss-surface bg-surface-page styleseed-scope kw-chat v2-monitoring-surface" role="region" aria-label=${`${keeper.name} 대화`}>
       <${ChatHeader}
         keeper=${keeper}
         detailOpen=${detailOpen}

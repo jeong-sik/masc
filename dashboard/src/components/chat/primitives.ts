@@ -384,8 +384,18 @@ function linkifyHtml(raw: string): string {
   )
 }
 
-function sanitizeHtml(raw: string): string {
-  return DOMPurify.sanitize(raw)
+const SVG_TAGS = ['svg', 'path', 'rect', 'circle', 'g', 'line', 'polyline', 'polygon', 'ellipse', 'defs', 'use', 'text', 'tspan']
+const SVG_ATTRS = ['viewBox', 'width', 'height', 'fill', 'stroke', 'cx', 'cy', 'r', 'x', 'y', 'x1', 'y1', 'x2', 'y2', 'points', 'd']
+
+function sanitizeHtml(raw: string, options?: { svg?: boolean }): string {
+  if (!options?.svg) return DOMPurify.sanitize(raw)
+  // DOMPurify strips the root <svg> when sanitizing a fragment directly.
+  // Wrapping it in a disposable <div> preserves the svg element, then we
+  // remove the wrapper so callers get clean SVG markup.
+  const wrapped = DOMPurify.sanitize(`<div>${raw}</div>`, { ADD_TAGS: SVG_TAGS, ADD_ATTR: SVG_ATTRS })
+  const tmp = document.createElement('div')
+  tmp.innerHTML = wrapped
+  return tmp.innerHTML.replace(/^<div[^>]*>|<\/div>$/g, '')
 }
 
 function sanitizeSvg(raw: string): string {
@@ -681,7 +691,7 @@ function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string
         ${src
           ? html`<img src=${src} alt=${name} class="chat-block-attach-img" />`
           : svg
-            ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
+            ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg, { svg: true }) }} />`
             : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}</div>`}
       </div>
       <figcaption class="chat-block-attach-cap">
@@ -786,7 +796,7 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
 
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
   const [open, setOpen] = useState(false)
-  const clean = useMemo(() => sanitizeSvg(svg), [svg])
+  const clean = useMemo(() => sanitizeHtml(svg, { svg: true }), [svg])
   return html`
     <figure class="chat-block-media" data-chat-block="svg">
       <div
@@ -1671,7 +1681,7 @@ export function ChatTranscript({
     : 'min-h-75 max-h-130'
 
   return html`
-    <div class=${`relative flex min-h-0 flex-col ${isPrimary ? 'flex-1' : ''}`}>
+    <div class=${`ss-surface bg-surface-page styleseed-scope relative flex min-h-0 flex-col ${isPrimary ? 'flex-1' : ''}`}>
       <div
         class=${`chat-transcript ${isPrimary ? 'chat-transcript-airy' : ''} flex ${heightClass} flex-col overflow-y-auto ${
           isPrimary
@@ -2030,7 +2040,7 @@ export function ChatComposer({
     void ingestFiles(event.dataTransfer?.files ?? null)
   }
 
-  const composerClass = isPrimary ? 'composer primary' : 'composer'
+  const composerClass = (isPrimary ? 'composer primary' : 'composer') + ' ss-card styleseed-scope'
   const boxClass = `composer-box ${focus ? 'focus' : ''} ${drag ? 'drag' : ''}`
 
   return html`

@@ -44,17 +44,20 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Surface wrapper — page background + primary text color */
-[data-theme="styleseed"] .ss-surface {
-  background-color: var(--surface-page);
-  color: var(--text-primary);
+/* Surface + card shells — fallbacks preserve the legacy dark theme when
+   StyleSeed is not active, so migrated components remain safe to render
+   in either mode. */
+.ss-surface {
+  background-color: var(--surface-page, var(--color-bg-page));
+  color: var(--text-primary, var(--color-fg-primary));
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
-/* Card base — all content lives inside cards */
-[data-theme="styleseed"] .ss-card {
-  background-color: var(--card);
+.ss-card {
+  background-color: var(--card, var(--color-bg-surface));
   border-radius: 1rem; /* rounded-2xl */
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-card, 0 1px 4px rgba(0, 0, 0, 0.5));
 }
 
 /* Dark mode: shadows are invisible, use subtle border for edges */
@@ -62,6 +65,94 @@
 .dark [data-theme="styleseed"] .ss-card {
   box-shadow: none;
   border: var(--card-border);
+}
+
+/* Scope bridge — when StyleSeed is active, every surface marked with
+   .styleseed-scope rewrites the legacy v2 semantic variables its children
+   already consume into StyleSeed tokens. This lets existing components
+   migrate without replacing every inline var() reference. */
+[data-theme="styleseed"] .styleseed-scope {
+  /* Text hierarchy */
+  --color-fg-primary: var(--text-primary);
+  --color-fg-secondary: var(--text-secondary);
+  --color-fg-muted: var(--text-tertiary);
+  --color-fg-disabled: var(--text-disabled);
+
+  /* Surfaces */
+  --color-bg-page: var(--surface-page);
+  --color-bg-surface: var(--card);
+  --color-bg-panel-alt: var(--surface-subtle);
+  --color-bg-elevated: var(--surface-subtle);
+  --color-bg-hover: var(--surface-muted);
+
+  /* Borders */
+  --color-border-default: var(--border);
+  --color-border-divider: var(--border);
+  --color-border-strong: var(--border);
+
+  /* Brand / accent */
+  --color-accent-fg: var(--brand);
+  --color-accent-fg-dim: var(--brand);
+  --color-accent-soft: var(--brand-tint);
+  --color-accent-glow: 155 95 255;
+  --brass-glow: 155 95 255;
+  --brass-soft: var(--brand-tint);
+  --brass-fg: var(--brand);
+  --brass-border: color-mix(in srgb, var(--brand) 35%, transparent);
+
+  /* Status */
+  --color-status-ok: var(--success);
+  --color-status-warn: var(--warning);
+  --color-status-err: var(--destructive);
+  --color-status-info: var(--info);
+  --ok-glow: 107 155 122;
+  --warn-glow: 217 119 6;
+  --err-glow: 212 24 61;
+  --info-glow: 59 130 246;
+  --ok-border: color-mix(in srgb, var(--success) 35%, transparent);
+  --warn-border: color-mix(in srgb, var(--warning) 35%, transparent);
+  --err-border: color-mix(in srgb, var(--destructive) 40%, transparent);
+  --info-border: color-mix(in srgb, var(--info) 35%, transparent);
+
+  /* Legacy status helpers used by chat blocks and roster chips */
+  --color-warn-soft: color-mix(in srgb, var(--warning) 12%, transparent);
+  --color-warn-fg: var(--warning);
+  --color-info-soft: color-mix(in srgb, var(--info) 12%, transparent);
+  --color-info-fg: var(--info);
+  --bad-soft: color-mix(in srgb, var(--destructive) 15%, transparent);
+
+  /* Misc v2 tokens consumed inside the migration scope */
+  --purple: var(--info);
+  --stalled-fg: var(--info);
+  --purple-12: var(--brand-tint);
+  --purple-24: color-mix(in srgb, var(--brand) 24%, transparent);
+  --accent-10: var(--brand-tint);
+  --accent-20: color-mix(in srgb, var(--brand) 20%, transparent);
+  --warn-10: color-mix(in srgb, var(--warning) 10%, transparent);
+  --warn-20: color-mix(in srgb, var(--warning) 20%, transparent);
+  --shadow-panel: var(--shadow-card);
+  --shadow-raised: var(--shadow-elevated);
+  --shadow-inset: none;
+  --elev-4-shadow: var(--shadow-card);
+
+  /* Code syntax */
+  --syn-key: var(--info);
+  --syn-str: var(--success);
+}
+
+/* Coerce migrated card/panel shells to the StyleSeed card radius and shadow
+   when the theme is active. The legacy .v2-monitoring-* / .monitor-surface-*
+   classes still provide structure and borders; this only updates the shape. */
+[data-theme="styleseed"] .v2-monitoring-card,
+[data-theme="styleseed"] .v2-monitoring-panel,
+[data-theme="styleseed"] .v2-monitoring-detail,
+[data-theme="styleseed"] .monitor-surface-card,
+[data-theme="styleseed"] .monitor-surface-card-strong,
+[data-theme="styleseed"] .monitor-surface-card-medium,
+[data-theme="styleseed"] .kw-card,
+[data-theme="styleseed"] .kw-sec.v2-monitoring-panel {
+  border-radius: 1rem;
+  box-shadow: var(--shadow-card);
 }
 
 /* Mobile safe-area helpers */

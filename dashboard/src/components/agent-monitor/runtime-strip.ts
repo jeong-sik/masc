@@ -31,7 +31,7 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
 
   return html`
-    <div class="v2-monitoring-detail agent-runtime-strip">
+    <div class="ss-card bg-card rounded-2xl shadow-card styleseed-scope v2-monitoring-detail agent-runtime-strip">
       <div class="flex items-center gap-1.5 text-sm">
         <${PipelineStageBadge} stage=${stage} />
       </div>

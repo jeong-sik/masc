@@ -6,6 +6,38 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
+/* Tailwind v4 theme bridge — exposes StyleSeed tokens as utilities.
+   Fallbacks point at the legacy v2 semantic variables so components that
+   add bg-surface-page / text-text-primary / shadow-card keep working when
+   the StyleSeed attribute is not active. */
+@theme inline {
+  --color-surface-page: var(--surface-page, var(--color-bg-page));
+  --color-card: var(--card, var(--color-bg-surface));
+  --color-surface-subtle: var(--surface-subtle, var(--color-bg-panel-alt));
+  --color-surface-muted: var(--surface-muted, var(--color-bg-hover));
+
+  --color-text-primary: var(--text-primary, var(--color-fg-primary));
+  --color-text-secondary: var(--text-secondary, var(--color-fg-secondary));
+  --color-text-tertiary: var(--text-tertiary, var(--color-fg-muted));
+  --color-text-disabled: var(--text-disabled, var(--color-fg-disabled));
+  --color-icon-default: var(--icon-default, var(--color-fg-secondary));
+
+  --color-brand: var(--brand, var(--color-accent-fg));
+  --color-brand-tint: var(--brand-tint, var(--color-accent-soft));
+  --color-success: var(--success, var(--color-status-ok));
+  --color-destructive: var(--destructive, var(--color-status-err));
+  --color-warning: var(--warning, var(--color-status-warn));
+  --color-info: var(--info, var(--color-status-info));
+  --color-border: var(--border, var(--color-border-default));
+  --color-alert-badge: var(--alert-badge, var(--color-status-err));
+
+  --shadow-card: var(--shadow-card, 0 1px 4px rgba(0, 0, 0, 0.5));
+  --shadow-card-hover: var(--shadow-card-hover, 0 2px 8px rgba(0, 0, 0, 0.55));
+  --shadow-elevated: var(--shadow-elevated, 0 8px 24px rgba(0, 0, 0, 0.55));
+  --shadow-modal: var(--shadow-modal, 0 8px 24px rgba(0, 0, 0, 0.55));
+  --shadow-button: var(--shadow-button, 0 1px 3px rgba(0, 0, 0, 0.5));
+}
+
 [data-theme="styleseed"] {
   color-scheme: light;
 

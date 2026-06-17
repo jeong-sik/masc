@@ -69,7 +69,7 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   const items = attentionItems(keeper)
   if (items.length === 0) return null
   return html`
-    <div class="kw-sec v2-monitoring-panel">
+    <div class="ss-card bg-card rounded-2xl shadow-card kw-sec v2-monitoring-panel">
       <h4>주의 <span class="kw-kp-att">${items.length}</span></h4>
       <div class="kw-att-list v2-monitoring-row">
         ${items.map((it, i) => html`
@@ -199,7 +199,7 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
   }, [compactState, keeper.name])
 
   return html`
-    <div class="kw-sec v2-monitoring-panel">
+    <div class="ss-card bg-card rounded-2xl shadow-card kw-sec v2-monitoring-panel">
       <h4>컨텍스트 점유</h4>
       <div class="kw-card v2-monitoring-card">
         <div class="flex items-baseline justify-between">
@@ -247,7 +247,7 @@ function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
   const peak = Math.max(1, ...series)
   const latest = series.length ? series[series.length - 1] : 0
   return html`
-    <div class="kw-sec v2-monitoring-panel">
+    <div class="ss-card bg-card rounded-2xl shadow-card kw-sec v2-monitoring-panel">
       <h4>런타임 · 처리량</h4>
       <div class="kw-vitals v2-monitoring-row">
         <div class="kw-vital"><div class="vk">모델</div><div class="vv" title=${model ?? ''}>${model ?? '—'}</div></div>
@@ -272,7 +272,7 @@ function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
 function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
   const owned = ownedTasks(keeper)
   return html`
-    <div class="kw-sec v2-monitoring-panel">
+    <div class="ss-card bg-card rounded-2xl shadow-card kw-sec v2-monitoring-panel">
       <h4>소유 태스크</h4>
       <div class="kw-list v2-monitoring-row">
         ${owned.length
@@ -297,7 +297,7 @@ export function KeeperWorkspaceRail({
   onToggleDetail: () => void
 }): VNode {
   return html`
-    <aside class="kw-rail v2-monitoring-surface" aria-label="키퍼 컨텍스트">
+    <aside class="ss-surface bg-surface-page styleseed-scope kw-rail v2-monitoring-surface" aria-label="키퍼 컨텍스트">
       <div class="kw-rail-scroll v2-monitoring-panel">
         <${AttentionSection} keeper=${keeper} />
         <${ThroughputSection} keeper=${keeper} />

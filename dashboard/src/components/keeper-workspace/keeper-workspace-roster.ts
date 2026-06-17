@@ -163,7 +163,7 @@ export function KeeperWorkspaceRoster({
   }
 
   return html`
-    <aside class="kw-roster v2-monitoring-surface" aria-label="키퍼 로스터">
+    <aside class="ss-surface bg-surface-page styleseed-scope kw-roster v2-monitoring-surface" aria-label="키퍼 로스터">
       <div class="kw-roster-head v2-monitoring-toolbar">
         <input
           class="kw-roster-search"

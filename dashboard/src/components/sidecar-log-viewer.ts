@@ -12,6 +12,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
+import { LogFilter } from './common/log-filter'
 import { get } from '../api/core'
 import { SurfaceCard } from './common/card'
 import { SkeletonText } from './common/skeleton'
@@ -143,23 +144,16 @@ const LEVEL_LABEL: Record<LogLevel, string> = {
 
 function LevelPills({ connectorId, active }: { connectorId: string; active: LogLevel }) {
   return html`
-    <div class="flex items-center gap-1" role="radiogroup" aria-label="log level filter">
-      ${LEVELS.map(level => {
-        const isActive = level === active
-        const base = 'v2-sidecar-log-level-pill cursor-pointer rounded-[var(--r-1)] border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'
-        const activeCls = 'border-[var(--color-accent-fg)] bg-[var(--accent-10)] text-[var(--color-fg-primary)]'
-        const idleCls = 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]'
-        return html`
-          <button
-            type="button"
-            role="radio"
-            aria-checked=${isActive}
-            class=${`${base} ${isActive ? activeCls : idleCls}`}
-            data-log-level=${level}
-            onClick=${() => setEntry(connectorId, { level })}
-          >${LEVEL_LABEL[level]}</button>
-        `
-      })}
+    <div class="flex items-center gap-1" role="group" aria-label="log level filter">
+      ${LEVELS.map(level => html`
+        <${LogFilter}
+          key=${level}
+          active=${level === active}
+          class="v2-sidecar-log-level-pill"
+          data-log-level=${level}
+          onClick=${() => setEntry(connectorId, { level })}
+        >${LEVEL_LABEL[level]}<//>
+      `)}
     </div>
   `
 }

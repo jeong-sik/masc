@@ -413,3 +413,8 @@ export function App() {
     </div>
   `
 }
+
+// Re-export the keeper-v2 v8 config panel + state surfaces from the app root
+// so downstream consumers have a single import surface.
+export { KeeperConfigPanel } from './components/keeper-config-panel-v2'
+export { EmptyState, ErrorState, LoadingState } from './components/state-surfaces'

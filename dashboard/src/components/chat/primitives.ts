@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import type { ComponentChildren, VNode } from 'preact'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
@@ -15,6 +16,55 @@ import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, Ch
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
 import type { ToolCallOutputBlob } from '../../api/dashboard'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
+import { Sigil } from '../common/sigil-chip'
+import { SuggestionChip } from '../common/suggestion-chip'
+import { StatusDot } from '../common/status-dot'
+import type { JSX } from 'preact'
+
+/** Keeper identity used by SigilBadge. */
+export interface SigilBadgeKeeper {
+  slot: number
+  id: string
+  sigil?: string
+}
+
+/** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
+export function ChatStatusDot({ status, pulse }: { status: string; pulse?: boolean }): VNode {
+  const state = status === 'run' ? 'ok' : status === 'pause' ? 'warn' : status === 'off' ? 'idle' : status
+  const toneClass = `bg-[var(--color-status-${state})]`
+  return html`
+    <${StatusDot}
+      class=${`${toneClass}${pulse ? ' animate-pulse' : ''}`}
+      ariaLabel=${state}
+    />
+  `
+}
+
+/** Canonical keeper identity badge — delegates to the shared Sigil primitive. */
+export function ChatSigilBadge({ k, size = 18, beat }: { k: SigilBadgeKeeper; size?: number; beat?: boolean }): VNode {
+  const monogram = k.sigil ?? k.id.slice(0, 2).toUpperCase()
+  return html`
+    <${Sigil}
+      slot=${k.slot}
+      size=${size}
+      heartbeat=${beat}
+      title=${k.id}
+      fontScale=${0.46}
+    >${monogram}<//>
+  `
+}
+
+/** Suggestion chip wrapper — delegates to the shared SuggestionChip primitive. */
+export function ChatSuggestionChip({
+  pre = '\u2192',
+  children,
+  ...rest
+}: {
+  pre?: string
+  children?: ComponentChildren
+} & JSX.HTMLAttributes<HTMLButtonElement>): VNode {
+  return html`<${SuggestionChip} pre=${pre} ...${rest}>${children}<//>`
+}
 
 function surfaceLink(surface?: SurfaceRef | null): { url: string; label: string; icon: string } | null {
   if (!surface || !surface.kind) return null

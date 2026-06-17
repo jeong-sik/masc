@@ -71,6 +71,7 @@ const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab 
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
 const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
 const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
+const LazySettingsSurface = lazy(async () => ({ default: (await import('./settings-surface')).SettingsSurface }))
 
 function lazyTabFallback(label: string) {
   return html`<${LoadingState}>Loading ${label}...<//>`
@@ -1163,6 +1164,12 @@ function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('System Logs')}>
           <${LazyLogViewer} />
+        <//>
+      `
+    case 'settings':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Settings')}>
+          <${LazySettingsSurface} />
         <//>
       `
     default:

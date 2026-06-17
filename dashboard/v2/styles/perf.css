@@ -1,0 +1,51 @@
+/* MASC v2 — performance layer styles (perf.jsx).
+   Windowing scrollers, content-visibility rows, native dialog chrome,
+   and the demo FPS meter. Tokens from colors_and_type.css + v2.css. */
+
+/* ── VirtualList / CVList scrollers ── */
+.vl-scroller { scrollbar-width: thin; }
+.vl-scroller::-webkit-scrollbar { width: 10px; }
+.vl-scroller::-webkit-scrollbar-thumb { background: var(--border-main); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+.vl-row { box-sizing: border-box; }
+.cv-list { display: flex; flex-direction: column; }
+.cv-row { box-sizing: border-box; }
+
+/* ── native <dialog> ── */
+.v2-dialog {
+  border: 1px solid var(--border-main);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-radius: var(--radius-lg, 12px);
+  padding: 0;
+  box-shadow: 0 24px 64px -12px rgba(0,0,0,0.7), 0 0 0 1px var(--border-soft);
+  max-width: min(92vw, 560px);
+  width: 100%;
+}
+.v2-dialog::backdrop {
+  background: color-mix(in oklab, var(--bg-deep) 64%, transparent);
+  backdrop-filter: blur(3px);
+  animation: v2dlg-bd 0.18s ease;
+}
+.v2-dialog[open] { animation: v2dlg-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes v2dlg-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes v2dlg-bd { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .v2-dialog[open], .v2-dialog::backdrop { animation: none; }
+}
+
+/* ── FPS meter (demo) ── */
+.fps-meter {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.02em;
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--border-main); background: var(--bg-card); color: var(--text-mid);
+}
+.fps-meter b { color: var(--text-bright); font-weight: 600; }
+.fps-meter .fps-label { color: var(--text-dim); margin-right: 2px; }
+.fps-meter .fps-low { color: var(--text-dim); }
+.fps-meter .fps-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+.fps-meter.ok .fps-dot { background: var(--status-ok); box-shadow: 0 0 7px var(--status-ok); }
+.fps-meter.warn .fps-dot { background: var(--status-warn, #e0a82e); box-shadow: 0 0 7px var(--status-warn, #e0a82e); }
+.fps-meter.bad .fps-dot { background: var(--status-bad, #e8472f); box-shadow: 0 0 7px var(--status-bad, #e8472f); }
+.fps-meter.ok b { color: var(--status-ok); }
+.fps-meter.bad b { color: var(--status-bad, #e8472f); }

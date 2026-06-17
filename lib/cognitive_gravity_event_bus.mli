@@ -36,7 +36,7 @@ val source_git : ?since_ref:string -> unit -> Cognitive_gravity.decay_trigger li
 val poll_all : unit -> (string * float) list
 
 (** [extract_keeper_id fact_id] extracts the keeper name prefix from a
-    fact_id formatted as \"keeper_name:rest\". Returns None on
+    fact_id formatted as "keeper_name:rest". Returns None on
     malformed input. *)
 val extract_keeper_id : string -> string option
 

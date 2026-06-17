@@ -24,42 +24,29 @@ type wait_timeout =
   ; cap : int
   }
 
-val with_slot : key:string -> max_concurrent:int option -> (unit -> 'a) -> 'a
-(** [with_slot ~key ~max_concurrent f] runs [f] while holding one of the
-    configured slots for [key].
-
-    [None] (or [Some n] with [n <= 0]) disables the gate for that key and runs
-    [f] immediately. [None] is the normal runtime.toml "unset" marker
-    (RFC-0058, {!Runtime_toml.parse_binding_fields}); an unconfigured binding
-    must fall back to the existing global gate, never be throttled to a
-    [Eio.Semaphore.make 0] deadlock.
-
-    The slot is released on normal return, exception, or fiber cancellation via
-    [Eio.Switch.on_release]. If [f] never acquires because acquisition is
-    cancelled, no slot is held and none is released.
-
-    The cap for a key is fixed at first acquisition. runtime.toml is
-    startup-only ("restart masc-mcp after edits"), so a key's cap does not
-    change within a process lifetime; a later call with a different
-    [max_concurrent] for the same key reuses the first semaphore and is
-    ignored. *)
-
 val with_slot_result :
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  ?wait_timeout_sec:float ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  wait_timeout_sec:float ->
   key:string ->
   max_concurrent:int option ->
   (unit -> 'a) ->
   ('a, wait_timeout) result
-(** [with_slot_result] is the bounded-acquire variant for hot keeper paths.
+(** [with_slot_result] acquires a binding slot with a mandatory timeout.
 
-    When [clock] and a positive finite [wait_timeout_sec] are both supplied,
-    waiting for a saturated key is capped by that duration. A timeout returns
-    [Error wait_timeout] without running [f] and without acquiring a slot.
+    Waiting for a saturated key is capped by [wait_timeout_sec]. A timeout
+    returns [Error wait_timeout] without running [f] and without acquiring a
+    slot.
 
-    Missing [clock], missing timeout, non-positive timeout, or
-    [None]/non-positive [max_concurrent] preserves [with_slot]'s
-    unbounded/ungated behavior. *)
+    [None] (or [Some n] with [n <= 0]) disables the gate for that key and runs
+    [f] immediately, returning [Ok (f ())]. An unconfigured binding must fall
+    back to the existing global gate, never be throttled to a
+    [Eio.Semaphore.make 0] deadlock.
+
+    The slot is released on normal return, exception, or fiber cancellation via
+    [Eio.Switch.on_release].
+
+    The cap for a key is fixed at first acquisition. runtime.toml is
+    startup-only, so a key's cap does not change within a process lifetime. *)
 
 val snapshot : unit -> (string * int * int) list
 (** [(key, in_flight, cap)] for every key that has been gated at least once.

@@ -467,22 +467,29 @@ let run_try_provider
            for the whole attempt so keepers assigned to the same runtime
            binding cannot collectively exceed that binding's provider
            concurrency limit. An unconfigured binding ([None]) runs ungated,
-           falling back to the global [Fd_accountant.Provider_http] gate. *)
-        match
-          Runtime_binding_capacity.with_slot_result
-            ?clock:(Eio_context.get_clock_opt ())
-            ?wait_timeout_sec:
-              (binding_capacity_wait_timeout_s ?per_provider_timeout_s ())
-            ~key:(Runtime_candidate.capacity_key candidate)
-            ~max_concurrent:(Runtime_candidate.max_concurrent candidate)
-            run_fn
-        with
-        | Ok result -> result
-        | Error timeout ->
-          Error
-            (binding_capacity_wait_timeout_error
-               ~runtime_id:ctx.error_runtime_id
-               timeout))
+           falling back to the global [Fd_accountant.Provider_http] gate.
+
+           The gate requires an Eio clock so that a saturated binding can fail
+           fast instead of waiting forever. If the clock is not initialized we
+           fall back to the global gate rather than block indefinitely. *)
+        (match Eio_context.get_clock_opt () with
+         | None -> run_fn ()
+         | Some clock ->
+           match
+             Runtime_binding_capacity.with_slot_result
+               ~clock
+               ~wait_timeout_sec:
+                 (binding_capacity_wait_timeout_s ?per_provider_timeout_s ())
+               ~key:(Runtime_candidate.capacity_key candidate)
+               ~max_concurrent:(Runtime_candidate.max_concurrent candidate)
+               run_fn
+           with
+           | Ok result -> result
+           | Error timeout ->
+             Error
+               (binding_capacity_wait_timeout_error
+                  ~runtime_id:ctx.error_runtime_id
+                  timeout)))
     in
     let result =
       (* Restore typed provider-context enrichment (auth-env / not-found hints).

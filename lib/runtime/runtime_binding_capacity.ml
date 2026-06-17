@@ -43,9 +43,9 @@ let finite_positive = function
   | Some value when Float.is_finite value && value > 0.0 -> Some value
   | Some _ | None -> None
 
-let acquire ?clock ?wait_timeout_sec (slot : slot) =
-  match clock, finite_positive wait_timeout_sec with
-  | Some clock, Some wait_timeout_sec ->
+let acquire ~clock ~wait_timeout_sec (slot : slot) =
+  match finite_positive (Some wait_timeout_sec) with
+  | Some wait_timeout_sec ->
     (try
        Eio.Time.with_timeout_exn clock wait_timeout_sec (fun () ->
          Eio.Semaphore.acquire slot.sem);
@@ -57,11 +57,10 @@ let acquire ?clock ?wait_timeout_sec (slot : slot) =
          ; in_flight = Atomic.get slot.in_flight
          ; cap = slot.cap
          })
-  | _, _ ->
-    Eio.Semaphore.acquire slot.sem;
-    Ok ()
+  | None ->
+    invalid_arg "Runtime_binding_capacity.acquire: wait_timeout_sec must be finite and positive"
 
-let with_slot_result ?clock ?wait_timeout_sec ~key ~max_concurrent f =
+let with_slot_result ~clock ~wait_timeout_sec ~key ~max_concurrent f =
   (* [None] (or [Some n] with [n <= 0]) = unconfigured binding (runtime.toml
      omits [max-concurrent], parsed as [None]). Run ungated rather than build a
      0-permit semaphore that would deadlock on first acquire. *)
@@ -74,7 +73,7 @@ let with_slot_result ?clock ?wait_timeout_sec ~key ~max_concurrent f =
        here and no slot is held. After [acquire] returns, [Atomic.incr] and
        [Switch.on_release] registration are synchronous, so every held slot has
        a release hook before [f] can yield. *)
-    match acquire ?clock ?wait_timeout_sec slot with
+    match acquire ~clock ~wait_timeout_sec slot with
     | Error timeout -> Error { timeout with key }
     | Ok () ->
       Atomic.incr slot.in_flight;
@@ -84,11 +83,6 @@ let with_slot_result ?clock ?wait_timeout_sec ~key ~max_concurrent f =
              Atomic.decr slot.in_flight;
              Eio.Semaphore.release slot.sem);
            f ()))
-
-let with_slot ~key ~max_concurrent f =
-  match with_slot_result ~key ~max_concurrent f with
-  | Ok value -> value
-  | Error _ -> assert false
 
 let snapshot () =
   Eio.Mutex.use_ro registry_mutex (fun () ->

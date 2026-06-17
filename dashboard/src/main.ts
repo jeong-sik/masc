@@ -51,6 +51,10 @@ import './styles/ops.css'
 import './styles/tools.css'
 import './styles/provider-matrix.css'
 import './styles/paper-theme.css'
+
+// StyleSeed design-system theme — default light palette.
+import './styles/styleseed-theme.css'
+
 import './styles/keeper-workspace.css'
 import './styles/copilot-dock.css'
 import './styles/keeper-turn-inspector.css'
@@ -87,13 +91,15 @@ import { startNavTelemetry } from './lib/nav-telemetry'
 import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from './lib/theme'
 
 function normalizeTheme(raw: string | null): ThemeId {
-  if (raw === 'paper' || raw === 'light') {
+  if (raw === 'styleseed' || raw === 'light') {
+    return 'styleseed'
+  }
+  if (raw === 'paper') {
     return 'paper'
   }
   // Preserve compatibility with existing callers that may send dark-themed values
-  // while keeping the default dashboard branch at the non-paper
-  // baseline (`dark-fantasy` in the generated token stack).
-  if (raw === 'dark' || raw === 'dark-fantasy' || raw === null || raw === '') {
+  // while treating explicit dark values as an opt-out to the legacy palette.
+  if (raw === 'dark' || raw === 'dark-fantasy') {
     return null
   }
   return null
@@ -101,7 +107,7 @@ function normalizeTheme(raw: string | null): ThemeId {
 
 function persistTheme(theme: ThemeId): void {
   try {
-    if (theme === 'paper') {
+    if (theme === 'styleseed' || theme === 'paper') {
       THEME_STORAGE_KEYS.forEach((key) => localStorage.setItem(key, theme))
     } else {
       THEME_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key))
@@ -122,11 +128,13 @@ function resolveTheme(): ThemeId {
       if (stored) return normalizeTheme(stored)
     }
   } catch { /* access denied */ }
-  return null
+  return 'styleseed'
 }
 
 function applyTheme(theme: ThemeId): void {
-  if (theme === 'paper') {
+  if (theme === 'styleseed') {
+    document.documentElement.dataset.theme = 'styleseed'
+  } else if (theme === 'paper') {
     document.documentElement.dataset.theme = 'paper'
   } else {
     delete document.documentElement.dataset.theme

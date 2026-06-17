@@ -24,6 +24,7 @@ end
 type panel_failure =
   | Timeout
   | Provider_error of string
+  | Internal_error of string
   | Empty_response
 [@@deriving yojson, show, eq]
 

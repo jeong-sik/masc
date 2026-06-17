@@ -41,10 +41,23 @@ let opt_string kvs k =
 
 let opt_string_list kvs k =
   match find kvs k with
+  | None -> Ok []
+  | Some (`List xs) ->
+    Ok (List.filter_map (function `String s -> Some s | _ -> None) xs)
+  | Some _ -> Error (Printf.sprintf "field %s: expected list" k)
+
+let opt_string_list_or_empty kvs k =
+  match find kvs k with
   | Some (`List xs) -> List.filter_map (function `String s -> Some s | _ -> None) xs
   | _ -> []
 
 let opt_list kvs k =
+  match find kvs k with
+  | None -> Ok []
+  | Some (`List xs) -> Ok xs
+  | Some _ -> Error (Printf.sprintf "field %s: expected list" k)
+
+let opt_list_or_empty kvs k =
   match find kvs k with
   | Some (`List xs) -> xs
   | _ -> []
@@ -55,7 +68,10 @@ let parse_claim : Yojson.Safe.t -> Fusion_types.claim option = function
   | `Assoc kvs ->
     (match opt_string kvs "text" with
      | Some text ->
-       Some { Fusion_types.text; supporting_models = opt_string_list kvs "supporting_models" }
+       Some
+         { Fusion_types.text
+         ; supporting_models = opt_string_list_or_empty kvs "supporting_models"
+         }
      | None -> None)
   | _ -> None
 
@@ -70,8 +86,12 @@ let parse_contradiction : Yojson.Safe.t -> Fusion_types.contradiction option = f
   | `Assoc kvs ->
     (match opt_string kvs "topic" with
      | Some topic ->
-       let positions = List.filter_map parse_position (opt_list kvs "positions") in
-       Some { Fusion_types.topic; positions; evidence = opt_string_list kvs "evidence" }
+       let positions = List.filter_map parse_position (opt_list_or_empty kvs "positions") in
+       Some
+         { Fusion_types.topic
+         ; positions
+         ; evidence = opt_string_list_or_empty kvs "evidence"
+         }
      | None -> None)
   | _ -> None
 
@@ -81,7 +101,7 @@ let parse_coverage : Yojson.Safe.t -> Fusion_types.coverage_gap option = functio
      | Some gap_topic ->
        Some
          { Fusion_types.gap_topic
-         ; addressed_by = opt_string_list kvs "addressed_by"
+         ; addressed_by = opt_string_list_or_empty kvs "addressed_by"
          ; missing = opt_string kvs "missing"
          }
      | None -> None)
@@ -107,7 +127,9 @@ let parse_decision : Yojson.Safe.t -> (Fusion_types.judge_decision, string) resu
        let* rationale = req_string kvs "rationale" in
        Ok (Fusion_types.Recommend { action; rationale })
      | Some (`String "insufficient") ->
-       Ok (Fusion_types.Insufficient { missing_for_decision = opt_string_list kvs "missing" })
+       Ok
+         (Fusion_types.Insufficient
+            { missing_for_decision = opt_string_list_or_empty kvs "missing" })
      | Some (`String other) -> Error (Printf.sprintf "decision.kind unknown: %s" other)
      | Some _ -> Error "decision.kind: expected string"
      | None -> Error "decision.kind: missing")
@@ -121,12 +143,23 @@ let of_json (j : Yojson.Safe.t) : (Fusion_types.judge_synthesis, string) result 
     | Some d -> parse_decision d
     | None -> Error "missing field: decision"
   in
+  let* consensus = Result.map (List.filter_map parse_claim) (opt_list kvs "consensus") in
+  let* contradictions =
+    Result.map (List.filter_map parse_contradiction) (opt_list kvs "contradictions")
+  in
+  let* partial_coverage =
+    Result.map (List.filter_map parse_coverage) (opt_list kvs "partial_coverage")
+  in
+  let* unique_insights =
+    Result.map (List.filter_map parse_insight) (opt_list kvs "unique_insights")
+  in
+  let* blind_spots = opt_string_list kvs "blind_spots" in
   Ok
-    { Fusion_types.consensus = List.filter_map parse_claim (opt_list kvs "consensus")
-    ; contradictions = List.filter_map parse_contradiction (opt_list kvs "contradictions")
-    ; partial_coverage = List.filter_map parse_coverage (opt_list kvs "partial_coverage")
-    ; unique_insights = List.filter_map parse_insight (opt_list kvs "unique_insights")
-    ; blind_spots = opt_string_list kvs "blind_spots"
+    { Fusion_types.consensus
+    ; contradictions
+    ; partial_coverage
+    ; unique_insights
+    ; blind_spots
     ; resolved_answer
     ; decision
     }

@@ -30,6 +30,7 @@ let run ~sw ~net ~base_dir ~budget ~hour_bucket ~policy ~request () : outcome =
             req.Fusion_types.web_tools || preset.Fusion_policy.web_tools
           in
           let max_tool_calls = preset.Fusion_policy.max_tool_calls_per_panel in
+          let start_time_unix = Unix.gettimeofday () in
           let panel =
             Fusion_panel.run ~sw ~net
               ~max_fibers:policy.Fusion_policy.max_concurrent_panels
@@ -49,8 +50,10 @@ let run ~sw ~net ~base_dir ~budget ~hour_bucket ~policy ~request () : outcome =
           in
           (match
              Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper
-               ~run_id:req.Fusion_types.run_id ~question:req.Fusion_types.prompt
-               ~panel ~judge
+               ~run_id:req.Fusion_types.run_id ~preset:preset.Fusion_policy.name
+               ~trigger:req.Fusion_types.trigger
+               ~question:req.Fusion_types.prompt ~panel ~judge
+               ~judge_model:preset.Fusion_policy.judge ~start_time_unix
            with
            | Ok () -> Completed { panel; judge }
            | Error msg -> Sink_failed msg)))

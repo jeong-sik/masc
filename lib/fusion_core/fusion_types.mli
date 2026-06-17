@@ -46,6 +46,7 @@ end
 type panel_failure =
   | Timeout  (** 구조적 타임아웃 (Masc_oas_bridge) *)
   | Provider_error of string  (** provider/transport 에러, 메시지 보존 *)
+  | Internal_error of string  (** Masc_oas_bridge 낮은 계층의 내포 오류 *)
   | Empty_response  (** 모델이 빈 응답 (keeper_librarian 빈응답 전례) *)
 [@@deriving yojson, show, eq]
 

@@ -73,6 +73,10 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
           (* 구조적 취소는 흡수하지 않고 재전파 (Eio 규약). *)
           raise exn
         | exception exn ->
+          (* 서버 로그에도 남겨 chat append 실패 시에도 원인이 소멸하지 않는다. *)
+          Log.Keeper.warn ~keeper_name:keeper
+            "fusion run %s background fiber exception: %s" run_id
+            (Printexc.to_string exn);
           append_chat_failure ~base_dir ~keeper ~run_id
             (Printf.sprintf "**Fusion run `%s`** _(aborted: %s)_" run_id
                (Printexc.to_string exn)));

@@ -22,6 +22,13 @@ let outcome_of_result (model : string)
       ; reason = Fusion_types.Provider_error (Agent_sdk.Error.to_string e)
       }
 
+let panel_failure_of_run_safe_error (e : Agent_sdk.Error.sdk_error)
+  : Fusion_types.panel_failure
+  =
+  match e with
+  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Fusion_types.Timeout
+  | _ -> Fusion_types.Internal_error (Agent_sdk.Error.to_string e)
+
 let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt
     ~web_tools ~max_tool_calls_per_panel () : Fusion_types.panel_outcome list
   =
@@ -53,11 +60,12 @@ let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt
     with
     | Ok run_results ->
       List.map (fun (name, res) -> outcome_of_result name res) run_results
-    | Error _ ->
-      (* 구조적 타임아웃/취소: 빌드된 모델 전부 Timeout 처리. *)
+    | Error e ->
+      (* run_safe은 구조적 타임아웃 외에도 bridge 낮은 계층 오류를 Error로 돌려준다.
+         모두 Timeout으로 오분류하지 않고 종류를 살린다. *)
+      let reason = panel_failure_of_run_safe_error e in
       List.map
-        (fun (_agent, model) ->
-          Fusion_types.Failed { failed_model = model; reason = Fusion_types.Timeout })
+        (fun (_agent, model) -> Fusion_types.Failed { failed_model = model; reason })
         built
   in
   build_failures @ answered

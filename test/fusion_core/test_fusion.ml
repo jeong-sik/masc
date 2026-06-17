@@ -274,6 +274,51 @@ max_tool_calls_per_panel = 17
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_max_tool_calls"
 
+(* 0/음수/NaN 타임아웃은 로드 단계에서 거부. run_safe의 invalid_arg를 막는다. *)
+let test_config_invalid_panel_timeout () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+panel_timeout_s = 0.0
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_timeout present" true
+      (List.exists
+         (function Fusion_config.Invalid_timeout _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_timeout"
+
+let test_config_invalid_judge_timeout () =
+  let s =
+    {|
+[fusion]
+enabled = true
+default_preset = "p1"
+[fusion.presets.p1]
+panel = ["a", "b"]
+judge = "a"
+panel_system_prompt = "p"
+judge_system_prompt = "j"
+judge_timeout_s = -1.0
+|}
+  in
+  match Fusion_config.of_toml (parse s) with
+  | Error es ->
+    Alcotest.(check bool) "Invalid_timeout present" true
+      (List.exists
+         (function Fusion_config.Invalid_timeout _ -> true | _ -> false)
+         es)
+  | Ok _ -> Alcotest.fail "expected Error Invalid_timeout"
+
 (* enabled인데 default_preset 생략(="") → preset 생략 호출이 폭빽할 default가 없어
    항상 Preset_unknown ""로 deny. 빈 default_preset도 로드 거부. *)
 let test_config_empty_default_preset () =
@@ -422,6 +467,24 @@ let test_judge_tolerant_skip () =
   | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
+(* 최상위 list 필드가 list가 아니면 Error — 비어있는 list([])나 누락은 여전히 허용. *)
+let test_judge_malformed_list () =
+  let s =
+    {|{ "consensus": "not a list", "resolved_answer": "r", "decision": {"kind":"answer","answer":"a"} }|}
+  in
+  match Fusion_judge_parse.of_string s with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "expected Error on malformed consensus list"
+
+let test_judge_missing_list_ok () =
+  (* 누락된 list 필드는 []로 처리해야 한다. *)
+  let s = {|{ "resolved_answer": "r", "decision": {"kind":"answer","answer":"a"} }|} in
+  match Fusion_judge_parse.of_string s with
+  | Ok js ->
+    Alcotest.(check int) "missing consensus -> []" 0 (List.length js.consensus);
+    Alcotest.(check int) "missing blind_spots -> []" 0 (List.length js.blind_spots)
+  | Error e -> Alcotest.failf "expected Ok, got %s" e
+
 (* --- budget counter (RFC-0252 §6/§10) --- *)
 
 let ok_or_fail = function Ok n -> n | Error () -> Alcotest.fail "expected Ok"
@@ -483,6 +546,8 @@ let () =
         ; Alcotest.test_case "bad_concurrency" `Quick test_config_bad_concurrency
         ; Alcotest.test_case "bad_per_hour" `Quick test_config_bad_per_hour
         ; Alcotest.test_case "invalid_max_tool_calls" `Quick test_config_invalid_max_tool_calls
+        ; Alcotest.test_case "invalid_panel_timeout" `Quick test_config_invalid_panel_timeout
+        ; Alcotest.test_case "invalid_judge_timeout" `Quick test_config_invalid_judge_timeout
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ] )
@@ -495,6 +560,8 @@ let () =
         ; Alcotest.test_case "missing_decision" `Quick test_judge_missing_decision
         ; Alcotest.test_case "code_fence" `Quick test_judge_code_fence
         ; Alcotest.test_case "tolerant_skip" `Quick test_judge_tolerant_skip
+        ; Alcotest.test_case "malformed_list" `Quick test_judge_malformed_list
+        ; Alcotest.test_case "missing_list_ok" `Quick test_judge_missing_list_ok
         ] )
     ; ( "budget"
       , [ Alcotest.test_case "basic" `Quick test_budget_basic

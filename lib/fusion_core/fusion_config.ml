@@ -9,6 +9,7 @@ type config_error =
   | Invalid_max_concurrent_panels of int
   | Invalid_per_hour_budget of int
   | Invalid_max_tool_calls of string * int
+  | Invalid_timeout of string * float
   | Missing_default_preset of string
   | Toml_type_error of string
 [@@deriving show, eq]
@@ -22,6 +23,12 @@ let disabled : Fusion_policy.t =
   ; high_stakes_task_kinds = []
   ; per_hour_budget = 0
   }
+
+(* 타임아웃은 양의 유한값이어야 한다. 0/음수/NaN/무한대는 run_safe에서
+   invalid_arg를 던지거나 무한 대기를 유발하므로 로드 단계에서 fail-fast. *)
+let timeout_ok (t : float) =
+  let cls = Float.classify_float t in
+  cls <> FP_nan && cls <> FP_infinite && Float.compare t 0.0 > 0
 
 (* preset 한 명 파싱. 누락 필드는 명시적 default, 패널 크기는 검증(fail-fast). *)
 let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
@@ -51,25 +58,30 @@ let parse_preset (name, tbl) : (Fusion_policy.preset, config_error) result =
   let max_tool_calls_per_panel =
     Otoml.find_or ~default:0 tbl Otoml.get_integer [ "max_tool_calls_per_panel" ]
   in
-  let p : Fusion_policy.preset =
-    { name
-    ; panel
-    ; judge
-    ; panel_system_prompt
-    ; judge_system_prompt
-    ; panel_timeout_s
-    ; judge_timeout_s
-    ; web_tools
-    ; max_tool_calls_per_panel
-    }
-  in
-  if not (Fusion_policy.preset_size_ok p) then
-    Error (Invalid_panel_size (name, List.length panel))
-  else if not (Fusion_policy.preset_prompts_present p) then Error (Missing_prompt name)
-  else if not (Fusion_policy.preset_judge_present p) then Error (Missing_judge_model name)
-  else if max_tool_calls_per_panel < 0 || max_tool_calls_per_panel > 16 then
-    Error (Invalid_max_tool_calls (name, max_tool_calls_per_panel))
-  else Ok p
+  if not (timeout_ok panel_timeout_s) then
+    Error (Invalid_timeout (name ^ ".panel_timeout_s", panel_timeout_s))
+  else if not (timeout_ok judge_timeout_s) then
+    Error (Invalid_timeout (name ^ ".judge_timeout_s", judge_timeout_s))
+  else
+    let p : Fusion_policy.preset =
+      { name
+      ; panel
+      ; judge
+      ; panel_system_prompt
+      ; judge_system_prompt
+      ; panel_timeout_s
+      ; judge_timeout_s
+      ; web_tools
+      ; max_tool_calls_per_panel
+      }
+    in
+    if not (Fusion_policy.preset_size_ok p) then
+      Error (Invalid_panel_size (name, List.length panel))
+    else if not (Fusion_policy.preset_prompts_present p) then Error (Missing_prompt name)
+    else if not (Fusion_policy.preset_judge_present p) then Error (Missing_judge_model name)
+    else if max_tool_calls_per_panel < 0 || max_tool_calls_per_panel > 16 then
+      Error (Invalid_max_tool_calls (name, max_tool_calls_per_panel))
+    else Ok p
 
 (* [fusion] 존재 확정 후의 본 파싱. Otoml.Type_error는 of_toml이 감싼다. *)
 let parse_enabled (toml : Otoml.t) : (Fusion_policy.t, config_error list) result =

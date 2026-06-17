@@ -20,6 +20,8 @@ type config_error =
           0/음수는 모든 호출을 silent deny-all로 만든다 (enabled-but-never-runs). *)
   | Invalid_max_tool_calls of string * int
       (** (preset 이름, 값) — 0..16 범위 위반 *)
+  | Invalid_timeout of string * float
+      (** (preset 필드 경로, 값) — 0/음수/NaN/무한대 타임아웃 *)
   | Missing_default_preset of string
       (** enabled인데 default_preset가 비었거나 presets에 없음. 빈 문자엏도 거부 —
           preset 생략 호출이 default_preset로 폭빽하는데 ""는 항상 Preset_unknown로

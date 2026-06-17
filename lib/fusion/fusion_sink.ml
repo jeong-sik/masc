@@ -82,15 +82,24 @@ let render_panel (o : Fusion_types.panel_outcome) : string =
    리뷰가 가능하도록 1주로 둔다 (Magic Number 회피 — named 상수). *)
 let board_post_ttl_hours = 24 * 7
 
-(* 패널 결과를 board meta_json 원소로. 토큰은 실측 관측. *)
+let usage_meta (u : Fusion_types.usage) : Yojson.Safe.t =
+  `Assoc
+    [ ("input_tokens", `Int u.Fusion_types.input_tokens)
+    ; ("output_tokens", `Int u.Fusion_types.output_tokens)
+    ]
+
+(* 패널 결과를 board meta_json 원소로. RFC-0252 §8.2 shape:
+   { "model": "...", "answer": "...", "confidence": 0.0, "usage": {...} } *)
 let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
   match o with
-  | Fusion_types.Answered { model; usage; _ } ->
+  | Fusion_types.Answered { model; answer; confidence; usage } ->
     `Assoc
       [ ("model", `String model)
       ; ("status", `String "answered")
-      ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
-      ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
+      ; ("answer", `String answer)
+      ; ( "confidence"
+        , match confidence with Some c -> `Float c | None -> `Float 0.0 )
+      ; ("usage", usage_meta usage)
       ]
   | Fusion_types.Failed { failed_model; reason } ->
     `Assoc
@@ -99,20 +108,72 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ; ("reason", `String (Fusion_types.show_panel_failure reason))
       ]
 
-(* 심판 결과를 board meta_json 원소로. *)
-let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.Safe.t =
-  (* status는 형제 panel_meta와 같은 동사형(판이 무엇을 했는가): 종합 산출이면
-     "synthesized", 실패면 "failed". tool-result ok-봉투("ok")가 아니라 board
-     증거의 judge 서술 필드다 (no-inline-ok-envelope 가드 대상과 별개 개념). *)
+let claim_meta (c : Fusion_types.claim) : Yojson.Safe.t =
+  `Assoc
+    [ ("text", `String c.text)
+    ; ("supporting_models", `List (List.map (fun m -> `String m) c.supporting_models))
+    ]
+
+let position_meta ((model, stance) : string * string) : Yojson.Safe.t =
+  `Assoc [ ("model", `String model); ("stance", `String stance) ]
+
+let contradiction_meta (c : Fusion_types.contradiction) : Yojson.Safe.t =
+  `Assoc
+    [ ("topic", `String c.topic)
+    ; ("positions", `List (List.map position_meta c.positions))
+    ; ("evidence", `List (List.map (fun e -> `String e) c.evidence))
+    ]
+
+let coverage_meta (g : Fusion_types.coverage_gap) : Yojson.Safe.t =
+  `Assoc
+    [ ("topic", `String g.gap_topic)
+    ; ("addressed_by", `List (List.map (fun m -> `String m) g.addressed_by))
+    ; ( "missing"
+      , match g.missing with Some m -> `String m | None -> `Null )
+    ]
+
+let insight_meta (i : Fusion_types.insight) : Yojson.Safe.t =
+  `Assoc [ ("text", `String i.insight_text); ("model", `String i.from_model) ]
+
+let decision_meta (d : Fusion_types.judge_decision) : Yojson.Safe.t =
+  match d with
+  | Fusion_types.Answer answer ->
+    `Assoc [ ("kind", `String "answer"); ("answer", `String answer) ]
+  | Fusion_types.Recommend { action; rationale } ->
+    `Assoc
+      [ ("kind", `String "recommend")
+      ; ("action", `String action)
+      ; ("rationale", `String rationale)
+      ]
+  | Fusion_types.Insufficient { missing_for_decision } ->
+    `Assoc
+      [ ("kind", `String "insufficient")
+      ; ("missing", `List (List.map (fun s -> `String s) missing_for_decision))
+      ]
+
+(* 심판 결과를 board meta_json 원소로. RFC-0252 §8.2 judge shape. *)
+let judge_meta ~(judge_model : string)
+    (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.Safe.t =
   match judge with
   | Ok j ->
     `Assoc
-      [ ("status", `String "synthesized")
-      ; ("decision", `String (render_decision j.Fusion_types.decision))
+      [ ("model", `String judge_model)
+      ; ("status", `String "synthesized")
+      ; ("consensus", `List (List.map claim_meta j.Fusion_types.consensus))
+      ; ( "contradictions"
+        , `List (List.map contradiction_meta j.Fusion_types.contradictions) )
+      ; ( "partial_coverage"
+        , `List (List.map coverage_meta j.Fusion_types.partial_coverage) )
+      ; ( "unique_insights"
+        , `List (List.map insight_meta j.Fusion_types.unique_insights) )
+      ; ("blind_spots", `List (List.map (fun b -> `String b) j.Fusion_types.blind_spots))
+      ; ("resolved_answer", `String j.Fusion_types.resolved_answer)
+      ; ("decision", decision_meta j.Fusion_types.decision)
       ]
   | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
 
-let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) result =
+let emit ~base_dir ~keeper ~run_id ~preset ~trigger ~question ~panel ~judge
+    ~judge_model ~start_time_unix : (unit, string) result =
   let conversation_id = "fusion/" ^ run_id in
   try
     let append content =
@@ -151,14 +212,23 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge : (unit, string) resu
           (render_decision j.Fusion_types.decision)
       | Error _ -> Printf.sprintf "Fusion deliberation (run %s): judge failed" run_id
     in
+    let latency_ms =
+      let elapsed = Unix.gettimeofday () -. start_time_unix in
+      int_of_float (elapsed *. 1000.0)
+    in
     let meta_json =
       Some
         (`Assoc
-           [ ("source", `String "fusion")
-           ; ("run_id", `String run_id)
-           ; ("question", `String question)
-           ; ("panel", `List (List.map panel_meta panel))
-           ; ("judge", judge_meta judge)
+           [ ( "fusion_deliberation"
+             , `Assoc
+                 [ ("run_id", `String run_id)
+                 ; ("preset", `String preset)
+                 ; ("trigger", `String (Fusion_types.trigger_label trigger))
+                 ; ("panel", `List (List.map panel_meta panel))
+                 ; ("judge", judge_meta ~judge_model judge)
+                 ; ("cost_usd", `Float 0.0)
+                 ; ("latency_ms", `Int latency_ms)
+                 ] )
            ])
     in
     (match

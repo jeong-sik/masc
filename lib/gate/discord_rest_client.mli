@@ -101,19 +101,36 @@ val trigger_typing :
 type embed =
   { title : string
   ; description : string option
+  ; url : string option
   ; color : int
+  ; image : string option
   ; fields : (string * string * bool) list
   }
-(** Simplified Discord embed for tool visualization. [color] is decimal
-    RGB (0xRRGGBB). [fields] are (name, value, inline) tuples. *)
+(** Simplified Discord embed. [color] is decimal RGB (0xRRGGBB).
+    [fields] are (name, value, inline) tuples. [url] is the embed link;
+    [image] is the URL of an image to display. *)
 
 val embed_to_json : embed -> Yojson.Safe.t
 (** Convert an embed to its JSON representation. Exposed for testing. *)
+
+val embed_field_value_limit : int
+(** Discord embed field value limit, in characters. *)
 
 val color_blue : int
 val color_green : int
 val color_red : int
 (** Predefined embed colors: blue=running, green=success, red=error. *)
+
+val link_embed :
+  url:string ->
+  title:string ->
+  description:string option ->
+  image:string option ->
+  embed
+(** Build a link-preview embed with optional description and thumbnail. *)
+
+val image_embed : url:string -> caption:string option -> embed
+(** Build an image embed with optional caption as the description. *)
 
 val send_embed_message :
   token:string ->

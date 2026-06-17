@@ -51,6 +51,20 @@ let test_final_split_redacts_before_chunking () =
     (contains full "[REDACTED]");
   check bool "raw secret removed" false (contains full secret)
 
+let test_public_voice_audio_url_uses_base_url () =
+  let url =
+    D.public_voice_audio_url ~base_url:"https://chat.example.com" "tok123"
+  in
+  check string "audio URL"
+    "https://chat.example.com/api/v1/voice/audio/tok123" url
+
+let test_public_voice_audio_url_strips_trailing_slash () =
+  let url =
+    D.public_voice_audio_url ~base_url:"https://chat.example.com/" "tok123"
+  in
+  check string "audio URL"
+    "https://chat.example.com/api/v1/voice/audio/tok123" url
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -66,5 +80,11 @@ let () =
             test_final_split_preserves_overflow
         ; test_case "redacts before chunking" `Quick
             test_final_split_redacts_before_chunking
+        ] )
+    ; ( "rich-blocks"
+      , [ test_case "audio URL uses base URL" `Quick
+            test_public_voice_audio_url_uses_base_url
+        ; test_case "audio URL strips trailing slash" `Quick
+            test_public_voice_audio_url_strips_trailing_slash
         ] )
     ]

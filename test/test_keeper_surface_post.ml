@@ -15,6 +15,8 @@ let target_pp fmt = function
   | SP.To_dashboard -> Format.fprintf fmt "To_dashboard"
   | SP.To_discord { channel_id } ->
       Format.fprintf fmt "To_discord{%s}" channel_id
+  | SP.To_slack { channel_id } ->
+      Format.fprintf fmt "To_slack{%s}" channel_id
 
 let target : SP.post_target testable = testable target_pp ( = )
 
@@ -24,10 +26,10 @@ let resolve = SP.resolve_target
 
 let test_dashboard_always_resolves () =
   check (result target string) "no bindings needed" (Ok SP.To_dashboard)
-    (resolve ~surface:"dashboard" ~channel_id:None ~bound_discord_channels:[])
+    (resolve ~surface:"dashboard" ~channel_id:None ~bound_discord_channels:[] ())
 
 let test_discord_unbound_is_error () =
-  match resolve ~surface:"discord" ~channel_id:None ~bound_discord_channels:[] with
+  match resolve ~surface:"discord" ~channel_id:None ~bound_discord_channels:[] () with
   | Error message ->
       check bool "names the unbound condition" true
         (Astring.String.is_infix ~affix:"no Discord channel binding" message)
@@ -37,12 +39,12 @@ let test_discord_single_binding_resolves_implicitly () =
   check (result target string) "single binding"
     (Ok (SP.To_discord { channel_id = "98791450001" }))
     (resolve ~surface:"discord" ~channel_id:None
-       ~bound_discord_channels:[ "98791450001" ])
+       ~bound_discord_channels:[ "98791450001" ] ())
 
 let test_discord_multiple_bindings_require_channel_id () =
   (match
      resolve ~surface:"discord" ~channel_id:None
-       ~bound_discord_channels:[ "111"; "222" ]
+       ~bound_discord_channels:[ "111"; "222" ] ()
    with
   | Error message ->
       check bool "lists bound channels" true
@@ -51,27 +53,67 @@ let test_discord_multiple_bindings_require_channel_id () =
   check (result target string) "explicit channel_id picks one"
     (Ok (SP.To_discord { channel_id = "222" }))
     (resolve ~surface:"discord" ~channel_id:(Some "222")
-       ~bound_discord_channels:[ "111"; "222" ])
+       ~bound_discord_channels:[ "111"; "222" ] ())
 
 let test_discord_foreign_channel_id_is_error () =
   match
     resolve ~surface:"discord" ~channel_id:(Some "999")
-      ~bound_discord_channels:[ "111" ]
+      ~bound_discord_channels:[ "111" ] ()
   with
   | Error message ->
       check bool "names the rejected id" true
         (Astring.String.is_infix ~affix:"999" message)
   | Ok _ -> fail "foreign channel_id must not resolve"
 
+let test_slack_unbound_is_error () =
+  match
+    resolve ~surface:"slack" ~channel_id:None
+      ~bound_discord_channels:[] ~bound_slack_channels:[] ()
+  with
+  | Error message ->
+      check bool "names the unbound condition" true
+        (Astring.String.is_infix ~affix:"no Slack channel binding" message)
+  | Ok _ -> fail "unbound slack must not resolve"
+
+let test_slack_single_binding_resolves_implicitly () =
+  check (result target string) "single slack binding"
+    (Ok (SP.To_slack { channel_id = "C123456" }))
+    (resolve ~surface:"slack" ~channel_id:None
+       ~bound_discord_channels:[] ~bound_slack_channels:[ "C123456" ] ())
+
+let test_slack_multiple_bindings_require_channel_id () =
+  (match
+     resolve ~surface:"slack" ~channel_id:None
+       ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ()
+   with
+  | Error message ->
+      check bool "lists bound slack channels" true
+        (Astring.String.is_infix ~affix:"AAA, BBB" message)
+  | Ok _ -> fail "ambiguous slack binding must not resolve");
+  check (result target string) "explicit channel_id picks one"
+    (Ok (SP.To_slack { channel_id = "BBB" }))
+    (resolve ~surface:"slack" ~channel_id:(Some "BBB")
+       ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ())
+
+let test_slack_foreign_channel_id_is_error () =
+  match
+    resolve ~surface:"slack" ~channel_id:(Some "ZZZ")
+      ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA" ] ()
+  with
+  | Error message ->
+      check bool "names the rejected slack id" true
+        (Astring.String.is_infix ~affix:"ZZZ" message)
+  | Ok _ -> fail "foreign slack channel_id must not resolve"
+
 let test_unsupported_surface_is_error () =
   List.iter
     (fun surface ->
-      match resolve ~surface ~channel_id:None ~bound_discord_channels:[] with
+      match resolve ~surface ~channel_id:None ~bound_discord_channels:[] () with
       | Error message ->
           check bool (surface ^ " unsupported") true
             (Astring.String.is_infix ~affix:"not supported" message)
       | Ok _ -> fail (surface ^ " must not resolve in P4"))
-    [ "slack"; "telegram"; "openclaw" ]
+    [ "telegram"; "openclaw" ]
 
 (* ── append_assistant_message ───────────────────────────────────── *)
 
@@ -128,6 +170,14 @@ let () =
             test_discord_multiple_bindings_require_channel_id;
           test_case "foreign channel_id is an error" `Quick
             test_discord_foreign_channel_id_is_error;
+          test_case "slack unbound is an error" `Quick
+            test_slack_unbound_is_error;
+          test_case "slack single binding resolves implicitly" `Quick
+            test_slack_single_binding_resolves_implicitly;
+          test_case "slack multiple bindings require channel_id" `Quick
+            test_slack_multiple_bindings_require_channel_id;
+          test_case "slack foreign channel_id is an error" `Quick
+            test_slack_foreign_channel_id_is_error;
           test_case "unsupported surfaces are errors" `Quick
             test_unsupported_surface_is_error;
         ] );

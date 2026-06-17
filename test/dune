@@ -1357,6 +1357,11 @@
 
 (include stanzas/test_keeper_chat_discord.inc)
 
+(test
+ (name test_keeper_chat_slack)
+ (modules test_keeper_chat_slack)
+ (libraries alcotest masc_test_deps))
+
 (include stanzas/test_ci_run_tests_script.inc)
 
 (include stanzas/test_context_max_observed_9953.inc)
@@ -2159,7 +2164,6 @@
  (preprocess
   (pps ppx_safe_shell))
  (libraries alcotest masc.masc_exec masc.exec_policy))
-
 ; Coverage regression tests for keeper/runtime immutable-state refactor (P9-P12).
 
 (test

@@ -95,24 +95,42 @@ let edit_message_silent ~token ~channel_id ~message_id ~content =
         "keeper_chat_discord: edit_message failed (msg=%s): %s"
         message_id err_str
 
-module For_testing = struct
-  let streaming_patch_content = streaming_patch_content
-  let final_head_and_overflow = final_head_and_overflow
-end
-
 (* ── Tool embed helpers ──────────────────────────────────────────── *)
 
-(* [tool_msgs] maps tool_call_id → (discord_message_id, tool_call_name).
-   We store the tool name so the "done" edit can preserve it in the
-   embed title without relying on the end event carrying the name. *)
-type tool_msg_entry = (string * string)
-(* (discord_message_id, tool_call_name) *)
+(* [tool_msgs] maps tool_call_id → tool_msg_entry. We store the Discord
+   message id, the tool name, and optional argument/result summaries so the
+   "done" edit can preserve the title and enrich the embed without relying
+   on the end event carrying them. *)
+type tool_msg_entry =
+  { discord_message_id : string
+  ; tool_call_name : string
+  ; args_summary : string option
+  ; result_summary : string option
+  }
 
 let find_tool_msg tool_msgs tool_call_id =
   List.assoc_opt tool_call_id tool_msgs
 
 let remove_tool_msg tool_msgs tool_call_id =
   List.filter (fun (k, _) -> k <> tool_call_id) tool_msgs
+
+let update_tool_context tool_msgs tool_call_id ~args_summary ~result_summary =
+  List.map
+    (fun (id, entry) ->
+       if id = tool_call_id then
+         let new_args =
+           match entry.args_summary with
+           | None -> Some args_summary
+           | Some _ -> entry.args_summary
+         in
+         let new_result =
+           match result_summary with
+           | Some _ -> result_summary
+           | None -> entry.result_summary
+         in
+         (id, { entry with args_summary = new_args; result_summary = new_result })
+       else (id, entry))
+    tool_msgs
 
 (* Truncate a string to [max_len], appending "…" when truncated.
    Separate from [truncate] above which truncates to Discord message
@@ -133,7 +151,9 @@ let send_tool_running ~token ~channel_id ~tool_call_name =
   let embed =
     { Discord_rest_client.title = tool_embed_title ~tool_name:tool_call_name
     ; description = Some "Running…"
+    ; url = None
     ; color = Discord_rest_client.color_blue
+    ; image = None
     ; fields = []
     }
   in
@@ -146,13 +166,34 @@ let send_tool_running ~token ~channel_id ~tool_call_name =
         "keeper_chat_discord: send_tool_running failed: %s" err_str;
       None
 
-(* Edit a "running" embed to "done", preserving the original tool name. *)
-let send_tool_done ~token ~channel_id ~message_id ~tool_call_name =
+(* Edit a "running" embed to "done", preserving the original tool name and
+   enriching it with optional argument and result summaries. *)
+let send_tool_done ~token ~channel_id ~message_id ~tool_call_name
+    ~args_summary ~result_summary =
+  let fields =
+    [ ( "args"
+      , truncate_to ~max_len:Discord_rest_client.embed_field_value_limit
+          args_summary
+      , false )
+    ]
+  in
+  let fields =
+    match result_summary with
+    | None -> fields
+    | Some summary ->
+        ( "result"
+        , truncate_to ~max_len:Discord_rest_client.embed_field_value_limit
+            summary
+        , false )
+        :: fields
+  in
   let embed =
     { Discord_rest_client.title = tool_embed_title ~tool_name:tool_call_name
     ; description = Some "✅ Done"
+    ; url = None
     ; color = Discord_rest_client.color_green
-    ; fields = []
+    ; image = None
+    ; fields
     }
   in
   match Discord_rest_client.edit_embed_message
@@ -163,19 +204,72 @@ let send_tool_done ~token ~channel_id ~message_id ~tool_call_name =
       Log.Keeper.warn
         "keeper_chat_discord: send_tool_done failed: %s" err_str
 
+(* ── Rich block delivery helpers ─────────────────────────────────── *)
+
+let public_voice_audio_url ?base_url token =
+  let base =
+    match base_url with
+    | Some b -> Masc_network_defaults.normalize_loopback_base_url b
+    | None -> Env_config_core.masc_http_base_url ()
+  in
+  base ^ "/api/v1/voice/audio/" ^ token
+
+let send_link_block ~token ~channel_id ~url ~title ~description ~image =
+  let embed =
+    Discord_rest_client.link_embed ~url ~title ~description ~image
+  in
+  match Discord_rest_client.send_embed_message
+          ~token ~channel_id ~content:"" ~embeds:[embed] ()
+  with
+  | Ok _msg_id -> ()
+  | Error err ->
+      let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
+      Log.Keeper.warn
+        "keeper_chat_discord: send_link_block failed: %s" err_str
+
+let send_image_block ~token ~channel_id ~url ~caption =
+  let embed = Discord_rest_client.image_embed ~url ~caption in
+  match Discord_rest_client.send_embed_message
+          ~token ~channel_id ~content:"" ~embeds:[embed] ()
+  with
+  | Ok _msg_id -> ()
+  | Error err ->
+      let err_str = Format.asprintf "%a" Discord_rest_client.pp_error err in
+      Log.Keeper.warn
+        "keeper_chat_discord: send_image_block failed: %s" err_str
+
+let send_audio_block ~token ~channel_id ~base_url ~audio_token ~message_text
+    ~duration_sec =
+  let url = public_voice_audio_url ?base_url audio_token in
+  let duration_prefix =
+    match duration_sec with
+    | None -> ""
+    | Some d -> Printf.sprintf "%.1fs " d
+  in
+  let content =
+    Printf.sprintf "🔊 %s%s\n%s" duration_prefix message_text url
+  in
+  send_message ~token ~channel_id ~content
+
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
 (* NDT-OK: wall-clock used for Discord rate-limit backoff only,
    not for deterministic policy or state transitions. *)
 let now () = Unix.gettimeofday ()
 
-let adapter_loop ~token ~channel_id ~events =
+let adapter_loop ~token ~channel_id ~events ?base_url () =
+  let base_url =
+    match base_url with
+    | Some b -> Some (Masc_network_defaults.normalize_loopback_base_url b)
+    | None -> None
+  in
   (* Streaming state:
      - msg_id: Some once the initial POST succeeds
      - last_edit_time: wall-clock of last PATCH (rate limiting)
      - last_edited_text: content sent by last POST/PATCH (skip no-op edits)
-     - tool_msgs: tool_call_id → (discord_message_id, tool_call_name) *)
-  let rec loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
+     - tool_msgs: tool_call_id → (discord_message_id, tool_call_name,
+       args_summary option, result_summary option) *)
+  let rec loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url
       ~(tool_msgs : (string * tool_msg_entry) list) =
     match Keeper_chat_events.subscribe events with
     | Text_delta text ->
@@ -186,7 +280,7 @@ let adapter_loop ~token ~channel_id ~events =
              (* First stable segment — POST to create the message. *)
              if String.length patch_content = 0 then
                loop ~acc_text ~msg_id:None ~last_edit_time
-                 ~last_edited_text ~tool_msgs
+                 ~last_edited_text ~base_url ~tool_msgs
              else
                (match Discord_rest_client.send_message
                        ~token ~channel_id ~content:patch_content ()
@@ -196,7 +290,7 @@ let adapter_loop ~token ~channel_id ~events =
                       ~msg_id:(Some created_id)
                       ~last_edit_time:(now ())
                       ~last_edited_text:patch_content
-                      ~tool_msgs
+                      ~base_url ~tool_msgs
                 | Error err ->
                     let err_str =
                       Format.asprintf "%a" Discord_rest_client.pp_error err
@@ -205,23 +299,23 @@ let adapter_loop ~token ~channel_id ~events =
                       "keeper_chat_discord: streaming POST failed: %s" err_str;
                     (* Keep accumulating; will try again on next delta. *)
                     loop ~acc_text ~msg_id:None
-                      ~last_edit_time ~last_edited_text ~tool_msgs)
+                      ~last_edit_time ~last_edited_text ~base_url ~tool_msgs)
          | Some mid ->
              let elapsed = now () -. last_edit_time in
              if patch_content = last_edited_text then
                loop ~acc_text ~msg_id ~last_edit_time
-                 ~last_edited_text ~tool_msgs
+                 ~last_edited_text ~base_url ~tool_msgs
              else if elapsed >= min_edit_interval_s then begin
                edit_message_silent ~token ~channel_id
                  ~message_id:mid ~content:patch_content;
                loop ~acc_text ~msg_id
                  ~last_edit_time:(now ())
                  ~last_edited_text:patch_content
-                 ~tool_msgs
+                 ~base_url ~tool_msgs
              end else
                (* Rate limited — skip this PATCH. *)
                loop ~acc_text ~msg_id ~last_edit_time
-                 ~last_edited_text ~tool_msgs)
+                 ~last_edited_text ~base_url ~tool_msgs)
     | Text_message_end ->
         (* Force a final PATCH for this text message if content changed. *)
         let final_content = truncate acc_text in
@@ -232,10 +326,10 @@ let adapter_loop ~token ~channel_id ~events =
              loop ~acc_text ~msg_id
                ~last_edit_time:(now ())
                ~last_edited_text:final_content
-               ~tool_msgs
+               ~base_url ~tool_msgs
          | _ ->
              loop ~acc_text ~msg_id ~last_edit_time
-               ~last_edited_text ~tool_msgs)
+               ~last_edited_text ~base_url ~tool_msgs)
     | Run_finished { run_id = _ } ->
         (match msg_id with
          | None ->
@@ -263,34 +357,74 @@ let adapter_loop ~token ~channel_id ~events =
         ()
     | Run_started { run_id = _; thread_id = _ } ->
         loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
-          ~last_edited_text:"" ~tool_msgs:[]
+          ~last_edited_text:"" ~base_url ~tool_msgs:[]
     | Text_message_start { message_id = _; role = _ } ->
-        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~tool_msgs
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Custom { name; value = _ } ->
         Log.Keeper.debug
           "keeper_chat_discord: custom event %s" name;
-        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~tool_msgs
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Tool_call_start { tool_call_id; tool_call_name } ->
         let tool_msgs =
           match send_tool_running ~token ~channel_id ~tool_call_name with
           | Some discord_msg_id ->
-              (tool_call_id, (discord_msg_id, tool_call_name)) :: tool_msgs
+              let entry =
+                { discord_message_id = discord_msg_id
+                ; tool_call_name
+                ; args_summary = None
+                ; result_summary = None
+                }
+              in
+              (tool_call_id, entry) :: tool_msgs
           | None -> tool_msgs
         in
-        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~tool_msgs
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Tool_call_args { tool_call_id = _; delta = _ } ->
         (* Args stream is not visualized — only start/end matters. *)
-        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~tool_msgs
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Tool_call_end { tool_call_id } ->
         (match find_tool_msg tool_msgs tool_call_id with
-         | Some (discord_msg_id, tool_call_name) ->
+         | Some entry ->
+             let args_summary = Option.value entry.args_summary ~default:"" in
              send_tool_done ~token ~channel_id
-               ~message_id:discord_msg_id ~tool_call_name;
+               ~message_id:entry.discord_message_id
+               ~tool_call_name:entry.tool_call_name ~args_summary
+               ~result_summary:entry.result_summary;
              let tool_msgs = remove_tool_msg tool_msgs tool_call_id in
-             loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~tool_msgs
+             loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
          | None ->
              (* No running embed was created (send failed earlier). *)
-             loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~tool_msgs)
+             loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs)
+    | Link_block { url; title; description; image } ->
+        send_link_block ~token ~channel_id ~url ~title ~description ~image;
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
+    | Image_block { url; caption } ->
+        send_image_block ~token ~channel_id ~url ~caption;
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
+    | Audio_block { token; mime = _; message_text; duration_sec } ->
+        send_audio_block ~token ~channel_id ~base_url ~audio_token:token
+          ~message_text ~duration_sec;
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
+    | Tool_context_block { tool_call_id; name = _; args_summary; result_summary }
+      ->
+        let tool_msgs =
+          if List.mem_assoc tool_call_id tool_msgs then
+            update_tool_context tool_msgs tool_call_id ~args_summary
+              ~result_summary
+          else begin
+            Log.Keeper.debug
+              "keeper_chat_discord: tool_context for unknown tool_call_id=%s"
+              tool_call_id;
+            tool_msgs
+          end
+        in
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
   in
   loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
-    ~last_edited_text:"" ~tool_msgs:[]
+    ~last_edited_text:"" ~base_url ~tool_msgs:[]
+
+module For_testing = struct
+  let streaming_patch_content = streaming_patch_content
+  let final_head_and_overflow = final_head_and_overflow
+  let public_voice_audio_url = public_voice_audio_url
+end

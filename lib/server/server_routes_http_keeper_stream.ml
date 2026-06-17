@@ -991,6 +991,10 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                     ~tool_call_id:(Some tool_call_id)
                     Tool_call_end)
             then loop ()
+        | Link_block _ | Image_block _ | Audio_block _ | Tool_context_block _ ->
+            (* Rich blocks are Discord-specific; the SSE stream already
+               receives the underlying text/audio through other events. *)
+            loop ()
         | Event_error { message } -> send_error message
         | Run_finished { run_id } ->
             current_run_id := Some run_id;

@@ -1,4 +1,5 @@
 import { normalizeKeeperConversationDetails, formatKeeperVisibleReply } from './keeper-message'
+import { parseTextToChatBlocks } from './lib/chat-blocks'
 import type { KeeperChatStreamEvent } from './api'
 import {
   appendAssistantDelta,
@@ -170,11 +171,13 @@ export function applyKeeperStreamEvent(
               }
             }
             const text = formatKeeperVisibleReply(rawText)
+            const blocks = entry.blocks?.length ? entry.blocks : parseTextToChatBlocks(text)
             return {
               ...entry,
               details,
               rawText,
               text,
+              blocks,
             }
           })
         }

@@ -21,6 +21,25 @@ type keeper_chat_event =
   | Tool_call_start of { tool_call_id : string; tool_call_name : string }
   | Tool_call_args of { tool_call_id : string; delta : string }
   | Tool_call_end of { tool_call_id : string }
+  | Link_block of
+      { url : string
+      ; title : string
+      ; description : string option
+      ; image : string option
+      }
+  | Image_block of { url : string; caption : string option }
+  | Audio_block of
+      { token : string
+      ; mime : string
+      ; message_text : string
+      ; duration_sec : float option
+      }
+  | Tool_context_block of
+      { tool_call_id : string
+      ; name : string
+      ; args_summary : string
+      ; result_summary : string option
+      }
 
 (** {1 Stream operations} *)
 

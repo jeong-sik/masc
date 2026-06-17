@@ -479,6 +479,68 @@ describe('ChatTranscript', () => {
     expect(audio?.getAttribute('src')).toBe('/api/v1/voice/audio/clip-1')
     expect(container.textContent).toContain('0:05')
   })
+
+  it('shows the audio caption and a load-error fallback', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: 'hello operator',
+            audio: {
+              token: 'clip-1',
+              audioUrl: null,
+              mime: 'audio/mpeg',
+              durationSec: null,
+              messageText: 'hello operator',
+              deviceId: null,
+            },
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const audio = container.querySelector('audio') as HTMLAudioElement | null
+    expect(audio).not.toBeNull()
+    expect(audio?.getAttribute('src')).toContain('/api/v1/voice/audio/clip-1')
+    expect(container.textContent).toContain('hello operator')
+    audio?.dispatchEvent(new Event('error', { bubbles: true }))
+    await flushUi()
+    expect(container.textContent).toContain('음성을 불러올 수 없습니다')
+  })
+
+  it('renders a real audio element inside a voice block when src is provided', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            blocks: [
+              { t: 'voice', secs: 5, wave: [0.2, 0.5], src: 'https://example.com/voice.mp3', transcript: 'note' },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const voice = container.querySelector('[data-chat-block="voice"]')
+    expect(voice).not.toBeNull()
+    const audio = voice?.querySelector('audio')
+    expect(audio).not.toBeNull()
+    expect(audio?.getAttribute('src')).toBe('https://example.com/voice.mp3')
+    expect(voice?.querySelectorAll('.chat-block-vbar').length).toBe(2)
+  })
 })
 
 describe('ChatComposer queue & stall', () => {
@@ -916,9 +978,11 @@ describe('ChatComposer multimodal', () => {
   }
 
   it('renders attachment and voice buttons', () => {
+    Object.assign(globalThis.navigator, { mediaDevices: { getUserMedia: vi.fn() } })
+    Object.assign(globalThis, { MediaRecorder: vi.fn() })
     renderComposer()
     expect(container.querySelector('[title="이미지·파일 첨부"]')).not.toBeNull()
-    expect(container.querySelector('[title="음성 입력 — 받아쓰기로 메시지 작성"]')).not.toBeNull()
+    expect(container.querySelector('[title="음성으로 입력"]')).not.toBeNull()
   })
 
   it('adds attachment chips from file input and removes them', async () => {
@@ -995,34 +1059,7 @@ describe('ChatComposer multimodal', () => {
     expect(container.querySelector('[data-chat-attachment-draft="att-drop"]')).not.toBeNull()
   })
 
-  it('records voice, shows a draft with waveform, and removes it', async () => {
-    renderComposer()
-    const voiceBtn = container.querySelector('[title="음성 입력 — 받아쓰기로 메시지 작성"]') as HTMLButtonElement
-    voiceBtn.click()
-    await new Promise((r) => setTimeout(r, 10))
-
-    expect(container.querySelector('[data-chat-record-bar]')).not.toBeNull()
-    expect(container.textContent).toContain('녹음 중')
-
-    vi.advanceTimersByTime(300)
-    await new Promise((r) => setTimeout(r, 10))
-
-    const stopBtn = container.querySelector('[title="녹음 종료 — 받아쓰기"]') as HTMLButtonElement
-    stopBtn.click()
-    await new Promise((r) => setTimeout(r, 10))
-
-    const draft = container.querySelector('[data-chat-voice-draft]')
-    expect(draft).not.toBeNull()
-    expect(draft?.textContent).toContain('받아쓰기')
-    expect(draft?.querySelectorAll('.vbar').length).toBeGreaterThan(0)
-
-    const removeBtn = container.querySelector('[data-chat-voice-draft] .cdraft-x') as HTMLButtonElement
-    removeBtn.click()
-    await new Promise((r) => setTimeout(r, 10))
-    expect(container.querySelector('[data-chat-voice-draft]')).toBeNull()
-  })
-
-  it('composes ordered blocks on send: attach, voice, text', async () => {
+  it('composes ordered blocks on send: attach, text', async () => {
     vi.mocked(collectAttachments).mockResolvedValue({
       attachments: [
         {
@@ -1048,29 +1085,83 @@ describe('ChatComposer multimodal', () => {
     fileInput.dispatchEvent(new Event('change'))
     await new Promise((r) => setTimeout(r, 10))
 
-    const voiceBtn = container.querySelector('[title="음성 입력 — 받아쓰기로 메시지 작성"]') as HTMLButtonElement
-    voiceBtn.click()
-    await new Promise((r) => setTimeout(r, 10))
-    vi.advanceTimersByTime(200)
-    const stopBtn = container.querySelector('[title="녹음 종료 — 받아쓰기"]') as HTMLButtonElement
-    stopBtn.click()
-    await new Promise((r) => setTimeout(r, 10))
-
     const sendBtn = container.querySelector('.send') as HTMLButtonElement
     sendBtn.click()
     await new Promise((r) => setTimeout(r, 10))
 
     expect(onSend).toHaveBeenCalledOnce()
     const blocks = onSend.mock.calls[0]?.[0].blocks as ChatBlock[]
-    expect(blocks).toHaveLength(3)
+    expect(blocks).toHaveLength(2)
     expect(blocks[0]).toMatchObject({ t: 'attach', name: 'screen.png', kind: 'image' })
-    expect(blocks[1]).toMatchObject({ t: 'voice', via: '음성 입력 · 받아쓰기' })
-    expect(blocks[2]).toMatchObject({ t: 'p', html: 'check this &lt;tag&gt;' })
+    expect(blocks[1]).toMatchObject({ t: 'p', html: 'check this &lt;tag&gt;' })
   })
 
   it('keeps send disabled until there is content', () => {
     renderComposer()
     const sendBtn = container.querySelector('.send') as HTMLButtonElement
     expect(sendBtn.disabled).toBe(true)
+  })
+})
+
+describe('rich block URL safety', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders safe image block src', () => {
+    const blocks: ChatBlock[] = [{ t: 'image', src: 'https://example.com/x.png' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const img = container.querySelector('img')
+    expect(img?.getAttribute('src')).toBe('https://example.com/x.png')
+  })
+
+  it('blocks javascript: image src and shows placeholder', () => {
+    const blocks: ChatBlock[] = [{ t: 'image', src: 'javascript:alert(1)' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toContain('unsafe URL')
+  })
+
+  it('renders safe link block href', () => {
+    const blocks: ChatBlock[] = [{ t: 'link', url: 'https://example.com', title: 'Example' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const a = container.querySelector('a')
+    expect(a?.getAttribute('href')).toBe('https://example.com')
+  })
+
+  it('blocks javascript: link href', () => {
+    const blocks: ChatBlock[] = [{ t: 'link', url: 'javascript:alert(1)', title: 'Bad' }]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    const a = container.querySelector('a')
+    expect(a?.getAttribute('href')).toBe('#')
+    expect(container.textContent).toContain('unsafe URL')
   })
 })

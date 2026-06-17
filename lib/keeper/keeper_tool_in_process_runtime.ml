@@ -136,6 +136,13 @@ let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
   end
 ;;
 
+let slack_token_opt () =
+  match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
+  | None -> None
+  | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+
 let handle_surface_post ~config ~(meta : keeper_meta) ~args =
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
   let content = Safe_ops.json_string ~default:"" "content" args in
@@ -159,9 +166,12 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
     let bound_discord_channels =
       Channel_gate_discord_state.bound_channels ~keeper_name:meta.name
     in
+    let bound_slack_channels =
+      Channel_gate_slack_state.bound_channels ~keeper_name:meta.name
+    in
     match
       Keeper_surface_post.resolve_target ~surface ~channel_id
-        ~bound_discord_channels
+        ~bound_slack_channels ~bound_discord_channels ()
     with
     | Error message -> Keeper_surface_post.error_json message
     | Ok Keeper_surface_post.To_dashboard ->
@@ -197,6 +207,25 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
             Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
               ~source:"discord";
             Keeper_surface_post.ok_json ~surface ~message_id ())
+    | Ok (Keeper_surface_post.To_slack { channel_id }) -> (
+        match slack_token_opt () with
+        | None ->
+            Keeper_surface_post.error_json
+              "MASC_SLACK_BOT_TOKEN is unset or empty"
+        | Some token ->
+            Keeper_chat_slack.send_message ~token ~channel:channel_id
+              ~content:safe_content;
+            Keeper_chat_store.append_assistant_message
+              ~base_dir:config.Workspace.base_path
+              ~keeper_name:meta.name
+              ~content:safe_content
+              ~surface:
+                (Surface_ref.Slack
+                   { team_id = None; channel_id; thread_ts = None })
+              ();
+            Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+              ~source:"slack";
+            Keeper_surface_post.ok_json ~surface ())
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =

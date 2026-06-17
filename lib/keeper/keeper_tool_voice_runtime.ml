@@ -158,11 +158,14 @@ let handle_speak
                let audio_url =
                  Printf.sprintf "/api/v1/voice/audio/%s" token
                in
+               let duration_sec =
+                 Voice_bridge_core.audio_duration_seconds ~audio_file:path
+               in
                Some
                  { Keeper_chat_store.token
                  ; audio_url = Some audio_url
                  ; mime = "audio/mpeg"
-                 ; duration_sec = None
+                 ; duration_sec
                  ; message_text = message
                  ; device_id = audio_device
                  }

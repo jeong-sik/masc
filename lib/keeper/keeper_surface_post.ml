@@ -1,12 +1,14 @@
 type post_target =
   | To_dashboard
   | To_discord of { channel_id : string }
+  | To_slack of { channel_id : string }
 
 let dashboard_label = "dashboard"
 let discord_label = "discord"
+let slack_label = "slack"
 
-let resolve_target ~surface ~channel_id ~bound_discord_channels :
-    (post_target, string) result =
+let resolve_target ~surface ~channel_id ?(bound_discord_channels = [])
+    ?(bound_slack_channels = []) () : (post_target, string) result =
   let surface = String.trim surface in
   if String.equal surface dashboard_label then Ok To_dashboard
   else if String.equal surface discord_label then
@@ -33,11 +35,35 @@ let resolve_target ~surface ~channel_id ~bound_discord_channels :
                "channel_id %s is not bound to this keeper (bound: %s)"
                requested
                (String.concat ", " bound))
+  else if String.equal surface slack_label then
+    let bound = List.map String.trim bound_slack_channels in
+    match (channel_id, bound) with
+    | _, [] ->
+        Error
+          "this keeper has no Slack channel binding; bind a channel first \
+           (posting to an unbound surface is an error, not a no-op)"
+    | None, [ only ] -> Ok (To_slack { channel_id = only })
+    | None, _ :: _ :: _ ->
+        Error
+          (Printf.sprintf
+             "multiple Slack channels are bound (%s); pass channel_id to \
+              pick one"
+             (String.concat ", " bound))
+    | Some requested, bound ->
+        let requested = String.trim requested in
+        if List.exists (String.equal requested) bound then
+          Ok (To_slack { channel_id = requested })
+        else
+          Error
+            (Printf.sprintf
+               "channel_id %s is not bound to this keeper (bound: %s)"
+               requested
+               (String.concat ", " bound))
   else
     Error
       (Printf.sprintf
-         "posting to %S is not supported: discord and dashboard only in this \
-          phase (generic gate connectors have no send surface yet)"
+         "posting to %S is not supported: discord, dashboard, and slack only \
+          in this phase (generic gate connectors have no send surface yet)"
          surface)
 
 let ok_json ~surface ?message_id () =

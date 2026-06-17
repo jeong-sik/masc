@@ -786,7 +786,7 @@ export type ChatAttachBlock = {
   kind?: string
 }
 
-export type ChatVoiceBlock = { t: 'voice'; secs?: number; wave?: number[]; via?: string; size?: string; transcript?: string }
+export type ChatVoiceBlock = { t: 'voice'; secs?: number; wave?: number[]; via?: string; size?: string; transcript?: string; src?: string }
 
 export type ChatImageBlock = { t: 'image'; src?: string; ph?: string; cap?: string }
 export type ChatSvgBlock = { t: 'svg'; svg: string; cap?: string }
@@ -821,7 +821,6 @@ export type ChatBlock =
   | ChatTraceBlock
   | ChatLinkBlock
   | ChatBroadcastBlock
-
 export type KeeperConversationStreamState =
   | 'opening'
   | 'thinking'

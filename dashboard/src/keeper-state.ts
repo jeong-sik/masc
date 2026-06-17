@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals'
 import { formatKeeperVisibleReply } from './keeper-message'
+import { parseTextToChatBlocks } from './lib/chat-blocks'
 import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './components/common/normalize'
 import type {
   KeeperConversationAttachment,
@@ -342,6 +343,7 @@ function normalizeHistoryEntry(
   // the bubble renders the error label/styling instead of a saved reply.
   const delivery: KeeperConversationDelivery =
     asString(raw.kind) === 'transport_failure' ? 'error' : 'history'
+  const blocks = role === 'assistant' ? parseTextToChatBlocks(text) : undefined
   return {
     // R3: key off the producer-assigned server id when present so the
     // render key is stable across history-page merges (the former
@@ -360,6 +362,7 @@ function normalizeHistoryEntry(
     surface,
     audio,
     attachments,
+    blocks,
   }
 }
 
@@ -468,10 +471,13 @@ export function finalizeAssistantEntry(
   entryId: string,
   patch: Partial<KeeperConversationEntry>,
 ): void {
-  updateThreadEntry(name, entryId, entry => ({
-    ...entry,
-    ...patch,
-  }))
+  updateThreadEntry(name, entryId, (entry) => {
+    const next: KeeperConversationEntry = { ...entry, ...patch }
+    if (next.role === 'assistant' && !next.blocks?.length && next.text) {
+      next.blocks = parseTextToChatBlocks(next.text)
+    }
+    return next
+  })
 }
 
 // Dedup key for merging server history with locally-appended entries.

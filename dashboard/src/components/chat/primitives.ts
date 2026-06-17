@@ -3,12 +3,12 @@ import type { ComponentChildren, VNode } from 'preact'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
-import { highlightCodeHtml } from '../common/shiki-highlighter'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
 import { parseMarkdownToBlocks } from './markdown-blocks'
 import { showToast } from '../common/toast'
+import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
@@ -388,10 +388,6 @@ function sanitizeHtml(raw: string): string {
   return DOMPurify.sanitize(raw)
 }
 
-function sanitizeSvg(raw: string): string {
-  return DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true } })
-}
-
 function renderInlineHtml(raw: string): { __html: string } {
   return { __html: sanitizeHtml(linkifyHtml(raw)) }
 }
@@ -545,8 +541,12 @@ function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html:
     let cancelled = false
     const run = async () => {
       try {
+        const shiki = await import('shiki')
         const text = codeBlockText(htmlContent, source)
-        const next = await highlightCodeHtml(text, cap && cap.trim() ? cap.trim() : 'text')
+        const next = await shiki.codeToHtml(text, {
+          lang: cap && cap.trim() ? cap.trim() : 'text',
+          theme: 'github-dark',
+        })
         if (!cancelled) setHighlighted(next)
       } catch {
         if (!cancelled) setFailed(true)
@@ -691,10 +691,20 @@ function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string
   `
 }
 
+function isSafeUrl(url: string): boolean {
+  try {
+    const u = new URL(url, typeof window !== 'undefined' ? window.location.href : 'http://localhost')
+    return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'data:'
+  } catch {
+    return false
+  }
+}
+
 function ChatVoiceBlock(b: ChatVoiceBlock) {
   const secs = b.secs ?? 14
   const [playing, setPlaying] = useState(false)
   const [prog, setProg] = useState(0)
+  const safeSrc = b.src && isSafeUrl(b.src) ? b.src : null
 
   useEffect(() => {
     if (!playing) return
@@ -725,9 +735,21 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
   return html`
     <div class="chat-block-voice" data-chat-block="voice">
       <div class="chat-block-voice-row">
-        <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
-          ${playing ? '❙❙' : '▶'}
-        </button>
+        ${safeSrc
+          ? html`
+              <audio
+                controls
+                preload="none"
+                src=${safeSrc}
+                class="h-8 max-w-[16rem]"
+                aria-label=${b.transcript || '음성 메시지'}
+              />
+            `
+          : html`
+              <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
+                ${playing ? '❙❙' : '▶'}
+              </button>
+            `}
         <div class="chat-block-voice-wave">
           ${bars.map((h, i) => html`
             <span
@@ -761,19 +783,20 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
   const [open, setOpen] = useState(false)
+  const safeSrc = src && isSafeUrl(src) ? src : null
   return html`
     <figure class="chat-block-media" data-chat-block="image">
-      <div class="chat-block-media-frame ${src ? 'cursor-zoom-in' : ''}" onClick=${() => src && setOpen(true)}>
-        ${src
-          ? html`<img src=${src} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
-          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}</div>`}
+      <div class="chat-block-media-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>
+        ${safeSrc
+          ? html`<img src=${safeSrc} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
+          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}${src ? ' (unsafe URL)' : ''}</div>`}
       </div>
       ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
-      ${open && src
+      ${open && safeSrc
         ? html`
             <${ChatPreviewModal} title=${cap || '이미지'} onClose=${() => setOpen(false)}>
               <img
-                src=${src}
+                src=${safeSrc}
                 alt=${cap || ''}
                 class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
               />
@@ -786,7 +809,7 @@ function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: str
 
 function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
   const [open, setOpen] = useState(false)
-  const clean = useMemo(() => sanitizeSvg(svg), [svg])
+  const clean = useMemo(() => sanitizeHtml(svg), [svg])
   return html`
     <figure class="chat-block-media" data-chat-block="svg">
       <div
@@ -838,7 +861,7 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
     <figure class="chat-block-media" data-chat-block="mermaid">
       <div class="chat-block-mermaid">
         ${svg
-          ? html`<div dangerouslySetInnerHTML=${{ __html: sanitizeSvg(svg) }} />`
+          ? html`<div dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
           : html`<div class="chat-block-media-ph">다이어그램 렌더링 중…</div>`}
       </div>
       ${caption ? html`<figcaption class="chat-block-media-cap">${caption}</figcaption>` : null}
@@ -957,19 +980,22 @@ function ChatLinkBlock(b: ChatLinkBlock) {
   } catch {
     host = b.meta
   }
+  const safeUrl = isSafeUrl(b.url) ? b.url : '#'
+  const unsafe = safeUrl === '#'
   return html`
     <a
-      class="chat-block-linkcard ${b.kind || ''}"
-      href=${b.url}
+      class="chat-block-linkcard ${b.kind || ''} ${unsafe ? 'chat-block-linkcard-unsafe' : ''}"
+      href=${safeUrl}
       target="_blank"
-      rel="noopener noreferrer"
+      rel=${unsafe ? undefined : 'noopener noreferrer'}
       data-chat-block="link"
+      onClick=${unsafe ? (e: MouseEvent) => { e.preventDefault() } : undefined}
     >
       <span class="chat-block-linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
       <span class="chat-block-linkcard-body">
         <span class="chat-block-linkcard-title">${b.title}</span>
         ${b.desc ? html`<span class="chat-block-linkcard-desc">${b.desc}</span>` : null}
-        <span class="chat-block-linkcard-meta">${b.meta || host}</span>
+        <span class="chat-block-linkcard-meta">${unsafe ? 'unsafe URL' : (b.meta || host)}</span>
       </span>
       <span class="chat-block-linkcard-go">↗</span>
     </a>
@@ -1015,7 +1041,7 @@ function ChatBlock({ block }: { block: ChatBlock }) {
     case 'shell': return html`<${ChatShellBlock} title=${block.title} lines=${block.lines} exit=${block.exit} dur=${block.dur} />`
     case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} data=${block.data} mimeType=${block.mimeType} />`
     case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} src=${block.src} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
-    case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} />`
+    case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} src=${block.src} />`
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
     case 'mermaid': return html`<${ChatMermaidBlock} source=${block.source} caption=${block.caption} />`
@@ -1151,6 +1177,12 @@ function formatAudioDuration(seconds?: number | null): string {
 // RFC-0235 P1/P3: user-gesture play button for synthesized assistant
 // voice clips. Uses the native `<audio controls>` element (no autoplay).
 function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
+  const [loadError, setLoadError] = useState(false)
+  const fallbackPath = `/api/v1/voice/audio/${encodeURIComponent(clip.token)}`
+  const fallbackSrc = typeof window !== 'undefined'
+    ? new URL(fallbackPath, window.location.href).href
+    : fallbackPath
+  const audioSrc = clip.audioUrl ?? fallbackSrc
   const duration = formatAudioDuration(clip.durationSec)
   return html`
     <div class="chat-audio-clip" data-chat-audio-clip>
@@ -1166,14 +1198,21 @@ function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
       <audio
         controls
         preload="none"
-        src=${clip.audioUrl ?? `/api/v1/voice/audio/${encodeURIComponent(clip.token)}`}
+        src=${audioSrc}
         aria-label=${clip.messageText || '음성 메시지'}
+        onError=${() => { setLoadError(true) }}
       />
       ${duration
         ? html`<span class="chat-audio-dur">${duration}</span>`
         : null}
       ${clip.deviceId
         ? html`<span class="chat-audio-device" title=${`device: ${clip.deviceId}`}>🔊</span>`
+        : null}
+      ${clip.messageText
+        ? html`<span class="chat-audio-caption">${clip.messageText}</span>`
+        : null}
+      ${loadError
+        ? html`<span class="chat-audio-error">음성을 불러올 수 없습니다.</span>`
         : null}
     </div>
   `
@@ -1717,25 +1756,8 @@ export function ChatTranscript({
 // stall so the operator can tell "slow model" from "dead transport".
 export const STREAM_STALL_THRESHOLD_S = 15
 
-interface VoiceDraft {
-  secs: number
-  size: string
-  wave: number[]
-  transcript: string
-}
-
-function fmtClock(secs: number): string {
-  const m = Math.floor(secs / 60)
-  const s = Math.floor(secs % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
 function escapeHtml(raw: string): string {
   return raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-function randomWave(n: number): number[] {
-  return Array.from({ length: n }, () => 0.22 + Math.random() * 0.74)
 }
 
 export function AttachDraftChip({
@@ -1766,54 +1788,6 @@ export function AttachDraftChip({
       >
         ✕
       </button>
-    </div>
-  `
-}
-
-function VoiceDraftChip({
-  draft,
-  onRemove,
-}: {
-  draft: VoiceDraft
-  onRemove: () => void
-}) {
-  return html`
-    <div class="cdraft voice" data-chat-voice-draft>
-      <span class="cdraft-glyph mic">◌</span>
-      <div class="cdraft-wave">
-        ${draft.wave.map((h, i) => html`<span key=${i} class="vbar on" style=${{ height: `${Math.round(4 + h * 18)}px` }}></span>`)}
-      </div>
-      <span class="cdraft-dur mono">${fmtClock(draft.secs)}</span>
-      <div class="cdraft-tx">
-        <span class="cdraft-tx-k">받아쓰기</span>
-        <span class="cdraft-tx-v">${draft.transcript}</span>
-      </div>
-      <button type="button" class="cdraft-x" title="음성 제거" aria-label="음성 제거" onClick=${onRemove}>✕</button>
-    </div>
-  `
-}
-
-function RecordBar({
-  secs,
-  wave,
-  onStop,
-  onCancel,
-}: {
-  secs: number
-  wave: number[]
-  onStop: () => void
-  onCancel: () => void
-}) {
-  return html`
-    <div class="rec-bar" data-chat-record-bar>
-      <span class="rec-dot"></span>
-      <span class="rec-lbl">녹음 중</span>
-      <span class="rec-clock mono">${fmtClock(secs)}</span>
-      <div class="rec-wave">
-        ${wave.map((h, i) => html`<span key=${i} class="rbar" style=${{ height: `${Math.round(3 + h * 20)}px` }}></span>`)}
-      </div>
-      <button type="button" class="rec-btn cancel" title="취소" onClick=${onCancel}>취소</button>
-      <button type="button" class="rec-btn stop" title="녹음 종료 — 받아쓰기" onClick=${onStop}>■ 완료</button>
     </div>
   `
 }
@@ -1852,13 +1826,17 @@ export function ChatComposer({
   const [focus, setFocus] = useState(false)
   const [drag, setDrag] = useState(false)
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
-  const [voiceDraft, setVoiceDraft] = useState<VoiceDraft | null>(null)
-  const [recording, setRecording] = useState(false)
-  const [recSecs, setRecSecs] = useState(0)
-  const [recWave, setRecWave] = useState<number[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const recIntervalRef = useRef<number | null>(null)
+
+  // RFC-0236 P1: speak to compose. Transcribed text appends to the draft at a
+  // newline; an empty draft is replaced outright. Send stays manual (no
+  // auto-send) so the operator can correct a transcription before it lands.
+  const voice = useVoiceInput({
+    onTranscribed: (text) => {
+      onDraftChange(draft.trim() === '' ? text : `${draft}\n${text}`)
+    },
+  })
 
   useEffect(() => {
     if (!streaming || !streamStartedAt) {
@@ -1870,27 +1848,6 @@ export function ChatComposer({
     const id = setInterval(tick, 1000)
     return () => clearInterval(id)
   }, [streaming, streamStartedAt])
-
-  useEffect(() => {
-    if (!recording) {
-      if (recIntervalRef.current) {
-        clearInterval(recIntervalRef.current)
-        recIntervalRef.current = null
-      }
-      return
-    }
-    const t0 = performance.now()
-    const id = window.setInterval(() => {
-      const s = (performance.now() - t0) / 1000
-      setRecSecs(s)
-      setRecWave((prev) => [...prev.slice(-46), 0.2 + Math.random() * 0.78])
-    }, 110)
-    recIntervalRef.current = id
-    return () => {
-      clearInterval(id)
-      recIntervalRef.current = null
-    }
-  }, [recording])
 
   // Derived from the 1 s elapsed tick above — no extra interval needed.
   const sinceLastEvent =
@@ -1906,7 +1863,7 @@ export function ChatComposer({
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
     : '볂이기'
   const isStreamWarning = streaming && elapsed > 60
-  const hasContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
+  const hasContent = draft.trim() !== '' || attachments.length > 0
   const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
 
   const isPrimary = layout === 'primary'
@@ -1938,29 +1895,6 @@ export function ChatComposer({
     }
   }
 
-  const startRecording = () => {
-    setRecording(true)
-    setRecSecs(0)
-    setRecWave([])
-  }
-
-  const stopRecording = () => {
-    const secs = Math.max(1, recSecs)
-    const n = Math.min(40, Math.max(14, Math.round(secs * 2.2)))
-    setRecording(false)
-    setVoiceDraft({
-      secs,
-      size: formatAttachmentSize(Math.round(secs * 3400)),
-      wave: randomWave(n),
-      transcript: '스케줄러 p99 스파이크 건, compact 도는 타이밍이랑 겹치는지 확인하고 결과만 알려줘.',
-    })
-  }
-
-  const cancelRecording = () => {
-    setRecording(false)
-    setVoiceDraft(null)
-  }
-
   const handleSend = () => {
     if (sendDisabled) return
     const blocks: ChatBlock[] = []
@@ -1980,16 +1914,6 @@ export function ChatComposer({
         sizeBytes: att.size,
       } as ChatBlock)
     }
-    if (voiceDraft) {
-      blocks.push({
-        t: 'voice',
-        secs: Math.round(voiceDraft.secs),
-        wave: voiceDraft.wave,
-        size: voiceDraft.size,
-        via: '음성 입력 · 받아쓰기',
-        transcript: voiceDraft.transcript,
-      } as ChatBlock)
-    }
     const text = draft.trim()
     if (text) {
       blocks.push({ t: 'p', html: escapeHtml(text) } as ChatBlock)
@@ -1997,7 +1921,6 @@ export function ChatComposer({
     void onSend({ blocks })
     onDraftChange('')
     setAttachments([])
-    setVoiceDraft(null)
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
@@ -2050,7 +1973,7 @@ export function ChatComposer({
                 <div class="text-xs text-[var(--color-fg-secondary)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
               </div>
             `}
-        ${attachments.length > 0 || voiceDraft
+        ${attachments.length > 0
           ? html`
               <div class="composer-tray">
                 ${attachments.map((att) => html`
@@ -2060,90 +1983,82 @@ export function ChatComposer({
                     onRemove=${() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}
                   />
                 `)}
-                ${voiceDraft ? html`<${VoiceDraftChip} draft=${voiceDraft} onRemove=${() => setVoiceDraft(null)} />` : null}
               </div>
             `
           : null}
         <div class=${boxClass}>
-          ${recording
-            ? html`<${RecordBar}
-                secs=${recSecs}
-                wave=${recWave}
-                onStop=${stopRecording}
-                onCancel=${cancelRecording}
-              />`
-            : html`
-                <textarea
-                  ref=${textareaRef}
-                  class=${(isPrimary
-                    ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-4 py-4 text-base leading-loose'
-                    : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose') + ` ${CHAT_FOCUS_RING}`}
-                  placeholder=${placeholder}
-                  aria-label="메시지 입력"
-                  value=${draft}
-                  onInput=${grow}
-                  onKeyDown=${onKeyDown}
-                  onFocus=${() => setFocus(true)}
-                  onBlur=${() => setFocus(false)}
-                  disabled=${disabled}
-                ></textarea>
-                <div class="composer-tools">
-                  <input
-                    ref=${fileInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,application/json,text/csv"
-                    multiple
-                    class="hidden"
-                    aria-label="파일 첨부"
-                    onChange=${(event: Event) => {
-                      const target = event.target as HTMLInputElement
-                      void ingestFiles(target.files)
-                      target.value = ''
-                    }}
-                  />
+          <textarea
+            ref=${textareaRef}
+            class=${(isPrimary
+              ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-4 py-4 text-base leading-loose'
+              : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose') + ` ${CHAT_FOCUS_RING}`}
+            placeholder=${placeholder}
+            aria-label="메시지 입력"
+            value=${draft}
+            onInput=${grow}
+            onKeyDown=${onKeyDown}
+            onFocus=${() => setFocus(true)}
+            onBlur=${() => setFocus(false)}
+            disabled=${disabled}
+          ></textarea>
+          <div class="composer-tools">
+            <input
+              ref=${fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,application/json,text/csv"
+              multiple
+              class="hidden"
+              aria-label="파일 첨부"
+              onChange=${(event: Event) => {
+                const target = event.target as HTMLInputElement
+                void ingestFiles(target.files)
+                target.value = ''
+              }}
+            />
+            <button
+              type="button"
+              class="ctool"
+              title="이미지·파일 첨부"
+              aria-label="이미지·파일 첨부"
+              disabled=${disabled}
+              onClick=${() => fileInputRef.current?.click()}
+            >
+              ⊕
+            </button>
+            ${voice.supported ? html`
+              <button
+                type="button"
+                class="ctool ${voice.state === 'recording' ? 'recording' : ''}"
+                title=${voice.state === 'recording' ? '녹음 중지' : voice.state === 'transcribing' ? '음성 인식 중' : '음성으로 입력'}
+                aria-label=${voice.state === 'recording' ? '녹음 중지' : '음성으로 입력'}
+                disabled=${voice.state === 'transcribing' || disabled}
+                onClick=${() => (voice.state === 'recording' ? voice.stop() : voice.start())}
+              >
+                ${voice.state === 'recording' ? '■ 녹음중' : voice.state === 'transcribing' ? '전사 중…' : '🎤 음성'}
+              </button>
+            ` : null}
+            <button
+              type="button"
+              class="send ${isStreamWarning && !canQueue ? 'warn' : ''}"
+              disabled=${sendDisabled}
+              onClick=${handleSend}
+            >
+              ${streamLabel}
+            </button>
+            ${streaming && onAbort
+              ? html`
                   <button
                     type="button"
-                    class="ctool"
-                    title="이미지·파일 첨부"
-                    aria-label="이미지·파일 첨부"
-                    disabled=${disabled}
-                    onClick=${() => fileInputRef.current?.click()}
+                    class="ctool abort"
+                    title="응답 중지"
+                    aria-label="응답 중지"
+                    onClick=${onAbort}
                   >
-                    ⊕
+                    중지${elapsed > 0 ? ` (${elapsed}s)` : ''}
                   </button>
-                  <button
-                    type="button"
-                    class="ctool"
-                    title="음성 입력 — 받아쓰기로 메시지 작성"
-                    aria-label="음성 입력"
-                    disabled=${disabled}
-                    onClick=${startRecording}
-                  >
-                    🎤
-                  </button>
-                  <button
-                    type="button"
-                    class="send ${isStreamWarning && !canQueue ? 'warn' : ''}"
-                    disabled=${sendDisabled}
-                    onClick=${handleSend}
-                  >
-                    ${streamLabel}
-                  </button>
-                  ${streaming && onAbort
-                    ? html`
-                        <button
-                          type="button"
-                          class="ctool abort"
-                          title="응답 중지"
-                          aria-label="응답 중지"
-                          onClick=${onAbort}
-                        >
-                          중지${elapsed > 0 ? ` (${elapsed}s)` : ''}
-                        </button>
-                      `
-                    : null}
-                </div>
-              `}
+                `
+              : null}
+          </div>
         </div>
         <div class="composer-foot">
           <span class="hint">

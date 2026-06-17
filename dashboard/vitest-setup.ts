@@ -93,14 +93,12 @@ vi.mock('shiki', () => {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
   }
-  const codeToHtml = vi.fn((code: string) => `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`)
   return {
     createHighlighter: vi.fn().mockResolvedValue({
       getLoadedLanguages: vi.fn().mockReturnValue([]),
       loadLanguage: vi.fn().mockResolvedValue(undefined),
-      codeToHtml,
-    }),
-    codeToHtml,
+      codeToHtml: vi.fn((code: string) => `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`)
+    })
   }
 })
 

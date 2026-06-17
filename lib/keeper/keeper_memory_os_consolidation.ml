@@ -130,10 +130,13 @@ let plan_of_string raw =
    claim). *)
 let consolidated_fact ~now ~members (group : merge_group) =
   let earliest =
-    List.fold_left
-      (fun acc m -> if m.first_seen < acc.first_seen then m else acc)
-      (List.hd members)
-      (List.tl members)
+    match members with
+    | [] -> invalid_arg "Keeper_memory_os_consolidation.consolidated_fact: empty members"
+    | first :: rest ->
+      List.fold_left
+        (fun acc m -> if m.first_seen < acc.first_seen then m else acc)
+        first
+        rest
   in
   let first_seen =
     List.fold_left (fun acc m -> Float.min acc m.first_seen) earliest.first_seen members
@@ -178,11 +181,15 @@ let apply_plan ~now ~facts plan =
        then (
          let member_facts = List.map (fun i -> facts_arr.(i)) members in
          let anchor =
-           List.fold_left
-             (fun acc i ->
-                if facts_arr.(i).first_seen < facts_arr.(acc).first_seen then i else acc)
-             (List.hd members)
-             (List.tl members)
+           (* members is guaranteed non-empty by the [>= 2] guard above *)
+           match members with
+           | [] -> invalid_arg "Keeper_memory_os_consolidation.apply_plan: empty group"
+           | first :: rest ->
+             List.fold_left
+               (fun acc i ->
+                  if facts_arr.(i).first_seen < facts_arr.(acc).first_seen then i else acc)
+               first
+               rest
          in
          List.iter (fun i -> slot.(i) <- `Consumed) members;
          Hashtbl.replace consolidated anchor (consolidated_fact ~now ~members:member_facts group)))

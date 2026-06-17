@@ -10,7 +10,7 @@ interface SchemaFormProps {
 
 export function SchemaForm({ schema, values, onChange }: SchemaFormProps) {
   if (!schema.properties || Object.keys(schema.properties).length === 0) {
-    return html`<p class="text-[var(--color-fg-muted)] text-xs py-2">이 도구는 파라미터가 없습니다.</p>`
+    return html`<p class="v2-lab-card text-[var(--color-fg-muted)] text-xs py-2">이 도구는 파라미터가 없습니다.</p>`
   }
 
   const required = new Set(schema.required ?? [])
@@ -25,7 +25,7 @@ export function SchemaForm({ schema, values, onChange }: SchemaFormProps) {
   }
 
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="v2-lab-panel flex flex-col gap-3">
       ${sorted.map(([name, prop]) => html`
         <${SchemaField} key=${name} name=${name} schema=${prop} value=${values[name]}
           required=${required.has(name)} onChange=${handleFieldChange} />

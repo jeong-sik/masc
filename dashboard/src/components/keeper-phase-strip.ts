@@ -72,7 +72,7 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
   const color = signalColor(t)
   const signal = t.operator_signal
   return html`
-    <div class="group relative flex flex-col items-center" key=${idx}>
+    <div class="group relative flex flex-col items-center v2-monitoring-row" key=${idx}>
       <div
         class="w-3 h-3 rounded-full border-2 cursor-default transition-transform hover:scale-125"
         style="border-color: ${color}; background: ${color}33"
@@ -101,7 +101,7 @@ function KeeperStrip({ name, data }: { name: string; data: KeeperTransitionsResp
   const transitions = data.transitions
 
   return html`
-    <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" role="listitem" aria-label="${name}: ${getPhaseStyle(phase).label}, 전환 ${transitions.length}건">
+    <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-row" role="listitem" aria-label="${name}: ${getPhaseStyle(phase).label}, 전환 ${transitions.length}건">
       <div class="w-24 shrink-0">
         <div class="text-sm font-semibold text-[var(--color-fg-secondary)] truncate">${name}</div>
         <div
@@ -140,16 +140,16 @@ export function KeeperPhaseTimeline() {
   }
 
   if (keeperList.length === 0) {
-    return html`<div class="text-xs text-[var(--color-fg-muted)] py-4 text-center">등록된 키퍼 없음</div>`
+    return html`<div class="text-xs text-[var(--color-fg-muted)] py-4 text-center v2-monitoring-panel">등록된 키퍼 없음</div>`
   }
 
   return html`
-    <div class="flex flex-col gap-2" role="list" aria-label="키퍼 페이즈 전환 타임라인">
-      <div class="flex items-center justify-between mb-1">
+    <div class="flex flex-col gap-2 v2-monitoring-surface" role="list" aria-label="키퍼 페이즈 전환 타임라인">
+      <div class="flex items-center justify-between mb-1 v2-monitoring-toolbar">
         <div class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">페이즈 전환 (최근 30건)</div>
         <button
           type="button"
-          class="text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] transition-colors"
+          class="text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] transition-colors v2-monitoring-action"
           onClick=${() => { void refreshKeeperPhaseTimeline() }}
         >새로고침</button>
       </div>
@@ -158,7 +158,7 @@ export function KeeperPhaseTimeline() {
         return d
           ? html`<${KeeperStrip} name=${k.name} data=${d} key=${k.name} />`
           : html`
-            <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" key=${k.name}>
+            <div class="flex items-center gap-3 py-2 px-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-row" key=${k.name}>
               <div class="w-24 text-sm font-semibold text-[var(--color-fg-secondary)] truncate">${k.name}</div>
               <span class="text-2xs text-[var(--color-fg-muted)]">데이터 없음</span>
             </div>

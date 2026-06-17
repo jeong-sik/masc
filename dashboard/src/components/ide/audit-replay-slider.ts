@@ -60,6 +60,7 @@ export function AuditReplaySlider({
 
   return html`
     <div
+      class="v2-ide-toolbar"
       data-testid="audit-replay-slider"
       style=${{
         display: 'grid',

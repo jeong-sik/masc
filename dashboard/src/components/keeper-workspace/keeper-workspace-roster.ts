@@ -80,7 +80,7 @@ function RosterRow({
   return html`
     <button
       type="button"
-      class="kw-kp-row"
+      class="kw-kp-row v2-monitoring-row"
       style=${style}
       aria-current=${active ? 'true' : 'false'}
       onClick=${() => onSelect(keeper.name)}
@@ -153,7 +153,7 @@ export function KeeperWorkspaceRoster({
 
   function renderItem(item: RosterItem): VNode {
     if (item.type === 'header') {
-      return html`<div class="kw-roster-group">${item.label}</div>`
+      return html`<div class="kw-roster-group v2-monitoring-row">${item.label}</div>`
     }
     return html`<${RosterRow} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} />`
   }
@@ -163,8 +163,8 @@ export function KeeperWorkspaceRoster({
   }
 
   return html`
-    <aside class="kw-roster" aria-label="키퍼 로스터">
-      <div class="kw-roster-head">
+    <aside class="kw-roster v2-monitoring-surface" aria-label="키퍼 로스터">
+      <div class="kw-roster-head v2-monitoring-toolbar">
         <input
           class="kw-roster-search"
           type="text"
@@ -174,11 +174,11 @@ export function KeeperWorkspaceRoster({
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
         />
       </div>
-      <div class="kw-roster-filters" role="group" aria-label="상태 필터">
+      <div class="kw-roster-filters v2-monitoring-toolbar" role="group" aria-label="상태 필터">
         ${filterChips.map(chip => html`
           <button
             type="button"
-            class="kw-rfilter"
+            class="kw-rfilter v2-monitoring-action"
             aria-pressed=${filter === chip.id ? 'true' : 'false'}
             onClick=${() => setFilter(chip.id)}
           >
@@ -187,7 +187,7 @@ export function KeeperWorkspaceRoster({
         `)}
       </div>
       ${visible.length === 0
-        ? html`<div class="kw-roster-list"><div class="kw-roster-empty">일치하는 키퍼가 없습니다</div></div>`
+        ? html`<div class="kw-roster-list"><div class="kw-roster-empty v2-monitoring-row">일치하는 키퍼가 없습니다</div></div>`
         : useVirtual
           ? html`<${VirtualList}
               items=${items}
@@ -202,7 +202,7 @@ export function KeeperWorkspaceRoster({
                 if (rows.length === 0) return null
                 return html`
                   <div>
-                    <div class="kw-roster-group">${group.label}</div>
+                    <div class="kw-roster-group v2-monitoring-row">${group.label}</div>
                     ${rows.map(k => html`<${RosterRow} key=${k.name} keeper=${k} active=${k.name === activeName} onSelect=${select} style=${rowStyle} />`)}
                   </div>
                 `

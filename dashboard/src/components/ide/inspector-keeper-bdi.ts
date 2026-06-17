@@ -166,7 +166,7 @@ function formatAge(value: string | null): string {
 
 function BdiRow({ label, value }: { readonly label: string, readonly value: string | null }) {
   return html`
-    <div style=${{ display: 'grid', gap: '2px' }}>
+    <div class="ide-bdi-row v2-ide-row" style=${{ display: 'grid', gap: '2px' }}>
       <span style=${{ font: 'var(--type-eyebrow)', color: 'var(--color-fg-muted)' }}>${label}</span>
       <span style=${{ color: value ? 'var(--color-fg-secondary)' : 'var(--color-fg-disabled)', lineHeight: 1.35 }}>
         ${value ?? '—'}
@@ -230,7 +230,7 @@ export function BdiRouteLinks({
         <button
           key=${link.id}
           type="button"
-          class="ide-bdi-route-link"
+          class="ide-bdi-route-link v2-ide-action"
           title=${link.evidence}
           aria-label=${`Open ${link.evidence}`}
           onClick=${() => openIdeContextRouteLink(link)}
@@ -340,6 +340,7 @@ export function InspectorKeeperBDI({
 
   return html`
     <section
+      class="ide-bdi-inspector v2-ide-panel"
       aria-label="Keeper BDI inspector"
       data-reduced-motion=${reducedMotion ? 'true' : 'false'}
       style=${{
@@ -385,6 +386,7 @@ export function InspectorKeeperBDI({
         ${focusLabel ? html`
           <button
             type="button"
+            class="v2-ide-action"
             data-testid="bdi-focus-label"
             onClick=${navigateToFocus}
             title=${cursor?.file_path ?? ''}
@@ -431,6 +433,7 @@ export function InspectorKeeperBDI({
             ? html`<span style=${{ color: 'var(--color-fg-disabled)' }}>—</span>`
             : tokenRows.map(row => html`
                 <div
+                  class="ide-bdi-token-row v2-ide-row"
                   key=${`${row.ts_unix ?? 0}-${row.total_tokens ?? 0}`}
                   style=${{ display: 'grid', gridTemplateColumns: '54px 1fr auto', gap: 'var(--sp-2)', color: 'var(--color-fg-secondary)' }}
                 >

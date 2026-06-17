@@ -1,5 +1,7 @@
+// @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest'
-import { buildDefaults, stripEmptyOptionals, validateRequired } from './schema-form'
+import { render, h } from 'preact'
+import { buildDefaults, stripEmptyOptionals, validateRequired, SchemaForm } from './schema-form'
 import type { JsonSchema } from '../../types/json-schema'
 
 // ================================================================
@@ -149,5 +151,34 @@ describe('validateRequired', () => {
   it('returns empty for schema with no required', () => {
     const schemaNoReq: JsonSchema = { type: 'object', properties: { name: { type: 'string' } } }
     expect(validateRequired({}, schemaNoReq)).toEqual([])
+  })
+})
+
+// ================================================================
+// Rendering / v2 markers
+// ================================================================
+
+describe('SchemaForm rendering', () => {
+  it('renders v2-lab-panel on the root and v2-lab-row on each field', () => {
+    const schema: JsonSchema = {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: { type: 'string' },
+        count: { type: 'integer' },
+      },
+    }
+    const container = document.createElement('div')
+    render(h(SchemaForm, { schema, values: {}, onChange: () => {} }), container)
+    expect(container.querySelector('.v2-lab-panel')).not.toBeNull()
+    expect(container.querySelectorAll('.v2-lab-row').length).toBe(2)
+  })
+
+  it('renders v2-lab-card when the schema has no parameters', () => {
+    const schema: JsonSchema = { type: 'object' }
+    const container = document.createElement('div')
+    render(h(SchemaForm, { schema, values: {}, onChange: () => {} }), container)
+    expect(container.querySelector('.v2-lab-card')).not.toBeNull()
+    expect(container.textContent).toContain('파라미터가 없습니다')
   })
 })

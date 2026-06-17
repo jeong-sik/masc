@@ -24,7 +24,7 @@ import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/s
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   const gap = coverageGapDisplay(data)
   return html`
-    <div class="text-3xs text-[var(--color-fg-disabled)]">
+    <div class="text-3xs text-[var(--color-fg-disabled)] v2-monitoring-row">
       <span class="font-mono">${data.source ?? '(unknown source)'}</span>
       <span class="mx-1" aria-hidden="true">·</span>
       <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
@@ -37,7 +37,7 @@ function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
 
 function BlockRow({ block }: { block: TurnBlock }) {
   return html`
-    <div class="flex items-center gap-2 text-2xs font-mono">
+    <div class="flex items-center gap-2 text-2xs font-mono v2-monitoring-row">
       <span class="text-[var(--color-fg-default)]">${block.block}</span>
       <span class="text-[var(--color-fg-muted)]">${block.bytes}B</span>
       <span class="text-[var(--color-fg-disabled)]" title=${block.digest}>
@@ -69,7 +69,7 @@ function episodeTtlLabel(episode: MemoryOsEpisodeSummary): string {
 
 function MemoryOsEpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
   return html`
-    <div class="min-w-0 border-t border-[var(--color-border-muted)] py-2 first:border-t-0">
+    <div class="min-w-0 border-t border-[var(--color-border-muted)] py-2 first:border-t-0 v2-monitoring-row">
       <div class="mb-1 flex min-w-0 flex-wrap items-center gap-2">
         <span class="font-mono text-2xs text-[var(--color-fg-default)]">
           ${episode.trace_id} g${episode.generation.toString().padStart(4, '0')}
@@ -104,10 +104,10 @@ function MemoryOsRecallSourcePanel({
 
   return html`
     <section
-      class="mb-3 border-y border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-3"
+      class="mb-3 border-y border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-3 v2-monitoring-panel"
       data-testid="memory-os-recall-source"
     >
-      <div class="flex min-w-0 flex-wrap items-start gap-3">
+      <div class="flex min-w-0 flex-wrap items-start gap-3 v2-monitoring-toolbar">
         <div class="min-w-0 flex-1">
           <div class="text-xs font-semibold text-[var(--color-fg-primary)]">Memory OS recall</div>
           <div class="mt-0.5 text-3xs text-[var(--color-fg-muted)]">
@@ -138,13 +138,13 @@ function MemoryOsRecallSourcePanel({
         ? html`<div class="mt-2 text-2xs text-[var(--color-status-err)]">${readErrorText}</div>`
         : null}
 
-      <div class="mt-2 divide-y divide-[var(--color-border-muted)]">
+      <div class="mt-2 divide-y divide-[var(--color-border-muted)] v2-monitoring-row">
         ${episodes.length === 0
-          ? html`<div class="py-2 text-2xs text-[var(--color-fg-disabled)]">recent episodes 없음</div>`
+          ? html`<div class="py-2 text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">recent episodes 없음</div>`
           : episodes.map(episode => html`<${MemoryOsEpisodeRow} key=${`${episode.trace_id}-${episode.generation}-${episode.created_at}`} episode=${episode} />`)}
       </div>
 
-      <details class="mt-2 text-3xs text-[var(--color-fg-disabled)]">
+      <details class="mt-2 text-3xs text-[var(--color-fg-disabled)] v2-monitoring-detail">
         <summary class="cursor-pointer">stores</summary>
         <div class="mt-1 break-all font-mono">facts: ${snapshot.facts_store}</div>
         <div class="mt-1 break-all font-mono">episodes: ${snapshot.episodes_store}</div>
@@ -172,19 +172,19 @@ export function KeeperMemoryOsRecallPanel({ keeperName }: { keeperName: string }
   }
 
   if (resource.state.value.error) {
-    return html`<div class="text-xs text-[var(--color-status-err)] p-3" role="alert">${resource.state.value.error}</div>`
+    return html`<div class="text-xs text-[var(--color-status-err)] p-3 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
   if (!response?.memory_os) {
     return html`
-      <div class="p-3 text-xs text-[var(--color-fg-muted)]">
+      <div class="p-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-panel">
         Memory OS recall source 없음
       </div>
     `
   }
 
   return html`
-    <div class="p-2">
+    <div class="p-2 v2-monitoring-surface">
       <${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${response.entries} />
     </div>
   `
@@ -194,10 +194,10 @@ function DiffSection({ diff }: { diff: TurnBlockDiff }) {
   const empty =
     diff.added.length === 0 && diff.removed.length === 0 && diff.changed.length === 0
   if (empty) {
-    return html`<div class="text-2xs text-[var(--color-fg-disabled)]">이전 턴과 블록 변화 없음</div>`
+    return html`<div class="text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">이전 턴과 블록 변화 없음</div>`
   }
   return html`
-    <div class="space-y-1">
+    <div class="space-y-1 v2-monitoring-row">
       ${diff.added.map(block => html`
         <div class="flex items-center gap-2 text-2xs font-mono text-[var(--color-status-ok)]">
           <span>+</span>
@@ -239,7 +239,7 @@ function TurnRow({ row }: { row: TurnRecordRow }) {
   ].filter(Boolean)
 
   return html`
-    <details class="rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
+    <details class="rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors v2-monitoring-row">
       <summary class="list-none cursor-pointer flex items-center gap-2 py-1.5 px-2 flex-wrap">
         <span class="text-xs font-mono font-medium text-[var(--color-fg-default)]">
           T${record.absolute_turn}
@@ -262,13 +262,13 @@ function TurnRow({ row }: { row: TurnRecordRow }) {
             </span>`
           : null}
       </summary>
-      <div class="px-3 pb-2 space-y-2">
+      <div class="px-3 pb-2 space-y-2 v2-monitoring-panel">
         <div>
           <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1">
             컨텍스트 블록 (조립 순서)
           </div>
           ${record.blocks.length === 0
-            ? html`<div class="text-2xs text-[var(--color-fg-disabled)]">기록된 블록 없음</div>`
+            ? html`<div class="text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">기록된 블록 없음</div>`
             : record.blocks.map(block => html`<${BlockRow} block=${block} />`)}
         </div>
         <div>
@@ -277,7 +277,7 @@ function TurnRow({ row }: { row: TurnRecordRow }) {
           </div>
           ${row.diff_vs_prev
             ? html`<${DiffSection} diff=${row.diff_vs_prev} />`
-            : html`<div class="text-2xs text-[var(--color-fg-disabled)]">같은 trace의 이전 턴 없음</div>`}
+            : html`<div class="text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">같은 trace의 이전 턴 없음</div>`}
         </div>
         ${record.execution_ids.length > 0
           ? html`
@@ -285,7 +285,7 @@ function TurnRow({ row }: { row: TurnRecordRow }) {
               <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1">
                 execution_ids
               </div>
-              <div class="text-2xs font-mono text-[var(--color-fg-muted)] break-all">
+              <div class="text-2xs font-mono text-[var(--color-fg-muted)] break-all v2-monitoring-row">
                 ${record.execution_ids.join(', ')}
               </div>
             </div>
@@ -315,7 +315,7 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
   }
 
   if (resource.state.value.error) {
-    return html`<div class="text-xs text-[var(--color-status-err)] p-4" role="alert">${resource.state.value.error}</div>`
+    return html`<div class="text-xs text-[var(--color-status-err)] p-4 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
   const rows = response?.entries ?? []
@@ -325,7 +325,7 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
 
   if (rows.length === 0) {
     return html`
-      <div class="p-4 space-y-1">
+      <div class="p-4 space-y-1 v2-monitoring-panel">
         ${memoryOsPanel}
         <div class="text-xs text-[var(--color-fg-muted)]">턴 레코드 없음 (서버 재시작 이후 keeper 턴부터 기록됩니다)</div>
         <${FreshnessLine} data=${response ?? { source: 'turn_record' }} />
@@ -337,8 +337,8 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
   const sorted = [...rows].reverse()
 
   return html`
-    <div class="p-2 space-y-1">
-      <div class="flex items-center justify-between px-1">
+    <div class="p-2 space-y-1 v2-monitoring-surface">
+      <div class="flex items-center justify-between px-1 v2-monitoring-toolbar">
         <${FreshnessLine} data=${response} />
         ${response && response.skipped_rows > 0
           ? html`<span class="text-3xs text-[var(--color-status-warn)]">

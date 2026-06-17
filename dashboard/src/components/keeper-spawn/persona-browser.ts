@@ -42,7 +42,7 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
   const spawnAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const title = persona.displayName ?? persona.name
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 flex flex-col gap-2 min-w-45">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 flex flex-col gap-2 min-w-45 v2-monitoring-card">
       <div class="text-base text-[var(--color-fg-secondary)] font-medium">${title}</div>
       ${persona.role ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${persona.role}</div>` : null}
       ${persona.mode ? html`<div class="text-3xs text-[var(--color-fg-muted)]">모드: ${persona.mode}</div>` : null}
@@ -77,22 +77,22 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
 export function PersonaBrowser() {
   useEffect(() => { if (personas.value.length === 0 && !personasLoading.value) void loadPersonas() }, [])
   const spawnAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  if (personasLoading.value) return html`<p class="text-xs text-[var(--color-fg-muted)] py-4" role="status">페르소나 로딩 중...</p>`
+  if (personasLoading.value) return html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-panel" role="status">페르소나 로딩 중...</p>`
   if (personasError.value) return html`
-    <div class="py-4">
+    <div class="py-4 v2-monitoring-panel">
       <p class="text-xs text-[var(--color-status-err)] mb-2">${personasError.value}</p>
       <${ActionButton} variant="ghost" size="sm" onClick=${() => void loadPersonas()}>재시도<//>
     </div>`
-  if (personas.value.length === 0) return html`<p class="text-xs text-[var(--color-fg-muted)] py-4">등록된 페르소나가 없습니다.</p>`
+  if (personas.value.length === 0) return html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-panel">등록된 페르소나가 없습니다.</p>`
   const visible = filterPersonas(personas.value, searchQuery.value)
   return html`
-    <div>
+    <div class="v2-monitoring-surface">
       ${spawnAccess.allowed ? null : html`
-        <p class="mb-3 text-2xs text-[var(--color-status-warn)]">
+        <p class="mb-3 text-2xs text-[var(--color-status-warn)] v2-monitoring-row">
           키퍼 생성 차단: ${spawnAccess.reason ?? 'worker 권한이 필요합니다.'}
         </p>
       `}
-      <div class="flex flex-wrap items-center gap-2 mb-3">
+      <div class="flex flex-wrap items-center gap-2 mb-3 v2-monitoring-toolbar">
         <${TextInput}
           type="search"
           class="min-w-45 flex-1 !px-2 !py-1 !text-2xs"
@@ -108,9 +108,9 @@ export function PersonaBrowser() {
         </span>
       </div>
       ${visible.length === 0
-        ? html`<p class="text-xs text-[var(--color-fg-muted)] py-4">검색 조건에 맞는 페르소나가 없습니다.</p>`
+        ? html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-row">검색 조건에 맞는 페르소나가 없습니다.</p>`
         : html`
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+          <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 v2-monitoring-row">
             ${visible.map(p => html`<${PersonaCard} key=${p.name} persona=${p} />`)}
           </div>
         `}

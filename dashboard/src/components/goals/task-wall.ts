@@ -70,10 +70,10 @@ export function TaskWall() {
 
   return html`
     <section
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
+      class="v2-workspace-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3"
       aria-label="키퍼별 태스크 월"
     >
-      <header class="mb-2 flex items-baseline justify-between">
+      <header class="v2-workspace-toolbar mb-2 flex items-baseline justify-between">
         <h3 class="text-xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">
           키퍼별 태스크 월
         </h3>
@@ -85,7 +85,7 @@ export function TaskWall() {
         ${cols.map(col => html`
           <div
             key=${col.keeper}
-            class="flex flex-col gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2"
+            class="v2-workspace-card flex flex-col gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2"
             aria-label=${`${keeperLabel(col.keeper)} 태스크 ${col.tasks.length}건`}
           >
             <div class="flex items-baseline justify-between gap-1 text-2xs">
@@ -96,10 +96,10 @@ export function TaskWall() {
             </div>
             <ul class="flex flex-col gap-0.5">
               ${col.tasks.map(t => html`
-                <li key=${t.id}>
+                <li key=${t.id} class="v2-workspace-row">
                   <button
                     type="button"
-                    class="flex w-full items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-left text-2xs hover:border-[var(--accent-40)] hover:bg-[var(--accent-10)]"
+                    class="v2-workspace-action flex w-full items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)]/50 bg-[var(--color-bg-surface)] px-1.5 py-0.5 text-left text-2xs hover:border-[var(--accent-40)] hover:bg-[var(--accent-10)]"
                     title=${`${t.id} · ${t.status ?? 'unknown'}`}
                     aria-label=${`태스크 ${t.id} 열기: ${t.title}`}
                     onClick=${() => navigate('workspace', { section: 'planning', task: t.id })}

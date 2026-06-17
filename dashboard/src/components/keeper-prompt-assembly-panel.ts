@@ -439,7 +439,7 @@ function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; i
   const attention = stageAttention(stage)
 
   return html`
-    <li class="min-w-0 border-t border-[var(--color-border-default)] py-3 first:border-t-0 first:pt-0 last:pb-0">
+    <li class="min-w-0 border-t border-[var(--color-border-default)] py-3 first:border-t-0 first:pt-0 last:pb-0 v2-monitoring-row">
       <div class="mb-1 flex flex-wrap items-center gap-2">
         <span class="text-3xs font-semibold text-[var(--color-fg-disabled)]">${index + 1}</span>
         <${StatusChip} tone=${messageTone} uppercase=${false}>${stage.messageSlot}<//>
@@ -505,7 +505,7 @@ function BuildPathStepRow({ step }: { step: BuildPathStep }) {
   const missingCount = step.stages.reduce((sum, stage) => sum + stage.missingCount, 0)
 
   return html`
-    <li class="min-w-0 border-t border-[var(--color-border-default)] py-3 first:border-t-0 first:pt-0 last:pb-0">
+    <li class="min-w-0 border-t border-[var(--color-border-default)] py-3 first:border-t-0 first:pt-0 last:pb-0 v2-monitoring-row">
       <div class="mb-1 flex flex-wrap items-center gap-2">
         <${StatusChip} tone=${step.tone} uppercase=${false}>${step.label}<//>
         <div class="text-xs font-semibold text-[var(--color-fg-primary)]">${step.title}</div>
@@ -513,7 +513,7 @@ function BuildPathStepRow({ step }: { step: BuildPathStep }) {
         ${missingCount > 0 ? html`<${StatusChip} tone="bad">${missingCount} missing<//>` : null}
       </div>
       <p class="m-0 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${step.summary}</p>
-      <div class="mt-2 flex flex-wrap gap-1">
+      <div class="mt-2 flex flex-wrap gap-1 v2-monitoring-row">
         ${step.chips.map(chip => html`
           <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-secondary)]">${chip}</span>
         `)}
@@ -526,8 +526,8 @@ function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
   const modelStages = stages.filter(stage => stage.role === 'model_input')
 
   return html`
-    <section data-prompt-route-default class="min-w-0 border-l border-[var(--accent-22)] py-1 pl-3">
-      <div class="mb-2 flex min-w-0 items-center gap-2">
+    <section data-prompt-route-default class="min-w-0 border-l border-[var(--accent-22)] py-1 pl-3 v2-monitoring-panel">
+      <div class="mb-2 flex min-w-0 items-center gap-2 v2-monitoring-toolbar">
         <div class="flex min-w-0 items-center gap-2">
           <${Send} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
           <div class="min-w-0">
@@ -552,8 +552,8 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
   const label = `${warnings.length} suggestion${warnings.length === 1 ? '' : 's'}`
 
   return html`
-    <details data-prompt-quality-checks class="mt-3 rounded-[var(--r-1)] border ${hasCritical ? 'border-[var(--bad-20)] bg-[var(--bad-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}">
-      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
+    <details data-prompt-quality-checks class="mt-3 rounded-[var(--r-1)] border ${hasCritical ? 'border-[var(--bad-20)] bg-[var(--bad-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'} v2-monitoring-detail">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 v2-monitoring-toolbar">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
           ${hasCritical ? html`<${AlertTriangle} size=${14} />` : null}
           Prompt cleanup
@@ -566,7 +566,7 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
       </summary>
       <div class="grid gap-2 border-t border-[var(--color-border-default)] p-3">
         ${warnings.map(warning => html`
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 v2-monitoring-panel">
             <div class="mb-1 flex flex-wrap items-center gap-2">
               <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${warning.title}</span>
               <${StatusChip} tone=${severityTone(warning.severity)}>${warning.severity}<//>
@@ -594,8 +594,8 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
   const pathSteps = buildPathSteps(report)
 
   return html`
-    <details data-developer-evidence class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
+    <details data-developer-evidence class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-detail">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 v2-monitoring-toolbar">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
           <${GitCompareArrows} size=${14} />
           Build details
@@ -605,15 +605,15 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
       <div class="border-t border-[var(--color-border-default)] p-3 pb-16 md:pb-3">
         <div data-source-audit-map class="mb-3">
           <div class="mb-2 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">build path</div>
-          <ol class="border-l border-[var(--accent-22)] pl-3">
+          <ol class="border-l border-[var(--accent-22)] pl-3 v2-monitoring-row">
             ${pathSteps.map(step => html`
               <${BuildPathStepRow} key=${step.id} step=${step} />
             `)}
           </ol>
         </div>
         <${CleanupDetails} warnings=${report.warnings} />
-        <details data-prompt-file-list class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-          <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
+        <details data-prompt-file-list class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-detail">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 v2-monitoring-toolbar">
             <span class="text-xs font-semibold text-[var(--color-fg-primary)]">Raw prompt files</span>
             <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">exact file details</span>
           </summary>
@@ -626,7 +626,7 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
             </div>
           ` : null}
           <div class="overflow-x-auto border-t border-[var(--color-border-default)]">
-            <table class="min-w-[860px] w-full border-collapse text-left text-2xs">
+            <table class="min-w-[860px] w-full border-collapse text-left text-2xs v2-monitoring-table">
               <thead class="bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]">
                 <tr>
                   <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">step</th>
@@ -676,9 +676,9 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
 function PromptAssemblyContent({ report, compact = false }: { report: KeeperPromptAssemblyReport; compact?: boolean }) {
   return html`
     <div
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 v2-monitoring-panel"
     >
-      <div class="mb-4 border-b border-[var(--color-border-default)] pb-3">
+      <div class="mb-4 border-b border-[var(--color-border-default)] pb-3 v2-monitoring-toolbar">
         <div class="max-w-4xl">
           <div class="mb-1 flex flex-wrap items-center gap-2">
             <${Route} size=${16} class="text-[var(--color-accent-fg)]" />
@@ -731,8 +731,8 @@ export function KeeperPromptAssemblyPanel({
   const showToolbar = ownsFetch || loading
 
   return html`
-    <div class="mb-5" data-keeper-prompt-assembly-panel>
-      ${showToolbar ? html`<div data-prompt-recipe-toolbar class="mb-2 flex items-center justify-between gap-3">
+    <div class="mb-5 v2-monitoring-panel" data-keeper-prompt-assembly-panel>
+      ${showToolbar ? html`<div data-prompt-recipe-toolbar class="mb-2 flex items-center justify-between gap-3 v2-monitoring-toolbar">
         <div class="flex items-center gap-2">
           <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Prompt Recipe</span>
           ${loading ? html`<${StatusChip} tone="info">loading<//>` : null}

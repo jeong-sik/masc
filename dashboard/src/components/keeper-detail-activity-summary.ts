@@ -22,7 +22,7 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
   if (!hasActivity) return null
 
   return html`
-    <div class="flex flex-wrap items-start gap-3 px-1">
+    <div class="flex flex-wrap items-start gap-3 px-1 v2-monitoring-row">
       ${hasActivitySignal
         ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)] px-2.5 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
             ${activity.label}
@@ -53,7 +53,7 @@ export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
         : null}
     </div>
     ${workPreview
-      ? html`<div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--accent-6)] border border-[var(--accent-12)] text-xs text-[var(--color-fg-primary)] leading-relaxed">
+      ? html`<div class="py-2 px-3 rounded-[var(--r-1)] bg-[var(--accent-6)] border border-[var(--accent-12)] text-xs text-[var(--color-fg-primary)] leading-relaxed v2-monitoring-panel">
           <div class="line-clamp-2">${workPreview}</div>
         </div>`
       : null}

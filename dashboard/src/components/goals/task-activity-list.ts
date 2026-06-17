@@ -84,7 +84,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
 
   if (!hasDetail) {
     return html`
-      <div class="flex items-center gap-3 py-1.5 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
+      <div class="v2-workspace-row flex items-center gap-3 py-1.5 px-3 rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">
         <span class="text-sm ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
         <span class="flex-1 text-xs text-text-body truncate">${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-3xs tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
@@ -96,7 +96,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
 
   return html`
     <details
-      class="rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors"
+      class="v2-workspace-detail rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors"
       onToggle=${(evt: Event) => {
         setIsOpen((evt.currentTarget as HTMLDetailsElement).open)
       }}
@@ -162,7 +162,7 @@ export function TaskActivityList({
   ]
 
   return html`
-    <div class="flex flex-col gap-2">
+    <div class="v2-workspace-surface flex flex-col gap-2">
       <${TextInput}
         type="search"
         value=${query}
@@ -177,7 +177,7 @@ export function TaskActivityList({
           <button
             key=${chip.key}
             type="button"
-            class="px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium border cursor-pointer transition-colors ${
+            class="v2-workspace-action px-2 py-1 rounded-[var(--r-1)] text-2xs font-medium border cursor-pointer transition-colors ${
               filter === chip.key
                 ? 'border-[var(--accent-40)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
                 : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-text-muted hover:bg-[var(--color-bg-hover)]'

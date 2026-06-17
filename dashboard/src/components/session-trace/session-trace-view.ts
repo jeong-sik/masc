@@ -55,7 +55,7 @@ function TraceSummaryBar({ summary }: { summary: TraceSummary }) {
   if (s.total_cost_usd > 0) items.push(`$${s.total_cost_usd.toFixed(3)}`)
 
   return html`
-    <div class="flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
+    <div class="v2-monitoring-trace-summary flex flex-wrap gap-2 text-3xs text-[var(--color-fg-muted)]">
       ${items.map(item => html`
         <span class="inline-flex items-center bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] px-2 py-1 rounded-[var(--r-1)] font-medium">
           ${item}
@@ -76,7 +76,7 @@ function LiveIndicator({ events }: { events: readonly { ts: number }[] }) {
   if (!isRecent) return null
 
   return html`
-    <div class="flex items-center gap-2 px-3 py-2 text-2xs text-[var(--color-fg-muted)]">
+    <div class="v2-monitoring-trace-live flex items-center gap-2 px-3 py-2 text-2xs text-[var(--color-fg-muted)]">
       <span class="relative flex size-2">
         <span class="animate-ping absolute inline-flex h-full w-full rounded-[var(--r-0)] bg-[var(--color-status-ok)] opacity-75"></span>
         <span class="relative inline-flex size-2 rounded-[var(--r-0)] bg-[var(--color-status-ok)]"></span>
@@ -141,7 +141,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
   // Error state
   if (error) {
     return html`
-      <div class="flex flex-col items-center gap-3 py-4">
+      <div class="v2-monitoring-trace-error flex flex-col items-center gap-3 py-4">
         <${ErrorState} message=${error} />
         <${ActionButton} variant="ghost" size="sm" onClick=${handleRefresh}>재시도<//>
       </div>
@@ -164,7 +164,7 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
   }
 
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="v2-monitoring-trace-surface flex flex-col gap-3">
       ${'' /* Filter + Refresh */}
       <div class="flex items-center justify-between gap-3">
         <${SessionTraceFilter} agentName=${agentName} />
@@ -184,14 +184,14 @@ export function SessionTraceView({ agentName, isKeeper, keeperStatus, keeperGene
       ${'' /* Event list */}
       <div
         ref=${listRef}
-        class="flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+        class="v2-monitoring-trace-list flex flex-col gap-0.5 max-h-[500px] overflow-y-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       >
         ${events.map(evt => html`<${SessionTraceEntry} key=${evt.id} event=${evt} searchQuery=${searchQuery} />`)}
         <${LiveIndicator} events=${events} />
       </div>
 
       ${'' /* Footer: event count */}
-      <div class="text-3xs text-[var(--color-fg-disabled)] text-right">
+      <div class="v2-monitoring-trace-footer text-3xs text-[var(--color-fg-disabled)] text-right">
         ${events.length}건 표시
       </div>
     </div>

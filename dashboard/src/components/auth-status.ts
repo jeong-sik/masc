@@ -200,9 +200,9 @@ export function AuthStatus() {
   const { dotColor, label } = authBadgeSummary()
 
   return html`
-    <div class="relative">
+    <div class="v2-shell-panel relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-xs font-medium py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] cursor-pointer font-[inherit] transition-colors duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] text-[var(--color-fg-secondary)] ${AUTH_FOCUS_RING}"
+        class="flex items-center gap-1.5 text-xs font-medium py-1 px-2 rounded-[var(--r-1)] border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] cursor-pointer font-[inherit] transition-colors duration-[var(--t-med)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] text-[var(--color-fg-secondary)] ${AUTH_FOCUS_RING} v2-shell-action"
         aria-expanded=${popoverOpen.value}
         aria-haspopup="true"
         aria-controls=${popoverId}
@@ -270,7 +270,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
       role="dialog"
       aria-labelledby=${labelId}
       data-state="open"
-      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-panel)] p-3 z-50"
+      class="v2-shell-panel auth-popover absolute right-0 top-full mt-1.5 w-80 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-panel)] p-3 z-50"
     >
       <h2 id=${labelId} class="sr-only">Auth status panel</h2>
       <div class="flex flex-col gap-3">
@@ -304,7 +304,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
               }}
             />
             <button type="button"
-              class="shrink-0 py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${AUTH_FOCUS_RING}"
+              class="shrink-0 py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${AUTH_FOCUS_RING} v2-shell-action"
               disabled=${actorOverrideLocked}
               onClick=${() => { void handleApplyActor() }}
             >Apply</button>
@@ -319,7 +319,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
           </div>
           ${authenticated ? html`
             <button type="button"
-              class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors ${AUTH_FOCUS_RING}"
+              class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
               onClick=${() => { void handleClearToken() }}
             >Clear token</button>
           ` : html`
@@ -334,7 +334,7 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void handleSetToken() }}
               />
               <button type="button"
-                class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors ${AUTH_FOCUS_RING}"
+                class="w-full py-1.5 px-3 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
                 onClick=${() => { void handleSetToken() }}
               >Set token</button>
             </div>
@@ -351,23 +351,23 @@ export function RemoteWarningBanner() {
   if (bannerDismissed.value || !model) return null
 
   return html`
-    <div role="alert" class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-sm font-medium text-[var(--warn-fg)]">
+    <div role="alert" class="shrink-0 flex items-center justify-between gap-3 px-4 py-2 bg-[var(--warn-10)] border-b border-[var(--warn-20)] text-sm font-medium text-[var(--warn-fg)] v2-shell-panel">
       <span>${model.message}</span>
       <div class="flex items-center gap-2 shrink-0">
         ${model.canClearToken ? html`
           <button type="button"
-            class="px-2 py-0.5 rounded-[var(--r-1)] text-xs font-medium border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors ${AUTH_FOCUS_RING}"
+            class="px-2 py-0.5 rounded-[var(--r-1)] text-xs font-medium border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
             aria-label="Clear stored bearer token"
             onClick=${() => { void handleClearToken() }}
           >Clear token</button>
         ` : null}
         <button type="button"
-          class="px-2 py-0.5 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors ${AUTH_FOCUS_RING}"
+          class="px-2 py-0.5 rounded-[var(--r-1)] text-xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
           aria-label="Open auth panel"
           onClick=${openPopover}
         >Open auth</button>
         <button type="button"
-          class="flex size-6 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors ${AUTH_FOCUS_RING}"
+          class="flex size-6 items-center justify-center rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors ${AUTH_FOCUS_RING} v2-shell-action"
           aria-label="Dismiss auth banner"
           onClick=${() => { bannerDismissed.value = true }}
         ><${X} size=${14} /><//>

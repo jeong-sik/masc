@@ -28,7 +28,7 @@ export function Work() {
     : 'board'
 
   return html`
-    <div class="flex min-w-0 flex-col gap-3">
+    <div class="v2-workspace-surface flex min-w-0 flex-col gap-3">
       <div class="min-w-0 transition-opacity duration-[var(--t-slow)]">
         <${ErrorBoundary} label=${current}>
           ${current === 'board' ? html`<${BoardSurface} />`

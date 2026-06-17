@@ -108,6 +108,7 @@ export function IdeEditor({
   if (document.file_path === null) {
     return html`
       <div
+        class="ide-editor-empty v2-ide-panel"
         role="region"
         aria-label="ide editor"
         data-testid="ide-editor-empty"
@@ -145,6 +146,7 @@ export function IdeEditor({
 
   return html`
     <div
+      class="ide-editor v2-ide-panel"
       role="region"
       aria-label="에디터 (code document store + RFC 0019 ownership)"
       style=${{
@@ -155,6 +157,7 @@ export function IdeEditor({
       }}
     >
       <div
+        class="ide-editor-header v2-ide-toolbar"
         style=${{
           display: 'flex',
           alignItems: 'center',
@@ -183,7 +186,7 @@ export function IdeEditor({
         ${currentFileFocus ? html`
           <div
             role="status"
-            class="ide-editor-context-focus"
+            class="ide-editor-context-focus v2-ide-detail"
             data-testid="ide-context-focus-status"
             title=${currentFileFocus.file_path}
           >
@@ -222,6 +225,7 @@ export function IdeEditor({
         ${onFindOpen || onFindClose ? html`
           <button
             type="button"
+            class="v2-ide-action"
             aria-label=${findOpen ? 'Close find panel' : 'Open find panel'}
             aria-pressed=${findOpen ? 'true' : 'false'}
             onClick=${() => findOpen ? onFindClose?.() : onFindOpen?.()}
@@ -473,7 +477,7 @@ function CodeMirrorEditor({
   useSignalValue(keeperTraceState)
 
   return html`
-    <div class="ide-codemirror-shell" data-view=${showBlame ? 'blame' : 'source'}>
+    <div class="ide-codemirror-shell v2-ide-panel" data-view=${showBlame ? 'blame' : 'source'}>
       ${showBlame ? BlameTimeline(ownership, keepers) : null}
       <div ref=${containerRef} class="ide-codemirror-host" />
       ${selectedAnn && editorRef.current ? AnnotationPopover({

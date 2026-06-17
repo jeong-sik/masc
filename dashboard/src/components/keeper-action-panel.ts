@@ -170,7 +170,7 @@ export function KeeperActionButtons({
 
   return html`
     <div
-      class="flex items-center gap-1 shrink-0"
+      class="flex items-center gap-1 shrink-0 v2-monitoring-action"
       data-testid="keeper-action-buttons"
       onClick=${stopPropagation ? (e: Event) => e.stopPropagation() : undefined}
     >

@@ -53,6 +53,7 @@ export function IdeFindPanel({
 
   return html`
     <div
+      class="ide-find-panel v2-ide-panel"
       role="search"
       aria-label="Find in current file"
       data-testid="ide-find-panel"
@@ -115,6 +116,7 @@ export function IdeFindPanel({
         />
         <button
           type="button"
+          class="v2-ide-action"
           aria-label="Previous match"
           disabled=${!canMove}
           onClick=${() => move(-1)}
@@ -122,6 +124,7 @@ export function IdeFindPanel({
         >Prev</button>
         <button
           type="button"
+          class="v2-ide-action"
           aria-label="Next match"
           disabled=${!canMove}
           onClick=${() => move(1)}
@@ -130,6 +133,7 @@ export function IdeFindPanel({
         ${onClose ? html`
           <button
             type="button"
+            class="v2-ide-action"
             aria-label="Close find panel"
             onClick=${onClose}
             style=${findButtonStyle(false)}
@@ -179,6 +183,7 @@ export function IdeFindPanel({
             >
               ${matches.map((item, index) => html`
                 <li
+                  class="v2-ide-row"
                   role="listitem"
                   aria-current=${index === activeIndex ? 'true' : undefined}
                   style=${{
@@ -218,6 +223,7 @@ function ToggleButton({
   return html`
     <button
       type="button"
+      class="v2-ide-action"
       aria-pressed=${pressed ? 'true' : 'false'}
       onClick=${onClick}
       style=${{

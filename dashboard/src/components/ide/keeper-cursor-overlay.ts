@@ -162,7 +162,7 @@ export function KeeperCursorWidget({ cursor, color, onJump }: KeeperCursorWidget
   
   return html`
     <div
-      class="keeper-cursor-widget"
+      class="keeper-cursor-widget v2-ide-detail"
       style=${{
         position: 'absolute',
         left: 0,
@@ -220,7 +220,7 @@ export function CollisionWarning({ collisions }: CollisionWarningProps) {
   const mediumRisk = collisions.filter(c => c.risk_level === 'medium')
   
   return html`
-    <div class="collision-warnings" style=${{
+    <div class="collision-warnings v2-ide-panel" style=${{
       padding: '8px 12px',
       background: 'var(--color-bg-warning)',
       borderBottom: '1px solid var(--color-border-warning)',
@@ -251,7 +251,7 @@ export function HeatmapRuler({ heatmap, totalLines }: HeatmapRulerProps) {
   const maxActivity = Math.max(1, ...heatmap.values())
   
   return html`
-    <div class="heatmap-ruler" style=${{
+    <div class="heatmap-ruler v2-ide-panel" style=${{
       width: '4px',
       background: 'var(--color-bg-surface)',
       borderLeft: '1px solid var(--color-border-default)',
@@ -287,7 +287,7 @@ export function ActiveFileIndicator({ activeFile, keeperCount }: ActiveFileIndic
   if (!activeFile) return null
   
   return html`
-    <div class="active-file-indicator" style=${{
+    <div class="active-file-indicator v2-ide-panel" style=${{
       padding: '6px 12px',
       background: 'var(--color-bg-muted)',
       borderBottom: '1px solid var(--color-border-default)',

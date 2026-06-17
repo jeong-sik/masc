@@ -148,7 +148,7 @@ function SurfaceRefList({ refs }: { refs: SurfaceVerificationRef[] }) {
   return html`
     <div class="mt-3 grid gap-1.5 text-3xs">
       ${refs.map(ref => html`
-        <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+        <div class="v2-shell-row flex min-w-0 flex-wrap items-center gap-1.5">
           <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-[var(--color-fg-muted)]">
             ${ref.label}
           </span>
@@ -163,7 +163,7 @@ function SurfaceRefList({ refs }: { refs: SurfaceVerificationRef[] }) {
 function SurfaceCard({ surface }: { surface: SurfaceReadinessEntry }) {
   const missingRefs = missingSurfaceVerificationRefs(surface)
   return html`
-    <article class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <article class="v2-shell-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -187,7 +187,7 @@ function SurfaceCard({ surface }: { surface: SurfaceReadinessEntry }) {
         </div>
         ${missingRefs.length > 0
           ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]">
+            <div class="v2-shell-detail rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-3xs text-[var(--bad-light)]">
               missing ${missingRefs.join(', ')}
             </div>
           `
@@ -203,7 +203,7 @@ function SurfaceReadinessBody({ data }: { data: SurfaceReadinessData }) {
   const filtered = filterSurfaceReadiness(data.surfaces, activeFilter.value)
   return html`
     <div class="space-y-4">
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
+      <div class="v2-shell-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4">
         <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div class="min-w-0">
             <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">

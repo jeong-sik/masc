@@ -49,6 +49,7 @@ export function EditorKeeperCursorChip(
   const isActive = status === 'active'
   return html`
     <li
+      class="v2-ide-row"
       key=${key}
       title=${`${ac.keeper_id} L${ac.line}${ac.tool_name ? ` · ${ac.tool_name}` : ''} · ${ac.focus_mode}`}
       style=${{

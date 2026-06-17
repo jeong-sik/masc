@@ -3,7 +3,7 @@ import { PanelCard } from './common/panel-card'
 
 function ProfileField({ label, value, color }: { label: string; value: string; color: string }) {
   return html`
-    <div class="flex items-start gap-2 text-xs text-[var(--color-fg-muted)]">
+    <div class="flex items-start gap-2 text-xs text-[var(--color-fg-muted)] v2-monitoring-row">
       <span class="flex-shrink-0">${label}:</span>
       <span class="font-medium leading-relaxed" style="color: ${color}">${value}</span>
     </div>
@@ -19,7 +19,7 @@ function GoalHorizonRow({
 }) {
   if (!value) return null
   return html`
-    <div class="flex items-start gap-2 text-xs text-[var(--color-fg-muted)]">
+    <div class="flex items-start gap-2 text-xs text-[var(--color-fg-muted)] v2-monitoring-row">
       <span class="flex-shrink-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide">${horizon}</span>
       <span class="font-medium leading-relaxed text-[var(--color-fg-secondary)]">${value}</span>
     </div>
@@ -59,10 +59,10 @@ export function KeeperBDIPanel({
 
   return html`
     <${PanelCard} title="BDI & Horizons">
-      <div class="flex flex-col gap-3">
+      <div class="flex flex-col gap-3 v2-monitoring-panel">
         ${hasBdi
           ? html`
-              <div class="flex flex-col gap-1.5">
+              <div class="flex flex-col gap-1.5 v2-monitoring-panel">
                 ${will ? html`<${ProfileField} label="의지" value=${will} color="var(--cyan)" />` : null}
                 ${needs ? html`<${ProfileField} label="필요" value=${needs} color="var(--color-status-warn)" />` : null}
                 ${desires ? html`<${ProfileField} label="염망" value=${desires} color="var(--purple)" />` : null}
@@ -71,7 +71,7 @@ export function KeeperBDIPanel({
           : null}
         ${hasGoals
           ? html`
-              <div class="flex flex-col gap-1.5">
+              <div class="flex flex-col gap-1.5 v2-monitoring-panel">
                 <div class="text-2xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)] mb-0.5">goal horizons</div>
                 <${GoalHorizonRow} horizon="short" value=${s} />
                 <${GoalHorizonRow} horizon="mid" value=${m} />

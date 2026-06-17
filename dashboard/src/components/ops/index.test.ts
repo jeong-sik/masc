@@ -176,6 +176,74 @@ describe('Ops surface', () => {
     expect(container.querySelector('.v2-command-surface')).not.toBeNull()
   }, 60000)
 
+  it('marks raw ops banner panels and activity rows with v2-command-* classes', async () => {
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorWorkspaceDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = {
+      tab: 'command',
+      params: {
+        section: 'operations',
+        source: 'mission',
+        action_type: 'keeper_message',
+        target_type: 'keeper',
+        target_id: 'keeper-a',
+      },
+      postId: null,
+    } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = 'Operator error banner'
+    operatorDigestError.value = 'Digest error banner'
+    operatorSnapshot.value = {
+      root: { paused: false, namespace: 'default' },
+      sessions: [],
+      keepers: [{ name: 'keeper-a', status: 'online' }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+    operatorWorkspaceDigest.value = {
+      target_type: 'namespace',
+      attention_items: [],
+      recommended_actions: [],
+      recent_reviews: [],
+    } as unknown as OperatorDigest
+    operatorActionLog.value = [
+      {
+        id: 1,
+        at: '2026-03-31T10:00:00Z',
+        actor: 'dashboard',
+        action_type: 'keeper_message',
+        target_label: 'keeper:keeper-a',
+        outcome: 'executed',
+        message: 'test intervention',
+      },
+    ]
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const panels = Array.from(container.querySelectorAll('.v2-command-panel'))
+    expect(panels.some(el => el.textContent?.includes('Operator error banner'))).toBe(true)
+    expect(panels.some(el => el.textContent?.includes('Digest error banner'))).toBe(true)
+    expect(panels.some(el => el.textContent?.includes('Continue mission board'))).toBe(true)
+
+    const items = Array.from(container.querySelectorAll('[data-testid="ops-activity-item"]'))
+    expect(items).toHaveLength(1)
+    expect(items[0]?.classList.contains('v2-command-row')).toBe(true)
+
+    const controls = container.querySelector('section[aria-label="Operations controls"]')
+    expect(controls?.classList.contains('v2-command-panel')).toBe(true)
+  }, 60000)
+
   it('does not render its own keeper roster or fleet pointer (lives on Monitor → Keeper Fleet)', async () => {
     const {
       Ops,

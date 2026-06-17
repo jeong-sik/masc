@@ -54,6 +54,7 @@ type panel_failure =
 type panel_answer =
   { model : string
   ; answer : string
+  ; confidence : float option
   ; usage : usage
   }
 [@@deriving yojson, show, eq]
@@ -148,9 +149,17 @@ type judge_synthesis =
     호출하는 것으로 표현되고, 게이트는 구조적 안전(enabled/preset/depth/
     per_hour_budget cap)만 본다. 따라서 각 변형은 score 비교·문자열 매칭 대상이
     아니라 "왜 발동했나"를 기록하는 라벨이다 (board meta·로그·메트릭용). *)
+type low_confidence =
+  { score : float
+  ; threshold : float
+  }
+[@@deriving yojson, show, eq]
+
 type fusion_trigger =
   | Explicit_tool_call  (** 키퍼가 masc_fusion을 직접 호출 *)
-  | Low_confidence  (** 키퍼가 자기 답의 확신이 낮다고 *판단*해 요청 *)
+  | Low_confidence of low_confidence
+      (** 키퍼가 자기 답의 확신이 낮다고 *판단*해 요청. [score]와 [threshold]는
+          기록용 라벨 페이로드 — 게이트는 이 값으로 거부하지 않는다(RFC-0255 §6). *)
   | High_stakes  (** 키퍼가 high-stakes로 판단해 요청 (라벨; payload는 미노출) *)
   | Contested_board  (** 보드 분쟁로 인해 요청 (라벨; payload는 미노출) *)
   | Operator_requested
@@ -183,6 +192,7 @@ type deny_reason =
   | Preset_unknown of string  (** preset 이름이 config에 없음 (fail-fast) *)
   | Depth_exceeded  (** depth = Nested *)
   | Over_hourly_budget  (** per_hour_budget 초과 *)
+  | Not_warranted  (** 키퍼 판단에도 불구하고 게이트가 구조적/정책상 거부 *)
 [@@deriving yojson, show, eq]
 
 (** 안정적 짧은 라벨 (로깅·메트릭용). *)

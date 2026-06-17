@@ -80,11 +80,13 @@ let board_post_ttl_hours = 24 * 7
    실측 토큰을 함께 남긴다. *)
 let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
   match o with
-  | Fusion_types.Answered { model; answer; usage; _ } ->
+  | Fusion_types.Answered { model; answer; confidence; usage } ->
     `Assoc
       [ ("model", `String model)
       ; ("status", `String "answered")
       ; ("answer", `String answer)
+      ; ( "confidence"
+        , match confidence with Some c -> `Float c | None -> `Null )
       ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
       ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
       ]
@@ -113,23 +115,7 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
     (unit, string) result =
   try
-    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0255 §8 개정).
-       상세 트랜스크립트(패널 답변 N개)는 아래 board post 증거로만 남기고, 키퍼 chat
-       lane에는 judge 결론(decision + resolved_answer)만 키퍼 *메인* conversation
-       (conversation_id 생략)에 append한다. → 키퍼 observation(recent_direct_conversation)이
-       패널 답변으로 도배되지 않고, librarian이 메인 chat 결론을 fact로 추출한다(memory-os
-       fact 타입에 직접 의존하지 않음 = 강결합 없는 통합). judge 실패 시에는 메인 흐름을
-       오염시키지 않으려 결론을 남기지 않는다(board에는 실패도 증거로 남는다). *)
-    (match judge with
-     | Ok j ->
-       Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper
-         ~content:
-           (Printf.sprintf "Fusion deliberation (run %s) — %s\n\n%s" run_id
-              (render_decision j.Fusion_types.decision) j.Fusion_types.resolved_answer)
-         ();
-       Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
-     | Error _ -> ());
-    (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
+    (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에
        남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
        완성이 없어 0(usage_of가 완성 응답에서만 토큰을 뽑음). *)
     let panel_usage =
@@ -166,13 +152,34 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
                  ] )
            ])
     in
+    (* board post를 먼저 기록하고, 성공한 뒤에만 키퍼 chat lane에 결론을 남긴다.
+       그래야 board post 실패 시 chat lane에 "완료된 것처럼" 남는 메시지가 남지
+       않아 롤백 없이 일관성을 유지한다. chat append 실패는 board 증거는 이미
+       있으므로 [Error]로 보고하고 orchestrator가 별도 실패 메시지를 남긴다. *)
     (match
        Board_dispatch.create_post ~author:keeper ~content:board_headline
          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
          ~ttl_hours:board_post_ttl_hours ()
      with
-     | Ok _post -> Ok ()
-     | Error e -> Error (Board.show_board_error e))
+     | Error e -> Error (Board.show_board_error e)
+     | Ok _post ->
+       (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0255 §8 개정).
+          상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat
+          lane에는 judge 결론(decision + resolved_answer)만 키퍼 *메인* conversation
+          (conversation_id 생략)에 append한다. → 키퍼 observation(recent_direct_conversation)이
+          패널 답변으로 도배되지 않고, librarian이 메인 chat 결론을 fact로 추출한다(memory-os
+          fact 타입에 직접 의존하지 않음 = 강결합 없는 통합). judge 실패 시에는 메인 흐름을
+          오염시키지 않으려 결론을 남기지 않는다(board에는 실패도 증거로 남는다). *)
+       (match judge with
+        | Ok j ->
+          Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper
+            ~content:
+              (Printf.sprintf "Fusion deliberation (run %s) — %s\n\n%s" run_id
+                 (render_decision j.Fusion_types.decision) j.Fusion_types.resolved_answer)
+            ();
+          Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
+        | Error _ -> ());
+       Ok ())
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)

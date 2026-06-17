@@ -121,10 +121,13 @@ type judge_synthesis =
 (* 게이트 입력 — 발동 이유 라벨, catch-all 없음. 게이트는 종류로 적격성을 판정하지
    않는다(심의 가치는 키퍼=LLM 판단). score/task_kind 매칭 페이로드는 제거했고,
    High_stakes/Contested_board도 unit 라벨만 남긴다(문자열 payload는 sink/board에
-   노출되지 않아 dead payload였음). *)
+   노출되지 않아 dead payload였음). Low_confidence는 기록용 score/threshold만
+   남긴다 — 게이트는 이 값으로 거부하지 않는다. *)
+type low_confidence = { score : float; threshold : float }
+
 type fusion_trigger =
   | Explicit_tool_call                              (* 키퍼가 masc_fusion을 직접 호출 *)
-  | Low_confidence                                  (* 키퍼가 자기 확신이 낮다고 판단해 요청 *)
+  | Low_confidence of low_confidence                  (* 키퍼가 자기 확신이 낮다고 판단해 요청 *)
   | High_stakes                                     (* 키퍼가 high-stakes로 판단해 요청 *)
   | Contested_board                                 (* 보드 분쟁로 인해 요청 *)
   | Operator_requested
@@ -143,6 +146,7 @@ type fusion_request =
 type deny_reason =
   | Disabled | Preset_unknown of string | Depth_exceeded
   | Over_hourly_budget
+  | Not_warranted                                   (* 키퍼 판단에도 불구하고 구조적/정책상 거부 *)
 
 type gate_decision = Allow of fusion_request | Deny of deny_reason
 ```

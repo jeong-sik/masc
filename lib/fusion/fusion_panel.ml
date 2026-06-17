@@ -15,7 +15,7 @@ let outcome_of_result (model : string)
       Fusion_types.Failed { failed_model = model; reason = Fusion_types.Empty_response }
     else
       Fusion_types.Answered
-        { model; answer; usage = Fusion_oas.usage_of resp }
+        { model; answer; confidence = None; usage = Fusion_oas.usage_of resp }
   | Error e ->
     Fusion_types.Failed
       { failed_model = model

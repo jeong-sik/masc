@@ -52,9 +52,10 @@ let test_depth_nested () =
 
 (* trigger는 발동 이유 라벨일 뿐 — 게이트는 종류로 거부하지 않는다(심의 가치는
    키퍼/LLM이 판단). 구조(enabled/preset/depth)만 통과하면 어떤 trigger든 Allow.
-   예전 score<threshold / task_kind∈list 판정(Not_warranted)은 제거됐다. *)
+   Low_confidence의 score/threshold는 기록용 페이로드이며 게이트는 이 값으로
+   거부하지 않는다. *)
 let test_low_confidence_trigger_allowed () =
-  let r = req ~trigger:Low_confidence () in
+  let r = req ~trigger:(Low_confidence { score = 0.3; threshold = 0.55 }) () in
   Alcotest.check gate "low_confidence label -> allow" (Allow r) (decide r)
 
 let test_high_stakes_trigger_allowed () =

@@ -84,7 +84,7 @@ In the autonomous (Host) lane there is no human and no resolver, so the verdict 
 
 ### 5.3 `decide` reshape: decouple the floor from trust
 
-Move the catastrophic cases out of the trust-graded path into an unconditional pre-check. Sketch (`approval_policy.ml`):
+Move the catastrophic cases out of the trust-graded path into an unconditional pre-check. As implemented in `approval_policy.ml`:
 
 ```ocaml
 (* Trust-INDEPENDENT catastrophic floor. Always Deny, regardless of overlay. *)
@@ -92,9 +92,9 @@ let catastrophic_floor (caps : Capability.t list) : Verdict.deny_reason option =
   match find_destructive_git caps with
   | Some g -> Some (Destructive_git g)
   | None ->
-    match find_write_escape caps with        (* redirects AND (new) fs-mutating argv — see §5.4 *)
+    match find_write_escape caps with        (* redirect write targets outside the workspace *)
     | Some ps -> Some (Path_escape ps)
-    | None -> find_catastrophic_program caps  (* mkfs always; dd→/dev/*; rm/chmod on root scope *)
+    | None -> find_catastrophic_program caps  (* mkfs, by binary identity (Exec_program.known) *)
 
 let decide policy ~overlay ~caps ~simple : Verdict.t =
   match catastrophic_floor caps with
@@ -113,21 +113,36 @@ let decide policy ~overlay ~caps ~simple : Verdict.t =
 
 ### 5.4 Catastrophic floor membership — typed, no string match
 
-The floor must be expressed over typed capabilities, not substrings (per RFC-0042/RFC-0088). Two layers:
+> **Premise correction (code-verified 2026-06-17, supersedes the original
+> draft of this section).** The first draft claimed a typed argv `Path_scope`
+> extension to `Capability_check.of_ir` was "the only way to detect `rm -rf /`
+> without string matching" and made it a supporting change ("P0"). Reading the
+> pipeline disproves this: `rm -rf /` is **already blocked downstream of the
+> gate** by `Exec_policy.validate_shell_ir_paths`, unconditionally, in both the
+> gate-on and gate-off paths. Trace: `path_argument_values "rm" ["-rf"; "/"]`
+> returns `["-rf"; "/"]` → `validate_path_values` matches `"/"` via
+> `looks_like_path_token` (contains `/`) → `validate_path "/"` fails the
+> workspace whitelist (`exec_policy_paths.ml:103`: only registered repos /
+> worktree root / `sandbox_workspace_root` are allowed; `/` is none) →
+> `Path_outside_whitelist`. The keeper threads `~workdir` on both dispatch
+> paths (`keeper_tool_execute_runtime.ml:419,428`), so the `workdir = None`
+> no-op branch is not taken. Therefore P0 is **dropped**: adding a typed argv
+> walker in `capability_check` while the `looks_like_path_token` heuristic
+> remains would be two layers classifying the same fs-path — the
+> duplicate-classification anti-pattern (CLAUDE.md workaround bar). Replacing
+> the `validate_paths` string heuristic with typed `Path_scope` capabilities is
+> a legitimate but larger, separate effort (its own RFC), not bundled here.
 
-**Already typed:**
-- `Destructive_git of Git_op.t` — `Git_op.Destructive` (force-push, `reset --hard`, `clean -fd[x]`, `branch -D`, `push --delete`); classified by `Git_op.of_argv`, not string match.
+The approval floor is therefore expressed over **three typed members**, all
+already available — no `Capability_check` change:
+
+- `Destructive_git of Git_op.t` — `Git_op.Destructive` (force-push, `reset --hard`, `clean -fd[x]`, `branch -D`, `push --delete`); classified by `Git_op.of_argv`, not string match. **Not covered by `validate_paths`** (force-push has no path argument), so the floor is the only enforcer — this is the genuine, non-redundant fix.
 - `Path_escape` from a write **redirect** outside the workspace (`find_write_escape`, existing).
-- `mkfs` — `Exec_program.Mkfs` (binary identity, typed).
+- `Catastrophic_program of Exec_program.t` — a binary that is catastrophic by identity regardless of arguments (currently `mkfs`, matched via `Exec_program.known bin = Some Mkfs`, binary identity, typed). New `Verdict.deny_reason` constructor.
 
-**Requires a typed extension (this RFC's supporting change):** `Capability_check.of_ir` currently emits `Write_path` only from redirects (`capability_check.ml:36-40`), never from command arguments. So `rm -rf /` produces only `Exec_program (rm, …)` with no path capability — its target is invisible to the policy. To classify catastrophic argv targets **without string matching**, extend `of_ir` to emit `Write_path (scope, …)` for the path-bearing arguments of known filesystem-mutating programs (`rm`, `dd`, `chmod`, `chown`, `mv`), resolving each arg through `Path_scope`. Then:
+Path-bearing destructive programs (`rm`, `dd`, `chmod`, `chown`, `mv`) are **deliberately not in the approval floor**: their danger is a function of the *target path*, which `validate_shell_ir_paths` already jails to the workspace downstream of the gate. At the approval-policy layer they are graded in stage 2 (e.g. `rm` is `Privileged`; under the autonomous overlay → `Allow`), and `validate_paths` then denies an out-of-workspace target. `test_rm_root_allowed_at_policy_layer_jailed_downstream` pins this boundary.
 
-- `rm`/`chmod`/`chown` whose target `Path_scope` is `Outside_workspace _` or resolves to filesystem root → floor `Path_escape`/new `Destructive_fs`.
-- `dd` writing to a `/dev/*` target → floor.
-
-This generalizes the existing redirect-only `find_write_escape` to argv, keeps the decision typed (`Path_scope.scope`), and is the only way to detect `rm -rf /` that satisfies the no-string-match bar. It is scoped to a closed set of fs-mutating `Exec_program.kind`s (compiler-enforced via exhaustive match).
-
-> Open: exact membership of "catastrophic" (§14). Default proposal: destructive-git, redirect/argv path-escape, mkfs, `dd`→`/dev/*`, `rm -rf` at root/outside scope. Fork bombs are rejected earlier as `Too_complex` by the bash subset parser.
+> Open (§13): whether `sudo`/`su` (privilege escalation, typed `Exec_program.known`) should join the `Catastrophic_program` floor as defense-in-depth. Fork bombs are rejected earlier as `Too_complex` by the bash subset parser.
 
 ### 5.5 Contextual trust via the `per_agent` overlay
 
@@ -162,18 +177,21 @@ The overlay is data; `decide` is unchanged between contexts. This is the context
 | `test_exec_dispatch.ml` | 274 | SPLIT | keep `dispatch_classified_with_approval` tests (rework for §5.2 verdicts); drop async/outcome tests |
 | `test_tool_dispatch.ml` (`dispatch_many` tests) | 274 | DROP | with the dead function |
 
-**Not in the PR, added by this RFC:** the `decide` reshape (§5.3), the `Capability_check` argv-path-scope extension (§5.4), the `catastrophic_floor` + `find_catastrophic_program`, the autonomous overlay (§5.5), and the sandbox branch (§5.1). The PR delivers wiring; this RFC supplies the policy the wiring should carry.
+**Not in the PR, added by this RFC:** the `decide` reshape (§5.3), the `catastrophic_floor` + `find_catastrophic_program` + `Verdict.Catastrophic_program` (§5.4), the `Approval_config.autonomous` overlay (§5.5), and the sandbox branch (§5.1). The PR delivers wiring; this RFC supplies the policy the wiring should carry. (The originally-planned `Capability_check` argv-path-scope extension is dropped — §5.4 premise correction.)
 
 > Already landed on the PR branch (`e6275dfbfe`): typed `Verdict.deny_reason_to_string` (H1), nested-pipeline `Too_complex` alignment (L4), doc-ordering fix (M1), deterministic `rm` test (L3). All remain valid; M3 (`Ask` informative summary) becomes moot once `Ask` is removed from the autonomous lane.
+>
+> P1 landed (this branch, after `a2a8145de8`): `catastrophic_floor` + `find_catastrophic_program` + `Verdict.Catastrophic_program` + `Approval_config.autonomous`, with the floor decoupled from `privileged_trust`. The two pre-RFC-0254 tests that encoded defect §2.2(4) (`git push --force` → `Allow`/`Suggest_confirm` under a loosened overlay) are inverted to assert `Deny`, plus floor-independence/`mkfs`/`rm`-boundary regression tests.
 
 ## 8. Implementation plan
 
-1. **P0 — `Capability_check` argv path-scope (§5.4).** Extend `of_ir`/`of_simple` to emit `Write_path` for fs-mutating program args, resolved via `Path_scope`. Unit tests: `rm ./build` → Inside; `rm /` and `rm /tmp/x` → Outside/root; `dd of=/dev/sda` → device.
-2. **P1 — `decide` reshape + `catastrophic_floor` (§5.3–5.4).** Move destructive-git out of the trust branch; add `find_catastrophic_program`. Tests: floor Denies regardless of overlay; non-catastrophic Allows under autonomous overlay.
-3. **P2 — autonomous overlay + sandbox branch (§5.1, 5.5).** Wire `per_agent`/context overlay; `Docker → skip`, `Local → autonomous`. Remove `Ask` handling from the keeper runtime.
-4. **P3 — telemetry relocation (§5.6).** Remove `log_verdict` from shared `gate_typed`; log at the approval boundary incl. allows.
-5. **P4 — drop dead code (§7).** Remove `dispatch_async`/`dispatch_decided_outcome`/`argv_of_ir`/`dispatch_many` + tests.
-6. **P5 — verification (§9).**
+P0 (typed argv path-scope) is **dropped** — see the §5.4 premise correction.
+
+1. **P1 — `decide` reshape + `catastrophic_floor` (§5.3–5.4). ✅ done (`approval_policy.ml`, this branch).** Destructive-git moved out of the trust branch into an unconditional floor; added `find_catastrophic_program` (mkfs) and the typed `Verdict.Catastrophic_program` reason; added the `Approval_config.autonomous` overlay. Tests (`lib/exec/test/test_approval_policy.ml`): the floor Denies `git push --force` under every overlay incl. autonomous; `mkfs` Denied under autonomous; `rm -rf /` Allowed at the policy layer (jailed downstream by `validate_paths`); `git status` Allowed under autonomous. Full `lib/exec` suite green (`DUNE_CACHE=disabled dune build --root . @lib/exec/test/runtest`).
+2. **P2 — autonomous overlay wiring + sandbox branch (§5.1, 5.5).** In `keeper_tool_execute_runtime.ml`: select `Approval_config.autonomous` for the keeper lane (replace the inline `permissive_default`/`per_agent = []`); `Docker → skip the gate`, `Local → autonomous`. Remove the `Ask`/`Approval_required` arm. (lib/keeper — CI-verified; local full build blocked by the agent_sdk pin drift.)
+3. **P3 — telemetry relocation (§5.6).** Remove `log_verdict` from shared `gate_typed`; log at the approval boundary incl. allows.
+4. **P4 — drop dead code (§7).** Remove `dispatch_async`/`dispatch_decided_outcome`/`argv_of_ir`/`dispatch_many` + tests.
+5. **P5 — verification (§9).**
 
 ## 9. Verification
 
@@ -208,10 +226,10 @@ This RFC **removes** a workaround-shaped construct (`Ask`-dangling: a verdict th
 
 ## 13. Open questions
 
-1. Exact catastrophic-floor membership (§5.4) — sign-off needed. Does `chmod -R 777` on workspace-internal paths count, or only root/outside scope?
-2. Should `Docker` profile still apply the catastrophic floor as defense-in-depth, or fully trust the container? (Hermes fully skips; defense-in-depth would keep the floor.)
+1. Should `sudo`/`su` join the `Catastrophic_program` floor (§5.4) as defense-in-depth? They are typed (`Exec_program.known`) and never legitimate for a keeper, but under the autonomous overlay they are currently graded `Privileged → Allow`. P1 left the floor at destructive-git + redirect-escape + `mkfs` per the chosen scope (Option A).
+2. Should the `Docker` profile still apply the catastrophic floor as defense-in-depth, or fully trust the container? (Hermes fully skips; defense-in-depth would keep the floor.) — decides P2.
 3. Operator-overlay resolver (§5.5) — separate RFC; what UI/protocol resolves `Ask`?
-4. `Capability_check` argv path-scope (§5.4) — which `Exec_program.kind`s are "fs-mutating"? Closed set: `rm`, `mv`, `cp`, `dd`, `chmod`, `chown`, `ln`, `truncate`, `shred`?
+4. Should the `validate_paths` `looks_like_path_token` + `command_materializes_path_arg` string/heuristic layer be replaced with typed `Path_scope` capabilities (a deferred "typed-replacement" RFC)? That is the honest home for the work the dropped P0 was reaching toward — at the validation layer, not a parallel walker in `capability_check`.
 
 ## 14. References
 

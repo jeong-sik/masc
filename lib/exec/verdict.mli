@@ -42,6 +42,10 @@ type deny_reason =
   | Unknown_bin of string
   | Path_escape of Path_scope.t
   | Destructive_git of Git_op.t
+  | Catastrophic_program of Exec_program.t
+      (** A binary that is never legitimate for a keeper regardless of its
+          arguments (e.g. [mkfs]).  Part of the trust-independent
+          catastrophic floor — RFC-0254 §5.4. *)
   | Policy_deny of { rule : string }
   | Parse_too_complex of Parsed.reason_too_complex
   | Parse_failed

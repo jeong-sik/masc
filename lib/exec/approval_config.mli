@@ -49,6 +49,12 @@ val permissive_default : agent_overlay
 (** [safe_trust = Auto_safe], audited/privileged at [Enforced].
     For well-trusted keeper agents in a dev worktree. *)
 
+val autonomous : agent_overlay
+(** All risk classes at [Observe] (allow + telemetry).  The overlay for an
+    autonomous keeper lane, where no human or resolver can answer an [Ask].
+    The trust-independent catastrophic floor in [Approval_policy.decide]
+    still applies above this overlay — RFC-0254 §5.5. *)
+
 val empty : t
 (** [empty] has [defaults = enforced_all] and no per-agent entries.
     Fail-closed bootstrap for CI and new agents. *)

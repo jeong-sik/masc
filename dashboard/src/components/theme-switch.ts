@@ -1,9 +1,10 @@
-// ThemeSwitch — compact header toggle for opt-in paper theme (#8177).
+// ThemeSwitch — compact header theme toggle.
 //
-// Cycles between the default dark palette and the "paper" palette.
-// The actual token swap lives in styles/paper-theme.css; this component
-// only flips document.documentElement.dataset.theme and persists the
-// choice to localStorage so reloads are stable.
+// Cycles between the default StyleSeed palette and the legacy dark palette.
+// The actual token swaps live in styles/styleseed-theme.css and
+// styles/paper-theme.css; this component only flips
+// document.documentElement.dataset.theme and persists the choice to
+// localStorage so reloads are stable.
 //
 // The switch is intentionally unobtrusive — a 2-letter mono label in
 // the same visual register as BuildIdentityBadge and ConnectionStatus.
@@ -17,7 +18,9 @@ import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from '../lib/the
 
 function readDomTheme(): ThemeId {
   const attr = document.documentElement.dataset.theme
-  return attr === 'paper' ? 'paper' : null
+  if (attr === 'styleseed') return 'styleseed'
+  if (attr === 'paper') return 'paper'
+  return null
 }
 
 // Single source of truth: mirrors the DOM attribute so Preact renders
@@ -48,7 +51,7 @@ function applyTheme(next: ThemeId): void {
 
 function syncThemeSearchParam(next: ThemeId): void {
   const url = new URL(window.location.href)
-  if (next === 'paper') {
+  if (next === 'styleseed' || next === 'paper') {
     url.searchParams.set(THEME_SEARCH_PARAM, next)
   } else {
     url.searchParams.delete(THEME_SEARCH_PARAM)
@@ -57,21 +60,30 @@ function syncThemeSearchParam(next: ThemeId): void {
 }
 
 function toggleTheme(): void {
-  applyTheme(currentTheme.value === 'paper' ? null : 'paper')
+  applyTheme(currentTheme.value === 'styleseed' ? null : 'styleseed')
 }
 
-const LABEL: Record<'default' | 'paper', string> = {
+const LABEL: Record<'default' | 'styleseed' | 'paper', string> = {
   default: 'DARK',
+  styleseed: 'SEED',
   paper: 'PAPER',
 }
 
-const TITLE: Record<'default' | 'paper', string> = {
-  default: '현재 테마: Dark · 클릭하여 Paper 테마로 전환',
-  paper: '현재 테마: Paper · 클릭하여 Dark 테마로 전환',
+const TITLE: Record<'default' | 'styleseed' | 'paper', string> = {
+  default: '현재 테마: Dark · 클릭하여 StyleSeed 테마로 전환',
+  styleseed: '현재 테마: StyleSeed · 클릭하여 Dark 테마로 전환',
+  paper: '현재 테마: Paper · 클릭하여 StyleSeed 테마로 전환',
 }
 
 export function ThemeSwitch() {
-  const key = currentTheme.value === 'paper' ? 'paper' : 'default'
+  // Re-sync with the DOM on every render so external bootstrapping (main.ts)
+  // and tests that set dataset.theme after module load see the correct label.
+  const domTheme = readDomTheme()
+  if (currentTheme.value !== domTheme) {
+    currentTheme.value = domTheme
+  }
+
+  const key = currentTheme.value === 'styleseed' ? 'styleseed' : currentTheme.value === 'paper' ? 'paper' : 'default'
   return html`
     <button
       type="button"

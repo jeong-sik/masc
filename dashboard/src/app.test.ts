@@ -34,6 +34,12 @@ describe('App v2 header chrome', () => {
     expect(app?.hasAttribute('data-surface')).toBe(true)
   })
 
+  it('sets the default StyleSeed theme on the dashboard root', () => {
+    renderApp()
+    const app = container.querySelector('.v2-app')
+    expect(app?.getAttribute('data-theme')).toBe('styleseed')
+  })
+
   it('renders v2 shell header and health strip scopes', () => {
     renderApp()
     expect(container.querySelector('header.v2-shell-header')).not.toBeNull()

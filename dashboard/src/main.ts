@@ -46,6 +46,8 @@ import './styles/keeper-turn-inspector.css'
 import './styles/ide-v2.css'
 import './styles/work-v2.css'
 import './styles/connectors-v2.css'
+import './styles/telemetry-v2.css'
+import './styles/craft-v2.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'

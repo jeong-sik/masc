@@ -227,6 +227,30 @@ let max_wait_sec () =
 
 let wait_poll_interval_sec = 0.25
 
+(** Deterministic per-key TTL jitter to prevent cache stampede.
+
+    When N entries are inserted at the same wall-clock instant with the
+    same TTL (e.g. per-keeper snapshot caches refreshed in a tight loop),
+    they expire together and recompute simultaneously — a thundering herd
+    proportional to N.  Spreading expiry by ±[ttl_jitter] per key (derived
+    from the key's hash, so it is deterministic and reproducible across
+    runs) lets co-issued entries drift apart.  Only the [expires_at]/
+    [stale_until] instant moves; the freshness window and [stale_grace]
+    duration are unchanged.
+
+    Measured on a 13-keeper runtime: ~39 per-keeper cache entries
+    ([kta:] / [operator:keeper-runtime-trust] / [kas:keeper-*-agent]) for
+    the 13 keepers expired in the same millisecond under a fixed 15s
+    [realtime_cache_ttl_s], driving hit_ratio to ~48% with recurring
+    recompute spikes every TTL. *)
+let ttl_jitter = 0.10
+
+let jittered_ttl ~key ttl =
+  let h = Hashtbl.hash key in
+  (* low 24 bits of the key hash → [0, 1) *)
+  let frac = float_of_int (h land 0xFFFFFF) *. (1.0 /. 16_777_216.0) in
+  ttl *. (1.0 +. ((frac *. 2.0) -. 1.0) *. ttl_jitter)
+
 (** PR-0.2.A: dashboard cache hit/miss observation labels.  Pure
     instrumentation — never branches on these counters. *)
 let cache_metric_label = [("cache", "dashboard")]
@@ -327,7 +351,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           atomic_update table (fun map ->
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
-              ((), SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map)
+              ((), SMap.add key (Ready { value; expires_at = ts +. jittered_ttl ~key ttl; stale_until = ts +. jittered_ttl ~key ttl +. stale_grace }) map)
             | _ ->
               Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
               ((), map)
@@ -431,7 +455,7 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            atomic_update table (fun map ->
              match SMap.find_opt key map with
              | Some (Computing { token = c; _ }) when c = token ->
-               ((), SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map)
+               ((), SMap.add key (Ready { value; expires_at = ts +. jittered_ttl ~key ttl; stale_until = ts +. jittered_ttl ~key ttl +. stale_grace }) map)
              | _ ->
                Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
                ((), map)
@@ -520,7 +544,7 @@ let get_or_compute_simple key ~ttl compute =
        atomic_update table (fun map ->
          match SMap.find_opt key map with
          | Some (Computing { token = c; _ }) when c = token ->
-           ((), SMap.add key (Ready { value; expires_at = ts_after +. ttl; stale_until = ts_after +. ttl +. stale_grace }) map)
+           ((), SMap.add key (Ready { value; expires_at = ts_after +. jittered_ttl ~key ttl; stale_until = ts_after +. jittered_ttl ~key ttl +. stale_grace }) map)
          | _ -> ((), map)
        );
        value

@@ -280,13 +280,13 @@ export function App() {
       style=${{ '--twk-font-scale': String(tweaksFontScale.value) }}
     >
       <${SkipLink} />
-      <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5">
+      <header class="${compactChromeMode ? 'hidden' : 'relative v2-shell-header'} z-10 shrink-0 px-4 py-2">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[1080px]:flex-col max-[1080px]:items-stretch">
           <div class="flex min-w-0 flex-1 items-center gap-3 max-[860px]:flex-wrap">
             <div class="flex min-w-0 shrink-0 items-center gap-2.5 max-[520px]:w-full">
               <button type="button"
-                class=${`hidden max-[768px]:flex size-8 items-center justify-center rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-primary)] cursor-pointer transition-colors hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+                class=${`hidden max-[768px]:flex size-11 items-center justify-center rounded-md border border-[var(--ss-border)] bg-[var(--ss-card)] text-[var(--ss-text-primary)] cursor-pointer transition-colors hover:bg-[var(--ss-surface-subtle)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? 'Close navigation' : 'Open navigation'}
                 aria-controls="dashboard-side-rail"
@@ -346,7 +346,7 @@ export function App() {
       ${widgetSoloMode
         ? html`
           <div
-            class="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5"
+            class="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-[var(--ss-border)] bg-[var(--ss-card)] px-3 py-1.5"
             data-testid="dashboard-widget-solo-auth-strip"
             aria-label="Solo view auth and runtime status"
           >
@@ -378,7 +378,7 @@ export function App() {
           `}
 
         <div class="v2-stage min-h-0 flex-1">
-          <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg'}>
+          <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--ss-radius-card)] border border-[var(--ss-border)] bg-[var(--ss-card)] shadow-[var(--ss-shadow-card)]'}>
             <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>
                 <${DashboardMain} />

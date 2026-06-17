@@ -40,6 +40,7 @@ import {
   boardExcludeAutomation,
   boardAuthorFilter,
   boardHearthFilter,
+  boardOffset,
 } from './store'
 import {
   requestNamespaceTruth,
@@ -413,9 +414,10 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
     hearth: eventHearth || undefined,
   }
   boardPosts.value = [post, ...boardPosts.value]
-  // Do not bump boardOffset for an optimistic prepend: the offset tracks the
-  // server-side pagination cursor, and mutating it here would skip the newly
-  // created post on the next real pagination fetch.
+  // The server-side offset-based list has shifted by one because of this real
+  // persisted post, so advance the pagination cursor to avoid requesting the
+  // same posts again on the next load-more fetch.
+  boardOffset.value += 1
   return true
 }
 

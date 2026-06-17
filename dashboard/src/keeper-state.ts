@@ -368,17 +368,18 @@ function normalizeHistoryEntry(
   const role = normalizeRole(raw.role)
   const rawText = asString(raw.content) ?? asString(raw.preview) ?? ''
   const attachments = normalizeAttachments(raw.attachments)
-  // Accept attachment-only rows: a user may send a file/image with no text.
-  // Without this guard the entry is dropped on reload even though it is
-  // persisted server-side.
-  if (!rawText && !attachments?.length) return null
+  const audio = normalizeAudioClip(raw.audio) ?? null
+  // Accept attachment-only or audio-only rows: a user may send a file/image
+  // with no text, or the assistant may emit a synthesized voice clip with no
+  // generated text. Without this guard those persisted rows are dropped on
+  // reload even though they are renderable server-side.
+  if (!rawText && !attachments?.length && !audio) return null
   const source = normalizeConversationSource(raw.source, role, rawText, previousSource)
   const text = formatKeeperVisibleReply(rawText)
-  if (!text && !attachments?.length) return null
+  if (!text && !attachments?.length && !audio) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
-  const audio = normalizeAudioClip(raw.audio) ?? null
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
   // apart from a real reply. Map it to the existing error delivery state so
@@ -574,7 +575,11 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
     const locals = merged.filter(isLocalEntry)
     const history = merged.filter(entry => !isLocalEntry(entry))
     const historyCap = Math.max(0, THREAD_ENTRY_CAP - locals.length)
-    kept = [...history.slice(-historyCap), ...locals]
+    // history.slice(-0) is equivalent to history.slice(0), so an explicit
+    // empty prefix is needed when the local tail already fills the cap.
+    kept = historyCap === 0
+      ? locals
+      : [...history.slice(-historyCap), ...locals]
   }
   keeperThreads.value = {
     ...keeperThreads.value,

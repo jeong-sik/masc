@@ -139,31 +139,23 @@ module FileSystem = struct
       the shared hashtable.  Uses [Stdlib.Mutex] + [Fun.protect]. *)
 
   let ki_replace t k v =
-    Mutex.lock t.key_index_mu;
-    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu)
-      (fun () -> Hashtbl.replace t.key_index k v)
+    Mutex.protect t.key_index_mu (fun () -> Hashtbl.replace t.key_index k v)
 
   let ki_remove t k =
-    Mutex.lock t.key_index_mu;
-    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu)
-      (fun () -> Hashtbl.remove t.key_index k)
+    Mutex.protect t.key_index_mu (fun () -> Hashtbl.remove t.key_index k)
 
   let ki_length t =
-    Mutex.lock t.key_index_mu;
-    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu)
-      (fun () -> Hashtbl.length t.key_index)
+    Mutex.protect t.key_index_mu (fun () -> Hashtbl.length t.key_index)
 
   let ki_iter t f =
     let entries =
-      Mutex.lock t.key_index_mu;
-      Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+      Mutex.protect t.key_index_mu (fun () ->
         Hashtbl.fold (fun k v acc -> (k, v) :: acc) t.key_index [])
     in
     List.iter (fun (k, v) -> f k v) entries
 
   let ki_replace_bulk t entries =
-    Mutex.lock t.key_index_mu;
-    Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+    Mutex.protect t.key_index_mu (fun () ->
       List.iter (fun (k, v) -> Hashtbl.replace t.key_index k v) entries)
 
   (** {2 Key Validation} *)
@@ -458,8 +450,7 @@ module FileSystem = struct
        The mutex is released BEFORE Eio.Promise.await (which needs Eio
        fiber context and would deadlock under a held Stdlib.Mutex). *)
     let action =
-      Mutex.lock t.key_index_mu;
-      Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+      Mutex.protect t.key_index_mu (fun () ->
         (* Direct Hashtbl access — already inside key_index_mu lock.
            ki_length would deadlock (non-reentrant mutex). *)
         if Hashtbl.length t.key_index > 0 then `Done
@@ -509,8 +500,7 @@ module FileSystem = struct
          Eio.Promise.resolve_ok r ();
          `Ready
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Mutex.lock t.key_index_mu;
-         Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
+         Mutex.protect t.key_index_mu (fun () ->
            t.key_index_promise <- None);
          Eio.Promise.resolve_error r exn;
          match exn with

@@ -13,6 +13,7 @@
 
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
+import { useMemo } from 'preact/hooks'
 import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
@@ -950,13 +951,28 @@ function CostFocusRail({
 }
 
 function CostDashboardContent({ view }: { view: CostView }) {
-  if (view === 'cost') {
-    const focus = activeCostFocus.value
-    const requestedMode = focus ? viewModeForCostFocus(focus) : viewMode.value
-    if (viewMode.value !== requestedMode) viewMode.value = requestedMode
+  const focus = activeCostFocus.value
+  const requestedMode = focus ? viewModeForCostFocus(focus) : viewMode.value
+  const mode = requestedMode
+  const activeState = mode === 'model' ? modelState.value : keeperState.value
+  const costData = useMemo(() => {
+    if (activeState.status !== 'loaded') return null
+    const data = activeState.data
+      .slice()
+      .sort((a, b) => (mode === 'model'
+        ? ((b as DashboardRuntimeModelMetric).total_cost_usd ?? 0) - ((a as DashboardRuntimeModelMetric).total_cost_usd ?? 0)
+        : (b as KeeperCostMetric).total_cost_usd - (a as KeeperCostMetric).total_cost_usd))
+    const maxCost = Math.max(0, ...data.map(m =>
+      mode === 'model' ? ((m as DashboardRuntimeModelMetric).total_cost_usd ?? 0) : (m as KeeperCostMetric).total_cost_usd))
+    const maxP95 = Math.max(0, ...data.map(m => {
+      const p95 = mode === 'model' ? (m as DashboardRuntimeModelMetric).p95_latency_ms : (m as KeeperCostMetric).p95_latency_ms
+      return p95 ?? 0
+    }))
+    return { data, maxCost, maxP95 }
+  }, [activeState, mode])
 
-    const mode = requestedMode
-    const activeState = mode === 'model' ? modelState.value : keeperState.value
+  if (view === 'cost') {
+    if (viewMode.value !== requestedMode) viewMode.value = requestedMode
 
     if (activeState.status === 'idle') {
       void loadActiveView(windowMinutes.value, view)
@@ -969,18 +985,8 @@ function CostDashboardContent({ view }: { view: CostView }) {
     }
     if (activeState.status !== 'loaded') return null
 
+    const { data, maxCost, maxP95 } = costData!
     const t = mode === 'model' ? modelTotals.value : keeperTotals.value
-    const data = activeState.data
-      .slice()
-      .sort((a, b) => (mode === 'model'
-        ? ((b as DashboardRuntimeModelMetric).total_cost_usd ?? 0) - ((a as DashboardRuntimeModelMetric).total_cost_usd ?? 0)
-        : (b as KeeperCostMetric).total_cost_usd - (a as KeeperCostMetric).total_cost_usd))
-    const maxCost = Math.max(0, ...data.map(m =>
-      mode === 'model' ? ((m as DashboardRuntimeModelMetric).total_cost_usd ?? 0) : (m as KeeperCostMetric).total_cost_usd))
-    const maxP95 = Math.max(0, ...data.map(m => {
-      const p95 = mode === 'model' ? (m as DashboardRuntimeModelMetric).p95_latency_ms : (m as KeeperCostMetric).p95_latency_ms
-      return p95 ?? 0
-    }))
     const loadedModelCount = modelState.value.status === 'loaded' ? modelState.value.data.length : null
     const loadedKeeperCount = keeperState.value.status === 'loaded' ? keeperState.value.data.length : null
     const loadedBucketCount = modelState.value.status === 'loaded' ? modelState.value.latencyBuckets.length : null

@@ -85,6 +85,23 @@ file independent of (1)(2)(3).
 `provider_slot` / `with_provider_slot` in `keeper_librarian_runtime.ml` are deleted. Per-keeper
 serialization now comes from `mem_mu`; the cross-keeper bottleneck is gone.
 
+### Correctness under detachment
+
+Detaching means a keeper's turn N+1 can run while turn N's memory unit is still
+on the lane. The data the unit reads must not race that later turn:
+
+- `Keeper_meta_contract.keeper_meta` and `Workspace.config` have no `mutable`
+  fields; updates return new records (`map_usage`, `reset_runtime_state` are
+  `keeper_meta -> keeper_meta`). Turn N's unit closes over turn N's immutable
+  record; turn N+1 gets its own. No race.
+- The one mutable per-keeper read in the deterministic write is the tool-emission
+  accumulator (`Keeper_tool_emission_hook.snapshot (accumulator_for_keeper
+  meta.name)`). It is snapshotted **synchronously at turn end**, before submit,
+  and the immutable snapshot is passed into the unit — so a later turn's
+  emissions cannot fold into this turn's notes.
+- The remaining shared mutable state is the on-disk memory bank, which the
+  lane's per-keeper mutex serializes.
+
 ## Accepted consequence
 
 Detaching memory work means a keeper can have a chat turn and a memory extraction in flight at the

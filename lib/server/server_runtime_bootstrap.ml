@@ -145,6 +145,10 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_net net;
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
+  (* RFC-0252: own detached per-keeper memory-lane fibers on the server root
+     switch. After [set_switch] so the lane and provider calls it forks share
+     the same long-lived switch (cancelled together at shutdown). *)
+  Keeper_memory_lane.init ~sw;
   (* RFC-0107 Phase D.2c — record full Eio.Stdenv for piaf-backed
      Pool in Masc_http_client.  Optional: tests / pre-bootstrap
      callers may omit [env], in which case Pool falls back to a

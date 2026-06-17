@@ -10,25 +10,26 @@
 .v2-status-tray,
 .v2-shell-header,
 .v2-health-strip {
-  /* v5 Observatory dark-fantasy palette, calibrated against the v2
-     colors_and_type.css "Dark Fantasy" theme. */
-  --v2-ink:         #0a0e18;
-  --v2-velvet:      #0f1524;
-  --v2-card:        #131a2a;
-  --v2-card-soft:   #161d30;
-  --v2-raised:      #1a2238;
-  --v2-border-soft: rgba(120, 140, 180, 0.09);
-  --v2-border:      rgba(120, 140, 180, 0.13);
-  --v2-border-strong: rgba(140, 160, 200, 0.18);
-  --v2-text:        #b8c4dc;
-  --v2-text-bright: #e8eef8;
-  --v2-text-dim:    #5a6a88;
-  --v2-text-faint:  #4a5a78;
-  --v2-accent-brass: #8a6a28;
-  --v2-accent-brass-dim: #5a4618;
-  --v2-ok:          #5a7a3a;
-  --v2-warn:        #a06a1a;
-  --v2-bad:         #a01818;
+  /* Shell palette — aliased to the global dark-fantasy tokens (owned by
+     v2-theme.css) instead of a local literal copy, so the shell chrome
+     stays in lockstep with the rest of the dashboard. */
+  --v2-ink:         var(--color-bg-page);
+  --v2-velvet:      var(--color-bg-surface);
+  --v2-card:        var(--color-bg-panel-alt);
+  --v2-card-soft:   var(--color-bg-elevated);
+  --v2-raised:      var(--color-bg-hover);
+  --v2-border-soft: var(--color-border-divider);
+  --v2-border:      var(--color-border-default);
+  --v2-border-strong: var(--color-border-strong);
+  --v2-text:        var(--color-fg-secondary);
+  --v2-text-bright: var(--color-fg-primary);
+  --v2-text-dim:    var(--color-fg-muted);
+  --v2-text-faint:  var(--color-fg-disabled);
+  --v2-accent-brass: var(--accent-brass);
+  --v2-accent-brass-dim: var(--color-accent-fg-dim);
+  --v2-ok:          var(--ok);
+  --v2-warn:        var(--warn);
+  --v2-bad:         var(--err);
 
   /* Re-use the generated type stacks (Cinzel display, Noto Sans KR UI). */
   --v2-font-display: var(--font-display);

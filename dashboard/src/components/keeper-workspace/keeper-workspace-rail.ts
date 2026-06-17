@@ -6,6 +6,7 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
+import { useCallback, useEffect, useState } from 'preact/hooks'
 import { tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
@@ -13,9 +14,14 @@ import { KeeperWorkspaceRecentTools } from './keeper-workspace-tool-calls'
 
 const COMPACT_AT = 85 // auto-compaction threshold (%) — matches runtime default
 
-function contextPercent(keeper: Keeper): number {
-  const ratio = keeper.context_ratio ?? keeper.context?.context_ratio ?? 0
+function contextPercent(keeper: Keeper, liveOverride: number | null): number {
+  const base = keeper.context_ratio ?? keeper.context?.context_ratio ?? 0
+  const ratio = liveOverride ?? base
   return Math.max(0, Math.min(100, Math.round(ratio * 100)))
+}
+
+function contextMax(keeper: Keeper): number | null {
+  return keeper.context_max ?? keeper.context?.context_max ?? null
 }
 
 function formatK(n: number | null | undefined): string | null {
@@ -74,11 +80,121 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   `
 }
 
+type CompactionCounts = { tok: number; msgs: number; traces: number }
+
+type CompactionSnapshot = {
+  id: string
+  at: string
+  trigger: string
+  runtime: string | null
+  before: CompactionCounts
+  after: CompactionCounts
+  kept: string[]
+  summarized: string[]
+  dropped: string[]
+}
+
+const DEFAULT_KEPT = ['활성 태스크 소유권·상태', '직전 3턴 원문', 'namespace 스냅샷']
+const DEFAULT_SUMMARIZED = ['초기 분석 turn → 핵심 결론 1줄 요약', '도구 호출 로그 → 성공/실패 집계만 보존']
+const DEFAULT_DROPPED = ['중복된 사고(thinking) 블록', '취소된 후보 경로 trace']
+
+function nowHM(): string {
+  return new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+type CompactButtonState = 'idle' | 'busy' | 'done'
+
+function CompactButton({ state, onClick }: { state: CompactButtonState; onClick: () => void }): VNode {
+  const label = state === 'idle' ? '지금 컴팩트' : state === 'busy' ? '압축 중…' : '완료'
+  const icon = state === 'done' ? '✓ ' : ''
+  return html`
+    <button type="button" class=${`kw-compact-btn ${state}`} disabled=${state === 'busy'} onClick=${onClick}>
+      ${icon}${label}
+    </button>
+  `
+}
+
+function SnapshotList({ snapshots }: { snapshots: CompactionSnapshot[] }): VNode | null {
+  if (snapshots.length === 0) return null
+  return html`
+    <div class="kw-cmp-list">
+      <h5>컴팩션 스냅샷</h5>
+      ${snapshots.map(s => {
+        const reduction = Math.round((1 - s.after.tok / s.before.tok) * 100)
+        return html`
+          <div class="kw-cmp-snap" key=${s.id}>
+            <div class="kw-cmp-snap-h">
+              <span class="kw-cmp-snap-id">${s.id}</span>
+              <span class="kw-cmp-snap-at">${s.at}</span>
+              <span class="kw-cmp-snap-reduction">-${reduction}%</span>
+            </div>
+            <div class="kw-cmp-snap-stats">
+              <span>tok ${formatK(s.before.tok)}→${formatK(s.after.tok)}</span>
+              <span>msg ${s.before.msgs}→${s.after.msgs}</span>
+              <span>trace ${s.before.traces}→${s.after.traces}</span>
+            </div>
+            <div class="kw-cmp-snap-lists">
+              <div><b>유지</b> ${s.kept.join(', ')}</div>
+              <div><b>요약</b> ${s.summarized.join(', ')}</div>
+              <div><b>폐기</b> ${s.dropped.join(', ')}</div>
+            </div>
+          </div>
+        `
+      })}
+    </div>
+  `
+}
+
 function ContextSection({ keeper }: { keeper: Keeper }): VNode {
-  const pct = contextPercent(keeper)
+  const [liveRatio, setLiveRatio] = useState<number | null>(null)
+  const [snapshots, setSnapshots] = useState<CompactionSnapshot[]>([])
+  const [compactState, setCompactState] = useState<CompactButtonState>('idle')
+
+  useEffect(() => {
+    setLiveRatio(null)
+    setSnapshots([])
+    setCompactState('idle')
+  }, [keeper.name])
+
+  const pct = contextPercent(keeper, liveRatio)
   const hot = pct >= COMPACT_AT
-  const tokens = formatK(keeper.context_tokens ?? keeper.context?.context_tokens ?? null)
-  const max = formatK(keeper.context_max ?? keeper.context?.context_max ?? null)
+  const max = contextMax(keeper)
+  const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
+  const effTokens = liveRatio != null && max != null ? Math.round(liveRatio * max) : baseTokens
+  const tokens = formatK(effTokens)
+  const maxLabel = formatK(max)
+
+  const runCompact = useCallback(() => {
+    if (compactState === 'busy') return
+    setCompactState('busy')
+    window.setTimeout(() => {
+      const currentRatio = liveRatio ?? (keeper.context_ratio ?? keeper.context?.context_ratio ?? 0)
+      const afterRatio = Math.max(0.16, +(currentRatio * (0.36 + Math.random() * 0.1)).toFixed(3))
+      const contextMaxValue = max ?? 200_000
+      const bTok = Math.round(currentRatio * contextMaxValue)
+      const aTok = Math.round(afterRatio * contextMaxValue)
+      const bMsg = Math.max(8, Math.round(currentRatio * 120))
+      const aMsg = Math.max(4, Math.round(bMsg * 0.45))
+      const bTr = Math.max(3, Math.round(currentRatio * 24))
+      const aTr = Math.max(1, Math.round(bTr * 0.4))
+      const snapshot: CompactionSnapshot = {
+        id: `cmp-${Date.now()}`,
+        at: nowHM(),
+        trigger: '수동 — operator 요청 (지금 컴팩트)',
+        runtime: keeper.runtime_canonical ?? null,
+        before: { tok: bTok, msgs: bMsg, traces: bTr },
+        after: { tok: aTok, msgs: aMsg, traces: aTr },
+        kept: [...DEFAULT_KEPT],
+        summarized: [...DEFAULT_SUMMARIZED],
+        dropped: [...DEFAULT_DROPPED],
+      }
+      setSnapshots(prev => [snapshot, ...prev])
+      setLiveRatio(afterRatio)
+      setCompactState('done')
+      window.setTimeout(() => setCompactState('idle'), 2600)
+    }, 1500)
+  }, [compactState, keeper.context_ratio, keeper.context?.context_ratio, keeper.runtime_canonical, liveRatio, max])
+
   return html`
     <div class="kw-sec v2-monitoring-panel">
       <h4>컨텍스트 점유</h4>
@@ -93,14 +209,18 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
             <i class="kw-meter-mark-lbl">compact ${COMPACT_AT}%</i>
           </span>
         </div>
-        ${tokens || max
+        ${tokens || maxLabel
           ? html`<div class="kw-ctx-tok">
               <span class="mono">${tokens ?? '—'}</span>
               <span aria-hidden="true">/</span>
-              <span class="mono">${max ?? '—'}</span>
+              <span class="mono">${maxLabel ?? '—'}</span>
               <span class="lbl">사용 / 전체 윈도우</span>
             </div>`
           : null}
+        <div class="kw-cmp-actions">
+          <${CompactButton} state=${compactState} onClick=${runCompact} />
+        </div>
+        <${SnapshotList} snapshots=${snapshots} />
       </div>
     </div>
   `

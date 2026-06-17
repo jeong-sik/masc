@@ -158,7 +158,31 @@ interface OverviewProps {
   discordTriggerPolicy?: string
   selectedConnectorId?: KnownConnectorId | null
   onSelectConnector?: (connectorId: KnownConnectorId) => void
+  onOpenConfig?: (connectorId: KnownConnectorId) => void
   detailTargetId?: string
+  filterQuery?: string
+}
+
+/** Pure: decide whether a connector tile matches the toolbar query.
+ *  Empty/whitespace queries always match so the default grid stays intact. */
+function tileMatchesQuery(
+  id: KnownConnectorId,
+  connector: GateConnectorInfo | null,
+  query: string | undefined,
+): boolean {
+  const needle = (query ?? '').trim().toLowerCase()
+  if (needle === '') return true
+  const haystack = [
+    id,
+    CONNECTOR_DISPLAY_NAMES[id] ?? '',
+    connector?.display_name ?? '',
+    connector?.channel ?? '',
+    connector?.status ?? '',
+    connector?.bot_user_name ?? '',
+  ]
+    .join(' ')
+    .toLowerCase()
+  return haystack.includes(needle)
 }
 
 function findConnector(connectors: GateConnectorInfo[], id: string): GateConnectorInfo | null {
@@ -221,12 +245,13 @@ export function summarizeOverviewTile(
   }
 }
 
-function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector, detailTargetId }: {
+function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector, onOpenConfig, detailTargetId }: {
   id: KnownConnectorId
   connector: GateConnectorInfo | null
   keeperCount: number
   selected: boolean
   onSelectConnector?: (connectorId: KnownConnectorId) => void
+  onOpenConfig?: (connectorId: KnownConnectorId) => void
   detailTargetId: string
 }) {
   const sidecarUp = connector?.available === true
@@ -268,44 +293,57 @@ function OverviewTile({ id, connector, keeperCount, selected, onSelectConnector,
       data-overview-tile=${id}
       data-overview-selected=${selected ? 'true' : 'false'}
     >
-      <button
-        type="button"
-        class="flex min-w-0 cursor-pointer items-start gap-3 text-left"
-        onClick=${() => selectConnector(true)}
-        aria-label=${`${displayName} 상세 보기`}
-        aria-pressed=${selected ? 'true' : 'false'}
-      >
-        <span
-          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--r-1)] text-base"
-          style=${accent}
-        >${channelIcon(id)}</span>
-        <span class="min-w-0 flex-1">
-          <span class="flex items-center gap-2">
-            <span class="block truncate text-sm font-semibold text-[var(--color-fg-primary)]">${displayName}</span>
-            <span class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
-            ${uptimeLabel !== null
-              ? html`
-                  <span
-                    class="rounded-[var(--r-0)] border border-[var(--ok-border)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
-                    data-uptime-chip
-                    title="last_ready_at 기준 경과 시간"
-                  >${uptimeLabel}</span>
-                `
-              : null}
+      <div class="flex items-start gap-2">
+        <button
+          type="button"
+          class="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left"
+          onClick=${() => selectConnector(true)}
+          aria-label=${`${displayName} 상세 보기`}
+          aria-pressed=${selected ? 'true' : 'false'}
+        >
+          <span
+            class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--r-1)] text-base"
+            style=${accent}
+          >${channelIcon(id)}</span>
+          <span class="min-w-0 flex-1">
+            <span class="flex items-center gap-2">
+              <span class="block truncate text-sm font-semibold text-[var(--color-fg-primary)]">${displayName}</span>
+              <span class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs font-medium ${summary.badgeClass}`}>${summary.badge}</span>
+              ${uptimeLabel !== null
+                ? html`
+                    <span
+                      class="rounded-[var(--r-0)] border border-[var(--ok-border)] bg-[var(--ok-10)] px-1.5 py-px text-3xs font-normal text-[var(--color-status-ok)]/80"
+                      data-uptime-chip
+                      title="last_ready_at 기준 경과 시간"
+                    >${uptimeLabel}</span>
+                  `
+                : null}
+            </span>
+            <span class="mt-1 block text-2xs leading-5 text-[var(--color-fg-disabled)]" data-overview-summary>${summary.detail}</span>
+            ${(() => {
+              const identity = formatTileIdentityLine(connector)
+              return identity !== null
+                ? html`<span
+                    class="mt-1 block truncate text-3xs text-[var(--color-fg-disabled)]"
+                    data-tile-identity=${id}
+                    title=${identity}
+                  >${identity}</span>`
+                : null
+            })()}
           </span>
-          <span class="mt-1 block text-2xs leading-5 text-[var(--color-fg-disabled)]" data-overview-summary>${summary.detail}</span>
-          ${(() => {
-            const identity = formatTileIdentityLine(connector)
-            return identity !== null
-              ? html`<span
-                  class="mt-1 block truncate text-3xs text-[var(--color-fg-disabled)]"
-                  data-tile-identity=${id}
-                  title=${identity}
-                >${identity}</span>`
-              : null
-          })()}
-        </span>
-      </button>
+        </button>
+        ${onOpenConfig
+          ? html`
+              <button
+                type="button"
+                class="shrink-0 cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 py-1 text-xs text-[var(--color-fg-disabled)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+                aria-label=${`${displayName} 설정 열기`}
+                title="설정"
+                onClick=${() => { onOpenConfig(id) }}
+              >⚙</button>
+            `
+          : null}
+      </div>
       <${ConnectorReadinessRail} pills=${pills} />
       <span class=${`text-3xs uppercase tracking-4 ${selected ? 'text-[var(--accent-1)]' : 'text-[var(--color-fg-disabled)]'}`}>
         ${selected ? 'Selected' : 'View Details'}
@@ -723,7 +761,9 @@ export function ConnectorOverviewStrip({
   discordTriggerPolicy,
   selectedConnectorId = null,
   onSelectConnector,
+  onOpenConfig,
   detailTargetId = 'connector-detail-panel',
+  filterQuery = '',
 }: OverviewProps) {
   useEffect(() => {
     stripMemory.value = updateStripMemory(stripMemory.value, connectors, Date.now())
@@ -760,17 +800,20 @@ export function ConnectorOverviewStrip({
         </div>
         <${BulkActions} connectors=${connectors} />
       </div>
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        ${KNOWN_CONNECTOR_IDS.map(id => html`
-          <${OverviewTile}
-            id=${id}
-            connector=${findConnector(connectors, id)}
-            keeperCount=${keeperCount}
-            selected=${selectedConnectorId === id}
-            onSelectConnector=${onSelectConnector}
-            detailTargetId=${detailTargetId}
-          />
-        `)}
+      <div class="cn-grid">
+        ${KNOWN_CONNECTOR_IDS
+          .filter(id => tileMatchesQuery(id, findConnector(connectors, id), filterQuery))
+          .map(id => html`
+            <${OverviewTile}
+              id=${id}
+              connector=${findConnector(connectors, id)}
+              keeperCount=${keeperCount}
+              selected=${selectedConnectorId === id}
+              onSelectConnector=${onSelectConnector}
+              onOpenConfig=${onOpenConfig}
+              detailTargetId=${detailTargetId}
+            />
+          `)}
       </div>
     </${SurfaceCard}>
   `

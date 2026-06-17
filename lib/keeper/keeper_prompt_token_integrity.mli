@@ -29,3 +29,16 @@ val scan_rendered_prompt :
   user_message:string ->
   continuity_summary:string ->
   string list
+
+(** Sanitize keeper_*/masc_* tokens that do not resolve to a live tool via
+    [Keeper_tool_resolution]. Registry-driven presentation-layer band-aid for
+    stale tool names leaking into prompts, replacing the hardcoded
+    retired-prefix list. Resolved tools and aliases are kept; env-var-shaped
+    (all-uppercase, e.g. [MASC_BASE_PATH]) tokens are kept (not tool
+    invocations). Unresolved tokens are replaced with
+    [<stale_tool_token>] to avoid leaving semantic holes in sentences.
+
+    When [~keeper_name] is supplied, each replacement emits
+    [masc_keeper_prompt_token_stripped_total] and a warning log so the
+    producer-side alarm is not silenced. *)
+val strip_unresolved_tool_tokens : ?keeper_name:string -> string -> string

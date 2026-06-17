@@ -113,6 +113,7 @@ type t =
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
   | PromptUnknownToolTokens
+  | PromptTokenStripped
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures

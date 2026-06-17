@@ -13,8 +13,8 @@ import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
 import { KeeperWorkspaceRecentTools } from './keeper-workspace-tool-calls'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
-import { asNumber, asString, isRecord } from '../common/normalize'
 import { formatDuration } from '../../lib/format-time'
+import { number, object, optional, safeParse, string, type InferOutput } from 'valibot'
 
 const COMPACT_AT = 85 // auto-compaction threshold (%) — matches runtime default
 
@@ -102,6 +102,33 @@ function formatAgo(seconds: number | null | undefined): string | null {
   return `${formatDuration(seconds)} 전`
 }
 
+const MascKeeperCompactResponseSchema = object({
+  before_tokens: number(),
+  after_tokens: number(),
+  saved_tokens: optional(number()),
+  trigger: optional(string()),
+  phase: optional(string()),
+})
+
+type MascKeeperCompactResponse = InferOutput<typeof MascKeeperCompactResponseSchema>
+
+function parseCompactResponse(text: string): MascKeeperCompactResponse {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error('컴팩트 응답을 JSON으로 파싱할 수 없습니다')
+  }
+  const result = safeParse(MascKeeperCompactResponseSchema, parsed)
+  if (!result.success) {
+    const detail = result.issues
+      .map(issue => issue.path?.map(p => String(p.key)).join('.') ?? 'root')
+      .join(', ')
+    throw new Error(`컴팩트 응답에 필수 값이 누락되었습니다: ${detail}`)
+  }
+  return result.output
+}
+
 type CompactButtonState = 'idle' | 'busy' | 'done'
 
 function CompactButton({ state, onClick }: { state: CompactButtonState; onClick: () => void }): VNode {
@@ -169,21 +196,15 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
     setCompactState('busy')
     try {
       const text = await callMcpTool('masc_keeper_compact', { name: keeper.name })
-      let parsed: unknown = null
-      try {
-        parsed = JSON.parse(text)
-      } catch {
-        parsed = null
-      }
-      const record = isRecord(parsed) ? parsed : null
-      const beforeTokens = asNumber(record?.before_tokens) ?? 0
-      const afterTokens = asNumber(record?.after_tokens) ?? 0
-      const savedTokens = asNumber(record?.saved_tokens) ?? Math.max(0, beforeTokens - afterTokens)
+      const response = parseCompactResponse(text)
+      const beforeTokens = response.before_tokens
+      const afterTokens = response.after_tokens
+      const savedTokens = response.saved_tokens ?? Math.max(0, beforeTokens - afterTokens)
       const snapshot: CompactionSnapshot = {
         id: `cmp-${Date.now()}`,
         at: nowHM(),
-        trigger: asString(record?.trigger) ?? '수동 컴팩트',
-        phase: asString(record?.phase) ?? null,
+        trigger: response.trigger ?? '수동 컴팩트',
+        phase: response.phase ?? null,
         beforeTokens,
         afterTokens,
         savedTokens,

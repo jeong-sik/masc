@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tasks } from '../../store'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
+import { callMcpTool } from '../../api/mcp'
+import { showToast, _testResetToasts } from '../common/toast'
 
 // The recent-tool-calls section now lazy-loads via fetchKeeperToolCalls (rather
 // than rendering keeper.recent_tool_names). Stub it so these rail tests never hit
@@ -31,9 +33,13 @@ vi.mock('../../api/mcp', () => ({
   })),
 }))
 
-vi.mock('../common/toast', () => ({
-  showToast: vi.fn(),
-}))
+vi.mock('../common/toast', async () => {
+  const actual = await vi.importActual<typeof import('../common/toast')>('../common/toast')
+  return {
+    ...actual,
+    showToast: vi.fn(),
+  }
+})
 
 function mkKeeper(partial: Partial<Keeper>): Keeper {
   return { name: 'masc-improver', status: 'running', ...partial } as Keeper
@@ -52,6 +58,8 @@ beforeEach(() => {
     mkTask({ id: 'T-4412', title: '세그먼트 리텐션 대시보드', status: 'in_progress', assignee: 'masc-improver' }),
     mkTask({ id: 'T-9999', title: '남의 태스크', status: 'todo', assignee: 'someone-else' }),
   ]
+  _testResetToasts()
+  vi.clearAllMocks()
 })
 
 afterEach(() => {
@@ -177,5 +185,70 @@ describe('KeeperWorkspaceRail', () => {
 
     expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(0)
     expect(container.textContent).toContain('30%')
+  })
+
+  it('prefers backend saved_tokens when present', async () => {
+    vi.mocked(callMcpTool).mockResolvedValueOnce(JSON.stringify({
+      before_tokens: 100000,
+      after_tokens: 30000,
+      saved_tokens: 80000,
+      phase: 'Running',
+      trigger: 'manual_operator_compact',
+    }))
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+
+    fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
+    await flushPromises()
+
+    expect(container.textContent).toContain('절약 80.0k tok')
+  })
+
+  it('falls back to computed saved_tokens when backend omits it', async () => {
+    vi.mocked(callMcpTool).mockResolvedValueOnce(JSON.stringify({
+      before_tokens: 100000,
+      after_tokens: 30000,
+      phase: 'Running',
+      trigger: 'manual_operator_compact',
+    }))
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+
+    fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
+    await flushPromises()
+
+    expect(container.textContent).toContain('절약 70.0k tok')
+  })
+
+  it('shows an error and adds no snapshot for a malformed 200 body', async () => {
+    vi.mocked(callMcpTool).mockResolvedValueOnce('not valid json')
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+
+    fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
+    await flushPromises()
+
+    expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(0)
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('JSON'), 'error')
+    expect((container.querySelector('.kw-compact-btn') as HTMLButtonElement).textContent).toContain('지금 컴팩트')
+  })
+
+  it('shows an error and adds no snapshot for an empty 200 body', async () => {
+    vi.mocked(callMcpTool).mockResolvedValueOnce('')
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+
+    fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
+    await flushPromises()
+
+    expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(0)
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('JSON'), 'error')
+  })
+
+  it('shows an error and adds no snapshot when required fields are missing', async () => {
+    vi.mocked(callMcpTool).mockResolvedValueOnce(JSON.stringify({ before_tokens: 100000 }))
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+
+    fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
+    await flushPromises()
+
+    expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(0)
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('누락'), 'error')
   })
 })

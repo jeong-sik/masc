@@ -76,9 +76,7 @@ let dropped_full_queue = Atomic.make 0
 
 let store_ref : (string * Dated_jsonl.t) option ref = ref None
 
-let with_write_queue_lock f =
-  Mutex.lock write_queue_mu;
-  Fun.protect ~finally:(fun () -> Mutex.unlock write_queue_mu) f
+let with_write_queue_lock f = Mutex.protect write_queue_mu f
 
 let take_queued_record () =
   with_write_queue_lock (fun () ->

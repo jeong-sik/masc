@@ -618,10 +618,7 @@ let full_health_snapshot_ttl_sec =
 ;;
 
 let with_full_health_snapshot_lock f =
-  Stdlib.Mutex.lock full_health_snapshot_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock full_health_snapshot_mu)
-    f
+  Stdlib.Mutex.protect full_health_snapshot_mu f
 
 let full_health_cached_field_names =
   [

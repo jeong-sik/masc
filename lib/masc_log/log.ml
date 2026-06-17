@@ -387,9 +387,7 @@ module Ring = struct
 
   let write_to_sink entry_json =
     rotate_if_needed ();
-    Stdlib.Mutex.lock sink_mutex;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock sink_mutex)
+    Stdlib.Mutex.protect sink_mutex
       (fun () ->
         (* Self-heal: if a prior rotate left [file_channel = None]
            (open failure) but the base dir is still configured, try

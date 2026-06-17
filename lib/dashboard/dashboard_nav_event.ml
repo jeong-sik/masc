@@ -17,6 +17,7 @@ let valid_surfaces =
   ; "lab"
   ; "code"
   ; "logs"
+  ; "settings"
   ]
 ;;
 
@@ -37,8 +38,9 @@ let valid_sections =
       ] )
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]
-  ; "workspace", [ "board"; "sub-boards"; "moderation"; "planning"; "repositories"; "verification" ]
-  ; "lab", [ "tools"; "harness" ]
+  ; ( "workspace"
+    , [ "board"; "sub-boards"; "moderation"; "planning"; "repositories"; "verification"; "work" ] )
+  ; "lab", [ "tools"; "harness"; "design-canvas"; "memory-explore"; "performance" ]
   ; "code", [ "ide-shell" ]
   ]
 ;;

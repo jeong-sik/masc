@@ -8,9 +8,8 @@ type retry_setup =
   ; turn_started_at : float
   ; turn_deadline : float
   ; remaining_turn_budget_s : unit -> float
-  ; retry_phase_started_at : float option ref
   ; elapsed_ms : float -> int
-  ; current_turn_phase_elapsed_ms : unit -> int * int option
+  ; current_turn_phase_elapsed_ms : float option -> int * int option
   ; keeper_profile : Keeper_types_profile.keeper_profile_defaults
   ; max_idle_turns : int
   ; max_turns : int

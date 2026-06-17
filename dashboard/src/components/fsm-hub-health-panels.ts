@@ -34,7 +34,7 @@ const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }>
 export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const m = snapshot.measurement
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] mb-2">
         측정
       </div>
@@ -119,7 +119,7 @@ export function InvariantsPanel({
   const allOk = okCount === total
   const badgeText = allOk ? `${total}/${total}` : `${okCount}/${total}`
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
       <div class="flex items-center justify-between mb-2">
         <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
           Safety
@@ -146,7 +146,7 @@ export function InvariantsPanel({
             : ''
           const tooltip = `${entry.label} — ${entry.ok ? 'holds' : 'BROKEN'}\n${desc}${rate ? `\n누적: ${rate}` : ''}`
           return html`
-            <li class="flex gap-2 text-3xs cursor-help" title=${tooltip}>
+            <li class="v2-monitoring-row flex gap-2 text-3xs cursor-help" title=${tooltip}>
               <span class=${`mt-[5px] h-1.5 w-1.5 rounded-full shrink-0 ${entry.ok ? 'bg-[var(--emerald)]' : 'bg-[var(--color-status-err)]'}`}></span>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-1.5">

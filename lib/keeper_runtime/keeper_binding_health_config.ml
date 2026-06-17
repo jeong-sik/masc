@@ -79,8 +79,7 @@ let local_cooldown_sec =
 
 let local_runtime_auth = function
   | Agent_sdk.Provider_runtime_binding.No_auth -> true
-  | Api_key_env _ | Oauth_cached_login | Setup_token_env _
-  | File _ | Exec _ -> false
+  | Api_key_env _ | Oauth_cached_login | Setup_token_env _ -> false
 
 let local_runtime_base_url base_url =
   match Uri.of_string (String.trim base_url) |> Uri.host with

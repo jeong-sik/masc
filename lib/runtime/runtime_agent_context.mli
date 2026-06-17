@@ -52,8 +52,6 @@ type config = {
           owned by [stream_idle_timeout_s] and the attempt liveness
           observer. Non-HTTP transports ignore it. *)
   max_tokens : int;
-  max_input_tokens : int option;
-  max_cost_usd : float option;
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
   context_reducer : Agent_sdk.Context_reducer.t option;

@@ -50,6 +50,20 @@ let test_redact_json_strings_redacts_sensitive_keys () =
   Alcotest.(check bool) "nested token hidden" false
     (String_util.contains_substring raw "nested-token")
 
+let test_redact_json_strings_redacts_secrets_in_values () =
+  let json =
+    `Assoc
+      [ ("message", `String "Retry with Authorization: Bearer ghp_xxxxxxxx");
+        ("url", `String "https://user:secret@api.example.com/v1")
+      ]
+  in
+  let redacted = Observability_redact.redact_json_strings json in
+  let raw = Yojson.Safe.to_string redacted in
+  Alcotest.(check bool) "bearer token hidden" false
+    (String_util.contains_substring raw "ghp_xxxxxxxx");
+  Alcotest.(check bool) "URL credential hidden" false
+    (String_util.contains_substring raw "user:secret")
+
 let test_denied_tool_input_returns_none () =
   let result = Observability_redact.redact_tool_input
     ~tool_name:"tool_auth_create" (`String "secret data") in
@@ -146,6 +160,8 @@ let () =
             test_redact_text_does_not_truncate;
           Alcotest.test_case "redact_json_strings redacts sensitive keys"
             `Quick test_redact_json_strings_redacts_sensitive_keys;
+          Alcotest.test_case "redact_json_strings redacts secrets embedded in values"
+            `Quick test_redact_json_strings_redacts_secrets_in_values;
           Alcotest.test_case "blob marker preserves structure" `Quick
             test_blob_marker_preserves_structure;
           Alcotest.test_case "blob marker redacts preview body" `Quick

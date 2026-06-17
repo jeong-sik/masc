@@ -39,7 +39,7 @@ function ChatHeader({
   // canonical home — so the header stays slim and the conversation gets the
   // vertical space instead of a redundant metadata sub-row.
   return html`
-    <div class="kw-chat-head">
+    <div class="kw-chat-head v2-monitoring-toolbar">
       <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${live} />
       <div class="kw-chat-id">
         <div class="kw-chat-name-row">
@@ -51,10 +51,10 @@ function ChatHeader({
       </div>
       <div class="kw-chat-actions">
         <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus=${keeperDisplayStatus(keeper)} />
-        <button type="button" class="kw-act danger" title="컨텍스트 비우기" onClick=${onClear}>비우기</button>
+        <button type="button" class="kw-act danger v2-monitoring-action" title="컨텍스트 비우기" onClick=${onClear}>비우기</button>
         <button
           type="button"
-          class="kw-act"
+          class="kw-act v2-monitoring-action"
           aria-pressed=${detailOpen ? 'true' : 'false'}
           title="상세 (상태 · 진단 · 정체성 · 설정 · 디버그)"
           onClick=${onToggleDetail}
@@ -76,7 +76,7 @@ export function KeeperWorkspaceChat({
   onClear: () => void
 }): VNode {
   return html`
-    <section class="kw-chat" role="region" aria-label=${`${keeper.name} 대화`}>
+    <section class="kw-chat v2-monitoring-surface" role="region" aria-label=${`${keeper.name} 대화`}>
       <${ChatHeader}
         keeper=${keeper}
         detailOpen=${detailOpen}

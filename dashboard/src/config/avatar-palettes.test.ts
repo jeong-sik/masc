@@ -21,7 +21,7 @@ describe('paletteForAgent', () => {
 
   it('returns valid palettes for different names', () => {
     const p1 = paletteForAgent('janitor')
-    const p2 = paletteForAgent('dreamer')
+    const p2 = paletteForAgent('alice')
     expect(typeof p1.skin).toBe('string')
     expect(typeof p2.skin).toBe('string')
   })

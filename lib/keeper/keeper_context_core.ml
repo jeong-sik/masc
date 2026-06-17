@@ -558,14 +558,14 @@ let resume_checkpoint_of_context
     version = Agent_sdk.Checkpoint.checkpoint_version;
     system_prompt = Some (system_prompt_of_context ctx);
     messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
-    max_total_tokens = Some (max_tokens_of_context ctx);
     context = checkpoint_context;
   }
 
-let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  match cp.max_total_tokens with
-  | Some value -> value
-  | None -> fallback
+(* OAS no longer persists a cumulative-token cap on the checkpoint
+   (budget enforcement removed). The per-response output max_tokens is
+   resolved from the model default at restore time. *)
+let checkpoint_max_tokens (_cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
+  fallback
 
 let context_of_oas_checkpoint
     ?(repair_orphans = true)
@@ -615,7 +615,6 @@ let save_oas_checkpoint
       system_prompt = Some (system_prompt_of_context ctx);
       messages = checkpoint_messages;
       created_at = Time_compat.now ();
-      max_total_tokens = Some (max_tokens_of_context ctx);
       context = checkpoint_context;
     }
   in

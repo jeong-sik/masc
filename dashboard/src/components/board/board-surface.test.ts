@@ -4,8 +4,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BoardSurface } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary } from '../../store'
 import { route } from '../../router'
-import { PAGE_SIZE, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, newPostFlair, newPostHearth, newPostSubmitting, showNewPostForm, subBoardOptions, subBoardOptionsError } from './board-state'
-import { boardLatencyMetrics, resetBoardLatencyMetrics } from '../../board-metrics'
+import { PAGE_SIZE, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, selectedBoardPostId, boardFilterMode, boardComposerMode } from './board-state'
+import { resetBoardLatencyMetrics } from '../../board-metrics'
 import type { BoardPost } from '../../types'
 
 import '@testing-library/jest-dom'
@@ -125,11 +125,8 @@ describe('contentCategory', () => {
   })
 })
 
-// ── Board component rendering tests ───────────────────────────────
+// ── Board v2 component rendering tests ────────────────────────────
 describe('BoardSurface Component', () => {
-  // PR #13152 review: vi.stubGlobal('fetch') in beforeEach without a matching
-  // unstub leaks the mocked fetch into later tests in the same worker.  Add
-  // an explicit afterEach that restores all stubbed globals.
   afterEach(async () => {
     cleanup()
     await vi.dynamicImportSettled()
@@ -167,19 +164,16 @@ describe('BoardSurface Component', () => {
       { name: 'bug', emoji: '🐛', label: 'Bug Report' },
     ]
     boardFlairsError.value = false
-    subBoardOptions.value = []
-    subBoardOptionsError.value = false
     resetBoardLatencyMetrics()
-    showNewPostForm.value = false
-    newPostHearth.value = ''
-    newPostFlair.value = ''
-    newPostSubmitting.value = false
     categoryVisibleLimits.value = {
       article: PAGE_SIZE,
       review: PAGE_SIZE,
       notice: PAGE_SIZE,
       system: PAGE_SIZE,
     }
+    selectedBoardPostId.value = null
+    boardFilterMode.value = 'all'
+    boardComposerMode.value = 'post'
     messages.value = []
     shellAuthSummary.value = null
     route.value = { params: {} } as any
@@ -190,16 +184,17 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText(/아직 게시글이 없습니다/)).toBeInTheDocument()
   })
 
-  it('wraps the board surface in the v2 workspace surface class', () => {
+  it('wraps the board surface in the v2 board surface class', () => {
     const { container } = render(h(BoardSurface, null))
-    expect(container.querySelector('.v2-workspace-surface')).not.toBeNull()
+    expect(container.querySelector('.v2-board-surface')).not.toBeNull()
   })
 
-  it('marks the sort bar and new-post form as v2 workspace panels', () => {
+  it('keeps v2 workspace panels for category cards', () => {
+    boardPosts.value = [
+      makePost({ id: 'post-1', title: '기술 탐색: test topic', body: 'content', author: 'keeper' }),
+    ]
     const { container } = render(h(BoardSurface, null))
-    const panels = container.querySelectorAll('.v2-workspace-panel')
-    expect(panels.length).toBeGreaterThanOrEqual(2)
-    expect(container.querySelector('.v2-workspace-action')).not.toBeNull()
+    expect(container.querySelectorAll('.v2-workspace-panel').length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders loading state when loading', () => {
@@ -317,7 +312,7 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText('flair:insight')).toBeInTheDocument()
   })
 
-  it('renders post moderation projection badges', () => {
+  it('renders moderation status badge on post cards', () => {
     boardPosts.value = [
       makePost({
         id: 'post-flagged',
@@ -331,7 +326,7 @@ describe('BoardSurface Component', () => {
 
     render(h(BoardSurface, null))
 
-    expect(screen.getByLabelText('게시글 moderation 신고됨 2건')).toHaveTextContent('신고됨 2')
+    expect(screen.getByText('모더레이션 대기')).toBeInTheDocument()
   })
 
   it('renders vote-blind post scores as hidden until voting', () => {
@@ -350,34 +345,7 @@ describe('BoardSurface Component', () => {
 
     render(h(BoardSurface, null))
 
-    expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent('투표 후 공개')
-  })
-
-  it('renders board visibility audit details on post cards', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-audit',
-        title: 'Audit visible',
-        body: 'content',
-        author: 'ani1999',
-        votes: null,
-        vote_balance: null,
-        vote_blind: true,
-        comment_count: 13,
-        created_at: '2026-04-17T00:00:00Z',
-        updated_at: '2026-04-17T01:00:00Z',
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    const audit = screen.getByLabelText(/게시글 표시 감사:/)
-    expect(audit).toHaveTextContent('표시 중')
-    expect(audit).toHaveTextContent('내부')
-    expect(audit).toHaveTextContent('댓글 13개')
-    expect(audit).toHaveTextContent('점수 투표 후 공개')
-    expect(audit).toHaveTextContent('최근 갱신됨')
-    expect(audit).toHaveTextContent('정렬 최신순')
+    expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent(/투표 후 공개/)
   })
 
   it('renders contributor quality badges on post cards', () => {
@@ -397,37 +365,111 @@ describe('BoardSurface Component', () => {
 
     render(h(BoardSurface, null))
 
-    expect(screen.getByLabelText('기여자 품질 72점 · 강함')).toHaveTextContent('품질 72')
+    expect(screen.getByLabelText(/기여자 품질 72점/)).toHaveTextContent('품질 72')
+  })
+
+  it('renders a state block panel when the post body contains one', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-state',
+        title: 'State transition',
+        body: '[STATE]\nfrom: idle\nto: running\nctx: ops\naction: start\n[/STATE]',
+        author: 'ani1999',
+      }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByTestId('bd-stateblock')).toBeInTheDocument()
+    expect(screen.getByText('상태 전이')).toBeInTheDocument()
+    expect(screen.getByText(/idle/)).toBeInTheDocument()
+  })
+
+  it('renders sub-board rail and filters posts by sub-board', () => {
+    boardHearths.value = [
+      { name: 'ops', count: 1 },
+      { name: 'review', count: 0 },
+    ]
+    boardPosts.value = [
+      makePost({ id: 'post-ops', title: 'Ops note', body: 'ops', author: 'keeper', hearth: 'ops' }),
+      makePost({ id: 'post-review', title: 'Review note', body: 'review', author: 'keeper', hearth: 'review' }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByTestId('bd-sub-all')).toBeInTheDocument()
+    expect(screen.getByTestId('bd-sub-ops')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('bd-sub-ops'))
+
+    expect(boardHearthFilter.value).toBe('ops')
+  })
+
+  it('renders filter chips for state and moderation', () => {
+    boardPosts.value = [
+      makePost({ id: 'post-state', title: 'State', body: '[STATE]\nGoal: x\n[/STATE]', author: 'keeper' }),
+      makePost({ id: 'post-mod', title: 'Mod', body: 'mod', author: 'keeper', moderation_status: 'flagged' }),
+    ]
+
+    render(h(BoardSurface, null))
+
+    expect(screen.getByTestId('bd-filter-all')).toBeInTheDocument()
+    expect(screen.getByTestId('bd-filter-state')).toBeInTheDocument()
+    expect(screen.getByTestId('bd-filter-mod')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('bd-filter-state'))
+    expect(boardFilterMode.value).toBe('state')
+  })
+
+  it('opens a thread detail side panel when a post is selected', () => {
+    boardPosts.value = [
+      makePost({ id: 'post-1', title: 'Selectable post', body: 'body', author: 'keeper', comment_count: 3 }),
+    ]
+
+    render(h(BoardSurface, null))
+    fireEvent.click(screen.getByTestId('bd-post-post-1'))
+
+    expect(screen.getByTestId('bd-thread-detail')).toBeInTheDocument()
+    expect(screen.getByText('스레드')).toBeInTheDocument()
+  })
+
+  it('switches composer mode tabs', () => {
+    render(h(BoardSurface, null))
+
+    expect(screen.getByTestId('bd-comp-tab-post')).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    expect(boardComposerMode.value).toBe('mention')
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-state'))
+    expect(boardComposerMode.value).toBe('state')
   })
 
   it('routes the mention inbox focus to the message surface', () => {
     route.value = { params: { focus: 'mention-inbox' } } as any
-    messages.value = [{ id: 'm-1', from: 'sojin', content: '@dashboard needs review' }]
+    messages.value = [{ id: 'm-1', from: 'sojin', content: '@dashboard needs review', timestamp: new Date().toISOString() }]
 
     render(h(BoardSurface, null))
 
     expect(screen.getByRole('heading', { name: 'Mention inbox' })).toBeInTheDocument()
-    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
   it('routes the message workspace focus to the workspace timeline surface', () => {
     route.value = { params: { focus: 'messages-workspace' } } as any
-    messages.value = [{ id: 'm-workspace', from: 'sangsu', workspace: 'ops', content: 'workspace update' }]
+    messages.value = [{ id: 'm-workspace', from: 'sangsu', workspace: 'ops', content: 'workspace update', timestamp: new Date().toISOString() }]
 
     render(h(BoardSurface, null))
 
     expect(screen.getByRole('heading', { name: 'Workspace timeline' })).toBeInTheDocument()
-    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
   it('routes the state-block focus to the message surface', () => {
     route.value = { params: { focus: 'state-block' } } as any
-    messages.value = [{ id: 'm-state', from: 'sangsu', content: '[STATE]\nGoal: keep context\n[/STATE]' }]
+    messages.value = [{ id: 'm-state', from: 'sangsu', content: '[STATE]\nGoal: keep context\n[/STATE]', timestamp: new Date().toISOString() }]
 
     render(h(BoardSurface, null))
 
     expect(screen.getByRole('heading', { name: 'State-block messages' })).toBeInTheDocument()
-    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
   it('routes the curation focus to the board curation surface', async () => {
@@ -442,7 +484,6 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(await screen.findByRole('heading', { name: 'AI curation snapshot' })).toBeInTheDocument()
-    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
   it('routes the karma focus to the board karma surface', async () => {
@@ -462,45 +503,6 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(await screen.findByRole('heading', { name: 'Karma ledger' })).toBeInTheDocument()
-    expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
-  })
-
-  it('renders compact board latency metrics when samples exist', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-1',
-        title: 'Latency sample',
-        body: 'content',
-        author: 'keeper',
-      }),
-    ]
-    boardLatencyMetrics.value = {
-      ...boardLatencyMetrics.value,
-      list: {
-        last_latency_ms: 42,
-        last_ok: true,
-        sample_count: 1,
-        failure_count: 0,
-        last_error: null,
-      },
-      reaction_toggle: {
-        last_latency_ms: 17,
-        last_ok: false,
-        sample_count: 1,
-        failure_count: 1,
-        last_error: 'network down',
-      },
-    }
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByLabelText('목록 지연 42밀리초')).toHaveTextContent('목록 42ms')
-    const failedChip = screen.getByLabelText('리액션 지연 17밀리초 실패')
-    expect(failedChip).toHaveTextContent('리액션 17ms 실패')
-    expect(failedChip.className).toContain('text-[var(--color-status-err)]')
-    expect(failedChip.className).toContain('border-[var(--bad-30)]')
-    expect(failedChip.className).not.toContain('color-status-bad')
-    expect(failedChip.className).not.toContain('bad-25')
   })
 
   it('hides system posts by default', () => {
@@ -515,74 +517,6 @@ describe('BoardSurface Component', () => {
     ]
     render(h(BoardSurface, null))
     expect(screen.queryByText('System Post')).not.toBeInTheDocument()
-  })
-
-  it('applies a hearth filter from the server hearth list', () => {
-    boardHearths.value = [{ name: 'ops', count: 2 }]
-    boardPosts.value = [
-      makePost({
-        id: 'post-ops',
-        title: 'Ops note',
-        body: 'ops content',
-        author: 'keeper',
-        hearth: 'ops',
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-    fireEvent.click(screen.getByRole('button', { name: 'hearth ops 2 posts' }))
-
-    expect(boardHearthFilter.value).toBe('ops')
-    expect(screen.getByRole('button', { name: 'hearth ops 2 posts' })).toHaveAttribute('aria-pressed', 'true')
-  })
-
-  it('keeps hearth refresh available without showing an error for a valid empty list', () => {
-    boardHearths.value = []
-    boardHearthsError.value = false
-
-    render(h(BoardSurface, null))
-
-    expect(screen.queryByText('hearth 목록을 불러오지 못했습니다')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'hearth 목록 새로고침' })).toBeInTheDocument()
-  })
-
-  it('shows the hearth load error only after a failed refresh', () => {
-    boardHearths.value = []
-    boardHearthsError.value = true
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByText('hearth 목록을 불러오지 못했습니다')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'hearth 목록 새로고침' })).toBeInTheDocument()
-  })
-
-  it('prefills the compose hearth from the active hearth filter', () => {
-    boardHearthFilter.value = 'ops'
-
-    render(h(BoardSurface, null))
-    fireEvent.click(screen.getByRole('button', { name: '+ 새 글 작성' }))
-
-    expect(screen.getByLabelText('새 글 category')).toHaveValue('ops')
-    expect(newPostHearth.value).toBe('ops')
-  })
-
-  it('renders explicit flair selection in the post composer', () => {
-    render(h(BoardSurface, null))
-    fireEvent.click(screen.getByRole('button', { name: '+ 새 글 작성' }))
-
-    const flair = screen.getByLabelText('새 글 flair')
-    expect(flair).toBeInTheDocument()
-    fireEvent.change(flair, { target: { value: 'bug' } })
-    expect(newPostFlair.value).toBe('bug')
-  })
-
-  it('disables compose cancel while a post is submitting', () => {
-    showNewPostForm.value = true
-    newPostSubmitting.value = true
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByRole('button', { name: '취소' })).toBeDisabled()
   })
 
   it('uses shared cursor pagination for category expansion', () => {

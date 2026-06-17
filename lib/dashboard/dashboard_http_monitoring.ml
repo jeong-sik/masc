@@ -216,23 +216,15 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
   ], true)
 
 let credential_monitoring_json () : Yojson.Safe.t =
-  let archived_starvation =
-    int_of_float
-      (Otel_metric_store.metric_total
-         Otel_metric_store.metric_config_credential_archived_starvation)
-  in
-  let needs_attention = archived_starvation > 0 in
+  (* Bare-form credential alias archive logic was removed; the legacy
+     starvation counter is always zero.  The dashboard field is retained
+     for API compatibility. *)
   `Assoc [
-    ("alert_level", `String (if needs_attention then "bad" else "ok"));
-    ("needs_attention", `Bool needs_attention);
-    ( "credential_archived_starvation_total",
-      `Int archived_starvation );
-    ( "metric_name",
-      `String Otel_metric_store.metric_config_credential_archived_starvation );
-    ( "reason",
-      if needs_attention then
-        `String "bare_form_keeper_credential_archived_after_starvation"
-      else `Null );
+    ("alert_level", `String "ok");
+    ("needs_attention", `Bool false);
+    ("credential_archived_starvation_total", `Int 0);
+    ("metric_name", `String "masc_config_credential_archived_starvation_total");
+    ("reason", `Null);
   ]
 
 let slot_monitoring_json () : Yojson.Safe.t =

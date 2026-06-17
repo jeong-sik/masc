@@ -8,14 +8,13 @@
 
     [guard_and_record_turn_start] can also gate dispatch once a
     turn exhausts its retry budget or stays stuck too long.
-    State is process-local; a server restart resets the
-    bookkeeping. *)
 
-type attempt_state = {
-  turn_id : int;
-  attempts : int;
-  first_started_at : float;  (** Unix seconds. *)
-}
+    The state is stored in the keeper registry entry and updated via
+    CAS on the per-entry atomic so a keeper's retry history is part of
+    the SSOT.  The previous separate [Hashtbl] + [Eio.Mutex.t] has
+    been removed. *)
+
+type attempt_state = Keeper_registry_types.livelock_attempt_state
 
 type start_outcome =
   | Fresh
@@ -39,15 +38,17 @@ type guarded_start_outcome =
   | Started of start_outcome
   | Blocked of gate_reason
 
-(** [record_turn_start ~keeper ~turn_id] increments the
+(** [record_turn_start ~base_path ~keeper ~turn_id] increments the
     [masc_keeper_turn_starts_total] counter and, when the start
     classifies as [Reattempt] or [Regression], the matching
     counter as well.  Returns the classification for the caller.
     Thread-safe across keeper fibers / domains. *)
-val record_turn_start : keeper:string -> turn_id:int -> start_outcome
+val record_turn_start :
+  base_path:string -> keeper:string -> turn_id:int -> start_outcome
 
 val guard_and_record_turn_start :
   ?now:(unit -> float) ->
+  base_path:string ->
   keeper:string ->
   turn_id:int ->
   max_attempts:int ->
@@ -67,11 +68,12 @@ val gate_reason_to_string : gate_reason -> string
 
 (** Read-only view of the current attempt state for a keeper.
     Returns [None] when no state has been recorded yet. *)
-val current_state : keeper:string -> attempt_state option
+val current_state : base_path:string -> keeper:string -> attempt_state option
 
 (** Convenience wrapper — Unix seconds since the FIRST attempt of
     the current turn id.  [None] when no state exists. *)
-val seconds_since_first_attempt : keeper:string -> float option
+val seconds_since_first_attempt :
+  base_path:string -> keeper:string -> float option
 
 (** Reset the in-memory state.  Intended for unit tests; the live
     server resets state implicitly on process restart. *)
@@ -81,4 +83,4 @@ val reset_for_tests : unit -> unit
     supervisor when a keeper fiber is cleaned up after a crash so
     that the next restart begins with a fresh counter rather than
     inheriting the previous stuck turn's exhaustion. *)
-val reset_keeper_livelock : keeper:string -> unit
+val reset_keeper_livelock : base_path:string -> keeper:string -> unit

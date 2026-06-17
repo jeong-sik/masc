@@ -22,6 +22,7 @@ interface VirtualListProps<T> {
   renderItem: (item: T, index: number) => ComponentChildren
   getKey: (item: T) => string
   className?: string
+  onEndReached?: () => void
 }
 
 interface VisibleRange {
@@ -44,6 +45,19 @@ function binarySearchOffset(offsets: number[], target: number): number {
   return lo
 }
 
+function readRowHeight(entry: ResizeObserverEntry): number {
+  const blockSize = entry.borderBoxSize?.[0]?.blockSize
+  if (typeof blockSize === 'number' && blockSize > 0) {
+    return Math.round(blockSize)
+  }
+  const contentHeight = entry.contentRect?.height
+  if (typeof contentHeight === 'number' && contentHeight > 0) {
+    return Math.round(contentHeight)
+  }
+  const target = entry.target as HTMLElement
+  return Math.round(target.getBoundingClientRect().height)
+}
+
 export function VirtualList<T>({
   items,
   itemHeight,
@@ -52,16 +66,24 @@ export function VirtualList<T>({
   renderItem,
   getKey,
   className = '',
+  onEndReached,
 }: VirtualListProps<T>) {
   // Hooks must be called unconditionally (Rules of Hooks)
   const containerRef = useRef<HTMLDivElement>(null)
   const heightsRef = useRef<Map<string, number>>(new Map())
+  const endReachedCalledRef = useRef(false)
   const [range, setRange] = useState<VisibleRange>({ start: 0, end: 30 })
   const [measureTick, setMeasureTick] = useState(0)
   const [effectiveOverscan, setEffectiveOverscan] = useState(overscan)
   const virtualize = items.length > ACTIVATION_THRESHOLD
 
   const dynamicMode = itemHeight === undefined
+
+  // Allow onEndReached to fire again after the dataset grows (typical infinite
+  // scroll pattern: new items load while the user remains near the bottom).
+  useEffect(() => {
+    endReachedCalledRef.current = false
+  }, [items.length])
 
   // PR-4.9: FPS adaptive quality — shrink overscan when frame rate drops.
   useEffect(() => {
@@ -72,6 +94,21 @@ export function VirtualList<T>({
       else setEffectiveOverscan(overscan)
     })
   }, [virtualize, overscan])
+
+  // Discard cached heights for items that are no longer present so the map
+  // does not grow unbounded across reordering / filtering.
+  useEffect(() => {
+    if (items.length === 0) {
+      heightsRef.current.clear()
+      return
+    }
+    const validKeys = new Set(items.map(getKey))
+    for (const key of heightsRef.current.keys()) {
+      if (!validKeys.has(key)) {
+        heightsRef.current.delete(key)
+      }
+    }
+  }, [items, getKey])
 
   const offsets = useMemo(() => {
     if (!dynamicMode) return [] as number[]
@@ -92,6 +129,7 @@ export function VirtualList<T>({
     if (!el) return
 
     let disposed = false
+    const endThreshold = dynamicMode ? estimatedItemHeight * 5 : itemHeight! * 4
 
     const recompute = () => {
       const os = effectiveOverscan
@@ -120,12 +158,27 @@ export function VirtualList<T>({
       }
     }
 
+    const checkEndReached = () => {
+      if (!onEndReached || disposed) return
+      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
+      const nearBottom = remaining < endThreshold
+      if (nearBottom && !endReachedCalledRef.current) {
+        endReachedCalledRef.current = true
+        onEndReached()
+      } else if (!nearBottom) {
+        endReachedCalledRef.current = false
+      }
+    }
+
     let ticking = false
     const onScroll = () => {
       if (ticking || disposed) return
       ticking = true
       requestAnimationFrame(() => {
-        if (!disposed) recompute()
+        if (!disposed) {
+          recompute()
+          checkEndReached()
+        }
         ticking = false
       })
     }
@@ -135,6 +188,7 @@ export function VirtualList<T>({
     })
 
     recompute()
+    checkEndReached()
     el.addEventListener('scroll', onScroll, { passive: true })
     ro.observe(el)
 
@@ -143,7 +197,7 @@ export function VirtualList<T>({
       el.removeEventListener('scroll', onScroll)
       ro.disconnect()
     }
-  }, [virtualize, items.length, itemHeight, effectiveOverscan, dynamicMode, offsets])
+  }, [virtualize, items.length, itemHeight, effectiveOverscan, dynamicMode, offsets, estimatedItemHeight, onEndReached])
 
   // Observe child heights in dynamic mode
   useEffect(() => {
@@ -155,12 +209,11 @@ export function VirtualList<T>({
     const ro = new ResizeObserver((entries) => {
       let changed = false
       for (const entry of entries) {
-        const target = entry.target as HTMLElement
-        const key = target.dataset.vlKey
+        const key = (entry.target as HTMLElement).dataset.vlKey
         if (!key) continue
-        const h = entry.borderBoxSize?.[0]?.blockSize ?? target.getBoundingClientRect().height
+        const h = readRowHeight(entry)
         const prev = heightsRef.current.get(key)
-        if (prev !== h) {
+        if (prev !== h && h > 0) {
           heightsRef.current.set(key, h)
           changed = true
         }
@@ -183,11 +236,25 @@ export function VirtualList<T>({
     }
   }, [virtualize, dynamicMode, range.start, range.end])
 
-  // Below threshold: render all items directly, no virtualization
+  // Below threshold: render all items directly, no virtualization. Apply
+  // content-visibility to each row so the browser can skip layout/paint for
+  // off-screen rows while keeping them in the DOM (Ctrl-F / a11y friendly).
   if (!virtualize) {
+    const fallbackRowHeight = itemHeight ?? estimatedItemHeight
     return html`
       <div class=${className}>
-        ${items.map((item, i) => renderItem(item, i))}
+        ${items.map((item, i) => html`
+          <div
+            key=${getKey(item)}
+            class="virtual-list-fallback-row"
+            style=${{
+              contentVisibility: 'auto',
+              containIntrinsicSize: `auto ${fallbackRowHeight}px`,
+            }}
+          >
+            ${renderItem(item, i)}
+          </div>
+        `)}
       </div>
     `
   }

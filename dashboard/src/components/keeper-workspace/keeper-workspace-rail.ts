@@ -60,11 +60,11 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   const items = attentionItems(keeper)
   if (items.length === 0) return null
   return html`
-    <div class="kw-sec">
+    <div class="kw-sec v2-monitoring-panel">
       <h4>주의 <span class="kw-kp-att">${items.length}</span></h4>
-      <div class="kw-att-list">
+      <div class="kw-att-list v2-monitoring-row">
         ${items.map((it, i) => html`
-          <div class=${`kw-att-item ${it.sev}`} key=${`${it.text}-${i}`}>
+          <div class=${`kw-att-item ${it.sev} v2-monitoring-row`} key=${`${it.text}-${i}`}>
             <span class="kw-att-dot" aria-hidden="true"></span>
             <span class="kw-att-text" title=${it.text}>${it.text}</span>
           </div>
@@ -80,9 +80,9 @@ function ContextSection({ keeper }: { keeper: Keeper }): VNode {
   const tokens = formatK(keeper.context_tokens ?? keeper.context?.context_tokens ?? null)
   const max = formatK(keeper.context_max ?? keeper.context?.context_max ?? null)
   return html`
-    <div class="kw-sec">
+    <div class="kw-sec v2-monitoring-panel">
       <h4>컨텍스트 점유</h4>
-      <div class="kw-card">
+      <div class="kw-card v2-monitoring-card">
         <div class="flex items-baseline justify-between">
           <span class="text-xs text-[var(--color-fg-secondary)]">윈도우 사용량</span>
           <span class=${`font-mono text-sm ${hot ? 'text-[var(--color-status-err)]' : 'text-[var(--color-accent-fg)]'}`}>${pct}%</span>
@@ -116,15 +116,15 @@ function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
   const peak = Math.max(1, ...series)
   const latest = series.length ? series[series.length - 1] : 0
   return html`
-    <div class="kw-sec">
+    <div class="kw-sec v2-monitoring-panel">
       <h4>런타임 · 처리량</h4>
-      <div class="kw-vitals">
+      <div class="kw-vitals v2-monitoring-row">
         <div class="kw-vital"><div class="vk">모델</div><div class="vv" title=${model ?? ''}>${model ?? '—'}</div></div>
         <div class="kw-vital"><div class="vk">런타임</div><div class="vv" title=${runtime ?? ''}>${runtime ?? '—'}</div></div>
         ${scope ? html`<div class="kw-vital" style=${{ gridColumn: '1 / -1' }}><div class="vk">scope</div><div class="vv" title=${scope}>${scope}</div></div>` : null}
       </div>
       ${series.length >= 2
-        ? html`<div class="kw-card mt-2">
+        ? html`<div class="kw-card mt-2 v2-monitoring-card">
             <div class="flex items-baseline justify-between">
               <span class="font-mono text-base text-[var(--color-status-ok)]">${latest}</span>
               <span class="text-2xs text-[var(--color-fg-muted)]">tok/s</span>
@@ -141,18 +141,18 @@ function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
 function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
   const owned = ownedTasks(keeper)
   return html`
-    <div class="kw-sec">
+    <div class="kw-sec v2-monitoring-panel">
       <h4>소유 태스크</h4>
-      <div class="kw-list">
+      <div class="kw-list v2-monitoring-row">
         ${owned.length
           ? owned.map(t => html`
-              <div class="kw-tasktag" key=${t.id}>
+              <div class="kw-tasktag v2-monitoring-row" key=${t.id}>
                 <span class="tid">${t.id}</span>
                 <span class="ttl" title=${t.title}>${t.title}</span>
                 ${t.status ? html`<span class=${`tstate ${taskStateClass(t.status)}`}>${t.status}</span>` : null}
               </div>
             `)
-          : html`<div class="kw-list-empty">할당된 태스크 없음</div>`}
+          : html`<div class="kw-list-empty v2-monitoring-row">할당된 태스크 없음</div>`}
       </div>
     </div>
   `
@@ -166,15 +166,15 @@ export function KeeperWorkspaceRail({
   onToggleDetail: () => void
 }): VNode {
   return html`
-    <aside class="kw-rail" aria-label="키퍼 컨텍스트">
-      <div class="kw-rail-scroll">
+    <aside class="kw-rail v2-monitoring-surface" aria-label="키퍼 컨텍스트">
+      <div class="kw-rail-scroll v2-monitoring-panel">
         <${AttentionSection} keeper=${keeper} />
         <${ThroughputSection} keeper=${keeper} />
         <${ContextSection} keeper=${keeper} />
         <${OwnedTasksSection} keeper=${keeper} />
         <${KeeperWorkspaceRecentTools} keeperName=${keeper.name} />
-        <div class="kw-sec">
-          <button type="button" class="kw-detail-btn" onClick=${onToggleDetail}>
+        <div class="kw-sec v2-monitoring-toolbar">
+          <button type="button" class="kw-detail-btn v2-monitoring-action" onClick=${onToggleDetail}>
             <span>상세 보기</span>
             <span class="sub">상태 · 진단 · 정체성 · 설정 →</span>
           </button>

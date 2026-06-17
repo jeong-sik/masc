@@ -81,21 +81,25 @@ let set_turn_selected_model ~base_path name selected_model =
 ;;
 
 let prepare_turn_retry_after_compaction ~base_path name =
-  let changed = ref false in
-  let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_prompting);
-      changed := true;
-      { (stamp_turn_progress ~now ~event_kind:"retry_after_compaction" obs) with
-        turn_phase = Packed Turn_prompting
-      ; decision_stage = Packed Decision_guard_ok
+  (* Routed through [set_turn_phase_with] so the compaction-retry reset uses
+     the same resolver / guard / broadcast pathway as [set_turn_phase]. *)
+  set_turn_phase_with
+    ~base_path
+    name
+    ~event_kind:"retry_after_compaction"
+    ~target:(Packed Turn_prompting)
+    ~update_obs:(fun obs ->
+      { obs with
+        decision_stage = Packed Decision_guard_ok
       ; selected_model = None
-      }));
-  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+      })
 ;;
 
 let mark_turn_gate_rejected_by_name name =
+  (* Name-only gate-rejection lookup (legacy server surface does not carry
+     base_path).  The phase transition itself is routed through
+     [set_turn_phase_with] so it shares the resolver / guard / broadcast
+     pathway with [set_turn_phase]. *)
   let target =
     StringMap.fold
       (fun _k v acc ->
@@ -108,20 +112,22 @@ let mark_turn_gate_rejected_by_name name =
   match target with
   | None -> ()
   | Some entry ->
-    let changed = ref false in
-    let now = Time_compat.now () in
-    update_entry ~base_path:entry.base_path name (fun e ->
-      update_current_turn e (fun obs ->
-        validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_finalizing);
-        changed := true;
-        { (stamp_turn_progress ~now ~event_kind:"gate_rejected" obs) with
-          decision_stage = Packed Decision_gate_rejected
-        ; turn_phase = Packed Turn_finalizing
-        }));
-    if !changed then broadcast_composite_changed ~name ~ts_unix:now
+    set_turn_phase_with
+      ~base_path:entry.base_path
+      name
+      ~event_kind:"gate_rejected"
+      ~target:(Packed Turn_finalizing)
+      ~update_obs:(fun obs -> { obs with decision_stage = Packed Decision_gate_rejected })
 ;;
 
 let mark_turn_finished ~base_path name =
+  (* Terminal turn lifecycle step: freeze [current_turn_observation] into
+     [last_completed_turn] and clear the live observation.  This is
+     intentionally NOT routed through [set_turn_phase_with]: it mutates the
+     turn container (Some -> None) rather than transitioning the turn_phase
+     sub-FSM.  It remains a separate, justified channel; the drift audit
+     concern is the phase-transition setters that were duplicating resolver
+     logic. *)
   let completed_turn_to_record = ref None in
   let changed = ref false in
   let now = Time_compat.now () in

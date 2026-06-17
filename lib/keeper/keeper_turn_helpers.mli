@@ -57,7 +57,7 @@ val post_assign_task : any_pending:bool -> channel:string -> unit
 val post_empty_queue_sleep : any_pending:bool -> channel:string -> unit
 (** FSM guard post-action for [EmptyQueueSleep]. *)
 
-val post_turn_complete_task : cycle_completed:bool ref -> unit
+val post_turn_complete_task : cycle_completed:bool -> unit
 (** FSM guard post-action for [TurnComplete]. *)
 
 val pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface

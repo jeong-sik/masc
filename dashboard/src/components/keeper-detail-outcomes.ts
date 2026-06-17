@@ -49,7 +49,7 @@ export function OutcomesLedger({ keeper, outcomes }: {
     : 'var(--color-status-err)'
 
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-3 v2-monitoring-panel">
       ${'' /* Row 1 — Success / Failure Ledger */}
       <${DetailCard} class="px-3 py-2">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">

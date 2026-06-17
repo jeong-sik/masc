@@ -74,4 +74,10 @@ describe('RecentToolList', () => {
     expect(body.textContent).toContain('fleet')
     expect(body.textContent).toContain('done-ok')
   })
+
+  it('applies v2-monitoring marker classes', () => {
+    mount([entry({ tool: 'masc_status' })])
+    expect(host.innerHTML).toContain('v2-monitoring-row')
+    expect(host.innerHTML).toContain('v2-monitoring-panel')
+  })
 })

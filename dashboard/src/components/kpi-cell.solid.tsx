@@ -86,8 +86,8 @@ export function KpiCell(props: KpiCellProps): JSX.Element {
   }
 
   const labelStyle: JSX.CSSProperties = {
-    'font-size': 'var(--font-size-3xs)',
-    color: 'var(--color-fg-disabled)',
+    'font-size': 'var(--font-size-2xs)',
+    color: 'var(--color-fg-muted)',
     'letter-spacing': '0.08em',
     'text-transform': 'uppercase',
     'font-weight': 600,
@@ -133,8 +133,8 @@ export function KpiCell(props: KpiCellProps): JSX.Element {
             display: 'inline-flex',
             'align-items': 'center',
             gap: '6px',
-            'font-size': 'var(--font-size-3xs)',
-            color: 'var(--color-fg-muted)',
+            'font-size': 'var(--font-size-2xs)',
+            color: 'var(--color-fg-secondary)',
             'letter-spacing': '0.06em',
             'text-transform': 'uppercase',
             'font-weight': 500,

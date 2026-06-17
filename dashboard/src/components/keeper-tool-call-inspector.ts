@@ -34,7 +34,7 @@ const formatTimestamp = formatTimeHms
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   const gap = coverageGapDisplay(data)
   return html`
-    <div class="text-3xs text-[var(--color-fg-disabled)]">
+    <div class="text-3xs text-[var(--color-fg-disabled)] v2-monitoring-row">
       <span class="font-mono">${data.source ?? '(unknown source)'}</span>
       <span class="mx-1" aria-hidden="true">·</span>
       <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
@@ -408,7 +408,7 @@ function CopyableToolCallBlock({
   ariaLabel: string
 }) {
   return html`
-    <div>
+    <div class="v2-monitoring-panel">
       <div class="mb-1 flex items-center justify-between gap-2">
         <${SectionCap}>${title}<//>
         <${CopyIdButton}
@@ -450,7 +450,7 @@ function ToolCallOutputBlock({ entry }: { entry: ToolCallEntry }) {
   }
 
   return html`
-    <div class="space-y-1">
+    <div class="space-y-1 v2-monitoring-panel">
       <${CopyableToolCallBlock}
         title="출력"
         value=${fullText.value ?? formatOutput(entry.output)}
@@ -458,11 +458,11 @@ function ToolCallOutputBlock({ entry }: { entry: ToolCallEntry }) {
         ariaLabel="도구 호출 출력 복사"
       />
       ${marker !== null && fullText.value === null ? html`
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 v2-monitoring-toolbar">
           <button
             type="button"
             data-testid="tool-output-load-full"
-            class=${`rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()}`}
+            class=${`rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()} v2-monitoring-action`}
             disabled=${loading.value}
             onClick=${() => void onLoadFull()}
           >
@@ -485,11 +485,11 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
   return html`
     <div
-      class="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors"
+      class="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors v2-monitoring-row"
     >
       <button
         type="button"
-        class=${`w-full flex items-center gap-2 px-3 py-2 text-xs cursor-pointer text-left ${ringFocusClasses()}`}
+        class=${`w-full flex items-center gap-2 px-3 py-2 text-xs cursor-pointer text-left ${ringFocusClasses()} v2-monitoring-action`}
         aria-expanded=${expanded.value}
         onClick=${() => { expanded.value = !expanded.value }}
       >
@@ -511,12 +511,12 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
       </button>
 
       ${expanded.value ? html`
-        <div class="px-3 pb-3 space-y-2">
+        <div class="px-3 pb-3 space-y-2 v2-monitoring-panel">
           ${entry.model ? html`
             <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
           ` : null}
           ${routeLinks.length > 0 ? html`
-            <div class="flex items-center justify-between gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2">
+            <div class="flex items-center justify-between gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-toolbar">
               <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${routeLinks.map(link => link.evidence).join(' · ')}>
                 ${routeLinks.map(link => link.evidence).join(' · ')}
               </span>
@@ -526,7 +526,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
                     key=${link.id}
                     type="button"
                     data-testid=${link.label === 'Code' ? 'keeper-tool-code-link' : undefined}
-                    class=${`keeper-tool-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()}`}
+                    class=${`keeper-tool-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()} v2-monitoring-action`}
                     title=${link.evidence}
                     aria-label=${`Open ${link.evidence}`}
                     onClick=${() => openIdeContextRouteLink(link)}
@@ -554,18 +554,18 @@ function ToolCallDossier({ entries, response }: { entries: readonly ToolCallEntr
   const dossier = deriveKeeperToolCallDossier(entries, response)
   return html`
     <div
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-3 v2-monitoring-panel"
       data-testid="keeper-tool-call-dossier"
     >
-      <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex flex-wrap items-center justify-between gap-2 v2-monitoring-toolbar">
         <${SectionCap} weight="semibold">Activity Dossier<//>
         <${StatusChip} tone=${dossier.tone} uppercase=${false}>${dossier.headline}<//>
       </div>
-      <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
+      <div class="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2 v2-monitoring-row">
         ${dossier.cards.map(card => html`
           <div
             key=${card.key}
-            class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2"
+            class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-card"
             title=${card.title ?? card.detail}
           >
             <div class="flex items-center justify-between gap-2">
@@ -578,7 +578,7 @@ function ToolCallDossier({ entries, response }: { entries: readonly ToolCallEntr
         `)}
       </div>
       ${dossier.evidenceLinks.length > 0 ? html`
-        <div class="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
+        <div class="mt-3 flex min-w-0 flex-wrap items-center gap-1.5 v2-monitoring-row">
           <span class="shrink-0 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Evidence links</span>
           ${dossier.evidenceLinks.map(item => html`
             <span
@@ -592,11 +592,11 @@ function ToolCallDossier({ entries, response }: { entries: readonly ToolCallEntr
         </div>
       ` : null}
       ${dossier.issues.length > 0 ? html`
-        <div class="mt-3 grid gap-1.5">
+        <div class="mt-3 grid gap-1.5 v2-monitoring-row">
           ${dossier.issues.map(issue => html`
             <div
               key=${issue.key}
-              class="flex min-w-0 items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1.5 text-3xs"
+              class="flex min-w-0 items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1.5 text-3xs v2-monitoring-row"
             >
               <${StatusChip} tone=${issue.tone} uppercase=${false} class="shrink-0">${issue.label}<//>
               <span class="min-w-0 truncate text-[var(--color-fg-muted)]" title=${issue.detail}>${issue.detail}</span>
@@ -651,14 +651,14 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   }
 
   if (resource.state.value.error) {
-    return html`<div class="text-xs text-[var(--color-status-err)] p-4" role="alert">${resource.state.value.error}</div>`
+    return html`<div class="text-xs text-[var(--color-status-err)] p-4 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
   const entries = allEntries
 
   if (entries.length === 0) {
     return html`
-      <div class="p-4">
+      <div class="p-4 v2-monitoring-panel">
         <div class="text-xs text-[var(--color-fg-muted)]">도구 호출 데이터 없음</div>
         <${FreshnessLine} data=${response ?? { source: 'tool_call_io' }} />
       </div>
@@ -673,10 +673,10 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const uniqueTools = new Set(entries.map(e => e.tool)).size
 
   return html`
-    <div class="space-y-3">
+    <div class="space-y-3 v2-monitoring-surface">
       <${ToolCallDossier} entries=${entries} response=${response ?? { keeper: keeperName, count: entries.length, source: 'tool_call_io', entries }} />
 
-      <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center justify-between gap-3 flex-wrap v2-monitoring-toolbar">
         <div class="flex gap-4 text-xs text-[var(--color-fg-muted)]">
           <span>${totalCalls} calls</span>
           <span>${uniqueTools} tools</span>
@@ -693,7 +693,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         />
       </div>
 
-      <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] overflow-hidden max-h-[500px] overflow-y-auto">
+      <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] overflow-hidden max-h-[500px] overflow-y-auto v2-monitoring-panel">
         <${SectionCap} class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] border-b border-[var(--color-border-default)]">
           <span class="w-4"></span>
           <span class="w-16">시간</span>

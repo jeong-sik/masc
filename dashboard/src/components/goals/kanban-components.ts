@@ -191,7 +191,7 @@ function KanbanCard({ task }: { task: Task }) {
   }
 
   return html`
-    <article class="flex flex-col gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-panel-alt)]">
+    <article class="v2-workspace-card flex flex-col gap-2 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-panel-alt)]">
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-wrap items-center gap-1.5">
           <span class="${DECK_CHIP} ${priorityToneClass(p)} font-semibold">${priorityLabel(p)}</span>
@@ -211,7 +211,7 @@ function KanbanCard({ task }: { task: Task }) {
 
       <button
         type="button"
-        class="cursor-pointer border-none bg-transparent p-0 text-left font-[inherit] text-sm font-semibold leading-snug text-[var(--color-fg-primary)] whitespace-pre-wrap break-words transition-colors hover:text-[var(--color-accent-fg)]"
+        class="v2-workspace-action cursor-pointer border-none bg-transparent p-0 text-left font-[inherit] text-sm font-semibold leading-snug text-[var(--color-fg-primary)] whitespace-pre-wrap break-words transition-colors hover:text-[var(--color-accent-fg)]"
         onClick=${() => openTaskDetail(task)}
       >${task.title}</button>
 
@@ -223,7 +223,7 @@ function KanbanCard({ task }: { task: Task }) {
           ${canExpand ? html`
             <button
               type="button"
-              class="w-fit rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+              class="v2-workspace-action w-fit rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => toggleTaskExpand(task.id)}
               aria-expanded=${isExpanded}
             >
@@ -250,7 +250,7 @@ function KanbanCard({ task }: { task: Task }) {
           href=${link.href}
           target="_blank"
           rel="noreferrer"
-          class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+          class="v2-workspace-action inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
         >
           ${link.label}
           <span aria-hidden="true">\u2197</span>
@@ -282,8 +282,8 @@ function TaskColumn({
   }, [listRef])
 
   return html`
-    <section class="flex min-h-60 flex-col ${DECK_PANEL}" aria-label=${title}>
-      <div class="${DECK_HEAD} flex items-start justify-between gap-3">
+    <section class="v2-workspace-panel flex min-h-60 flex-col ${DECK_PANEL}" aria-label=${title}>
+      <div class="v2-workspace-toolbar ${DECK_HEAD} flex items-start justify-between gap-3">
         <div>
           <h3 class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-primary)]">${title}</h3>
           <p class="mt-1 text-3xs leading-relaxed text-[var(--color-fg-muted)]">${description}</p>
@@ -304,8 +304,8 @@ function BacklogPressure({ todoTasks }: { todoTasks: Task[] }) {
   if (total === 0) return null
 
   return html`
-    <section class="mb-3 ${DECK_PANEL}" aria-label="Backlog pressure">
-      <div class="${DECK_HEAD} flex items-start justify-between gap-3">
+    <section class="v2-workspace-panel mb-3 ${DECK_PANEL}" aria-label="Backlog pressure">
+      <div class="v2-workspace-toolbar ${DECK_HEAD} flex items-start justify-between gap-3">
         <div>
           <h3 class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-primary)]">Backlog Pressure</h3>
           <p class="mt-1 text-3xs leading-relaxed text-[var(--color-fg-muted)]">Unclaimed tasks grouped by priority and oldest age.</p>
@@ -323,7 +323,7 @@ function BacklogPressure({ todoTasks }: { todoTasks: Task[] }) {
             type="button"
             disabled=${!row.oldestTask}
             onClick=${() => row.oldestTask ? openTaskDetail(row.oldestTask) : undefined}
-            class=${`min-h-22 rounded-[var(--r-0)] border p-2 text-left transition-colors ${pressureToneClass(row)} ${row.oldestTask ? 'hover:border-[var(--color-border-strong)]' : 'opacity-60'}`}
+            class=${`v2-workspace-action min-h-22 rounded-[var(--r-0)] border p-2 text-left transition-colors ${pressureToneClass(row)} ${row.oldestTask ? 'hover:border-[var(--color-border-strong)]' : 'opacity-60'}`}
             aria-label=${`${priorityLabel(row.priority)} backlog pressure: ${row.count} unclaimed`}
           >
             <div class="flex items-center justify-between gap-2">
@@ -416,9 +416,9 @@ export function TaskBacklog() {
   return html`
     <${SectionCard} label="태스크 백로그" class="section" variant="compact">
       ${hasError && hasData ? html`
-        <div class="mb-2 rounded-[var(--r-0)] border border-warn/25 bg-warn/10 px-2.5 py-1.5 text-2xs text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
+        <div class="v2-workspace-panel mb-2 rounded-[var(--r-0)] border border-warn/25 bg-warn/10 px-2.5 py-1.5 text-2xs text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
       ` : null}
-      <div class="mb-3 flex flex-wrap items-center gap-2">
+      <div class="v2-workspace-toolbar mb-3 flex flex-wrap items-center gap-2">
         <div class="min-w-55 flex-1">
           <${TextInput}
             value=${query}
@@ -430,7 +430,7 @@ export function TaskBacklog() {
         ${hasSearch ? html`
           <button
             type="button"
-            class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-2 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+            class="v2-workspace-action rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-2 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
             onClick=${() => {
               resetTaskSearch()
               searchDoneVisibleCount.value = DONE_PAGE_SIZE
@@ -483,7 +483,7 @@ export function TaskBacklog() {
           ${hasMoreDone ? html`
             <button
               type="button"
-              class="w-full rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
+              class="v2-workspace-action w-full rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => {
                 if (hasSearch) searchDoneVisibleCount.value += DONE_PAGE_SIZE
                 else doneVisibleCount.value += DONE_PAGE_SIZE

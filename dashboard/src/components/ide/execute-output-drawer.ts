@@ -204,6 +204,7 @@ function ExecuteOutputContextLinks({
         <button
           key=${link.id}
           type="button"
+          class="v2-ide-action"
           title=${link.evidence}
           aria-label=${`Open ${link.evidence}`}
           onClick=${() => openIdeContextRouteLink(link)}
@@ -309,13 +310,13 @@ export function ExecuteOutputDrawer({ keeperName }: ExecuteOutputDrawerProps) {
 
   return html`
     <aside
-      class="border-t border-solid border-[var(--color-border-divider)] bg-[var(--color-bg-page)]"
+      class="execute-output-drawer v2-ide-panel border-t border-solid border-[var(--color-border-divider)] bg-[var(--color-bg-page)]"
       data-testid="execute-output-drawer"
       data-keeper=${keeper}
       aria-label="Execute output drawer"
     >
       <div
-        class="flex min-w-0 flex-wrap items-center gap-2 border-b border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 font-mono text-2xs"
+        class="execute-output-drawer-header v2-ide-toolbar flex min-w-0 flex-wrap items-center gap-2 border-b border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 font-mono text-2xs"
       >
         <span class="text-[var(--color-fg-secondary)]">TERMINAL</span>
         <span class="text-[var(--color-fg-muted)]">${keeper || 'none'}</span>

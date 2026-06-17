@@ -97,7 +97,7 @@ val record_turn_tool_events
   -> keeper_name:string
   -> turn_tool_event_tracker
   -> Agent_sdk.Event_bus.event list
-  -> unit
+  -> turn_tool_event_tracker
 
 val turn_tool_event_integrity_error
   :  turn_tool_event_tracker

@@ -44,6 +44,7 @@ export function UnifiedDiffView(
   const diffFocus = diffContextFocusForRows(rows, contextFocus)
   return html`
     <div
+      class="v2-ide-panel"
       role="region"
       aria-label="Unified diff preview"
       style=${{
@@ -73,6 +74,7 @@ export function UnifiedDiffView(
               const focused = diffRowMatchesFocus(row, diffFocus)
               return html`
               <li
+                class="v2-ide-row"
                 data-context-focus=${focused ? 'true' : 'false'}
                 style=${{
                   display: 'grid',
@@ -117,6 +119,7 @@ function DiffSummaryStrip({
     : summary.changed
   return html`
     <div
+      class="v2-ide-toolbar"
       role="status"
       aria-label=${formatDiffSummaryAria(summary, mode)}
       style=${{
@@ -183,6 +186,7 @@ function DiffContextFocus({
             <button
               key=${link.id}
               type="button"
+              class="v2-ide-action"
               title=${link.evidence}
               aria-label=${`Open ${link.evidence}`}
               onClick=${() => openDiffContextRouteLink(link)}
@@ -197,6 +201,7 @@ function DiffContextFocus({
 function DiffEmptyState(label: string) {
   return html`
     <div
+      class="v2-ide-panel"
       role="note"
       style=${{
         display: 'grid',
@@ -226,6 +231,7 @@ export function SplitDiffView(
   const diffFocus = diffContextFocusForRows(rows, contextFocus)
   return html`
     <div
+      class="v2-ide-panel"
       role="region"
       aria-label="Split diff preview"
       style=${{
@@ -259,6 +265,7 @@ export function SplitDiffView(
             const focused = splitDiffRowMatchesFocus(row, diffFocus)
             return html`
             <div
+              class="v2-ide-row"
               data-context-focus=${focused ? 'true' : 'false'}
               style=${{
                 display: 'grid',

@@ -18,9 +18,9 @@ export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   // unmount the panel and drop the draft text and scroll position.
   // Past transcript stays readable; only new sends need a live keeper.
   return html`
-    <div class="flex flex-col gap-3">
+    <div class="flex flex-col gap-3 v2-monitoring-surface">
       ${isOffline ? html`
-        <div class="px-4 py-3 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] text-sm text-[var(--color-status-warn)]">
+        <div class="px-4 py-3 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] text-sm text-[var(--color-status-warn)] v2-monitoring-panel">
           이 키퍼는 현재 비활동 상태입니다. 지난 대화는 그대로 볼 수 있으며, 새 메시지는 기동 후 전달됩니다.
         </div>
       ` : null}
@@ -102,7 +102,7 @@ export function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">저장소 (${repos.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
-                <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+                <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-row">
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${r.name}</span>
@@ -123,7 +123,7 @@ export function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
             <${SectionHeader} size="xs" class="mb-1.5">PRs (${prs.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${prs.map(pr => html`
-                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-row">
                   <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
                   <${MonoBadge}>${pr.branch}</${MonoBadge}>
                   ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded-[var(--r-1)] bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}

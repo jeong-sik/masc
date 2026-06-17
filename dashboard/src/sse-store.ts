@@ -536,6 +536,11 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
+  // Signal-only freshness tick for keeper composite state. The SSE payload
+  // carries only the keeper name and a wall-clock timestamp; it is *not* the
+  // authoritative composite snapshot. Consumers that need the new state must
+  // observe [compositeTick] and re-fetch [/api/v1/keepers/:name/composite]
+  // from the registry. See docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md §Read Model Rules.
   if (event.type === 'keeper_composite_changed') {
     const payload = event as unknown as { name?: string; ts_unix?: number }
     const name = typeof payload.name === 'string' ? payload.name : ''

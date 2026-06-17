@@ -74,14 +74,14 @@ function CheckpointSummaryCard({
 }) {
   if (!summary) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-muted)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-card">
         ${title}: 저장된 checkpoint 없음
       </div>
     `
   }
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 v2-monitoring-card">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${title}</span>
         <${SnapshotBadge} tone="accent">gen ${summary.generation}</${SnapshotBadge}>
@@ -182,7 +182,7 @@ export function KeeperCheckpointPanel({
 
   if (loading) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-muted)]" role="status">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-panel" role="status">
         checkpoint inventory 로딩 중...
       </div>
     `
@@ -190,7 +190,7 @@ export function KeeperCheckpointPanel({
 
   if (error) {
     return html`
-      <div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-xs text-[var(--rose-light)]">
+      <div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-3 text-xs text-[var(--rose-light)] v2-monitoring-panel">
         ${error}
         <${ActionButton}
           variant="ghost"
@@ -203,8 +203,8 @@ export function KeeperCheckpointPanel({
   }
 
   return html`
-    <div class="flex flex-col gap-3">
-      <div class="flex items-center justify-between gap-3">
+    <div class="flex flex-col gap-3 v2-monitoring-panel">
+      <div class="flex items-center justify-between gap-3 v2-monitoring-toolbar">
         <div class="text-2xs text-[var(--color-fg-muted)]">
           current OAS checkpoint와 OAS snapshot history만 노출합니다.
         </div>
@@ -216,7 +216,7 @@ export function KeeperCheckpointPanel({
           >새로고침<//>
           <button
             type="button"
-            class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 v2-monitoring-action"
             disabled=${deleting || selectedIds.length === 0}
             onClick=${deleteSelected}
           >${deleting ? '삭제 중...' : `선택 삭제 (${selectedIds.length})`}</button>
@@ -228,8 +228,8 @@ export function KeeperCheckpointPanel({
         summary=${inventory?.current ?? null}
       />
 
-      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 py-2">
+      <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-panel">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] px-3 py-2 v2-monitoring-toolbar">
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
             OAS Snapshot History
             ${inventory && inventory.history.length > 0 && historyQuery.trim() !== ''
@@ -246,17 +246,17 @@ export function KeeperCheckpointPanel({
           />
         </div>
         ${!inventory || inventory.history.length === 0
-          ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">저장된 OAS history snapshot이 아직 없습니다.</div>`
+          ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)] v2-monitoring-row">저장된 OAS history snapshot이 아직 없습니다.</div>`
           : (() => {
               const visibleHistory = filterCheckpointHistory(inventory.history, historyQuery)
               const isFiltering = historyQuery.trim() !== ''
               if (isFiltering && visibleHistory.length === 0) {
-                return html`<div class="px-3 py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${inventory.history.length} items)</div>`
+                return html`<div class="px-3 py-4 text-center text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">필터 결과 없음 (${inventory.history.length} items)</div>`
               }
               return html`
                 <div class="flex flex-col">
                   ${visibleHistory.map(item => html`
-                    <label class="flex gap-3 border-b border-[var(--color-border-default)] px-3 py-3 text-xs last:border-b-0">
+                    <label class="flex gap-3 border-b border-[var(--color-border-default)] px-3 py-3 text-xs last:border-b-0 v2-monitoring-row">
                       <${Checkbox}
                         class="mt-1"
                         checked=${selectedIds.includes(item.snapshot_id)}
@@ -280,7 +280,7 @@ export function KeeperCheckpointPanel({
                           ? html`<div class="mt-2 text-xs leading-relaxed text-[var(--color-fg-primary)]">${item.latest_preview}</div>`
                           : null}
                         ${item.continuity_summary
-                          ? html`<pre class="mt-2 whitespace-pre-wrap rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${item.continuity_summary}</pre>`
+                          ? html`<pre class="mt-2 whitespace-pre-wrap rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)] v2-monitoring-detail">${item.continuity_summary}</pre>`
                           : html`<div class="mt-2 text-2xs text-[var(--color-fg-disabled)]">continuity snapshot 없음</div>`}
                       </div>
                     </label>
@@ -459,7 +459,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         ${latestEntry
           ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-8)] p-3 mb-3">
+            <div class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-8)] p-3 mb-3 v2-monitoring-panel">
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-accent-fg)]">최신 핸드오프</span>
                 <${MonoBadge}>${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}</${MonoBadge}>
@@ -478,18 +478,18 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           `
           : null}
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3 v2-monitoring-row">
+          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-card">
             <${SectionHeader} size="xs">현재 세대</${SectionHeader}>
             <div class="mt-1 text-lg font-semibold text-[var(--color-fg-secondary)]">${currentGeneration ?? '-'}</div>
             ${generationId ? html`<div class="text-3xs text-[var(--color-fg-disabled)] font-mono truncate" title=${generationId}>${generationId}</div>` : null}
           </div>
-          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-card">
             <${SectionHeader} size="xs">추적 계보</${SectionHeader}>
             <div class="mt-1 text-lg font-semibold text-[var(--color-fg-secondary)]">${traceHistoryCount}</div>
             <div class="text-3xs text-[var(--color-fg-disabled)]">historical traces retained in meta.trace_history</div>
           </div>
-          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+          <div class="px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] v2-monitoring-card">
             <${SectionHeader} size="xs">현재 추적</${SectionHeader}>
             <div class="mt-1 text-sm font-mono text-[var(--color-fg-secondary)] truncate" title=${currentTraceId ?? ''}>${currentTraceId ? compactTraceId(currentTraceId) : '-'}</div>
             <div class="text-3xs text-[var(--color-fg-disabled)]">artifact appears after the first successful handoff</div>
@@ -498,7 +498,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         ${manifest
           ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 mb-3">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 mb-3 v2-monitoring-panel">
               <div class="flex flex-wrap items-center gap-2 mb-2">
                 <${SectionHeader} size="xs">현재 매니페스트</${SectionHeader}>
                 <${MonoBadge}>gen ${manifest.generation}</${MonoBadge}>
@@ -509,15 +509,15 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">created <${TimeAgo} timestamp=${manifest.created_at} /></span>`
                   : null}
               </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-2xs">
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-2xs v2-monitoring-row">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 v2-monitoring-card">
                   <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider mb-1">부모</div>
                   <div class="text-[var(--color-fg-secondary)]">${manifest.parent_generation != null ? `gen ${manifest.parent_generation}` : 'root generation'}</div>
                   ${manifest.parent_trace_id
                     ? html`<div class="font-mono text-[var(--color-fg-disabled)] truncate" title=${manifest.parent_trace_id}>${compactTraceId(manifest.parent_trace_id)}</div>`
                     : null}
                 </div>
-                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+                <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 v2-monitoring-card">
                   <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider mb-1">트리거</div>
                   <div class="text-[var(--color-fg-secondary)]">${manifest.trigger_reason ?? '-'}</div>
                   <div class="text-[var(--color-fg-disabled)]">context ratio ${formatPct1(manifest.context_ratio)}</div>
@@ -544,7 +544,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
             </div>
           `
           : html`
-            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 mb-3 text-2xs text-[var(--color-fg-muted)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 mb-3 text-2xs text-[var(--color-fg-muted)] v2-monitoring-panel">
               아직 handoff lineage manifest가 없습니다. generation 0에서는 현재 trace만 유지되고, 첫 successful handoff 이후부터 manifest/index가 생깁니다.
             </div>
           `}
@@ -554,12 +554,12 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           <div class="text-2xs text-[var(--color-fg-disabled)] mb-2">최신 rollover 가 먼저 표시되어 operator 가 현재 trace 를 최근 이력과 비교할 수 있습니다.</div>
           ${recent.length > 0
             ? html`
-              <div class="flex flex-col gap-2">
+              <div class="flex flex-col gap-2 v2-monitoring-row">
                 ${recent.map((entry, index) => {
                   const isLatest = index === 0
                   const entryMeta = lineageVerdictMeta(entry.continuity_verdict)
                   return html`
-                    <div class=${`px-3 py-2 rounded-[var(--r-1)] border ${isLatest ? 'border-[var(--accent-22)] bg-[var(--accent-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}`}>
+                    <div class=${`px-3 py-2 rounded-[var(--r-1)] border ${isLatest ? 'border-[var(--accent-22)] bg-[var(--accent-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'} v2-monitoring-row`}>
                       <div class="flex flex-wrap items-center gap-2">
                         <${MonoBadge}>gen ${entry.generation}</${MonoBadge}>
                         ${isLatest

@@ -4,10 +4,14 @@ import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
+import { ringFocusClasses } from '../common/ring'
 import { useVoiceInput } from './voice-input'
+
+const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
+import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
 import type { ToolCallOutputBlob } from '../../api/dashboard'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
@@ -205,6 +209,446 @@ function attachmentMeta(attachment: KeeperConversationAttachment): string {
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
 }
 
+// --- Keeper v2 rich block helpers -------------------------------------------------
+
+function linkifyHtml(raw: string): string {
+  if (!raw || raw.indexOf('http') === -1 || raw.indexOf('<a ') !== -1) return raw
+  return raw.replace(
+    /(^|[\s(>])(https?:\/\/[^\s<)]+[^\s<).,!?:;])/g,
+    '$1<a class="inline-link" href="$2" target="_blank" rel="noopener noreferrer">$2</a>',
+  )
+}
+
+function sanitizeHtml(raw: string): string {
+  return DOMPurify.sanitize(raw)
+}
+
+function renderInlineHtml(raw: string): { __html: string } {
+  return { __html: sanitizeHtml(linkifyHtml(raw)) }
+}
+
+function highlightJson(obj: unknown): string {
+  const s = JSON.stringify(obj, null, 2)
+  return sanitizeHtml(
+    s
+      .replace(/("[^"]+"):/g, '<span class="chat-json-key">$1</span>:')
+      .replace(/: ("[^"]*")/g, ': <span class="chat-json-str">$1</span>'),
+  )
+}
+
+function traceDur(trace: ChatTraceStep[]): string | null {
+  let sum = 0
+  let has = false
+  trace.forEach((st) => {
+    if (st.kind !== 'tool') return
+    const m = st.dur?.match(/([\d.]+)s/)
+    if (m?.[1]) {
+      sum += parseFloat(m[1])
+      has = true
+    }
+  })
+  return has ? `${Math.round(sum * 10) / 10}s` : null
+}
+
+function ChatTextBlock({ html: htmlContent }: { html: string }) {
+  return html`<p class="mb-2 text-base leading-airy text-[var(--color-fg-primary)]" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
+}
+
+function ChatHeadingBlock({ html: htmlContent }: { html: string }) {
+  return html`<h4 class="mb-1 mt-2 text-sm font-semibold text-[var(--color-fg-secondary)]" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
+}
+
+function ChatListBlock({ items }: { items: string[] }) {
+  return html`
+    <ul class="my-1 list-disc pl-5 text-base leading-airy text-[var(--color-fg-primary)]">
+      ${items.map((it, i) => html`<li key=${i} dangerouslySetInnerHTML=${renderInlineHtml(it)} />`)}
+    </ul>
+  `
+}
+
+function ChatCalloutBlock({ severity = 'warn', html: htmlContent }: ChatCalloutBlock) {
+  const icon = severity === 'bad' ? '✕' : severity === 'info' ? 'ℹ' : '⚠'
+  return html`
+    <div class="chat-block-callout ${severity}" data-chat-block="callout">
+      <span class="shrink-0">${icon}</span>
+      <span class="min-w-0" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />
+    </div>
+  `
+}
+
+function ChatTableBlock({ head, rows }: ChatTableBlock) {
+  const cell = (c: ChatTableBlock['head'][number]) => (typeof c === 'object' ? c : { v: c })
+  return html`
+    <table class="chat-block-table" data-chat-block="table">
+      <thead>
+        <tr>
+          ${head.map((h, i) => {
+            const c = cell(h)
+            return html`<th key=${i} class=${c.num ? 'chat-block-cell-num' : ''}>${c.v}</th>`
+          })}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row, ri) => html`
+          <tr key=${ri}>
+            ${row.map((c0, ci) => {
+              const c = cell(c0)
+              return html`<td key=${ci} class="${c.num ? 'chat-block-cell-num' : ''} ${c.muted ? 'chat-block-cell-muted' : ''}">${c.v}</td>`
+            })}
+          </tr>
+        `)}
+      </tbody>
+    </table>
+  `
+}
+
+function ChatCodeBlock({ cap, html: htmlContent }: { cap?: string; html: string }) {
+  return html`
+    <div class="chat-block-code" data-chat-block="code">
+      ${cap ? html`<div class="chat-block-code-cap">${cap}</div>` : null}
+      <pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed"><code dangerouslySetInnerHTML=${{ __html: sanitizeHtml(htmlContent) }} /></pre>
+    </div>
+  `
+}
+
+function ChatShellBlock({ title, lines, exit, dur }: ChatShellBlock) {
+  return html`
+    <div class="chat-block-shell" data-chat-block="shell">
+      <div class="chat-block-shell-bar">
+        <span class="chat-block-shell-dot r"></span>
+        <span class="chat-block-shell-dot y"></span>
+        <span class="chat-block-shell-dot g"></span>
+        <span class="chat-block-shell-title">${title || 'keeper@worktree'}</span>
+      </div>
+      <pre class="m-0 p-3 text-2xs leading-relaxed">
+        ${lines.map((ln, i) => html`
+          <div key=${i} class="chat-block-shell-line ${ln.t || ''}">
+            ${ln.t === 'cmd' ? html`<span class="chat-block-shell-prompt">$ </span>` : null}
+            <span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(ln.v) }} />
+          </div>
+        `)}
+      </pre>
+      ${typeof exit === 'number'
+        ? html`<div class="chat-block-shell-exit ${exit === 0 ? 'ok' : 'fail'}">exit ${exit}${dur ? ` · ${dur}` : ''}</div>`
+        : null}
+    </div>
+  `
+}
+
+function ChatArtifactBlock({ kind, name, size, note }: { kind?: string; name: string; size?: string; note?: string }) {
+  const icon = kind === 'md' ? '⌹' : kind === 'svg' ? '◫' : kind === 'json' ? '{ }' : '⎙'
+  return html`
+    <div class="chat-block-artifact" data-chat-block="artifact">
+      <span class="chat-block-artifact-icon">${icon}</span>
+      <div class="min-w-0 flex-1">
+        <div class="chat-block-artifact-name">${name}</div>
+        <div class="chat-block-artifact-sub">
+          ${(kind || 'file').toUpperCase()}${size ? ` · ${size}` : ''}${note ? ` · ${note}` : ''}
+        </div>
+      </div>
+      <button type="button" class="chat-block-artifact-btn" aria-label="열기">열기</button>
+      <button type="button" class="chat-block-artifact-btn" aria-label="다운로드">다운로드</button>
+    </div>
+  `
+}
+
+function ChatAttachBlock({ name, dims, svg, ph, via, size }: { name: string; dims?: string; svg?: string; ph?: string; via?: string; size?: string }) {
+  return html`
+    <figure class="chat-block-attach" data-chat-block="attach">
+      <div class="chat-block-attach-hd">
+        <span>◫</span>
+        <span class="chat-block-attach-name">${name}</span>
+        ${dims ? html`<span class="chat-block-attach-dims">${dims}</span>` : null}
+      </div>
+      <div class="chat-block-attach-frame">
+        ${svg
+          ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
+          : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}</div>`}
+      </div>
+      <figcaption class="chat-block-attach-cap">
+        <span>이미지 첨부</span>${via ? ` · ${via}` : ''}${size ? ` · ${size}` : ''}
+      </figcaption>
+    </figure>
+  `
+}
+
+function ChatVoiceBlock(b: ChatVoiceBlock) {
+  const secs = b.secs ?? 14
+  const [playing, setPlaying] = useState(false)
+  const [prog, setProg] = useState(0)
+
+  useEffect(() => {
+    if (!playing) return
+    const start = performance.now() - prog * secs * 1000
+    let raf = 0
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - start) / (secs * 1000))
+      setProg(p)
+      if (p >= 1) {
+        setPlaying(false)
+        return
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [playing])
+
+  const toggle = () => {
+    if (prog >= 1) setProg(0)
+    setPlaying((p) => !p)
+  }
+
+  const bars = b.wave ?? []
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`
+  const shown = playing || prog > 0 ? prog * secs : secs
+
+  return html`
+    <div class="chat-block-voice" data-chat-block="voice">
+      <div class="chat-block-voice-row">
+        <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
+          ${playing ? '❙❙' : '▶'}
+        </button>
+        <div class="chat-block-voice-wave">
+          ${bars.map((h, i) => html`
+            <span
+              key=${i}
+              class="chat-block-vbar ${(i + 0.5) / bars.length <= prog ? 'on' : ''}"
+              style=${{ height: `${Math.round(5 + h * 21)}px` }}
+            />
+          `)}
+        </div>
+        <span class="chat-block-voice-dur">${fmt(shown)}</span>
+      </div>
+      ${b.via || b.size
+        ? html`
+            <div class="chat-block-voice-meta">
+              ${b.via ? html`<span>◌ ${b.via}</span>` : null}
+              ${b.size ? html`<span>${b.size}</span>` : null}
+            </div>
+          `
+        : null}
+      ${b.transcript
+        ? html`
+            <div class="chat-block-voice-tx">
+              <span>받아쓰기</span>
+              <span>${b.transcript}</span>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
+  return html`
+    <figure class="chat-block-media" data-chat-block="image">
+      <div class="chat-block-media-frame">
+        ${src
+          ? html`<img src=${src} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
+          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}</div>`}
+      </div>
+      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+    </figure>
+  `
+}
+
+function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
+  return html`
+    <figure class="chat-block-media" data-chat-block="svg">
+      <div class="chat-block-media-frame" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />
+      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+    </figure>
+  `
+}
+
+function ChatTraceStep({ step }: { step: ChatTraceStep }) {
+  const [open, setOpen] = useState(false)
+
+  if (step.kind === 'think') {
+    return html`
+      <div class="chat-block-tstep think" data-chat-trace-step="think">
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <div class="chat-block-tstep-row">
+            <span class="chat-block-tstep-kind">Thinking</span>
+            <span>${step.text}</span>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  if (step.kind === 'reason') {
+    const exp = !!step.detail
+    return html`
+      <div class="chat-block-tstep reason ${open ? 'exp' : ''}" data-chat-trace-step="reason">
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <div class="chat-block-tstep-row ${exp ? 'click' : ''}" onClick=${() => { if (exp) setOpen((o) => !o) }}>
+            <span class="chat-block-tstep-kind">Reasoning</span>
+            <span class="chat-block-tstep-text" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.text) }} />
+            ${exp ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
+          </div>
+          ${exp && open
+            ? html`<div class="chat-block-reason-detail" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.detail ?? '') }} />`
+            : null}
+        </div>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
+      <span class="chat-block-tnode"></span>
+      <div class="min-w-0 flex-1">
+        <div class="chat-block-tstep-row click" onClick=${() => setOpen((o) => !o)}>
+          <span class="chat-block-tstep-kind">Tool</span>
+          <span class="chat-block-tstep-name">${step.name}</span>
+          <span class="chat-block-tstep-status ${step.status === 'ok' ? 'ok' : 'bad'}"></span>
+          <span class="chat-block-tstep-dur">${step.dur}</span>
+          <span class="chat-block-tstep-chev">▶</span>
+        </div>
+        ${open
+          ? html`
+              <div class="chat-block-tool-body">
+                ${step.args !== undefined
+                  ? html`
+                      <div class="chat-block-tool-label">args</div>
+                      <pre class="m-0 overflow-x-auto text-2xs" dangerouslySetInnerHTML=${{ __html: highlightJson(step.args) }} />
+                    `
+                  : null}
+                ${step.result !== undefined
+                  ? html`
+                      <div class="chat-block-tool-label">result</div>
+                      <pre class="m-0 overflow-x-auto text-2xs" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.result) }} />
+                    `
+                  : null}
+              </div>
+            `
+          : null}
+      </div>
+    </div>
+  `
+}
+
+function ChatTraceBlock({ trace }: { trace: ChatTraceStep[] }) {
+  const [open, setOpen] = useState(true)
+  const toolN = trace.filter((s) => s.kind === 'tool').length
+  const dur = traceDur(trace)
+
+  return html`
+    <div class="chat-block-trace ${open ? 'open' : ''}" data-chat-block="trace">
+      <button
+        type="button"
+        class="chat-block-trace-hd"
+        onClick=${() => setOpen((o) => !o)}
+        aria-expanded=${open}
+      >
+        <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
+        <span>◈</span>
+        <span class="chat-block-trace-label">작업 과정</span>
+        <span class="chat-block-trace-count">${trace.length}단계</span>
+        <span class="chat-block-trace-meta">
+          ${toolN > 0 ? html`<span>도구 ${toolN}</span>` : null}
+          ${dur ? html`<span class="tnum">${dur}</span>` : null}
+        </span>
+      </button>
+      ${open
+        ? html`
+            <div class="chat-block-trace-steps">
+              <span class="chat-block-trace-rail"></span>
+              ${trace.map((s, i) => html`<${ChatTraceStep} key=${i} step=${s} />`)}
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+function ChatLinkBlock(b: ChatLinkBlock) {
+  let host = b.meta
+  try {
+    host = new URL(b.url).hostname.replace(/^www\./, '')
+  } catch {
+    host = b.meta
+  }
+  return html`
+    <a
+      class="chat-block-linkcard ${b.kind || ''}"
+      href=${b.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-chat-block="link"
+    >
+      <span class="chat-block-linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
+      <span class="chat-block-linkcard-body">
+        <span class="chat-block-linkcard-title">${b.title}</span>
+        ${b.desc ? html`<span class="chat-block-linkcard-desc">${b.desc}</span>` : null}
+        <span class="chat-block-linkcard-meta">${b.meta || host}</span>
+      </span>
+      <span class="chat-block-linkcard-go">↗</span>
+    </a>
+  `
+}
+
+const BROADCAST_ACK_LABEL: Record<string, string> = { acked: '확인함', read: '읽음', delivered: '전달됨' }
+
+function ChatBroadcastBlock(b: ChatBroadcastBlock) {
+  const ackN = b.recipients.filter((r) => r.ack === 'acked').length
+  return html`
+    <div class="chat-block-broadcast" data-chat-block="broadcast">
+      <div class="chat-block-broadcast-hd">
+        <span>⊚ 브로드캐스트</span>
+        <span class="chat-block-broadcast-scope">${b.scope}</span>
+        <span class="chat-block-broadcast-via">${b.via}</span>
+        <span class="chat-block-broadcast-count">${ackN}/${b.recipients.length} 확인</span>
+      </div>
+      <div class="chat-block-broadcast-note">${b.note}</div>
+      <div class="chat-block-broadcast-rcpts">
+        ${b.recipients.map((r, i) => html`
+          <div key=${i} class="chat-block-broadcast-rcpt ${r.ack}">
+            <span class="chat-block-broadcast-avatar">${r.id.slice(0, 2).toUpperCase()}</span>
+            <span class="chat-block-broadcast-id">${r.id}</span>
+            <span class="chat-block-broadcast-ack">
+              ${BROADCAST_ACK_LABEL[r.ack] || r.ack}${r.at ? ` · ${r.at}` : ''}
+            </span>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function ChatBlock({ block }: { block: ChatBlock }) {
+  switch (block.t) {
+    case 'p': return html`<${ChatTextBlock} html=${block.html} />`
+    case 'h4': return html`<${ChatHeadingBlock} html=${block.html} />`
+    case 'ul': return html`<${ChatListBlock} items=${block.items} />`
+    case 'callout': return html`<${ChatCalloutBlock} severity=${block.severity} html=${block.html} />`
+    case 'table': return html`<${ChatTableBlock} head=${block.head} rows=${block.rows} />`
+    case 'code': return html`<${ChatCodeBlock} cap=${block.cap} html=${block.html} />`
+    case 'shell': return html`<${ChatShellBlock} title=${block.title} lines=${block.lines} exit=${block.exit} dur=${block.dur} />`
+    case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} />`
+    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
+    case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} />`
+    case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
+    case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
+    case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
+    case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
+    case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
+    default: return null
+  }
+}
+
+function ChatBlocks({ blocks }: { blocks: ChatBlock[] }) {
+  return html`
+    <div class="flex flex-col gap-3" data-chat-blocks>
+      ${blocks.map((b, i) => html`<${ChatBlock} key=${i} block=${b} />`)}
+    </div>
+  `
+}
+
 function LiveMessagePlaceholder({ label }: { label: string }) {
   return html`
     <div
@@ -235,12 +679,12 @@ function renderAttachmentCard(attachment: KeeperConversationAttachment) {
       `
     : html`
         <div class="flex min-h-18 items-center gap-3 px-3 py-3">
-          <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">
+          <span class="inline-flex h-9 w-11 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">
             FILE
           </span>
           <div class="min-w-0">
-            <div class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">${attachment.name}</div>
-            <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">${meta}</div>
+            <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+            <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
           </div>
         </div>
       `
@@ -262,8 +706,8 @@ function renderAttachmentCard(attachment: KeeperConversationAttachment) {
       ${isRenderableImageAttachment(attachment)
         ? html`
             <div class="border-t border-[var(--color-border-default)] px-3 py-2">
-              <div class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">${attachment.name}</div>
-              <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">${meta}</div>
+              <div class="truncate text-sm font-bold text-[var(--color-fg-primary)]">${attachment.name}</div>
+              <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${meta}</div>
             </div>
           `
         : null}
@@ -296,10 +740,10 @@ function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
         aria-label=${clip.messageText || '음성 메시지'}
       />
       ${duration
-        ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${duration}</span>`
+        ? html`<span class="text-xs tabular-nums text-[var(--color-fg-secondary)]">${duration}</span>`
         : null}
       ${clip.deviceId
-        ? html`<span class="text-2xs text-[var(--color-fg-muted)]" title=${`device: ${clip.deviceId}`}>🔊</span>`
+        ? html`<span class="text-xs text-[var(--color-fg-secondary)]" title=${`device: ${clip.deviceId}`}>🔊</span>`
         : null}
     </div>
   `
@@ -319,11 +763,12 @@ function ChatMessageBubble({
   const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
+  const hasBlocks = entry.blocks && entry.blocks.length > 0
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
   const collapseThreshold = 1200
-  const isCollapsible = messageLength > collapseThreshold
+  const isCollapsible = !hasBlocks && messageLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -347,7 +792,7 @@ function ChatMessageBubble({
       <div class=${`flex justify-between gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
         <div class=${`flex min-w-0 flex-1 gap-3 ${isMessenger ? 'items-center' : 'items-start'}`}>
           <div
-            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-2xs font-semibold uppercase tracking-[var(--track-caps)] ${
+            class=${`chat-avatar ${tone} flex shrink-0 items-center justify-center border text-xs font-bold uppercase tracking-[var(--track-caps)] ${
               isMessenger ? 'size-8 rounded-card' : 'size-10 rounded-[var(--r-1)]'
             }`}
           >
@@ -357,16 +802,16 @@ function ChatMessageBubble({
             ${isMessenger
               ? html`
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span class="truncate text-xs font-semibold text-[var(--color-fg-secondary)]">
+                    <span class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">
                       ${avatarLabel(entry)}
                     </span>
                     ${timestamp
-                      ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
+                      ? html`<span class="text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
                       : null}
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -379,7 +824,7 @@ function ChatMessageBubble({
                             href=${surfaceInfo.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-medium text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -389,7 +834,7 @@ function ChatMessageBubble({
                       : surfaceInfo
                       ? html`
                           <span
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -402,14 +847,14 @@ function ChatMessageBubble({
               : html`
                   <div class="flex flex-wrap items-center gap-1.5">
                     <span
-                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] border px-2.5 py-1 text-3xs font-semibold uppercase tracking-3`}
+                      class=${`chat-role-chip ${tone} inline-flex items-center rounded-[var(--r-0)] border px-2.5 py-1 text-2xs font-bold uppercase tracking-2`}
                     >
                       ${entry.label}
                     </span>
                     ${showDeliveryBadge(entry, variant)
                       ? html`
                           <span
-                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-3xs font-medium uppercase tracking-2 text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 text-2xs font-semibold uppercase tracking-2 text-[var(--color-fg-secondary)]"
                             data-chat-delivery=${delivery}
                           >
                             ${delivery}
@@ -418,7 +863,7 @@ function ChatMessageBubble({
                       : null}
                     ${timestamp
                       ? html`
-                          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium tabular-nums text-[var(--color-fg-muted)]">
+                          <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">
                             ${timestamp}
                           </span>
                         `
@@ -429,7 +874,7 @@ function ChatMessageBubble({
                             href=${surfaceInfo.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING}"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -439,7 +884,7 @@ function ChatMessageBubble({
                       : surfaceInfo
                       ? html`
                           <span
-                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-muted)]"
+                            class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]"
                             title=${surfaceInfo.label}
                           >
                             <span>${surfaceInfo.icon}</span>
@@ -448,7 +893,7 @@ function ChatMessageBubble({
                         `
                       : null}
                   </div>
-                  <div class="mt-2 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">
+                  <div class="mt-2 truncate text-sm font-bold text-[var(--color-fg-primary)]">
                     ${avatarLabel(entry)}
                   </div>
                 `}
@@ -458,7 +903,7 @@ function ChatMessageBubble({
           ? html`
               <button
                 type="button"
-                class=${`border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${
+                class=${`border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING} ${
                   isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
                 }`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
@@ -473,7 +918,7 @@ function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-secondary)]">
+              <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-semibold text-[var(--color-fg-primary)]">
                 ${item}
               </span>
             `)}
@@ -483,15 +928,19 @@ function ChatMessageBubble({
       ${liveLabel
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
-            <div
-              class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
-              dangerouslySetInnerHTML=${{
-                __html: DOMPurify.sanitize(
-                  marked.parse(messageText) as string,
-                  { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
-                )
-              }}
-            />
+            ${hasBlocks
+              ? html`<${ChatBlocks} blocks=${entry.blocks!} />`
+              : html`
+                  <div
+                    class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+                    dangerouslySetInnerHTML=${{
+                      __html: DOMPurify.sanitize(
+                        marked.parse(messageText) as string,
+                        { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
+                      )
+                    }}
+                  />
+                `}
             ${entry.delivery === 'streaming'
               ? html`<span class="inline-block ml-0.5 animate-pulse text-[var(--color-status-info)]" aria-hidden="true">▍</span>`
               : null}
@@ -500,7 +949,7 @@ function ChatMessageBubble({
         ? html`
             <button
               type="button"
-              class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+              class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
               onClick=${() => { setMessageCollapsed(!messageCollapsed) }}
             >
               ${messageCollapsed ? '더 보기' : '접기'}
@@ -519,7 +968,7 @@ function ChatMessageBubble({
         : null}
       ${entry.error
         ? html`
-            <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-xs leading-paragraph text-[var(--bad-light)]">
+            <div class="rounded-[var(--r-1)] border border-[var(--err-border)] bg-[var(--bad-soft)] px-3 py-2 text-sm font-medium leading-paragraph text-[var(--bad-light)]">
               ${entry.error}
             </div>
           `
@@ -533,8 +982,8 @@ function ChatMessageBubble({
                     <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                       ${overview.map(item => html`
                         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5">
-                          <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">${item.label}</div>
-                          <div class="mt-1 text-sm font-semibold text-[var(--color-fg-secondary)]">${item.value}</div>
+                          <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">${item.label}</div>
+                          <div class="mt-1 text-sm font-bold text-[var(--color-fg-primary)]">${item.value}</div>
                         </div>
                       `)}
                     </div>
@@ -543,10 +992,10 @@ function ChatMessageBubble({
               ${entry.details.skillPrimary
                 ? html`
                     <div class="chat-detail-callout rounded-[var(--r-1)] border border-[var(--ok-border)] px-3 py-3">
-                      <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--ok-fg)]">스킬 경로</div>
-                      <div class="mt-1 text-sm font-semibold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
+                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--ok-fg)]">스킬 경로</div>
+                      <div class="mt-1 text-sm font-bold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
                       ${entry.details.skillReason
-                        ? html`<div class="mt-1 text-xs leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
+                        ? html`<div class="mt-1 text-sm leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
                         : null}
                     </div>
                   `
@@ -554,12 +1003,12 @@ function ChatMessageBubble({
               ${state.length > 0
                 ? html`
                     <div class="flex flex-col gap-2">
-                      <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">상태 스냅샷</div>
+                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-fg-secondary)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
                           <div class="rounded-[var(--r-1)] border border-[var(--color-accent-soft)] bg-[var(--accent-6)] px-3 py-2.5">
-                            <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
-                            <div class="mt-1 text-xs leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
+                            <div class="text-2xs font-bold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
+                            <div class="mt-1 text-sm leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
                           </div>
                         `)}
                       </div>
@@ -571,7 +1020,7 @@ function ChatMessageBubble({
                     <div class="flex flex-col gap-2">
                       <button
                         type="button"
-                        class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-2xs font-medium text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+                        class="self-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] ${CHAT_FOCUS_RING}"
                         onClick=${() => { setRawExpandedRaw(!rawExpandedRaw) }}
                       >
                         ${rawExpanded ? '원본 숨기기' : '원본 보기'}
@@ -664,59 +1113,59 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
     >
       <button
         type="button"
-        class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-bg-hover)] transition-colors"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-[var(--color-bg-hover)] transition-colors ${CHAT_FOCUS_RING}"
         onClick=${() => { setExpanded(!expanded) }}
         aria-expanded=${expanded}
       >
-        <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-3xs font-mono font-bold text-[var(--color-fg-muted)]">T</span>
-        <span class="font-mono text-xs font-medium text-[var(--color-accent-fg)] truncate">${toolName}</span>
-        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-3xs font-medium text-[var(--color-fg-muted)]">입력</span>
+        <span class="inline-flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] text-2xs font-mono font-bold text-[var(--color-fg-secondary)]">T</span>
+        <span class="font-mono text-sm font-semibold text-[var(--color-accent-fg)] truncate">${toolName}</span>
+        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]">입력</span>
         ${outputEntry
           ? html`<span
-              class=${`text-2xs ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-[var(--color-status-err)]'}`}
+              class=${`text-xs font-semibold ${outputEntry.success ? 'text-[var(--color-ok-fg)]' : 'text-[var(--color-status-err)]'}`}
               title=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
               aria-label=${outputEntry.success ? 'tool succeeded' : 'tool failed'}
             >${outputEntry.success ? '✓' : '✗'}</span>`
           : null}
         ${timestamp
-          ? html`<span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
+          ? html`<span class="ml-auto text-xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
           : null}
-        <span class="ml-1 text-xs text-[var(--color-fg-muted)]">${expanded ? '▾' : '▸'}</span>
+        <span class="ml-1 text-sm text-[var(--color-fg-secondary)]">${expanded ? '▾' : '▸'}</span>
       </button>
       ${expanded
         ? html`
             <div class="flex flex-col gap-2 border-t border-[var(--color-border-default)] px-3 py-2">
               ${isEmptyArgs
-                ? html`<div class="text-2xs font-mono text-[var(--color-fg-muted)]">입력 없음 (매개변수가 없는 도구)</div>`
+                ? html`<div class="text-xs font-mono text-[var(--color-fg-secondary)]">입력 없음 (매개변수가 없는 도구)</div>`
                 : html`
                     <div>
-                      <div class="mb-1 text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">arguments</div>
-                      <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-48 overflow-y-auto">${displayArgs}</pre>
+                      <div class="mb-1 text-2xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">arguments</div>
+                      <pre class="text-xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-primary)] max-h-48 overflow-y-auto">${displayArgs}</pre>
                     </div>
                   `}
               ${hasOutput
                 ? html`
                     <div>
-                      <div class="mb-1 flex items-center gap-1 text-3xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">
+                      <div class="mb-1 flex items-center gap-1 text-2xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">
                         <span>output</span>
                         ${outputView.truncated
-                          ? html`<span class="font-normal normal-case text-[var(--color-fg-muted)]">· truncated, see tool inspector</span>`
+                          ? html`<span class="font-normal normal-case text-[var(--color-fg-secondary)]">· truncated, see tool inspector</span>`
                           : null}
                       </div>
-                      <pre class="text-2xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-secondary)] max-h-64 overflow-y-auto">${outputView.text}</pre>
+                      <pre class="text-xs font-mono whitespace-pre-wrap break-all text-[var(--color-fg-primary)] max-h-64 overflow-y-auto">${outputView.text}</pre>
                     </div>
                   `
                 : null}
               ${!hasOutput
                 ? isEmptyArgs
-                  ? html`<div class="text-2xs text-[var(--color-fg-muted)]">출력 대기 중…</div>`
-                  : html`<div class="text-3xs text-[var(--color-fg-muted)]">출력(결과)은 도구 실행 추적 패널에서 확인</div>`
+                  ? html`<div class="text-xs text-[var(--color-fg-secondary)]">출력 대기 중…</div>`
+                  : html`<div class="text-2xs text-[var(--color-fg-secondary)]">출력(결과)은 도구 실행 추적 패널에서 확인</div>`
                 : null}
             </div>
           `
         : html`
             <div class="px-3 pb-2">
-              <div class="truncate text-2xs font-mono text-[var(--color-fg-muted)]">${preview}</div>
+              <div class="truncate text-xs font-mono text-[var(--color-fg-secondary)]">${preview}</div>
             </div>
           `
       }
@@ -800,8 +1249,8 @@ export function ChatTranscript({
         ${entries.length === 0
           ? html`
               <div class="flex min-h-55 flex-col items-center justify-center rounded-card border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 text-center">
-                <div class="text-2xs font-semibold uppercase tracking-5 text-[var(--color-fg-muted)]">직접 메시지 없음</div>
-                <div class="mt-3 max-w-[34rem] text-sm leading-airy text-[var(--color-fg-secondary)]">${emptyText}</div>
+                <div class="text-xs font-bold uppercase tracking-4 text-[var(--color-fg-secondary)]">직접 메시지 없음</div>
+                <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">${emptyText}</div>
               </div>
             `
           : entries.map(entry => entry.role === 'tool'
@@ -813,7 +1262,7 @@ export function ChatTranscript({
         ? html`
             <button
               type="button"
-              class="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-1.5 text-2xs font-medium text-[var(--color-fg-primary)] shadow-[var(--shadow-raised)] transition-colors hover:bg-[var(--color-bg-hover)]"
+              class="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-fg-primary)] shadow-[var(--shadow-raised)] transition-colors hover:bg-[var(--color-bg-hover)] ${CHAT_FOCUS_RING}"
               onClick=${scrollToBottom}
               data-chat-jump-latest
             >
@@ -898,19 +1347,20 @@ export function ChatComposer({
   const sendDisabled = disabled || draft.trim() === '' || (streaming && !queueEnabled)
 
   const isPrimary = layout === 'primary'
+  const composerFocusRing = ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })
 
   return html`
     <div class="chat-composer flex flex-col gap-3">
       ${isPrimary ? null : html`
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">메시지</div>
-          <div class="text-2xs text-[var(--color-fg-muted)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
+          <div class="text-xs font-bold uppercase tracking-3 text-[var(--color-fg-secondary)]">메시지</div>
+          <div class="text-xs text-[var(--color-fg-secondary)]">Enter로 전송, Shift+Enter로 줄바꿈</div>
         </div>
       `}
       <textarea
-        class=${isPrimary
+        class=${(isPrimary
           ? 'control-textarea min-h-30 rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-4 py-4 text-base leading-loose'
-          : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose'}
+          : 'control-textarea min-h-24 rounded-card border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-3 py-3 text-base leading-loose') + ` ${composerFocusRing}`}
         placeholder=${placeholder}
         aria-label="메시지 입력"
         value=${draft}
@@ -927,7 +1377,7 @@ export function ChatComposer({
       ></textarea>
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex min-w-0 flex-col gap-1">
-          <div class="text-2xs leading-paragraph text-[var(--color-fg-muted)]">
+          <div class="text-xs leading-paragraph text-[var(--color-fg-secondary)]">
             ${streaming
               ? canQueue
                 ? '응답 스트리밍 중 — 지금 보내는 메시지는 대기열에 쌓였다가 차례로 전달됩니다.'
@@ -936,7 +1386,7 @@ export function ChatComposer({
           </div>
           ${isStalled
             ? html`
-                <div class="text-2xs font-medium text-[var(--color-status-warn)]" data-chat-stall-hint>
+                <div class="text-xs font-semibold text-[var(--color-status-warn)]" data-chat-stall-hint>
                   마지막 수신 ${sinceLastEvent}초 전 — 스트림이 지연되고 있습니다. 계속 멈춰 있으면 중지 후 다시 시도하세요.
                 </div>
               `
@@ -946,7 +1396,7 @@ export function ChatComposer({
         ${queueCount > 0
           ? html`
               <span
-                class="inline-flex items-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]"
+                class="inline-flex items-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-2.5 py-1 text-xs font-semibold text-[var(--color-fg-secondary)]"
                 data-chat-queue-count
               >
                 대기 ${queueCount}

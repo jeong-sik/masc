@@ -53,7 +53,7 @@ export function ExcusePatterns() {
 
   if (s.status === 'loading') {
     return html`
-      <${SectionCard} label="Anti-Rationalization 핑계 패턴">
+      <${SectionCard} label="Anti-Rationalization 핑계 패턴" class="v2-command-panel">
         <${LoadingState}>핑계 패턴 불러오는 중...<//>
       <//>
     `
@@ -61,7 +61,7 @@ export function ExcusePatterns() {
 
   if (s.status === 'error') {
     return html`
-      <${SectionCard} label="Anti-Rationalization 핑계 패턴">
+      <${SectionCard} label="Anti-Rationalization 핑계 패턴" class="v2-command-panel">
         <div class="p-4 text-[var(--color-status-err)]" role="alert">패턴 로드 실패: ${s.message}</div>
       <//>
     `
@@ -71,7 +71,7 @@ export function ExcusePatterns() {
   const jsonStr = data ? JSON.stringify(data, null, 2) : '[]'
 
   return html`
-    <${SectionCard} label="Anti-Rationalization 핑계 패턴">
+    <${SectionCard} label="Anti-Rationalization 핑계 패턴" class="v2-command-panel">
       <div class="p-4">
         <p class="text-sm text-[var(--color-fg-muted)] mb-4">
           이 패턴들은 에이전트 completion note 와 매칭됩니다. 매칭되면 해당 task 는 거부됩니다.

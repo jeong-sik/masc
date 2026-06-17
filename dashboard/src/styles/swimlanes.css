@@ -9,9 +9,9 @@
 
 :root {
   --sl-label-w: 180px;
-  --sl-row-h: 22px;
-  --sl-row-h-tall: 28px;
-  --sl-row-h-compact: 18px;
+  --sl-row-h: 24px;        /* +2px: more legible row without breaking density */
+  --sl-row-h-tall: 30px;   /* +2px: comfortable density */
+  --sl-row-h-compact: 20px; /* +2px: keep compact viable */
 }
 
 .sl-toolbar {
@@ -27,7 +27,7 @@
 }
 .sl-toolbar .label {
   color: var(--color-fg-muted); letter-spacing: .08em; font-weight: var(--fw-semi);
-  font-size: var(--fs-10);
+  font-size: var(--fs-11);
 }
 .sl-tb-brand { display: inline-flex; align-items: center; gap: var(--sp-1h); flex-shrink: 0; }
 .sl-tb-sep {
@@ -45,7 +45,7 @@
 .sl-range {
   margin-left: auto;
   font-family: var(--font-mono); font-size: var(--fs-10);
-  color: var(--color-fg-disabled);
+  color: var(--color-fg-muted);
   flex-shrink: 0;
   padding-left: var(--sp-3);
 }
@@ -98,7 +98,7 @@
 .sl-axis-label {
   display: flex; align-items: center; padding: 0 var(--sp-3);
   border-right: 1px solid var(--color-border-default);
-  color: var(--color-fg-muted); font-size: var(--fs-9); letter-spacing: .1em;
+  color: var(--color-fg-muted); font-size: var(--fs-10); letter-spacing: .1em;
 }
 .sl-axis-track { position: relative; }
 .sl-tick {
@@ -166,17 +166,17 @@
   cursor: pointer;
   transition: background var(--t-fast);
 }
-.sl-row:hover { background: var(--hover-overlay); }
-.sl-row.is-active { background: var(--color-bg-elevated); }
+.sl-row:hover { background: var(--state-hover-bg); }
+.sl-row.is-active { background: var(--state-selected-bg); }
 .sl-row.is-active .sl-name { color: var(--brass-1); }
 .sl-row.is-active .sl-status.dot-running { box-shadow: 0 0 6px rgb(var(--brass-glow) / .8); }
 
-/* status tinted backgrounds — very subtle */
-.sl-row.st-error     { background: rgb(var(--err-glow) / .04); }
-.sl-row.st-error.is-active { background: rgb(var(--err-glow) / .10); }
-.sl-row.st-blocker   { background: rgb(var(--warn-glow) / .04); }
-.sl-row.st-blocker.is-active { background: rgb(var(--warn-glow) / .09); }
-.sl-row.st-running   { background: rgb(var(--brass-glow) / .02); }
+/* status tinted backgrounds — readable but still subtle */
+.sl-row.st-error     { background: rgb(var(--err-glow) / .06); }
+.sl-row.st-error.is-active { background: rgb(var(--err-glow) / .12); }
+.sl-row.st-blocker   { background: rgb(var(--warn-glow) / .06); }
+.sl-row.st-blocker.is-active { background: rgb(var(--warn-glow) / .11); }
+.sl-row.st-running   { background: rgb(var(--brass-glow) / .04); }
 
 /* collapsed empty lane — smaller, muted */
 .sl-row-collapsed {
@@ -218,18 +218,18 @@
 .sl-status.dot-idle { background: var(--idle); }
 
 .sl-name {
-  color: var(--color-fg-primary); font-weight: var(--fw-med);
+  color: var(--color-fg-primary); font-weight: var(--fw-semi);
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: var(--fs-11);
+  font-size: var(--fs-12);
 }
 .sl-meta {
-  font-family: var(--font-mono); font-size: var(--fs-10);
-  color: var(--color-fg-muted); flex-shrink: 0;
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  color: var(--color-fg-secondary); flex-shrink: 0;
   display: flex; gap: 3px;
 }
-.sl-meta b { color: var(--color-fg-primary); font-weight: var(--fw-med); }
+.sl-meta b { color: var(--color-fg-primary); font-weight: var(--fw-semi); }
 .sl-meta .err { color: var(--err); }
 
 /* mini-sparkline in label */

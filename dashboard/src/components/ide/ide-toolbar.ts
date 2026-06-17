@@ -33,6 +33,8 @@ const VIEW_TABS: ReadonlyArray<{ readonly id: ViewTab; readonly label: string }>
 const TOOLBAR_BUTTON_BASE =
   'v2-ide-action h-7 shrink-0 cursor-pointer rounded-[var(--r-1)] px-2 font-mono text-2xs uppercase tracking-[var(--track-caps)] transition-colors'
 
+const VIEW_TAB_BASE = 'ide-v2-view'
+
 export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },
   { kind: 'parallel', label: 'Parallel', description: '동시 keeper 작업 표시' },
@@ -184,12 +186,10 @@ export function IdeToolbar({
             aria-selected=${tab.id === activeView ? 'true' : 'false'}
             tabIndex=${tab.id === activeView ? 0 : -1}
             onClick=${() => onViewChange(tab.id)}
-            class=${TOOLBAR_BUTTON_BASE}
+            class=${`${TOOLBAR_BUTTON_BASE} ${VIEW_TAB_BASE}`}
             style=${{
               background: 'transparent',
               color: tab.id === activeView ? 'var(--color-fg-primary)' : 'var(--color-fg-muted)',
-              border: '1px solid transparent',
-              borderBottom: tab.id === activeView ? '2px solid var(--color-accent-fg)' : '2px solid transparent',
             }}
           >${tab.label}</button>
         `)}

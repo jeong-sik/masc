@@ -21,7 +21,7 @@ export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Ke
 
   if (isOffline) return html`
     <button type="button"
-      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors"
+      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors v2-monitoring-action"
       title="기동: offline keeper 를 다시 시작합니다 (offline → running)"
       onClick=${() => {
         void (async () => {
@@ -42,7 +42,7 @@ export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Ke
 
   if (isRunning) return html`
     <button type="button"
-      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors"
+      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors v2-monitoring-action"
       title="종료: keeper 를 완전 종료합니다 (running/paused → offline, fiber + 리소스 정리)"
       onClick=${() => {
         void (async () => {
@@ -106,7 +106,7 @@ export function KeeperClearContextDialog({
       overlayClass="fixed inset-0 z-[80] bg-[var(--dialog-overlay-bg)]/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
       panelClass="w-full max-w-130 rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--dialog-panel-bg)] shadow-[var(--shadow-raised)]"
     >
-      <div class="p-5 flex flex-col gap-4">
+      <div class="p-5 flex flex-col gap-4 v2-monitoring-panel">
         <div class="flex flex-col gap-1">
           <h3 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-secondary)]">키퍼 컨텍스트 비우기</h3>
           <p id=${descId} class="m-0 text-sm leading-relaxed text-[var(--color-fg-muted)]">
@@ -141,11 +141,11 @@ export function KeeperClearContextDialog({
           </span>
         </label>
 
-        <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+        <div class="rounded-[var(--r-1)] border border-[var(--warn-24)] bg-[var(--warn-8)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)] v2-monitoring-panel">
           마지막 수단용 액션입니다. 잘못된 continuity가 재주입될 때만 쓰고, 실행 후 즉시 상태를 다시 확인하세요.
         </div>
 
-        <div class="flex items-center justify-end gap-2">
+        <div class="flex items-center justify-end gap-2 v2-monitoring-toolbar">
           <${ActionButton}
             variant="ghost"
             size="lg"
@@ -154,7 +154,7 @@ export function KeeperClearContextDialog({
           >취소<//>
           <button
             type="button"
-            class="px-4 py-2 rounded-[var(--r-1)] text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[var(--bad-50)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+            class="px-4 py-2 rounded-[var(--r-1)] text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[var(--bad-50)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 v2-monitoring-action"
             disabled=${pending || reason.trim() === ''}
             onClick=${onSubmit}
           >${pending ? '비우는 중...' : '비우기'}</button>

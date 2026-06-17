@@ -15,7 +15,7 @@ export function MutedSpan({ children }: { children: unknown }) {
 }
 
 export function DetailRow({ children }: { children: unknown }) {
-  return html`<div class="flex items-center justify-between mb-1.5">${children}</div>`
+  return html`<div class="flex items-center justify-between mb-1.5 v2-monitoring-row">${children}</div>`
 }
 
 // ── KPI Card ─────────────────────────────────────────────
@@ -51,7 +51,7 @@ export function DetailCard({ class: cx, children }: {
   children: unknown
 }) {
   return html`
-    <div class="p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''}">${children}</div>
+    <div class="p-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] ${cx ?? ''} v2-monitoring-card">${children}</div>
   `
 }
 
@@ -75,30 +75,30 @@ export function OperationalHealth({ keeper }: { keeper: Keeper }) {
   if (!hasAny) return null
 
   return html`
-    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
+    <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 v2-monitoring-panel">
       <div class="mb-2 text-3xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">운영 건강도</div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
-          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[hbTone]} flex flex-col gap-0.5 v2-monitoring-card">
             <${Eyebrow}>하트비트</${Eyebrow}>
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
           </div>
         ` : null}
         ${compSavedRatio != null ? html`
-          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[compTone]} flex flex-col gap-0.5">
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[compTone]} flex flex-col gap-0.5 v2-monitoring-card">
             <${Eyebrow}>압축 절감률</${Eyebrow}>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${formatPct1(compSavedRatio)}</span>
             ${avgSaved != null ? html`<${MutedSpan}>avg ${formatTokens(avgSaved)} saved</${MutedSpan}>` : null}
           </div>
         ` : null}
         ${dropRatio != null ? html`
-          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[dropTone]} flex flex-col gap-0.5">
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE[dropTone]} flex flex-col gap-0.5 v2-monitoring-card">
             <${Eyebrow}>메모리 손실률</${Eyebrow}>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[dropTone]}">${formatPct1(dropRatio)}</span>
           </div>
         ` : null}
         ${lastCompAgo != null ? html`
-          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE['default']} flex flex-col gap-0.5">
+          <div class="p-2 rounded-[var(--r-1)] border ${KPI_TONE['default']} flex flex-col gap-0.5 v2-monitoring-card">
             <${Eyebrow}>마지막 압축</${Eyebrow}>
             <span class="text-xs font-mono text-[var(--color-fg-secondary)]">${formatDurationCompound(lastCompAgo)} 전</span>
           </div>
@@ -117,7 +117,7 @@ export function KpiSection({ title, children }: {
   children: unknown
 }) {
   return html`
-    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3" aria-label=${title}>
+    <section class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 v2-monitoring-panel" aria-label=${title}>
       <header class="mb-2">
         <h3 class="text-2xs font-semibold tracking-[var(--track-caps)] uppercase text-[var(--color-fg-muted)]">${title}</h3>
       </header>
@@ -146,7 +146,7 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const outcomes = keeper.outcomes
 
   return html`
-    <div class="flex flex-col gap-3 mb-5">
+    <div class="flex flex-col gap-3 mb-5 v2-monitoring-surface">
       <${KpiSection} title="정체성">
         <div class="grid grid-cols-3 gap-2">
           <${StatTile}

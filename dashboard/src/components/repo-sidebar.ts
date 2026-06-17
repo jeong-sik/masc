@@ -115,13 +115,13 @@ function StatusIcon({ status }: { status: RepoStatus }) {
 function StatusLabel({ status }: { status: RepoStatus }) {
   switch (status) {
     case 'active':
-      return html`<span class="text-2xs font-medium text-[var(--color-status-ok)]">활성</span>`
+      return html`<span class="text-xs font-bold text-[var(--color-status-ok)]">활성</span>`
     case 'paused':
-      return html`<span class="text-2xs font-medium text-[var(--color-status-warn)]">일시정지</span>`
+      return html`<span class="text-xs font-bold text-[var(--color-status-warn)]">일시정지</span>`
     case 'error':
-      return html`<span class="text-2xs font-medium text-[var(--color-status-err)]">오류</span>`
+      return html`<span class="text-xs font-bold text-[var(--color-status-err)]">오류</span>`
     case 'unknown':
-      return html`<span class="text-2xs font-medium text-[var(--color-fg-muted)]">알 수 없음</span>`
+      return html`<span class="text-xs font-bold text-[var(--color-fg-secondary)]">알 수 없음</span>`
   }
 }
 
@@ -136,9 +136,9 @@ export function RepoSidebar() {
 
   if (state.status === 'loading') {
     return html`
-      <div class="flex flex-col h-full">
+      <div class="v2-workspace-surface flex flex-col h-full">
         <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-default)]">
-          <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">저장소</span>
+          <span class="text-sm font-bold text-[var(--color-fg-secondary)]">저장소</span>
         </div>
         <${LoadingState} class="flex-1">저장소 목록 불러오는 중...<//>
       </div>
@@ -147,12 +147,12 @@ export function RepoSidebar() {
 
   if (state.status === 'error') {
     return html`
-      <div class="flex flex-col h-full">
+      <div class="v2-workspace-surface flex flex-col h-full">
         <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-default)]">
-          <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">저장소</span>
+          <span class="text-sm font-bold text-[var(--color-fg-secondary)]">저장소</span>
           <button
             type="button"
-            class="text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] cursor-pointer transition-colors"
+            class="text-xs font-semibold px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] cursor-pointer transition-colors"
             onClick=${() => void fetchRepositories()}
           >
             다시 시도
@@ -169,10 +169,10 @@ export function RepoSidebar() {
   const selected = selectedRepoId.value
 
   return html`
-    <div class="flex flex-col h-full">
+    <div class="v2-workspace-surface flex flex-col h-full">
       <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-default)]">
-        <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">
-          저장소 <span class="text-[var(--color-fg-muted)] font-normal">(${repos.length})</span>
+        <span class="text-sm font-bold text-[var(--color-fg-secondary)]">
+          저장소 <span class="text-[var(--color-fg-secondary)] font-normal">(${repos.length})</span>
         </span>
         <div class="flex items-center gap-1">
           <button
@@ -180,7 +180,7 @@ export function RepoSidebar() {
             title="base path 아래 git 저장소 스캔"
             aria-label="base path 아래 git 저장소 스캔"
             disabled=${isScanningRepositories.value}
-            class="flex items-center gap-1 text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            class="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer transition-colors"
             onClick=${() => { void scanRepositories() }}
           >
             <${Search} size=${12} aria-hidden="true" />
@@ -188,7 +188,7 @@ export function RepoSidebar() {
           </button>
           <button
             type="button"
-            class="flex items-center gap-1 text-2xs px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] cursor-pointer transition-colors"
+            class="flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-accent-fg)] cursor-pointer transition-colors"
             onClick=${() => { showAddRepoDialog.value = true }}
           >
             <${Plus} size=${12} aria-hidden="true" />
@@ -200,7 +200,7 @@ export function RepoSidebar() {
       <div class="flex-1 overflow-y-auto py-1">
         ${repos.length === 0
           ? html`
-            <div class="px-3 py-6 text-center text-2xs text-[var(--color-fg-muted)]">
+            <div class="px-3 py-6 text-center text-xs text-[var(--color-fg-secondary)]">
               등록된 저장소가 없습니다.
               <div class="mt-1">
                 <button
@@ -219,19 +219,19 @@ export function RepoSidebar() {
               <button
                 key=${repo.id}
                 type="button"
-                class="w-full text-left px-3 py-2 cursor-pointer transition-colors border-l-2 ${isSelected ? 'bg-[var(--accent-10)] border-l-accent' : 'border-l-transparent hover:bg-[var(--color-bg-elevated)]'}"
+                class="w-full text-left px-3 py-2 cursor-pointer transition-colors border-l-2 ${isSelected ? 'bg-[var(--color-bg-hover)] border-l-[var(--color-accent-fg)]' : 'border-l-transparent hover:bg-[var(--color-bg-elevated)]'}"
                 onClick=${() => { selectRepo(repo.id) }}
                 aria-pressed=${isSelected ? 'true' : 'false'}
               >
                 <div class="flex items-center gap-2">
                   <${StatusIcon} status=${repo.status} />
-                  <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate flex-1">
+                  <span class="text-sm font-semibold ${isSelected ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-fg-secondary)]'} truncate flex-1">
                     ${repo.name}
                   </span>
                 </div>
                 <div class="flex items-center gap-2 mt-1 ml-5">
                   <${StatusLabel} status=${repo.status} />
-                  <span class="text-2xs text-[var(--color-fg-muted)] flex items-center gap-1">
+                  <span class="text-xs text-[var(--color-fg-secondary)] flex items-center gap-1">
                     <${GitBranch} size=${10} aria-hidden="true" />
                     ${repo.default_branch}
                   </span>

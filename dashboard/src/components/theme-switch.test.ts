@@ -48,6 +48,13 @@ describe('ThemeSwitch', () => {
     expect(btn!.getAttribute('title')).toContain('Dark')
   })
 
+  it('carries the v2 shell action marker', () => {
+    const container = document.createElement('div')
+    render(h(ThemeSwitch), container)
+    const btn = container.querySelector('button')
+    expect(btn!.classList.contains('v2-shell-action')).toBe(true)
+  })
+
   it('has correct aria-label after toggling to paper', () => {
     const container = document.createElement('div')
     render(h(ThemeSwitch), container)

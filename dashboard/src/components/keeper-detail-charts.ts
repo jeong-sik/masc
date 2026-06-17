@@ -104,12 +104,12 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
   const avgRatio = inputTokens.reduce((a, b) => a + b, 0) / Math.max(outputTokens.reduce((a, b) => a + b, 0), 1)
 
   return html`
-    <div class="mb-5">
+    <div class="mb-5 v2-monitoring-panel">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">턴 토큰 추세</span>
         <${MutedSpan}>${points.length} turns</${MutedSpan}>
       </div>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3 v2-monitoring-row">
         ${'' /* Dual-line chart: input (cyan) + output (green) */}
         <${DetailCard} class="md:col-span-2">
           <div class="flex items-center gap-4 mb-1.5">
@@ -186,7 +186,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
   const fallbackCount = fallbackIndices.length
 
   return html`
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5 v2-monitoring-row">
       ${'' /* Latency + fallback markers */}
       <${DetailCard}>
         <${DetailRow}>

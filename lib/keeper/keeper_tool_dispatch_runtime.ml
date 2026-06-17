@@ -563,7 +563,12 @@ let execute_keeper_tool_call_with_outcome
        in
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string ToolNotAllowed)
-         ~labels:[ "keeper", meta.name; "tool", name; "reason", reason ]
+         ~labels:
+           [ "keeper", meta.name
+           ; "tool", name
+           ; "reason", reason
+           ; "tool_type", Tool_telemetry.tool_type_of_name name
+           ]
          ();
        make_executed_tool_result
          (Yojson.Safe.to_string

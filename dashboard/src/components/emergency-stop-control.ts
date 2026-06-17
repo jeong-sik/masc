@@ -35,7 +35,7 @@ export function EmergencyStopControl() {
 
   if (state === 'paused') {
     return html`
-      <div class="flex items-center gap-1.5" data-testid="emergency-stop-control">
+      <div class="v2-shell-panel flex items-center gap-1.5" data-testid="emergency-stop-control">
         <${CountBadge} tone="warn">Paused<//>
         ${access.allowed ? html`
           <${ActionButton} variant="ghost" size="sm" disabled=${loading}

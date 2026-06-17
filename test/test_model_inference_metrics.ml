@@ -376,7 +376,7 @@ let test_untrusted_usage_excluded_from_aggregates () =
 let test_error_turns_counted () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
-    let path = make_keeper_dir base "dreamer" in
+    let path = make_keeper_dir base "alice" in
     let ts = now_unix () in
     write_decisions path [
       success_entry ~model:"qwen-35b" ~ts:(ts -. 20.0) ();

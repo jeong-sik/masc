@@ -33,8 +33,11 @@
 @import "./tools.css";
 @import "./ui.css";
 @import "./responsive.css";
+@import "./settings-surface.css";
 @import "./v2-shell.css";
+@import "./app-shell-v2.css";
 @import "./v2-theme.css";
+@import "./keeper-turn-inspector.css";
 @import "./v2-logs.css";
 @import "./v2-overview.css";
 @import "./v2-connectors.css";
@@ -135,7 +138,7 @@
   white-space: nowrap;
   text-transform: uppercase;
   background: var(--color-bg-elevated);
-  color: var(--color-fg-muted);
+  color: var(--color-fg-secondary);
   &.ok { background: var(--color-ok-soft); color: var(--color-ok-fg); }
   &.warn { background: var(--color-warn-soft); color: var(--color-warn-fg); }
   &.bad { background: var(--color-err-soft); color: var(--color-err-fg); }
@@ -161,7 +164,7 @@
   border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   background: color-mix(in srgb, var(--color-bg-panel-alt) 72%, transparent);
-  color: var(--color-fg-secondary);
+  color: var(--color-fg-primary);
   font-size: var(--fs-sm);
   line-height: 1.4;
   transition: border-color var(--t-fast);
@@ -184,7 +187,7 @@ thead th {
   padding: 6px 8px;
   font-size: var(--fs-xs);
   font-weight: var(--fw-semi);
-  color: var(--color-fg-muted);
+  color: var(--color-fg-secondary);
   text-transform: uppercase;
   letter-spacing: var(--track-caps);
   border-bottom: 1px solid var(--color-border-default);
@@ -194,7 +197,7 @@ thead th {
 tbody td {
   padding: 6px 8px;
   border-bottom: 1px solid var(--color-border-default);
-  color: var(--color-fg-secondary);
+  color: var(--color-fg-primary);
   vertical-align: top;
 }
 

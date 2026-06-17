@@ -103,14 +103,14 @@ export function AddRepoDialog() {
         if (e.target === e.currentTarget) closeAddRepoDialog()
       }}
     >
-      <div class="w-full max-w-lg rounded-[var(--r-4)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] mx-4">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-default)]">
+      <div class="v2-connector-surface w-full max-w-lg rounded-[var(--r-4)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] mx-4">
+        <div class="v2-connector-toolbar flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-default)]">
           <h2 id="add-repo-title" class="text-sm font-semibold text-[var(--color-fg-secondary)]">
             저장소 추가
           </h2>
           <button
             type="button"
-            class="p-1 rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] cursor-pointer transition-colors"
+            class="v2-connector-action p-1 rounded-[var(--r-1)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] cursor-pointer transition-colors"
             aria-label="닫기"
             onClick=${closeAddRepoDialog}
           >
@@ -121,7 +121,7 @@ export function AddRepoDialog() {
         <div class="px-4 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
           ${formError.value
             ? html`
-              <div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-3 py-2 text-xs text-[var(--bad-light)]" role="alert">
+              <div class="v2-connector-panel rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-12)] px-3 py-2 text-xs text-[var(--bad-light)]" role="alert">
                 ${formError.value}
               </div>
             `
@@ -208,10 +208,10 @@ export function AddRepoDialog() {
             : null}
         </div>
 
-        <div class="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-border-default)]">
+        <div class="v2-connector-toolbar flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-border-default)]">
           <button
             type="button"
-            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+            class="v2-connector-action px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
             onClick=${closeAddRepoDialog}
             disabled=${formSubmitting.value}
           >
@@ -219,7 +219,7 @@ export function AddRepoDialog() {
           </button>
           <button
             type="button"
-            class="px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] hover:opacity-90 transition-opacity disabled:opacity-50"
+            class="v2-connector-action px-4 py-1.5 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] hover:opacity-90 transition-opacity disabled:opacity-50"
             onClick=${() => void submitAddRepo()}
             disabled=${formSubmitting.value}
           >

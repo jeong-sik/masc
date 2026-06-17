@@ -91,7 +91,7 @@ export const IdeInterject: FunctionComponent<IdeInterjectProps> = ({ keeperName 
 
   return html`
     <div
-      class="ide-interject-bar"
+      class="ide-interject-bar v2-ide-panel"
       role="region"
       aria-label="INTERJECT (interject store active keeper wiring)"
       style=${{
@@ -207,6 +207,7 @@ function InterjectContextLinks({
         <button
           key=${link.id}
           type="button"
+          class="v2-ide-action"
           title=${link.evidence}
           aria-label=${`Open ${link.evidence}`}
           onClick=${() => openIdeContextRouteLink(link)}
@@ -220,6 +221,7 @@ function InterjectButton(action: InterjectActionState, onClick: () => void) {
   return html`
     <button
       type="button"
+      class="v2-ide-action"
       disabled=${!action.enabled}
       aria-label=${action.disabled_reason
         ? `${action.label} (${action.disabled_reason})`

@@ -164,6 +164,53 @@ describe('Governance surface', () => {
 
     expect(container.querySelector('.v2-command-surface')).not.toBeNull()
     expect(container.querySelector('.v2-command-panel')).not.toBeNull()
+    expect(container.querySelector('.v2-command-toolbar')).not.toBeNull()
+  }, 20000)
+
+  it('marks raw banner panels with v2-command-panel', async () => {
+    const response: DashboardGovernanceResponse = {
+      generated_at: '2026-03-26T00:00:00Z',
+      summary: {
+        judge_online: false,
+        oldest_open_case_age_s: 90000,
+        last_activity_age_s: 90000,
+      },
+      items: [],
+      activity: [],
+      judgments: [],
+      pending_actions: [],
+      approval_queue: [
+        {
+          id: 'appr-1',
+          keeper_name: 'governance-judge',
+          tool_name: 'tool_edit_file',
+          risk_level: 'critical',
+          requested_at: '2026-03-26T00:00:00Z',
+          waiting_s: 18,
+        },
+      ],
+    }
+
+    const { Governance } = await loadComponentWithApi({
+      decideGovernanceExecutionOrder: Vitest.vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance: Vitest.vi.fn().mockResolvedValue(response),
+      fetchGovernanceCaseStatus: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      resolveGovernanceApproval: Vitest.vi.fn().mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' }),
+      submitGovernanceCaseBrief: Vitest.vi.fn().mockResolvedValue(governanceBundle()),
+      submitGovernancePetition: Vitest.vi.fn().mockResolvedValue({ case: { id: 'gov-case-1' } }),
+    })
+
+    render(html`<${Governance} />`, container)
+    await flushUi()
+
+    expect(
+      Array.from(container.querySelectorAll('.v2-command-panel')).some(
+        el => el.textContent?.includes('All open cases are older than'),
+      ),
+    ).toBe(true)
+
+    const hitlBanner = container.querySelector('[data-testid="keeper-hitl-alert-banner"]') as HTMLElement | null
+    expect(hitlBanner?.classList.contains('v2-command-panel')).toBe(true)
   }, 20000)
 
   it('auto-refreshes the live judge surface while visible', async () => {
@@ -229,8 +276,8 @@ describe('Governance surface', () => {
         {
           judgment_id: 'j-1',
           target_kind: 'agent_health',
-          target_id: 'dreamer',
-          summary: 'Agent dreamer has been zombie for 30 minutes.',
+          target_id: 'alice',
+          summary: 'Agent alice has been zombie for 30 minutes.',
           confidence: 0.85,
           generated_at: '2026-03-30T00:00:00Z',
           recommended_action: { action_kind: 'recover', resolved_tool: 'masc_operator_confirm', reason: 'zombie agent detected' },
@@ -254,7 +301,7 @@ describe('Governance surface', () => {
 
     expect(container.textContent).toContain('AI Judge')
     expect(container.textContent).toContain('agent_health')
-    expect(container.textContent).toContain('dreamer')
+    expect(container.textContent).toContain('alice')
     expect(container.textContent).toContain('85%')
     expect(container.textContent).toContain('recover')
     expect(container.textContent).toContain('masc_operator_confirm')

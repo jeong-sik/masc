@@ -99,10 +99,9 @@ let max_tokens_of_context (ctx : working_context) =
   ctx.max_tokens
 
 let with_max_tokens (ctx : working_context) max_tokens =
-  let checkpoint =
-    { ctx.checkpoint with max_total_tokens = Some max_tokens }
-  in
-  { max_tokens; checkpoint }
+  (* OAS no longer carries a cumulative-token cap on the checkpoint; the
+     working_context [max_tokens] is the per-response output limit only. *)
+  { ctx with max_tokens }
 
 let system_prompt_of_context (ctx : working_context) =
   Option.value ~default:"" ctx.checkpoint.system_prompt
@@ -134,8 +133,6 @@ let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
     response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
-    max_input_tokens = None;
-    max_total_tokens = Some max_tokens;
     context;
     mcp_sessions = [];
     working_context = None;

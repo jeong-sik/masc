@@ -58,4 +58,8 @@ module For_testing : sig
 
   (** Test-only write accessor. No production caller. *)
   val exchange_drain_cancel : t -> drain_cancel_state -> drain_cancel_state
+
+  (** The take-and-close step [unsubscribe] runs: atomically claims [Closed]
+      and returns the displaced background drain handle (if any). *)
+  val take_drain_cancel : t -> Eio.Cancel.t option
 end

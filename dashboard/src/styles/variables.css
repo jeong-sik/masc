@@ -638,44 +638,17 @@ html:not([data-theme="paper"]) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   DARK FANTASY palette application (foundation sweep, 2026-06)
+   DARK FANTASY type restore (foundation sweep, 2026-06)
 
-   The raw token tier (tokens.generated.css @theme + tokens.css) and the
-   v5 "Pretendard neutral sans" decision stay in place as the brass canon.
-   This block is the active theme override: it re-points the surface
-   primitives to the _ds Dark-Fantasy palette and restores the engraved
-   display / warm body type stacks. It is the LAST :root in the foundation
-   load order (after tokens.generated.css, tokens.css), so it wins for
-   every var(--color-*) / var(--font-display|body) consumer — and the whole
-   chain (--color-bg-page 170×, --bg-deep 33×, --bg-0 27×, the color-mix
-   shells) bottoms out here.
-
-   WORKAROUND scope: an override layer is used (not a generated-file edit)
-   because tokens.generated.* is @generated and locked by the tokens-drift
-   CI gate (Gate 3), and its generator (design-system/tokens/build.ts) is
-   absent in-tree. The 8 baked Tailwind utilities (bg-bg-0 / bg-bg-1) keep
-   #0c0b08 / #141210 — within ~2 hex of the dark-fantasy bg, visually
-   identical. Root fix: restore build.ts and regenerate from source.ts.
+   The surface/text/accent palette is owned by v2-theme.css (the last-loading
+   theme bridge); this block only restores the engraved display / warm book
+   body type stacks that the v5 "Pretendard neutral sans" default (tokens.css)
+   and a keeper-v2 font bridge had erased. Chrome/UI stays sans (--font-sans,
+   --font-ui) for data density; headings/KPIs opt into --font-display (Cinzel),
+   narrative into --font-body (EB Garamond). Placed last so it wins over
+   tokens.css's --font-display: var(--font-sans).
    ══════════════════════════════════════════════════════════════ */
 :root {
-  /* Surfaces — wet stone / blood-soaked wood (source: _ds colors_and_type.css) */
-  --color-bg-0: #0a0706;   /* page bg — pitch with a red undertone */
-  --color-bg-1: #14100d;   /* topbar / composer — rotted wood */
-  --color-bg-2: #1b1612;   /* panel surface — card base */
-  --color-bg-3: #221815;   /* elevated card — bruised meat */
-  --color-bg-4: #2e211c;   /* hover / active row */
-  /* Hairlines — scabbed, stitched leather */
-  --color-line-1: #2a1a14; /* default border */
-  --color-line-2: #5a3028; /* emphasized border — scab / raw wound */
-  --color-line-3: #3a2419; /* divider between zones */
-  /* Text — bone and bandage, never pure white */
-  --color-fg-1: #e8d8b8;   /* primary — clean bone */
-  --color-fg-2: #b8a488;   /* secondary — dirty bandage */
-  --color-fg-3: #6a5848;   /* tertiary / labels — mold dust */
-  --color-fg-4: #4a3a30;   /* disabled / placeholder */
-
-  /* Engraved display + warm book body restored over the v5 sans default.
-     Chrome/UI stays sans (--font-sans, --font-ui) for data density. */
   --font-display: "Cinzel", "Noto Sans KR", "EB Garamond", serif;
   --font-body: "EB Garamond", "Noto Sans KR", Georgia, serif;
 }

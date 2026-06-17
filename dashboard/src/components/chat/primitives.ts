@@ -11,6 +11,7 @@ const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
+import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
 import type { ToolCallOutputBlob } from '../../api/dashboard'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
@@ -208,6 +209,446 @@ function attachmentMeta(attachment: KeeperConversationAttachment): string {
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
 }
 
+// --- Keeper v2 rich block helpers -------------------------------------------------
+
+function linkifyHtml(raw: string): string {
+  if (!raw || raw.indexOf('http') === -1 || raw.indexOf('<a ') !== -1) return raw
+  return raw.replace(
+    /(^|[\s(>])(https?:\/\/[^\s<)]+[^\s<).,!?:;])/g,
+    '$1<a class="inline-link" href="$2" target="_blank" rel="noopener noreferrer">$2</a>',
+  )
+}
+
+function sanitizeHtml(raw: string): string {
+  return DOMPurify.sanitize(raw)
+}
+
+function renderInlineHtml(raw: string): { __html: string } {
+  return { __html: sanitizeHtml(linkifyHtml(raw)) }
+}
+
+function highlightJson(obj: unknown): string {
+  const s = JSON.stringify(obj, null, 2)
+  return sanitizeHtml(
+    s
+      .replace(/("[^"]+"):/g, '<span class="chat-json-key">$1</span>:')
+      .replace(/: ("[^"]*")/g, ': <span class="chat-json-str">$1</span>'),
+  )
+}
+
+function traceDur(trace: ChatTraceStep[]): string | null {
+  let sum = 0
+  let has = false
+  trace.forEach((st) => {
+    if (st.kind !== 'tool') return
+    const m = st.dur?.match(/([\d.]+)s/)
+    if (m?.[1]) {
+      sum += parseFloat(m[1])
+      has = true
+    }
+  })
+  return has ? `${Math.round(sum * 10) / 10}s` : null
+}
+
+function ChatTextBlock({ html: htmlContent }: { html: string }) {
+  return html`<p class="mb-2 text-base leading-airy text-[var(--color-fg-primary)]" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
+}
+
+function ChatHeadingBlock({ html: htmlContent }: { html: string }) {
+  return html`<h4 class="mb-1 mt-2 text-sm font-semibold text-[var(--color-fg-secondary)]" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
+}
+
+function ChatListBlock({ items }: { items: string[] }) {
+  return html`
+    <ul class="my-1 list-disc pl-5 text-base leading-airy text-[var(--color-fg-primary)]">
+      ${items.map((it, i) => html`<li key=${i} dangerouslySetInnerHTML=${renderInlineHtml(it)} />`)}
+    </ul>
+  `
+}
+
+function ChatCalloutBlock({ severity = 'warn', html: htmlContent }: ChatCalloutBlock) {
+  const icon = severity === 'bad' ? '✕' : severity === 'info' ? 'ℹ' : '⚠'
+  return html`
+    <div class="chat-block-callout ${severity}" data-chat-block="callout">
+      <span class="shrink-0">${icon}</span>
+      <span class="min-w-0" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />
+    </div>
+  `
+}
+
+function ChatTableBlock({ head, rows }: ChatTableBlock) {
+  const cell = (c: ChatTableBlock['head'][number]) => (typeof c === 'object' ? c : { v: c })
+  return html`
+    <table class="chat-block-table" data-chat-block="table">
+      <thead>
+        <tr>
+          ${head.map((h, i) => {
+            const c = cell(h)
+            return html`<th key=${i} class=${c.num ? 'chat-block-cell-num' : ''}>${c.v}</th>`
+          })}
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((row, ri) => html`
+          <tr key=${ri}>
+            ${row.map((c0, ci) => {
+              const c = cell(c0)
+              return html`<td key=${ci} class="${c.num ? 'chat-block-cell-num' : ''} ${c.muted ? 'chat-block-cell-muted' : ''}">${c.v}</td>`
+            })}
+          </tr>
+        `)}
+      </tbody>
+    </table>
+  `
+}
+
+function ChatCodeBlock({ cap, html: htmlContent }: { cap?: string; html: string }) {
+  return html`
+    <div class="chat-block-code" data-chat-block="code">
+      ${cap ? html`<div class="chat-block-code-cap">${cap}</div>` : null}
+      <pre class="m-0 overflow-x-auto p-3 text-2xs leading-relaxed"><code dangerouslySetInnerHTML=${{ __html: sanitizeHtml(htmlContent) }} /></pre>
+    </div>
+  `
+}
+
+function ChatShellBlock({ title, lines, exit, dur }: ChatShellBlock) {
+  return html`
+    <div class="chat-block-shell" data-chat-block="shell">
+      <div class="chat-block-shell-bar">
+        <span class="chat-block-shell-dot r"></span>
+        <span class="chat-block-shell-dot y"></span>
+        <span class="chat-block-shell-dot g"></span>
+        <span class="chat-block-shell-title">${title || 'keeper@worktree'}</span>
+      </div>
+      <pre class="m-0 p-3 text-2xs leading-relaxed">
+        ${lines.map((ln, i) => html`
+          <div key=${i} class="chat-block-shell-line ${ln.t || ''}">
+            ${ln.t === 'cmd' ? html`<span class="chat-block-shell-prompt">$ </span>` : null}
+            <span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(ln.v) }} />
+          </div>
+        `)}
+      </pre>
+      ${typeof exit === 'number'
+        ? html`<div class="chat-block-shell-exit ${exit === 0 ? 'ok' : 'fail'}">exit ${exit}${dur ? ` · ${dur}` : ''}</div>`
+        : null}
+    </div>
+  `
+}
+
+function ChatArtifactBlock({ kind, name, size, note }: { kind?: string; name: string; size?: string; note?: string }) {
+  const icon = kind === 'md' ? '⌹' : kind === 'svg' ? '◫' : kind === 'json' ? '{ }' : '⎙'
+  return html`
+    <div class="chat-block-artifact" data-chat-block="artifact">
+      <span class="chat-block-artifact-icon">${icon}</span>
+      <div class="min-w-0 flex-1">
+        <div class="chat-block-artifact-name">${name}</div>
+        <div class="chat-block-artifact-sub">
+          ${(kind || 'file').toUpperCase()}${size ? ` · ${size}` : ''}${note ? ` · ${note}` : ''}
+        </div>
+      </div>
+      <button type="button" class="chat-block-artifact-btn" aria-label="열기">열기</button>
+      <button type="button" class="chat-block-artifact-btn" aria-label="다운로드">다운로드</button>
+    </div>
+  `
+}
+
+function ChatAttachBlock({ name, dims, svg, ph, via, size }: { name: string; dims?: string; svg?: string; ph?: string; via?: string; size?: string }) {
+  return html`
+    <figure class="chat-block-attach" data-chat-block="attach">
+      <div class="chat-block-attach-hd">
+        <span>◫</span>
+        <span class="chat-block-attach-name">${name}</span>
+        ${dims ? html`<span class="chat-block-attach-dims">${dims}</span>` : null}
+      </div>
+      <div class="chat-block-attach-frame">
+        ${svg
+          ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
+          : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}</div>`}
+      </div>
+      <figcaption class="chat-block-attach-cap">
+        <span>이미지 첨부</span>${via ? ` · ${via}` : ''}${size ? ` · ${size}` : ''}
+      </figcaption>
+    </figure>
+  `
+}
+
+function ChatVoiceBlock(b: ChatVoiceBlock) {
+  const secs = b.secs ?? 14
+  const [playing, setPlaying] = useState(false)
+  const [prog, setProg] = useState(0)
+
+  useEffect(() => {
+    if (!playing) return
+    const start = performance.now() - prog * secs * 1000
+    let raf = 0
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - start) / (secs * 1000))
+      setProg(p)
+      if (p >= 1) {
+        setPlaying(false)
+        return
+      }
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [playing])
+
+  const toggle = () => {
+    if (prog >= 1) setProg(0)
+    setPlaying((p) => !p)
+  }
+
+  const bars = b.wave ?? []
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}`
+  const shown = playing || prog > 0 ? prog * secs : secs
+
+  return html`
+    <div class="chat-block-voice" data-chat-block="voice">
+      <div class="chat-block-voice-row">
+        <button type="button" class="chat-block-voice-play ${playing ? 'on' : ''}" onClick=${toggle} aria-label=${playing ? '일시정지' : '재생'}>
+          ${playing ? '❙❙' : '▶'}
+        </button>
+        <div class="chat-block-voice-wave">
+          ${bars.map((h, i) => html`
+            <span
+              key=${i}
+              class="chat-block-vbar ${(i + 0.5) / bars.length <= prog ? 'on' : ''}"
+              style=${{ height: `${Math.round(5 + h * 21)}px` }}
+            />
+          `)}
+        </div>
+        <span class="chat-block-voice-dur">${fmt(shown)}</span>
+      </div>
+      ${b.via || b.size
+        ? html`
+            <div class="chat-block-voice-meta">
+              ${b.via ? html`<span>◌ ${b.via}</span>` : null}
+              ${b.size ? html`<span>${b.size}</span>` : null}
+            </div>
+          `
+        : null}
+      ${b.transcript
+        ? html`
+            <div class="chat-block-voice-tx">
+              <span>받아쓰기</span>
+              <span>${b.transcript}</span>
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
+  return html`
+    <figure class="chat-block-media" data-chat-block="image">
+      <div class="chat-block-media-frame">
+        ${src
+          ? html`<img src=${src} alt=${cap || ''} class="max-h-52 w-full rounded-[var(--r-1)] object-contain" />`
+          : html`<div class="chat-block-media-ph">${ph || '실행 화면'}</div>`}
+      </div>
+      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+    </figure>
+  `
+}
+
+function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
+  return html`
+    <figure class="chat-block-media" data-chat-block="svg">
+      <div class="chat-block-media-frame" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />
+      ${cap ? html`<figcaption class="chat-block-media-cap">${cap}</figcaption>` : null}
+    </figure>
+  `
+}
+
+function ChatTraceStep({ step }: { step: ChatTraceStep }) {
+  const [open, setOpen] = useState(false)
+
+  if (step.kind === 'think') {
+    return html`
+      <div class="chat-block-tstep think" data-chat-trace-step="think">
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <div class="chat-block-tstep-row">
+            <span class="chat-block-tstep-kind">Thinking</span>
+            <span>${step.text}</span>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  if (step.kind === 'reason') {
+    const exp = !!step.detail
+    return html`
+      <div class="chat-block-tstep reason ${open ? 'exp' : ''}" data-chat-trace-step="reason">
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <div class="chat-block-tstep-row ${exp ? 'click' : ''}" onClick=${() => { if (exp) setOpen((o) => !o) }}>
+            <span class="chat-block-tstep-kind">Reasoning</span>
+            <span class="chat-block-tstep-text" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.text) }} />
+            ${exp ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
+          </div>
+          ${exp && open
+            ? html`<div class="chat-block-reason-detail" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.detail ?? '') }} />`
+            : null}
+        </div>
+      </div>
+    `
+  }
+
+  return html`
+    <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
+      <span class="chat-block-tnode"></span>
+      <div class="min-w-0 flex-1">
+        <div class="chat-block-tstep-row click" onClick=${() => setOpen((o) => !o)}>
+          <span class="chat-block-tstep-kind">Tool</span>
+          <span class="chat-block-tstep-name">${step.name}</span>
+          <span class="chat-block-tstep-status ${step.status === 'ok' ? 'ok' : 'bad'}"></span>
+          <span class="chat-block-tstep-dur">${step.dur}</span>
+          <span class="chat-block-tstep-chev">▶</span>
+        </div>
+        ${open
+          ? html`
+              <div class="chat-block-tool-body">
+                ${step.args !== undefined
+                  ? html`
+                      <div class="chat-block-tool-label">args</div>
+                      <pre class="m-0 overflow-x-auto text-2xs" dangerouslySetInnerHTML=${{ __html: highlightJson(step.args) }} />
+                    `
+                  : null}
+                ${step.result !== undefined
+                  ? html`
+                      <div class="chat-block-tool-label">result</div>
+                      <pre class="m-0 overflow-x-auto text-2xs" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(step.result) }} />
+                    `
+                  : null}
+              </div>
+            `
+          : null}
+      </div>
+    </div>
+  `
+}
+
+function ChatTraceBlock({ trace }: { trace: ChatTraceStep[] }) {
+  const [open, setOpen] = useState(true)
+  const toolN = trace.filter((s) => s.kind === 'tool').length
+  const dur = traceDur(trace)
+
+  return html`
+    <div class="chat-block-trace ${open ? 'open' : ''}" data-chat-block="trace">
+      <button
+        type="button"
+        class="chat-block-trace-hd"
+        onClick=${() => setOpen((o) => !o)}
+        aria-expanded=${open}
+      >
+        <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
+        <span>◈</span>
+        <span class="chat-block-trace-label">작업 과정</span>
+        <span class="chat-block-trace-count">${trace.length}단계</span>
+        <span class="chat-block-trace-meta">
+          ${toolN > 0 ? html`<span>도구 ${toolN}</span>` : null}
+          ${dur ? html`<span class="tnum">${dur}</span>` : null}
+        </span>
+      </button>
+      ${open
+        ? html`
+            <div class="chat-block-trace-steps">
+              <span class="chat-block-trace-rail"></span>
+              ${trace.map((s, i) => html`<${ChatTraceStep} key=${i} step=${s} />`)}
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
+function ChatLinkBlock(b: ChatLinkBlock) {
+  let host = b.meta
+  try {
+    host = new URL(b.url).hostname.replace(/^www\./, '')
+  } catch {
+    host = b.meta
+  }
+  return html`
+    <a
+      class="chat-block-linkcard ${b.kind || ''}"
+      href=${b.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      data-chat-block="link"
+    >
+      <span class="chat-block-linkcard-fav">${b.fav || (host ? host.slice(0, 1).toUpperCase() : '↗')}</span>
+      <span class="chat-block-linkcard-body">
+        <span class="chat-block-linkcard-title">${b.title}</span>
+        ${b.desc ? html`<span class="chat-block-linkcard-desc">${b.desc}</span>` : null}
+        <span class="chat-block-linkcard-meta">${b.meta || host}</span>
+      </span>
+      <span class="chat-block-linkcard-go">↗</span>
+    </a>
+  `
+}
+
+const BROADCAST_ACK_LABEL: Record<string, string> = { acked: '확인함', read: '읽음', delivered: '전달됨' }
+
+function ChatBroadcastBlock(b: ChatBroadcastBlock) {
+  const ackN = b.recipients.filter((r) => r.ack === 'acked').length
+  return html`
+    <div class="chat-block-broadcast" data-chat-block="broadcast">
+      <div class="chat-block-broadcast-hd">
+        <span>⊚ 브로드캐스트</span>
+        <span class="chat-block-broadcast-scope">${b.scope}</span>
+        <span class="chat-block-broadcast-via">${b.via}</span>
+        <span class="chat-block-broadcast-count">${ackN}/${b.recipients.length} 확인</span>
+      </div>
+      <div class="chat-block-broadcast-note">${b.note}</div>
+      <div class="chat-block-broadcast-rcpts">
+        ${b.recipients.map((r, i) => html`
+          <div key=${i} class="chat-block-broadcast-rcpt ${r.ack}">
+            <span class="chat-block-broadcast-avatar">${r.id.slice(0, 2).toUpperCase()}</span>
+            <span class="chat-block-broadcast-id">${r.id}</span>
+            <span class="chat-block-broadcast-ack">
+              ${BROADCAST_ACK_LABEL[r.ack] || r.ack}${r.at ? ` · ${r.at}` : ''}
+            </span>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function ChatBlock({ block }: { block: ChatBlock }) {
+  switch (block.t) {
+    case 'p': return html`<${ChatTextBlock} html=${block.html} />`
+    case 'h4': return html`<${ChatHeadingBlock} html=${block.html} />`
+    case 'ul': return html`<${ChatListBlock} items=${block.items} />`
+    case 'callout': return html`<${ChatCalloutBlock} severity=${block.severity} html=${block.html} />`
+    case 'table': return html`<${ChatTableBlock} head=${block.head} rows=${block.rows} />`
+    case 'code': return html`<${ChatCodeBlock} cap=${block.cap} html=${block.html} />`
+    case 'shell': return html`<${ChatShellBlock} title=${block.title} lines=${block.lines} exit=${block.exit} dur=${block.dur} />`
+    case 'artifact': return html`<${ChatArtifactBlock} kind=${block.kind} name=${block.name} size=${block.size} note=${block.note} />`
+    case 'attach': return html`<${ChatAttachBlock} name=${block.name} dims=${block.dims} svg=${block.svg} ph=${block.ph} via=${block.via} size=${block.size} />`
+    case 'voice': return html`<${ChatVoiceBlock} secs=${block.secs} wave=${block.wave} via=${block.via} size=${block.size} transcript=${block.transcript} />`
+    case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
+    case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
+    case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
+    case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
+    case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
+    default: return null
+  }
+}
+
+function ChatBlocks({ blocks }: { blocks: ChatBlock[] }) {
+  return html`
+    <div class="flex flex-col gap-3" data-chat-blocks>
+      ${blocks.map((b, i) => html`<${ChatBlock} key=${i} block=${b} />`)}
+    </div>
+  `
+}
+
 function LiveMessagePlaceholder({ label }: { label: string }) {
   return html`
     <div
@@ -322,11 +763,12 @@ function ChatMessageBubble({
   const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
+  const hasBlocks = entry.blocks && entry.blocks.length > 0
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
   const collapseThreshold = 1200
-  const isCollapsible = messageLength > collapseThreshold
+  const isCollapsible = !hasBlocks && messageLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -486,15 +928,19 @@ function ChatMessageBubble({
       ${liveLabel
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
-            <div
-              class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
-              dangerouslySetInnerHTML=${{
-                __html: DOMPurify.sanitize(
-                  marked.parse(messageText) as string,
-                  { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
-                )
-              }}
-            />
+            ${hasBlocks
+              ? html`<${ChatBlocks} blocks=${entry.blocks!} />`
+              : html`
+                  <div
+                    class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+                    dangerouslySetInnerHTML=${{
+                      __html: DOMPurify.sanitize(
+                        marked.parse(messageText) as string,
+                        { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
+                      )
+                    }}
+                  />
+                `}
             ${entry.delivery === 'streaming'
               ? html`<span class="inline-block ml-0.5 animate-pulse text-[var(--color-status-info)]" aria-hidden="true">▍</span>`
               : null}

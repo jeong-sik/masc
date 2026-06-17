@@ -47,28 +47,18 @@ let dominant_cohort cohorts =
 ;;
 
 let update_suppression_streak dominant_key =
-  let rec loop () =
-    let current = Atomic.get escape_state in
-    let next =
-      if String.equal current.last_dominant_cohort dominant_key
-      then
-        { current with
-          consecutive_suppressions = current.consecutive_suppressions + 1
-        }
-      else { last_dominant_cohort = dominant_key; consecutive_suppressions = 1 }
-    in
-    if not (Atomic.compare_and_set escape_state current next) then loop ()
-  in
-  loop ()
+  Atomic_util.update escape_state (fun current ->
+    if String.equal current.last_dominant_cohort dominant_key
+    then
+      { current with
+        consecutive_suppressions = current.consecutive_suppressions + 1
+      }
+    else { last_dominant_cohort = dominant_key; consecutive_suppressions = 1 })
 ;;
 
 let reset_suppression_streak () =
-  let rec loop () =
-    let current = Atomic.get escape_state in
-    let next = { current with consecutive_suppressions = 0 } in
-    if not (Atomic.compare_and_set escape_state current next) then loop ()
-  in
-  loop ()
+  Atomic_util.update escape_state (fun current ->
+    { current with consecutive_suppressions = 0 })
 ;;
 
 let publish_suppression

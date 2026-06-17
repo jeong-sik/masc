@@ -1,5 +1,5 @@
 (* Fusion — 심의 결과 가시화 (구현).
-   계약/문서: fusion_sink.mli, docs/rfc/RFC-0252 §8 *)
+   계약/문서: fusion_sink.mli, docs/rfc/RFC-0255 §8 *)
 
 let render_decision (d : Fusion_types.judge_decision) : string =
   match d with
@@ -113,7 +113,7 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
     (unit, string) result =
   try
-    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
+    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0255 §8 개정).
        상세 트랜스크립트(패널 답변 N개)는 아래 board post 증거로만 남기고, 키퍼 chat
        lane에는 judge 결론(decision + resolved_answer)만 키퍼 *메인* conversation
        (conversation_id 생략)에 append한다. → 키퍼 observation(recent_direct_conversation)이
@@ -171,7 +171,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
          ~ttl_hours:board_post_ttl_hours ()
      with
-     | Ok () -> Ok ()
+     | Ok _post -> Ok ()
      | Error e -> Error (Board.show_board_error e))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

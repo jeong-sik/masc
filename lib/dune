@@ -551,7 +551,7 @@
   ;; Parse_outcome — RFC-0145 canonical helper for parse-with-failure
   ;; boundaries (replaces silent [try ... with _ -> None] pattern).
   masc.parse_outcome
-  ;; RFC-0252 — Fusion panel+judge deliberation pure core (types, gate, config,
+  ;; RFC-0255 — Fusion panel+judge deliberation pure core (types, gate, config,
   ;; judge JSON parse). lib/fusion/ (OAS-calling glue) lives in this main lib.
   masc.fusion_core)
  (preprocess

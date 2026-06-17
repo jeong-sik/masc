@@ -6,7 +6,7 @@
     native structured output을 보장하지 않는다. 일반 실행 + tolerant 파서는 모든
     provider에서 작동한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §7.2 *)
 
 (** 질문 + 패널 답들로 심판 프롬프트를 구성한다
     ({!Fusion_judge_parse.expected_json_doc} 지시 포함). 순수 — 테스트 가능. *)

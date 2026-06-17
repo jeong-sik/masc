@@ -1,5 +1,5 @@
 (* Fusion — runtime.toml [fusion] 파싱 (구현).
-   계약/문서: fusion_config.mli, docs/rfc/RFC-0252 §9 *)
+   계약/문서: fusion_config.mli, docs/rfc/RFC-0255 §9 *)
 
 type config_error =
   | Empty_presets

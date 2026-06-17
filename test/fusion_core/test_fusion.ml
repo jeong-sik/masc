@@ -1,4 +1,4 @@
-(* Standalone alcotest for the pure fusion core (RFC-0252 §6/§9/§10).
+(* Standalone alcotest for the pure fusion core (RFC-0255 §6/§9/§10).
    Proves: deterministic gate branches, TOML config validation, depth guard,
    atomic budget check-and-increment. *)
 
@@ -34,7 +34,7 @@ let decide ?(policy = base_policy) r = Fusion_policy.decide ~policy r
 
 let ok_int = Alcotest.result Alcotest.int Alcotest.unit
 
-(* --- gate branches (RFC-0252 §6) --- *)
+(* --- gate branches (RFC-0255 §6) --- *)
 
 let test_disabled () =
   let policy = { base_policy with Fusion_policy.enabled = false } in
@@ -58,7 +58,7 @@ let test_low_confidence_trigger_allowed () =
   Alcotest.check gate "low_confidence label -> allow" (Allow r) (decide r)
 
 let test_high_stakes_trigger_allowed () =
-  let r = req ~trigger:(High_stakes "anything") () in
+  let r = req ~trigger:High_stakes () in
   Alcotest.check gate "high_stakes label -> allow" (Allow r) (decide r)
 
 let test_allow () =
@@ -73,7 +73,7 @@ let test_explicit_still_budget_bound () =
     (Error ())
     (Fusion_budget.try_incr_if_under b ~hour_bucket:"H1" ~limit:0)
 
-(* --- config (RFC-0252 §9) --- *)
+(* --- config (RFC-0255 §9) --- *)
 
 let parse s = Otoml.Parser.from_string s
 
@@ -324,7 +324,7 @@ let test_config_disabled_with_preset () =
     Alcotest.failf "seed [fusion] must parse, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
 
-(* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
+(* --- judge LLM-facing JSON parse (RFC-0255 §7.2) --- *)
 
 let jdecision = Alcotest.testable pp_judge_decision equal_judge_decision
 
@@ -408,7 +408,7 @@ let test_judge_tolerant_skip () =
   | Ok js -> Alcotest.(check int) "tolerant consensus" 1 (List.length js.consensus)
   | Error e -> Alcotest.failf "expected Ok, got %s" e
 
-(* --- budget counter (RFC-0252 §6/§10) --- *)
+(* --- budget counter (RFC-0255 §6/§10) --- *)
 
 let ok_or_fail = function Ok n -> n | Error () -> Alcotest.fail "expected Ok"
 

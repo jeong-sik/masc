@@ -1,4 +1,4 @@
-# RFC-0252 — Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장)
+# RFC-0255 — Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장)
 
 - Status: Draft
 - Author: Vincent (yousleepwhen) + Claude
@@ -119,12 +119,14 @@ type judge_synthesis =
   }
 
 (* 게이트 입력 — 발동 이유 라벨, catch-all 없음. 게이트는 종류로 적격성을 판정하지
-   않는다(심의 가치는 키퍼=LLM 판단). score/task_kind 매칭 페이로드를 두지 않는다. *)
+   않는다(심의 가치는 키퍼=LLM 판단). score/task_kind 매칭 페이로드는 제거했고,
+   High_stakes/Contested_board도 unit 라벨만 남긴다(문자열 payload는 sink/board에
+   노출되지 않아 dead payload였음). *)
 type fusion_trigger =
   | Explicit_tool_call                              (* 키퍼가 masc_fusion을 직접 호출 *)
   | Low_confidence                                  (* 키퍼가 자기 확신이 낮다고 판단해 요청 *)
-  | High_stakes     of string                       (* 키퍼가 high-stakes로 판단한 task 설명 *)
-  | Contested_board of { post_id : string }
+  | High_stakes                                     (* 키퍼가 high-stakes로 판단해 요청 *)
+  | Contested_board                                 (* 보드 분쟁로 인해 요청 *)
   | Operator_requested
   | Harness_eval                                    (* eval 하네스가 결정론적으로 구동 *)
 
@@ -344,6 +346,7 @@ test/fusion/
 5. **action fusion(v2)**: 패널이 tool-call 제안 → 심판 선택·실행. tool-call consensus + side-effect atomicity 필요. 별도 RFC.
 6. **provider 동시성**: qwen36 max-concurrent=2 등 → `max_concurrent_panels`로 존중, 초과 패널은 queue.
 7. **`run_with_caller` vs `run_safe`**: v1은 string caller `run_safe`. 타입드 `Env_config_oas_bridge.caller` 변형 추가는 후속(해당 모듈 침습).
+8. **Stacked PR 취약성 / RFC 번호 충돌**: 본 기능은 #21339 → #21351 → #21425 순으로 쌓인 3단 스택에서 단일 PR(#21425)로 정리 중이다. masc에서는 base 브랜치가 `--delete-branch`로 머지되면 의존 PR이 retarget되지 않고 close될 수 있고, base가 `main`이 아니면 `branches:[main]` CI가 트리거되지 않는다. 따라서 머지 전 반드시 (a) fusion RFC 번호를 main의 `.next-number` 기준 최신 free number(RFC-0255)로 확정하고, (b) 의존 PR들을 닫거나 본 PR로 통합(retarget 대신 supersede)해야 한다. 본 문서의 번호는 main HEAD 기준 0255로 재배정됨.
 
 ---
 

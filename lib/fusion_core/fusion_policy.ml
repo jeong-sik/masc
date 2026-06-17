@@ -1,5 +1,5 @@
 (* Fusion — 결정론적 발동 게이트 (구현).
-   계약/문서: fusion_policy.mli, docs/rfc/RFC-0252 §6 *)
+   계약/문서: fusion_policy.mli, docs/rfc/RFC-0255 §6 *)
 
 type preset =
   { name : string
@@ -53,7 +53,7 @@ let find_preset (policy : t) name =
    (실패 시 호출자가 [Over_hourly_budget]로 Deny). decide는 enabled/preset/depth의
    구조적 판정만 담당한다 — "이 턴이 심의할 가치가 있나"는 게이트가 score 비교나
    문자열 매칭으로 판정하지 않고, 키퍼(이미 LLM)가 판단해 masc_fusion을 호출하는
-   것으로 표현한다(RFC-0252 §6). 따라서 [req.trigger]는 발동 이유 라벨일 뿐
+   것으로 표현한다(RFC-0255 §6). 따라서 [req.trigger]는 발동 이유 라벨일 뿐
    적격성 판정에 쓰이지 않으며, 남용은 [per_hour_budget] cap이 막는다. *)
 let decide ~(policy : t)
     (req : Fusion_types.fusion_request) : Fusion_types.gate_decision =

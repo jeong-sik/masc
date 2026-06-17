@@ -1,4 +1,4 @@
-(** Fusion — 심의 결과 가시화 (RFC-0252 §8, "결과를 키퍼 흐름에 녹이기" 개정).
+(** Fusion — 심의 결과 가시화 (RFC-0255 §8, "결과를 키퍼 흐름에 녹이기" 개정).
 
     judge 결론(decision + resolved_answer)을 요청 키퍼의 *메인* chat lane에 authored
     메시지로 한 줄 남기고 SSE 브로드캐스트한다 → 키퍼가 다음 턴 observation
@@ -11,7 +11,7 @@
     conversation을 필터하지 않아, 긴 패널 답변이 키퍼 [recent_direct_conversation]
     observation을 도배한다(§8.1 개정).
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §8 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §8 *)
 
 (** judge 결론을 키퍼 메인 chat lane에 남기고 board에 패널/심판 구조화 증거를 post한다.
 

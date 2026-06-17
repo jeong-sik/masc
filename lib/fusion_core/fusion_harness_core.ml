@@ -1,5 +1,5 @@
 (* Fusion 하네스 — self-consistency 다수결 집계 (구현).
-   계약/문서: fusion_harness_core.mli, docs/rfc/RFC-0252 §11.
+   계약/문서: fusion_harness_core.mli, docs/rfc/RFC-0255 §11.
 
    채점·전략 우열은 judge(LLM 판단)가 한다. 결정론 string 매칭 채점은 표현 변이를
    못 잡고 심의 가치를 단답 정답률로 환원하는 어거지라 두지 않는다. 판단이 불필요한

@@ -7,14 +7,14 @@
     이 모듈은 순수 데이터 타입만 담는다: OAS·키퍼·보드 의존 0, 독립 컴파일 가능.
     fan-out(패널), 구조화 출력(심판), 게이트, 가시성은 별도 모듈이 이 타입을 소비한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md
 
     @stability Evolving *)
 
 (** {1 토큰 사용량} *)
 
 (** 단일 완성의 토큰 사용량. fusion은 패널 N + 심판 1 완성을 합산해 비용을
-    회계한다 (RFC-0252 §10). 외부 usage 타입에 결합하지 않도록 자체 정의한다. *)
+    회계한다 (RFC-0255 §10). 외부 usage 타입에 결합하지 않도록 자체 정의한다. *)
 type usage =
   { input_tokens : int
   ; output_tokens : int
@@ -30,7 +30,7 @@ val add_usage : usage -> usage -> usage
 (** {1 재귀 가드} *)
 
 (** 심의 깊이. OpenRouter의 [x-openrouter-fusion-depth] 헤더에 대응하는 타입드
-    가드. 패널/심판은 fusion을 다시 못 부른다 — 1단계로 제한 (RFC-0252 §10). *)
+    가드. 패널/심판은 fusion을 다시 못 부른다 — 1단계로 제한 (RFC-0255 §10). *)
 module Fusion_depth : sig
   type t =
     | Top  (** 키퍼/오퍼레이터가 시작한 최상위 심의 *)
@@ -143,7 +143,7 @@ type judge_synthesis =
 
 (** fusion 발동 사유 — 게이트 입력(이유 라벨). catch-all 없음.
 
-    게이트는 trigger의 *종류*로 심의 가치를 판정하지 않는다(RFC-0252 §6).
+    게이트는 trigger의 *종류*로 심의 가치를 판정하지 않는다(RFC-0255 §6).
     "이 결정이 심의할 가치가 있나"는 키퍼(이미 LLM)가 스스로 판단해 masc_fusion을
     호출하는 것으로 표현되고, 게이트는 구조적 안전(enabled/preset/depth/
     per_hour_budget cap)만 본다. 따라서 각 변형은 score 비교·문자열 매칭 대상이
@@ -151,8 +151,8 @@ type judge_synthesis =
 type fusion_trigger =
   | Explicit_tool_call  (** 키퍼가 masc_fusion을 직접 호출 *)
   | Low_confidence  (** 키퍼가 자기 답의 확신이 낮다고 *판단*해 요청 *)
-  | High_stakes of string  (** 키퍼가 high-stakes로 판단한 task 설명 (라벨) *)
-  | Contested_board of string  (** post_id — 보드에서 다툼 *)
+  | High_stakes  (** 키퍼가 high-stakes로 판단해 요청 (라벨; payload는 미노출) *)
+  | Contested_board  (** 보드 분쟁로 인해 요청 (라벨; payload는 미노출) *)
   | Operator_requested
   | Harness_eval  (** eval 하네스가 결정론적으로 구동 *)
 [@@deriving yojson, show, eq]

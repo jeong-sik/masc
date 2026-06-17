@@ -179,7 +179,7 @@ nick0cave = "ollama.gemma4-26b-a4b-qat"
 [discord]
 trigger_policy = "mention_or_thread"
 
-# ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
+# ── Fusion 패널+심판 심의 (RFC-0255) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 기본 OFF (opt-in).
 # [fusion] 섹션이 없거나 enabled=false면 masc_fusion 호출은 게이트에서
 # Deny로 즉시 반환되고 모델을 호출하지 않는다.
@@ -195,7 +195,7 @@ max_concurrent_panels = 2
 [fusion.gate]
 # 구조적 자원 cap만 둔다. "이 턴이 심의할 가치가 있나"는 게이트가 score 비교나
 # 문자열 매칭으로 판정하지 않는다 — 키퍼(이미 LLM)가 masc_fusion 호출로 판단하고,
-# 게이트는 발동 남용만 막는다 (RFC-0252 §6). 시간당 최대 발동 횟수 (UTC hour bucket).
+# 게이트는 발동 남용만 막는다 (RFC-0255 §6). 시간당 최대 발동 횟수 (UTC hour bucket).
 per_hour_budget = 20
 
 # 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.

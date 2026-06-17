@@ -1,5 +1,5 @@
 (* Fusion — 패널+심판 심의 루프의 타입드 계약 (구현).
-   계약/문서: fusion_types.mli, docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md *)
+   계약/문서: fusion_types.mli, docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md *)
 
 type usage =
   { input_tokens : int
@@ -105,8 +105,8 @@ type judge_synthesis =
 type fusion_trigger =
   | Explicit_tool_call
   | Low_confidence
-  | High_stakes of string
-  | Contested_board of string
+  | High_stakes
+  | Contested_board
   | Operator_requested
   | Harness_eval
 [@@deriving yojson, show, eq]
@@ -114,8 +114,8 @@ type fusion_trigger =
 let trigger_label = function
   | Explicit_tool_call -> "explicit_tool_call"
   | Low_confidence -> "low_confidence"
-  | High_stakes _ -> "high_stakes"
-  | Contested_board _ -> "contested_board"
+  | High_stakes -> "high_stakes"
+  | Contested_board -> "contested_board"
   | Operator_requested -> "operator_requested"
   | Harness_eval -> "harness_eval"
 

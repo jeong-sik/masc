@@ -7,7 +7,7 @@
     결정론으로 제공한다(같은 답이 몇 번 나왔나를 세는 것 = 판단이 아니라 집계).
     토큰 비용 실측은 {!Fusion_types.add_usage}로, 채점·전략 우열은 judge가 담당한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §11 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §11 *)
 
 (** 다수결 집계 (self-consistency) — 결정론. 정규화(trim + lowercase + 내부 공백
     1칸 축약) 키로 최빈 답을 고르고, 동률이면 입력에서 먼저 등장한 답의 원문을

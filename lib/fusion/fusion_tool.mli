@@ -3,12 +3,12 @@
     키퍼 dispatch arm(lib/keeper)이 이 [handle]을 호출한다. 배선(descriptor/schema/
     typed match arm)은 키퍼 쪽에 얇게 두고, 게이트·예산·fiber fork 로직은 여기 둔다.
 
-    동작(RFC-0252 §4): args에서 prompt/preset/web_tools를 typed 파싱 → 정책 게이트 판정
+    동작(RFC-0255 §4): args에서 prompt/preset/web_tools를 typed 파싱 → 정책 게이트 판정
     → [Allow]면 [Eio.Fiber.fork ~sw]로 out-of-band 심의를 띄우고 즉시 status JSON
     반환(키퍼는 막히지 않음). [Deny]면 fiber 없이 사유를 즉시 반환(예산 미소모).
     시간당 예산은 orchestrator가 원자적으로 소비한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §4/§6 *)
+    설계 SSOT: docs/rfc/RFC-0255-fusion-panel-judge-deliberation.md §4/§6 *)
 
 (** 서버 단일 시간당 예산 카운터. 키퍼 dispatch가 프로세스당 하나를 공유한다. *)
 val budget : Fusion_budget.t

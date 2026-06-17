@@ -1,5 +1,5 @@
 (* Fusion — OAS 호출 공유 글루 (구현).
-   계약/문서: fusion_oas.mli, docs/rfc/RFC-0252 §7
+   계약/문서: fusion_oas.mli, docs/rfc/RFC-0255 §7
 
    OAS 범용 함수만 소비: Runtime_oas_runner(id→provider) → Runtime_agent(build).
    fusion 개념은 OAS에 노출하지 않는다. *)

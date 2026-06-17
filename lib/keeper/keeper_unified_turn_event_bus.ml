@@ -7,12 +7,14 @@ type event_bus_state =
 
 type t =
   { keeper_name : string
+  ; turn_id : int
   ; event_bus_sub : Agent_sdk_metrics_bridge.handle option
   ; drain_cancel : Eio.Cancel.t option ref
   ; state : event_bus_state Atomic.t
+  ; pending_tool_count : int ref
   }
 
-let create ~keeper_name () =
+let create ~keeper_name ~turn_id () =
   let event_bus_sub =
     match Keeper_event_bus.get () with
     | Some bus ->
@@ -24,6 +26,7 @@ let create ~keeper_name () =
     | None -> None
   in
   { keeper_name
+  ; turn_id
   ; event_bus_sub
   ; drain_cancel = ref None
   ; state =
@@ -31,7 +34,56 @@ let create ~keeper_name () =
         { summary = Keeper_turn_runtime_budget.empty_turn_event_bus_summary
         ; tracker = Keeper_unified_turn_types.create_turn_tool_event_tracker ()
         }
+  ; pending_tool_count = ref 0
   }
+;;
+
+(* Emit Streaming⇄Awaiting_tool_result FSM transitions from OAS Event_bus
+   ToolCalled/ToolCompleted pairs. A pending-tool counter lets the FSM
+   reflect concurrent tool calls (we stay in Awaiting_tool_result until
+   the last pending call completes). The transition is guarded with
+   [Keeper_turn_fsm.assert_transition_allowed] so a late event that
+   arrives after the turn has already moved to a terminal state is
+   ignored rather than raising. *)
+let record_fsm_tool_transitions t events =
+  let safe_emit ~prev state =
+    match
+      Keeper_turn_fsm.assert_transition_allowed
+        ~from_state:prev
+        ~to_state:state
+        ()
+    with
+    | Ok _ ->
+      Keeper_turn_fsm.emit_transition
+        ~keeper_name:t.keeper_name
+        ~turn_id:t.turn_id
+        ~prev
+        state
+    | Error _ -> ()
+  in
+  List.iter
+    (fun (evt : Agent_sdk.Event_bus.event) ->
+       match evt.payload with
+       | Agent_sdk.Event_bus.ToolCalled _ ->
+         let prev = !(t.pending_tool_count) in
+         t.pending_tool_count := prev + 1;
+         if prev = 0
+         then
+           safe_emit
+             ~prev:Keeper_turn_fsm.Streaming
+             Keeper_turn_fsm.Awaiting_tool_result
+       | Agent_sdk.Event_bus.ToolCompleted _ ->
+         let prev = !(t.pending_tool_count) in
+         if prev > 0
+         then (
+           t.pending_tool_count := prev - 1;
+           if prev = 1
+           then
+             safe_emit
+               ~prev:Keeper_turn_fsm.Awaiting_tool_result
+               Keeper_turn_fsm.Streaming)
+       | _ -> ())
+    events
 ;;
 
 let drain ?(site = "unspecified") t =
@@ -45,6 +97,7 @@ let drain ?(site = "unspecified") t =
     Keeper_metrics.(to_string EventBusDrain)
     ~labels:[ "site", site; "outcome", outcome ]
     ();
+  record_fsm_tool_transitions t events;
   let rec update () =
     let old = Atomic.get t.state in
     let new_tracker =

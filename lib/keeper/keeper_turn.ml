@@ -167,6 +167,93 @@ let preflight_keeper_msg ctx args : (unit, string) result =
         | Ok () ->
           Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
 
+(* -- Direct-message turn FSM wrapper ---------------------------------------- *)
+
+(** Run a direct [masc_keeper_msg] turn with the same typed FSM transitions
+    emitted by the autonomous [Keeper_unified_turn.run_keeper_cycle] path.
+
+    Direct turns historically called [Keeper_agent_run.run_turn] directly,
+    which left them invisible to [Keeper_turn_fsm] telemetry and violated
+    the SSOT contract audited in
+    [docs/audit/2026-06-13-masc-fsm-drift-audit.md] (finding #3).  This
+    wrapper emits the canonical start sequence
+    [Idle -> Phase_gating -> Runtime_routing -> Awaiting_provider -> Streaming]
+    before invoking [f], then records the matching terminal state
+    ([Done], [Failed], or [Cancelled]) from the result or exception.
+
+    The wrapper is intentionally thin: it does not duplicate metrics,
+    receipt, or meta writes — those remain in
+    [run_keeper_msg_turn_admitted].  It only restores FSM observability so
+    direct and autonomous turns share the same state-machine read model. *)
+let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name
+    ~turn_id
+    ~prev:Keeper_turn_fsm.Idle
+    Keeper_turn_fsm.Phase_gating;
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name
+    ~turn_id
+    ~prev:Keeper_turn_fsm.Phase_gating
+    Keeper_turn_fsm.Runtime_routing;
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name
+    ~turn_id
+    ~prev:Keeper_turn_fsm.Runtime_routing
+    Keeper_turn_fsm.Awaiting_provider;
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name
+    ~turn_id
+    ~prev:Keeper_turn_fsm.Awaiting_provider
+    Keeper_turn_fsm.Streaming;
+  try
+    let result = f () in
+    (match result with
+     | Ok _ ->
+       Keeper_turn_fsm.emit_transition
+         ~keeper_name
+         ~turn_id
+         ~prev:Keeper_turn_fsm.Streaming
+         Keeper_turn_fsm.Completing;
+       Keeper_turn_fsm.emit_transition
+         ~keeper_name
+         ~turn_id
+         ~prev:Keeper_turn_fsm.Completing
+         Keeper_turn_fsm.Done
+     | Error err ->
+       let reason =
+         Keeper_turn_fsm.Failure_provider_error
+           { kind = Keeper_agent_error.sdk_error_kind err
+           ; detail = Agent_sdk.Error.to_string err
+           }
+       in
+       Keeper_turn_fsm.emit_transition
+         ~keeper_name
+         ~turn_id
+         ~prev:Keeper_turn_fsm.Streaming
+         (Keeper_turn_fsm.Failed reason));
+    result
+  with
+  | Eio.Cancel.Cancelled _ as e ->
+    (* Cooperative cancellation must be preserved and reflected as a
+       terminal [Cancelled] state, not swallowed as a successful completion.
+       See [KeeperTurnFSM.tla] [HonorStopSignal] and the audit finding #5. *)
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name
+      ~turn_id
+      ~prev:Keeper_turn_fsm.Streaming
+      (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop);
+    raise e
+  | exn ->
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name
+      ~turn_id
+      ~prev:Keeper_turn_fsm.Streaming
+      (Keeper_turn_fsm.Failed
+         (Keeper_turn_fsm.Failure_unexpected_exception
+            { exn = Printexc.to_string exn; backtrace = None }));
+    raise exn
+
 (* -- handle_keeper_msg: orchestrator ---------------------------------------- *)
 
 (* Body of [handle_keeper_msg], runnable only while holding the keeper's
@@ -235,6 +322,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
     | Ok meta0 ->
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in
+      let keeper_turn_id = meta0.runtime.usage.total_turns + 1 in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
       let meta = meta0 in
@@ -497,27 +585,31 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
             let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
             let run_result, latency_ms =
               Keeper_context_runtime.timed (fun () ->
-                  Keeper_agent_run.run_turn
-                    ~config:ctx.config ~meta ~turn_ctx_cell ~base_dir
-                    ~max_context:max_runtime_context
-                    ~build_turn_prompt
-                    ~user_message:message
-                    ~runtime_id:
-                      (                         (turn_runtime_id))
-                    ~world_observation
-                    ~turn_affordances
-                    (* A kmsg turn is user-triggered, i.e. reactive: it must
-                       use the reactive idle budget so the graduated idle hook
-                       (nudge -> final warning -> graceful Skip) can run its
-                       course before the OAS loop guard aborts the run. *)
-                    ~max_idle_turns:
-                      (Keeper_runtime_resolved.reactive_max_idle_turns ())
-                    ?oas_timeout_s:keeper_msg_oas_timeout_s
-                    ~generation:meta.runtime.generation
-                    ?on_event
-                    ~trajectory_acc
-                    ?event_bus:(Keeper_event_bus.get ())
-                    ())
+                  run_direct_turn_with_fsm
+                    ~keeper_name:meta.name
+                    ~turn_id:keeper_turn_id
+                    (fun () ->
+                       Keeper_agent_run.run_turn
+                         ~config:ctx.config ~meta ~turn_ctx_cell ~base_dir
+                         ~max_context:max_runtime_context
+                         ~build_turn_prompt
+                         ~user_message:message
+                         ~runtime_id:
+                           (                         (turn_runtime_id))
+                         ~world_observation
+                         ~turn_affordances
+                         (* A kmsg turn is user-triggered, i.e. reactive: it must
+                            use the reactive idle budget so the graduated idle hook
+                            (nudge -> final warning -> graceful Skip) can run its
+                            course before the OAS loop guard aborts the run. *)
+                         ~max_idle_turns:
+                           (Keeper_runtime_resolved.reactive_max_idle_turns ())
+                         ?oas_timeout_s:keeper_msg_oas_timeout_s
+                         ~generation:meta.runtime.generation
+                         ?on_event
+                         ~trajectory_acc
+                         ?event_bus:(Keeper_event_bus.get ())
+                         ()))
             in
             match run_result with
             | Error err ->

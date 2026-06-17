@@ -6,6 +6,10 @@
     + log on failure. No registry state touched. *)
 
 let composite_changed ~name ~ts_unix =
+  (* Signal-only freshness tick: name + timestamp. The authoritative read
+     model is the per-keeper composite HTTP endpoint; consumers must
+     re-fetch [/api/v1/keepers/:name/composite]. See
+     docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md §Read Model Rules. *)
   try
     let json =
       `Assoc

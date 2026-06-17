@@ -112,6 +112,10 @@ val update_status :
     runs {!validate_transition}, and on success rewrites the task
     list with the new status, bumping [version] and refreshing
     [last_updated] (ISO 8601 of the current monotonic time).
+    If [status] is terminal, the commit also clears any agent
+    [current_task] cache still pointing to [task_id] so the backlog
+    write and cache invalidation happen atomically in the same
+    transaction.
     Errors:
     - [TaskNotFound task_id] when the task is absent.
     - [TaskInvalidState <message>] from {!validate_transition}.
@@ -123,6 +127,7 @@ val delete_task :
   (unit, Masc_error.t) result
 (** [delete_task config ~task_id] takes the Workspace [.backlog] file lock,
     filters the task out of the
-    backlog and writes it back with [version] bumped.  Idempotent
+    backlog and writes it back with [version] bumped, then clears any
+    agent [current_task] cache still pointing to [task_id].  Idempotent
     — deleting a non-existent task is silently a no-op (always
     returns [Ok ()] when the backlog is readable). *)

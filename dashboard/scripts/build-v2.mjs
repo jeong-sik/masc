@@ -22,6 +22,25 @@ const srcDir = join(dashboardDir, 'v2')
 const outDir = join(dashboardDir, '..', 'assets', 'dashboard', 'v2')
 const portraitSrc = join(dashboardDir, 'public', 'assets', 'keepers', 'portraits')
 
+// Convert top-level `const`/`let` -> `var` in esbuild output.
+//
+// The files share one global lexical scope across ordered classic <script> tags
+// and several re-declare the same top-level binding (e.g. `const { useState } =
+// React` appears in many files). Across scripts that is a "Identifier already
+// declared" SyntaxError that kills the whole second file. `var` allows
+// redeclaration and still attaches to the global object, preserving the
+// cross-file sharing the prototype depends on. The in-browser Babel the
+// prototype used did this via its block-scoping transform; esbuild cannot lower
+// const/let, so we do it ourselves — but ONLY at the top level.
+//
+// esbuild always emits top-level statements at column 0 and indents nested code,
+// so anchoring on line-start `const`/`let` rewrites exactly the global bindings
+// while leaving every nested (indented) const/let and every `for (let …)` head
+// untouched — block scoping inside functions/loops is preserved.
+function topLevelConstToVar(code) {
+  return code.replace(/^(?:const|let)\b/gm, 'var')
+}
+
 // Load order — must match index.html. The shared global scope makes order load-bearing.
 const SCRIPTS = [
   'primitives', 'molecules', 'organisms-2', 'organisms-5', 'perf', 'tweaks-panel',
@@ -46,7 +65,7 @@ async function main() {
       format: undefined, // keep top-level decls global for classic <script> sharing
       sourcemap: false,
     })
-    await writeFile(join(outDir, `${name}.js`), result.code, 'utf8')
+    await writeFile(join(outDir, `${name}.js`), topLevelConstToVar(result.code), 'utf8')
   }
 
   // 2. CSS.

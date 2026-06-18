@@ -1,4 +1,4 @@
-(** Per-keeper memory execution lane (RFC-0255).
+(** Per-keeper memory execution lane (RFC-0256).
 
     Detaches post-turn memory work (deterministic write, librarian extraction,
     compaction) from the keeper turn lane. Each keeper has its own mutex, so

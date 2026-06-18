@@ -1,4 +1,4 @@
-# RFC-0255 — Per-keeper memory execution lane
+# RFC-0256 — Per-keeper memory execution lane
 
 - Status: Draft
 - Date: 2026-06-17

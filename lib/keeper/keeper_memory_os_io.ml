@@ -344,6 +344,29 @@ let read_edges_all ~keeper_id =
 let read_associations ~keeper_id =
   read_edges_all ~keeper_id |> Keeper_memory_os_edges.aggregate
 ;;
+(* RFC-0239 Q4: cap the edges store to [keep] highest-ranked edges when total exceeds [trigger]. Returns the number of edges dropped. *)
+let cap_edges ~keeper_id ~keep ~trigger ~rank =
+  let path = edges_path ~keeper_id in
+  let all = read_edges_all ~keeper_id in
+  let total = List.length all in
+  if total <= trigger
+  then 0
+  else (
+    let kept =
+      all
+      |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
+      |> take_first keep
+    in
+    let content =
+      match kept with
+      | [] -> ""
+      | _ ->
+        (kept |> List.map (fun e -> Yojson.Safe.to_string (Keeper_memory_os_edges.edge_to_json e)) |> String.concat "\n")
+        ^ "\n"
+    in
+    write_file_atomically path content;
+    total - List.length kept)
+;;
 
 let read_facts_all_strict ~keeper_id =
   let path = facts_path ~keeper_id in

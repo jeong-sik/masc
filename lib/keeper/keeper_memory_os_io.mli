@@ -52,6 +52,8 @@ val read_edges_all : keeper_id:string -> Keeper_memory_os_edges.edge list
 (** The aggregated read view: per-(src,dst,relation) associations with Hebbian
     weight, the surface a spreading-activation recall consumes. *)
 val read_associations : keeper_id:string -> Keeper_memory_os_edges.association list
+val cap_edges :
+  keeper_id:string -> keep:int -> trigger:int -> rank:(Keeper_memory_os_edges.edge -> float) -> int
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
 

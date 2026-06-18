@@ -656,6 +656,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let default_runtime_id =
     Otoml.find_opt toml Otoml.get_string [ "runtime"; "default" ]
   in
+  let librarian_runtime_id =
+    Otoml.find_opt toml Otoml.get_string [ "runtime"; "librarian" ]
+  in
   if all_errors <> []
   then Error all_errors
   else (
@@ -674,6 +677,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; models
       ; bindings
       ; default_runtime_id
+      ; librarian_runtime_id
       ; keeper_assignments
       })
 ;;

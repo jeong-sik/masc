@@ -28,7 +28,7 @@ let test_repo_runtime_toml_loads () =
   check bool "repo runtime.toml present" true (Sys.file_exists path);
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
-  | Ok (runtimes, default, assignments) ->
+  | Ok (runtimes, default, assignments, _librarian) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
@@ -316,7 +316,7 @@ let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_temp_runtime_toml content (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "runtime TOML should materialize: %s" msg
-    | Ok (runtimes, _default, _assignments) ->
+    | Ok (runtimes, _default, _assignments, _librarian) ->
       let expect id expected =
         match
           List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
@@ -342,6 +342,46 @@ let test_runtime_toml_max_concurrent_flows_to_candidate () =
       expect "local.no-cap" None;
       expect "local.capped" (Some 5))
 
+(* [runtime].librarian (RFC: memory-os librarian routing): resolves to a
+   configured runtime and is returned by load_list; absent = None (inherit
+   keeper runtime); an unknown id is rejected at load like [runtime].default. *)
+let test_librarian_runtime_routing () =
+  let base =
+    "[providers.local]\n\
+     display-name = \"Local\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://localhost:11434\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.libr]\n\
+     api-name = \"libr\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.libr]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n"
+  in
+  with_temp_runtime_toml (base ^ "librarian = \"local.libr\"\n") (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "librarian routing should load: %s" msg
+    | Ok (_runtimes, _default, _assignments, librarian) ->
+      check (option string) "librarian runtime id" (Some "local.libr") librarian);
+  with_temp_runtime_toml base (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "absent librarian should load: %s" msg
+    | Ok (_, _, _, librarian) ->
+      check (option string) "librarian unset is None" None librarian);
+  with_temp_runtime_toml (base ^ "librarian = \"local.nope\"\n") (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> failf "unknown [runtime].librarian id must be rejected at load"
+    | Error _ -> ())
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -349,6 +389,9 @@ let () =
             test_runtime_json_not_in_repo_config;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case
+            "[runtime].librarian resolves, defaults to None, rejects unknown"
+            `Quick test_librarian_runtime_routing;
           test_case
             "lifecycle TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_lifecycle_keys;

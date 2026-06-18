@@ -19,12 +19,16 @@ val id_of_binding : binding -> string
 val of_binding : config -> binding -> t option
 
 val load_list :
-  config_path:string -> (t list * t * (string * string) list, string) result
+  config_path:string
+  -> (t list * t * (string * string) list * string option, string) result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
-    keeper_assignments)]. Fails ([Error]) if [\[runtime\].default] is missing /
-    unresolved, or if any [\[runtime.assignments\]] target does not resolve to a
-    configured runtime (mirrors default validation — no silent fallback for a
-    typo'd assignment). [keeper_assignments] is the keeper→runtime-id list. *)
+    keeper_assignments, librarian_runtime_id)]. Fails ([Error]) if
+    [\[runtime\].default] is missing / unresolved, if any
+    [\[runtime.assignments\]] target does not resolve to a configured runtime, or
+    if [\[runtime\].librarian] is set to an unresolved id (mirrors default
+    validation — no silent fallback for a typo'd id). [keeper_assignments] is the
+    keeper→runtime-id list; [librarian_runtime_id] is the optional memory-os
+    librarian runtime. *)
 
 val runtime_ids : t list -> string list
 
@@ -46,6 +50,13 @@ val runtime_id_for_keeper : string -> string option
     {!get_default_runtime_id}). The id is opaque (only the OAS adapter parses
     it). persona⊥{model,runtime}: keeper→runtime assignment is NOT sourced from
     persona JSON or keeper TOML. *)
+
+val librarian_runtime_id : unit -> string option
+(** [\[runtime\].librarian] runtime id for the memory-os librarian, or [None]
+    when unset (the librarian inherits each keeper's runtime). Validated at load
+    so a [Some] always resolves to a configured runtime.
+    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] overrides this at the librarian
+    call site. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id

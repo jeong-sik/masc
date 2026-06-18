@@ -184,6 +184,14 @@ type config =
   ; models : model_spec list
   ; bindings : binding list
   ; default_runtime_id : string option
+  ; librarian_runtime_id : string option
+    (** [\[runtime\].librarian] — runtime id ["provider.model"] for the memory-os
+        librarian (post-turn episode extraction). The librarian requests JSON
+        mode, so it must run on a model that declares
+        [supports-response-format-json]; the keeper chat runtimes need not.
+        [None] = the librarian inherits each keeper's runtime (legacy). An
+        unknown id is rejected at load like [\[runtime\].default]. The
+        [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] env var overrides this. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
         runtime.toml is the sole SSOT for keeper→runtime assignment (persona⊥

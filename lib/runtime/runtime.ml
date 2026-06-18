@@ -69,8 +69,28 @@ let validate_keeper_assignments ~(config_path : string) (runtimes : t list)
          (List.length runtimes))
 ;;
 
+(* [runtime].librarian must resolve to a configured runtime when set, mirroring
+   [runtime].default / [runtime.assignments] validation: an unknown id is an
+   operator typo rejected at load, not a silent fallback (Unknown→Permissive
+   anti-pattern). [None] is the designed "inherit the keeper's runtime" case. *)
+let validate_librarian_runtime ~(config_path : string) (runtimes : t list)
+    (librarian_id : string option) : (unit, string) result =
+  match librarian_id with
+  | None -> Ok ()
+  | Some id ->
+    if List.exists (fun (r : t) -> String.equal r.id id) runtimes
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "%s: [runtime].librarian = %S not found among %d runtimes"
+           config_path
+           id
+           (List.length runtimes))
+;;
+
 let materialize_config ~(config_path : string) (cfg : config)
-  : (t list * t * (string * string) list, string) result
+  : (t list * t * (string * string) list * string option, string) result
   =
   let runtimes = List.filter_map (of_binding cfg) cfg.bindings in
   let assignments = cfg.keeper_assignments in
@@ -93,11 +113,18 @@ let materialize_config ~(config_path : string) (cfg : config)
      | Some rt ->
        (match validate_keeper_assignments ~config_path runtimes assignments with
         | Error _ as e -> e
-        | Ok () -> Ok (runtimes, rt, assignments)))
+        | Ok () ->
+          (match
+             validate_librarian_runtime ~config_path runtimes
+               cfg.librarian_runtime_id
+           with
+           | Error _ as e -> e
+           | Ok () ->
+             Ok (runtimes, rt, assignments, cfg.librarian_runtime_id))))
 ;;
 
 let load_list ~(config_path : string)
-  : (t list * t * (string * string) list, string) result
+  : (t list * t * (string * string) list * string option, string) result
   =
   match Runtime_toml.parse_file config_path with
   | Error errs ->
@@ -124,14 +151,20 @@ let runtimes_ref : t list Atomic.t = Atomic.make []
    configured runtime. *)
 let keeper_assignments_ref : (string * string) list Atomic.t = Atomic.make []
 
+(* [runtime].librarian — runtime id for the memory-os librarian, or [None] to
+   inherit the keeper's own runtime. Populated by [init_default], read by
+   [librarian_runtime_id]; validated at load so a [Some] always resolves. *)
+let librarian_runtime_id_ref : string option Atomic.t = Atomic.make None
+
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let init_default ~config_path =
   match load_list ~config_path with
-  | Ok (runtimes, rt, assignments) ->
+  | Ok (runtimes, rt, assignments, librarian_id) ->
     Atomic.set runtimes_ref runtimes;
     Atomic.set default_runtime_ref (Some rt);
     Atomic.set keeper_assignments_ref assignments;
+    Atomic.set librarian_runtime_id_ref librarian_id;
     Ok ()
   | Error _ as e -> e
 
@@ -148,6 +181,11 @@ let get_runtime_ids () = runtime_ids (Atomic.get runtimes_ref)
 let runtime_id_for_keeper (keeper_name : string) : string option =
   List.assoc_opt keeper_name (Atomic.get keeper_assignments_ref)
 ;;
+
+(* [runtime].librarian routing for the memory-os librarian. [None] = the
+   librarian inherits each keeper's runtime (legacy). Reads the Atomic ref set by
+   [init_default]; the env override lives in keeper_librarian_runtime. *)
+let librarian_runtime_id () = Atomic.get librarian_runtime_id_ref
 
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the *requested* runtime (a keeper's persona

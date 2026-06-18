@@ -11,6 +11,13 @@
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
+# memory-os librarian (post-turn episode extraction) runs JSON mode, so it is
+# routed independently of keeper chat to a JSON-capable runtime. minimax-m3
+# declares supports-response-format-json (deepseek-v4-flash does not — it
+# measured ~74% empty/invalid-JSON on the librarian, 2026-06-18). Override per
+# process with MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each
+# keeper's runtime (legacy).
+librarian = "ollama_cloud.minimax-m3"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"

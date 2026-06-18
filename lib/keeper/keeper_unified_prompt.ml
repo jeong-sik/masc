@@ -830,7 +830,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     | Keeper_context_layers.Context_health ->
       Some
         (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
-           (observation.context_ratio *. 100.0)
+           (Lazy.force observation.context_ratio *. 100.0)
            observation.idle_seconds)
     (* 5. Autonomous trigger — lower churn than reactive inboxes. *)
     | Keeper_context_layers.Autonomous_trigger ->

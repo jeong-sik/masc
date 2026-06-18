@@ -279,7 +279,7 @@ end
 
 val run :
   sw:Eio.Switch.t ->
-  net:[> `Generic ] Eio.Net.ty Eio.Resource.t ->
+  net:[> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   clock:_ Eio.Time.clock ->
   config ->
   h2_request_handler ->

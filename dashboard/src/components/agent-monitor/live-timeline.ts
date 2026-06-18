@@ -129,20 +129,28 @@ function getAgentJournalEntries(name: string): JournalEntry[] {
 
 export function AgentLiveTimeline({ name }: { name: string }) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const allEntries = getAgentJournalEntries(name)
+  // getAgentJournalEntries scans the full MAX_JOURNAL_ENTRIES ring buffer (200)
+  // with 2x toLowerCase + includes per entry. Parent AgentProfile re-renders on
+  // every mention-input keystroke (mentionText) and other unrelated signals;
+  // memoizing on [name, journal.value] skips the scan when neither the journal
+  // contents nor the target agent changed. This also makes the downstream
+  // `filtered` useMemo ([allEntries, activeFilter]) effective — previously
+  // allEntries was a fresh array every render so that memo always missed.
+  const allEntries = useMemo(() => getAgentJournalEntries(name), [name, journal.value])
 
   const filtered = useMemo(() => {
     const f = activeFilter.value
     return allEntries.filter(e => eventMatchesFilter(e, f))
   }, [allEntries, activeFilter.value])
 
-  // events/min calculation: count events in the last 60 seconds
-  const eventsPerMin = useMemo(() => {
-    const now = Date.now()
-    const cutoff = now - 60_000
-    const recentCount = allEntries.filter(e => e.timestamp > cutoff).length
-    return recentCount
-  }, [allEntries])
+  // events/min: kept as a plain (non-memoized) computation because it reads
+  // Date.now() to define a sliding 60s window. With allEntries now ref-stable,
+  // a useMemo([allEntries]) would freeze this count whenever the journal was
+  // quiet — the window would stop sliding and past events would never age out.
+  // allEntries is capped at 50 (sliced upstream), so this filter is cheap.
+  const now = Date.now()
+  const cutoff = now - 60_000
+  const eventsPerMin = allEntries.filter(e => e.timestamp > cutoff).length
 
   useEffect(() => {
     if (autoScroll.value && scrollRef.current) {

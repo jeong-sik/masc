@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
 import { isKeeperCrashed } from '../lib/keeper-predicates'
@@ -93,8 +93,6 @@ interface DashboardStatusTrayProps {
   sideRailCollapsed?: boolean
 }
 
-const TRAY_ORDER: StatusTrayKey[] = ['transport', 'fleet', 'activity', 'attention']
-
 const ITEM_META = {
   transport: { icon: Radio, title: 'Transport' },
   fleet: { icon: Users, title: 'Fleet' },
@@ -144,20 +142,37 @@ function latestEntries(entries: readonly JournalEntry[]): JournalEntry[] {
   return entries.slice(0, 5)
 }
 
-export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
-  const latest = latestEntries(input.journalEntries)
-  const latestEntry = latest[0]
-  const totalKeepers = input.keepers.length
-  const staleCount = input.keepers.filter(keeper => input.staleKeeperNames.has(keeper.name)).length
-  const keeperAttention = countKeeperAttention(input.keepers)
-  const freshKeepers = Math.max(0, totalKeepers - staleCount)
-  const pendingVerificationTasks = countPendingVerification(input.tasks)
+type TransportInput = Pick<StatusTrayInput,
+  | 'wsOnly' | 'sseConnected' | 'wsConnected' | 'wsReady'
+  | 'wsLastEventAt' | 'wsEventCount60s' | 'wsLastPongAt' | 'wsLastPongLatencyMs'
+  | 'wsSseFallbackActive' | 'wsSseFallbackReason' | 'wsLastError'
+  | 'reconnectCount' | 'lastDisconnectedAt' | 'now'>
 
-  let transport: StatusTrayItem
+type FleetInput = Pick<StatusTrayInput,
+  'keepers' | 'staleKeeperNames' | 'tasks' | 'journalEntries' | 'unacknowledgedErrors'>
+
+interface FleetSummary {
+  items: { fleet: StatusTrayItem; activity: StatusTrayItem; attention: StatusTrayItem }
+  counts: {
+    totalKeepers: number
+    freshKeepers: number
+    staleKeepers: number
+    keeperAttention: number
+    pendingVerificationTasks: number
+    unacknowledgedErrors: number
+  }
+  latestJournalEntries: JournalEntry[]
+}
+
+// Transport item depends only on ws signals + `now` (Date.now()). Separated from
+// the fleet/activity/attention cone so the latter can be memoized and skipped on
+// ws deltas — dashboardWsLastEventAt updates on every WS event (very frequent),
+// but transport is the only item that reads it.
+function computeTransportItem(input: TransportInput): StatusTrayItem {
   if (input.wsOnly) {
     if (!input.wsConnected || !input.wsReady) {
       if (input.wsSseFallbackActive && input.sseConnected) {
-        transport = {
+        return {
           key: 'transport',
           tone: 'warn',
           label: 'Client',
@@ -166,56 +181,65 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
             ? `client WS degraded; ${clip(input.wsSseFallbackReason)}`
             : 'client WS degraded; SSE fallback is live',
         }
-      } else {
-        transport = {
-          key: 'transport',
-          tone: 'err',
-          label: 'Client',
-          value: 'closed',
-          detail: input.wsLastError
-            ? clip(input.wsLastError)
-            : 'client WS channel is not ready; server transport truth is in Diagnostics > Transport',
-        }
       }
-    } else {
-      const silentMs = input.wsLastEventAt === 0
-        ? Number.POSITIVE_INFINITY
-        : input.now - input.wsLastEventAt
-      const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
-      const pongAgeMs = input.wsLastPongAt === 0
-        ? Number.POSITIVE_INFINITY
-        : input.now - input.wsLastPongAt
-      const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
-      const pongLatency = input.wsLastPongLatencyMs == null
-        ? 'pong'
-        : `${input.wsLastPongLatencyMs}ms`
-      transport = {
+      return {
         key: 'transport',
-        tone: silent && !heartbeatFresh ? 'warn' : 'ok',
+        tone: 'err',
         label: 'Client',
-        value: silent
-          ? heartbeatFresh ? pongLatency : 'silent'
-          : `${input.wsEventCount60s} deltas/min`,
-        detail: silent
-          ? heartbeatFresh
-            ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
-            : 'client WS channel is open but no recent event or heartbeat pong has arrived'
-          : `last applied route delta ${Math.floor(silentMs / 1000)}s ago`,
+        value: 'closed',
+        detail: input.wsLastError
+          ? clip(input.wsLastError)
+          : 'client WS channel is not ready; server transport truth is in Diagnostics > Transport',
       }
     }
-  } else {
-    transport = {
+    const silentMs = input.wsLastEventAt === 0
+      ? Number.POSITIVE_INFINITY
+      : input.now - input.wsLastEventAt
+    const silent = input.wsLastEventAt === 0 || silentMs > STATUS_TRAY_SILENT_MS
+    const pongAgeMs = input.wsLastPongAt === 0
+      ? Number.POSITIVE_INFINITY
+      : input.now - input.wsLastPongAt
+    const heartbeatFresh = pongAgeMs <= STATUS_TRAY_HEARTBEAT_FRESH_MS
+    const pongLatency = input.wsLastPongLatencyMs == null
+      ? 'pong'
+      : `${input.wsLastPongLatencyMs}ms`
+    return {
       key: 'transport',
-      tone: input.sseConnected ? 'ok' : 'err',
+      tone: silent && !heartbeatFresh ? 'warn' : 'ok',
       label: 'Client',
-      value: input.sseConnected ? 'live' : 'offline',
-      detail: input.sseConnected
-        ? input.wsConnected
-          ? 'client SSE is live with WS mirror connected'
-          : 'client SSE is live'
-        : formatDisconnectedDetail(input),
+      value: silent
+        ? heartbeatFresh ? pongLatency : 'silent'
+        : `${input.wsEventCount60s} deltas/min`,
+      detail: silent
+        ? heartbeatFresh
+          ? `client WS channel is idle; heartbeat pong ${Math.floor(pongAgeMs / 1000)}s ago`
+          : 'client WS channel is open but no recent event or heartbeat pong has arrived'
+        : `last applied route delta ${Math.floor(silentMs / 1000)}s ago`,
     }
   }
+  return {
+    key: 'transport',
+    tone: input.sseConnected ? 'ok' : 'err',
+    label: 'Client',
+    value: input.sseConnected ? 'live' : 'offline',
+    detail: input.sseConnected
+      ? input.wsConnected
+        ? 'client SSE is live with WS mirror connected'
+        : 'client SSE is live'
+      : formatDisconnectedDetail(input),
+  }
+}
+
+// Fleet/activity/attention items + their counts. `now`-independent and ws-independent —
+// memoizable on [keepers, staleKeeperNames, tasks, journalEntries, unacknowledgedErrors].
+function computeFleetAttention(input: FleetInput): FleetSummary {
+  const latest = latestEntries(input.journalEntries)
+  const latestEntry = latest[0]
+  const totalKeepers = input.keepers.length
+  const staleCount = input.keepers.filter(keeper => input.staleKeeperNames.has(keeper.name)).length
+  const keeperAttention = countKeeperAttention(input.keepers)
+  const freshKeepers = Math.max(0, totalKeepers - staleCount)
+  const pendingVerificationTasks = countPendingVerification(input.tasks)
 
   const fleetTone: StatusTrayTone = totalKeepers === 0
     ? 'muted'
@@ -249,11 +273,8 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
       keeperAttention,
       pendingVerificationTasks,
       unacknowledgedErrors: input.unacknowledgedErrors,
-      reconnectCount: input.reconnectCount,
-      wsEventCount60s: input.wsEventCount60s,
     },
     items: {
-      transport,
       fleet: {
         key: 'fleet',
         tone: fleetTone,
@@ -281,6 +302,26 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
           ? 'no operator attention queued'
           : `${input.unacknowledgedErrors} errors - ${keeperAttention} keepers - ${pendingVerificationTasks} verify`,
       },
+    },
+  }
+}
+
+// Thin combiner preserving the original StatusTraySummary shape — tests call this
+// directly and assert on items.* / counts.*, so the output must be byte-identical
+// to the pre-split implementation.
+export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
+  const transport = computeTransportItem(input)
+  const fleet = computeFleetAttention(input)
+  return {
+    latestJournalEntries: fleet.latestJournalEntries,
+    counts: {
+      ...fleet.counts,
+      reconnectCount: input.reconnectCount,
+      wsEventCount60s: input.wsEventCount60s,
+    },
+    items: {
+      transport,
+      ...fleet.items,
     },
   }
 }
@@ -426,12 +467,24 @@ function PopoverContent({
   `
 }
 
-export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStatusTrayProps) {
-  const [activeKey, setActiveKey] = useState<StatusTrayKey | null>(null)
-  const trayRef = useRef<HTMLElement>(null)
-  const wsOnly = dashboardWsOnlyEnabled()
-  const summary = summarizeStatusTray({
-    wsOnly,
+const FLEET_TRAY_KEYS = ['fleet', 'activity', 'attention'] as const
+
+const EMPTY_ITEM: StatusTrayItem = {
+  key: 'transport',
+  tone: 'muted',
+  label: '',
+  value: '',
+  detail: '',
+}
+
+// Phase 2: signal subscriptions are isolated per chip so a ws delta
+// (dashboardWsLastEventAt updates per WS event) re-renders only the transport
+// chip — not the parent, the bar, or the fleet/activity/attention buttons.
+
+// Reads only ws signals + now. ws deltas re-render this chip alone.
+function TransportChip({ active, onActivate }: { active: boolean; onActivate: () => void }) {
+  const transport = computeTransportItem({
+    wsOnly: dashboardWsOnlyEnabled(),
     sseConnected: connected.value,
     wsConnected: dashboardWsConnected.value,
     wsReady: dashboardWsReady.value,
@@ -444,13 +497,135 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     wsLastError: dashboardWsLastError.value,
     reconnectCount: reconnectCount.value,
     lastDisconnectedAt: lastDisconnectedAt.value,
-    keepers: keepers.value,
-    staleKeeperNames: staleKeepers.value,
-    tasks: tasks.value,
-    journalEntries: journal.value,
-    unacknowledgedErrors: unacknowledgedCount.value,
     now: Date.now(),
   })
+  return html`<${TrayButton} item=${transport} active=${active} onClick=${onActivate} />`
+}
+
+// Reads only keepers/tasks/journal signals, memoized. ws deltas never reach it.
+function FleetChips({
+  activeKey,
+  onActivate,
+}: {
+  activeKey: StatusTrayKey | null
+  onActivate: (key: StatusTrayKey) => void
+}) {
+  const fleet = useMemo(
+    () =>
+      computeFleetAttention({
+        keepers: keepers.value,
+        staleKeeperNames: staleKeepers.value,
+        tasks: tasks.value,
+        journalEntries: journal.value,
+        unacknowledgedErrors: unacknowledgedCount.value,
+      }),
+    [keepers.value, staleKeepers.value, tasks.value, journal.value, unacknowledgedCount.value],
+  )
+  return html`
+    ${FLEET_TRAY_KEYS.map(key => html`
+      <${TrayButton}
+        item=${fleet.items[key]}
+        active=${activeKey === key}
+        onClick=${() => onActivate(key)}
+      />
+    `)}
+  `
+}
+
+// Active-key popover. Reads only the signals the active key needs: ws signals
+// for transport, keepers/tasks/journal for fleet/activity/attention. Reuses
+// PopoverContent with a summary assembled for the active key (unused fields
+// are zeroed — PopoverContent's active branch only reads its own fields).
+function StatusTrayPopover({
+  activeKey,
+  onClose,
+}: {
+  activeKey: StatusTrayKey
+  onClose: () => void
+}) {
+  let summary: StatusTraySummary
+  if (activeKey === 'transport') {
+    summary = {
+      latestJournalEntries: [],
+      counts: {
+        totalKeepers: 0,
+        freshKeepers: 0,
+        staleKeepers: 0,
+        keeperAttention: 0,
+        pendingVerificationTasks: 0,
+        unacknowledgedErrors: 0,
+        reconnectCount: reconnectCount.value,
+        wsEventCount60s: dashboardWsEventCount60s.value,
+      },
+      items: {
+        transport: computeTransportItem({
+          wsOnly: dashboardWsOnlyEnabled(),
+          sseConnected: connected.value,
+          wsConnected: dashboardWsConnected.value,
+          wsReady: dashboardWsReady.value,
+          wsLastEventAt: dashboardWsLastEventAt.value,
+          wsEventCount60s: dashboardWsEventCount60s.value,
+          wsLastPongAt: dashboardWsLastPongAt.value,
+          wsLastPongLatencyMs: dashboardWsLastPongLatencyMs.value,
+          wsSseFallbackActive: dashboardWsSseFallbackActive.value,
+          wsSseFallbackReason: dashboardWsSseFallbackReason.value,
+          wsLastError: dashboardWsLastError.value,
+          reconnectCount: reconnectCount.value,
+          lastDisconnectedAt: lastDisconnectedAt.value,
+          now: Date.now(),
+        }),
+        fleet: EMPTY_ITEM,
+        activity: EMPTY_ITEM,
+        attention: EMPTY_ITEM,
+      },
+    }
+  } else {
+    const fleet = computeFleetAttention({
+      keepers: keepers.value,
+      staleKeeperNames: staleKeepers.value,
+      tasks: tasks.value,
+      journalEntries: journal.value,
+      unacknowledgedErrors: unacknowledgedCount.value,
+    })
+    summary = {
+      latestJournalEntries: fleet.latestJournalEntries,
+      counts: { ...fleet.counts, reconnectCount: 0, wsEventCount60s: 0 },
+      items: { transport: EMPTY_ITEM, ...fleet.items },
+    }
+  }
+  const item = summary.items[activeKey]
+  return html`
+    <div
+      id="dashboard-status-tray-popover"
+      data-testid="dashboard-status-tray-popover"
+      role="dialog"
+      aria-label=${`${item.label} details`}
+      class=${`v2-shell-panel tray-popover tone-${item.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl max-[520px]:w-full`}
+    >
+      <div class="v2-shell-toolbar tray-popover-head mb-3 flex min-w-0 items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="tray-popover-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${item.label}</div>
+          <div class="tray-popover-detail mt-0.5 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${item.detail}</div>
+        </div>
+        <button
+          type="button"
+          class=${`v2-shell-action tray-popover-close inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
+          aria-label="Close status tray details"
+          onClick=${onClose}
+        >
+          <${X} size=${14} aria-hidden="true" />
+        </button>
+      </div>
+      <${PopoverContent} activeKey=${activeKey} summary=${summary} />
+    </div>
+  `
+}
+
+// Slim parent: owns activeKey + layout + outside-click only. Reads no ws/keepers
+// signals (only route.value.tab for the code offset), so ws deltas cannot reach it.
+export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStatusTrayProps) {
+  const [activeKey, setActiveKey] = useState<StatusTrayKey | null>(null)
+  const trayRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     if (!activeKey) return undefined
@@ -474,9 +649,10 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     }
   }, [activeKey])
 
-  const activeItem = activeKey ? summary.items[activeKey] : null
   const codeOffset = route.value.tab === 'code' ? 'bottom-16' : 'bottom-3 max-[520px]:bottom-2'
   const sideRailOffset = sideRailCollapsed ? 'left-[4.75rem]' : 'left-[14.75rem]'
+
+  const activate = (key: StatusTrayKey) => setActiveKey(activeKey === key ? null : key)
 
   return html`
     <aside
@@ -485,40 +661,11 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
       aria-label="Dashboard status tray"
       data-testid="dashboard-status-tray"
     >
-      ${activeItem ? html`
-        <div
-          id="dashboard-status-tray-popover"
-          data-testid="dashboard-status-tray-popover"
-          role="dialog"
-          aria-label=${`${activeItem.label} details`}
-          class=${`v2-shell-panel tray-popover tone-${activeItem.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl max-[520px]:w-full`}
-        >
-          <div class="v2-shell-toolbar tray-popover-head mb-3 flex min-w-0 items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="tray-popover-label font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${activeItem.label}</div>
-              <div class="tray-popover-detail mt-0.5 truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${activeItem.detail}</div>
-            </div>
-            <button
-              type="button"
-              class=${`v2-shell-action tray-popover-close inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-xs text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 1, offsetSurface: 'surface' })}`}
-              aria-label="Close status tray details"
-              onClick=${() => { setActiveKey(null) }}
-            >
-              <${X} size=${14} aria-hidden="true" />
-            </button>
-          </div>
-          <${PopoverContent} activeKey=${activeKey} summary=${summary} />
-        </div>
-      ` : null}
+      ${activeKey ? html`<${StatusTrayPopover} activeKey=${activeKey} onClose=${() => setActiveKey(null)} />` : null}
 
       <div class="v2-tray-bar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-header-bg)] p-1 shadow-[var(--shadow-panel)] backdrop-blur-xl [scrollbar-width:none]">
-        ${TRAY_ORDER.map(key => html`
-          <${TrayButton}
-            item=${summary.items[key]}
-            active=${activeKey === key}
-            onClick=${() => { setActiveKey(activeKey === key ? null : key) }}
-          />
-        `)}
+        <${TransportChip} active=${activeKey === 'transport'} onActivate=${() => activate('transport')} />
+        <${FleetChips} activeKey=${activeKey} onActivate=${activate} />
       </div>
     </aside>
   `

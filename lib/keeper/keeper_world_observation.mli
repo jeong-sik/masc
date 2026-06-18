@@ -85,7 +85,7 @@ type world_observation = {
   continuity_summary : string;
   (** Latest continuity snapshot text (empty if unavailable). *)
 
-  context_ratio : float;
+  context_ratio : float Lazy.t;
   (** Current context window utilization [0.0, 1.0]. *)
 
   unclaimed_task_count : int;

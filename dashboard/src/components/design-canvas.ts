@@ -4,7 +4,7 @@
 // representative states. No backend wiring; all data is mock/sample.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import { Meter } from './common/meter'
 import { Vital, Vitals } from './common/vital'
 import { StatCell } from './common/stat-cell'
@@ -597,8 +597,14 @@ function FixtureGoalsTable() {
 }
 
 function FixtureJobsTable() {
-  const rows = FIXTURE_GOALS.flatMap((goal) =>
-    goal.jobs.map((job) => ({ ...job, goalId: goal.id, goalTitle: goal.title })),
+  // FIXTURE_GOALS is a module-level constant; the flattened job-row array never
+  // changes. Memoize once (empty deps) so parent DesignCanvas re-renders (theme
+  // toggle, category change) skip the O(goals*jobs) flatMap + spread rebuild.
+  const rows = useMemo(
+    () => FIXTURE_GOALS.flatMap((goal) =>
+      goal.jobs.map((job) => ({ ...job, goalId: goal.id, goalTitle: goal.title })),
+    ),
+    [],
   )
 
   const columns = [

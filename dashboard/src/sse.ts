@@ -1,7 +1,7 @@
 // MASC Dashboard — SSE (Server-Sent Events) hook
 // Auto-reconnect with exponential backoff, signal-based event dispatch
 
-import { signal, type ReadonlySignal } from '@preact/signals'
+import { batch, signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
 import { formatCost } from './lib/format-number'
@@ -260,6 +260,56 @@ export function normalizeSSEDispatchType(rawType: string): string {
 
 
 
+// rAF-coalesced ingress: buffer SSE events and flush once per animation
+// frame inside batch(), collapsing a high-frequency burst (keeper streaming
+// emits per-token events) to <=1 signal notification / render per frame.
+// Mirrors dashboard-ws.ts's pendingInbound + scheduleFlush + batch() pattern;
+// the two flush bodies differ (WS: processInboundMessage, here: handleEvent),
+// so this is a local copy rather than a shared util — extract if a third
+// consumer appears.
+const pendingEvents: SSEEvent[] = []
+let flushHandle = 0
+
+function scheduleFlush(): void {
+  if (flushHandle) return
+  if (typeof requestAnimationFrame === 'undefined') {
+    flushHandle = setTimeout(() => {
+      flushHandle = 0
+      flushPending()
+    }, 0) as unknown as number
+    return
+  }
+  flushHandle = requestAnimationFrame(() => {
+    flushHandle = 0
+    flushPending()
+  })
+}
+
+function flushPending(): void {
+  if (pendingEvents.length === 0) return
+  const events = pendingEvents.splice(0, pendingEvents.length)
+  // Order preserved (splice + for-loop); batch() coalesces all signal writes
+  // across the whole burst into one notification.
+  batch(() => {
+    for (const ev of events) {
+      eventCount.value++
+      lastEvent.value = ev
+      handleEvent(ev)
+    }
+  })
+}
+
+/** Test-only: synchronously drain pending SSE events. Production code never
+ *  calls this — the rAF loop owns timing. Mirrors dashboard-ws.flushPendingInbound. */
+export function flushPendingSseEvents(): void {
+  if (flushHandle) {
+    if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(flushHandle)
+    else clearTimeout(flushHandle)
+    flushHandle = 0
+  }
+  flushPending()
+}
+
 export function connectSSE(): void {
   disconnectSSE()
 
@@ -302,9 +352,8 @@ export function connectSSE(): void {
       const parsed = parseSSEMessage(candidate)
       if (!parsed) return
       const ev = parsed as unknown as SSEEvent
-      eventCount.value++
-      lastEvent.value = ev
-      handleEvent(ev)
+      pendingEvents.push(ev)
+      scheduleFlush()
     }
   })
 

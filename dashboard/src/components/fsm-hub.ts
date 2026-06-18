@@ -930,11 +930,18 @@ function StatusBar({
 
   const staleSec = lastFetchAt > 0 ? Math.max(0, now - lastFetchAt) : 0
 
-  const brokenInvariants = snapshot
-    ? Object.entries(snapshot.invariants)
-        .filter(([_, ok]) => !ok)
-        .map(([k]) => k)
-    : []
+  // Object.entries+filter+map over snapshot.invariants. StatusBar re-renders on
+  // the 1s useNowSecondsTicker tick (now changes every second) which is unrelated
+  // to snapshot.invariants; memoize on [snapshot] to skip the rebuild on ticks
+  // where the snapshot did not change.
+  const brokenInvariants = useMemo(
+    () => snapshot
+      ? Object.entries(snapshot.invariants)
+          .filter(([_, ok]) => !ok)
+          .map(([k]) => k)
+      : [],
+    [snapshot],
+  )
   const hasAnomaly = brokenInvariants.length > 0
   const anomalyTitle = hasAnomaly
     ? [

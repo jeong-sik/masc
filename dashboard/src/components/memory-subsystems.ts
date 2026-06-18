@@ -199,24 +199,29 @@ export function filterMemoryEntries(
 }
 
 function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
-  if (synapses.length === 0) return null
-
   // Sort by activity total (success + failure on either side) — hubs appear top-left.
   // Sorting the matrix by some feature is common in Hebbian literature
   // (e.g. Sadeh & Clopath, PNAS 2024 sorts by stimulus tuning peak); activity
   // total is a usage-frequency proxy chosen here because MASC has no stimulus.
-  const activity = new Map<string, number>()
-  synapses.forEach(s => {
-    const n = s.success_count + s.failure_count
-    activity.set(s.from_agent, (activity.get(s.from_agent) ?? 0) + n)
-    activity.set(s.to_agent, (activity.get(s.to_agent) ?? 0) + n)
-  })
-  const agents = Array.from(activity.keys()).sort(
-    (a, b) => (activity.get(b) ?? 0) - (activity.get(a) ?? 0),
-  )
-
-  const cellMap = new Map<string, MemorySubsystemsSynapse>()
-  synapses.forEach(s => cellMap.set(`${s.from_agent}|${s.to_agent}`, s))
+  // Memoized above the early return: synapses is a stable prop, so the activity
+  // aggregation + agent sort + cell-map rebuild is skipped on unrelated re-renders.
+  const derived = useMemo(() => {
+    if (synapses.length === 0) return null
+    const activity = new Map<string, number>()
+    synapses.forEach(s => {
+      const n = s.success_count + s.failure_count
+      activity.set(s.from_agent, (activity.get(s.from_agent) ?? 0) + n)
+      activity.set(s.to_agent, (activity.get(s.to_agent) ?? 0) + n)
+    })
+    const agents = Array.from(activity.keys()).sort(
+      (a, b) => (activity.get(b) ?? 0) - (activity.get(a) ?? 0),
+    )
+    const cellMap = new Map<string, MemorySubsystemsSynapse>()
+    synapses.forEach(s => cellMap.set(`${s.from_agent}|${s.to_agent}`, s))
+    return { agents, cellMap }
+  }, [synapses])
+  if (!derived) return null
+  const { agents, cellMap } = derived
 
   const n = agents.length
   const cell = (CELL_SIZE_BREAKPOINTS.find(b => n <= b.maxAgents) ?? CELL_SIZE_BREAKPOINTS[CELL_SIZE_BREAKPOINTS.length - 1]!).cell

@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { memo } from 'preact/compat'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { get } from '../../api/core'
@@ -535,7 +536,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       >
         ${events.length === 0
           ? html`<li class="ide-rail-empty">no recent activity</li>`
-          : events.map(item => ActivityRow(item, presence, overlay))}
+          : events.map(item => html`<${ActivityRow} item=${item} presence=${presence} overlay=${overlay} />`)}
       </ol>
     </div>
   `
@@ -897,11 +898,15 @@ function activityRefreshTitle(state: ActivityRefreshState, refreshMs: number | n
   return parts.join(' | ')
 }
 
-function ActivityRow(
-  item: RunActivityEvent,
-  presence: KeeperPresenceSnapshot | null,
-  overlay: KeeperCursorOverlay,
-) {
+const ActivityRow = memo(function ActivityRow({
+  item,
+  presence,
+  overlay,
+}: {
+  item: RunActivityEvent
+  presence: KeeperPresenceSnapshot | null
+  overlay: KeeperCursorOverlay
+}) {
   const hue = keeperHueIndex(item.keeper_id)
   const dot = `var(--color-keeper-${hue}-glow, var(--k-${hue}))`
   const entry = presenceEntries(presence).find(e => e.keeper_id === item.keeper_id)
@@ -1000,7 +1005,7 @@ function ActivityRow(
       </div>
     </li>
   `
-}
+})
 
 function ActivityRouteLink(link: IdeContextRouteLink) {
   return html`

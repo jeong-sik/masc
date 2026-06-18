@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import { post } from '../api/core'
 import { DEFAULT_MASC_ORIGIN } from '../config/constants'
@@ -692,32 +692,43 @@ function ConnectorLivePanel({
       )
     : ''
 
-  const observedWorkspaces = uniqueStrings([
-    ...(gate?.bindings ?? [])
-      .filter(binding => binding.channel === (connector?.channel ?? ''))
-      .map(binding => binding.workspace_id),
-    ...(gate?.recent_events ?? [])
-      .filter(event => event.channel === (connector?.channel ?? ''))
-      .map(event => event.workspace_id),
-    ...configuredBindings.map(binding => binding.channel_id),
-  ])
+  // observedWorkspaces / bindingsByKeeper / knownNames / knownGroups form a
+  // derivation chain over stable props (gate, connector, configuredBindings,
+  // keepers). The panel re-renders on unrelated UI state (keeperQuery filter
+  // keystrokes, actionLoading toggles); memoizing each stage on its stable
+  // upstream skips the workspace dedup + per-keeper binding regroup on those.
+  const observedWorkspaces = useMemo(
+    () => uniqueStrings([
+      ...(gate?.bindings ?? [])
+        .filter(binding => binding.channel === (connector?.channel ?? ''))
+        .map(binding => binding.workspace_id),
+      ...(gate?.recent_events ?? [])
+        .filter(event => event.channel === (connector?.channel ?? ''))
+        .map(event => event.workspace_id),
+      ...configuredBindings.map(binding => binding.channel_id),
+    ]),
+    [gate, connector, configuredBindings],
+  )
 
-  const bindingsByKeeper = new Map<string, Array<{ channel_id: string; keeper_name: string }>>()
-  for (const binding of configuredBindings) {
-    const existing = bindingsByKeeper.get(binding.keeper_name)
-    if (existing) {
-      existing.push(binding)
-    } else {
-      bindingsByKeeper.set(binding.keeper_name, [binding])
+  const bindingsByKeeper = useMemo(() => {
+    const m = new Map<string, Array<{ channel_id: string; keeper_name: string }>>()
+    for (const binding of configuredBindings) {
+      const existing = m.get(binding.keeper_name)
+      if (existing) {
+        existing.push(binding)
+      } else {
+        m.set(binding.keeper_name, [binding])
+      }
     }
-  }
-  const knownNames = new Set(keepers.map(keeper => keeper.name))
-  const knownGroups: KeeperGroup[] = keepers.map(keeper => ({
+    return m
+  }, [configuredBindings])
+  const knownNames = useMemo(() => new Set(keepers.map(keeper => keeper.name)), [keepers])
+  const knownGroups = useMemo<KeeperGroup[]>(() => keepers.map(keeper => ({
     name: keeper.name,
     keeper,
     bindings: bindingsByKeeper.get(keeper.name) ?? [],
     unknown: false,
-  }))
+  })), [keepers, bindingsByKeeper])
   const unknownGroups: KeeperGroup[] = []
   for (const [name, bindings] of bindingsByKeeper) {
     if (knownNames.has(name)) continue

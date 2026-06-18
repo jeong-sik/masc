@@ -636,8 +636,12 @@ let snapshot_json
   in
   (* Singleflight cache lookup: check for fresh hit, in-flight compute,
      or start a new compute.  Uses Eio.Mutex for safe Hashtbl access.
-     Waiters use poll-retry (not Condition.await inside protect:true)
-     to stay cancellable — same pattern as Dashboard_cache. *)
+     Waiters await the owner's [Condition] broadcast (the [cond] stored in
+     the [Computing] slot, fired at compute finish), racing a short timer
+     via [Eio.Fiber.first] so they stay cancellable and re-check on a known
+     cadence as a lost-wakeup safety net.  The [Condition]+mutex machinery
+     was always present; the await replaces a prior blind poll-retry that
+     added up to [_poll_interval_s] latency per cache miss. *)
   let _max_wait_s = 60.0 in
   let _poll_interval_s = 0.25 in
   let rec cache_lookup ~waited =
@@ -663,7 +667,7 @@ let snapshot_json
           | Some (Cached { value; expires_at }) when Time_compat.now () < expires_at ->
             `Hit value
           | Some (Computing { stale = Some value; _ }) -> `Hit value
-          | Some (Computing { started_at; stuck_warned; _ }) ->
+          | Some (Computing { cond; started_at; stuck_warned }) ->
             if waited >= _max_wait_s && not !stuck_warned
             then (
               stuck_warned := true;
@@ -673,7 +677,7 @@ let snapshot_json
                 cache_key
                 waited
                 (Time_compat.now () -. started_at));
-            `Wait
+            `Wait cond
           | Some (Cached { value; _ }) ->
             let cond = Eio.Condition.create () in
             _maybe_evict_snapshot ();
@@ -703,10 +707,20 @@ let snapshot_json
       in
       match action with
       | `Hit value -> value
-      | `Wait ->
-        (* Another fiber is computing this key — poll-retry outside mutex
-           to remain cancellable. *)
-        Eio.Time.sleep ctx.clock _poll_interval_s;
+      | `Wait cond ->
+        (* Another fiber is computing this key.  Await its broadcast (fired
+           at compute finish) for near-zero wakeup latency, racing a short
+           timer so we stay cancellable and re-check on a known cadence as a
+           lost-wakeup safety net.  [Eio.Fiber.first] cancels whichever fiber
+           loses the race, and [~protect:true] releases the mutex under
+           cancel — so the waiter stays cancellable. *)
+        let () =
+          Eio.Fiber.first
+            (fun () ->
+               Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
+                 Eio.Condition.await cond _snapshot_mu))
+            (fun () -> Eio.Time.sleep ctx.clock _poll_interval_s)
+        in
         cache_lookup ~waited:(waited +. _poll_interval_s)
       | `Compute cond ->
         (match compute_snapshot () with

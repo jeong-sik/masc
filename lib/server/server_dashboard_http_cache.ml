@@ -69,9 +69,20 @@ let extend_projection_diagnostics json extra_fields =
         | _ -> []
       in
       let merged =
-        List.fold_left
-          (fun acc (key, value) -> upsert_assoc_field key value acc)
-          existing extra_fields
+        (* Merge [extra_fields] into [existing] in a single traversal. The
+           prior fold ran one [upsert_assoc_field] per extra field, and
+           [upsert_assoc_field] is [(k,v) :: List.remove_assoc k ...] — so it
+           scanned the whole diagnostic list and allocated a fresh list prefix
+           once per extra field. Here we filter [existing] once, dropping any
+           key present in [extra_fields], then prepend the extras in reverse.
+           The resulting ordering matches the prior fold exactly:
+           [(k_n,v_n); ...; (k_1,v_1); existing-minus-extras], preserving the
+           relative order of unchanged entries. *)
+        let extra_keys = List.map fst extra_fields in
+        let kept =
+          List.filter (fun (k, _) -> not (List.mem k extra_keys)) existing
+        in
+        List.rev_append (List.rev extra_fields) kept
       in
       `Assoc
         (upsert_assoc_field "projection_diagnostics" (`Assoc merged)

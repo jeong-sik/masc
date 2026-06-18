@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { fetchLogs, fetchProviderLogsCatalog, fetchProviderLogTail } from '../api/dashboard.js'
 import type {
   LogEntry,
@@ -762,7 +762,12 @@ export function LogViewer() {
   const logTotal = logData?.total ?? 0
   const logLoading = s.status === 'loading'
   const logError = s.status === 'error' ? s.message : null
-  const summary = summarizeLogWindow(logEntries)
+  // summarizeLogWindow iterates the full entries array (counts errors/warnings,
+  // builds cause/module Maps). When logData is loaded the entries ref is stable
+  // across unrelated re-renders (toolbar interactions, polling status flips);
+  // memoizing on [logEntries] skips the recount. In the loading state logEntries
+  // is a fresh `[]` so the memo misses, but the derivation is cheap then.
+  const summary = useMemo(() => summarizeLogWindow(logEntries), [logEntries])
 
   return html`
     <div class="logs-viewer v2-logs-surface flex h-full min-h-0 flex-col gap-4">

@@ -313,7 +313,13 @@ def run_judge(claims: list[str], backend: JudgeBackend) -> list[str]:
     prompt = f"Classify these {len(claims)} claims:\n{numbered}"
     try:
         out = _chat(backend, JUDGE_SYSTEM, prompt)
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+    except (
+        urllib.error.URLError,
+        OSError,
+        json.JSONDecodeError,
+        KeyError,
+        ValueError,
+    ) as e:
         # ValueError covers both json.JSONDecodeError (subclass) and the typed
         # malformed-shape errors raised by _chat (empty choices, missing
         # content), so an empty-but-well-formed provider reply degrades to

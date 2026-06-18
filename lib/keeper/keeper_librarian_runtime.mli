@@ -116,6 +116,7 @@ val extract_with_provider
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> provider_cfg:Llm_provider.Provider_config.t
+  -> generation:int
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
 

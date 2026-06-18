@@ -343,7 +343,7 @@ let extract_with_provider
     ~sw
     ~net
     ~provider_cfg
-    ?generation
+    ~generation
     (inp : Keeper_librarian.input)
   =
   match messages_for_librarian inp with

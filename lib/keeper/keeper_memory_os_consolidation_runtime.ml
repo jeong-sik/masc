@@ -11,6 +11,7 @@
 
 module Io = Keeper_memory_os_io
 module Consolidation = Keeper_memory_os_consolidation
+module Types = Keeper_memory_os_types
 
 (* Same shape as [Keeper_memory_llm_summary.complete_fn]; the LLM call is
    injectable so the loop is driveable with a fake completion in tests. *)
@@ -62,6 +63,10 @@ type outcome =
   | Skipped_too_few of int
   | Transport_failed of string
   | Unparseable of string
+  | Snapshot_changed of
+      { before : int
+      ; current : int
+      }
   | Consolidated of
       { before : int
       ; after : int
@@ -75,6 +80,16 @@ type outcome =
 let with_facts_lock ?clock ~keeper_id f =
   try File_lock_eio.with_lock ?clock (Io.facts_path ~keeper_id) f with
   | Failure msg -> Transport_failed ("consolidation lock timeout: " ^ msg)
+;;
+
+let fact_fingerprint fact = Types.fact_to_json fact |> Yojson.Safe.to_string
+
+let rec same_fact_snapshot left right =
+  match left, right with
+  | [], [] -> true
+  | l :: ls, r :: rs ->
+    String.equal (fact_fingerprint l) (fact_fingerprint r) && same_fact_snapshot ls rs
+  | [], _ :: _ | _ :: _, [] -> false
 ;;
 
 let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
@@ -149,8 +164,15 @@ let consolidate_keeper
                | Some plan ->
                  let survivors = Consolidation.apply_plan ~now ~facts plan in
                  let after = List.length survivors in
-                 if not dry_run then Io.rewrite_facts_atomically ~keeper_id survivors;
-                 Consolidated { before; after }))))
+                 if dry_run
+                 then Consolidated { before; after }
+                 else (
+                   let current = Io.read_facts_all ~keeper_id in
+                   if not (same_fact_snapshot facts current)
+                   then Snapshot_changed { before; current = List.length current }
+                   else (
+                     Io.rewrite_facts_atomically ~keeper_id survivors;
+                     Consolidated { before; after }))))))
   in
   with_facts_lock ?clock ~keeper_id run
 ;;

@@ -61,8 +61,8 @@ let int_list_of_json = function
     List.filter_map
       (function
         | `Int i -> Some i
-        | `Float f -> Some (int_of_float f)
-        | `Assoc _ | `Bool _ | `Intlit _ | `List _ | `Null | `String _ -> None)
+        | `Intlit s -> int_of_string_opt s
+        | `Assoc _ | `Bool _ | `Float _ | `List _ | `Null | `String _ -> None)
       items
   | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _ -> []
 ;;

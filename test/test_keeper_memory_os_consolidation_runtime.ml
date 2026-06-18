@@ -161,6 +161,56 @@ let test_consolidate_dry_run_preserves_store () =
           (List.length (Io.read_facts_all ~keeper_id))))))
 ;;
 
+let test_consolidate_rejects_stale_snapshot () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        let complete : Runtime.complete_fn =
+          fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+          Io.append_fact ~keeper_id (fact "new fact while model was judging");
+          Ok
+            { Llm_provider.Types.id = "fake"
+            ; model = "fake"
+            ; stop_reason = Llm_provider.Types.EndTurn
+            ; content =
+                [ Atypes.Text
+                    {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"ab","category":"fact"}],"drop_indices":[]}|}
+                ]
+            ; usage = None
+            ; telemetry = None
+            }
+        in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match outcome with
+         | Runtime.Snapshot_changed { before; current } ->
+           Alcotest.(check int) "judged snapshot size" 4 before;
+           Alcotest.(check int) "current snapshot size" 5 current
+         | _ -> Alcotest.fail "expected Snapshot_changed");
+        let claims =
+          Io.read_facts_all ~keeper_id
+          |> List.map (fun f -> f.Types.claim)
+          |> List.sort String.compare
+        in
+        Alcotest.(check (list string))
+          "store is not overwritten by stale survivors"
+          [ "a"; "b"; "c"; "d"; "new fact while model was judging" ]
+          claims))))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os_consolidation_runtime"
@@ -168,6 +218,7 @@ let () =
       , [ Alcotest.test_case "applies the model's plan" `Quick test_consolidate_applies_plan
         ; Alcotest.test_case "skips when too few facts" `Quick test_consolidate_skips_too_few
         ; Alcotest.test_case "dry-run preserves the store" `Quick test_consolidate_dry_run_preserves_store
+        ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
         ] )
     ]
 ;;

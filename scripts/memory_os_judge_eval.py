@@ -351,11 +351,16 @@ def calibrate(backend: JudgeBackend, min_acc: float) -> float:
     return acc
 
 
-def load_facts(store_dir: str, include_shared: bool) -> list[tuple[str, str]]:
+def load_facts(
+    store_dir: str, *, include_shared: bool = True, only_shared: bool = False
+) -> list[tuple[str, str]]:
     """Returns [(claim, producer_category)]."""
     facts = []
     for path in sorted(glob.glob(os.path.join(store_dir, "*.facts.jsonl"))):
-        if not include_shared and os.path.basename(path).startswith("_shared"):
+        is_shared = os.path.basename(path).startswith("_shared")
+        if only_shared and not is_shared:
+            continue
+        if not include_shared and is_shared:
             continue
         with open(path) as f:
             for line in f:
@@ -426,11 +431,12 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = load_runtime_cfg(args.runtime_config)
-    provider, model, source = resolve_judge_target(cfg)
     if args.judge_provider or args.judge_model:
         if not (args.judge_provider and args.judge_model):
             sys.exit("--judge-provider and --judge-model must be given together")
         provider, model, source = args.judge_provider, args.judge_model, "cli"
+    else:
+        provider, model, source = resolve_judge_target(cfg)
     backend = resolve_backend(cfg, provider, model)
     print(
         f"judge: provider={provider} model={model} (source={source}) "
@@ -444,15 +450,14 @@ def main() -> int:
     if args.mode == "calibrate":
         return 0
 
-    shared = load_facts(args.store_dir, include_shared=True)
+    shared_facts = load_facts(args.store_dir, only_shared=True)
     keeper_facts = load_facts(args.store_dir, include_shared=False)
-    shared_only = [f for f in shared if f not in keeper_facts]
 
     if args.mode == "measure":
-        if shared_only:
-            sl = judge_all([c for c, _ in shared_only], backend, args.batch)
+        if shared_facts:
+            sl = judge_all([c for c, _ in shared_facts], backend, args.batch)
             print(
-                f"\n_shared tier ({len(shared_only)} facts): noise_rate = {noise_rate(sl):.0%} "
+                f"\n_shared tier ({len(shared_facts)} facts): noise_rate = {noise_rate(sl):.0%} "
                 f"(eph {sl.count('ephemeral')} / dur {sl.count('durable')} / unc {sl.count('uncertain')})"
             )
         sample = deterministic_sample(keeper_facts, args.sample)

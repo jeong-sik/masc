@@ -156,6 +156,18 @@ let test_parse_plan_json () =
     Alcotest.(check (list int)) "drop indices" [ 3 ] plan.Consolidation.drop_indices
 ;;
 
+let test_parse_rejects_fractional_indices () =
+  let raw =
+    {|{"groups":[{"member_indices":[0,1.5],"consolidated_claim":"merged","category":"fact"}],"drop_indices":[2.1,3]}|}
+  in
+  match Consolidation.plan_of_string raw with
+  | None -> Alcotest.fail "expected the plan to parse"
+  | Some plan ->
+    let g = List.hd plan.Consolidation.groups in
+    Alcotest.(check (list int)) "fractional member ignored" [ 0 ] g.Consolidation.member_indices;
+    Alcotest.(check (list int)) "fractional drop ignored" [ 3 ] plan.Consolidation.drop_indices
+;;
+
 (* A garbled group is dropped individually; the rest of the plan stands. *)
 let test_parse_degrades_garbled_group () =
   let raw =
@@ -183,6 +195,7 @@ let () =
         ] )
     ; ( "parse"
       , [ Alcotest.test_case "parses a plan" `Quick test_parse_plan_json
+        ; Alcotest.test_case "rejects fractional indices" `Quick test_parse_rejects_fractional_indices
         ; Alcotest.test_case "degrades a garbled group" `Quick test_parse_degrades_garbled_group
         ; Alcotest.test_case "non-JSON is None" `Quick test_parse_non_json_is_none
         ] )

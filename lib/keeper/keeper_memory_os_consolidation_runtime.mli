@@ -11,15 +11,20 @@ type outcome =
   | Skipped_too_few of int
   | Transport_failed of string
   | Unparseable of string
+  | Snapshot_changed of
+      { before : int
+      ; current : int
+      }
   | Consolidated of
       { before : int
       ; after : int
       }
 
 (** Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it,
-    and (unless [dry_run]) rewrite the store atomically. Below a minimum fact
-    count it skips the LLM call. Returns the outcome without raising for the
-    expected failure modes so a caller fiber stays alive. *)
+    and (unless [dry_run]) rewrite the store atomically only if the fact snapshot
+    still matches the model's input. Below a minimum fact count it skips the LLM
+    call. Returns the outcome without raising for the expected failure modes so a
+    caller fiber stays alive. *)
 val consolidate_keeper
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

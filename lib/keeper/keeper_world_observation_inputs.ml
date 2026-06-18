@@ -67,8 +67,12 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     in
     let failed =
       (* "Failed" here means still-auditable active work. Terminal Cancelled
-         tasks are historical evidence, not a reason to wake every keeper. *)
+         tasks are historical evidence, not a reason to wake every keeper.
+         Keep the current keeper's own task out of the count: keepers may
+         claim without a materialized [.masc/agents/] record, so the audit can
+         still see the self-assigned task as an orphan. *)
       Workspace.audit_orphan_tasks config
+      |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
       |> List.map fst
       |> List.filter claim_scope_filter
       |> List.length

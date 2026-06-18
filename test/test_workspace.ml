@@ -1401,6 +1401,88 @@ let test_audit_orphan_nonkeeper_uses_default_threshold () =
       (List.length orphans)
   )
 
+(* A keeper-shaped non-keeper (name matches the pattern, but agent_type is not
+   "keeper" and the record is not keeper-owned) must use the ordinary 300s
+   threshold, not the 3600s keeper grace. Regression for review follow-up. *)
+let test_audit_orphan_detects_keeper_shaped_non_keeper () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Spoof task" ~priority:1 ~description:"" in
+    let spoof = "keeper-spoof-agent" in
+    let _ = Workspace.bind_session config ~agent_name:spoof ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:spoof ~task_id:"task-001" in
+    age_active_agent config ~agent_type:"spoof" ~name:spoof ~age_seconds:600.0;
+    let orphans = Workspace.audit_orphan_tasks config in
+    Alcotest.(check int)
+      "keeper-shaped non-keeper past default threshold is an orphan"
+      1
+      (List.length orphans);
+    let (_, assignee) = List.hd orphans in
+    Alcotest.(check string) "orphan assignee is the spoof worker" spoof assignee
+  )
+
+(* An agent whose record is stamped as keeper-owned (via meta.keeper_name)
+   gets the keeper threshold even when its agent_type is not "keeper". *)
+let test_audit_orphan_spares_keeper_owned_meta_within_grace () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Keeper-owned task" ~priority:1 ~description:"" in
+    let worker = "claude-runtime-agent" in
+    let _ = Workspace.bind_session config ~agent_name:worker ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:worker ~task_id:"task-001" in
+    age_active_agent config ~agent_type:"claude" ~name:worker ~age_seconds:600.0;
+    Workspace.update_local_agent_state config ~agent_name:worker (fun agent ->
+      let open Masc_domain in
+      let meta =
+        match agent.meta with
+        | Some m -> { m with keeper_name = Some "keeper-sangsu" }
+        | None ->
+          { session_id = ""
+          ; agent_type = agent.agent_type
+          ; pid = None
+          ; hostname = None
+          ; tty = None
+          ; parent_task = None
+          ; keeper_name = Some "keeper-sangsu"
+          ; keeper_id = None
+          }
+      in
+      { agent with meta = Some meta });
+    let orphans = Workspace.audit_orphan_tasks config in
+    Alcotest.(check int)
+      "keeper-owned worker within grace is not an orphan"
+      0
+      (List.length orphans)
+  )
+
+let keeper_meta_for_self_filter agent_name =
+  let json =
+    `Assoc
+      [ ("name", `String "self-filter-keeper")
+      ; ("agent_name", `String agent_name)
+      ; ("trace_id", `String "trace-self-filter")
+      ; ("goal", `String "self-filter regression")
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> { meta with active_goal_ids = [] }
+  | Error err -> Alcotest.fail ("keeper_meta_for_self_filter failed: " ^ err)
+
+(* Keepers can claim without a materialized [.masc/agents/] record. The keeper
+   backlog failed-task count must exclude the keeper's own claimed task so it
+   does not re-trigger a self-wake loop. *)
+let test_read_backlog_counts_excludes_self_owned_orphan () =
+  with_test_env (fun config ->
+    let keeper = "keeper-self-filter-agent" in
+    let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
+    (* Remove the agent file to simulate a keeper with no active registry record. *)
+    let _ = Workspace.end_session config ~agent_name:keeper in
+    let meta = keeper_meta_for_self_filter keeper in
+    let _, _, failed, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
+  )
+
 let test_cleanup_zombies_releases_tasks () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
@@ -1887,6 +1969,12 @@ let () =
         test_audit_orphan_detects_dead_keeper_beyond_grace;
       Alcotest.test_case "audit orphan non-keeper uses default threshold" `Quick
         test_audit_orphan_nonkeeper_uses_default_threshold;
+      Alcotest.test_case "audit orphan detects keeper-shaped non-keeper" `Quick
+        test_audit_orphan_detects_keeper_shaped_non_keeper;
+      Alcotest.test_case "audit orphan spares keeper-owned meta within grace" `Quick
+        test_audit_orphan_spares_keeper_owned_meta_within_grace;
+      Alcotest.test_case "read backlog counts excludes self-owned orphan" `Quick
+        test_read_backlog_counts_excludes_self_owned_orphan;
       Alcotest.test_case "cleanup zombies runtime" `Quick test_cleanup_zombies_releases_tasks;
     ];
 

@@ -180,9 +180,11 @@ describe('dashboardSlicesForRoute', () => {
   it('only subscribes slices from the shared push vocabulary', () => {
     const routes = [
       { tab: 'overview', params: {} },
+      { tab: 'board', params: {} },
       { tab: 'workspace', params: { section: 'planning' } },
       { tab: 'workspace', params: { section: 'board' } },
       { tab: 'monitoring', params: { section: 'agents' } },
+      { tab: 'keepers', params: { keeper: 'sangsu' } },
       { tab: 'monitoring', params: { section: 'cognition' } },
       { tab: 'monitoring', params: { section: 'fleet-health', view: 'comparison' } },
       { tab: 'command', params: {} },
@@ -218,6 +220,12 @@ describe('dashboardSlicesForRoute', () => {
   })
 
   it('keeps board route snapshots HTTP-owned while subscribing goals and fleet FSM slices', () => {
+    expect(dashboardSlicesForRoute({ tab: 'board', params: {} }))
+      .toEqual([
+        'namespace',
+        'shell',
+        'transport',
+      ])
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'board' } }))
       .toEqual([
         'namespace',
@@ -228,6 +236,14 @@ describe('dashboardSlicesForRoute', () => {
       .toContain('goals')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'agents' } }))
       .toContain('composite')
+    expect(dashboardSlicesForRoute({ tab: 'keepers', params: { keeper: 'sangsu' } }))
+      .toEqual([
+        'composite',
+        'execution',
+        'namespace',
+        'shell',
+        'transport',
+      ])
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'cognition' } }))
       .toContain('composite')
   })

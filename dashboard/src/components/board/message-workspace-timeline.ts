@@ -6,12 +6,12 @@ import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { SYSTEM_MESSAGE_FROM, boardMessageRowKey, previewBoardMessage } from '../../lib/board-utils'
-import { navigate } from '../../router'
 import { messages } from '../../store'
 import type { Message } from '../../types'
 import { ComposerV2 } from './composer-v2'
 import { extractMentionTargets } from './mention-inbox'
 import { extractStateBlocks } from './state-block-messages'
+import { navigateBoard } from './board-route'
 
 interface TimelineRow {
   message: Message
@@ -157,7 +157,7 @@ export function MessageWorkspaceTimeline() {
           variant="ghost"
           size="sm"
           class="inline-flex items-center gap-1.5"
-          onClick=${() => navigate('workspace', { section: 'board' })}
+          onClick=${() => navigateBoard()}
           ariaLabel="게시판으로 돌아가기"
         >
           <${ArrowLeft} size=${14} aria-hidden="true" />

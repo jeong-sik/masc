@@ -59,6 +59,20 @@ describe('refreshPlanForRoute', () => {
     })).toEqual(['shell', 'namespaceTruth', 'missionSnapshot', 'execution'])
   })
 
+  it('hydrates the top-level keepers workspace from live execution state', () => {
+    expect(refreshPlanForRoute({
+      tab: 'keepers',
+      params: { keeper: 'sangsu' },
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+  })
+
+  it('hydrates the top-level board surface from the board store', () => {
+    expect(refreshPlanForRoute({
+      tab: 'board',
+      params: {},
+    })).toEqual(['board'])
+  })
+
   it('uses the current monitoring sections', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
@@ -209,6 +223,15 @@ describe('refreshPlanForRoute', () => {
     refreshForRoute({
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
+    })
+
+    expect(refreshExecution).toHaveBeenCalledWith()
+  })
+
+  it('uses the scheduler-backed execution refresh path on Keepers navigation', () => {
+    refreshForRoute({
+      tab: 'keepers',
+      params: { keeper: 'sangsu' },
     })
 
     expect(refreshExecution).toHaveBeenCalledWith()

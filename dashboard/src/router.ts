@@ -279,7 +279,7 @@ export function replaceRoute(tab: TabId, params?: Record<string, string>): void 
 }
 
 export function navigateToPost(postId: string): void {
-  window.location.hash = `#workspace?section=board&post=${encodeURIComponent(postId)}`
+  window.location.hash = `#board?post=${encodeURIComponent(postId)}`
 }
 
 export function initRouter(): void {

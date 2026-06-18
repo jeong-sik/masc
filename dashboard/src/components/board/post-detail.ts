@@ -11,7 +11,7 @@ import { RichComposer } from '../common/rich-composer'
 import { RichContent } from '../common/rich-content'
 import { TextInput } from '../common/input'
 import { stripStateBlocks } from '../../keeper-message'
-import { navigate, replaceRoute, route } from '../../router'
+import { route } from '../../router'
 import { votePost, voteComment } from '../../api/board'
 import { ModerationBadge } from './moderation-badge'
 import { ReactionBar } from './reaction-bar'
@@ -43,6 +43,7 @@ import {
   refreshBoard,
 } from './board-state'
 import type { BoardComment, BoardPost } from './board-state'
+import { navigateBoard, replaceBoardRoute } from './board-route'
 
 const MAX_INLINE_COMMENT_DEPTH = 5
 const INITIAL_CHILD_REPLY_LIMIT = 5
@@ -55,11 +56,10 @@ function cleanCommentRouteParam(value: string | undefined): string | null {
 function clearCommentRouteFocus(postId: string): void {
   const params: Record<string, string> = {
     ...route.value.params,
-    section: 'board',
     post: postId,
   }
   delete params.comment
-  replaceRoute('workspace', params)
+  replaceBoardRoute(params)
 }
 
 // ── Expiry chip (returns html, kept in UI layer) ───────────────────
@@ -556,7 +556,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
         variant="ghost"
         size="sm"
         class="mb-4 text-xs"
-        onClick=${() => navigate('workspace', { section: 'board' })}
+        onClick=${() => navigateBoard()}
       >← 게시판으로 돌아가기<//>
 
       <${SurfaceCard}>

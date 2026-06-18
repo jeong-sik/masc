@@ -6,7 +6,8 @@ import {
   operatorActionBusy,
   operatorSnapshot,
 } from '../../operator-store'
-import type { OperatorSnapshot } from '../../types'
+import { keepers as dashboardKeepers } from '../../store'
+import type { Keeper, OperatorSnapshot } from '../../types'
 
 import '@testing-library/jest-dom'
 
@@ -49,6 +50,15 @@ function snapshotWithKeepers(keepers: Array<{
   } as unknown as OperatorSnapshot
 }
 
+function keeperFixture(overrides: Partial<Keeper> & { name: string }): Keeper {
+  const { name, status = 'running', ...rest } = overrides
+  return {
+    name,
+    status,
+    ...rest,
+  } as Keeper
+}
+
 describe('buildComposerV2Request', () => {
   it('keeps the compose shape required by the C3 contract', () => {
     expect(buildComposerV2Request({
@@ -65,6 +75,32 @@ describe('buildComposerV2Request', () => {
           keys: ['Goal', 'NEXT'],
         },
         attachments: [],
+      },
+    })
+  })
+
+  it('preserves multimodal attachment drafts in the request envelope', () => {
+    expect(buildComposerV2Request({
+      mode: 'broadcast',
+      workspaceId: 'ops',
+      body: 'see attached',
+      attachments: [{
+        id: 'att-1',
+        kind: 'file',
+        name: 'trace.log',
+        size: '4 KB',
+      }],
+    })).toEqual({
+      compose: {
+        mode: 'broadcast',
+        target: { workspace_id: 'ops' },
+        body: 'see attached',
+        attachments: [{
+          id: 'att-1',
+          kind: 'file',
+          name: 'trace.log',
+          size: '4 KB',
+        }],
       },
     })
   })
@@ -88,12 +124,14 @@ describe('ComposerV2', () => {
       { name: 'nick0cave', status: 'busy' },
       { name: 'offline-one', status: 'offline' },
     ])
+    dashboardKeepers.value = []
   })
 
   afterEach(() => {
     cleanup()
     operatorSnapshot.value = null
     operatorActionBusy.value = false
+    dashboardKeepers.value = []
     vi.clearAllMocks()
   })
 
@@ -112,6 +150,48 @@ describe('ComposerV2', () => {
     })
     expect(dispatchOperatorActionMock).not.toHaveBeenCalled()
     expect((screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('sends attachment-only drafts through the current text transport', async () => {
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+
+    fireEvent.change(screen.getByTestId('composer-v2-file-input'), {
+      target: { files: [new File(['body'], 'trace.log', { type: 'text/plain' })] },
+    })
+
+    expect(screen.getByTestId('composer-v2-tray')).toHaveTextContent('trace.log')
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => {
+      expect(sendBroadcastMock).toHaveBeenCalledWith(
+        'dashboard-test',
+        'Attachments:\n- trace.log (4 B · file)',
+      )
+    })
+    expect(screen.queryByTestId('composer-v2-tray')).not.toBeInTheDocument()
+  })
+
+  it('captures a voice draft and serializes it into the current text transport', async () => {
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start voice draft' }))
+    expect(screen.getByTestId('composer-v2-recorder')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /완료/ }))
+    expect(screen.getByTestId('composer-v2-tray')).toHaveTextContent('받아쓰기')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => {
+      expect(sendBroadcastMock).toHaveBeenCalledWith(
+        'dashboard-test',
+        expect.stringContaining('Voice memo 0:12 (40 KB)'),
+      )
+    })
+    expect(sendBroadcastMock).toHaveBeenCalledWith(
+      'dashboard-test',
+      expect.stringContaining('스케줄러 p99 스파이크와 compact 타이밍을 비교해서 결과만 알려줘.'),
+    )
   })
 
   it('sends keeper DMs through the operator keeper-message action', async () => {
@@ -146,9 +226,29 @@ describe('ComposerV2', () => {
     fireEvent.click(screen.getByRole('button', { name: 'DM mode' }))
 
     const select = screen.getByLabelText('Composer v2 keeper target') as HTMLSelectElement
-    const options = Array.from(select.options).map(option => option.textContent)
+    const options = Array.from(select.options).map(option => option.textContent).filter(label => label !== 'Keeper')
     expect(options).toContain('paused-one')
     expect(options).not.toContain('offline-one')
+  })
+
+  it('uses execution keepers as a fallback when operator snapshot targets are empty', () => {
+    operatorSnapshot.value = null
+    dashboardKeepers.value = [
+      keeperFixture({ name: 'fallback-a', status: 'running' }),
+      keeperFixture({ name: 'fallback-paused', status: 'offline', phase: 'Paused', paused: true }),
+      keeperFixture({ name: 'fallback-offline', status: 'offline', phase: 'Offline' }),
+    ]
+
+    render(h(ComposerV2, { workspaceId: 'ops' }))
+    fireEvent.click(screen.getByRole('button', { name: 'DM mode' }))
+
+    expect(screen.getByText('0 chars · 0 files · 2 keeper targets')).toBeInTheDocument()
+    const select = screen.getByLabelText('Composer v2 keeper target') as HTMLSelectElement
+    const options = Array.from(select.options)
+      .map(option => option.textContent)
+      .filter(label => label !== 'Keeper')
+    expect(options).toEqual(['fallback-a', 'fallback-paused'])
+    expect(select.value).toBe('keeper:fallback-a')
   })
 
   it('requires a parsed state block before state sends', async () => {

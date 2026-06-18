@@ -1,12 +1,14 @@
 import { h } from 'preact'
-import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/preact'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { BoardSurface } from './board-surface'
 import { boardPosts, boardLoading, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardHasMore, boardLoadingMore, messages, shellAuthSummary } from '../../store'
 import { route } from '../../router'
+import { createPost, sendBroadcast } from '../../api'
+import { dispatchOperatorAction, operatorSnapshot } from '../../operator-store'
 import { PAGE_SIZE, boardFlairs, boardFlairsError, boardHearths, boardHearthsError, categoryVisibleLimits, contentCategory, selectedBoardPostId, boardFilterMode, boardComposerMode } from './board-state'
 import { resetBoardLatencyMetrics } from '../../board-metrics'
-import type { BoardPost } from '../../types'
+import type { BoardPost, OperatorSnapshot } from '../../types'
 
 import '@testing-library/jest-dom'
 
@@ -25,17 +27,27 @@ vi.mock('../../router', () => ({
 }))
 
 vi.mock('../../api', () => ({
+  currentDashboardActor: vi.fn(() => 'dashboard-test'),
   fetchBoardPost: vi.fn(),
   votePost: vi.fn(),
   fetchBoardHearths: vi.fn().mockResolvedValue([]),
   fetchSubBoards: vi.fn().mockResolvedValue([]),
   commentPost: vi.fn(),
   createPost: vi.fn(),
+  sendBroadcast: vi.fn(),
 }))
 
 vi.mock('../../api/actions', () => ({
   deleteBoardPost: vi.fn(),
 }))
+
+vi.mock('../../operator-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../operator-store')>()
+  return {
+    ...actual,
+    dispatchOperatorAction: vi.fn(),
+  }
+})
 
 vi.mock('./board-state', async () => {
   const actual = await vi.importActual<Record<string, unknown>>('./board-state')
@@ -70,6 +82,23 @@ function makePost(overrides: Partial<BoardPost> & { id: string; title: string; a
     hearth_count: 0,
     ...overrides,
   } as BoardPost
+}
+
+function snapshotWithKeepers(keepers: Array<{
+  name: string
+  status?: string
+  phase?: string | null
+  pipeline_stage?: string | null
+  paused?: boolean | null
+}>): OperatorSnapshot {
+  return {
+    root: { paused: false, namespace: 'default' },
+    sessions: [],
+    keepers,
+    recent_messages: [],
+    pending_confirms: [],
+    available_actions: [],
+  } as unknown as OperatorSnapshot
 }
 
 // ── Content category classifier tests ─────────────────────────────
@@ -174,6 +203,10 @@ describe('BoardSurface Component', () => {
     selectedBoardPostId.value = null
     boardFilterMode.value = 'all'
     boardComposerMode.value = 'post'
+    operatorSnapshot.value = snapshotWithKeepers([
+      { name: 'sangsu', status: 'active' },
+      { name: 'albini', status: 'paused', paused: true },
+    ])
     messages.value = []
     shellAuthSummary.value = null
     route.value = { params: {} } as any
@@ -187,6 +220,35 @@ describe('BoardSurface Component', () => {
   it('wraps the board surface in the v2 board surface class', () => {
     const { container } = render(h(BoardSurface, null))
     expect(container.querySelector('.v2-board-surface')).not.toBeNull()
+  })
+
+  it('shows the mention inbox detail rail by default', () => {
+    const { container } = render(h(BoardSurface, null))
+    expect(container.querySelector('[data-testid="bd-mention-detail"]')).not.toBeNull()
+  })
+
+  it('opens and closes the mention inbox detail rail from the mobile queue action', () => {
+    messages.value = [
+      { id: 'm-1', from: 'sojin', content: '@dashboard needs review', timestamp: new Date().toISOString() },
+      { id: 'm-2', from: 'sangsu', content: 'plain update', timestamp: new Date().toISOString() },
+      { id: 'm-3', from: 'albini', type: 'mention', content: 'manual mention routing', timestamp: new Date().toISOString() },
+    ]
+    render(h(BoardSurface, null))
+
+    const detail = screen.getByTestId('bd-mention-detail')
+    expect(detail).not.toHaveClass('is-mobile-open')
+
+    const queues = screen.getByTestId('bd-mobile-queues')
+    const mentionQueue = within(queues).getByTestId('bd-mobile-queue-mentions')
+    expect(mentionQueue).toHaveTextContent('멘션 인박스')
+    expect(mentionQueue).toHaveTextContent('2')
+
+    fireEvent.click(mentionQueue)
+    expect(detail).toHaveClass('is-mobile-open')
+    expect(within(detail).getByText('@dashboard')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('멘션 인박스 닫기'))
+    expect(detail).not.toHaveClass('is-mobile-open')
   })
 
   it('keeps v2 workspace panels for category cards', () => {
@@ -438,7 +500,7 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
     fireEvent.click(screen.getByTestId('bd-post-post-1'))
 
-    expect(screen.getByTestId('bd-thread-detail')).toBeInTheDocument()
+    expect(screen.getByTestId('bd-thread-detail')).toHaveClass('has-post')
     expect(screen.getByText('스레드')).toBeInTheDocument()
   })
 
@@ -452,6 +514,244 @@ describe('BoardSurface Component', () => {
 
     fireEvent.click(screen.getByTestId('bd-comp-tab-state'))
     expect(boardComposerMode.value).toBe('state')
+  })
+
+  it('starts the mobile composer shell collapsed and toggles it open', () => {
+    render(h(BoardSurface, null))
+
+    const composer = screen.getByTestId('bd-composer')
+    const toggle = screen.getByTestId('bd-composer-mobile-toggle')
+
+    expect(composer).toHaveAttribute('data-mobile-open', 'false')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle).toHaveTextContent('새 글')
+
+    fireEvent.click(toggle)
+
+    expect(composer).toHaveAttribute('data-mobile-open', 'true')
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(toggle).toHaveTextContent('접기')
+  })
+
+  it('submits the mobile quick composer using the first body line as title', async () => {
+    const createPostMock = vi.mocked(createPost)
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    fireEvent.input(screen.getByTestId('bd-composer-mobile-body'), {
+      target: { value: 'Mobile quick note\nsecond line' },
+    })
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
+
+    expect(createPostMock).toHaveBeenCalledWith(
+      'Mobile quick note',
+      'Mobile quick note\nsecond line',
+      'dashboard-user',
+      { hearth: undefined },
+    )
+  })
+
+  it('submits the mobile mention quick composer through the keeper message action', () => {
+    const dispatchMock = vi.mocked(dispatchOperatorAction)
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    fireEvent.input(screen.getByTestId('bd-composer-mobile-body'), {
+      target: { value: '@sangsu check the queue' },
+    })
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
+
+    expect(dispatchMock).toHaveBeenCalledWith({
+      actor: 'dashboard-test',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'sangsu',
+      payload: { message: '@sangsu check the queue' },
+    })
+  })
+
+  it('submits mobile mention quick composer through the target picker', () => {
+    const dispatchMock = vi.mocked(dispatchOperatorAction)
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    const target = screen.getByLabelText('Mobile mention target') as HTMLSelectElement
+    expect(Array.from(target.options).map(option => option.textContent)).toEqual(['sangsu', 'albini'])
+
+    fireEvent.input(target, { target: { value: 'keeper:albini' } })
+    fireEvent.input(screen.getByTestId('bd-composer-mobile-body'), {
+      target: { value: 'check the queue' },
+    })
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
+
+    expect(dispatchMock).toHaveBeenCalledWith({
+      actor: 'dashboard-test',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'albini',
+      payload: { message: 'check the queue' },
+    })
+  })
+
+  it('keeps plain mobile mention body text when changing the target picker', () => {
+    const dispatchMock = vi.mocked(dispatchOperatorAction)
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    const target = screen.getByLabelText('Mobile mention target') as HTMLSelectElement
+    const body = screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement
+
+    fireEvent.input(body, { target: { value: 'check the queue' } })
+    fireEvent.input(target, { target: { value: 'keeper:albini' } })
+    expect(body.value).toBe('check the queue')
+
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
+
+    expect(dispatchMock).toHaveBeenCalledWith({
+      actor: 'dashboard-test',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'albini',
+      payload: { message: 'check the queue' },
+    })
+  })
+
+  it('completes mobile mention text through the compact autocomplete listbox', () => {
+    const dispatchMock = vi.mocked(dispatchOperatorAction)
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    const body = screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement
+
+    fireEvent.input(body, { target: { value: '@al' } })
+    const listbox = screen.getByTestId('bd-composer-mobile-mention-listbox')
+    fireEvent.click(within(listbox).getByRole('option', { name: /albini/ }))
+
+    expect(body.value).toBe('@albini ')
+    expect(screen.getByLabelText('Mobile mention target')).toHaveValue('keeper:albini')
+
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
+
+    expect(dispatchMock).toHaveBeenCalledWith({
+      actor: 'dashboard-test',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'albini',
+      payload: { message: '@albini' },
+    })
+  })
+
+  it('accepts the active mobile mention autocomplete option with Enter', () => {
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    const body = screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement
+
+    fireEvent.input(body, { target: { value: '@sa' } })
+    expect(screen.getByTestId('bd-composer-mobile-mention-listbox')).toBeInTheDocument()
+
+    fireEvent.keyDown(body, { key: 'Enter' })
+
+    expect(body.value).toBe('@sangsu ')
+    expect(screen.queryByTestId('bd-composer-mobile-mention-listbox')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Mobile mention target')).toHaveValue('keeper:sangsu')
+  })
+
+  it('serializes compact mobile mention attachment and voice drafts before sending', () => {
+    const dispatchMock = vi.mocked(dispatchOperatorAction)
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    fireEvent.input(screen.getByLabelText('Mobile mention target'), { target: { value: 'keeper:sangsu' } })
+
+    const fileInput = screen.getByTestId('bd-composer-mobile-file-input') as HTMLInputElement
+    fireEvent.change(fileInput, {
+      target: { files: [new File(['trace'], 'trace.log', { type: 'text/plain' })] },
+    })
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-voice'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-voice-stop'))
+    fireEvent.input(screen.getByTestId('bd-composer-mobile-body'), {
+      target: { value: 'check trace' },
+    })
+
+    expect(screen.getByTestId('bd-composer-mobile-draft-tray')).toHaveTextContent('trace.log')
+    expect(screen.getByTestId('bd-composer-mobile-draft-tray')).toHaveTextContent('받아쓰기')
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-send'))
+
+    expect(dispatchMock).toHaveBeenCalledWith({
+      actor: 'dashboard-test',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'sangsu',
+      payload: {
+        message: [
+          'Attachments:',
+          '- trace.log (5 B · file)',
+          '',
+          'Voice memo 0:12 (40 KB)',
+          '스케줄러 p99 스파이크와 compact 타이밍을 비교해서 결과만 알려줘.',
+          '',
+          'check trace',
+        ].join('\n'),
+      },
+    })
+  })
+
+  it('removes compact mobile mention multimodal drafts and re-disables send', () => {
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-mention'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    fireEvent.input(screen.getByLabelText('Mobile mention target'), { target: { value: 'keeper:sangsu' } })
+    const send = screen.getByTestId('bd-composer-mobile-send')
+
+    fireEvent.change(screen.getByTestId('bd-composer-mobile-file-input'), {
+      target: { files: [new File(['trace'], 'trace.log', { type: 'text/plain' })] },
+    })
+    expect(send).not.toBeDisabled()
+    fireEvent.click(screen.getByLabelText('Remove mobile attachment trace.log'))
+    expect(screen.queryByTestId('bd-composer-mobile-draft-tray')).not.toBeInTheDocument()
+    expect(send).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-voice'))
+    expect(screen.getByTestId('bd-composer-mobile-recorder')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-voice-stop'))
+    expect(send).not.toBeDisabled()
+    fireEvent.click(screen.getByLabelText('Remove mobile voice draft'))
+    expect(screen.queryByTestId('bd-composer-mobile-draft-tray')).not.toBeInTheDocument()
+    expect(send).toBeDisabled()
+  })
+
+  it('inserts a mobile state template before quick broadcast submit', () => {
+    const broadcastMock = vi.mocked(sendBroadcast)
+    render(h(BoardSurface, null))
+
+    fireEvent.click(screen.getByTestId('bd-comp-tab-state'))
+    fireEvent.click(screen.getByTestId('bd-composer-mobile-toggle'))
+    const body = screen.getByTestId('bd-composer-mobile-body') as HTMLTextAreaElement
+    const send = screen.getByTestId('bd-composer-mobile-send')
+
+    fireEvent.click(screen.getByLabelText('Insert state block'))
+    expect(body.value).toContain('[STATE]')
+    expect(body.value).toContain('Goal: ')
+    expect(send).toBeDisabled()
+
+    fireEvent.input(screen.getByTestId('bd-composer-mobile-body'), {
+      target: { value: body.value.replace('Goal: ', 'Goal: mobile parity') },
+    })
+    expect(send).not.toBeDisabled()
+    fireEvent.click(send)
+
+    expect(broadcastMock).toHaveBeenCalledWith(
+      'dashboard-test',
+      '[STATE]\nGoal: mobile parity\nDONE: \nNEXT: \nDecisions: \nOpenQuestions: \nConstraints: \n[/STATE]',
+    )
   })
 
   it('routes the mention inbox focus to the message surface', () => {

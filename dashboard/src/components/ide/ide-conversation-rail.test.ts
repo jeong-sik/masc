@@ -477,10 +477,10 @@ describe('IdeConversationRail', () => {
     expect(links.map(link => link.getAttribute('aria-label'))).toContain('Open Comment comment-1')
 
     fireEvent.click(links.find(link => link.textContent === 'Board')!)
-    expect(window.location.hash).toBe('#workspace?section=board&post=thread-line')
+    expect(window.location.hash).toBe('#board?post=thread-line')
 
     fireEvent.click(links.find(link => link.textContent === 'Comment')!)
-    expect(window.location.hash).toBe('#workspace?section=board&post=thread-line&comment=comment-1')
+    expect(window.location.hash).toBe('#board?post=thread-line&comment=comment-1')
 
     fireEvent.click(links.find(link => link.textContent === 'PR')!)
     expect(window.location.hash).toBe('#workspace?section=repositories&pr=15035')

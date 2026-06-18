@@ -350,8 +350,32 @@
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
+  .v2-app #dashboard-side-rail.v2-shell-rail {
+    height: 100vh;
+    max-height: none;
+  }
+
+  .v2-app .v2-shell-tabs,
+  .v2-app .v2-desktop-header-only {
+    display: none;
+  }
+
+  .v2-app .v2-mobile-bottom-bar {
+    display: flex;
+  }
+
+  .v2-app .dashboard-main-scroll {
+    padding-bottom: 4rem;
+  }
+
   .v2-app .v2-header-actions .v2-statchip {
+    display: none;
+  }
+}
+
+@media (min-width: 901px) {
+  .v2-app .v2-mobile-bottom-bar {
     display: none;
   }
 }

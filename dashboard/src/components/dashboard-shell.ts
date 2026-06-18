@@ -27,6 +27,7 @@ import { LoadingState } from './common/feedback-state'
 import {
   DASHBOARD_SURFACES,
   DASHBOARD_NAV_ITEMS,
+  PRIMARY_DASHBOARD_SURFACES,
   currentSectionForRoute,
   visibleSectionItemsForTab,
 } from '../config/navigation'
@@ -64,6 +65,8 @@ function BuildInfoRow({ label, children }: { label: string; children: unknown })
 
 const LazyOverview = lazy(async () => ({ default: (await import('./overview/overview')).Overview }))
 const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
+const LazyKeeperDetailPage = lazy(async () => ({ default: (await import('./keeper-detail-page')).KeeperDetailPage }))
+const LazyBoardSurface = lazy(async () => ({ default: (await import('./board/board-surface')).BoardSurface }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
 const LazyOperations = lazy(async () => ({ default: (await import('./operations-panel')).OperationsPanel }))
 const LazyConnectors = lazy(async () => ({ default: (await import('./connector-status')).ConnectorStatusPanel }))
@@ -1032,10 +1035,20 @@ function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
   `
 }
 
-export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggle?: () => void }) {
+export function SideRail({
+  collapsed,
+  onToggle,
+  primaryOnly = true,
+}: {
+  collapsed?: boolean
+  onToggle?: () => void
+  primaryOnly?: boolean
+}) {
   const currentTab = route.value.tab
   const currentSection = currentSectionForRoute(route.value)
-  const visibleSurfaces = DASHBOARD_SURFACES.filter(surface => surface.hidden !== true)
+  const visibleSurfaces = primaryOnly
+    ? PRIMARY_DASHBOARD_SURFACES
+    : DASHBOARD_SURFACES.filter(surface => surface.hidden !== true)
 
   return html`
     <nav class="v2-shell-surface flex flex-col h-full" aria-label="Dashboard navigation">
@@ -1143,6 +1156,18 @@ function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('Monitor')}>
           <${LazyStatus} />
+        <//>
+      `
+    case 'keepers':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Keepers')}>
+          <${LazyKeeperDetailPage} />
+        <//>
+      `
+    case 'board':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Board')}>
+          <${LazyBoardSurface} />
         <//>
       `
     case 'workspace':
@@ -1312,6 +1337,7 @@ function useSurfaceDocumentTitle(): void {
 }
 
 export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
+  if (routeState.tab === 'keepers') return true
   return routeState.tab === 'monitoring'
     && routeState.params.section === 'agents'
     && typeof routeState.params.keeper === 'string'
@@ -1382,7 +1408,7 @@ export function DashboardMain() {
 
   const routeLabel = dashboardRouteBoundaryKey(route.value)
   const soloMode = isWidgetSoloRoute(route.value)
-  const immersiveSurface = route.value.tab === 'code'
+  const immersiveSurface = route.value.tab === 'code' || route.value.tab === 'keepers'
   const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`
     <div class=${`v2-shell-panel ${immersiveSurface

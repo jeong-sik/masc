@@ -3,28 +3,42 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
-import { MobileBottomBar } from './mobile-nav'
+import { DashboardNavRail } from './mobile-nav'
+import type { RouteState } from '../types'
 
-const navigate = vi.fn()
-const hashForRoute = vi.fn((tab: string, params?: Record<string, string>) => {
-  return params ? `#${tab}?${new URLSearchParams(params)}` : `#${tab}`
-})
-
-vi.mock('../router', () => ({
-  navigate: (...args: Parameters<typeof navigate>) => navigate(...args),
-  hashForRoute: (...args: Parameters<typeof hashForRoute>) => hashForRoute(...args),
+const routerMock = vi.hoisted(() => ({
+  navigate: vi.fn(),
+  hashForRoute: vi.fn((tab: string, params?: Record<string, string>) => {
+    return params ? `#${tab}?${new URLSearchParams(params)}` : `#${tab}`
+  }),
+  routeState: {
+    value: { tab: 'monitoring', params: { section: 'agents' }, postId: null } as RouteState,
+  } as { value: RouteState },
 }))
 
-const PRIMARY_LABELS = ['Overview', 'Monitor', 'Command', 'Workspace'] as const
+vi.mock('../router', () => ({
+  route: routerMock.routeState,
+  navigate: (...args: Parameters<typeof routerMock.navigate>) => routerMock.navigate(...args),
+  hashForRoute: (...args: Parameters<typeof routerMock.hashForRoute>) => routerMock.hashForRoute(...args),
+}))
 
-describe('MobileBottomBar', () => {
+const PRIMARY_LABELS = ['Overview', 'Work', 'Keepers', 'Board'] as const
+
+describe('DashboardNavRail', () => {
   let container: HTMLElement
+  let onToggleCollapsed: ReturnType<typeof vi.fn>
+  let onToggleDrawer: ReturnType<typeof vi.fn>
+  let onCloseDrawer: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    navigate.mockClear()
-    hashForRoute.mockClear()
+    routerMock.routeState.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null } as RouteState
+    routerMock.navigate.mockClear()
+    routerMock.hashForRoute.mockClear()
+    onToggleCollapsed = vi.fn()
+    onToggleDrawer = vi.fn()
+    onCloseDrawer = vi.fn()
   })
 
   afterEach(() => {
@@ -32,56 +46,112 @@ describe('MobileBottomBar', () => {
     document.body.removeChild(container)
   })
 
-  it('renders the 4 primary surfaces plus a More button', () => {
-    render(html`<${MobileBottomBar} currentTab="monitoring" onMenuToggle=${() => {}} />`, container)
+  function renderNav(props: Partial<Parameters<typeof DashboardNavRail>[0]> = {}) {
+    render(html`
+      <${DashboardNavRail}
+        currentTab=${props.currentTab ?? 'monitoring'}
+        mobile=${props.mobile ?? true}
+        drawerOpen=${props.drawerOpen ?? false}
+        keeperDetailMode=${props.keeperDetailMode ?? false}
+        collapsed=${props.collapsed ?? false}
+        onToggleCollapsed=${props.onToggleCollapsed ?? onToggleCollapsed}
+        onToggleDrawer=${props.onToggleDrawer ?? onToggleDrawer}
+        onCloseDrawer=${props.onCloseDrawer ?? onCloseDrawer}
+      />
+    `, container)
+  }
 
-    const nav = container.querySelector('nav[aria-label="Primary mobile navigation"]')
-    expect(nav).not.toBeNull()
+  it('renders one shared rail owner with mobile tabs when the drawer is closed', () => {
+    renderNav({ currentTab: 'monitoring', mobile: true, drawerOpen: false })
 
-    const labels = Array.from(container.querySelectorAll('a, button'))
+    expect(container.querySelector('[data-testid="dashboard-nav-rail"]')).not.toBeNull()
+    const tabs = container.querySelector('nav[aria-label="Primary mobile navigation"]')
+    expect(tabs).not.toBeNull()
+    expect(tabs?.className).toContain('v2-mobile-bottom-bar')
+
+    const labels = Array.from(tabs?.querySelectorAll('a, button') ?? [])
       .map(el => el.textContent?.trim())
-    for (const label of PRIMARY_LABELS) {
-      expect(labels).toContain(label)
-    }
-    expect(labels).toContain('More')
+    expect(labels).toEqual([...PRIMARY_LABELS, 'More'])
   })
 
-  it('marks only the current surface with aria-current=page', () => {
-    render(html`<${MobileBottomBar} currentTab="command" onMenuToggle=${() => {}} />`, container)
+  it('marks only the current mobile tab with aria-current=page', () => {
+    renderNav({ currentTab: 'keepers', mobile: true })
 
-    const links = Array.from(container.querySelectorAll('a'))
+    const links = Array.from(container.querySelectorAll('nav[aria-label="Primary mobile navigation"] a'))
     const current = links.find(a => a.getAttribute('aria-current') === 'page')
-    expect(current?.textContent?.trim()).toBe('Command')
+    expect(current?.textContent?.trim()).toBe('Keepers')
 
     for (const link of links.filter(a => a !== current)) {
       expect(link.hasAttribute('aria-current')).toBe(false)
     }
   })
 
-  it('invokes onMenuToggle when the More button is clicked', () => {
-    const onMenuToggle = vi.fn()
-    render(html`<${MobileBottomBar} currentTab="overview" onMenuToggle=${onMenuToggle} />`, container)
+  it('opens the operational drawer from the mobile More tab', () => {
+    renderNav({ mobile: true, drawerOpen: false })
 
     const more = Array.from(container.querySelectorAll('button'))
       .find(b => b.textContent?.includes('More')) as HTMLElement
     expect(more).toBeTruthy()
     more.click()
 
-    expect(onMenuToggle).toHaveBeenCalledTimes(1)
+    expect(onToggleDrawer).toHaveBeenCalledTimes(1)
   })
 
-  it('guarantees a 44px minimum touch target on every interactive item', () => {
-    render(html`<${MobileBottomBar} currentTab="overview" onMenuToggle=${() => {}} />`, container)
+  it('hides mobile tabs while the drawer overlay is open', () => {
+    renderNav({ mobile: true, drawerOpen: true, collapsed: true })
 
-    const interactives = container.querySelectorAll('a, button')
-    expect(interactives.length).toBe(PRIMARY_LABELS.length + 1) // 4 surfaces + More
+    expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).toBeNull()
+    const rail = container.querySelector('[data-testid="dashboard-nav-rail"]')
+    expect(rail?.className).toContain('block')
+    expect(rail?.className).toContain('fixed')
+
+    const overlay = container.querySelector('[data-testid="dashboard-nav-rail-overlay"]') as HTMLElement | null
+    expect(overlay).not.toBeNull()
+    overlay!.click()
+    expect(onCloseDrawer).toHaveBeenCalledTimes(1)
+
+    expect(container.querySelector('.nb-sub')?.textContent).toContain('Cockpit')
+  })
+
+  it('keeps operational routes in the mobile More drawer', () => {
+    renderNav({ mobile: true, drawerOpen: true })
+
+    const railText = container.querySelector('[data-testid="dashboard-nav-rail"]')?.textContent ?? ''
+    expect(railText).toContain('Monitor')
+    expect(railText).toContain('Command')
+    expect(railText).toContain('Lab')
+    expect(railText).toContain('Logs')
+  })
+
+  it('does not render mobile tabs in desktop mode', () => {
+    renderNav({ mobile: false, drawerOpen: false, collapsed: true })
+
+    expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).toBeNull()
+    const rail = container.querySelector('[data-testid="dashboard-nav-rail"]')
+    expect(rail).not.toBeNull()
+    expect(rail?.className).toContain('w-14')
+    expect(rail?.className).toContain('max-[1100px]:hidden')
+  })
+
+  it('hides mobile tabs while reading keeper chat', () => {
+    renderNav({ mobile: true, drawerOpen: false, keeperDetailMode: true })
+
+    expect(container.querySelector('nav[aria-label="Primary mobile navigation"]')).toBeNull()
+    expect(container.querySelector('[data-testid="dashboard-nav-rail"]')).not.toBeNull()
+  })
+
+  it('guarantees a 44px minimum touch target on every mobile tab item', () => {
+    renderNav({ mobile: true })
+
+    const interactives = container.querySelectorAll('nav[aria-label="Primary mobile navigation"] a, nav[aria-label="Primary mobile navigation"] button')
+    expect(interactives.length).toBe(PRIMARY_LABELS.length + 1)
     for (const el of interactives) {
       expect(el.className).toContain('min-h-[44px]')
     }
   })
 
-  it('passes axe accessibility', async () => {
-    render(html`<${MobileBottomBar} currentTab="overview" onMenuToggle=${() => {}} />`, container)
+  it('passes axe accessibility for the closed mobile rail state', async () => {
+    renderNav({ mobile: true, drawerOpen: false })
     expect(await axe(container)).toHaveNoViolations()
   })
 })

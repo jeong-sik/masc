@@ -294,6 +294,36 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
   })
 
+  it('renders an optional message action and passes the clicked entry', () => {
+    const onClick = vi.fn()
+    const target = entry({
+      id: 'a1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '검사할 응답',
+    })
+
+    render(
+      html`<${ChatTranscript}
+        entries=${[target]}
+        emptyText="empty"
+        variant="messenger"
+        action=${{ label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick }}
+      />`,
+      container,
+    )
+
+    const action = container.querySelector('[data-testid="chat-message-action"]') as HTMLButtonElement
+    expect(action).not.toBeNull()
+    expect(action.textContent).toBe('턴 상세')
+
+    fireEvent.click(action)
+
+    expect(onClick).toHaveBeenCalledTimes(1)
+    expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
+  })
+
   it('renders a thinking placeholder when the model is reasoning', () => {
     render(
       html`<${ChatTranscript}

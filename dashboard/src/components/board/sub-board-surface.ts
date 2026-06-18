@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { Hash, Pencil, Plus, RefreshCw, Trash2, Users } from 'lucide-preact'
 import { createSubBoard, deleteSubBoard, fetchSubBoards, updateSubBoard } from '../../api/board'
-import { navigate } from '../../router'
 import { boardHearthFilter } from '../../store'
 import type { SubBoard, SubBoardAccess } from '../../types'
 import { ActionButton } from '../common/button'
@@ -13,6 +12,7 @@ import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
+import { navigateBoard } from './board-route'
 
 const ACCESS_OPTIONS: Array<{ value: SubBoardAccess; label: string }> = [
   { value: 'open', label: 'Open' },
@@ -61,7 +61,7 @@ function SubBoardRow({ board, onEdit, onDelete, deleting }: SubBoardRowProps) {
             </span>
             <div class="min-w-0 cursor-pointer" onClick=${() => {
               boardHearthFilter.value = board.slug
-              navigate('workspace', { section: 'board' })
+              navigateBoard()
             }}>
               <h3 class="truncate text-sm font-semibold text-[var(--color-fg-primary)] hover:underline">${board.name || board.slug}</h3>
               <div class="truncate font-mono text-2xs text-[var(--color-fg-muted)]">/${board.slug}</div>

@@ -1,46 +1,103 @@
-// MobileBottomBar — 하단 고정 주요 서피스 탭 + ☰(전체 drawer 진입).
+// DashboardNavRail — responsive shell navigation rail.
 //
-// 모바일(<=768px)에서만 렌더. 엄지 도달 영역(하단)에 사용자 우선순위가 높은
-// 4개 서피스(overview·monitoring·command·workspace)를 노출해 한 손으로 빠른
-// 상태 파악·턴 제어 진입을 보장. 나머지 서피스(connectors·lab·code·logs)는
-// ☰ 버튼이 여는 overlay drawer(app.ts 의 mobileMenuOpen)로 접근.
-//
-// 터치 타겟: 각 항목 min-h-[44px] (Apple HIG / WCAG 2.5.5 권장 최소).
-// RouteLink 가 ring focus 를 자동 추가하므로 class 에 ring 을 넣지 않는다.
+// The keeper-v2 prototype uses one NavRail component whose CSS morphs from a
+// left rail into a mobile bottom tab bar at 900px. The dashboard still needs a
+// richer operational drawer for secondary sections, but one component now owns
+// the desktop rail, mobile drawer, and mobile tab strip instead of app.ts
+// stitching together separate navigation surfaces.
 
 import { html } from 'htm/preact'
+import { Fragment } from 'preact'
 import { Menu } from 'lucide-preact'
 import { RouteLink } from './common/route-link'
 import { SurfaceIcon } from './surface-icon'
-import { VISIBLE_DASHBOARD_NAV_ITEMS } from '../config/navigation'
+import { PRIMARY_DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { ringFocusClasses } from './common/ring'
+import { SideRail } from './dashboard-shell'
 import type { TabId } from '../types'
 
-// 하단 탭에 노출할 주요 서피스. 선택 기준 = 사용자 모바일 우선순위
-// (턴·폴링 제어 = command, 상태 모니터링 = monitoring/overview,
-//  작업 보드 = workspace). 이 4개는 모바일에서 80% 이상의 진입을 커버.
+// Keep the mobile bar aligned with the keeper-v2 prototype's primary surfaces:
+// Overview, Work, Keepers, and Board. Operational lanes remain in More.
 const MOBILE_PRIMARY_TAB_IDS: ReadonlyArray<TabId> = [
   'overview',
-  'monitoring',
-  'command',
   'workspace',
+  'keepers',
+  'board',
 ]
 
-const mobilePrimaryItems = VISIBLE_DASHBOARD_NAV_ITEMS.filter(item =>
-  MOBILE_PRIMARY_TAB_IDS.includes(item.id),
-)
+const mobilePrimaryItems = MOBILE_PRIMARY_TAB_IDS.flatMap(id => {
+  const item = PRIMARY_DASHBOARD_NAV_ITEMS.find(navItem => navItem.id === id)
+  return item ? [item] : []
+})
 
-interface MobileBottomBarProps {
+interface MobileNavRailTabsProps {
   currentTab: TabId
   onMenuToggle: () => void
 }
 
-export function MobileBottomBar({ currentTab, onMenuToggle }: MobileBottomBarProps) {
+interface DashboardNavRailProps {
+  currentTab: TabId
+  mobile: boolean
+  drawerOpen: boolean
+  keeperDetailMode: boolean
+  collapsed: boolean
+  onToggleCollapsed: () => void
+  onToggleDrawer: () => void
+  onCloseDrawer: () => void
+}
+
+export function DashboardNavRail({
+  currentTab,
+  mobile,
+  drawerOpen,
+  keeperDetailMode,
+  collapsed,
+  onToggleCollapsed,
+  onToggleDrawer,
+  onCloseDrawer,
+}: DashboardNavRailProps) {
+  const effectiveCollapsed = mobile ? false : collapsed
+  const sideRailWidthClass = mobile ? 'w-72' : (collapsed ? 'w-14' : 'w-55')
+  const sideRailResponsiveClass = mobile
+    ? drawerOpen
+      ? 'block fixed inset-y-0 left-0 z-50 m-0 max-h-none rounded-none border-r'
+      : 'hidden'
+    : 'max-[1100px]:hidden'
+
+  return html`
+    <${Fragment}>
+      ${drawerOpen && mobile ? html`
+        <button
+          type="button"
+          aria-label="Close navigation"
+          tabindex=${-1}
+          data-testid="dashboard-nav-rail-overlay"
+          class="fixed inset-0 z-40 cursor-pointer bg-black/50"
+          onClick=${onCloseDrawer}
+        ></button>
+      ` : null}
+      <aside
+        id="dashboard-side-rail"
+        aria-label="Sidebar navigation"
+        data-testid="dashboard-nav-rail"
+        class="v2-shell-rail ${sideRailWidthClass} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] ${sideRailResponsiveClass}"
+      >
+        <${SideRail} collapsed=${effectiveCollapsed} onToggle=${onToggleCollapsed} primaryOnly=${!mobile} />
+      </aside>
+      ${mobile && !drawerOpen && !keeperDetailMode
+        ? html`<${MobileNavRailTabs} currentTab=${currentTab} onMenuToggle=${onToggleDrawer} />`
+        : null}
+    <//>
+  `
+}
+
+function MobileNavRailTabs({ currentTab, onMenuToggle }: MobileNavRailTabsProps) {
   return html`
     <nav
-      class="v2-shell-surface hidden max-[768px]:flex fixed inset-x-0 bottom-0 z-40 items-stretch border-t border-[var(--color-border-strong)] bg-[var(--shell-header-bg)] backdrop-blur-xl"
+      class="v2-shell-surface v2-mobile-bottom-bar fixed inset-x-0 bottom-0 z-40 items-stretch border-t border-[var(--color-border-strong)] bg-[var(--shell-header-bg)] backdrop-blur-xl"
       style=${{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       aria-label="Primary mobile navigation"
+      data-testid="dashboard-nav-rail-mobile-tabs"
     >
       ${mobilePrimaryItems.map(item => {
         const active = item.id === currentTab

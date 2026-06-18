@@ -26,14 +26,59 @@ async function loadChat() {
     KeeperLifecycleButtons: () => html`<span data-testid="kw-lifecycle-buttons">Lifecycle</span>`,
   }))
   vi.doMock('../keeper-shared', () => ({
-    KeeperConversationPanel: () => html`<div data-testid="kw-conversation-panel">Conversation</div>`,
+    KeeperConversationPanel: ({ onInspectTurn }: { onInspectTurn?: (entry: unknown) => void }) => html`
+      <div data-testid="kw-conversation-panel">
+        Conversation
+        ${onInspectTurn
+          ? html`
+              <button
+                type="button"
+                data-testid="kw-message-turn-action"
+                onClick=${() => onInspectTurn({
+                  id: 'msg-turn-1',
+                  role: 'assistant',
+                  source: 'direct_assistant',
+                  label: 'sangsu',
+                  text: 'done',
+                  timestamp: '2026-03-24T00:02:00.000Z',
+                  delivery: 'history',
+                })}
+              >턴 상세</button>
+            `
+          : null}
+      </div>
+    `,
   }))
   vi.doMock('../keeper-turn-inspector', () => ({
-    KeeperTurnInspector: ({ keeperName }: { keeperName: string }) =>
-      html`<div data-testid="kw-turn-inspector" data-keeper=${keeperName}>TurnInspector</div>`,
+    KeeperTurnInspector: ({
+      keeperName,
+      initialTurnTimestamp,
+    }: {
+      keeperName: string
+      initialTurnTimestamp?: string | null
+    }) =>
+      html`
+        <div
+          data-testid="kw-turn-inspector"
+          data-keeper=${keeperName}
+          data-initial-turn-timestamp=${initialTurnTimestamp ?? ''}
+        >TurnInspector</div>
+      `,
   }))
   vi.doMock('../../lib/keeper-runtime-display', () => ({
     keeperDisplayStatus: () => 'running',
+  }))
+  vi.doMock('../../lib/keeper-predicates', () => ({
+    keeperActionVisibility: () => ({
+      canBoot: false,
+      canPause: true,
+      canResume: false,
+      canShutdown: true,
+      canWake: false,
+    }),
+  }))
+  vi.doMock('../keeper-action-panel', () => ({
+    runKeeperAction: vi.fn(async () => undefined),
   }))
   vi.doMock('../chat/artifact-panel', () => ({
     ChatArtifactPanel: ({ entries }: { entries: unknown[] }) =>
@@ -64,6 +109,8 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../keeper-shared')
     vi.doUnmock('../keeper-turn-inspector')
     vi.doUnmock('../../lib/keeper-runtime-display')
+    vi.doUnmock('../../lib/keeper-predicates')
+    vi.doUnmock('../keeper-action-panel')
     vi.doUnmock('../chat/artifact-panel')
     vi.doUnmock('../keeper-detail-state')
   })
@@ -84,7 +131,8 @@ describe('KeeperWorkspaceChat', () => {
 
     expect(container.querySelector('[data-testid="kw-sigil"]')?.textContent).toBe('sangsu')
     expect(container.querySelector('[data-testid="kw-conversation-panel"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="kw-chat-turn-inspector-btn"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-turn"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-icons"]')).not.toBeNull()
   })
 
   it('opens the turn inspector drawer when the turn inspector button is clicked', async () => {
@@ -103,7 +151,7 @@ describe('KeeperWorkspaceChat', () => {
 
     expect(container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')).toBeNull()
 
-    const btn = container.querySelector('[data-testid="kw-chat-turn-inspector-btn"]') as HTMLButtonElement
+    const btn = container.querySelector('[data-testid="kw-chat-command-turn"]') as HTMLButtonElement
     await act(async () => {
       btn.click()
     })
@@ -146,6 +194,35 @@ describe('KeeperWorkspaceChat', () => {
     expect(keeperMobilePane.value).toBe('roster')
   })
 
+  it('opens the turn inspector drawer from a message-level turn action', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+
+    await act(async () => {
+      render(html`
+        <${KeeperWorkspaceChat}
+          keeper=${mockKeeper}
+          detailOpen=${false}
+          onToggleDetail=${vi.fn()}
+          onClear=${vi.fn()}
+        />
+      `, container)
+    })
+
+    const action = container.querySelector('[data-testid="kw-message-turn-action"]') as HTMLButtonElement
+    expect(action).not.toBeNull()
+
+    await act(async () => {
+      action.click()
+    })
+
+    const drawer = container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')
+    expect(drawer).not.toBeNull()
+    expect(drawer?.textContent).toContain('메시지 sangsu')
+    expect(drawer?.textContent).toContain('2026-03-24T00:02:00.000Z')
+    expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-keeper')).toBe('sangsu')
+    expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-initial-turn-timestamp')).toBe('2026-03-24T00:02:00.000Z')
+  })
+
   it('toggles the artifact panel when the artifacts button is clicked', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
 
@@ -162,8 +239,8 @@ describe('KeeperWorkspaceChat', () => {
 
     expect(container.querySelector('[data-testid="kw-artifact-panel"]')).toBeNull()
 
-    const btn = container.querySelector('[data-testid="kw-chat-artifacts-toggle"]') as HTMLButtonElement
-    expect(btn?.textContent?.trim()).toBe('아티팩트')
+    const btn = container.querySelector('[data-testid="kw-chat-command-artifacts"]') as HTMLButtonElement
+    expect(btn?.getAttribute('aria-label')).toBe('아티팩트')
 
     await act(async () => {
       btn.click()
@@ -171,12 +248,61 @@ describe('KeeperWorkspaceChat', () => {
 
     const panel = container.querySelector('[data-testid="kw-artifact-panel"]')
     expect(panel).not.toBeNull()
-    expect(btn?.textContent?.trim()).toBe('아티팩트 숨김')
+    expect(btn?.getAttribute('aria-label')).toBe('아티팩트 숨김')
+    expect(btn?.getAttribute('aria-pressed')).toBe('true')
 
     await act(async () => {
       btn.click()
     })
 
     expect(container.querySelector('[data-testid="kw-artifact-panel"]')).toBeNull()
+  })
+
+  it('renders mobile roster and context controls when mobile mode is enabled', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    const onBack = vi.fn()
+    const onOpenRail = vi.fn()
+    const onOpenConfig = vi.fn()
+
+    await act(async () => {
+      render(html`
+        <${KeeperWorkspaceChat}
+          keeper=${mockKeeper}
+          detailOpen=${false}
+          onToggleDetail=${vi.fn()}
+          onClear=${vi.fn()}
+          mobile=${true}
+          onBack=${onBack}
+          onOpenRail=${onOpenRail}
+          onOpenConfig=${onOpenConfig}
+        />
+      `, container)
+    })
+
+    const back = container.querySelector('[data-testid="kw-chat-back-to-roster"]') as HTMLButtonElement | null
+    const context = container.querySelector('[data-testid="kw-chat-mobile-context"]') as HTMLButtonElement | null
+    const menuToggle = container.querySelector('[data-testid="kw-chat-command-menu-toggle"]') as HTMLButtonElement | null
+
+    expect(back).not.toBeNull()
+    expect(back?.getAttribute('aria-label')).toBe('키퍼 로스터로 돌아가기')
+    expect(context).not.toBeNull()
+    expect(menuToggle).not.toBeNull()
+    expect(container.querySelector('[data-testid="kw-chat-command-config"]')).toBeNull()
+
+    await act(async () => {
+      back?.click()
+      context?.click()
+      menuToggle?.click()
+    })
+
+    expect(onBack).toHaveBeenCalledTimes(1)
+    expect(onOpenRail).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[data-testid="kw-chat-command-config"]')).not.toBeNull()
+
+    await act(async () => {
+      ;(container.querySelector('[data-testid="kw-chat-command-config"]') as HTMLButtonElement).click()
+    })
+
+    expect(onOpenConfig).toHaveBeenCalledTimes(1)
   })
 })

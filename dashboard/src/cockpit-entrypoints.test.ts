@@ -129,6 +129,9 @@ describe('cockpit entrypoint registry', () => {
       tab: 'workspace',
       params: { section: 'planning', view: 'goal-tree' },
     })
+    expect(cockpitTargetForParams({ mode: 'Comms', tab: 'board-feed' })).toEqual({
+      tab: 'board',
+    })
     expect(cockpitTargetForParams({ mode: 'Comms', tab: 'composer' })).toEqual({
       tab: 'command',
       params: { section: 'operations', view: 'ops' },
@@ -199,6 +202,10 @@ describe('cockpit entrypoint registry', () => {
     expect(cockpitTargetForParams({ mode: 'Comms', tab: 'cm-bc' })).toEqual({
       tab: 'command',
       params: { section: 'operations', view: 'ops', focus: 'broadcast' },
+    })
+    expect(cockpitTargetForParams({ mode: 'Comms', tab: 'bd-thr' })).toEqual({
+      tab: 'board',
+      params: { focus: 'thread' },
     })
     expect(cockpitTargetForParams({ mode: 'Work', tab: 'acc-led' })).toEqual({
       tab: 'workspace',

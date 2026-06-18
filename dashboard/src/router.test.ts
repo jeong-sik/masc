@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   navigate,
+  navigateToPost,
   replaceRoute,
   route,
   hashForRoute,
@@ -25,6 +26,32 @@ describe('navigate', () => {
     navigate('workspace', { section: 'board' })
     expect(route.value.tab).toBe('workspace')
     expect(route.value.params.section).toBe('board')
+  })
+
+  it('navigates to top-level keepers without monitor section baggage', () => {
+    navigate('keepers', { section: 'agents', keeper: 'sangsu' })
+    expect(route.value.tab).toBe('keepers')
+    expect(route.value.params).toEqual({ keeper: 'sangsu' })
+    expect(window.location.hash).toBe('#keepers?keeper=sangsu')
+  })
+
+  it('navigates to top-level board without workspace section baggage', () => {
+    navigate('board', { section: 'board', post: 'post-1', comment: 'comment-1' })
+    expect(route.value.tab).toBe('board')
+    expect(route.value.params).toEqual({ post: 'post-1', comment: 'comment-1' })
+    expect(window.location.hash).toBe('#board?post=post-1&comment=comment-1')
+  })
+
+  it('keeps workspace board deep links routeable for compatibility', () => {
+    navigate('workspace', { section: 'board', post: 'post-1' })
+    expect(route.value.tab).toBe('workspace')
+    expect(route.value.params).toEqual({ section: 'board', post: 'post-1' })
+    expect(window.location.hash).toBe('#workspace?section=board&post=post-1')
+  })
+
+  it('opens board posts on the top-level board surface', () => {
+    navigateToPost('post 1')
+    expect(window.location.hash).toBe('#board?post=post%201')
   })
 
   it('redirects removed operations params to operations', () => {

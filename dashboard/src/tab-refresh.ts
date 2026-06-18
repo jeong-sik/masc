@@ -64,6 +64,10 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
   switch (routeState.tab) {
     case 'overview':
       return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution']
+    case 'keepers':
+      return ['namespaceTruth', 'execution', 'missionSnapshot']
+    case 'board':
+      return ['board']
     case 'monitoring':
       if (routeState.params.section === 'observatory') {
         return ['namespaceTruth', 'observatory']

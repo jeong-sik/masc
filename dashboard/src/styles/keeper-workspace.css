@@ -52,9 +52,12 @@
     var(--kw-rail-w, 312px);
   height: 100%;
   min-height: 0;
+  position: relative;
   background: var(--color-bg-page);
   color: var(--color-fg-primary);
 }
+.kw-grid[data-roster="mini"] { --kw-roster-w: 64px; }
+.kw-grid[data-rail="closed"] { --kw-rail-w: 0px; }
 
 /* Detail ("상세 보기") takes over the conversation + rail span as a
  * single scrollable column; roster stays for keeper switching. */
@@ -63,26 +66,57 @@
 @media (max-width: 1180px) {
   .kw-grid { grid-template-columns: var(--kw-roster-w, 248px) minmax(0, 1fr); }
   .kw-grid .kw-rail { display: none; }
+  .kw-rail-toggle.right { display: none; }
 }
-/* Below 860px the rail is already gone and roster + conversation can no longer
- * sit side by side. Rather than stacking both in one column (which halves the
- * grid height — the conversation collapses to ~half a screen behind the full
- * roster), switch to a single visible pane driven by `data-mobile-pane`
- * (keeperMobilePane signal). The hidden pane is removed from the grid so the
- * visible one stretches to the full grid height. Roster row select → 'chat';
- * the chat header "← 키퍼" back button → 'roster'. */
+/* Below 860px the workspace becomes master-detail: the roster and chat/detail
+ * panes share one grid column, and JS flips data-mobile-pane after selection.
+ * The attribute is backed by keeperMobilePane so direct routes and roster
+ * selection use the same pane switcher. */
 @media (max-width: 860px) {
-  .kw-grid { grid-template-columns: minmax(0, 1fr); }
-  .kw-grid[data-mobile-pane="chat"] > .kw-roster { display: none; }
-  .kw-grid[data-mobile-pane="roster"] > .kw-chat,
-  .kw-grid[data-mobile-pane="roster"] > .kw-detail { display: none; }
+  .kw-grid { grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+  .kw-grid[data-mobile-pane] { grid-template-rows: minmax(0, 1fr); }
+  .kw-grid[data-mobile-pane="roster"] .kw-chat,
+  .kw-grid[data-mobile-pane="roster"] .kw-detail {
+    display: none;
+  }
+  .kw-grid[data-mobile-pane="chat"] .kw-roster {
+    display: none;
+  }
+  .kw-grid[data-mobile-pane="roster"] .kw-roster,
+  .kw-grid[data-mobile-pane="chat"] .kw-chat,
+  .kw-grid[data-mobile-pane="chat"] .kw-detail {
+    min-height: 0;
+    height: 100%;
+  }
+  .kw-rail-toggle { display: none; }
+  .kw-roster { border-right: 0; border-bottom: 0; }
+  .kw-chat-head { flex-wrap: wrap; align-items: flex-start; min-width: 0; padding: 12px 14px; }
+  .kw-chat-id { flex: 1 1 132px; }
+  .kw-chat-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 0;
+    margin-left: auto;
+  }
+  .kw-act { padding: 6px 10px; }
+  .kw-thread-inner .chat-transcript {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .kw-composer-inner { padding: 0 16px; }
+  .kw-chat-toolbar { padding: 6px 16px; }
+  .kw-detail-scroll { padding: 14px; }
 }
 
 /* ════ ROSTER (left) ════════════════════════════════════════════ */
 .kw-roster {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: visible;
   border-right: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);
 }
@@ -115,10 +149,11 @@
    the right of the filter chips; pill control with the same resting/hover/focus
    treatment as the search field and filter chips. */
 .kw-roster-sort {
+  min-width: 78px;
   margin-left: auto;
   font-size: var(--fs-11); letter-spacing: 0.04em;
-  padding: 4px 7px; border-radius: var(--radius-pill); cursor: pointer;
-  border: 1px solid var(--color-border-default); background: transparent; color: var(--color-fg-secondary);
+  padding: 4px 8px; border-radius: var(--radius-pill); cursor: pointer;
+  border: 1px solid var(--color-border-default); background: var(--color-bg-surface); color: var(--color-fg-secondary);
   transition: color .15s, border-color .15s, background .15s; outline: none;
 }
 .kw-roster-sort:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); }
@@ -126,11 +161,28 @@
 .kw-roster-sort option { background: var(--color-bg-elevated); color: var(--color-fg-primary); }
 
 .kw-roster-list { flex: 1; overflow-y: auto; padding: 9px 8px; }
+.kw-roster-mini-list { display: flex; flex: 1; flex-direction: column; align-items: center; gap: 8px; overflow-y: auto; padding: 12px 8px; }
 .kw-roster-group {
   font-size: var(--fs-11); font-weight: var(--fw-bold); letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-fg-secondary);
   padding: 12px 8px 6px;
 }
 .kw-roster-empty { padding: 30px 12px; text-align: center; color: var(--color-fg-secondary); font-size: var(--fs-13); }
+
+.kw-kp-mini {
+  position: relative;
+  display: inline-flex;
+  width: 46px;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-2);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+.kw-kp-mini:hover { background: var(--color-bg-surface); border-color: var(--color-border-default); }
+.kw-kp-mini[aria-current="true"] { background: var(--color-bg-surface); border-color: var(--color-accent-fg-dim); box-shadow: inset 0 0 0 1px var(--accent-10); }
+.kw-kp-mini .kw-dot { position: absolute; right: 5px; bottom: 5px; }
 
 .kw-kp-row {
   display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: start;
@@ -144,12 +196,18 @@
   transition: background .14s, border-color .14s;
   position: relative;
 }
+.kw-kp-row:focus-visible { outline: 2px solid var(--color-accent-fg-dim); outline-offset: 2px; }
 .kw-kp-row:hover { background: var(--color-bg-surface); border-color: var(--color-border-default); }
 .kw-kp-row[aria-current="true"] { background: var(--color-bg-surface); border-color: var(--color-accent-fg-dim); box-shadow: inset 0 0 0 1px var(--accent-10); }
 .kw-kp-row[aria-current="true"]::before {
   content: ""; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 3px;
   background: var(--color-accent-fg); border-radius: 0 3px 3px 0;
   box-shadow: 0 0 10px rgb(var(--color-accent-glow) / 0.6);
+}
+.kw-kp-row:hover .kw-kp-right,
+.kw-kp-row:focus-within .kw-kp-right {
+  opacity: 0;
+  pointer-events: none;
 }
 .kw-kp-meta { min-width: 0; }
 .kw-kp-name { font-weight: var(--fw-bold); font-size: 15px; color: var(--color-fg-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -165,6 +223,97 @@
   color: var(--color-status-err);
   background: rgb(var(--color-status-err-glow) / 0.16);
   border: 1px solid rgb(var(--color-status-err-glow) / 0.35);
+}
+.kw-kp-more {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  z-index: 2;
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transform: translateY(-50%);
+  opacity: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-panel-alt);
+  color: var(--color-fg-secondary);
+  cursor: pointer;
+  transition: opacity .14s, color .15s, border-color .15s, background .15s;
+}
+.kw-kp-row:hover .kw-kp-more,
+.kw-kp-row:focus-within .kw-kp-more {
+  opacity: 1;
+}
+.kw-kp-more:hover {
+  color: var(--color-accent-fg);
+  border-color: var(--color-accent-fg-dim);
+  background: var(--color-bg-surface);
+}
+.kw-kp-menu {
+  position: absolute;
+  z-index: 80;
+  min-width: 190px;
+  padding: 5px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--r-2);
+  background: var(--color-bg-panel-alt);
+  box-shadow: var(--shadow-raised);
+}
+.kw-kp-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px 8px;
+  border-bottom: 1px solid var(--color-border-divider);
+  margin-bottom: 4px;
+  color: var(--color-fg-primary);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+}
+.kw-kp-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.kw-kp-menu-item:hover {
+  color: var(--color-fg-primary);
+  background: var(--color-bg-surface);
+}
+.kw-kp-menu-item.danger { color: var(--color-status-err); }
+.kw-kp-menu-item.danger:hover { background: rgb(var(--color-status-err-glow) / 0.12); }
+.kw-kp-menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--color-border-divider);
+}
+.kw-kp-menu-note {
+  padding: 8px 10px;
+  color: var(--color-fg-muted);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+}
+@media (max-width: 860px) {
+  .kw-kp-more { opacity: 1; }
+  .kw-kp-row .kw-kp-right { padding-right: 30px; }
+  .kw-kp-row:hover .kw-kp-right,
+  .kw-kp-row:focus-within .kw-kp-right {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* shared sigil avatar (roster + chat hero) — color from --color-keeper-N */
@@ -230,6 +379,92 @@
 .kw-state-pill.off { color: var(--color-fg-muted); }
 
 .kw-chat-actions { display: flex; gap: 7px; align-items: center; flex: none; }
+.kw-chat-command-icons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.kw-chat-command-icon,
+.kw-chat-command-menu-toggle,
+.kw-chat-ctx-mobile {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-secondary);
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s, transform .12s;
+}
+.kw-chat-command-icon:hover,
+.kw-chat-command-menu-toggle:hover,
+.kw-chat-ctx-mobile:hover {
+  color: var(--color-fg-primary);
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+.kw-chat-command-icon.active { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); background: var(--accent-10); }
+.kw-chat-command-icon.danger,
+.kw-chat-command-item.danger { color: var(--color-status-err); }
+.kw-chat-command-icon.danger:hover,
+.kw-chat-command-item.danger:hover {
+  border-color: rgb(var(--color-status-err-glow) / 0.5);
+  background: rgb(var(--color-status-err-glow) / 0.12);
+}
+.kw-chat-command-icon:disabled,
+.kw-chat-command-menu-toggle:disabled,
+.kw-chat-command-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.kw-chat-mobile-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.kw-chat-command-menu {
+  position: relative;
+  display: inline-flex;
+}
+.kw-chat-command-popover {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  width: max-content;
+  min-width: 190px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--r-2);
+  background: var(--color-bg-panel-alt);
+  box-shadow: var(--shadow-raised);
+}
+.kw-chat-command-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+  transition: color .15s, background .15s;
+}
+.kw-chat-command-item:hover {
+  color: var(--color-fg-primary);
+  background: var(--color-bg-surface);
+}
 .kw-act {
   font-size: var(--fs-12); font-weight: var(--fw-med); letter-spacing: 0.02em;
   padding: 7px 12px; border-radius: var(--r-1); cursor: pointer;
@@ -239,6 +474,148 @@
 .kw-act:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); background: var(--color-bg-hover); }
 .kw-act:disabled { opacity: 0.5; cursor: not-allowed; }
 .kw-act.danger:hover { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.5); }
+.kw-chat-mobile-btn {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--r-1);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-secondary);
+  cursor: pointer;
+  flex: none;
+}
+.kw-chat-mobile-btn:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); background: var(--color-bg-hover); }
+.kw-chat-ctx-mobile {
+  gap: 6px;
+}
+.kw-chat-ctx-mobile span { display: none; }
+
+.kw-mobile-rail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(0 0 0 / 0.38);
+}
+.kw-mobile-rail-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 340px);
+  height: 100%;
+  min-height: 0;
+  background: var(--color-bg-panel-alt);
+  border-left: 1px solid var(--color-border-default);
+  box-shadow: -18px 0 46px rgb(0 0 0 / 0.32);
+}
+.kw-mobile-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border-default);
+}
+.kw-mobile-rail-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-13);
+  color: var(--color-fg-primary);
+}
+.kw-mobile-rail-drawer .kw-rail {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  border-left: 0;
+}
+
+.kw-config-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay-keeper);
+  display: flex;
+  justify-content: flex-end;
+  background: var(--backdrop-modal);
+  isolation: isolate;
+}
+.kw-config-drawer {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 96vw);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--color-border-strong);
+  background: var(--color-bg-surface);
+  box-shadow: var(--shadow-drawer-left);
+}
+.kw-config-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--color-border-strong);
+  background: var(--color-bg-elevated);
+}
+.kw-config-head h3 {
+  margin: 0;
+  color: var(--color-fg-primary);
+  font: var(--type-title);
+}
+.kw-config-head p {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--color-fg-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kw-config-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 24px;
+  background: var(--color-bg-page);
+}
+
+@media (max-width: 860px) {
+  .kw-config-drawer {
+    width: 100vw;
+    border-left: 0;
+  }
+}
+
+.kw-rail-toggle {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  width: 20px;
+  height: 44px;
+  transform: translateY(-50%);
+  border: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface);
+  color: var(--color-fg-muted);
+  border-radius: var(--r-1);
+  cursor: pointer;
+}
+.kw-rail-toggle:hover {
+  color: var(--color-fg-primary);
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+.kw-rail-toggle.left { left: calc(var(--kw-roster-w, 286px) - 10px); }
+.kw-rail-toggle.right { right: calc(var(--kw-rail-w, 312px) - 10px); }
+.kw-grid[data-rail="closed"] .kw-rail-toggle.right { right: 2px; }
 
 /* Mobile conversation header (≤860px). The desktop header is a single flex row
  * [sigil | identity (flex:1) | actions (flex:none)]. At phone widths the five

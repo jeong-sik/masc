@@ -1,6 +1,6 @@
 import { signal } from '@preact/signals'
 import { navigate, route } from '../router'
-import type { Keeper } from '../types'
+import type { Keeper, TabId } from '../types'
 import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
 import { activeKeeperName } from '../keeper-state'
 import { registerKeeperTurnRefresh } from '../sse-store'
@@ -39,14 +39,21 @@ function selectedKeeperMatches(keeperName: string): boolean {
   return selected.name === trimmed || selected.agent_name === trimmed
 }
 
-function baseAgentDirectoryRouteParams(): Record<string, string> {
+function baseAgentDirectoryRoute(): { tab: TabId; params: Record<string, string> } {
+  if (route.value.tab === 'keepers') {
+    const next: Record<string, string> = { ...route.value.params }
+    delete next.agent
+    delete next.keeper
+    delete next.section
+    return { tab: 'keepers', params: next }
+  }
   if (route.value.tab === 'monitoring' && route.value.params.section === 'agents') {
     const next: Record<string, string> = { ...route.value.params, section: 'agents' }
     delete next.agent
     delete next.keeper
-    return next
+    return { tab: 'monitoring', params: next }
   }
-  return { section: 'agents' }
+  return { tab: 'monitoring', params: { section: 'agents' } }
 }
 
 export function openKeeperDetail(k: Keeper) {
@@ -54,7 +61,8 @@ export function openKeeperDetail(k: Keeper) {
   keeperMobilePane.value = 'chat'
   selectKeeper(k.name)
   void loadKeeperConfig(k.name)
-  navigate('monitoring', { ...baseAgentDirectoryRouteParams(), keeper: k.name })
+  const base = baseAgentDirectoryRoute()
+  navigate(base.tab, { ...base.params, keeper: k.name })
 }
 
 export function clearKeeperDetailSelection(keeperName?: string) {
@@ -66,5 +74,6 @@ export function clearKeeperDetailSelection(keeperName?: string) {
 
 export function closeKeeperDetail() {
   clearKeeperDetailSelection()
-  navigate('monitoring', baseAgentDirectoryRouteParams())
+  const base = baseAgentDirectoryRoute()
+  navigate(base.tab, base.params)
 }

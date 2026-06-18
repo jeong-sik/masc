@@ -417,10 +417,12 @@ export function KeeperConversationPanel({
   keeperName,
   placeholder,
   layout = 'default',
+  onInspectTurn,
 }: {
   keeperName: string
   placeholder: string
   layout?: 'default' | 'primary' | 'workspace'
+  onInspectTurn?: (entry: KeeperConversationEntry) => void
 }) {
   const [draft, setDraft] = useState('')
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
@@ -630,6 +632,7 @@ export function KeeperConversationPanel({
               size="primary"
               showDayDividers=${true}
               showSourceBadge=${true}
+              action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
             />
           </div>
         </div>
@@ -756,6 +759,7 @@ export function KeeperConversationPanel({
           showMetadata=${showMetadata}
           variant="messenger"
           size="primary"
+          action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
         />
 
         ${!showInternal && hiddenCount > 0
@@ -866,6 +870,7 @@ export function KeeperConversationPanel({
             showMetadata=${showMetadata}
             variant="messenger"
             size="default"
+            action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
           />
         </div>
 

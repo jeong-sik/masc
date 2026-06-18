@@ -9,6 +9,8 @@ import {
   Plug,
   ScrollText,
   Settings,
+  SquareKanban,
+  UsersRound,
 } from 'lucide-preact'
 import type { DashboardSurfaceIcon } from '../config/navigation'
 
@@ -24,6 +26,10 @@ export function SurfaceIcon({ icon, size = 16 }: SurfaceIconProps) {
       return html`<${Home} ...${props} />`
     case 'monitoring':
       return html`<${Activity} ...${props} />`
+    case 'keepers':
+      return html`<${UsersRound} ...${props} />`
+    case 'board':
+      return html`<${SquareKanban} ...${props} />`
     case 'command':
       return html`<${Gauge} ...${props} />`
     case 'connectors':

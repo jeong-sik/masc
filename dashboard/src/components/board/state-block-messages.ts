@@ -7,9 +7,9 @@ import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { stripStateBlocks } from '../../keeper-message'
 import { SYSTEM_MESSAGE_FROM } from '../../lib/board-utils'
-import { navigate } from '../../router'
 import { messages } from '../../store'
 import type { Message } from '../../types'
+import { navigateBoard } from './board-route'
 
 interface StateBlockRow {
   message: Message
@@ -151,7 +151,7 @@ export function StateBlockMessages() {
           variant="ghost"
           size="sm"
           class="inline-flex items-center gap-1.5"
-          onClick=${() => navigate('workspace', { section: 'board' })}
+          onClick=${() => navigateBoard()}
           ariaLabel="게시판으로 돌아가기"
         >
           <${ArrowLeft} size=${14} aria-hidden="true" />

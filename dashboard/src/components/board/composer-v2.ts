@@ -1,7 +1,8 @@
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useState } from 'preact/hooks'
-import { AtSign, Braces, Megaphone, Send, UserRound } from 'lucide-preact'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { AtSign, Braces, Megaphone, Mic, Paperclip, Send, Square, UserRound, X } from 'lucide-preact'
 import { currentDashboardActor, sendBroadcast } from '../../api'
+import { keepers as dashboardKeepers, refreshExecution } from '../../store'
 import {
   dispatchOperatorAction,
   operatorActionBusy,
@@ -32,6 +33,21 @@ interface StructuredStateBlock {
   kind: 'state-block'
   raw: string
   keys: string[]
+}
+
+export interface ComposerAttachmentDraft {
+  id: string
+  kind: 'image' | 'file'
+  name: string
+  size: string
+  dims?: string | null
+}
+
+export interface ComposerVoiceDraft {
+  secs: number
+  size: string
+  wave: number[]
+  transcript: string
 }
 
 export interface ComposerV2Request {
@@ -77,6 +93,7 @@ export function buildComposerV2Request(input: {
   workspaceId: string
   body: string
   keeperId?: string | null
+  attachments?: ComposerAttachmentDraft[]
 }): ComposerV2Request {
   const body = input.body.trim()
   const target: ComposerV2Target = {}
@@ -93,9 +110,55 @@ export function buildComposerV2Request(input: {
       mode: input.mode,
       target: Object.keys(target).length > 0 ? target : undefined,
       body: composeBody,
-      attachments: [],
+      attachments: input.attachments ?? [],
     },
   }
+}
+
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function formatClock(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds))
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
+}
+
+export function createComposerVoiceDraft(): ComposerVoiceDraft {
+  return {
+    secs: 12,
+    size: formatFileSize(12 * 3400),
+    wave: [0.35, 0.72, 0.48, 0.9, 0.42, 0.66, 0.58, 0.8, 0.5, 0.7, 0.38, 0.62],
+    transcript: '스케줄러 p99 스파이크와 compact 타이밍을 비교해서 결과만 알려줘.',
+  }
+}
+
+export function serializeComposerBody(input: {
+  text: string
+  attachments: ComposerAttachmentDraft[]
+  voice: ComposerVoiceDraft | null
+}): string {
+  const blocks: string[] = []
+  if (input.attachments.length > 0) {
+    blocks.push([
+      'Attachments:',
+      ...input.attachments.map(attachment => {
+        const meta = [attachment.size, attachment.kind, attachment.dims].filter(Boolean).join(' · ')
+        return `- ${attachment.name}${meta ? ` (${meta})` : ''}`
+      }),
+    ].join('\n'))
+  }
+  if (input.voice) {
+    blocks.push([
+      `Voice memo ${formatClock(input.voice.secs)} (${input.voice.size})`,
+      input.voice.transcript,
+    ].join('\n'))
+  }
+  const text = input.text.trim()
+  if (text) blocks.push(text)
+  return blocks.join('\n\n')
 }
 
 interface ComposerV2Props {
@@ -123,8 +186,12 @@ export function ComposerV2({
   }, [controlledMode, onModeChange])
   const [draft, setDraft] = useState('')
   const [keeperTarget, setKeeperTarget] = useState('')
+  const [attachments, setAttachments] = useState<ComposerAttachmentDraft[]>([])
+  const [voiceDraft, setVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
+  const [recording, setRecording] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const workspace = normalizeWorkspaceId(workspaceId)
   const busy = submitting || operatorActionBusy.value
   const mention = useOperatorMentionContext({
@@ -132,6 +199,7 @@ export function ComposerV2({
     target: keeperTarget,
     dmActive: mode === 'dm',
     listboxId: MENTION_LISTBOX_ID,
+    fallbackKeepers: dashboardKeepers.value,
   })
   const {
     onlineKeepers,
@@ -151,8 +219,10 @@ export function ComposerV2({
     setDismissedMentionQuery,
   } = mention
   const stateKeys = mode === 'state-block' ? stateBlockKeys(draft) : []
+  const hasDraftContent = draft.trim() !== '' || attachments.length > 0 || voiceDraft !== null
+  const attachmentLabel = `${attachments.length} file${attachments.length === 1 ? '' : 's'}`
   const sendDisabled = busy
-    || draft.trim() === ''
+    || !hasDraftContent
     || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
     || (mode === 'state-block' && stateKeys.length === 0)
 
@@ -162,6 +232,12 @@ export function ComposerV2({
     const firstKeeper = onlineKeepers[0]?.name
     setKeeperTarget(firstKeeper ? `keeper:${firstKeeper}` : '')
   }, [mode, onlineKeeperNames, selectedKeeperOnline])
+
+  useEffect(() => {
+    if (mode !== 'dm') return
+    if (onlineKeepers.length > 0) return
+    void refreshExecution()
+  }, [mode, onlineKeepers.length])
 
   function chooseMode(nextMode: ComposerV2Mode): void {
     setMode(nextMode)
@@ -176,8 +252,34 @@ export function ComposerV2({
     setDraft(current => replaceTrailingMentionDraft(current, keeperName))
   }
 
+  function attachFiles(files: FileList | File[]): void {
+    const nextFiles = Array.from(files).slice(0, 6)
+    if (nextFiles.length === 0) return
+    setAttachments(current => [
+      ...current,
+      ...nextFiles.map((file, index): ComposerAttachmentDraft => ({
+        id: `${Date.now()}-${index}-${file.name}`,
+        kind: file.type.startsWith('image/') ? 'image' : 'file',
+        name: file.name,
+        size: formatFileSize(file.size),
+      })),
+    ].slice(0, 6))
+  }
+
+  function stopVoiceDraft(): void {
+    setRecording(false)
+    setVoiceDraft(createComposerVoiceDraft())
+  }
+
+  function resetDraft(): void {
+    setDraft('')
+    setAttachments([])
+    setVoiceDraft(null)
+    setRecording(false)
+  }
+
   async function submit(): Promise<void> {
-    const message = draft.trim()
+    const message = serializeComposerBody({ text: draft, attachments, voice: voiceDraft })
     if (!message || sendDisabled) return
     const keeperId = mode === 'dm'
       ? trailingMentionTarget ?? keeperNameFromTarget(keeperTarget)
@@ -187,6 +289,7 @@ export function ComposerV2({
       workspaceId: workspace,
       body: message,
       keeperId,
+      attachments,
     })
     setSubmitting(true)
     setSubmitError(null)
@@ -204,7 +307,7 @@ export function ComposerV2({
         await sendBroadcast(currentDashboardActor(), composeBodyText(request.compose.body))
       }
       if (keeperId) setKeeperTarget(`keeper:${keeperId}`)
-      setDraft('')
+      resetDraft()
       showToast('Message sent.', 'success')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Message send failed.'
@@ -246,11 +349,64 @@ export function ComposerV2({
           #${workspace}
         </span>
         <span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]" aria-live="polite">
-          ${draft.length} chars · ${onlineKeepers.length} keeper targets
+          ${draft.length} chars · ${attachmentLabel}${voiceDraft ? ' · voice' : ''} · ${onlineKeepers.length} keeper targets
         </span>
       </div>
 
       <div class="mt-3 grid gap-2">
+        ${attachments.length > 0 || voiceDraft
+          ? html`
+              <div class="composer-tray" data-testid="composer-v2-tray">
+                ${attachments.map(attachment => html`
+                  <div class="cdraft att" key=${attachment.id}>
+                    <div class="cdraft-thumb">
+                      <span class="cdraft-glyph">${attachment.kind === 'image' ? '▧' : '◫'}</span>
+                    </div>
+                    <div class="cdraft-meta">
+                      <span class="cdraft-name mono">${attachment.name}</span>
+                      <span class="cdraft-sub mono">${[attachment.size, attachment.kind, attachment.dims].filter(Boolean).join(' · ')}</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="cdraft-x"
+                      title="첨부 제거"
+                      aria-label=${`Remove attachment ${attachment.name}`}
+                      onClick=${() => { setAttachments(current => current.filter(item => item.id !== attachment.id)) }}
+                      disabled=${busy}
+                    >
+                      <${X} size=${10} aria-hidden="true" />
+                    </button>
+                  </div>
+                `)}
+                ${voiceDraft
+                  ? html`
+                      <div class="cdraft voice">
+                        <span class="cdraft-glyph mic">◌</span>
+                        <div class="cdraft-wave" aria-hidden="true">
+                          ${voiceDraft.wave.map((height, index) => html`<span class="vbar" key=${index} style=${{ height: `${Math.round(4 + height * 18)}px` }} />`)}
+                        </div>
+                        <span class="cdraft-dur mono">${formatClock(voiceDraft.secs)}</span>
+                        <div class="cdraft-tx">
+                          <span class="cdraft-tx-k">받아쓰기</span>
+                          <span class="cdraft-tx-v">${voiceDraft.transcript}</span>
+                        </div>
+                        <button
+                          type="button"
+                          class="cdraft-x"
+                          title="음성 제거"
+                          aria-label="Remove voice draft"
+                          onClick=${() => { setVoiceDraft(null) }}
+                          disabled=${busy}
+                        >
+                          <${X} size=${10} aria-hidden="true" />
+                        </button>
+                      </div>
+                    `
+                  : null}
+              </div>
+            `
+          : null}
+
         ${mode === 'dm'
           ? html`
               <${Select}
@@ -297,6 +453,24 @@ export function ComposerV2({
                     </div>
                   `
                 : null}
+            `
+          : null}
+
+        ${recording
+          ? html`
+              <div class="rec-bar" data-testid="composer-v2-recorder">
+                <span class="rec-dot" aria-hidden="true"></span>
+                <span class="rec-lbl">녹음 중</span>
+                <span class="rec-clock mono">0:12</span>
+                <div class="rec-wave" aria-hidden="true">
+                  ${[0.4, 0.8, 0.5, 0.9, 0.45, 0.75, 0.52, 0.84, 0.48, 0.7].map((height, index) => html`<span class="rbar" key=${index} style=${{ height: `${Math.round(3 + height * 20)}px` }} />`)}
+                </div>
+                <button type="button" class="rec-btn cancel" onClick=${() => { setRecording(false) }} disabled=${busy}>취소</button>
+                <button type="button" class="rec-btn stop" onClick=${stopVoiceDraft} disabled=${busy}>
+                  <${Square} size=${11} aria-hidden="true" />
+                  완료
+                </button>
+              </div>
             `
           : null}
 
@@ -347,6 +521,47 @@ export function ComposerV2({
           }}
           disabled=${busy}
         />
+
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="composer-tools" aria-label="Composer v2 multimodal tools">
+            <input
+              ref=${fileInputRef}
+              type="file"
+              accept="image/*,.pdf,.txt,.log,.json,.csv,.md"
+              multiple
+              hidden
+              data-testid="composer-v2-file-input"
+              onChange=${(event: Event) => {
+                const input = event.target as HTMLInputElement
+                if (input.files) attachFiles(input.files)
+                input.value = ''
+              }}
+            />
+            <button
+              type="button"
+              class="ctool"
+              title="이미지·파일 첨부"
+              aria-label="Attach file"
+              onClick=${() => { fileInputRef.current?.click() }}
+              disabled=${busy || attachments.length >= 6}
+              data-testid="composer-v2-attach"
+            >
+              <${Paperclip} size=${15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="ctool"
+              title="음성 입력"
+              aria-label="Start voice draft"
+              onClick=${() => { setRecording(true) }}
+              disabled=${busy || recording}
+              data-testid="composer-v2-voice"
+            >
+              <${Mic} size=${15} aria-hidden="true" />
+            </button>
+          </div>
+          <span class="text-2xs text-[var(--color-fg-muted)]">⌘ ↵ 전송 · 파일/음성 포함</span>
+        </div>
 
         ${mode === 'state-block'
           ? html`

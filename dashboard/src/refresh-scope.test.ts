@@ -18,6 +18,7 @@ describe('routeWantsRefreshTarget', () => {
 
   it('matches execution-backed routes without broadening fleet-health defaults', () => {
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'agents' }), 'execution')).toBe(true)
+    expect(routeWantsRefreshTarget(route('keepers', { keeper: 'sangsu' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'cognition' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'journey' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'observatory' }), 'execution')).toBe(false)
@@ -30,6 +31,7 @@ describe('routeWantsRefreshTarget', () => {
   it('keeps operator, board, and activity refreshes scoped to their visible surfaces', () => {
     expect(routeWantsRefreshTarget(route('command'), 'operator')).toBe(true)
     expect(routeWantsRefreshTarget(route('command', { view: 'inspector' }), 'operator')).toBe(false)
+    expect(routeWantsRefreshTarget(route('board'), 'board')).toBe(true)
     expect(routeWantsRefreshTarget(route('workspace', { section: 'board' }), 'board')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'observatory' }), 'activity')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'observatory', view: 'activity' }), 'activity')).toBe(true)

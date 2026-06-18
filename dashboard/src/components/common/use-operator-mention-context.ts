@@ -8,7 +8,11 @@
 
 import { useEffect, useState, type Dispatch, type StateUpdater } from 'preact/hooks'
 import { operatorSnapshot } from '../../operator-store'
-import { isKeeperOperatorTargetable } from '../../lib/keeper-predicates'
+import {
+  isKeeperOperatorTargetable,
+  type KeeperOfflineInput,
+  type KeeperPausedInput,
+} from '../../lib/keeper-predicates'
 import {
   keeperNameFromTarget,
   mentionCandidates,
@@ -48,6 +52,19 @@ export interface UseOperatorMentionContextOptions {
   dmActive: boolean
   /** ARIA listbox id used to build per-option ids. Surfaces use different ids. */
   listboxId: string
+  /** Secondary roster used when the operator snapshot has no targetable keepers. */
+  fallbackKeepers?: MentionSourceKeeper[]
+}
+
+interface MentionSourceKeeper extends KeeperPausedInput, KeeperOfflineInput {
+  name?: string | null
+}
+
+function targetableMentionKeepers(keepers: MentionSourceKeeper[]): OnlineKeeper[] {
+  return keepers
+    .filter(keeper => typeof keeper.name === 'string' && keeper.name.trim() !== '')
+    .filter(isKeeperOperatorTargetable)
+    .map(keeper => ({ name: keeper.name!.trim(), status: keeper.status ?? undefined }))
 }
 
 export function useOperatorMentionContext(
@@ -61,9 +78,9 @@ export function useOperatorMentionContext(
   const snapshot = operatorSnapshot.value
   // Paused keepers stay targetable so operators can DM/probe/resume them,
   // even when another lifecycle axis still carries an offline-ish token.
-  const onlineKeepers: OnlineKeeper[] = (snapshot?.keepers ?? [])
-    .filter(isKeeperOperatorTargetable)
-    .map(keeper => ({ name: keeper.name, status: keeper.status }))
+  const operatorKeepers = targetableMentionKeepers(snapshot?.keepers ?? [])
+  const fallbackKeepers = targetableMentionKeepers(opts.fallbackKeepers ?? [])
+  const onlineKeepers = operatorKeepers.length > 0 ? operatorKeepers : fallbackKeepers
   const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
 
   const selectedKeeper = keeperNameFromTarget(target)

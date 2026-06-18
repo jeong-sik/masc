@@ -193,3 +193,13 @@
 @media (max-width: 860px) {
   .dock.docked { position: fixed; right: 0; top: 50px; bottom: 0; width: 320px; z-index: 60; box-shadow: var(--shadow-pop); }
 }
+
+@media (max-width: 900px) {
+  .v2-app[data-mobile="true"] .dock-fab {
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .v2-app[data-mobile="true"][data-keeper-detail-mode="true"] .dock-fab {
+    bottom: 22px;
+  }
+}

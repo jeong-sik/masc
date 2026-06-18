@@ -7,10 +7,14 @@ vi.mock('../../router', async (orig) => ({
   ...(await orig<typeof import('../../router')>()),
   navigate: vi.fn(),
 }))
+vi.mock('../keeper-action-panel', () => ({
+  runKeeperAction: vi.fn(async () => undefined),
+}))
 
 import { navigate } from '../../router'
 import { keepers } from '../../store'
 import { keeperMobilePane } from '../keeper-detail-state'
+import { runKeeperAction } from '../keeper-action-panel'
 import { KeeperWorkspaceRoster } from './keeper-workspace-roster'
 import type { Keeper } from '../../types'
 
@@ -29,6 +33,7 @@ let host: HTMLElement
 beforeEach(() => {
   keepers.value = FIXTURE
   vi.mocked(navigate).mockClear()
+  vi.mocked(runKeeperAction).mockClear()
   host = document.createElement('div')
   document.body.appendChild(host)
 })
@@ -78,6 +83,59 @@ describe('KeeperWorkspaceRoster', () => {
     expect(keeperMobilePane.value).toBe('chat')
   })
 
+  it('opens a row command menu without selecting the row', () => {
+    const onSelect = vi.fn()
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" onSelect=${onSelect} />`, host)
+
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-sangsu"]') as HTMLButtonElement)
+
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull()
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')?.textContent).toContain('sangsu')
+    expect(host.querySelector('[data-testid="kw-roster-menu-open-chat"]')).not.toBeNull()
+    expect(host.querySelector('[data-testid="kw-roster-menu-config"]')).not.toBeNull()
+    expect(navigate).not.toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('opens chat from a row command menu', () => {
+    const onSelect = vi.fn()
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" onSelect=${onSelect} />`, host)
+
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-sangsu"]') as HTMLButtonElement)
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-open-chat"]') as HTMLButtonElement)
+
+    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'sangsu' })
+    expect(onSelect).toHaveBeenCalledWith('sangsu')
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
+  })
+
+  it('runs lifecycle actions from a row command menu', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-masc-improver"]') as HTMLButtonElement)
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-pause"]') as HTMLButtonElement)
+
+    expect(runKeeperAction).toHaveBeenCalledWith('masc-improver', 'pause')
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
+  })
+
+  it('routes and opens config from a row command menu', () => {
+    const onOpenConfig = vi.fn()
+    render(html`
+      <${KeeperWorkspaceRoster}
+        activeName="masc-improver"
+        onOpenConfig=${onOpenConfig}
+      />
+    `, host)
+
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-rama"]') as HTMLButtonElement)
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-config"]') as HTMLButtonElement)
+
+    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'rama' })
+    expect(onOpenConfig).toHaveBeenCalledWith('rama')
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
+  })
+
   it('filters by search query', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
     const search = host.querySelector('.kw-roster-search') as HTMLInputElement
@@ -85,6 +143,31 @@ describe('KeeperWorkspaceRoster', () => {
     const rows = host.querySelectorAll('.kw-kp-row')
     expect(rows.length).toBe(1)
     expect(rows[0]?.textContent).toContain('rama')
+  })
+
+  it('sorts the roster by name and attention count', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const sort = host.querySelector('.kw-roster-sort') as HTMLSelectElement
+
+    fireEvent.change(sort, { target: { value: 'name' } })
+    let rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
+    expect(rows.map(r => r.textContent ?? '')).toEqual([
+      expect.stringContaining('masc-improver'),
+      expect.stringContaining('rama'),
+      expect.stringContaining('sangsu'),
+    ])
+
+    fireEvent.change(sort, { target: { value: 'att' } })
+    rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
+    expect(rows[0]?.textContent).toContain('rama')
+  })
+
+  it('renders a compact sigil-only roster in mini mode', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" mini=${true} />`, host)
+    expect(host.querySelector('.kw-roster-search')).toBeNull()
+    expect(host.querySelector('.kw-roster-sort')).toBeNull()
+    expect(host.querySelectorAll('.kw-kp-mini').length).toBe(3)
+    expect(host.querySelector('.kw-kp-mini[aria-current="true"]')).not.toBeNull()
   })
 
   it('shows a work-preview line per row, preferring recent output', () => {

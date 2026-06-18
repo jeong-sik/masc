@@ -9,7 +9,9 @@ import {
   type DashboardPushSlice,
 } from './dashboard-slices'
 import {
+  DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES,
   DASHBOARD_WS_HEARTBEAT_INTERVAL_MS,
+  DASHBOARD_WS_HEARTBEAT_RPC_TIMEOUT_MS,
   DASHBOARD_WS_RPC_TIMEOUT_MS,
   RECONNECT_JITTER_MS,
   RECONNECT_MAX_MS,
@@ -57,7 +59,13 @@ let lastSubscribeKey = ''
 let desiredRouteState: DashboardRouteState | null = null
 let shouldReconnect = true
 let connectGeneration = 0
+let discoveryCacheFailureCount = 0
+let helloFailed = false
 const pending = new Map<number, PendingRpc>()
+
+// WebSocket close codes that indicate a persistent failure and should stop
+// reconnection attempts (1008 policy violation, 1011 server error).
+const FATAL_CLOSE_CODES = new Set([1008, 1011])
 
 function sessionStorageOrNull(): Storage | null {
   if (typeof sessionStorage === 'undefined') return null
@@ -130,6 +138,19 @@ function clearCachedWsUrl(): void {
 
 export function clearDashboardWsDiscoveryCacheForTests(): void {
   clearCachedWsUrl()
+  discoveryCacheFailureCount = 0
+}
+
+function resetDiscoveryCacheFailures(): void {
+  discoveryCacheFailureCount = 0
+}
+
+function maybeInvalidateDiscoveryCache(): void {
+  discoveryCacheFailureCount += 1
+  if (discoveryCacheFailureCount >= DASHBOARD_WS_DISCOVERY_CACHE_MAX_FAILURES) {
+    clearCachedWsUrl()
+    resetDiscoveryCacheFailures()
+  }
 }
 
 // Phase 2 (PR-4.6): rAF accumulator for inbound WS messages.
@@ -310,7 +331,7 @@ function startHeartbeat(ws: WebSocket): void {
     }
     heartbeatInFlight = true
     const sentAt = noteDashboardWsPing()
-    void sendRpc('dashboard/ping', {})
+    void sendRpc('dashboard/ping', {}, DASHBOARD_WS_HEARTBEAT_RPC_TIMEOUT_MS)
       .then(() => {
         if (socket === ws) {
           noteDashboardWsPong(sentAt)
@@ -354,7 +375,7 @@ async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
   return { wsUrl: data.ws_url, retry: false, fromCache: false }
 }
 
-function sendRpc(method: string, params: JsonObject): Promise<unknown> {
+function sendRpc(method: string, params: JsonObject, timeoutMs = DASHBOARD_WS_RPC_TIMEOUT_MS): Promise<unknown> {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return Promise.reject(new Error('dashboard websocket is not open'))
   }
@@ -365,7 +386,7 @@ function sendRpc(method: string, params: JsonObject): Promise<unknown> {
     const timeout = setTimeout(() => {
       if (!pending.delete(id)) return
       reject(new Error(`dashboard websocket rpc timed out: ${method}`))
-    }, DASHBOARD_WS_RPC_TIMEOUT_MS)
+    }, timeoutMs)
     pending.set(id, { resolve, reject, timeout })
     try {
       currentSocket.send(JSON.stringify(payload))
@@ -531,13 +552,12 @@ function handleMessage(data: unknown): void {
 
 function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
   if (socket !== ws) return
-  const wasReady = dashboardWsReady.value
   batch(() => {
     dashboardWsConnected.value = false
     dashboardWsReady.value = false
     dashboardWsLastError.value = errorToString(err)
   })
-  if (!wasReady) clearCachedWsUrl()
+  maybeInvalidateDiscoveryCache()
   lastSubscribeKey = ''
   closeSocket()
   scheduleReconnect()
@@ -599,6 +619,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   if (!shouldReconnect || generation !== connectGeneration) return
 
   closeSocket()
+  helloFailed = false
   let ws: WebSocket
   try {
     ws = new WebSocket(wsUrl)
@@ -606,9 +627,9 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     // Cache only values that constructed successfully: writing before
     // [new WebSocket(...)] would persist a malformed/incompatible URL
     // through the next reconnect, adding an extra failure+backoff cycle
-    // before discovery is retried. Also clear any prior cached value so
-    // a stale entry from an earlier session does not survive.
-    clearCachedWsUrl()
+    // before discovery is retried. Also invalidate the cache after repeated
+    // construction failures so a stale entry does not survive.
+    maybeInvalidateDiscoveryCache()
     batch(() => {
       dashboardWsLastError.value = errorToString(err)
     })
@@ -633,6 +654,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     })
       .then(() => {
         if (socket !== ws) return
+        resetDiscoveryCacheFailures()
         batch(() => {
           dashboardWsReady.value = true
           dashboardWsLastError.value = null
@@ -647,7 +669,24 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
           startHeartbeat(ws)
         }
       })
-      .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
+      .catch(err => {
+        const errMsg = errorToString(err)
+        // A hello timeout may be transient; keep reconnecting. An explicit
+        // hello error (server rejected the handshake) or a socket close during
+        // hello is fatal and should stop reconnection attempts.
+        if (errMsg.includes('rpc timed out')) {
+          reconnectAfterCurrentSocketFailure(ws, err)
+          return
+        }
+        helloFailed = true
+        if (socket !== ws) return
+        batch(() => {
+          dashboardWsConnected.value = false
+          dashboardWsReady.value = false
+          dashboardWsLastError.value = errMsg
+        })
+        closeSocket()
+      })
   }
   ws.onmessage = (event) => {
     if (socket !== ws) return
@@ -661,7 +700,6 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   }
   ws.onclose = (event) => {
     if (socket !== ws) return
-    const wasReady = dashboardWsReady.value
     const closeError = new Error(formatCloseEventError(event))
     // Clean close (wasClean=true) is server-initiated (shutdown/redeploy/idle),
     // not a degraded-WS error. Leaving lastError set on a clean close would trip
@@ -671,16 +709,26 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     // keep lastError set so the fallback still engages. reconnect runs either
     // way; pending RPCs are rejected either way (socket is gone).
     const clean = event.wasClean === true
+    // Fatal closes indicate a persistent condition (policy violation, server
+    // error, or abnormal close after hello was explicitly rejected). Stop
+    // reconnecting so the client does not spin on a rejected session.
+    const fatal = FATAL_CLOSE_CODES.has(event.code) || (helloFailed && !clean)
     clearHeartbeatTimer()
     batch(() => {
       dashboardWsConnected.value = false
       dashboardWsReady.value = false
       dashboardWsLastError.value = clean ? null : closeError.message
     })
-    if (!wasReady) clearCachedWsUrl()
+    if (!fatal) {
+      maybeInvalidateDiscoveryCache()
+    }
     lastSubscribeKey = ''
     socket = null
     rejectPendingRpcs(closeError)
+    if (fatal) {
+      shouldReconnect = false
+      return
+    }
     scheduleReconnect()
   }
 }
@@ -689,6 +737,8 @@ export function disconnectDashboardWS(): void {
   shouldReconnect = false
   connectGeneration += 1
   clearReconnectTimer()
+  helloFailed = false
+  discoveryCacheFailureCount = 0
   batch(() => {
     dashboardWsConnected.value = false
     dashboardWsReady.value = false

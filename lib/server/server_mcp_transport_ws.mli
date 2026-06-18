@@ -73,7 +73,10 @@ type dashboard_auth_state =
 type ws_session = {
   id : string;
   wsd : Httpun_ws.Wsd.t;
-  mutable closed : bool;
+  closed : bool Atomic.t;
+  write_mutex : Eio.Mutex.t;
+  last_pong_at : float Atomic.t;
+  missed_pongs : int Atomic.t;
   dashboard_auth : dashboard_auth_state Atomic.t;
   mutable dashboard_route : string option;
   dashboard_slices : (string, unit) Hashtbl.t;
@@ -89,7 +92,11 @@ type ws_session = {
     {!sessions} table directly.  Mutable fields track
     the dashboard handshake / ack state machine; see the
     [#10648] / dashboard-ws.v1 protocol notes in the .ml
-    for the field semantics. *)
+    for the field semantics.
+
+    Cross-fiber scalar state ([closed], [last_pong_at], [missed_pongs]) is
+    held in [Atomic.t] values; all writes to [wsd] are serialized through
+    [write_mutex]. *)
 
 val dashboard_auth_is_authenticated : dashboard_auth_state -> bool
 (** [true] once [dashboard_hello] has authenticated the session. *)
@@ -150,6 +157,14 @@ val new_session : id:string -> wsd:Httpun_ws.Wsd.t -> ws_session
     inserts the result into {!sessions} under
     {!with_sessions_rw}. *)
 
+val is_session_closed : ws_session -> bool
+(** [true] once the session has been closed locally or the httpun-ws writer
+    has shut down.  Safe to call from any fiber. *)
+
+val record_pong : ws_session -> unit
+(** Refresh [last_pong_at] and reset the missed-pong counter.  Called by the
+    WS frame handler on every [Pong] frame. *)
+
 val cleanup_session : string -> unit
 (** Removes the session from {!sessions} (and the
     slice-fanout side index).  Idempotent — calling on
@@ -181,8 +196,9 @@ val upgrade_connection :
   Httpun.Reqd.t ->
   (unit, string) result
 (** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin.  When [sw]
-    and [clock] are provided, forks the same protocol-level heartbeat used by
-    the standalone WS listener. *)
+    and [clock] are provided, forks the protocol-level heartbeat on a
+    per-connection switch (a child of [sw]) and closes the session after a
+    configurable number of missed pongs. *)
 
 (** {1 Outbound delivery} *)
 
@@ -322,3 +338,7 @@ val __test_reset_env_caches : unit -> unit
     {!client_buffer_limit_bytes} and
     {!slice_index_enabled} caches so the next call
     re-reads the environment. *)
+
+val __test_missed_pong_threshold : unit -> int
+(** Test-only seam: exposes the configured missed-pong threshold so tests can
+    verify default / env-var / clamping behavior. *)

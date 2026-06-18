@@ -1,16 +1,8 @@
 (** Standalone WebSocket server for MASC MCP.
 
     Runs on a separate port (default 8937, configurable via MASC_WS_PORT).
-    Enabled by default. Disable with MASC_WS_ENABLED=0.
-
-    Unlike the /ws upgrade path on the HTTP port, this server owns the
-    full TCP socket, so httpun-ws can run the HTTP->WS upgrade lifecycle
-    end-to-end without conflicting with gluten's protocol management.
-
-    Session state is shared with {!Server_mcp_transport_ws}: the same
-    [sessions] hashtable, [send_to_session], and [cleanup_session] are
-    reused.  This module only handles TCP accept + connection handler
-    wiring. *)
+    Session state is shared with {!Server_mcp_transport_ws}; this module only
+    wires TCP accept + the httpun-ws connection handler. *)
 
 module Ws = Httpun_ws
 module Ws_eio = Httpun_ws_eio
@@ -25,15 +17,23 @@ let configured_port () = Env_config.Transport.ws_port
     Disable with MASC_WS_ENABLED=0 or MASC_WS_ENABLED=false. *)
 let is_enabled () = Transport_metrics.ws_enabled ()
 
-(** Interval between protocol-level heartbeat pings on each WS session.
-
-    30s strikes a balance between keeping NAT/proxy mappings warm
-    (typical idle-mapping eviction is 60-120s) and not spamming the
-    write path on a quiet connection.  The browser handles pong replies
-    invisibly in the WebSocket implementation; the server detects dead
-    peers when [Ws.Wsd.is_closed] flips or the underlying write raises a
-    classify_write_failure-recognised error. *)
+(** Interval between protocol-level heartbeat pings on each WS session. *)
 let heartbeat_interval_s = 30.0
+
+(** Default consecutive unanswered pings before the server closes the session.
+    Override with [MASC_WS_MISSED_PONG_THRESHOLD]. *)
+let pong_timeout_intervals = 3
+
+(** Configurable missed-pong threshold. [0] disables the guard; negatives are
+    clamped to [0].  Read once per session. *)
+let missed_pong_threshold () =
+  max 0 (Env_config_core.get_int ~default:pong_timeout_intervals "MASC_WS_MISSED_PONG_THRESHOLD")
+
+(** Cap for accept-error exponential backoff. *)
+let accept_backoff_cap_s = 5.0
+
+(** Factor for accept-error backoff jitter (±20%). *)
+let accept_backoff_jitter_frac = 0.2
 
 let max_ws_close_reason_log_len = 96
 let max_ws_close_payload_len = 125
@@ -146,6 +146,14 @@ module For_testing = struct
         }
 
   let plan_ws_close_payload_chunk = plan_ws_close_payload_chunk
+
+  let heartbeat_interval_s = heartbeat_interval_s
+  let pong_timeout_intervals = pong_timeout_intervals
+  let missed_pong_threshold = missed_pong_threshold
+  let accept_backoff_cap_s = accept_backoff_cap_s
+
+  (** Deterministic next accept-error backoff (production adds jitter). *)
+  let next_accept_backoff backoff_s = Float.min accept_backoff_cap_s (backoff_s *. 1.5)
 end
 
 let log_ws_client_close_payload ~session_id ~declared_len payload =
@@ -216,15 +224,8 @@ let standalone_ws_eof_summary = function
   | Some (`Exn exn) -> Printf.sprintf "error=%s" (Printexc.to_string exn)
 ;;
 
-(** WebSocket handler factory.
-
-    For each accepted connection, httpun-ws-eio calls this with the
-    client address and a [Wsd.t].  We create a session in the shared
-    registry and wire frame callbacks to [on_message].
-
-    [~sw] is the server-wide switch — heartbeat fibers fork onto it and
-    self-exit as soon as the session closes.  [~clock] drives the
-    heartbeat sleep. *)
+(** WebSocket handler factory.  [~sw] is the per-connection switch so heartbeat
+    fibers exit with the connection instead of lingering on the server switch. *)
 let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
   : Ws.Websocket_connection.input_handlers
   =
@@ -238,10 +239,10 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
   (* Register as SSE external subscriber for broadcast events *)
   Sse.subscribe_external
     ~id:session_id
-    ~is_alive:(fun () -> (not session.closed) && not (Ws.Wsd.is_closed session.wsd))
+    ~is_alive:(fun () -> not (Server_mcp_transport_ws.is_session_closed session))
     ~callback:(fun sse_event ->
       if
-        (not session.closed)
+        (not (Server_mcp_transport_ws.is_session_closed session))
         && not (Server_mcp_transport_ws.send_dashboard_or_raw_sse session sse_event)
       then (
         Log.Server.debug
@@ -249,44 +250,57 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
           session_id;
         Server_mcp_transport_ws.cleanup_session session_id))
     ();
-  (* Heartbeat fiber: emit a protocol-level ping every
-     [heartbeat_interval_s] to keep NAT/proxy mappings warm and surface
-     silent disconnects so the reconnect path on the client can engage
-     instead of hanging on a dead socket.  Exits once [session.closed]
-     flips or the writer is closed, so it does not outlive the
-     connection beyond one sleep tick. *)
+  (* Heartbeat fiber: ping every [heartbeat_interval_s], count missed pongs,
+     and close the session once the threshold is reached. *)
+  let threshold = missed_pong_threshold () in
   Eio.Fiber.fork ~sw (fun () ->
+    let send_ping () =
+      Eio_guard.with_mutex session.write_mutex (fun () ->
+        if not (Server_mcp_transport_ws.is_session_closed session) then
+          Ws.Wsd.send_ping session.wsd)
+    in
     let rec loop () =
       Eio.Time.sleep clock heartbeat_interval_s;
-      if (not session.closed) && not (Ws.Wsd.is_closed session.wsd)
-      then (
-        let send_failed = ref false in
-        (try Ws.Wsd.send_ping wsd with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           send_failed := true;
-           (match Http_server_eio.Late_response.classify_write_failure exn with
-            | Some _ ->
-              Log.Server.debug
-                "[ws-standalone] session %s heartbeat skipped (writer closed during \
-                 cancel race)"
-                session_id
-            | None ->
-              Log.Server.warn
-                "[ws-standalone] session %s heartbeat send_ping failed: %s"
-                session_id
-                (Printexc.to_string exn)));
-        if !send_failed
-        then
-          (* If send_ping failed while [session.closed]/[Wsd.is_closed]
-             still read false, the loop would otherwise spin emitting
-             warnings until the WSD finally observed the broken socket.
-             Mark the session closed and run [cleanup_session] now so
-             the rest of the pipeline (sessions table, heartbeat budget,
-             aggregate metrics) drops the half-open session immediately
-             instead of leaking a fiber per failure. *)
+      if Server_mcp_transport_ws.is_session_closed session
+      then ()
+      else begin
+        let missed = Atomic.get session.missed_pongs in
+        if threshold > 0 && missed >= threshold
+        then begin
+          Log.Server.debug
+            "[ws-standalone] session %s missed %d pongs; closing"
+            session_id
+            missed;
           Server_mcp_transport_ws.cleanup_session session_id
-        else loop ())
+        end
+        else begin
+          let send_failed = ref false in
+          (try send_ping () with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+             send_failed := true;
+             (match Http_server_eio.Late_response.classify_write_failure exn with
+              | Some _ ->
+                Log.Server.debug
+                  "[ws-standalone] session %s heartbeat skipped (writer closed during \
+                   cancel race)"
+                  session_id
+              | None ->
+                Log.Server.warn
+                  "[ws-standalone] session %s heartbeat send_ping failed: %s"
+                  session_id
+                  (Printexc.to_string exn)));
+          if !send_failed
+          then
+            (* Drop the half-open session immediately so the loop does not
+               spin until the WSD observes the broken socket. *)
+            Server_mcp_transport_ws.cleanup_session session_id
+          else begin
+            Atomic.set session.missed_pongs (missed + 1);
+            loop ()
+          end
+        end
+      end
     in
     loop ());
   (* #10875: WS storm (#10701) emits ~190k connect/close lines/day at INFO,
@@ -305,19 +319,14 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
             ~len
             payload
         | `Ping ->
-          (* Guard against "cannot write to closed writer" when the WSD is
-           closed during a cancel/disconnect race (2026-05-05 cycle9 incident).
-           The outer connection_handler catch already swallows these, but
-           wrapping here makes the intent explicit and avoids an intermediate
-           httpun-ws state-machine inconsistency.
-
-           Use the centralized [Late_response.classify_write_failure]
-           SSOT so the recognized "writer closed during cancel" race
-           is downgraded to debug here too — matching the outer
-           connection_handler.  Anything the classifier does not own
-           (genuine bugs / unexpected exceptions) still warns.  This
-           closes the warn-noise gap reported in #13082 review. *)
-          (try Ws.Wsd.send_pong wsd with
+          (* Serialize the pong through the write mutex and re-check closure
+             under the lock to avoid racing cleanup/heartbeat.  Recognized
+             "writer closed during cancel" races are downgraded to debug. *)
+          (try
+             Eio_guard.with_mutex session.write_mutex (fun () ->
+               if not (Server_mcp_transport_ws.is_session_closed session) then
+                 Ws.Wsd.send_pong session.wsd)
+           with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | exn ->
              (match Http_server_eio.Late_response.classify_write_failure exn with
@@ -329,10 +338,13 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
                   "[ws-standalone] send_pong failed: %s"
                   (Printexc.to_string exn)));
           Ws.Payload.close payload
+        | `Pong ->
+          Server_mcp_transport_ws.record_pong session;
+          Ws.Payload.close payload
         | `Connection_close ->
           log_ws_client_close_payload ~session_id ~declared_len:len payload;
           Server_mcp_transport_ws.cleanup_session session_id
-        | `Pong | `Other _ -> Ws.Payload.close payload)
+        | `Other _ -> Ws.Payload.close payload)
   ; eof =
       (fun ?error () ->
         Log.Server.debug
@@ -343,16 +355,8 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
   }
 ;;
 
-(** Start the standalone WebSocket server.
-
-    Forks a fiber that listens for TCP connections and runs the
-    httpun-ws-eio connection handler for each.  Does nothing if
-    [MASC_WS_ENABLED] is not set.
-
-    @param sw Eio switch for structured concurrency.
-    @param env Eio environment (for network access).
-    @param on_message Called with [(session_id, body_str)] for each
-      inbound text frame. *)
+(** Start the standalone WebSocket server.  Does nothing if
+    [MASC_WS_ENABLED] is not set. *)
 let start
       ~(sw : Eio.Switch.t)
       ~(env : Eio_unix.Stdenv.base)
@@ -375,11 +379,6 @@ let start
       Transport_metrics.set_ws_runtime_listening true;
       Transport_metrics.set_ws_listen_status "listening";
       let clock = Eio.Stdenv.clock env in
-      let connection_handler =
-        Ws_eio.Server.create_connection_handler
-          ~sw
-          (make_websocket_handler ~sw ~clock ~on_message)
-      in
       Eio.Fiber.fork ~sw (fun () ->
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)
         Eio_guard.protect
@@ -392,17 +391,16 @@ let start
                try
                  let flow, client_addr = Eio.Net.accept ~sw socket in
                  Eio.Fiber.fork ~sw (fun () ->
-                   (* Per-connection switch so the accepted [flow] is
-                     released the moment the WS handler exits, not when
-                     the long-lived server [sw] closes. Without this
-                     each connection's FD lingers in the kernel [CLOSED]
-                     state until shutdown — a 1Hz dashboard reconnect
-                     (claude-in-chrome's playwright Chrome polls
-                     [ws://127.0.0.1:8937/]) accumulates ~3 600 FDs/h,
-                     tripping [admission_queue_rejected: fd count >= 90%]
-                     and starving every keeper subprocess. Pattern
-                     matches [http_server_h2.ml]'s accept loop. *)
+                   (* Per-connection switch releases [flow] as soon as the
+                      handler exits, preventing FD accumulation.  The connection
+                      handler and WebSocket handler are created here so the
+                      heartbeat fiber runs on [conn_sw], not the server switch. *)
                    Eio.Switch.run (fun conn_sw ->
+                     let connection_handler =
+                       Ws_eio.Server.create_connection_handler
+                         ~sw:conn_sw
+                         (make_websocket_handler ~sw:conn_sw ~clock ~on_message)
+                     in
                      Eio.Switch.on_release conn_sw (fun () ->
                        try Eio.Flow.close flow with
                        | Eio.Cancel.Cancelled _ as e -> raise e
@@ -430,7 +428,7 @@ let start
                  Log.Server.error
                    "WS standalone accept error: %s"
                    (Printexc.to_string exn);
-                 (* Backoff to avoid tight error loops *)
+                 (* Back off exponentially with jitter and a 5s cap. *)
                  (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s with
                   | Eio.Cancel.Cancelled _ as e -> raise e
                   | exn ->
@@ -439,7 +437,11 @@ let start
                       port
                       backoff_s
                       (Printexc.to_string exn));
-                 let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+                 let base = Float.min accept_backoff_cap_s (backoff_s *. 1.5) in
+                 let jitter =
+                   base *. accept_backoff_jitter_frac *. ((Random.float 2.0) -. 1.0) (* NDT-OK: intentional jitter to avoid thundering-herd reconnects. *)
+                 in
+                 let next_backoff = Float.max 0.05 (base +. jitter) in
                  accept_loop next_backoff
              in
              accept_loop 0.05))

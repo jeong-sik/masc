@@ -2141,6 +2141,65 @@ let test_consolidator_rejects_corrupt_source_store () =
         (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
       Alcotest.(check bool) "error includes line number" true (contains ":2:" msg))
 ;;
+let test_librarian_provider_slot_gate_caps_at_capacity () =
+  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" "1" (fun () ->
+    with_eio (fun ~sw ~net:_ ~clock ->
+      (* Capacity 1: while one entrant holds the slot, a concurrent entrant drops
+         ([None]) after [provider_slot_wait_sec] instead of blocking — the #21230
+         storm-guard the per-keeper lane keeps as an optional fleet-wide gate. *)
+      let entered, resolve_entered = Eio.Promise.create () in
+      let release, resolve_release = Eio.Promise.create () in
+      let first = ref None in
+      Eio.Fiber.fork ~sw (fun () ->
+        first
+        := Some
+             (Librarian_runtime.with_provider_slot ~clock (fun () ->
+                Eio.Promise.resolve resolve_entered ();
+                Eio.Promise.await release;
+                "ran")));
+      Eio.Promise.await entered;
+      let second = Librarian_runtime.with_provider_slot ~clock (fun () -> "ran") in
+      Eio.Promise.resolve resolve_release ();
+      wait_for_ref ~clock "first slot holder" first;
+      Alcotest.(check (option string))
+        "concurrent entrant drops at capacity 1"
+        None
+        second;
+      Alcotest.(check (option (option string)))
+        "slot holder ran"
+        (Some (Some "ran"))
+        !first))
+;;
+
+let test_librarian_provider_slot_gate_disabled_at_zero () =
+  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" "0" (fun () ->
+    with_eio (fun ~sw ~net:_ ~clock ->
+      (* Capacity 0 disables the gate: a held slot does not cap a concurrent
+         entrant — both run ([Some]). *)
+      let entered, resolve_entered = Eio.Promise.create () in
+      let release, resolve_release = Eio.Promise.create () in
+      let first = ref None in
+      Eio.Fiber.fork ~sw (fun () ->
+        first
+        := Some
+             (Librarian_runtime.with_provider_slot ~clock (fun () ->
+                Eio.Promise.resolve resolve_entered ();
+                Eio.Promise.await release;
+                "ran")));
+      Eio.Promise.await entered;
+      let second = Librarian_runtime.with_provider_slot ~clock (fun () -> "ran") in
+      Eio.Promise.resolve resolve_release ();
+      wait_for_ref ~clock "first slot holder" first;
+      Alcotest.(check (option string))
+        "gate disabled: concurrent entrant also ran"
+        (Some "ran")
+        second;
+      Alcotest.(check (option (option string)))
+        "slot holder ran"
+        (Some (Some "ran"))
+        !first))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -2370,6 +2429,16 @@ let () =
             "edge writes gated by alpha (P2a-3)"
             `Quick
             test_edges_writes_enabled_tracks_alpha
+        ] )
+    ; ( "librarian runtime"
+      , [ Alcotest.test_case
+            "provider slot gate caps concurrency at capacity (#21376/#21230)"
+            `Quick
+            test_librarian_provider_slot_gate_caps_at_capacity
+        ; Alcotest.test_case
+            "provider slot gate disabled at capacity 0"
+            `Quick
+            test_librarian_provider_slot_gate_disabled_at_zero
         ] )
     ]
 ;;

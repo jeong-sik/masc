@@ -241,32 +241,43 @@ def _extract_json_array(text: str) -> str | None:
     """Return the first well-balanced top-level JSON array in [text].
 
     Mirrors a strict parser enough to avoid the greedy-regex trap that would
-    match from an opening '[' all the way to the last ']' in the response.
+    match from an opening '[' all the way to the last ']' in the response. The
+    model can also prefix prose like "[analysis]" before the real answer, so
+    keep scanning until a balanced candidate parses as JSON array.
     """
-    start = text.find("[")
-    if start == -1:
-        return None
-    depth = 0
-    in_str = False
-    escape = False
-    for i, ch in enumerate(text[start:], start):
-        if escape:
-            escape = False
-            continue
-        if ch == "\\":
-            escape = True
-            continue
-        if ch == '"':
-            in_str = not in_str
-            continue
-        if in_str:
-            continue
-        if ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
-            if depth == 0:
-                return text[start : i + 1]
+    start = -1
+    while True:
+        start = text.find("[", start + 1)
+        if start == -1:
+            return None
+        depth = 0
+        in_str = False
+        escape = False
+        for i, ch in enumerate(text[start:], start):
+            if escape:
+                escape = False
+                continue
+            if ch == "\\":
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start : i + 1]
+                    try:
+                        parsed = json.loads(candidate)
+                    except Exception:
+                        break
+                    if isinstance(parsed, list):
+                        return candidate
+                    break
     return None
 
 

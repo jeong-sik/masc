@@ -141,6 +141,28 @@ let test_apply_first_group_wins_contested () =
     (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
+let test_apply_rejects_category_downgrade () =
+  let facts =
+    [ fact ~category:Types.Lesson "Timeout failures need bounded retries"
+    ; fact ~category:Types.Fact "The retry loop timed out under load"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "Retry loops can time out under load"
+          ; category = Types.Fact
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  Alcotest.(check (list string))
+    "downgraded group is skipped"
+    [ "The retry loop timed out under load"; "Timeout failures need bounded retries" ]
+    (claims (Consolidation.apply_plan ~now ~facts plan))
+;;
+
 let test_parse_plan_json () =
   let raw =
     {|{"groups":[{"member_indices":[0,2],"consolidated_claim":"merged","category":"lesson"}],"drop_indices":[3]}|}
@@ -209,6 +231,7 @@ let () =
         ; Alcotest.test_case "skips bad indices" `Quick test_apply_skips_bad_indices
         ; Alcotest.test_case "drops listed indices" `Quick test_apply_drops_listed
         ; Alcotest.test_case "first group wins contested fact" `Quick test_apply_first_group_wins_contested
+        ; Alcotest.test_case "rejects category downgrade" `Quick test_apply_rejects_category_downgrade
         ] )
     ; ( "parse"
       , [ Alcotest.test_case "parses a plan" `Quick test_parse_plan_json

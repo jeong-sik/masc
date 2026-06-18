@@ -54,6 +54,23 @@ let render_numbered_facts facts =
   |> String.concat "\n"
 ;;
 
+let category_specificity = function
+  | Ephemeral | Unknown _ -> 0
+  | Fact -> 1
+  | Code_change | Preference | Blocker | Goal | Constraint -> 2
+  | Validated_approach | Lesson -> 3
+;;
+
+let group_preserves_category ~members (group : merge_group) =
+  let member_specificity =
+    List.fold_left
+      (fun acc (fact : fact) -> max acc (category_specificity fact.category))
+      0
+      members
+  in
+  category_specificity group.category >= member_specificity
+;;
+
 (* ---------- JSON parsing (defensive, like the librarian) ---------- *)
 
 let int_list_of_json = function
@@ -221,19 +238,26 @@ let apply_plan ~now ~facts plan =
        if List.length members >= 2
        then (
          let member_facts = List.map (fun i -> facts_arr.(i)) members in
-         let anchor =
-           (* members is guaranteed non-empty by the [>= 2] guard above *)
-           match members with
-           | [] -> invalid_arg "Keeper_memory_os_consolidation.apply_plan: empty group"
-           | first :: rest ->
-             List.fold_left
-               (fun acc i ->
-                  if facts_arr.(i).first_seen < facts_arr.(acc).first_seen then i else acc)
-               first
-               rest
-         in
-         List.iter (fun i -> slot.(i) <- `Consumed) members;
-         Hashtbl.replace consolidated anchor (consolidated_fact ~now ~members:member_facts group)))
+         if group_preserves_category ~members:member_facts group
+         then (
+           let anchor =
+             (* members is guaranteed non-empty by the [>= 2] guard above *)
+             match members with
+             | [] -> invalid_arg "Keeper_memory_os_consolidation.apply_plan: empty group"
+             | first :: rest ->
+               List.fold_left
+                 (fun acc i ->
+                    if facts_arr.(i).first_seen < facts_arr.(acc).first_seen
+                    then i
+                    else acc)
+                 first
+                 rest
+           in
+           List.iter (fun i -> slot.(i) <- `Consumed) members;
+           Hashtbl.replace
+             consolidated
+             anchor
+             (consolidated_fact ~now ~members:member_facts group))))
     plan.groups;
   List.iter
     (fun i -> if in_range i && slot.(i) = `Keep then slot.(i) <- `Drop)

@@ -240,6 +240,10 @@ let () =
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
+  (* Capture the Eio handles the OAS/fusion call path reads via
+     [Masc_eio_env.get_opt]. Without this, [Masc_oas_bridge.run_safe] finds no
+     clock and runs the panel/judge calls without timeout enforcement. *)
+  Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
   let config_path = runtime_toml_path ~base_path in
   (match Runtime.init_default ~config_path with
    | Error msg ->

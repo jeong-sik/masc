@@ -85,6 +85,8 @@ let cadence_step ~cadence ~counter =
 let cadence_due ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
     let counter =
+      (* sound-partial: allow — an unseen (keeper, trace) is due immediately via
+         [fresh_counter]; fresh-state init, not a default hiding a parse error. *)
       Option.value ~default:fresh_counter
         (Hashtbl.find_opt cadence_counters (keeper_id, trace_id))
     in

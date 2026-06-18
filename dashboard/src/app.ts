@@ -327,7 +327,7 @@ export function App() {
                 scheduler <b>${serverStatus.value ? 'healthy' : '—'}</b>
               </span>
             </div>
-            <${EmergencyStopControl} />
+            <span class="contents" data-mobile-detail-keep><${EmergencyStopControl} /></span>
             <${CopilotDockTopBarButton} dock=${dock} />
             <${Suspense} fallback=${authStatusFallback()}>
               <${LazyAuthStatus} />

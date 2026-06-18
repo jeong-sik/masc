@@ -168,8 +168,15 @@ describe('App v2 header chrome', () => {
     expect(menuButton).not.toBeNull()
     menuButton!.click()
 
+    // When open, the rail must both drop max-[768px]:hidden AND add
+    // max-[768px]:block. The rail also carries the static max-[1100px]:hidden,
+    // so removing :hidden alone leaves it display:none at <=768px — the
+    // pre-fix '' open-state class regressed exactly here. Assert both tokens in
+    // the same waitFor so they are checked at the open moment.
     await waitFor(() => {
+      expect(rail?.classList.contains('max-[1100px]:hidden')).toBe(true)
       expect(rail?.classList.contains('max-[768px]:hidden')).toBe(false)
+      expect(rail?.classList.contains('max-[768px]:block')).toBe(true)
     })
   })
 

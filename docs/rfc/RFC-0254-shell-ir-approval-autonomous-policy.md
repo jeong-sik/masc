@@ -111,6 +111,36 @@ let decide policy ~overlay ~caps ~simple : Verdict.t =
 
 `find_destructive_git` no longer reads `privileged_trust` — destructive git is in the floor. This fixes defect §2.2(4): loosening trust never re-enables force-push.
 
+### 5.3.1 Floor independence from the kill-switch (amendment, 2026-06-18)
+
+§5.3 decoupled the floor from *trust* (a loosened overlay can no longer
+re-enable force-push). It did **not** decouple it from the *flag*.
+`catastrophic_floor` runs only inside `dispatch_classified_with_approval`, which
+`keeper_tool_execute_runtime.ml` invokes only when
+`MASC_SHELL_IR_APPROVAL_GATE_ENABLED` is true. With the flag off, the keeper
+path falls to bare `dispatch_classified`, which skips the floor entirely — so
+the kill-switch silently removes it. For destructive git that means **zero**
+enforcement when off, because §5.4 establishes the floor is its only enforcer
+(force-push has no path argument for `validate_paths` to jail). This contradicts
+§4 lesson (c): "a catastrophic floor is unconditional, independent of
+mode/allowlist." (The flag was `default=false, Experimental` at the time of
+§5.3; it is now `default=true, Active`, so the gap bites only when the
+kill-switch is set explicitly — but a one-line env override dropping irreversible
+protection is precisely the hazard the floor exists to remove.)
+
+**Amendment.** The floor moves into the always-run chokepoint
+`dispatch_classified` — the single function every executed command passes
+through (the flag-off keeper path, `keeper_workspace_read_ops`, and
+`keeper_deterministic_evidence_probe` all reach it directly, and
+`dispatch_classified_with_approval` delegates its allow path to it). The pure
+`catastrophic_floor` is exposed from `Approval_policy` and called there; `decide`
+keeps calling the same function (single source of truth), so the `_with_approval`
+allow-path re-scan is a `None` no-op, not a double-deny. The kill-switch now
+disables only the trust-overlay grading (stage 2 / the `Ask` approval path); the
+catastrophic floor is unconditional — both trust-independent (§5.3) and
+flag-independent (this amendment). A floor hit on the bare path surfaces as the
+same `Policy_denied` typed error the `_with_approval` path already returns.
+
 ### 5.4 Catastrophic floor membership — typed, no string match
 
 > **Premise correction (code-verified 2026-06-17, supersedes the original

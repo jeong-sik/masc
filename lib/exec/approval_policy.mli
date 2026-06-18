@@ -42,3 +42,18 @@ val decide :
     [git push --force].  Path-bearing destructive programs ([rm], [dd], …)
     are graded in stage 2; their target paths are jailed to the workspace by
     [Exec_policy.validate_shell_ir_paths] downstream of this decision. *)
+
+val catastrophic_floor : Capability.t list -> Verdict.deny_reason option
+(** Stage 1 of [decide] on its own: [Some reason] for a [Destructive] git op, a
+    redirect [Write_path] escaping the workspace, or a catastrophic-by-identity
+    binary ([mkfs]); [None] otherwise.
+
+    Exposed so the always-run dispatch core
+    ([Keeper_tool_execute_shell_ir.dispatch_classified]) can enforce the floor
+    on every executed command, independent of the
+    [MASC_SHELL_IR_APPROVAL_GATE_ENABLED] flag.  The flag gates only the
+    trust-overlay grading (stage 2 / the [Ask] approval path); the floor must
+    not be flag-gated — RFC-0254 §4 lesson (c) "a catastrophic floor is
+    unconditional, independent of mode/allowlist".  For destructive git this
+    floor is the {i only} enforcer: force-push has no path argument, so
+    [validate_shell_ir_paths] cannot catch it (RFC-0254 §5.4). *)

@@ -1007,5 +1007,43 @@ let () =
   | Error (Keeper_tool_execute_shell_ir.Approval_required _) -> ()
   | Error _ -> assert false
 
+(* --- Keeper_tool_execute_shell_ir.dispatch_classified: catastrophic floor is
+   flag-independent (RFC-0254 §5.3.1) --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "git" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("push", default_meta); Lit ("--force", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  (* The bare [dispatch_classified] path takes no approval_config/agent_id — it is
+     the [MASC_SHELL_IR_APPROVAL_GATE_ENABLED]=off route that
+     [keeper_tool_execute_runtime.ml] falls to when the kill-switch is set.
+     Before §5.3.1 it skipped the catastrophic floor, so [git push --force]
+     (no path argument, so [validate_paths] cannot jail it — §5.4) executed.
+     The floor must now deny it here as [Policy_denied], identically to the
+     _with_approval path, proving the floor is flag-independent.  ([Ok _] would
+     mean the floor was skipped — a regression; [git push --force] in /tmp is a
+     non-repo no-op even if it ran, so no filesystem effect.) *)
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok _ -> assert false
+  | Error (Keeper_tool_execute_shell_ir.Policy_denied _) -> ()
+  | Error _ -> assert false
+
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

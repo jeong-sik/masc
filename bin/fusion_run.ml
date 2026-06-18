@@ -1,19 +1,21 @@
 (* RFC-0252 standalone fusion harness.
 
-   Runs three arms on the same prompt and prints them side by side so a human
+   Runs four arms on the same prompt and prints them side by side so a human
    can judge whether panel+judge deliberation beats the alternatives:
 
    [1] BASELINE          single model, one call.
-   [2] SELF-CONSISTENCY  the same judge model sampled N times + the same judge
+   [2] SELF-CONSISTENCY  the same judge model sampled N times + majority
+                         aggregate. Homogeneous, no judge synthesis.
+   [3] SELF-MOA          the same judge model sampled N times + judge
                          synthesis. Cost-matched to fusion (same panelist count,
                          same judge call) but homogeneous.
-   [3] FUSION            N diverse models + judge synthesis. Heterogeneous.
+   [4] FUSION            N diverse models + judge synthesis. Heterogeneous.
 
    Why the self-consistency arm exists: comparing fusion only against a single
    call conflates two effects — spending more compute and using diverse models.
-   Self-consistency holds compute fixed and varies only diversity, so [2] vs [3]
-   isolates the panel-diversity effect. If fusion only matches self-consistency,
-   the apparent win was compute, not heterogeneity (Self-MoA, arXiv:2502.00674).
+   Self-MoA holds compute fixed and varies only diversity, so [3] vs [4]
+   isolates the panel-diversity effect. If fusion only matches Self-MoA, the
+   apparent win was compute, not heterogeneity (Self-MoA, arXiv:2502.00674).
    The harness cannot force a sampling temperature (fusion exposes none), so the
    N self-consistency samples diverge only if the provider samples stochastically;
    each sample is printed verbatim so a deterministic provider is visible rather
@@ -129,11 +131,11 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
 (* Print a judge arm and return (resolved_answer, judge_in_tokens, judge_out_tokens). *)
 let print_judge_arm ~(tag : string)
     (r : (Fusion_types.judge_synthesis * Fusion_types.usage, string) result)
-  : string * int * int =
+  : (string * int * int, string) result =
   match r with
   | Error msg ->
     Printf.printf "  [%s] judge failed: %s\n\n" tag msg;
-    (Printf.sprintf "(judge failed: %s)" msg, 0, 0)
+    Error msg
   | Ok (synthesis, u) ->
     Printf.printf
       "  [%s] decision: %s\n\n  RESOLVED ANSWER:\n%s\n\n"
@@ -145,18 +147,20 @@ let print_judge_arm ~(tag : string)
       tag
       (Yojson.Safe.pretty_to_string
          (Fusion_types.judge_synthesis_to_yojson synthesis));
-    ( synthesis.Fusion_types.resolved_answer
-    , u.Fusion_types.input_tokens
-    , u.Fusion_types.output_tokens )
+    Ok
+      ( synthesis.Fusion_types.resolved_answer
+      , u.Fusion_types.input_tokens
+      , u.Fusion_types.output_tokens )
 
 let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.preset)
     ~(prompt : string) ~(config_path : string) : unit =
   let n = List.length preset.Fusion_policy.panel in
   let max_fibers = max 1 policy.Fusion_policy.max_concurrent_panels in
+  let incomplete = ref [] in
+  let mark_incomplete msg = incomplete := msg :: !incomplete in
   Printf.printf
-    "%s\nFUSION HARNESS (RFC-0252) — single vs self-consistency vs fusion\n%s\n"
-    bar
-    bar;
+    "%s\nFUSION HARNESS (RFC-0252) — single vs self-consistency vs Self-MoA vs fusion\n%s\n"
+    bar bar;
   Printf.printf
     "config: %s\npreset: %s\npanel:  %s\njudge:  %s\nprompt: %s\n\n"
     config_path
@@ -196,9 +200,9 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     sum_usage (List.filter_map usage_of_outcome baseline)
   in
 
-  (* ── [2] SELF-CONSISTENCY: same judge model x n + judge (cost-matched) ── *)
+  (* ── [2] SELF-CONSISTENCY: same judge model x n + majority aggregate ── *)
   Printf.printf
-    "%s\n[2] SELF-CONSISTENCY — %s x %d samples + judge (cost-matched, homogeneous)\n%s\n"
+    "%s\n[2] SELF-CONSISTENCY — %s x %d samples + majority aggregate\n%s\n"
     rule
     preset.Fusion_policy.judge
     n
@@ -206,63 +210,118 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
   let sc_models = List.init n (fun _ -> preset.Fusion_policy.judge) in
   let sc_panel = run_panel ~max_fibers ~models:sc_models in
   List.iter (print_outcome ~tag:"self-consistency") sc_panel;
-  let sc_answer, sc_judge_in, sc_judge_out =
-    print_judge_arm ~tag:"self-consistency" (synthesize ~sw ~net ~preset ~prompt ~panel:sc_panel)
+  let sc_answers = List.filter_map answer_of_outcome sc_panel in
+  let sc_answer =
+    match sc_answers with
+    | [] ->
+      let msg = "self-consistency majority has no answered samples" in
+      Printf.printf "  [self-consistency] majority failed: %s\n\n" msg;
+      mark_incomplete msg;
+      "(self-consistency majority unavailable)"
+    | answers ->
+      let answer = Fusion_harness_core.majority_vote answers in
+      Printf.printf
+        "  [self-consistency] MAJORITY ANSWER (%d samples):\n%s\n\n"
+        (List.length answers)
+        answer;
+      answer
   in
   let sc_panel_in, sc_panel_out =
     sum_usage (List.filter_map usage_of_outcome sc_panel)
   in
 
-  (* ── [3] FUSION: n diverse models + judge (heterogeneous) ── *)
+  (* ── [3] SELF-MOA: same judge model x n + judge synthesis ── *)
   Printf.printf
-    "%s\n[3] FUSION — %d diverse models + judge (heterogeneous)\n%s\n"
+    "%s\n[3] SELF-MOA — %s x %d samples + judge synthesis (cost-matched, homogeneous)\n%s\n"
+    rule
+    preset.Fusion_policy.judge
+    n
+    rule;
+  let self_moa_answer, self_moa_judge_in, self_moa_judge_out =
+    match
+      print_judge_arm ~tag:"self-moa"
+        (synthesize ~sw ~net ~preset ~prompt ~panel:sc_panel)
+    with
+    | Ok values -> values
+    | Error msg ->
+      mark_incomplete ("self-moa judge failed: " ^ msg);
+      (Printf.sprintf "(self-moa judge failed: %s)" msg, 0, 0)
+  in
+
+  (* ── [4] FUSION: n diverse models + judge (heterogeneous) ── *)
+  Printf.printf
+    "%s\n[4] FUSION — %d diverse models + judge synthesis (heterogeneous)\n%s\n"
     rule
     n
     rule;
   let fusion_panel = run_panel ~max_fibers ~models:preset.Fusion_policy.panel in
   List.iter (print_outcome ~tag:"fusion") fusion_panel;
   let fusion_answer, fusion_judge_in, fusion_judge_out =
-    print_judge_arm ~tag:"fusion" (synthesize ~sw ~net ~preset ~prompt ~panel:fusion_panel)
+    match
+      print_judge_arm ~tag:"fusion"
+        (synthesize ~sw ~net ~preset ~prompt ~panel:fusion_panel)
+    with
+    | Ok values -> values
+    | Error msg ->
+      mark_incomplete ("fusion judge failed: " ^ msg);
+      (Printf.sprintf "(fusion judge failed: %s)" msg, 0, 0)
   in
   let fusion_panel_in, fusion_panel_out =
     sum_usage (List.filter_map usage_of_outcome fusion_panel)
   in
 
-  (* ── SIDE-BY-SIDE SUMMARY (3-way) ── *)
-  let sc_in = sc_panel_in + sc_judge_in in
-  let sc_out = sc_panel_out + sc_judge_out in
+  (* ── SIDE-BY-SIDE SUMMARY (4-way) ── *)
+  let self_moa_in = sc_panel_in + self_moa_judge_in in
+  let self_moa_out = sc_panel_out + self_moa_judge_out in
   let fusion_in = fusion_panel_in + fusion_judge_in in
   let fusion_out = fusion_panel_out + fusion_judge_out in
+  let incomplete = List.rev !incomplete in
+  let status = if incomplete = [] then "complete" else "INCOMPLETE" in
   Printf.printf
-    "%s\nSUMMARY — single vs self-consistency vs fusion\n%s\n"
+    "%s\nSUMMARY (%s) — single vs self-consistency vs Self-MoA vs fusion\n%s\n"
     bar
+    status
     bar;
   Printf.printf "BASELINE (%s, 1 call):\n%s\n\n" preset.Fusion_policy.judge baseline_answer;
   Printf.printf
-    "SELF-CONSISTENCY (%s x %d + judge):\n%s\n\n"
+    "SELF-CONSISTENCY (%s x %d + majority):\n%s\n\n"
     preset.Fusion_policy.judge
     n
     sc_answer;
+  Printf.printf
+    "SELF-MOA (%s x %d + judge):\n%s\n\n"
+    preset.Fusion_policy.judge
+    n
+    self_moa_answer;
   Printf.printf "FUSION (%d diverse + judge):\n%s\n\n" n fusion_answer;
   Printf.printf
     "COST (tokens in/out):\n\
     \  baseline:         %d/%d\n\
-    \  self-consistency: %d/%d  (panel %d/%d + judge %d/%d)\n\
+    \  self-consistency: %d/%d  (panel only; majority aggregate)\n\
+    \  self-moa:         %d/%d  (panel %d/%d + judge %d/%d)\n\
     \  fusion:           %d/%d  (panel %d/%d + judge %d/%d)\n"
     baseline_in
     baseline_out
-    sc_in
-    sc_out
     sc_panel_in
     sc_panel_out
-    sc_judge_in
-    sc_judge_out
+    self_moa_in
+    self_moa_out
+    sc_panel_in
+    sc_panel_out
+    self_moa_judge_in
+    self_moa_judge_out
     fusion_in
     fusion_out
     fusion_panel_in
     fusion_panel_out
     fusion_judge_in
-    fusion_judge_out
+    fusion_judge_out;
+  if incomplete <> [] then (
+    Printf.eprintf "\nINCOMPLETE fusion harness run:\n";
+    List.iter (Printf.eprintf "  - %s\n") incomplete;
+    flush stdout;
+    flush stderr;
+    exit 1)
 
 (* ── entry point ── *)
 let () =
@@ -270,21 +329,33 @@ let () =
   let preset_override = ref None in
   let prompt_parts = ref [] in
   let rec parse = function
-    | [] -> ()
+    | [] -> Ok ()
     | "--base" :: v :: rest ->
       base := Some v;
       parse rest
+    | [ "--base" ] -> Error "missing value for --base"
     | "--preset" :: v :: rest ->
       preset_override := Some v;
       parse rest
+    | [ "--preset" ] -> Error "missing value for --preset"
+    | "--" :: rest ->
+      prompt_parts := List.rev_append rest !prompt_parts;
+      Ok ()
+    | x :: _ when String.length x > 0 && x.[0] = '-' ->
+      Error ("unknown option: " ^ x)
     | x :: rest ->
       prompt_parts := x :: !prompt_parts;
       parse rest
   in
-  parse (match Array.to_list Sys.argv with _ :: tl -> tl | [] -> []);
+  (match parse (match Array.to_list Sys.argv with _ :: tl -> tl | [] -> []) with
+   | Ok () -> ()
+   | Error msg ->
+     Printf.eprintf "fusion_run: %s\n" msg;
+     prerr_endline "usage: fusion_run [--base PATH] [--preset NAME] [--] <prompt...>";
+     exit 2);
   let prompt = String.concat " " (List.rev !prompt_parts) in
   if String.trim prompt = "" then (
-    prerr_endline "usage: fusion_run [--base PATH] [--preset NAME] <prompt...>";
+    prerr_endline "usage: fusion_run [--base PATH] [--preset NAME] [--] <prompt...>";
     exit 2);
   (* Base path: explicit --base wins; else the workspace base the server uses
      (MASC_BASE_PATH via Host_config, surfaced by Config_dir_resolver). We do

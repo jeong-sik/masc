@@ -51,7 +51,7 @@ let find_write_escape (caps : Capability.t list) : Path_scope.t option =
       (* /dev/null is the canonical discard sink for typed stdout/stderr
          redirection; it is already exempted in path validation and handled
          as a drop target by the native dispatcher. *)
-      not (String.equal (Path_scope.raw ps) "/dev/null")
+      not (Path_scope.is_discard_sink ps)
     | Inside_workspace _ | Inside_sandbox _ -> false
   in
   let rec scan = function

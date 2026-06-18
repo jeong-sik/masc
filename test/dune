@@ -82,6 +82,9 @@
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
+  test_keeper_memory_os_consolidation
+  test_keeper_memory_os_consolidation_runtime
+  eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state
   test_runtime_attempt_fsm
@@ -372,6 +375,9 @@
   test_keeper_turn_disposition
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
+  test_keeper_memory_os_consolidation
+  test_keeper_memory_os_consolidation_runtime
+  eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state
   test_runtime_attempt_fsm

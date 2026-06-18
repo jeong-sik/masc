@@ -341,26 +341,26 @@ let extract_and_append_with_provider
     (* RFC-0243: persist the episode log (unique episode file + event), then
        UPSERT its claims into the fact store instead of blind-appending. A claim
        re-extracted across turns is folded into the existing row
-       (Keeper_memory_os_policy.reobserve_fact: confidence blends, access_count
-       and last_verified_at refresh) rather than accumulating as an immortal
-       frozen-confidence duplicate — the accuracy-inversion root fix. The same
-       call applies the RFC-0239 Q4 retention cap in one atomic rewrite. The
-       episode log already retains the raw claims, but a fact-merge failure is
-       still reported to the caller so the turn is not counted as a clean
-       librarian write. *)
+       (Keeper_memory_os_policy.reobserve_fact: RFC-0247 refreshes
+       [last_verified_at] only) rather than accumulating as a duplicate. The same
+       call applies the RFC-0239 Q4 retention cap (ranked by the structural
+       [retention_rank]) in one atomic rewrite. The episode log already retains
+       the raw claims, but a fact-merge failure is still reported to the caller so
+       the turn is not counted as a clean librarian write. *)
     Keeper_memory_os_io.append_episode ~keeper_id episode;
     Keeper_memory_os_io.append_event ~keeper_id episode;
     (match
        try
          let window = Keeper_memory_os_io.fact_recall_window in
          let (_ : Keeper_memory_os_io.fact_merge_stats) =
-           Keeper_memory_os_io.merge_and_cap_facts
-             ~keeper_id
-             ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
-             ~incoming:episode.Keeper_memory_os_types.claims
-             ~keep:window
-             ~trigger:(window + (window / 2))
-             ~rank:(Keeper_memory_os_policy.score_fact ~now)
+           File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
+             Keeper_memory_os_io.merge_and_cap_facts
+               ~keeper_id
+               ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
+               ~incoming:episode.Keeper_memory_os_types.claims
+               ~keep:window
+               ~trigger:(window + (window / 2))
+               ~rank:(Keeper_memory_os_policy.retention_rank ~now))
          in
          Ok ()
        with

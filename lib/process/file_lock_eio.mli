@@ -27,10 +27,12 @@ val stale_lock_seconds : float
     Used by non-Eio systhread contexts. Prefer {!with_lock} for
     ordinary callers. *)
 
+exception Flock_timeout of { caller : string; path : string; attempts : int }
+
 (** Non-blocking [F_TLOCK] with retry. On success returns the open
     file descriptor holding the lock. On timeout closes the fd and
-    raises [Failure]. [clock] is accepted but ignored in this variant
-    (systhread-friendly). *)
+    raises {!Flock_timeout}. [clock] is accepted but ignored in this
+    variant (systhread-friendly). *)
 val acquire_flock_retry :
   ?clock:'a option ->
   lock_path:string ->

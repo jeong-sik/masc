@@ -90,13 +90,6 @@ let int_field key fields =
   | None -> None
 ;;
 
-let number_field key fields =
-  match List.assoc_opt key fields with
-  | Some (`Float f) -> Some f
-  | Some (`Int i) -> Some (float_of_int i)
-  | Some (`Assoc _ | `Bool _ | `Intlit _ | `List _ | `Null | `String _) | None -> None
-;;
-
 let rec traverse f = function
   | [] -> Some []
   | x :: xs ->
@@ -116,12 +109,6 @@ let string_list_field_or_empty key fields =
   match List.assoc_opt key fields with
   | None -> Some []
   | Some _ -> string_list_field key fields
-;;
-
-let confidence_field fields =
-  match number_field "confidence" fields with
-  | Some confidence when confidence >= 0.0 && confidence <= 1.0 -> Some confidence
-  | Some _ | None -> None
 ;;
 
 let json_of_output raw =
@@ -173,39 +160,34 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
   | `Assoc fields ->
     (match
        string_field "claim" fields
-       , confidence_field fields
        , string_field "category" fields
        , int_field "source_turn" fields
      with
-     | Some claim, Some confidence, Some category_str, Some turn when turn >= 0 ->
+     | Some claim, Some category_str, Some turn when turn >= 0 ->
        let tool_call_id = optional_string_field "source_tool_call_id" fields in
       (* Parse-once at the producer boundary: the LLM's free-text category becomes
          a typed [category] here, so no surface string reaches the store or the
-         consolidator (RFC-0244 §2.3 / #21241; RFC-0247 §2.5). The category then
-         drives retention (RFC-0247 §2.3) — an [Ephemeral] coordination claim is
-         born with a short TTL and fast decay, durable knowledge with none. *)
+         consolidator (RFC-0244 §2.3 / #21241; RFC-0247 §2.5). The category drives
+         retention (RFC-0247 §2.3) — an [Ephemeral] coordination claim is born
+         with a short TTL, durable knowledge with none. RFC-0247 also stopped
+         parsing the LLM's [confidence] number: the score it fed is gone. *)
       let category = category_of_string category_str in
       Some
         { claim
-        ; confidence
-         ; category
+        ; category
          ; source = claim_source ~trace_id turn tool_call_id
          (* Tier-1 (per-keeper) facts carry no distinct-keeper corroboration set;
             the consolidator populates observed_by only on promotion (RFC-0244). *)
          ; observed_by = []
-         ; access_count = 0
          ; first_seen = now
-         ; last_accessed = now
          ; valid_until = category_valid_until ~now category
          ; last_verified_at = Some now
-         ; expected_lifetime_cycles = category_lifetime_cycles category
          ; schema_version
          }
-     | (Some _, Some _, Some _, Some _)
-     | (Some _, Some _, Some _, None)
-     | (Some _, Some _, None, _)
-     | (Some _, None, _, _)
-     | (None, _, _, _) -> None)
+     | (Some _, Some _, Some _)
+     | (Some _, Some _, None)
+     | (Some _, None, _)
+     | (None, _, _) -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 

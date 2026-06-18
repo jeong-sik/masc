@@ -31,7 +31,12 @@ type provenance_event =
     non-promotable category is the type-level backstop that lets the consolidation
     fiber be turned back on without injecting recall noise — robust even when the
     prompt's durability gate is imperfect. [Unknown] is distinct: a rising
-    [Unknown] rate signals the librarian prompt needs a new arm. *)
+    [Unknown] rate signals the librarian prompt needs a new arm.
+
+    [Validated_approach] and [Lesson] (RFC-0247 §6) are the outcome-derived kinds
+    the redesign exists to capture: an approach confirmed by its result, and a
+    failure distilled into how to improve next time. Both are durable and
+    promotable. *)
 type category =
   | Code_change
   | Fact
@@ -40,6 +45,8 @@ type category =
   | Goal
   | Constraint
   | Ephemeral
+  | Validated_approach
+  | Lesson
   | Unknown of string
 
 (** Canonical lowercase token for a category (round-trips with
@@ -67,31 +74,24 @@ val is_promotable : category -> bool
     pass) reachable. *)
 val category_valid_until : now:float -> category -> float option
 
-(** RFC-0247 §2.3: the expected lifetime, in retention cycles, a newly written
-    fact of this category should carry — drives the per-fact truth-decay rate in
-    the retention policy ([truth_lambda_for_fact]). Exhaustive over {!category}.
-    [Ephemeral] decays fast (a few cycles); everything else returns [None] and
-    decays at the slow default rate. Makes the previously-inert
-    [expected_lifetime_cycles] field live. *)
-val category_lifetime_cycles : category -> int option
+(** A single semantic claim extracted from conversation history.
 
-(** A single semantic claim extracted from conversation history. *)
+    RFC-0247 (purge): the fact carries only structure — claim, typed category,
+    provenance, the distinct-keeper corroboration set, and the timestamps. The
+    deleted fields (confidence, access_count, last_accessed, stale_factor,
+    expected_lifetime_cycles) fed the removed composite score; a fact's value is
+    the librarian's judgment, not a number on the row. *)
 type fact =
   { claim : string
-  ; confidence : float
   ; category : category
   ; source : provenance_event
   ; observed_by : string list
     (** RFC-0244 Tier 2 (shared semantic store) only: the sorted set of distinct
         keeper ids that have corroborated this claim. Empty for Tier-1 per-keeper
-        facts (omitted from their JSON). Populated by the consolidator; a shared
-        fact's confidence rises only per new distinct keeper. *)
-  ; access_count : int
+        facts (omitted from their JSON). Populated by the consolidator. *)
   ; first_seen : float
-  ; last_accessed : float
   ; valid_until : float option
   ; last_verified_at : float option
-  ; expected_lifetime_cycles : int option
   ; schema_version : string
   }
 

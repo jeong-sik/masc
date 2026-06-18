@@ -1,6 +1,6 @@
 (** Memory-OS "brain" end-to-end verification harness.
 
-    This is NOT another unit test. The 65 unit tests in [test_keeper_memory_os]
+    This is NOT another unit test. The unit tests in [test_keeper_memory_os]
     exercise each organ in isolation with hand-built fixtures, bypassing the env
     switches and testing one function at a time. This harness fills the gap
     between those unit tests and the live fleet by exercising the REAL production
@@ -16,18 +16,20 @@
     - S2 forgetting (GC) COMPOSES with consolidation: GC expires ephemeral facts,
       keeps durable ones, and never clobbers the consolidator-owned _shared tier
       (the production sweep excludes it).
-    - S3 associative recall (activation) discriminates a LINKED fact from an
-      UNLINKED one that is otherwise symmetric and was winning by base score —
-      the only differing variable is the edge — through the real render path, and
-      the activation switch (alpha=0) is byte-identical to default.
-    - S4 confidence MUTATES on the production write path (merge_and_cap_facts +
-      reobserve_fact) and persists, with an un-reobserved control held fixed.
+    - S3 structural recall ordering: recall ranks by truth anchor
+      ([last_verified_at] or [first_seen]), not by a composite score or
+      activation boost. A fact verified later is recalled ahead of an older
+      fact, deterministically.
+    - S4 truth-anchor refresh via reobserve_fact: re-extracting the same claim
+      advances [last_verified_at] while preserving [first_seen] provenance; an
+      unreobserved control keeps its original anchor.
 
     DOES NOT VERIFY (honest boundary — do not claim otherwise):
-    - That the LLM librarian assigns categories correctly. That is the residual
-      #21244 PRODUCER risk; S1's teeth check demonstrates the producer is
-      load-bearing but cannot prove it correct. Verifying it needs live-fleet
-      data or a transcript eval, not an offline deterministic harness.
+    - That the LLM librarian assigns categories correctly, or which facts are
+      valuable. That is the residual #21244 PRODUCER risk and the LLM-judgment
+      layer; S1's teeth check demonstrates the gate is load-bearing but cannot
+      prove the producer correct. Verifying it needs live-fleet data or a
+      transcript eval, not an offline deterministic harness.
     - Live fleet behaviour: this seeds synthetic data. Run with
       [--keepers-dir <path>] for a read-only DRY-RUN against a real store
       (observability only — no pass/fail, since real ground truth is unknown).
@@ -40,7 +42,6 @@ module Memory_io = Masc.Keeper_memory_os_io
 module GC = Masc.Keeper_memory_os_gc
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
-module Edges = Masc.Keeper_memory_os_edges
 
 (* ---------- tiny verdict framework (prints + exit code) ---------- *)
 
@@ -77,24 +78,18 @@ let contains substring s =
 
 let mk_fact
       ~now
-      ?(confidence = 0.8)
       ?(category = Types.Fact)
       ?(valid_until = None)
-      ?(access_count = 1)
       ?(age_seconds = 3600.0)
       claim
   =
   { Types.claim
-  ; Types.confidence
   ; Types.category
   ; Types.source = { Types.trace_id = "harness-trace"; Types.turn = 1; Types.tool_call_id = None }
   ; Types.observed_by = []
-  ; Types.access_count
   ; Types.first_seen = now -. age_seconds
-  ; Types.last_accessed = now -. age_seconds
   ; Types.valid_until
   ; Types.last_verified_at = Some (now -. age_seconds)
-  ; Types.expected_lifetime_cycles = None
   ; Types.schema_version = Types.schema_version
   }
 ;;
@@ -161,9 +156,9 @@ let with_prompt_registry f =
 let scenario_consolidation_gate () =
   section "S1 consolidation typed-gate (#21244) — non-vacuity + teeth";
   let now = 1_000_000.0 in
-  let eph c = mk_fact ~now ~category:Types.Ephemeral ~confidence:0.9 c in
-  let fct c = mk_fact ~now ~category:Types.Fact ~confidence:0.8 c in
-  let con c = mk_fact ~now ~category:Types.Constraint ~confidence:0.8 c in
+  let eph c = mk_fact ~now ~category:Types.Ephemeral c in
+  let fct c = mk_fact ~now ~category:Types.Fact c in
+  let con c = mk_fact ~now ~category:Types.Constraint c in
   (* Modelled on the #21244 live finding: the ONLY >=2-keeper-corroborated claims
      were ephemeral lifecycle boilerplate. Here two ephemeral claims AND two
      durable claims each clear the 2-keeper bar; single-keeper noise must never
@@ -206,8 +201,8 @@ let scenario_forgetting_composition () =
   section "S2 forgetting (GC) ∘ consolidation composition (disk-backed)";
   with_temp_keepers_dir (fun _dir ->
     let now = 2_000_000.0 in
-    let expired = mk_fact ~now ~category:Types.Ephemeral ~confidence:0.9 ~valid_until:(Some (now -. 10.0)) "scheduled tick alpha" in
-    let durable = mk_fact ~now ~category:Types.Fact ~confidence:0.9 ~valid_until:None "dune build invariant holds" in
+    let expired = mk_fact ~now ~category:Types.Ephemeral ~valid_until:(Some (now -. 10.0)) "scheduled tick alpha" in
+    let durable = mk_fact ~now ~category:Types.Fact ~valid_until:None "dune build invariant holds" in
     Memory_io.append_fact ~keeper_id:"alpha" expired;
     Memory_io.append_fact ~keeper_id:"alpha" durable;
     Memory_io.append_fact ~keeper_id:"beta" durable;
@@ -220,7 +215,7 @@ let scenario_forgetting_composition () =
       "production GC sweep excludes _shared (list_fact_store_keeper_ids omits it)"
       (not (List.mem "_shared" (Memory_io.list_fact_store_keeper_ids ())));
     let g = GC.run_gc ~keeper_id:"alpha" ~now () in
-    note "alpha GC: ttl_expired=%d discarded=%d dedup=%d written=%d" g.GC.ttl_expired g.GC.verdict_discarded g.GC.dedup_removed g.GC.written;
+    note "alpha GC: ttl_expired=%d dedup=%d written=%d" g.GC.ttl_expired g.GC.dedup_removed g.GC.written;
     let _ = GC.run_gc ~keeper_id:"beta" ~now () in
     let alpha_after = List.map (fun f -> f.Types.claim) (Memory_io.read_facts_all ~keeper_id:"alpha") in
     check "GC forgot the expired ephemeral" (not (List.mem "scheduled tick alpha" alpha_after));
@@ -229,57 +224,41 @@ let scenario_forgetting_composition () =
     check "composition: _shared untouched by the keeper GC sweep (1 = 1)" (shared_after = shared_before))
 ;;
 
-(* ---------- S3 associative recall (activation): symmetric control flip + switch ---------- *)
+(* ---------- S3 structural recall ordering (RFC-0247 purge) ---------- *)
 
-let scenario_activation () =
-  section "S3 associative recall (activation) — symmetric control flip + switch";
+let scenario_structural_recall () =
+  section "S3 structural recall ordering — truth-anchor recency (RFC-0247 purge)";
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _dir ->
       let now = 3_000_000.0 in
       let kid = "k" in
-      let seed = "alpha anchor topic" in
-      (* anchor: high lexical match to the seed -> top of the base ranking.
-         gamma: a satellite with HIGHER base than beta, but UNLINKED (control).
-         beta: a satellite with LOWER base than gamma, LINKED to anchor.
-         beta and gamma share structure; gamma is winning at base. The ONLY
-         differing variable is the anchor<->beta edge. *)
-      let anchor = mk_fact ~now ~confidence:0.95 "alpha anchor topic primary statement" in
-      let gamma = mk_fact ~now ~confidence:0.55 "gamma lone satellite detail row" in
-      let beta = mk_fact ~now ~confidence:0.45 "beta linked satellite detail row" in
-      List.iter (Memory_io.append_fact ~keeper_id:kid) [ anchor; gamma; beta ];
-      let episode = mk_episode ~created_at:now [ anchor.Types.claim; beta.Types.claim ] in
-      Memory_io.append_edges ~keeper_id:kid (Edges.co_occurrence_edges episode);
-      let render alpha_value =
-        with_env "MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA" alpha_value (fun () ->
-          Recall.render_context ~keeper_id:kid ~now ~max_facts:2 ~seed ())
-      in
-      let base0 = render "0" in
-      check "non-vacuity: at alpha=0, control gamma IS recalled (it leads beta by base)" (contains "gamma lone satellite" base0);
-      check "non-vacuity: at alpha=0, linked beta is NOT in the top-2" (not (contains "beta linked satellite" base0));
-      let activated = render "5" in
-      check "POSITIVE: at alpha>0, the linked beta is pulled into the top-2" (contains "beta linked satellite" activated);
-      check "NEGATIVE (false-positive guard): the unlinked gamma is NOT lifted — it drops out" (not (contains "gamma lone satellite" activated));
-      note "the control gamma was AHEAD by base and lost only because beta had an association => lift attributable solely to the edge";
-      let default_render =
-        with_env "MASC_KEEPER_MEMORY_OS_ACTIVATION_ALPHA" "" (fun () ->
-          Recall.render_context ~keeper_id:kid ~now ~max_facts:2 ~seed ())
-      in
-      check "switch: alpha=0 render is byte-identical to default (env cleared)" (String.equal base0 default_render)))
+      (* older: verified long ago; newer: verified recently. Both are current and
+         durable. The ONLY difference is the truth anchor, so any ordering is
+         attributable solely to structural recency. *)
+      let older = mk_fact ~now ~category:Types.Fact ~age_seconds:86_400.0 "older verified fact" in
+      let newer = mk_fact ~now ~category:Types.Fact ~age_seconds:60.0 "newer verified fact" in
+      List.iter (Memory_io.append_fact ~keeper_id:kid) [ older; newer ];
+      let rendered = Recall.render_context ~keeper_id:kid ~now ~max_facts:1 () in
+      check "newer fact is recalled first (structural recency)" (contains "newer verified fact" rendered);
+      check "older fact is omitted from top-1" (not (contains "older verified fact" rendered));
+      let rendered2 = Recall.render_context ~keeper_id:kid ~now ~max_facts:2 () in
+      check "both facts appear when max_facts=2" (contains "older verified fact" rendered2);
+      note "recall order is deterministic structure, not a score or activation boost"))
 ;;
 
-(* ---------- S4 confidence mutation via production write path + control ---------- *)
+(* ---------- S4 truth-anchor refresh via production write path + control ---------- *)
 
-let scenario_confidence_mutation () =
-  section "S4 confidence mutation (RFC-0243 reobserve) — production write path + control";
+let scenario_truth_anchor_refresh () =
+  section "S4 truth-anchor refresh (RFC-0247 reobserve) — production write path + control";
   with_temp_keepers_dir (fun _dir ->
     let now = 4_000_000.0 in
     let kid = "k" in
-    let target = mk_fact ~now ~confidence:0.6 ~access_count:1 "confidence target claim text" in
-    let control = mk_fact ~now ~confidence:0.6 ~access_count:1 "untouched control claim text" in
+    let target = mk_fact ~now ~category:Types.Fact ~age_seconds:3600.0 "truth target claim text" in
+    let control = mk_fact ~now ~category:Types.Fact ~age_seconds:3600.0 "untouched control claim text" in
     Memory_io.append_fact ~keeper_id:kid target;
     Memory_io.append_fact ~keeper_id:kid control;
     let later = now +. 100.0 in
-    let incoming = [ mk_fact ~now:later ~confidence:0.9 ~access_count:1 "confidence target claim text" ] in
+    let incoming = [ mk_fact ~now:later ~category:Types.Fact ~age_seconds:0.0 "truth target claim text" ] in
     let window = Memory_io.fact_recall_window in
     (* Replicates keeper_librarian_runtime.ml exactly: upsert via reobserve_fact. *)
     let stats =
@@ -289,20 +268,21 @@ let scenario_confidence_mutation () =
         ~incoming
         ~keep:window
         ~trigger:(window + (window / 2))
-        ~rank:(Policy.score_fact ~now:later)
+        ~rank:(Policy.retention_rank ~now:later)
     in
     note "merge stats: merged=%d appended=%d dropped=%d" stats.Memory_io.merged stats.Memory_io.appended stats.Memory_io.dropped;
     check "re-observation folded into existing row (merged=1, not appended)" (stats.Memory_io.merged = 1 && stats.Memory_io.appended = 0);
     let facts = Memory_io.read_facts_all ~keeper_id:kid in
     let find c = List.find_opt (fun f -> f.Types.claim = c) facts in
-    (match find "confidence target claim text" with
+    (match find "truth target claim text" with
      | Some f ->
-       check "PROPERTY: target confidence mutated off the frozen 0.6 (accuracy-inversion fix is live)" (Float.abs (f.Types.confidence -. 0.6) > 1e-6);
-       check "target access_count grew (> 1)" (f.Types.access_count > 1)
+       check "PROPERTY: target last_verified_at advanced to later" (f.Types.last_verified_at = Some later);
+       check "PROPERTY: target first_seen provenance preserved" (f.Types.first_seen = target.Types.first_seen)
      | None -> check "target fact present after upsert" false);
     match find "untouched control claim text" with
     | Some f ->
-      check "CONTROL: the un-reobserved fact keeps confidence 0.6 (change attributable to reobserve)" (Float.abs (f.Types.confidence -. 0.6) < 1e-6)
+      check "CONTROL: the un-reobserved fact keeps original last_verified_at"
+        (f.Types.last_verified_at = target.Types.last_verified_at)
     | None -> check "control fact present" false)
 ;;
 
@@ -324,13 +304,12 @@ let observe_real_store dir =
       List.iter
         (fun kid ->
            let g = GC.run_gc ~dry_run:true ~keeper_id:kid ~now () in
-           if g.GC.ttl_expired > 0 || g.GC.verdict_discarded > 0 || g.GC.dedup_removed > 0
+           if g.GC.ttl_expired > 0 || g.GC.dedup_removed > 0
            then
              note
-               "GC DRY-RUN keeper=%s would prune: ttl_expired=%d discarded=%d dedup=%d (of %d)"
+               "GC DRY-RUN keeper=%s would prune: ttl_expired=%d dedup=%d (of %d)"
                kid
                g.GC.ttl_expired
-               g.GC.verdict_discarded
                g.GC.dedup_removed
                g.GC.total_input)
         keeper_ids;
@@ -352,12 +331,12 @@ let real_keepers_dir argv =
 
 let () =
   Printf.printf "MEMORY-OS BRAIN HARNESS — deterministic end-to-end organ-composition verification\n%!";
-  Printf.printf "VERIFIES: typed-gate teeth (#21244) · GC∘consolidation composition · activation linked-vs-unlinked · confidence mutation\n%!";
-  Printf.printf "DOES NOT VERIFY: LLM producer category correctness · live-fleet behaviour · env-fiber scheduling (see module doc)\n%!";
+  Printf.printf "VERIFIES: typed-gate teeth (#21244) · GC∘consolidation composition · structural recall ordering · truth-anchor refresh\n%!";
+  Printf.printf "DOES NOT VERIFY: LLM producer category/value judgments · live-fleet behaviour · env-fiber scheduling (see module doc)\n%!";
   scenario_consolidation_gate ();
   scenario_forgetting_composition ();
-  scenario_activation ();
-  scenario_confidence_mutation ();
+  scenario_structural_recall ();
+  scenario_truth_anchor_refresh ();
   (match real_keepers_dir Sys.argv with
    | Some dir -> observe_real_store dir
    | None -> ());

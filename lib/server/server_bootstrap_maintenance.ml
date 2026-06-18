@@ -148,14 +148,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                in
                if
                  report.Keeper_memory_os_gc.ttl_expired > 0
-                 || report.verdict_discarded > 0
                  || report.dedup_removed > 0
                then
                  Log.Server.info
-                   "memory_os_gc: keeper=%s ttl_expired=%d discarded=%d dedup=%d written=%d"
+                   "memory_os_gc: keeper=%s ttl_expired=%d dedup=%d written=%d"
                    keeper_id
                    report.ttl_expired
-                   report.verdict_discarded
                    report.dedup_removed
                    report.written
              with

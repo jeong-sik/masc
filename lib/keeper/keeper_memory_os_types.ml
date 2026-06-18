@@ -26,7 +26,14 @@ type provenance_event =
    arm for coordination/lifecycle boilerplate — the structural backstop for the
    #21244 mislabel-and-promote failure: even if the prompt's durability gate is
    imperfect, a claim the LLM recognizes as ephemeral is typed non-promotable and
-   forgotten, rather than silently entering the store as a durable fact. *)
+   forgotten, rather than silently entering the store as a durable fact.
+
+   [Validated_approach] and [Lesson] (RFC-0247 §6) are the two outcome-derived
+   kinds the redesign exists to capture: a [Validated_approach] is something that
+   worked, confirmed by its result ("remember successes well"); a [Lesson] is a
+   failure distilled into how to do it better next time ("record failures as the
+   way to improve them" — mirrors the Why/How-to-apply shape of a Claude-Code
+   feedback note). Both are durable, cross-keeper knowledge, so both promote. *)
 type category =
   | Code_change
   | Fact
@@ -35,6 +42,8 @@ type category =
   | Goal
   | Constraint
   | Ephemeral
+  | Validated_approach
+  | Lesson
   | Unknown of string
 
 let category_to_string = function
@@ -45,6 +54,8 @@ let category_to_string = function
   | Goal -> "goal"
   | Constraint -> "constraint"
   | Ephemeral -> "ephemeral"
+  | Validated_approach -> "validated_approach"
+  | Lesson -> "lesson"
   | Unknown s -> s
 ;;
 
@@ -57,64 +68,59 @@ let category_of_string s =
   | "goal" -> Goal
   | "constraint" -> Constraint
   | "ephemeral" -> Ephemeral
+  | "validated_approach" -> Validated_approach
+  | "lesson" -> Lesson
   | _ -> Unknown s
 ;;
 
 (* Exhaustive promotability: only objective, durable claim kinds cross keepers.
-   Preserves the prior [Fact; Constraint] whitelist exactly; everything else —
+   Extends the prior [Fact; Constraint] whitelist with the two outcome-derived
+   kinds [Validated_approach] and [Lesson] — a validated approach and a hard-won
+   lesson are exactly the knowledge worth sharing fleet-wide. Everything else —
    including [Ephemeral] and any [Unknown] label — stays keeper-local. Exhaustive
    match (not a runtime [category list]) so a future durable kind must be
    classified here at compile time rather than silently defaulting to
    non-promotable, the no-silent-omission property RFC-0247 §2.5 argues for over
    the prompt-suppression approach. *)
 let is_promotable = function
-  | Fact | Constraint -> true
+  | Fact | Constraint | Validated_approach | Lesson -> true
   | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
 ;;
 
 (* RFC-0247 §2.3 (forgetting): retention is a property of the category. A
    coordination event ("checkpoint saved") is stale within a day and worthless in
-   a later session, so it gets a short hard TTL and a fast truth-decay; durable
-   knowledge never hard-expires and decays slowly. These two functions are the
-   write-side producers that make [valid_until] and [expected_lifetime_cycles]
-   (previously set-once-to-None dead fields) actually reachable. *)
+   a later session, so it gets a short hard TTL; durable knowledge never
+   hard-expires. [category_valid_until] is the write-side producer that makes
+   [valid_until] reachable. The companion [category_lifetime_cycles] (truth-decay
+   rate) was deleted with the score it fed. *)
 
 (* A coordination/lifecycle fact is stale within a day. Named, not magic. *)
 let ephemeral_ttl_seconds = 86_400.0
 
-(* Ephemeral facts decay over a few retention cycles; with the policy's
-   default_cycle_seconds (1h) this is a ~hours half-life vs the ~30-day default,
-   so an ephemeral fact loses recall score fast even before its hard TTL. *)
-let ephemeral_lifetime_cycles = 3
-
 let category_valid_until ~now = function
   | Ephemeral -> Some (now +. ephemeral_ttl_seconds)
-  | Fact | Constraint | Preference | Blocker | Goal | Code_change | Unknown _ -> None
+  | Fact | Constraint | Preference | Blocker | Goal | Code_change
+  | Validated_approach | Lesson | Unknown _ -> None
 ;;
 
-let category_lifetime_cycles = function
-  | Ephemeral -> Some ephemeral_lifetime_cycles
-  | Fact | Constraint | Preference | Blocker | Goal | Code_change | Unknown _ -> None
-;;
-
+(* RFC-0247 (purge): the fact carries only structure — the claim, its typed
+   category, provenance, the distinct-keeper corroboration set, and three
+   timestamps (first_seen, optional last_verified_at, optional Ephemeral
+   valid_until). The deleted fields (confidence, access_count, last_accessed,
+   stale_factor, expected_lifetime_cycles) were inputs to the removed composite
+   score; a fact's value is the librarian's judgment, not a number on the row. *)
 type fact =
   { claim : string
-  ; confidence : float
   ; category : category
   ; source : provenance_event
   ; observed_by : string list
     (* RFC-0244 Tier 2 (shared semantic store) ONLY: the sorted set of distinct
        keeper ids that have corroborated this claim. Empty for Tier-1 per-keeper
        facts — a single keeper's store has no distinct keeper-source to track, so
-       it is omitted from their JSON. This is the consolidator-populated field
-       that makes cross-keeper confidence live: a shared fact's confidence rises
-       only per NEW distinct keeper, never on a same-keeper repeat. *)
-  ; access_count : int
+       it is omitted from their JSON. *)
   ; first_seen : float
-  ; last_accessed : float
   ; valid_until : float option
   ; last_verified_at : float option
-  ; expected_lifetime_cycles : int option
   ; schema_version : string
   }
 
@@ -203,10 +209,6 @@ let provenance_event_of_json (json : Yojson.Safe.t) =
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let clamp01 value =
-  Float.max 0.0 (Float.min 1.0 value)
-;;
-
 (* Claim identity SSOT: collapse a claim to a normalized fingerprint (lowercase +
    internal-whitespace-collapsed + trailing-space-trimmed) so trivially reworded
    re-confirmations of the same conclusion ("...would end the session" vs "...will
@@ -237,25 +239,17 @@ let optional_float_field key = function
   | None -> []
 ;;
 
-let optional_int_field key = function
-  | Some value -> [ key, `Int value ]
-  | None -> []
-;;
-
 let fact_to_json f =
   let fields =
     [ "claim", `String f.claim
-    ; "confidence", `Float f.confidence
     ; "category", `String (category_to_string f.category)
     ; "source", provenance_event_to_json f.source
-    ; "access_count", `Int f.access_count
     ; "first_seen", `Float f.first_seen
-    ; "last_accessed", `Float f.last_accessed
+
     ; "schema_version", `String f.schema_version
     ]
     @ optional_float_field "valid_until" f.valid_until
     @ optional_float_field "last_verified_at" f.last_verified_at
-    @ optional_int_field "expected_lifetime_cycles" f.expected_lifetime_cycles
     (* Tier-1 facts carry [], which is omitted so per-keeper stores stay
        byte-identical to pre-RFC-0244; only Tier-2 shared facts emit it. *)
     @ (match f.observed_by with
@@ -265,58 +259,50 @@ let fact_to_json f =
   `Assoc fields
 ;;
 
+(* RFC-0247 (purge): a fact decodes from [claim], [category], and [source] only.
+   [confidence] is no longer required — it was in the required tuple, so any
+   legacy row missing it was DROPPED (the R5 row-loss). Removing it both deletes
+   the dead field and stops dropping confidence-less rows. The dead JSON keys
+   (confidence/access_count/last_accessed/stale_factor/expected_lifetime_cycles)
+   that legacy v3 rows still carry are simply ignored — Yojson decoders skip
+   unknown keys, so old rows round-trip to the slim shape on the next rewrite. *)
 let fact_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
     (match
        ( json_string_field "claim" fields
-       , json_float_field "confidence" fields
        , json_string_field "category" fields
        , List.assoc_opt "source" fields )
      with
-     | Some claim, Some confidence, Some category_str, Some source_json ->
+     | Some claim, Some category_str, Some source_json ->
        (match provenance_event_of_json source_json with
         | Some source ->
-          (* DET-OK: backward-compatible defaults for optional persisted fields. *)
-          let access_count = Option.value (json_int_field "access_count" fields) ~default:0 in
           (* DET-OK: absent first_seen defaults to epoch for migration safety. *)
           let first_seen = Option.value (json_float_field "first_seen" fields) ~default:0.0 in
-          (* DET-OK: absent last_accessed inherits first_seen. *)
-          let last_accessed = Option.value (json_float_field "last_accessed" fields) ~default:first_seen in
           let valid_until = json_float_field "valid_until" fields in
           let last_verified_at = json_float_field "last_verified_at" fields in
           (* DET-OK: absent observed_by defaults to empty (Tier-1 / legacy facts). *)
           let observed_by =
             Option.value (json_string_list_field "observed_by" fields) ~default:[]
           in
-          let expected_lifetime_cycles =
-            match json_int_field "expected_lifetime_cycles" fields with
-            | Some cycles when cycles > 0 -> Some cycles
-            | Some _ | None -> None
-          in
           Some
             { claim
-            ; confidence = clamp01 confidence
             ; (* Parse-once at the read boundary; legacy free-string categories
                  on disk map to their arm or [Unknown] (graceful-degrade). *)
               category = category_of_string category_str
             ; source
             ; observed_by
-            ; access_count
             ; first_seen
-            ; last_accessed
             ; valid_until
             ; last_verified_at
-            ; expected_lifetime_cycles
             ; schema_version =
                 (* DET-OK: default to current schema for forward compatibility. *)
                 Option.value (json_string_field "schema_version" fields) ~default:schema_version
             }
         | None -> None)
-     | (Some _, Some _, Some _, None)
-     | (Some _, Some _, None, _)
-     | (Some _, None, _, _)
-     | (None, _, _, _) -> None)
+     | (Some _, Some _, None)
+     | (Some _, None, _)
+     | (None, _, _) -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 

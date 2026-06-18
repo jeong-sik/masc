@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { signal } from '@preact/signals'
 import { act } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Keeper } from '../../types'
@@ -38,6 +39,9 @@ async function loadChat() {
     ChatArtifactPanel: ({ entries }: { entries: unknown[] }) =>
       html`<div data-testid="kw-artifact-panel" data-artifact-count=${entries.length}>Artifacts</div>`,
   }))
+  vi.doMock('../keeper-detail-state', () => ({
+    keeperMobilePane: signal<'roster' | 'chat'>('chat'),
+  }))
   return import('./keeper-workspace-chat')
 }
 
@@ -61,6 +65,7 @@ describe('KeeperWorkspaceChat', () => {
     vi.doUnmock('../keeper-turn-inspector')
     vi.doUnmock('../../lib/keeper-runtime-display')
     vi.doUnmock('../chat/artifact-panel')
+    vi.doUnmock('../keeper-detail-state')
   })
 
   it('renders the chat header and conversation panel', async () => {
@@ -113,6 +118,32 @@ describe('KeeperWorkspaceChat', () => {
     })
 
     expect(container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')).toBeNull()
+  })
+
+  it('switches the mobile pane to roster when the back button is clicked', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    const { keeperMobilePane } = await import('../keeper-detail-state')
+    keeperMobilePane.value = 'chat'
+
+    await act(async () => {
+      render(html`
+        <${KeeperWorkspaceChat}
+          keeper=${mockKeeper}
+          detailOpen=${false}
+          onToggleDetail=${vi.fn()}
+          onClear=${vi.fn()}
+        />
+      `, container)
+    })
+
+    const back = container.querySelector('[data-testid="kw-chat-back-to-roster"]') as HTMLButtonElement
+    expect(back).not.toBeNull()
+
+    await act(async () => {
+      back.click()
+    })
+
+    expect(keeperMobilePane.value).toBe('roster')
   })
 
   it('toggles the artifact panel when the artifacts button is clicked', async () => {

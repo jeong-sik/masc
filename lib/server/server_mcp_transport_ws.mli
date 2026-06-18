@@ -339,11 +339,6 @@ val __test_reset_env_caches : unit -> unit
     {!slice_index_enabled} caches so the next call
     re-reads the environment. *)
 
-val __test_new_session : id:string -> ws_session
-(** Test-only seam: construct a session with a placeholder [Wsd.t] so lifecycle
-    and state probes can be exercised without a live HTTP upgrade.  The
-    resulting value must not be used for actual wire I/O. *)
-
 val __test_missed_pong_threshold : unit -> int
 (** Test-only seam: exposes the configured missed-pong threshold so tests can
     verify default / env-var / clamping behavior. *)

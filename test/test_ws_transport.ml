@@ -653,7 +653,7 @@ let test_dashboard_auth_authenticated_tokenless () =
 (* ====== Cross-fiber scalar state (Atomic.t) ====== *)
 
 let test_new_session_initializes_pong_state () =
-  let session = Ws.__test_new_session ~id:"pong-state-init" in
+  let session = Ws.new_session ~id:"pong-state-init" ~wsd:(Obj.magic ()) in
   Alcotest.(check bool) "closed starts false" false (Atomic.get session.closed);
   Alcotest.(check int) "missed_pongs starts at 0" 0 (Atomic.get session.missed_pongs);
   Alcotest.(check bool) "last_pong_at is in the recent past"
@@ -661,7 +661,7 @@ let test_new_session_initializes_pong_state () =
     (Atomic.get session.last_pong_at <= Unix.gettimeofday ())
 
 let test_record_pong_resets_missed_pongs () =
-  let session = Ws.__test_new_session ~id:"pong-reset" in
+  let session = Ws.new_session ~id:"pong-reset" ~wsd:(Obj.magic ()) in
   Atomic.set session.missed_pongs 5;
   let before = Atomic.get session.last_pong_at in
   Unix.sleepf 0.005;

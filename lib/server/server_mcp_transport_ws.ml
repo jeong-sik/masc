@@ -177,12 +177,6 @@ let new_session ~id ~wsd =
     inbound_partial_text = None;
   }
 
-(** Test-only: build a session with a placeholder [Wsd.t].  The placeholder is
-    never written to by well-behaved tests; it exists only so white-box tests
-    can exercise session lifecycle state without a live HTTP upgrade. *)
-let __test_new_session ~id =
-  new_session ~id ~wsd:(Obj.magic ())
-
 (** [true] when the session has been closed locally or the httpun-ws writer has
     shut down.  Reads the atomic [closed] flag and the WSD state; safe from any
     fiber. *)

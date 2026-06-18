@@ -16,7 +16,6 @@ let dashboard_metrics_cache_mu = Stdlib.Mutex.create ()
 let dashboard_model_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_cost_latency_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_costs_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_keeper_decisions_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_decisions_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_keeper_memory_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 
@@ -204,24 +203,16 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
          let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int limit ] in
+         let keeper_names = Keeper_meta_store.keeper_names config in
+         let keepers =
+           List.filter_map (fun name ->
+             match Keeper_meta_store.read_meta config name with
+             | Ok (Some m) -> Some m
+             | _ -> None
+           ) keeper_names
+         in
          let json =
-           cached_dashboard_json ~sw ~cache:dashboard_keeper_decisions_cache
-             ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_json ~config
-                  ~keepers:[] ~limit ())
-             ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_decisions_json ~config ~keepers
-                 ~limit ())
+           Dashboard_http_keeper.keeper_decisions_json ~config ~keepers ~limit ()
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

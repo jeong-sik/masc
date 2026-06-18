@@ -456,7 +456,70 @@ let read_state config =
   else
     default_state ()
 
+let max_resolved_requests () =
+  (* Bounds how many resolved (Approved/Rejected/Cancelled) requests the
+     persistent [state.requests] list retains. The list is append-only
+     (create_request: requests @ [request]) with no prior pruning, so it
+     grew unbounded for the lifetime of the state file — a long-lived
+     allocation source (live_words growth after restart). Open requests
+     are always kept; only terminal resolved entries are capped. *)
+  match Sys.getenv_opt "MASC_GOAL_VERIFICATION_MAX_RESOLVED" with
+  | Some v ->
+      (match int_of_string_opt (String.trim v) with
+       | Some n when n > 0 -> n
+       | _ -> 500)
+  | None -> 500
+
+let prune_resolved_requests requests =
+  (* Keep every Open (active quorum) request plus the most recent
+     [max_resolved_requests] resolved entries. Resolved requests are
+     terminal: quorum evaluation only consults Open rows and vote dedup
+     short-circuits on non-Open status, so dropping old resolved entries cannot
+     regress correctness. Retention is by [resolved_at] so a long-lived Open
+     request that resolves now survives even if many newer-created terminal rows
+     already fill the cap. Output preserves original list order for retained
+     rows. *)
+  let opens, resolved =
+    List.partition (fun (r : goal_verification_request) -> r.status = Open) requests
+  in
+  let max_r = max_resolved_requests () in
+  let resolved_len = List.length resolved in
+  if resolved_len <= max_r then requests
+  else (
+    let retention_key (r : goal_verification_request) =
+      match r.resolved_at with
+      | Some resolved_at -> resolved_at
+      | None ->
+          (* NDT-OK: legacy terminal rows may not have [resolved_at]. This
+             fallback only orders bounded retention after the request already
+             reached a terminal state; open quorum semantics do not depend on
+             it. *)
+          r.created_at
+    in
+    let ranked =
+      resolved
+      |> List.mapi (fun index request -> index, request)
+      |> List.sort (fun (left_index, left) (right_index, right) ->
+        match String.compare (retention_key right) (retention_key left) with
+        | 0 -> Int.compare right_index left_index
+        | n -> n)
+    in
+    let keep_ids = Hashtbl.create max_r in
+    let rec add_first n = function
+      | _ when n <= 0 -> ()
+      | [] -> ()
+      | (_, request) :: rest ->
+          Hashtbl.replace keep_ids request.id ();
+          add_first (n - 1) rest
+    in
+    add_first max_r ranked;
+    let should_keep (request : goal_verification_request) =
+      request.status = Open || Hashtbl.mem keep_ids request.id
+    in
+    List.filter should_keep requests)
+
 let write_state config (state : state) =
+  let state = { state with requests = prune_resolved_requests state.requests } in
   let json = state_to_yojson state in
   Workspace_utils.write_json config (requests_path config) json;
   Workspace_utils.write_json config (requests_recovery_path config) json
@@ -557,50 +620,11 @@ let emit_event config ~(goal_id : string) ~(event_type : string)
   in
   Fs_compat.append_jsonl path event
 
-let max_resolved_requests () =
-  (* Bounds how many resolved (Approved/Rejected/Cancelled) requests the
-     persistent [state.requests] list retains. The list is append-only
-     (create_request: requests @ [request]) with no prior pruning, so it
-     grew unbounded for the lifetime of the state file — a long-lived
-     allocation source (live_words growth after restart). Open requests
-     are always kept; only terminal resolved entries are capped. *)
-  match Sys.getenv_opt "MASC_GOAL_VERIFICATION_MAX_RESOLVED" with
-  | Some v -> (match int_of_string_opt (String.trim v) with Some n when n > 0 -> n | _ -> 500)
-  | None -> 500
-
-let prune_resolved_requests requests =
-  (* Keep every Open (active quorum) request plus the most recent
-     [max_resolved_requests] resolved entries. Resolved requests are
-     terminal: quorum evaluation only consults Open rows and vote dedup
-     short-circuits on non-Open status, so dropping old resolved entries
-     cannot regress correctness. Append order is chronological, so
-     dropping from the front of the resolved partition drops the oldest.
-     Order across the list is not load-bearing — list_requests_for_goal
-     filters by goal_id and find_request searches by id. *)
-  let opens, resolved = List.partition (fun (r : goal_verification_request) -> r.status = Open) requests in
-  let max_r = max_resolved_requests () in
-  let resolved_len = List.length resolved in
-  if resolved_len <= max_r then requests
-  else
-    (* Skip (resolved_len - max_r) oldest resolved, keep the rest. *)
-    let to_skip = resolved_len - max_r in
-    let rec keep_after_skip n = function
-      | _ :: rest when n > 0 -> keep_after_skip (n - 1) rest
-      | rest -> rest
-    in
-    opens @ keep_after_skip to_skip resolved
-
 let update_state config f =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
-      (* Bound long-lived growth: cap resolved requests on every write so
-         the persistent list cannot grow without limit. No-op once the
-         resolved count is within the cap. *)
-      let next_state =
-        { next_state with requests = prune_resolved_requests next_state.requests }
-      in
       write_state config next_state;
       next_state)
 
@@ -672,6 +696,13 @@ let evaluate_quorum request =
   else
     Pending
 
+let replace_request_for_write ~request_id (updated_request : goal_verification_request) requests =
+  let matches row = String.equal row.id request_id in
+  if updated_request.status = Open then
+    List.map (fun row -> if matches row then updated_request else row) requests
+  else
+    List.filter (fun row -> not (matches row)) requests @ [ updated_request ]
+
 let cancel_request config ~(request_id : string) =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
@@ -689,10 +720,7 @@ let cancel_request config ~(request_id : string) =
             }
           in
           let requests =
-            List.map
-              (fun row ->
-                if String.equal row.id request_id then updated_request else row)
-              state.requests
+            replace_request_for_write ~request_id updated_request state.requests
           in
           write_state config
             { version = state.version + 1; updated_at = resolved_at; requests };
@@ -746,10 +774,7 @@ let submit_vote config ~(request_id : string) ~(principal : goal_principal)
                   Failed )
           in
           let requests =
-            List.map
-              (fun row ->
-                if String.equal row.id request_id then next_request else row)
-              state.requests
+            replace_request_for_write ~request_id next_request state.requests
           in
           write_state config
             { version = state.version + 1; updated_at = submitted_at; requests };

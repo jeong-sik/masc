@@ -113,8 +113,24 @@
 /* ── Agent roster rows ────────────────────────────────────────────────────── */
 
 .v2-monitoring-roster-row {
+  position: relative;
   transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
+
+/* Scannable per-row tone rail (keeper-v2 Fleet design) — a 3px left edge keyed
+   to the runtime band (data-tone) so keeper state reads down a single column
+   instead of every row looking identical. */
+.v2-monitoring-roster-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--roster-rail, transparent);
+}
+.v2-monitoring-roster-row[data-tone="ok"] { --roster-rail: var(--color-status-ok); }
+.v2-monitoring-roster-row[data-tone="warn"] { --roster-rail: var(--color-status-warn); }
+.v2-monitoring-roster-row[data-tone="bad"] { --roster-rail: var(--color-status-err); }
+.v2-monitoring-roster-row[data-tone="idle"] { --roster-rail: color-mix(in oklab, var(--color-fg-muted) 50%, transparent); }
 
 .v2-monitoring-roster-row:hover {
   border-color: var(--color-border-strong);

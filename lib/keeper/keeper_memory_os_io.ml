@@ -91,6 +91,15 @@ let episode_path ~keeper_id ~trace_id ~generation =
     (Printf.sprintf "%s-g%04d.json" trace_id generation)
 ;;
 
+(** Compute the next generation number for a trace's episode files.
+
+    Scans the episodes directory for files matching [trace_id-gNNNN.json]
+    and returns [max_gen + 1].  This is a **single-writer** operation:
+    concurrent callers for the same [trace_id] will race on the directory
+    scan and may produce duplicate generation numbers.  The caller must
+    ensure at most one fiber calls [next_generation] for a given
+    [trace_id] at a time (e.g. via a per-trace sequencer or by running
+    all extractions for one trace on a single fiber). *)
 let next_generation ~keeper_id ~trace_id =
   let dir = episodes_dir ~keeper_id in
   let prefix = Printf.sprintf "%s-g" trace_id in

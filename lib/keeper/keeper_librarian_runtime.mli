@@ -23,18 +23,30 @@ val cadence_turns : unit -> int
 
 val cadence_step : cadence:int -> counter:int -> int * bool
 (** Pure cadence decision. [(updated_counter, due)] for a keeper whose counter
-    (turns since last extraction) is [counter] under [cadence]. cadence<=1 is
-    always due with the counter pinned at 0. Exposed for testing the cadence
-    logic without the per-keeper counter table. *)
+    (turns since last successful extraction) is [counter] under [cadence].
+    [counter < 0] is treated as a fresh (keeper, trace) and is due immediately.
+    cadence<=1 is always due with the counter pinned at 0. When due, the updated
+    counter is set to [cadence] and stays there until [cadence_record_success]
+    resets it. Exposed for testing the cadence logic without the per-keeper
+    counter table. *)
 
-val cadence_due : keeper_id:string -> bool
-(** Advance [keeper_id]'s persistent cadence counter by one turn and report
-    whether extraction is due now. This is what [run_best_effort] gates on.
-    First call for an unseen [keeper_id] starts from counter 0, so tests can
-    drive the per-keeper state machine with a fresh id and no reset hook. *)
+val cadence_due : keeper_id:string -> trace_id:string -> bool
+(** Advance the persistent cadence counter for ([keeper_id], [trace_id]) by one
+    turn and report whether extraction is due now. This is what
+    [run_best_effort] gates on. The counter is scoped to the active trace so a
+    handoff rollover starts a fresh cadence cycle. First call for an unseen pair
+    is due immediately. *)
+
+val cadence_record_success : keeper_id:string -> trace_id:string -> unit
+(** Record a successful extraction for ([keeper_id], [trace_id]) so the cadence
+    counter resets and the next cycle can begin. Must only be called after a
+    due turn actually produced an episode; skipped or failed attempts must not
+    call this. *)
 
 val max_messages : unit -> int
-(** Maximum recent checkpoint messages sent to the librarian prompt. *)
+(** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
+    effective prompt window is this value scaled by [cadence_turns] so skipped
+    turns are not evicted before the next due extraction. *)
 
 val default_timeout_sec : unit -> float
 (** Provider timeout for post-turn extraction. Defaults to governance inference

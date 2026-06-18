@@ -52,35 +52,50 @@ let cadence_turns () =
   |> max 1
 ;;
 
-(* Per-keeper "turns since last extraction" counters. Stdlib.Mutex (not
-   Eio.Mutex): the critical section is a Hashtbl read/write that never yields,
-   and the table is reachable from concurrent keeper fibers. *)
+(* Per-(keeper, active trace) "turns since last successful extraction"
+   counters. Stdlib.Mutex (not Eio.Mutex): the critical section is a Hashtbl
+   read/write that never yields, and the table is reachable from concurrent
+   keeper fibers. *)
 let cadence_mu = Stdlib.Mutex.create ()
-let cadence_counters : (string, int) Hashtbl.t = Hashtbl.create 16
+let cadence_counters : (string * string, int) Hashtbl.t = Hashtbl.create 16
 
-(* Advance [keeper_id]'s counter and report whether extraction is due this turn.
-   A due turn resets the counter to 0. cadence<=1 is always due (per-turn). *)
+(* A counter value below 0 means the (keeper, trace) has never had a successful
+   extraction: the next turn is due immediately. *)
+let fresh_counter = -1
+
 (* Pure cadence decision. Given the keeper's current [counter] (turns since its
-   last extraction) and the [cadence], return the updated counter and whether
-   extraction is due now. cadence<=1 is always due and pins the counter at 0. *)
+   last successful extraction) and the [cadence], return the updated counter and
+   whether extraction is due now.
+
+   - counter < 0 (fresh) is due immediately.
+   - cadence <= 1 is always due with the counter pinned at 0.
+   - When due, the counter is set to [cadence] and stays there until
+     [cadence_record_success] resets it to 0. This keeps the keeper due across
+     skipped or failed attempts instead of silently suppressing the next turns. *)
 let cadence_step ~cadence ~counter =
   if cadence <= 1
   then 0, true
+  else if counter < 0
+  then cadence, true
   else (
     let next = counter + 1 in
-    if next >= cadence then 0, true else next, false)
+    if next >= cadence then cadence, true else next, false)
 ;;
 
-let cadence_due ~keeper_id =
+let cadence_due ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
     let counter =
-      (* sound-partial: allow — an unseen keeper legitimately starts at counter
-         0 (per the .mli); fresh-state init, not a default hiding a parse failure. *)
-      Option.value ~default:0 (Hashtbl.find_opt cadence_counters keeper_id)
+      Option.value ~default:fresh_counter
+        (Hashtbl.find_opt cadence_counters (keeper_id, trace_id))
     in
     let updated, due = cadence_step ~cadence:(cadence_turns ()) ~counter in
-    Hashtbl.replace cadence_counters keeper_id updated;
+    Hashtbl.replace cadence_counters (keeper_id, trace_id) updated;
     due)
+;;
+
+let cadence_record_success ~keeper_id ~trace_id =
+  Stdlib.Mutex.protect cadence_mu (fun () ->
+    Hashtbl.replace cadence_counters (keeper_id, trace_id) 0)
 ;;
 
 let max_messages () =
@@ -88,6 +103,12 @@ let max_messages () =
     "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
     ~default:24
   |> max 1
+;;
+
+(* Scale the prompt window by the cadence so skipped turns stay visible until
+   the next due extraction. Without this, a tool-heavy skipped turn can scroll
+   out of the per-turn cap before its first successful extraction. *)
+let prompt_max_messages () = max_messages () * cadence_turns ()
 ;;
 
 let default_timeout_sec () =
@@ -207,7 +228,7 @@ let render_prompt key variables =
 
 let messages_for_librarian (inp : Keeper_librarian.input) =
   let input =
-    { inp with messages = select_recent_messages ~max_messages:(max_messages ()) inp.messages }
+    { inp with messages = select_recent_messages ~max_messages:(prompt_max_messages ()) inp.messages }
   in
   match render_prompt Keeper_prompt_names.librarian_system [] with
   | Error _ as e -> e
@@ -382,11 +403,13 @@ let provider_for_runtime ~runtime_id =
      | None -> Error "no runtime configured for librarian extraction")
 ;;
 
-let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id inp =
+let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_librarian.input) =
   (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
      advances its cadence counter, and a not-due turn skips extraction entirely
-     (the messages remain in the window for the next due turn). *)
-  if enabled () && cadence_due ~keeper_id
+     (the messages remain in the window for the next due turn). The cadence
+     counter is scoped to the active trace so a rollover does not inherit the
+     previous trace's schedule. *)
+  if enabled () && cadence_due ~keeper_id ~trace_id:inp.trace_id
   then (
     try
       match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
@@ -422,6 +445,9 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id inp =
                  inp
              with
              | Ok episode ->
+               (* Only a successful write resets the cadence. Skipped or failed
+                  attempts leave the keeper due on the next turn. *)
+               cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
                Log.Keeper.info ~keeper_name:keeper_id
                  "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
                  episode.Keeper_memory_os_types.trace_id

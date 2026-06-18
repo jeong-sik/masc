@@ -3,15 +3,18 @@
 open Masc.Cognitive_gravity_event_bus
 
 let approx_eq a b = Float.abs (a -. b) <= 0.0001
+let reset () = For_testing.reset ()
 
 (* ── Registry lifecycle ───────────────────────────────── *)
 
 let test_empty_registry_dispatch_returns_empty () =
+  reset ();
   (* No triggers registered → dispatch returns [] *)
   let events = dispatch () in
   Alcotest.(check int) "empty dispatch yields zero events" 0 (List.length events)
 
 let test_register_and_dispatch_turn_elapsed () =
+  reset ();
   let fired = ref false in
   let handler ev = fired := true in
   let trigger = TurnElapsed { age = 10; min_age = 3 } in
@@ -27,6 +30,7 @@ let test_register_and_dispatch_turn_elapsed () =
     (approx_eq ev.delta 0.02) true
 
 let test_register_and_dispatch_no_new_mentions () =
+  reset ();
   let fired = ref false in
   let handler ev = fired := true in
   let trigger = NoNewMentions { turns = 5; min_idle = 2 } in
@@ -38,6 +42,7 @@ let test_register_and_dispatch_no_new_mentions () =
     (approx_eq ev.delta 0.05) true
 
 let test_register_and_dispatch_contradiction () =
+  reset ();
   let captured = ref None in
   let handler ev = captured := Some ev.target_fact_ids in
   let trigger = Contradiction { fact_id = "fact-42"; staleness = 3.5 } in
@@ -50,6 +55,7 @@ let test_register_and_dispatch_contradiction () =
       "target fact_ids contains fact-42" [ "fact-42" ] ids
 
 let test_manual_decay_rate_passed_through () =
+  reset ();
   let fired = ref false in
   let handler ev = fired := true in
   let rate = 0.33 in
@@ -63,7 +69,18 @@ let test_manual_decay_rate_passed_through () =
   Alcotest.(check (list string))
     "target fact_ids preserved" [ "a"; "b" ] ev.target_fact_ids
 
+let test_empty_manual_decay_does_not_fire () =
+  reset ();
+  let fired = ref false in
+  let handler _ev = fired := true in
+  let trigger = ManualDecay { fact_ids = []; rate = 0.0 } in
+  register_trigger trigger ~handler;
+  let events = dispatch () in
+  Alcotest.(check bool) "empty manual handler not invoked" false !fired;
+  Alcotest.(check int) "no event returned" 0 (List.length events)
+
 let test_multiple_triggers_all_fire () =
+  reset ();
   let counter = ref 0 in
   let h _ = incr counter in
   register_trigger (TurnElapsed { age = 1; min_age = 0 }) ~handler:h;
@@ -76,6 +93,7 @@ let test_multiple_triggers_all_fire () =
 (* ── Emit ─────────────────────────────────────────────── *)
 
 let test_emit_calls_registered_handler () =
+  reset ();
   let captured = ref None in
   let handler ev = captured := Some ev in
   let trigger = TurnElapsed { age = 5; min_age = 1 } in
@@ -98,12 +116,59 @@ let test_emit_calls_registered_handler () =
 (* ── Scalars ──────────────────────────────────────────── *)
 
 let test_default_delta_values () =
+  reset ();
   Alcotest.(check bool) "TurnElapsed default delta = 0.02"
     (approx_eq (default_delta (TurnElapsed { age = 1; min_age = 0 })) 0.02) true;
   Alcotest.(check bool) "NoNewMentions default delta = 0.05"
     (approx_eq (default_delta (NoNewMentions { turns = 1; min_idle = 0 })) 0.05) true;
   Alcotest.(check bool) "Contradiction default delta = 0.10"
-    (approx_eq (default_delta (Contradiction { fact_id = ""; staleness = 0.0 })) 0.10) true
+    (approx_eq (default_delta (Contradiction { fact_id = ""; staleness = 1.0 })) 0.10) true
+
+let test_default_log_handler_writes_under_data_root () =
+  reset ();
+  let base_path = Filename.temp_file "cognitive-gravity-" ".tmp" in
+  Sys.remove base_path;
+  let event =
+    { trigger = ManualDecay { fact_ids = [ "fact\"42"; "line\n2" ]; rate = 0.2 }
+    ; target_fact_ids = [ "fact\"42"; "line\n2" ]
+    ; delta = 0.2
+    ; applied_at_turn = 7
+    }
+  in
+  default_log_handler base_path event;
+  let dir =
+    Filename.concat
+      (Filename.concat base_path "data")
+      "cognitive-gravity-events"
+  in
+  Alcotest.(check bool) "data event dir exists" true (Sys.file_exists dir);
+  let files = Sys.readdir dir |> Array.to_list in
+  Alcotest.(check bool) "event file created" true (List.length files > 0);
+  let path = Filename.concat dir (List.hd files) in
+  let ic = open_in path in
+  let line =
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () -> input_line ic)
+  in
+  match Yojson.Safe.from_string line with
+  | `Assoc fields ->
+    Alcotest.(check string)
+      "trigger"
+      "ManualDecay"
+      (match List.assoc_opt "trigger" fields with
+       | Some (`String value) -> value
+       | _ -> "");
+    Alcotest.(check (list string))
+      "escaped fact ids round-trip"
+      [ "fact\"42"; "line\n2" ]
+      (match List.assoc_opt "target_fact_ids" fields with
+       | Some (`List items) ->
+         List.filter_map
+           (function
+             | `String value -> Some value
+             | _ -> None)
+           items
+       | _ -> [])
+  | _ -> Alcotest.fail "expected JSON object"
 
 (* ── Test registration ────────────────────────────────── *)
 
@@ -115,6 +180,7 @@ let () =
         Alcotest.test_case "register + dispatch NoNewMentions" `Quick test_register_and_dispatch_no_new_mentions;
         Alcotest.test_case "register + dispatch Contradiction" `Quick test_register_and_dispatch_contradiction;
         Alcotest.test_case "ManualDecay rate passed through" `Quick test_manual_decay_rate_passed_through;
+        Alcotest.test_case "empty ManualDecay does not fire" `Quick test_empty_manual_decay_does_not_fire;
         Alcotest.test_case "multiple triggers all fire" `Quick test_multiple_triggers_all_fire;
       ];
       "emit", [
@@ -122,5 +188,8 @@ let () =
       ];
       "scalars", [
         Alcotest.test_case "default_delta values" `Quick test_default_delta_values;
+      ];
+      "logging", [
+        Alcotest.test_case "writes under data root" `Quick test_default_log_handler_writes_under_data_root;
       ];
     ]

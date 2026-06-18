@@ -109,3 +109,7 @@ val run_gc : base_path:string -> unit
 
     Designed to be called from {!Keeper_compact_audit}'s compaction loop
     after score recalculation. *)
+
+module For_testing : sig
+  val reset : unit -> unit
+end

@@ -548,6 +548,10 @@ function sameConversationEntry(
   return left.role === right.role && left.text === right.text
 }
 
+function isInFlightDelivery(delivery: KeeperConversationDelivery): boolean {
+  return delivery === 'sending' || delivery === 'streaming' || delivery === 'queued'
+}
+
 function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // An empty history payload means the caller did not request history
   // (e.g. hydrateKeeperStatus fast path with tail_messages: 0), not
@@ -559,7 +563,12 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   const localEntries = existing.filter(
     entry =>
       entry.delivery !== 'history'
-      && !entries.some(historyEntry => sameConversationEntry(entry, historyEntry)),
+      // In-flight (sending/streaming/queued) entries represent live state and
+      // must survive history merges until they finalize. Otherwise a queued
+      // assistant with empty text can be mistaken for an older empty-text
+      // history row and dropped, making the queued reply look like an error.
+      && (isInFlightDelivery(entry.delivery)
+        || !entries.some(historyEntry => sameConversationEntry(entry, historyEntry))),
   )
   // When the merged list exceeds the cap, prefer to keep locally-created
   // entries (optimistic/pending/live) at the end rather than trimming the

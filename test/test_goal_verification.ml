@@ -84,6 +84,51 @@ let test_invalid_vote_does_not_bump () =
   in
   check int "no votes written" 0 (List.length saved.votes)
 
+let test_resolved_requests_bounded () =
+  (* Cap resolved requests via a small env value, create more resolved
+     requests than the cap plus one Open request, and verify: (1) total
+     requests == cap + open count, (2) the Open request survives, (3) the
+     oldest resolved request is pruned. Proves the prune is
+     correctness-preserving for active quorum (Open) while bounding
+     long-lived growth. *)
+  Unix.putenv "MASC_GOAL_VERIFICATION_MAX_RESOLVED" "3";
+  Fun.protect ~finally:(fun () ->
+      Unix.putenv "MASC_GOAL_VERIFICATION_MAX_RESOLVED" "")
+  @@ fun () ->
+  with_workspace @@ fun config ->
+  let requested_by = operator "planner" in
+  let mk i =
+    match
+      Goal_verification.create_request config
+        ~goal_id:(Printf.sprintf "goal-%d" i) ~requested_by
+        ~policy_snapshot:(request_snapshot ~requested_by)
+    with
+    | Ok r -> r
+    | Error msg -> fail msg
+  in
+  (* 5 resolved (Cancelled) requests — exceeds the cap of 3 *)
+  let resolved_ids = List.init 5 (fun i -> (mk i).id) in
+  List.iter
+    (fun id ->
+      match Goal_verification.cancel_request config ~request_id:id with
+      | Ok _ -> ()
+      | Error msg -> fail msg)
+    resolved_ids;
+  (* 1 Open request that must survive the cap *)
+  let open_req = mk 6 in
+  let state = Goal_verification.read_state config in
+  check int "requests bounded to cap + open" 4 (List.length state.requests);
+  (match Goal_verification.find_request config ~request_id:open_req.id with
+   | Some r ->
+       (match r.Goal_verification.status with
+        | Goal_verification.Open -> ()
+        | _ -> fail "open request has non-Open status after cap")
+   | None -> fail "open request dropped by cap");
+  (* Oldest resolved request (index 0, first created) must be pruned. *)
+  (match Goal_verification.find_request config ~request_id:(List.nth resolved_ids 0) with
+   | None -> ()
+   | Some _ -> fail "oldest resolved request not pruned")
+
 let () =
   run "Goal_verification"
     [
@@ -93,5 +138,10 @@ let () =
             test_cancel_missing_request_does_not_bump;
           test_case "invalid vote: no bump" `Quick
             test_invalid_vote_does_not_bump;
+        ] );
+      ( "bounded_growth",
+        [
+          test_case "resolved requests capped, open preserved"
+            `Quick test_resolved_requests_bounded;
         ] );
     ]

@@ -9,8 +9,8 @@ type t =
       (* Trust-independent catastrophic floor (RFC-0255 §4.5).  This includes
          irreversible operations plus raw commands whose recovery preconditions
          are stateful and unproven at the syntax classifier. *)
-      [ `Push_force | `Clean_force | `Stash_drop | `Worktree_remove
-      | `Reset_hard | `Branch_delete ]
+      [ `Push_force | `Push_delete | `Clean_force | `Stash_drop
+      | `Worktree_remove | `Reset_hard | `Branch_delete ]
 
 let has_flag args flag = List.mem flag args
 
@@ -69,6 +69,8 @@ let of_argv = function
        | "push" ->
            if has_flag rest "--force" || has_short_flag rest 'f' then
              Ok (Destructive `Push_force)
+           else if has_flag rest "--delete" || has_short_flag rest 'd' then
+             Ok (Destructive `Push_delete)
            else Ok (Mutating `Push)
        | "reset" when has_flag rest "--hard" ->
            Ok (Destructive `Reset_hard)

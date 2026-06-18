@@ -478,3 +478,34 @@
 @media (prefers-reduced-motion: reduce) {
   .kw-sigil-beat { animation: none; box-shadow: 0 0 8px rgb(var(--sigil-glow, 255 255 255) / 0.5); }
 }
+
+/* ════ C1 — day divider in the transcript ═══════════════════════════
+ * Standalone .daydiv: a centered uppercase date with a hairline rule on each
+ * side. Rendered by ChatTranscript only when showDayDividers (workspace). */
+.kw-daydiv {
+  display: flex; align-items: center; gap: 12px;
+  margin: 4px 0;
+  font-size: var(--fs-10); letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--color-fg-muted);
+}
+.kw-daydiv::before, .kw-daydiv::after {
+  content: ""; flex: 1; height: 1px; background: var(--color-border-divider);
+}
+
+/* ════ C2 — message source badge ════════════════════════════════════
+ * Distinguishes non-obvious message provenance (world-state / internal /
+ * tool / system) from a plain user/assistant turn. Mirrors the standalone
+ * .src-badge chip; colors are semantic and tied to the dashboard tokens
+ * (the standalone's channel colors don't map to the live transport). */
+.kw-src-badge {
+  display: inline-flex; align-items: center;
+  font-size: var(--fs-10); letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: var(--fw-semi);
+  padding: 1px 6px; border-radius: var(--r-1);
+  color: var(--color-fg-secondary);
+  background: var(--color-bg-surface); border: 1px solid var(--color-border-default);
+}
+.kw-src-badge.world    { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); }
+.kw-src-badge.internal { color: var(--color-fg-muted); }
+.kw-src-badge.tool     { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.4); }
+.kw-src-badge.system   { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.4); }

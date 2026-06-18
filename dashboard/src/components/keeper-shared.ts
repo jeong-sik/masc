@@ -628,6 +628,8 @@ export function KeeperConversationPanel({
               showMetadata=${showMetadata}
               variant="messenger"
               size="primary"
+              showDayDividers=${true}
+              showSourceBadge=${true}
             />
           </div>
         </div>

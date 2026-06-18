@@ -15,7 +15,7 @@ import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
-import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, SurfaceRef } from '../../types'
+import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallOutputBlob } from '../../api/dashboard'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
@@ -189,6 +189,38 @@ function avatarLabel(entry: KeeperConversationEntry): string {
 function avatarMonogram(entry: KeeperConversationEntry): string {
   const label = avatarLabel(entry)
   return label.slice(0, 2).toUpperCase()
+}
+
+// C2: badge non-obvious message provenance. The standalone's .src-badge marks
+// external CHANNELS (discord/slack/imessage) which the live keeper transport
+// does not have — its `source` is a *semantic* origin instead. So we badge the
+// origins that are easy to mistake for a plain user/assistant turn
+// (world-state injection, internal prompt, tool result, system) and leave the
+// two ordinary cases (direct_user / direct_assistant) unbadged.
+const SOURCE_BADGE: Partial<Record<KeeperConversationSource, { label: string; cls: string }>> = {
+  world_state_prompt: { label: '월드', cls: 'world' },
+  internal_assistant: { label: '내부', cls: 'internal' },
+  tool_result: { label: '도구', cls: 'tool' },
+  system: { label: '시스템', cls: 'system' },
+}
+function sourceBadgeInfo(entry: KeeperConversationEntry): { label: string; cls: string } | null {
+  return SOURCE_BADGE[entry.source] ?? null
+}
+
+// C1: group transcript messages by calendar day for the workspace day divider.
+// Absolute "M월 D일" labels (not relative 오늘/어제) so the output is a pure
+// function of the timestamp — deterministic and snapshot-test stable.
+function dayKey(timestamp?: string | null): string | null {
+  if (!timestamp) return null
+  const d = new Date(timestamp)
+  if (Number.isNaN(d.getTime())) return null
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+}
+function dayDividerLabel(timestamp?: string | null): string | null {
+  if (!timestamp) return null
+  const d = new Date(timestamp)
+  if (Number.isNaN(d.getTime())) return null
+  return `${d.getMonth() + 1}월 ${d.getDate()}일`
 }
 
 function tokenSummary(details: KeeperConversationDetails | null | undefined): string | null {
@@ -1264,10 +1296,12 @@ function ChatMessageBubble({
   entry,
   showMetadata = true,
   variant = 'default',
+  showSourceBadge = false,
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
+  showSourceBadge?: boolean
 }) {
   const [expandedRaw, setExpandedRaw] = useState(false)
   const [rawExpandedRaw, setRawExpandedRaw] = useState(false)
@@ -1295,6 +1329,7 @@ function ChatMessageBubble({
   const state = stateRows(entry.details?.stateBlock)
   const delivery = deliveryLabel(entry)
   const timestamp = timeLabel(entry.timestamp)
+  const sourceBadge = showSourceBadge ? sourceBadgeInfo(entry) : null
   const attachments = entry.attachments ?? []
   const surfaceInfo = surfaceLink(entry.surface)
 
@@ -1325,6 +1360,9 @@ function ChatMessageBubble({
                     </span>
                     ${timestamp
                       ? html`<span class="text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">${timestamp}</span>`
+                      : null}
+                    ${sourceBadge
+                      ? html`<span class=${`kw-src-badge ${sourceBadge.cls}`}>${sourceBadge.label}</span>`
                       : null}
                     ${showDeliveryBadge(entry, variant)
                       ? html`
@@ -1702,12 +1740,18 @@ export function ChatTranscript({
   showMetadata,
   variant = 'default',
   size = 'default',
+  showDayDividers = false,
+  showSourceBadge = false,
 }: {
   entries: KeeperConversationEntry[]
   emptyText: string
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   size?: ChatTranscriptSize
+  // C1/C2: opt-in workspace polish. Default false so every other chat surface
+  // (copilot dock, detail page, etc.) renders unchanged.
+  showDayDividers?: boolean
+  showSourceBadge?: boolean
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(true)
@@ -1773,10 +1817,24 @@ export function ChatTranscript({
                 <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">${emptyText}</div>
               </div>
             `
-          : entries.map(entry => entry.role === 'tool'
-              ? html`<${ToolCallBubble} key=${entry.id} entry=${entry} />`
-              : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} />`
-          )}
+          : entries.flatMap((entry, i) => {
+              const bubble = entry.role === 'tool'
+                ? html`<${ToolCallBubble} key=${entry.id} entry=${entry} />`
+                : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} showSourceBadge=${showSourceBadge} />`
+              // C1: emit a day divider before the first message of each calendar
+              // day. Skipped entirely when showDayDividers is off (every non-
+              // workspace surface), so their flat render is byte-identical.
+              if (!showDayDividers) return [bubble]
+              const dk = dayKey(entry.timestamp)
+              const prevDk = i > 0 ? dayKey(entries[i - 1]?.timestamp) : null
+              if (dk && dk !== prevDk) {
+                return [
+                  html`<div class="kw-daydiv" key=${`day:${dk}`}>${dayDividerLabel(entry.timestamp)}</div>`,
+                  bubble,
+                ]
+              }
+              return [bubble]
+            })}
       </div>
       ${unread
         ? html`

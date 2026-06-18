@@ -310,7 +310,6 @@
   unix
   yojson
   fmt
-  str
   eio
   eio_main
   time_compat

@@ -40,19 +40,6 @@
    Base path: --base wins; else MASC_BASE_PATH (via Config_dir_resolver); else
    the run fails. --preset defaults to policy.default_preset. *)
 
-(* runtime.toml absolute path, mirroring Fusion_config_loader.runtime_toml_path
-   so the harness resolves the same file the server and the fusion loader do
-   (honours MASC_CONFIG_DIR override + <base>/.masc/config/ fallback). *)
-let runtime_toml_path ~base_path : string =
-  let inputs = Config_dir_resolver.inputs_from_env () in
-  let resolution =
-    Config_dir_resolver.resolve_with
-      { inputs with Config_dir_resolver.env_base_path = Some base_path }
-  in
-  Filename.concat
-    resolution.Config_dir_resolver.config_root.Config_dir_resolver.path
-    Config_dir_resolver.runtime_toml_filename
-
 (* ── pretty printers (exhaustive: fusion_types are closed sums by design) ── *)
 
 let rule = String.make 72 '-'
@@ -194,7 +181,11 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
   let baseline_answer =
     match first_some answer_of_outcome baseline with
     | Some a -> a
-    | None -> "(baseline produced no answer)"
+    | None ->
+      let msg = "baseline produced no answer" in
+      Printf.printf "  [baseline] failed: %s\n\n" msg;
+      mark_incomplete msg;
+      "(baseline produced no answer)"
   in
   let baseline_in, baseline_out =
     sum_usage (List.filter_map usage_of_outcome baseline)
@@ -381,7 +372,7 @@ let () =
      [Masc_eio_env.get_opt]. Without this, [Masc_oas_bridge.run_safe] finds no
      clock and runs the panel/judge calls without timeout enforcement. *)
   Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
-  let config_path = runtime_toml_path ~base_path in
+  let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   (match Runtime.init_default ~config_path with
    | Error msg ->
      Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;

@@ -11,6 +11,10 @@
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §9 *)
 
+(** [runtime_toml_path ~base_path] returns the runtime.toml path resolved with
+    the same Config_dir_resolver recipe used by [load]. *)
+val runtime_toml_path : base_path:string -> string
+
 (** [load ~base_path]: workspace base path 기준으로 runtime.toml의 [fusion]을 로드.
 
     - runtime.toml 부재 → [Ok Fusion_config.disabled] (opt-in OFF 기본).

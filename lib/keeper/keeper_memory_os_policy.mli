@@ -12,9 +12,9 @@ open Keeper_memory_os_types
     decide which rows the size cap drops, never to rank recall. *)
 val retention_rank : now:float -> fact -> float
 
-(** Fold a re-observation of an existing fact into that fact: the only effect is
-    to refresh [last_verified_at] to [now] (re-extraction is fresh evidence the
-    claim still holds). Identity and first-seen provenance are preserved. The
-    prior confidence-blend and access-count bump fed the deleted score and are
-    gone — there is no numeric strength to move. *)
+(** Fold a re-observation of an existing fact into that fact: refresh
+    [last_verified_at] to [now] and replace [valid_until] from the incoming
+    no-TTL fact, clearing legacy finite TTLs. Identity and first-seen provenance
+    are preserved. The prior confidence-blend and access-count bump fed the
+    deleted score and are gone — there is no numeric strength to move. *)
 val reobserve_fact : now:float -> existing:fact -> incoming:fact -> fact

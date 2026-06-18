@@ -17,30 +17,32 @@ let durable_retention_tier = 1.0e15
 (* RFC-0247 §-1: structural retention rank for the bounded store cap. This is NOT
    a relevance score — it is a deterministic two-tier lexicographic order used
    ONLY to decide which rows the size cap drops when the store grows past its
-   trigger: durable categories outrank Ephemeral (a typed decision via
-   [category_valid_until], which returns [Some] only for Ephemeral), and within a
-   tier the most-recently-verified (else first-seen) fact is kept. It never ranks
-   recall — recall ordering is structural + judgment, not a number. *)
-let retention_rank ~now (f : fact) =
+   trigger: durable categories outrank Ephemeral, and within a tier the
+   most-recently-verified (else first-seen) fact is kept. It never ranks recall —
+   recall ordering is structural + judgment, not a number. *)
+let retention_rank ~now:_ (f : fact) =
   let tier =
-    match category_valid_until ~now f.category with
-    | None -> durable_retention_tier
-    | Some _ -> 0.0
+    match f.category with
+    | Ephemeral -> 0.0
+    | Fact | Constraint | Preference | Blocker | Goal | Code_change
+    | Validated_approach | Lesson | Unknown _ -> durable_retention_tier
   in
   let recency = match f.last_verified_at with Some t -> t | None -> f.first_seen in
   tier +. recency
 ;;
 
-(* RFC-0247 (purge): fold a re-observation of an existing fact into that fact.
+(* RFC-0247/RFC-0251: fold a re-observation of an existing fact into that fact.
    [existing] is the persisted row; [incoming] is the newly extracted claim with
-   the same normalized identity. The only effect is to refresh the truth anchor:
-   the librarian re-extracting the same claim is fresh evidence that the claim
-   still holds, so [last_verified_at] advances to [now] and the staleness marker
-   resets. Identity and first-seen provenance are preserved.
+   the same normalized identity. The truth anchor refreshes to [now], and
+   [valid_until] is replaced from [incoming] so no-TTL re-observations clear
+   legacy finite TTLs. Identity and first-seen provenance are preserved.
 
    The prior merge also blended a confidence float and bumped an access counter;
    both fed the deleted composite score and are gone. There is no numeric
    strength to move — re-observation is a binary "seen again now". *)
-let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
-  { existing with last_verified_at = Some now }
+let reobserve_fact ~now ~existing ~incoming =
+  { existing with
+    valid_until = incoming.valid_until
+  ; last_verified_at = Some now
+  }
 ;;

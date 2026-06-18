@@ -1625,15 +1625,25 @@ let test_reobserve_fact_refreshes_truth_anchor () =
   let existing =
     { (fact_fixture ~now ()) with
       Types.first_seen = now -. 86400.0
+    ; Types.valid_until = Some (now -. 1.0)
     ; Types.last_verified_at = Some (now -. 7200.0)
     }
   in
-  let incoming = { existing with Types.last_verified_at = Some now } in
+  let incoming =
+    { existing with
+      Types.valid_until = None
+    ; Types.last_verified_at = Some now
+    }
+  in
   let merged = Policy.reobserve_fact ~now ~existing ~incoming in
   Alcotest.(check (option (float 1e-9)))
     "last_verified_at refreshed to now"
     (Some now)
     merged.Types.last_verified_at;
+  Alcotest.(check (option (float 1e-9)))
+    "legacy valid_until cleared by no-TTL reobserve"
+    None
+    merged.Types.valid_until;
   Alcotest.(check (float 1e-9))
     "first_seen preserved"
     (now -. 86400.0)
@@ -1652,12 +1662,17 @@ let test_merge_and_cap_upserts_reobserved_claim () =
     let base = fact_fixture ~now () in
     let claim = "User deploys via blue-green" in
     let first =
-      { base with Types.claim; Types.last_verified_at = Some (now -. 86400.0) }
+      { base with
+        Types.claim
+      ; Types.valid_until = Some (now -. 1.0)
+      ; Types.last_verified_at = Some (now -. 86400.0)
+      }
     in
     Memory_io.append_fact ~keeper_id first;
     let reobserved =
       { base with
         Types.claim = "user  deploys via BLUE-GREEN"
+      ; Types.valid_until = None
       ; Types.last_verified_at = Some now
       }
     in
@@ -1679,6 +1694,10 @@ let test_merge_and_cap_upserts_reobserved_claim () =
       "last_verified_at refreshed to now"
       (Some now)
       row.Types.last_verified_at;
+    Alcotest.(check (option (float 1e-9)))
+      "legacy valid_until cleared on upsert"
+      None
+      row.Types.valid_until;
     Alcotest.(check string) "first observation's claim text kept" claim row.Types.claim)
 ;;
 

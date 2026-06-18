@@ -362,7 +362,7 @@ let extract_with_provider
         if String.equal raw ""
         then Unparseable "librarian provider returned empty response"
         else (
-          match Keeper_librarian.episode_of_output ?generation inp raw with
+          match Keeper_librarian.episode_of_output ~generation inp raw with
           | Some episode -> Parsed episode
           | None -> Unparseable "librarian provider returned invalid episode JSON")
     in

@@ -247,7 +247,20 @@ let namespace_truth_snapshot_from_caches (state : Mcp_server.server_state) :
     let config = (Mcp_server.workspace_config state) in
     let shell_json = cached_shell_json_for_namespace ~config in
     let execution_json =
-      cached_surface_json Server_dashboard_http_execution_surfaces.execution_cache
+      (* Broadcast path reads the cached surface's raw [json] — a stable ref
+         retained until the next successful refresh — instead of
+         [cached_surface_json]. The latter rebuilds an [Assoc] tree carrying
+         volatile fields ([cache_state], [stale_age_ms], [last_success_at]) on
+         every call via [extend_projection_diagnostics]. But
+         [compose_namespace_truth_snapshot] consumes only the structural
+         fields of the execution surface ([execution_queue],
+         [operation_briefs], [summary], [keepers], [tasks]) and never the
+         projection-diagnostics fields, so reading the stable raw [json] skips
+         that per-broadcast-check allocation entirely without changing the
+         composed snapshot. The HTTP path
+         ([dashboard_namespace_truth_http_json]) keeps [cached_surface_json]
+         where clients render cache_state/stale_age_ms. *)
+      Server_dashboard_http_execution_surfaces.execution_cache.json
     in
     let command_summary_json = `Assoc [] in
     Some

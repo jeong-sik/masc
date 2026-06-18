@@ -191,10 +191,10 @@ let default_timeout_sec () =
 ;;
 
 let runtime_id_for_librarian ~runtime_id =
-  match Sys.getenv_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" with
-  | Some value ->
-    let value = String.trim value in
-    if String.equal value "" then runtime_id else value
+  match
+    Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+  with
+  | Some value -> value
   | None -> runtime_id
 ;;
 

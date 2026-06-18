@@ -1046,4 +1046,38 @@ let () =
   | Error _ -> assert false
 
 let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "mkfs" |> Result.get_ok in
+  let ir =
+    { bin
+    ; args = [ Lit ("/dev/sdb1", default_meta) ]
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
+  in
+  (* A second, distinct floor member (Catastrophic_program) on the bare path.
+     The destructive-git case alone could pass even if a regression narrowed the
+     bare-path capability derivation; denying a catastrophic-by-identity binary
+     too proves the bare [dispatch_classified] runs the whole
+     [catastrophic_floor], not just one arm.  (The third member, redirect
+     write-escape, is covered at the policy layer in test_approval_policy; all
+     three route through the same single [catastrophic_floor] function, so two
+     distinct members exercising the bare path guard the wiring.) *)
+  match
+    Keeper_tool_execute_shell_ir.dispatch_classified
+      ~workdir:"/tmp"
+      ~sandbox:(Masc_exec.Sandbox_target.host ())
+      envelope
+  with
+  | Ok _ -> assert false
+  | Error (Keeper_tool_execute_shell_ir.Policy_denied _) -> ()
+  | Error _ -> assert false
+
+let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

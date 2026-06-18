@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [0.19.46] - 2026-06-18
+
+### Changed
+- `agent_sdk`: bumped the OAS runtime pin from `v0.207.2` (`3efb5f00`) to
+  `v0.207.3` (`57ed7272`, OAS `main` HEAD, release 0.207.3 #2118) and raised
+  the dependency floor to `>= 0.207.3` in `dune-project` / `masc.opam`. Pin
+  metadata in `scripts/oas-agent-sdk-pin.sh` and the generated doc blocks were
+  regenerated; `scripts/check-oas-pin.sh` verifies the floor, the upstream
+  ref-reachability of the pinned SHA, and the installed opam switch version.
+
+
 ## [0.19.45] - 2026-06-17
 
 ### Changed

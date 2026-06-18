@@ -91,6 +91,22 @@ let episode_path ~keeper_id ~trace_id ~generation =
     (Printf.sprintf "%s-g%04d.json" trace_id generation)
 ;;
 
+let next_generation ~keeper_id ~trace_id =
+  let dir = episodes_dir ~keeper_id in
+  let prefix = Printf.sprintf "%s-g" trace_id in
+  let max_gen =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter_map (fun name ->
+      if String.starts_with ~prefix name then
+        let rest = String.drop_prefix name (String.length prefix) in
+        try Some (int_of_string (String.sub rest 0 4)) with _ -> None
+      else None)
+    |> List.fold_left max (-1)
+  in
+  max_gen + 1
+;;
+
 let unique_episode_path ~keeper_id episode =
   let created_ms =
     episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float

@@ -343,13 +343,14 @@ let extract_with_provider
     ~sw
     ~net
     ~provider_cfg
+    ?generation
     (inp : Keeper_librarian.input)
   =
   match messages_for_librarian inp with
   | Error _ as e -> e
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
-    let attempt messages =
+let attempt messages =
       match
         with_timeout ?clock ~timeout_sec (fun () ->
           complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
@@ -361,7 +362,7 @@ let extract_with_provider
         if String.equal raw ""
         then Unparseable "librarian provider returned empty response"
         else (
-          match Keeper_librarian.episode_of_output inp raw with
+          match Keeper_librarian.episode_of_output ?generation inp raw with
           | Some episode -> Parsed episode
           | None -> Unparseable "librarian provider returned invalid episode JSON")
     in
@@ -381,7 +382,10 @@ let extract_and_append_with_provider
     ~provider_cfg
     inp
   =
-  match extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg inp with
+  let generation =
+    Keeper_memory_os_io.next_generation ~keeper_id ~trace_id:inp.Keeper_librarian.trace_id
+  in
+  match extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp with
   | Error _ as e -> e
   | Ok episode ->
     let now = episode.Keeper_memory_os_types.created_at in

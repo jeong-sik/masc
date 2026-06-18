@@ -1,11 +1,11 @@
-# RFC-0256: Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing
+# RFC-0257: Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing
 
 **Status**: Draft
 **Date**: 2026-06-18
 **Verified against HEAD**: `c7a0ff81f6` (worktree base)
 **Builds on**: [RFC-0042](./RFC-0042-keeper-terminal-code-closed-sum.md) (no-string-classifier lineage), [RFC-0199](./RFC-0199-evidence-driven-auto-approval.md) (evidence-driven verdict replaces human bottleneck — same philosophy, different domain)
 **Related**: PR #21401 `feat(keeper): adversarial review verdict + author wake-on-fail (PoC)`; Anti_rationalization (#3067, cross-model adversarial completion gate)
-**Number note**: `docs/rfc/.next-number` reads `0255` at HEAD, but **RFC-0255 is already claimed** by the path-jail keeper-stall work (PR #21488, 2026-06-18). This RFC takes `0256` to avoid the known `.next-number` read-not-reserve race. The number must be re-confirmed at merge time.
+**Number note**: this RFC was first drafted as `0256`, which collided with PR #21471 (`RFC-0256-mutex-protect-migration.md`, an unrelated topic — not a multi-phase share). #21471 is the older PR and already claims file `0256` and bumps `.next-number` 0255→0257, so the queue-next free number is `0257`; this RFC takes `0257` and advances the ledger to `0258`. This collision is itself an instance of the `.next-number` read-not-reserve race (0255→0256→0257 chain), which the meta-fix in RFC-0078 (number reservation ledger) is meant to close at merge time.
 
 ## 1. Summary
 

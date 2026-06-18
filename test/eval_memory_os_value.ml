@@ -2,8 +2,12 @@
 
     The VALUE measurement of the live store is done by the LLM judge in
     [scripts/memory_os_judge_eval.py] (step 0b): it labels each fact
-    durable|ephemeral via `sb glm-text` and reports this same noise_rate, validated
-    against a small human-anchored gold set before its numbers are trusted.
+    durable|ephemeral via the judge model resolved from runtime.toml
+    ([memory_os].judge, else [runtime].default) over a direct
+    openai-compatible HTTP call — not via the `sb glm-text` Second Brain CLI
+    (a boundary violation that PR deliberately removed) — and reports this same
+    noise_rate, validated against a small human-anchored gold set before its
+    numbers are trusted.
 
     Per the 2026-06-16 directive (replace heuristic/manual-recorded parts with LLM
     judgement), this file no longer hand-records any labels: the gold calibration

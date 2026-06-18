@@ -208,7 +208,21 @@ def _chat(backend: JudgeBackend, system: str, user: str) -> str:
     )
     with urllib.request.urlopen(req, timeout=JUDGE_TIMEOUT_SEC) as resp:
         payload = json.loads(resp.read().decode())
-    return payload["choices"][0]["message"]["content"]
+    # Parse the response shape explicitly instead of chained index access. A
+    # well-formed openai-compatible envelope can still carry choices=[] (no
+    # completion produced); `["choices"][0]` would then raise IndexError, which
+    # is not in run_judge's degrade tuple and would crash the always-on
+    # calibrate gate. Map every malformed shape to one typed ValueError so the
+    # caller can honor its "unparseable -> uncertain" contract.
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("chat response carried no choices")
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        raise ValueError("chat response missing message.content text")
+    return content
 
 
 def _extract_json_array(text: str) -> str | None:
@@ -276,7 +290,11 @@ def run_judge(claims: list[str], backend: JudgeBackend) -> list[str]:
     prompt = f"Classify these {len(claims)} claims:\n{numbered}"
     try:
         out = _chat(backend, JUDGE_SYSTEM, prompt)
-    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError) as e:
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError, ValueError) as e:
+        # ValueError covers both json.JSONDecodeError (subclass) and the typed
+        # malformed-shape errors raised by _chat (empty choices, missing
+        # content), so an empty-but-well-formed provider reply degrades to
+        # 'uncertain' rather than crashing the calibrate gate.
         print(f"  judge call failed: {e}", file=sys.stderr)
         return ["uncertain"] * len(claims)
     labels = ["uncertain"] * len(claims)

@@ -149,8 +149,18 @@ let () =
               check bool "masc_goal_list -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_goal_list"
                  = Some Tool_dispatch.Mod_state);
-              check bool "tool_execute has no MCP static route" true
-                (Option.is_none (Tool_dispatch.lookup_tag "tool_execute")));
+              check bool "masc_goal_upsert -> Mod_state" true
+                (Tool_dispatch.lookup_tag "masc_goal_upsert"
+                 = Some Tool_dispatch.Mod_state);
+              check bool "masc_goal_transition -> Mod_state" true
+                (Tool_dispatch.lookup_tag "masc_goal_transition"
+                 = Some Tool_dispatch.Mod_state);
+              check bool "masc_goal_verify -> Mod_state" true
+                (Tool_dispatch.lookup_tag "masc_goal_verify"
+                 = Some Tool_dispatch.Mod_state);
+              check bool "tool_execute -> Mod_external" true
+                (Tool_dispatch.lookup_tag "tool_execute"
+                 = Some Tool_dispatch.Mod_external));
           test_case "mint_token accepts active static tool names" `Quick (fun () ->
               check bool "masc_status mints" true
                 (Result.is_ok

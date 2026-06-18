@@ -399,6 +399,125 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(keeperActionErrors.value.echo).toContain('서버 재시작')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps the queued assistant after page reload while history has only the user message', async () => {
+    vi.useFakeTimers()
+    try {
+      _resetChatHydrationForTests()
+      _clearPendingKeeperChatRequestsForTests()
+      upsertPendingKeeperChatRequest({
+        requestId: 'kmsg_echo_1',
+        keeperName: 'echo',
+        message: '진행 상황?',
+        submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+      })
+
+      // Server already persisted the user turn, but the assistant reply is
+      // still queued and has not been written yet.
+      fetchKeeperChatHistory.mockResolvedValue([
+        { role: 'user', content: '진행 상황?', ts: 1_780_000_000 },
+      ])
+
+      // First poll says queued; second poll completes so the test can finish.
+      let pollCount = 0
+      fetchQueuedKeeperMessageResult.mockImplementation(() => {
+        pollCount += 1
+        if (pollCount === 1) {
+          return Promise.resolve({ status: 'queued' })
+        }
+        return Promise.resolve({ status: 'done', ok: true, result: { reply: '완료' } })
+      })
+
+      // Simulate the post-reload mount: hydrate history and resume pending
+      // requests are kicked off concurrently by the panel effect.
+      await hydrateKeeperChatHistory('echo')
+      const resumePromise = resumePendingKeeperChatRequests('echo')
+
+      // During the first sleep the assistant should still be queued.
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect((keeperThreads.value.echo ?? []).some(entry => entry.role === 'assistant' && entry.delivery === 'queued')).toBe(true)
+
+      // Let the resume loop finish.
+      await vi.advanceTimersByTimeAsync(2_000)
+      await resumePromise
+
+      const thread = keeperThreads.value.echo ?? []
+      expect(thread.filter(entry => entry.role === 'user')).toHaveLength(1)
+      expect(thread.some(entry => entry.role === 'assistant' && entry.delivery === 'delivered')).toBe(true)
+      expect(keeperActionErrors.value.echo).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not replace a queued assistant with an older empty-text history error', async () => {
+    vi.useFakeTimers()
+    try {
+      _resetChatHydrationForTests()
+      _clearPendingKeeperChatRequestsForTests()
+      upsertPendingKeeperChatRequest({
+        requestId: 'kmsg_echo_2',
+        keeperName: 'echo',
+        message: '진행 상황?',
+        submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+      })
+
+      // History resolves after the resume loop has created pending entries,
+      // so the merge races against the in-flight queued assistant. The older
+      // history error has empty visible text (kept only because of its audio
+      // clip), which would collide with the pending assistant under a naive
+      // role+text dedup and cause the queued state to appear as an error.
+      fetchKeeperChatHistory.mockImplementation(() => new Promise(resolve => {
+        setTimeout(() => {
+          resolve([
+            { role: 'user', content: 'old question', ts: 1_700_000_000 },
+            {
+              role: 'assistant',
+              content: '',
+              ts: 1_700_000_001,
+              kind: 'transport_failure',
+              audio: {
+                token: 'old-failure-clip',
+                mime: 'audio/mpeg',
+                duration_sec: 1,
+                message_text: '',
+              },
+            },
+          ])
+        }, 100)
+      }))
+
+      // Keep queued for the race window, then complete so the test can end.
+      let pollCount = 0
+      fetchQueuedKeeperMessageResult.mockImplementation(() => {
+        pollCount += 1
+        if (pollCount === 1) {
+          return Promise.resolve({ status: 'queued' })
+        }
+        return Promise.resolve({ status: 'done', ok: true, result: { reply: '완료' } })
+      })
+
+      const hydratePromise = hydrateKeeperChatHistory('echo')
+      const resumePromise = resumePendingKeeperChatRequests('echo')
+
+      // Let history resolve and merge while the assistant is still queued.
+      await vi.advanceTimersByTimeAsync(200)
+      await hydratePromise
+
+      const thread = keeperThreads.value.echo ?? []
+      const assistants = thread.filter(entry => entry.role === 'assistant')
+      expect(assistants).toHaveLength(2)
+      expect(assistants.some(entry => entry.delivery === 'queued')).toBe(true)
+      expect(assistants.some(entry => entry.delivery === 'error')).toBe(true)
+      expect(keeperActionErrors.value.echo).toBeNull()
+
+      // Let the resume loop finish.
+      await vi.advanceTimersByTimeAsync(2_000)
+      await resumePromise
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 // ─── Status / runtime actions (exports untested before this block) ──

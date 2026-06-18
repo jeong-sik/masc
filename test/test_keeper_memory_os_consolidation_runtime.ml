@@ -22,24 +22,33 @@ let fact claim =
 
 (* A fake completion that ignores its inputs and returns [canned] as the model's
    text response, so the loop is exercised end to end without a provider. *)
+let fake_response canned =
+  { Llm_provider.Types.id = "fake"
+  ; model = "fake"
+  ; stop_reason = Llm_provider.Types.EndTurn
+  ; content = [ Atypes.Text canned ]
+  ; usage = None
+  ; telemetry = None
+  }
+;;
+
 let fake_complete canned : Runtime.complete_fn =
-  fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
-  Ok
-    { Llm_provider.Types.id = "fake"
-    ; model = "fake"
-    ; stop_reason = Llm_provider.Types.EndTurn
-    ; content = [ Atypes.Text canned ]
-    ; usage = None
-    ; telemetry = None
-    }
+  fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () -> Ok (fake_response canned)
+;;
+
+let fake_complete_with_config inspect canned : Runtime.complete_fn =
+  fun ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () ->
+  inspect config;
+  Ok (fake_response canned)
 ;;
 
 (* The fake completion ignores the config, so any valid one works. *)
-let provider_cfg () =
+let provider_cfg ?max_tokens () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Anthropic
     ~model_id:"fake"
     ~base_url:"http://localhost"
+    ?max_tokens
     ()
 ;;
 
@@ -251,15 +260,57 @@ let test_consolidate_rejects_malformed_fact_store () =
         | _ -> Alcotest.fail "expected Unparseable for malformed fact store"))))
 ;;
 
+let test_consolidate_respects_configured_max_tokens () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        let seen_max_tokens = ref None in
+        let plan =
+          {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"ab","category":"fact"}],"drop_indices":[]}|}
+        in
+        let complete =
+          fake_complete_with_config
+            (fun config ->
+               seen_max_tokens := config.Llm_provider.Provider_config.max_tokens)
+            plan
+        in
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~provider_cfg:(provider_cfg ~max_tokens:512 ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        (match outcome with
+         | Runtime.Consolidated _ -> ()
+         | _ -> Alcotest.fail "expected Consolidated");
+        Alcotest.(check (option int))
+          "configured max_tokens cap is preserved"
+          (Some 512)
+          !seen_max_tokens))))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os_consolidation_runtime"
     [ ( "loop"
       , [ Alcotest.test_case "applies the model's plan" `Quick test_consolidate_applies_plan
         ; Alcotest.test_case "skips when too few facts" `Quick test_consolidate_skips_too_few
-        ; Alcotest.test_case "dry-run preserves the store" `Quick test_consolidate_dry_run_preserves_store
-        ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
-        ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store
-        ] )
+	        ; Alcotest.test_case "dry-run preserves the store" `Quick test_consolidate_dry_run_preserves_store
+	        ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
+	        ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store
+        ; Alcotest.test_case
+            "respects configured max_tokens cap"
+            `Quick
+            test_consolidate_respects_configured_max_tokens
+	        ] )
     ]
 ;;

@@ -33,6 +33,13 @@ class MemoryOsJudgeEvalTest(unittest.TestCase):
             '[{"i":1,"label":"durable","why":["a","b"]}]',
         )
 
+    def test_extract_json_array_skips_valid_non_answer_arrays(self) -> None:
+        text = 'valid labels: ["durable","ephemeral","uncertain"]\n[{"i":1,"label":"durable"}]'
+        self.assertEqual(
+            memory_os_judge_eval._extract_json_array(text),
+            '[{"i":1,"label":"durable"}]',
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

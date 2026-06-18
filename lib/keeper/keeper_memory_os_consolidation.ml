@@ -47,10 +47,18 @@ let empty_plan = { groups = []; drop_indices = [] }
 (* The numbered fact list the consolidation prompt sees: one 0-based line per
    fact, "[category] claim". The index is the only handle the LLM gets on an
    existing fact, so [apply_plan] reads back the same order. Pure — no IO. *)
+let one_line_claim claim =
+  claim
+  |> String.map (function
+    | '\r' | '\n' -> ' '
+    | c -> c)
+  |> String.trim
+;;
+
 let render_numbered_facts facts =
   facts
   |> List.mapi (fun i (f : fact) ->
-    Printf.sprintf "%d: [%s] %s" i (category_to_string f.category) f.claim)
+    Printf.sprintf "%d: [%s] %s" i (category_to_string f.category) (one_line_claim f.claim))
   |> String.concat "\n"
 ;;
 
@@ -62,13 +70,20 @@ let category_specificity = function
 ;;
 
 let group_preserves_category ~members (group : merge_group) =
+  let group_specificity = category_specificity group.category in
   let member_specificity =
     List.fold_left
       (fun acc (fact : fact) -> max acc (category_specificity fact.category))
       0
       members
   in
-  category_specificity group.category >= member_specificity
+  group_specificity = member_specificity
+  && List.exists
+       (fun (fact : fact) ->
+          String.equal
+            (category_to_string fact.category)
+            (category_to_string group.category))
+       members
 ;;
 
 (* ---------- JSON parsing (defensive, like the librarian) ---------- *)
@@ -181,11 +196,49 @@ let plan_of_string raw =
 
 (* ---------- Apply (pure, deterministic) ---------- *)
 
+let min_optional_float values =
+  List.fold_left
+    (fun acc -> function
+       | None -> acc
+       | Some value ->
+         (match acc with
+          | None -> Some value
+          | Some current -> Some (Float.min current value)))
+    None
+    values
+;;
+
+let max_optional_float values =
+  List.fold_left
+    (fun acc -> function
+       | None -> acc
+       | Some value ->
+         (match acc with
+          | None -> Some value
+          | Some current -> Some (Float.max current value)))
+    None
+    values
+;;
+
+let valid_until_for_group ~now ~members category =
+  match category with
+  | Ephemeral ->
+    (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
+     | Some _ as valid_until -> valid_until
+     | None -> category_valid_until ~now category)
+  | Fact | Constraint | Preference | Blocker | Goal | Code_change
+  | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category
+;;
+
+let last_verified_for_members members =
+  max_optional_float (List.map (fun (m : fact) -> m.last_verified_at) members)
+;;
+
 (* The consolidated fact for one group: its claim/category come from the LLM; its
-   provenance is reconstructed structurally from the members so nothing is
-   fabricated — earliest source/first_seen, the union of corroborating keepers,
-   re-verified now (the consolidation is a fresh confirmation of the merged
-   claim). *)
+   provenance and temporal metadata are reconstructed structurally from the
+   members so nothing is fabricated — earliest source/first_seen, the union of
+   corroborating keepers, existing Ephemeral expiry, and the newest verification
+   timestamp from the merged members. *)
 let consolidated_fact ~now ~members (group : merge_group) =
   let earliest =
     match members with
@@ -207,8 +260,8 @@ let consolidated_fact ~now ~members (group : merge_group) =
   ; source = earliest.source
   ; observed_by
   ; first_seen
-  ; valid_until = category_valid_until ~now group.category
-  ; last_verified_at = Some now
+  ; valid_until = valid_until_for_group ~now ~members group.category
+  ; last_verified_at = last_verified_for_members members
   ; schema_version
   }
 ;;

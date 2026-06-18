@@ -94,6 +94,12 @@ VALID = {"durable", "ephemeral", "uncertain"}
 JUDGE_TIMEOUT_SEC = 180
 
 
+def _looks_like_answer_array(parsed: object) -> bool:
+    return isinstance(parsed, list) and any(
+        isinstance(obj, dict) and "i" in obj for obj in parsed
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class JudgeBackend:
     """Resolved openai-compatible endpoint for the judge model.
@@ -275,7 +281,7 @@ def _extract_json_array(text: str) -> str | None:
                         parsed = json.loads(candidate)
                     except Exception:
                         break
-                    if isinstance(parsed, list):
+                    if _looks_like_answer_array(parsed):
                         return candidate
                     break
     return None

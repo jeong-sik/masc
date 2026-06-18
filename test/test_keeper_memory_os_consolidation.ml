@@ -5,14 +5,26 @@ module Consolidation = Masc.Keeper_memory_os_consolidation
 
 let now = 1_000_000.0
 
-let fact ?(category = Types.Fact) ?(first_seen = now) ?(observed_by = []) claim =
+let fact
+      ?(category = Types.Fact)
+      ?(first_seen = now)
+      ?valid_until
+      ?last_verified_at
+      ?(observed_by = [])
+      claim
+  =
+  let last_verified_at =
+    match last_verified_at with
+    | Some value -> Some value
+    | None -> Some first_seen
+  in
   { Types.claim
   ; category
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by
   ; first_seen
-  ; valid_until = None
-  ; last_verified_at = Some first_seen
+  ; valid_until
+  ; last_verified_at
   ; schema_version = Types.schema_version
   }
 ;;
@@ -20,8 +32,8 @@ let fact ?(category = Types.Fact) ?(first_seen = now) ?(observed_by = []) claim 
 let claims facts = List.map (fun f -> f.Types.claim) facts |> List.sort String.compare
 
 (* A two-member group collapses into one consolidated claim; provenance is the
-   earliest member's, first_seen is the min, observed_by is the union, and the
-   merged fact is re-verified at [now]. *)
+   earliest member's, first_seen is the min, observed_by is the union, and
+   verification age is preserved from the newest member verification. *)
 let test_apply_merges_group () =
   let facts =
     [ fact ~first_seen:200.0 ~observed_by:[ "alpha" ] "deploy uses blue-green"
@@ -47,8 +59,8 @@ let test_apply_merges_group () =
       [ "alpha"; "beta" ]
       merged.Types.observed_by;
     Alcotest.(check (option (float 1e-9)))
-      "re-verified at now"
-      (Some now)
+      "newest verification preserved"
+      (Some 200.0)
       merged.Types.last_verified_at
   | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
 ;;
@@ -163,6 +175,76 @@ let test_apply_rejects_category_downgrade () =
     (claims (Consolidation.apply_plan ~now ~facts plan))
 ;;
 
+let test_apply_rejects_category_upgrade () =
+  let facts =
+    [ fact ~category:Types.Fact "The retry loop timed out under load"
+    ; fact ~category:Types.Fact "Retry loops can time out under load"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "Retry timeout failures imply a durable lesson"
+          ; category = Types.Lesson
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  Alcotest.(check (list string))
+    "upgraded group is skipped"
+    [ "Retry loops can time out under load"; "The retry loop timed out under load" ]
+    (claims (Consolidation.apply_plan ~now ~facts plan))
+;;
+
+let test_apply_preserves_ephemeral_expiry_and_verification_age () =
+  let facts =
+    [ fact
+        ~category:Types.Ephemeral
+        ~valid_until:1_100.0
+        ~last_verified_at:900.0
+        "checkpoint saved"
+    ; fact
+        ~category:Types.Ephemeral
+        ~valid_until:1_200.0
+        ~last_verified_at:950.0
+        "continuation checkpoint saved"
+    ]
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "checkpoint saved"
+          ; category = Types.Ephemeral
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  match Consolidation.apply_plan ~now ~facts plan with
+  | [ merged ] ->
+    Alcotest.(check (option (float 1e-9)))
+      "earliest ephemeral expiry preserved"
+      (Some 1_100.0)
+      merged.Types.valid_until;
+    Alcotest.(check (option (float 1e-9)))
+      "newest verification preserved"
+      (Some 950.0)
+      merged.Types.last_verified_at
+  | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
+;;
+
+let test_render_numbered_facts_keeps_one_fact_per_line () =
+  let rendered =
+    Consolidation.render_numbered_facts
+      [ fact "line one\nline two"; fact "carriage\rreturn" ]
+  in
+  Alcotest.(check (list string))
+    "one numbered fact per line"
+    [ "0: [fact] line one line two"; "1: [fact] carriage return" ]
+    (String.split_on_char '\n' rendered)
+;;
+
 let test_parse_plan_json () =
   let raw =
     {|{"groups":[{"member_indices":[0,2],"consolidated_claim":"merged","category":"lesson"}],"drop_indices":[3]}|}
@@ -230,15 +312,26 @@ let () =
         ; Alcotest.test_case "single-member group is no-op" `Quick test_apply_single_member_group_is_noop
         ; Alcotest.test_case "skips bad indices" `Quick test_apply_skips_bad_indices
         ; Alcotest.test_case "drops listed indices" `Quick test_apply_drops_listed
-        ; Alcotest.test_case "first group wins contested fact" `Quick test_apply_first_group_wins_contested
-        ; Alcotest.test_case "rejects category downgrade" `Quick test_apply_rejects_category_downgrade
+	        ; Alcotest.test_case "first group wins contested fact" `Quick test_apply_first_group_wins_contested
+	        ; Alcotest.test_case "rejects category downgrade" `Quick test_apply_rejects_category_downgrade
+        ; Alcotest.test_case "rejects category upgrade" `Quick test_apply_rejects_category_upgrade
+        ; Alcotest.test_case
+            "preserves ephemeral expiry and verification age"
+            `Quick
+            test_apply_preserves_ephemeral_expiry_and_verification_age
+	        ] )
+	    ; ( "parse"
+	      , [ Alcotest.test_case "parses a plan" `Quick test_parse_plan_json
+	        ; Alcotest.test_case "rejects fractional indices" `Quick test_parse_rejects_fractional_indices
+	        ; Alcotest.test_case "parses fenced/prefixed JSON" `Quick test_parse_plan_from_fenced_or_prefixed_json
+	        ; Alcotest.test_case "degrades a garbled group" `Quick test_parse_degrades_garbled_group
+	        ; Alcotest.test_case "non-JSON is None" `Quick test_parse_non_json_is_none
+	        ] )
+    ; ( "render"
+      , [ Alcotest.test_case
+            "keeps one fact per prompt line"
+            `Quick
+            test_render_numbered_facts_keeps_one_fact_per_line
         ] )
-    ; ( "parse"
-      , [ Alcotest.test_case "parses a plan" `Quick test_parse_plan_json
-        ; Alcotest.test_case "rejects fractional indices" `Quick test_parse_rejects_fractional_indices
-        ; Alcotest.test_case "parses fenced/prefixed JSON" `Quick test_parse_plan_from_fenced_or_prefixed_json
-        ; Alcotest.test_case "degrades a garbled group" `Quick test_parse_degrades_garbled_group
-        ; Alcotest.test_case "non-JSON is None" `Quick test_parse_non_json_is_none
-        ] )
-    ]
+	    ]
 ;;

@@ -145,4 +145,44 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelector('.virtual-list-spacer')).not.toBeNull()
     expect(host.querySelector('.kw-roster-list')).not.toBeNull()
   })
+
+  it('renders the sort select defaulting to status order', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const sortSel = host.querySelector('.kw-roster-sort') as HTMLSelectElement
+    expect(sortSel).not.toBeNull()
+    expect(sortSel.value).toBe('status')
+    expect(Array.from(sortSel.options).map(o => o.value)).toEqual(['status', 'name', 'att'])
+    // status mode keeps the bucket group headers
+    expect(host.querySelectorAll('.kw-roster-group').length).toBeGreaterThan(0)
+  })
+
+  it('sorts by name into a flat alphabetical list with no group headers', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    fireEvent.change(host.querySelector('.kw-roster-sort') as HTMLSelectElement, {
+      target: { value: 'name' },
+    })
+    // flat list → status group headers disappear
+    expect(host.querySelectorAll('.kw-roster-group').length).toBe(0)
+    const order = Array.from(host.querySelectorAll('.kw-kp-row')).map(r =>
+      r.textContent?.includes('masc-improver') ? 'masc-improver' : r.textContent?.includes('rama') ? 'rama' : 'sangsu',
+    )
+    expect(order).toEqual(['masc-improver', 'rama', 'sangsu'])
+  })
+
+  it('sorts by attention, ranking attention-needing keepers first', () => {
+    keepers.value = [
+      mk({ name: 'calm', status: 'running' }),
+      mk({ name: 'blocked-3', status: 'running', blocked_task_count: 3 }),
+      mk({ name: 'flagged', status: 'running', needs_attention: true }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="calm" />`, host)
+    fireEvent.change(host.querySelector('.kw-roster-sort') as HTMLSelectElement, {
+      target: { value: 'att' },
+    })
+    const order = Array.from(host.querySelectorAll('.kw-kp-row')).map(r =>
+      r.textContent?.includes('blocked-3') ? 'blocked-3' : r.textContent?.includes('flagged') ? 'flagged' : 'calm',
+    )
+    // blocked-3 (score 3) > flagged (flag → score 1) > calm (score 0)
+    expect(order).toEqual(['blocked-3', 'flagged', 'calm'])
+  })
 })

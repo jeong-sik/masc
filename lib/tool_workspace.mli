@@ -74,6 +74,12 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
 
 (** {1 Dispatch} *)
 
+(** Tool names routed by {!dispatch}.  This list is derived from the
+    same binding table used by runtime dispatch, so schema/registry
+    tests can fail when a workspace schema is exposed without a handler
+    route or a handler route is added without a schema. *)
+val dispatchable_names : string list
+
 (** [dispatch ctx ~name ~args] routes [name] to the appropriate
     private handler ([handle_status], [handle_reset],
     [handle_init], [handle_check],

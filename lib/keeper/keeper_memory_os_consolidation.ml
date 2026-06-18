@@ -115,10 +115,51 @@ let plan_of_json (json : Yojson.Safe.t) =
     empty_plan
 ;;
 
-let plan_of_string raw =
+let json_of_output raw =
+  let raw = String.trim raw in
+  let raw =
+    if String.starts_with ~prefix:"```" raw
+    then (
+      match String.split_on_char '\n' raw with
+      | first :: rest when String.starts_with ~prefix:"```" first ->
+        rest
+        |> List.rev
+        |> (function
+          | last :: rest when String.starts_with ~prefix:"```" (String.trim last) ->
+            List.rev rest
+          | lines -> List.rev lines)
+        |> String.concat "\n"
+        |> String.trim
+      | _ -> raw)
+    else raw
+  in
   match Yojson.Safe.from_string raw with
-  | json -> Some (plan_of_json json)
-  | exception (Yojson.Json_error _ | Failure _) -> None
+  | json -> Some json
+  | exception Yojson.Json_error _ ->
+    let len = String.length raw in
+    let rec find_from i ch =
+      if i >= len then None else if Char.equal raw.[i] ch then Some i else find_from (i + 1) ch
+    in
+    let rec find_from_right i ch =
+      if i < 0
+      then None
+      else if Char.equal raw.[i] ch
+      then Some i
+      else find_from_right (i - 1) ch
+    in
+    (match find_from 0 '{', find_from_right (len - 1) '}' with
+     | Some start, Some stop when start < stop ->
+       let candidate = String.sub raw start (stop - start + 1) in
+       (match Yojson.Safe.from_string candidate with
+        | json -> Some json
+        | exception Yojson.Json_error _ -> None)
+     | _ -> None)
+;;
+
+let plan_of_string raw =
+  match json_of_output raw with
+  | Some json -> Some (plan_of_json json)
+  | None -> None
 ;;
 
 (* ---------- Apply (pure, deterministic) ---------- *)

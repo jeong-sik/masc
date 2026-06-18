@@ -79,6 +79,9 @@ type outcome =
    snapshotting before the LLM and validating before write. *)
 let with_facts_lock ?clock ~keeper_id f =
   try File_lock_eio.with_lock ?clock (Io.facts_path ~keeper_id) f with
+  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
+    Transport_failed
+      (Printf.sprintf "consolidation lock timeout: %s after %d attempts" path attempts)
   | Failure msg -> Transport_failed ("consolidation lock timeout: " ^ msg)
 ;;
 
@@ -140,39 +143,44 @@ let consolidate_keeper
       ()
   =
   let run () =
-    let facts = Io.read_facts_all ~keeper_id in
-    let before = List.length facts in
-    if before < min_facts_to_consolidate
-    then Skipped_too_few before
-    else (
-      match messages_for_consolidation facts with
-      | Error msg -> Unparseable msg
-      | Ok messages ->
-        let config = provider_for_consolidation provider_cfg in
-        (match
-           with_timeout ?clock ~timeout_sec (fun () ->
-             complete ~sw ~net ?clock ~config ~messages ())
-         with
-         | None -> Transport_failed "consolidation provider timed out"
-         | Some (Error _) -> Transport_failed "consolidation provider transport error"
-         | Some (Ok response) ->
-           (match response_text response with
-            | None -> Unparseable "consolidation provider returned empty response"
-            | Some raw ->
-              (match Consolidation.plan_of_string raw with
-               | None -> Unparseable "consolidation provider returned invalid plan JSON"
-               | Some plan ->
-                 let survivors = Consolidation.apply_plan ~now ~facts plan in
-                 let after = List.length survivors in
-                 if dry_run
-                 then Consolidated { before; after }
-                 else (
-                   let current = Io.read_facts_all ~keeper_id in
-                   if not (same_fact_snapshot facts current)
-                   then Snapshot_changed { before; current = List.length current }
+    match Io.read_facts_all_strict ~keeper_id with
+    | Error msg -> Unparseable ("consolidation fact store read failed: " ^ msg)
+    | Ok facts ->
+      let before = List.length facts in
+      if before < min_facts_to_consolidate
+      then Skipped_too_few before
+      else
+        match messages_for_consolidation facts with
+        | Error msg -> Unparseable msg
+        | Ok messages ->
+          let config = provider_for_consolidation provider_cfg in
+          (match
+             with_timeout ?clock ~timeout_sec (fun () ->
+               complete ~sw ~net ?clock ~config ~messages ())
+           with
+           | None -> Transport_failed "consolidation provider timed out"
+           | Some (Error _) -> Transport_failed "consolidation provider transport error"
+           | Some (Ok response) ->
+             (match response_text response with
+              | None -> Unparseable "consolidation provider returned empty response"
+              | Some raw ->
+                (match Consolidation.plan_of_string raw with
+                 | None -> Unparseable "consolidation provider returned invalid plan JSON"
+                 | Some plan ->
+                   let survivors = Consolidation.apply_plan ~now ~facts plan in
+                   let after = List.length survivors in
+                   if dry_run
+                   then Consolidated { before; after }
                    else (
-                     Io.rewrite_facts_atomically ~keeper_id survivors;
-                     Consolidated { before; after }))))))
+                     match Io.read_facts_all_strict ~keeper_id with
+                     | Error msg ->
+                       Unparseable ("consolidation fact store changed before rewrite: " ^ msg)
+                     | Ok current ->
+                       if not (same_fact_snapshot facts current)
+                       then Snapshot_changed { before; current = List.length current }
+                       else (
+                         Io.rewrite_facts_atomically ~keeper_id survivors;
+                         Consolidated { before; after })))))
   in
   with_facts_lock ?clock ~keeper_id run
 ;;

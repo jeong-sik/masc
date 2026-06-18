@@ -211,6 +211,46 @@ let test_consolidate_rejects_stale_snapshot () =
           claims))))
 ;;
 
+let append_raw_fact_line ~keeper_id line =
+  let oc =
+    open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 (Io.facts_path ~keeper_id)
+  in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       output_string oc line;
+       output_char oc '\n')
+;;
+
+let test_consolidate_rejects_malformed_fact_store () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        append_raw_fact_line ~keeper_id "{not-json";
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete:(fake_complete "{}")
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        match outcome with
+        | Runtime.Unparseable msg ->
+          Alcotest.(check bool)
+            "strict read failure reported"
+            true
+            (String.contains msg ':')
+        | _ -> Alcotest.fail "expected Unparseable for malformed fact store"))))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os_consolidation_runtime"
@@ -219,6 +259,7 @@ let () =
         ; Alcotest.test_case "skips when too few facts" `Quick test_consolidate_skips_too_few
         ; Alcotest.test_case "dry-run preserves the store" `Quick test_consolidate_dry_run_preserves_store
         ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
+        ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store
         ] )
     ]
 ;;

@@ -168,6 +168,23 @@ let test_parse_rejects_fractional_indices () =
     Alcotest.(check (list int)) "fractional drop ignored" [ 3 ] plan.Consolidation.drop_indices
 ;;
 
+let test_parse_plan_from_fenced_or_prefixed_json () =
+  let json =
+    {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"merged","category":"fact"}],"drop_indices":[]}|}
+  in
+  [ "fenced", Printf.sprintf "```json\n%s\n```" json
+  ; "prefixed", Printf.sprintf "Here is the plan:\n%s" json
+  ]
+  |> List.iter (fun (label, raw) ->
+    match Consolidation.plan_of_string raw with
+    | None -> Alcotest.failf "%s plan should parse" label
+    | Some plan ->
+      Alcotest.(check int)
+        (label ^ " group count")
+        1
+        (List.length plan.Consolidation.groups))
+;;
+
 (* A garbled group is dropped individually; the rest of the plan stands. *)
 let test_parse_degrades_garbled_group () =
   let raw =
@@ -196,6 +213,7 @@ let () =
     ; ( "parse"
       , [ Alcotest.test_case "parses a plan" `Quick test_parse_plan_json
         ; Alcotest.test_case "rejects fractional indices" `Quick test_parse_rejects_fractional_indices
+        ; Alcotest.test_case "parses fenced/prefixed JSON" `Quick test_parse_plan_from_fenced_or_prefixed_json
         ; Alcotest.test_case "degrades a garbled group" `Quick test_parse_degrades_garbled_group
         ; Alcotest.test_case "non-JSON is None" `Quick test_parse_non_json_is_none
         ] )

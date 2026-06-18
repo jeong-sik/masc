@@ -149,6 +149,16 @@ def resolve_judge_target(cfg: dict) -> tuple[str, str, str]:
     )
 
 
+def resolve_api_model_name(cfg: dict, model: str) -> str:
+    models = cfg.get("models", {})
+    model_cfg = models.get(model) if isinstance(models, dict) else None
+    if isinstance(model_cfg, dict):
+        api_name = model_cfg.get("api-name")
+        if isinstance(api_name, str) and api_name.strip():
+            return api_name.strip()
+    return model
+
+
 def resolve_backend(cfg: dict, provider_name: str, model: str) -> JudgeBackend:
     """Build a JudgeBackend from [providers.<provider_name>] in an already-loaded cfg.
 
@@ -180,7 +190,9 @@ def resolve_backend(cfg: dict, provider_name: str, model: str) -> JudgeBackend:
         sys.exit(f"credential env {key_env!r} for provider {provider_name!r} is empty")
 
     return JudgeBackend(
-        chat_url=f"{endpoint}/chat/completions", api_key=api_key, model=model
+        chat_url=f"{endpoint}/chat/completions",
+        api_key=api_key,
+        model=resolve_api_model_name(cfg, model),
     )
 
 

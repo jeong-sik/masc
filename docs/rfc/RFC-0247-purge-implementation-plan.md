@@ -1,13 +1,17 @@
-result keys: ['reports', 'plan']
-n reports: 4 | plan len: 24948
-================================================================================
-All four reports' load-bearing claims are confirmed against source. Critically I found one nuance the reports under-stated: `fact_of_json` requires `confidence` (line 275 `json_float_field "confidence"` must be `Some`, else the `(Some _, None, _, _) -> None` arm at line 329 **drops the row entirely**). So the codec migration is not optional — it must make `confidence` decode-optional or the 6462 rows vanish. I have everything needed.
-
-I'll provide my final answer as the architect's plan.
-
+---
+rfc: "0247"
+extends: "0247"
+title: "Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247)"
+status: Draft
+created: 2026-06-16
+updated: 2026-06-18
 ---
 
 # IMPLEMENTATION PLAN — Purge the score-based Memory OS, rebuild summarize/forget/update as LLM judgment
+
+> Phase document of [RFC-0247](RFC-0247-memory-os-associative-graph-forgetting-brain.md). File-level purge+replace plan for removing score-based Memory OS and rebuilding summarize/forget/update as LLM judgment.
+>
+> Constraint carried from source review: `fact_of_json` (codec) requires `confidence` to be `Some` — the `(Some _, None, _, _) -> None` arm drops the row entirely. The codec migration must make `confidence` decode-optional, or the 6462 existing rows vanish.
 
 Worktree: `/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/rfc-0246-keeper-brain-memory`. All file:line refs verified against source I opened. Strict-reviewer stance applied throughout: **no step may compute a keep/forget/promote decision from a number, and no step may classify a claim by substring.**
 

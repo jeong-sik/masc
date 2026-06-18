@@ -1225,6 +1225,13 @@
 
 ; test_failover_leader removed (CP purge)
 
+; RFC-0258 P1: grounded verifier verdict parsing.
+
+(test
+ (name test_verifier_core_grounding)
+ (modules test_verifier_core_grounding)
+ (libraries masc_test_deps))
+
 ; Keeper Tool Matrix — shared case modules as a library
 
 (library

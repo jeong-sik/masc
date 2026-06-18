@@ -23,6 +23,17 @@ type verdict =
   | Warn of string
   | Fail of string
 
+type grounded_ref = {
+  path : string;
+  line : int option;
+  quote : string;
+}
+
+type grounded_verdict = private {
+  verdict : verdict;
+  evidence : grounded_ref list;
+}
+
 (** {1 Read-Only Detection} *)
 
 (** [should_skip ~action_description] returns [true] when the
@@ -52,14 +63,29 @@ val valid_verdict_strings : string list
     [Fail] fill in a default reason. *)
 val parse_verdict : string -> (verdict, string) result
 
+(** [grounded_of verdict evidence] builds a grounded verdict. [Pass]
+    does not require evidence. [Warn]/[Fail] require at least one
+    evidence item with a non-empty [path] and [quote], and [line] must
+    be 1-based when present. *)
+val grounded_of :
+  verdict -> grounded_ref list -> (grounded_verdict, string) result
+
 (** {1 Structured Verdict — report_verdict tool} *)
 
 (** MCP tool schema for [report_verdict]: [verdict] (enum of
-    {!valid_verdict_strings}) + optional [reason]. *)
+    {!valid_verdict_strings}) + optional [reason] and optional
+    [evidence]. *)
 val report_verdict_schema : Masc_domain.tool_schema
 
 (** Parse a [report_verdict] JSON arg payload. Empty/missing [reason]
     on [Warn]/[Fail] fills in a default reason (same as
     {!parse_verdict}). Errors on type mismatch or unknown [verdict]
-    values. *)
+    values. Optional [evidence] is accepted but ignored by this
+    compatibility parser. *)
 val parse_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
+
+(** Parse a [report_verdict] JSON arg payload and enforce grounding.
+    This is the opt-in parser for reviewers that need blocking/wake
+    semantics: [Warn]/[Fail] without valid [evidence] return [Error]. *)
+val parse_grounded_verdict_from_json :
+  Yojson.Safe.t -> (grounded_verdict, string) result

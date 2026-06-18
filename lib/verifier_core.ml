@@ -25,6 +25,17 @@ type verdict =
   | Warn of string
   | Fail of string
 
+type grounded_ref = {
+  path : string;
+  line : int option;
+  quote : string;
+}
+
+type grounded_verdict = {
+  verdict : verdict;
+  evidence : grounded_ref list;
+}
+
 (* ================================================================ *)
 (* Read-Only Detection                                              *)
 (* ================================================================ *)
@@ -120,6 +131,38 @@ let parse_verdict (text : string) : (verdict, string) result =
        String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed
        |> String_util.to_string))
 
+let validate_grounded_ref idx (ref_ : grounded_ref) =
+  let path = String.trim ref_.path in
+  let quote = String.trim ref_.quote in
+  if path = "" then Error (sprintf "evidence[%d].path is required" idx)
+  else if quote = "" then Error (sprintf "evidence[%d].quote is required" idx)
+  else
+    match ref_.line with
+    | Some line when line <= 0 ->
+      Error (sprintf "evidence[%d].line must be >= 1" idx)
+    | Some _ | None -> Ok ()
+
+let validate_grounded_refs refs =
+  let rec loop idx = function
+    | [] -> Ok ()
+    | ref_ :: rest -> (
+      match validate_grounded_ref idx ref_ with
+      | Error _ as e -> e
+      | Ok () -> loop (idx + 1) rest)
+  in
+  loop 0 refs
+
+let grounded_of verdict evidence =
+  match verdict with
+  | Pass -> Ok { verdict; evidence = [] }
+  | Warn _ | Fail _ ->
+    if evidence = [] then
+      Error "WARN/FAIL verdicts require at least one evidence item"
+    else
+      match validate_grounded_refs evidence with
+      | Error _ as e -> e
+      | Ok () -> Ok { verdict; evidence }
+
 (* ================================================================ *)
 (* Structured Verdict: Tool Schema + JSON Parsing (ADR D3)          *)
 (* ================================================================ *)
@@ -142,6 +185,29 @@ let report_verdict_schema : Masc_domain.tool_schema =
         "reason", `Assoc [
           "type", `String "string";
           "description", `String "Brief explanation for the verdict (required for WARN and FAIL)";
+        ];
+        "evidence", `Assoc [
+          "type", `String "array";
+          "description", `String "Optional grounding references: each item cites a repo-relative path, optional 1-based line, and verbatim quote";
+          "items", `Assoc [
+            "type", `String "object";
+            "properties", `Assoc [
+              "path", `Assoc [
+                "type", `String "string";
+                "description", `String "Repo-relative file path inspected by the reviewer";
+              ];
+              "line", `Assoc [
+                "type", `String "integer";
+                "minimum", `Int 1;
+                "description", `String "Optional 1-based line number";
+              ];
+              "quote", `Assoc [
+                "type", `String "string";
+                "description", `String "Verbatim excerpt from the cited file";
+              ];
+            ];
+            "required", `List [ `String "path"; `String "quote" ];
+          ];
         ];
       ];
       "required", `List [`String "verdict"];
@@ -174,3 +240,61 @@ let parse_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
     Error (sprintf "verdict JSON type error: %s" msg)
   | exn ->
     Error (sprintf "verdict JSON parse error: %s" (Printexc.to_string exn))
+
+let parse_evidence_line ~idx json =
+  match Json_util.assoc_member_opt "line" json with
+  | None | Some `Null -> Ok None
+  | Some (`Int line) when line > 0 -> Ok (Some line)
+  | Some (`Intlit raw) -> (
+    match int_of_string_opt raw with
+    | Some line when line > 0 -> Ok (Some line)
+    | _ -> Error (sprintf "evidence[%d].line must be >= 1" idx))
+  | Some (`Int _) -> Error (sprintf "evidence[%d].line must be >= 1" idx)
+  | Some other ->
+    Error
+      (sprintf "evidence[%d].line must be an integer, got %s" idx
+         (Json_util.kind_name other))
+
+let parse_evidence_item idx = function
+  | `Assoc _ as json -> (
+    match Json_util.require_string json "path" with
+    | Error msg -> Error (sprintf "evidence[%d]: %s" idx msg)
+    | Ok path -> (
+      match Json_util.require_string json "quote" with
+      | Error msg -> Error (sprintf "evidence[%d]: %s" idx msg)
+      | Ok quote -> (
+        match parse_evidence_line ~idx json with
+        | Error _ as e -> e
+        | Ok line ->
+          let ref_ = { path; line; quote } in
+          match validate_grounded_ref idx ref_ with
+          | Error _ as e -> e
+          | Ok () -> Ok ref_)))
+  | other ->
+    Error
+      (sprintf "evidence[%d] must be an object, got %s" idx
+         (Json_util.kind_name other))
+
+let parse_evidence_from_json args =
+  match Json_util.assoc_member_opt "evidence" args with
+  | None | Some `Null -> Ok []
+  | Some (`List items) ->
+    let rec loop idx acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest -> (
+        match parse_evidence_item idx item with
+        | Error _ as e -> e
+        | Ok ref_ -> loop (idx + 1) (ref_ :: acc) rest)
+    in
+    loop 0 [] items
+  | Some other ->
+    Error (sprintf "evidence must be an array, got %s" (Json_util.kind_name other))
+
+let parse_grounded_verdict_from_json args =
+  match parse_verdict_from_json args with
+  | Error _ as e -> e
+  | Ok Pass -> grounded_of Pass []
+  | Ok verdict -> (
+    match parse_evidence_from_json args with
+    | Error _ as e -> e
+    | Ok evidence -> grounded_of verdict evidence)

@@ -151,6 +151,34 @@ supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
 
+# MiniMax M3 (Ollama Cloud) — runtime for the memory-os librarian (post-turn
+# episode extraction). The librarian requests JsonMode
+# (keeper_librarian_runtime.ml:228); a runtime whose model omits
+# supports-response-format-json produces unconstrained output, which on the
+# fleet default (deepseek-v4-flash, no JSON capability declared) measured ~74%
+# empty / invalid-JSON. minimax-m3 declares json + structured output and is the
+# memory_os judge runtime. Activate for the librarian only via
+# MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID=ollama_cloud.minimax-m3 (keeper
+# chat stays on [runtime].default). api-name verified 2026-06-18 against
+# https://ollama.com/v1/chat/completions: HTTP 200 with response_format
+# json_object honored (clean JSON body), model "minimax-m3".
+[models.minimax-m3]
+api-name = "minimax-m3"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.minimax-m3.capabilities]
+max-output-tokens = 131072
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+
+[ollama_cloud.minimax-m3]
+
 [ollama.gemma4-26b-a4b-qat]
 max-concurrent = 1
 

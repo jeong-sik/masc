@@ -9,9 +9,8 @@
   },
   "scripts": {
     "dev": "MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:8935 vite",
-    "build": "vite build && node scripts/build-v2.mjs",
+    "build": "vite build",
     "build:report": "BUNDLE_REPORT=1 vite build",
-    "build:v2": "node scripts/build-v2.mjs",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",

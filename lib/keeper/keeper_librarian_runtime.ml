@@ -353,13 +353,14 @@ let extract_and_append_with_provider
        try
          let window = Keeper_memory_os_io.fact_recall_window in
          let (_ : Keeper_memory_os_io.fact_merge_stats) =
-           Keeper_memory_os_io.merge_and_cap_facts
-             ~keeper_id
-             ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
-             ~incoming:episode.Keeper_memory_os_types.claims
-             ~keep:window
-             ~trigger:(window + (window / 2))
-             ~rank:(Keeper_memory_os_policy.retention_rank ~now)
+           File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
+             Keeper_memory_os_io.merge_and_cap_facts
+               ~keeper_id
+               ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
+               ~incoming:episode.Keeper_memory_os_types.claims
+               ~keep:window
+               ~trigger:(window + (window / 2))
+               ~rank:(Keeper_memory_os_policy.retention_rank ~now))
          in
          Ok ()
        with

@@ -15,7 +15,7 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 ;;
 
-(* RFC-0256 adversarial review: the previous process-global slot was removed in
+(* RFC-0257 adversarial review: the previous process-global slot was removed in
    favor of per-keeper lanes, but measured production data showed that an
    unbounded shared flash/glm provider pool can spike empty-response rates.
    Re-introduce an optional fleet-wide concurrency gate around librarian provider

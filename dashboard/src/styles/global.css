@@ -28,7 +28,6 @@
 @import "./dashboard.css";
 @import "./governance.css";
 @import "./governance-agent.css";
-@import "./keeper-detail.css";
 @import "./ops.css";
 @import "./pipeline.css";
 @import "./pixel-avatar.css";
@@ -40,7 +39,6 @@
 @import "./app-shell-v2.css";
 @import "./v2-theme.css";
 @import "./v2-skin-tokens.css";
-@import "./v2-keeper-chat.css";
 @import "./keeper-turn-inspector.css";
 @import "./v2-logs.css";
 @import "./v2-overview.css";

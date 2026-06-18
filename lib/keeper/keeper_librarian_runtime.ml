@@ -29,22 +29,33 @@ let global_slot_capacity () =
   |> max 0
 ;;
 
-let global_slot_wait_sec () =
-  Keeper_memory_bank_env.memory_env_float_logged
-    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT_WAIT_SEC"
-    ~default:0.25
-  |> Float.max 0.0
-;;
+let provider_slot_wait_sec = 0.25
 
-let provider_slot =
-  lazy
-    (match global_slot_capacity () with
-     | 0 -> None
-     | n -> Some (Eio.Semaphore.make n))
+type provider_slot_state =
+  { capacity : int
+  ; slot : Eio.Semaphore.t option
+  }
+
+let provider_slot_mu = Stdlib.Mutex.create ()
+let provider_slot_state : provider_slot_state option ref = ref None
+
+let provider_slot_for_capacity capacity =
+  Stdlib.Mutex.protect provider_slot_mu (fun () ->
+    match !provider_slot_state with
+    | Some state when state.capacity = capacity -> state.slot
+    | _ ->
+      let slot =
+        match capacity with
+        | 0 -> None
+        | n -> Some (Eio.Semaphore.make n)
+      in
+      provider_slot_state := Some { capacity; slot };
+      slot)
 ;;
 
 let with_provider_slot ?clock f =
-  match Lazy.force provider_slot with
+  let capacity = global_slot_capacity () in
+  match provider_slot_for_capacity capacity with
   | None -> Some (f ())
   | Some sem ->
     let acquired = ref false in
@@ -55,7 +66,7 @@ let with_provider_slot ?clock f =
          acquired := true
        | Some clock ->
          (try
-            Eio.Time.with_timeout_exn clock (global_slot_wait_sec ()) (fun () ->
+            Eio.Time.with_timeout_exn clock provider_slot_wait_sec (fun () ->
               Eio.Semaphore.acquire sem);
             acquired := true
           with
@@ -67,7 +78,11 @@ let with_provider_slot ?clock f =
          "librarian provider slot acquisition failed: %s"
          (Printexc.to_string exn));
     if !acquired
-    then Some (Eio_guard.protect ~finally:(fun () -> Eio.Semaphore.release sem) f)
+    then
+      Some
+        (Eio.Switch.run (fun cleanup_sw ->
+           Eio.Switch.on_release cleanup_sw (fun () -> Eio.Semaphore.release sem);
+           f ()))
     else None
 ;;
 

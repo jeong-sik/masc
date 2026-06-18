@@ -112,6 +112,25 @@ let release_reservation ~keeper_name entry =
     dec_pending ~keeper_name ())
 ;;
 
+let protect_cleanup ~keeper_name label f =
+  try f () with
+  | exn ->
+    record_counter ~keeper_name MemoryLaneUnitFailures;
+    Log.Keeper.warn ~keeper_name
+      "memory lane cleanup failed (%s): %s"
+      label
+      (Printexc.to_string exn)
+;;
+
+let release_after_run ~keeper_name entry ~acquired ~in_flight =
+  if !in_flight
+  then protect_cleanup ~keeper_name "dec_in_flight" (fun () -> dec_in_flight ~keeper_name ());
+  if !acquired
+  then protect_cleanup ~keeper_name "unlock" (fun () -> Eio.Mutex.unlock entry.mem_mu);
+  protect_cleanup ~keeper_name "release_reservation" (fun () ->
+    release_reservation ~keeper_name entry)
+;;
+
 (* Runs on a forked fiber owned by the executor switch. Holds [mem_mu] across
    the unit. Releases the mutex (only if acquired) and the reservation on every
    exit, including cancellation at shutdown. No exception escapes: a best-effort
@@ -119,24 +138,25 @@ let release_reservation ~keeper_name entry =
    fleet. *)
 let run_unit ~keeper_name entry sw f =
   let acquired = ref false in
-  (try
-     Eio.Mutex.lock entry.mem_mu;
-     (* No suspension point between [lock] returning and this assignment, so
-        cancellation cannot strand a held mutex with [acquired = false]. *)
-     acquired := true;
-     inc_in_flight ~keeper_name ();
-     Eio_context.with_turn_switch sw f
-   with
-   | Eio.Cancel.Cancelled _ -> () (* shutdown: silent *)
-   | exn ->
-     record_counter ~keeper_name MemoryLaneUnitFailures;
-     Log.Keeper.warn ~keeper_name
-       "memory lane unit failed: %s"
-       (Printexc.to_string exn));
-  if !acquired then (
-    dec_in_flight ~keeper_name ();
-    Eio.Mutex.unlock entry.mem_mu);
-  release_reservation ~keeper_name entry
+  let in_flight = ref false in
+  Eio.Switch.run (fun cleanup_sw ->
+    Eio.Switch.on_release cleanup_sw (fun () ->
+      release_after_run ~keeper_name entry ~acquired ~in_flight);
+      try
+        Eio.Mutex.lock entry.mem_mu;
+        (* No suspension point between [lock] returning and this assignment, so
+           cancellation cannot strand a held mutex with [acquired = false]. *)
+        acquired := true;
+        inc_in_flight ~keeper_name ();
+        in_flight := true;
+        Eio_context.with_turn_switch sw f
+      with
+      | Eio.Cancel.Cancelled _ -> () (* shutdown: silent, cleanup runs above *)
+      | exn ->
+        record_counter ~keeper_name MemoryLaneUnitFailures;
+        Log.Keeper.warn ~keeper_name
+          "memory lane unit failed: %s"
+          (Printexc.to_string exn))
 ;;
 
 let submit ~base_path ~keeper_name f =

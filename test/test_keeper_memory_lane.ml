@@ -6,7 +6,10 @@
 
 module Lane = Masc.Keeper_memory_lane
 
-let base_path = "/tmp/test-memory-lane"
+exception Test_boom
+exception Cancel_lane_test
+
+let base_path = Filename.concat (Filename.get_temp_dir_name ()) "test-memory-lane"
 
 (* No executor switch set -> submit runs inline so no work is lost. *)
 let test_inline_when_uninitialized () =
@@ -26,7 +29,7 @@ let test_inline_when_uninitialized () =
 let test_inline_contains_raise () =
   Lane.For_testing.reset ();
   let outcome =
-    Lane.submit ~base_path ~keeper_name:"k1" (fun () -> failwith "inline boom")
+    Lane.submit ~base_path ~keeper_name:"k1" (fun () -> raise Test_boom)
   in
   match outcome with
   | Lane.Ran_inline -> ()
@@ -135,7 +138,7 @@ let test_releases_on_raise () =
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
       let _ =
-        Lane.submit ~base_path ~keeper_name:"k1" (fun () -> failwith "boom")
+        Lane.submit ~base_path ~keeper_name:"k1" (fun () -> raise Test_boom)
       in
       Eio.Fiber.yield ();
       Eio.Fiber.yield ();
@@ -149,6 +152,34 @@ let test_releases_on_raise () =
   | Some 0 -> ()
   | Some n -> Alcotest.failf "pending leaked: %d" n
   | None -> Alcotest.fail "keeper entry missing"
+;;
+
+(* Cancellation during shutdown releases both the mutex and the pending slot. *)
+let test_releases_on_cancel () =
+  Lane.For_testing.reset ();
+  (try
+     Eio_main.run (fun _env ->
+       Eio.Switch.run (fun sw ->
+         Lane.init ~sw;
+         let started, set_started = Eio.Promise.create () in
+         let never, _set_never = Eio.Promise.create () in
+         let outcome =
+           Lane.submit ~base_path ~keeper_name:"k1" (fun () ->
+             Eio.Promise.resolve set_started ();
+             Eio.Promise.await never)
+         in
+         (match outcome with
+          | Lane.Submitted -> ()
+         | Lane.Ran_inline -> Alcotest.fail "cancel test unexpectedly ran inline"
+         | Lane.Dropped -> Alcotest.fail "cancel test unexpectedly dropped");
+         Eio.Promise.await started;
+         Eio.Switch.fail sw Cancel_lane_test))
+   with
+   | Cancel_lane_test -> ());
+  match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
+  | Some 0 -> ()
+  | Some n -> Alcotest.failf "pending leaked after cancel: %d" n
+  | None -> Alcotest.fail "keeper entry missing after cancel"
 ;;
 
 let () =
@@ -173,6 +204,7 @@ let () =
             test_independent_across_keepers
         ; Alcotest.test_case "saturation drops" `Quick test_saturation_drops
         ; Alcotest.test_case "releases on raise" `Quick test_releases_on_raise
+        ; Alcotest.test_case "releases on cancel" `Quick test_releases_on_cancel
         ] )
     ]
 ;;

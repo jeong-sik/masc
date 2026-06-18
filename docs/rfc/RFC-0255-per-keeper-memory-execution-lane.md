@@ -6,17 +6,11 @@
 
 ## Problem
 
-Post-turn memory work (librarian extraction + memory-bank compaction) runs through a
-process-global single slot:
+Before this RFC, post-turn memory work (librarian extraction + memory-bank compaction) ran through
+a process-global single slot in `keeper_librarian_runtime.ml`.
 
-```
-lib/keeper/keeper_librarian_runtime.ml:42
-  let provider_slot = Eio.Semaphore.make 1
-```
-
-`with_provider_slot` (`:197`, used at `:222`) acquires this one module-level semaphore on
-every librarian invocation, with a 0.25s wait (`MASC_KEEPER_MEMORY_OS_LIBRARIAN_SLOT_WAIT_SEC`,
-default `:47`); on timeout the extraction is dropped (`provider_slot_busy`).
+`with_provider_slot` acquired that one module-level semaphore on every librarian invocation, with a
+short wait; on timeout the extraction was dropped (`provider_slot_busy`).
 
 With ~13 keepers, every keeper's librarian work funnels through one slot. One keeper holding
 the slot forces the others to wait 0.25s and then discard the extraction. This contradicts the
@@ -80,10 +74,13 @@ memory-bank-touching work — move onto the lane** (serialized per keeper by `me
 inline**: it only reads (`goal_alignment_score`, history) and writes the *decision* log, a separate
 file independent of (1)(2)(3).
 
-### Remove the global slot
+### Separate keeper ordering from provider-pool protection
 
-`provider_slot` / `with_provider_slot` in `keeper_librarian_runtime.ml` are deleted. Per-keeper
-serialization now comes from `mem_mu`; the cross-keeper bottleneck is gone.
+The old global slot mixed two concerns: per-keeper memory ordering and provider-pool
+protection. Per-keeper ordering now comes from `Keeper_memory_lane.mem_mu`. Provider-pool
+protection remains as a separate, optional fleet-wide gate around the provider round-trip only.
+That gate is not a memory-ordering primitive and does not serialize deterministic writes or
+compaction.
 
 ### Correctness under detachment
 
@@ -115,8 +112,8 @@ provider concurrency gate** around librarian calls:
 
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` (default `1`): maximum simultaneous librarian
   provider round-trips across all keepers. `0` disables the gate.
-- `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT_WAIT_SEC` (default `0.25`): how long a lane fiber
-  waits for the shared slot before dropping the extraction best-effort.
+- The wait is a fixed 0.25s best-effort acquisition window. It is deliberately not another
+  environment knob; the capacity is the operator-controlled variable.
 
 Per-keeper lane fairness is preserved (`mem_mu` still orders each keeper's units), while the shared
 pool is protected from the empty-response storm observed in #21230. Lane independence and provider
@@ -169,7 +166,6 @@ Per-keeper lane:
 Fleet-wide librarian provider gate:
 
 - `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT` (default `1`)
-- `MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT_WAIT_SEC` (default `0.25`)
 - `masc_keeper_memory_lane_provider_slot_busy_total`
 
 Saturation and provider-slot-busy events are also logged at WARN level with the keeper name.
@@ -183,6 +179,8 @@ Saturation and provider-slot-busy events are also logged at WARN level with the 
 - two different keepers run concurrently (no cross-keeper blocking).
 - `pending` over `max_pending` drops and counts the submission.
 - a submitted unit that raises releases `mem_mu` and decrements `pending` (no leak).
+- cancelling the executor switch while a unit is in flight releases `mem_mu` and decrements
+  `pending`.
 
 ## Rollback
 

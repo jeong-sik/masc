@@ -1141,6 +1141,33 @@ let test_gc_dry_run_and_rewrite () =
       (List.exists (fun f -> String.equal f.Types.claim "expired fact") survivors))
 ;;
 
+let test_gc_rejects_corrupt_store () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "ttl-sweep-corrupt-keeper" in
+    let now = 1_000_000.0 in
+    Memory_io.append_fact ~keeper_id (fact_fixture ~now ());
+    let oc =
+      open_out_gen [ Open_append; Open_text ] 0o644 (Memory_io.facts_path ~keeper_id)
+    in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{not-json}\n");
+    try
+      ignore (GC.run_gc ~keeper_id ~now ());
+      Alcotest.fail "expected corrupt fact store to fail loud"
+    with
+    | Invalid_argument msg ->
+      Alcotest.(check bool)
+        "error identifies GC input"
+        true
+        (contains "Keeper_memory_os_gc.run_gc" msg);
+      Alcotest.(check bool)
+        "error includes source fact store"
+        true
+        (contains (Memory_io.facts_path ~keeper_id) msg);
+      Alcotest.(check bool) "error includes line number" true (contains ":2:" msg))
+;;
+
 let test_recall_context_empty_without_memory () =
   with_temp_keepers_dir (fun _keepers_dir ->
     let ctx =
@@ -2257,9 +2284,9 @@ let () =
             `Quick
             test_cap_facts_keeps_top_ranked
         ; Alcotest.test_case
-            "TTL sweep only removes expired rows (RFC-0251)"
+            "GC rejects corrupt fact store"
             `Quick
-            test_gc_ttl_sweep_only_removes_expired_facts
+            test_gc_rejects_corrupt_store
         ; Alcotest.test_case
             "merge_and_cap upserts re-observed claim (RFC-0243)"
             `Quick

@@ -8,6 +8,15 @@ import { loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
 
 export const selectedKeeper = signal<Keeper | null>(null)
 
+/** Mobile (≤860px) single-pane switch for the keeper workspace grid.
+ * Desktop shows roster | conversation | rail side by side; below 860px only
+ * one pane fits at a time, so this selects the visible one. Defaults to 'chat'
+ * because entering keeper detail means a keeper is focused. Roster row select
+ * and `openKeeperDetail` set 'chat'; the chat header back button sets 'roster'.
+ * Read by `.kw-grid[data-mobile-pane]` in keeper-workspace.css. */
+export type KeeperMobilePane = 'roster' | 'chat'
+export const keeperMobilePane = signal<KeeperMobilePane>('chat')
+
 registerKeeperTurnRefresh((keeperName: string) => {
   if (keeperName !== activeKeeperName.value) return
   void hydrateKeeperStatus(keeperName, true)
@@ -42,6 +51,7 @@ function baseAgentDirectoryRouteParams(): Record<string, string> {
 
 export function openKeeperDetail(k: Keeper) {
   selectedKeeper.value = k
+  keeperMobilePane.value = 'chat'
   selectKeeper(k.name)
   void loadKeeperConfig(k.name)
   navigate('monitoring', { ...baseAgentDirectoryRouteParams(), keeper: k.name })

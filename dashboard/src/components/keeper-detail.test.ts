@@ -142,6 +142,7 @@ import {
   clearKeeperDetailSelection,
   closeKeeperDetail,
   filterCheckpointHistory,
+  keeperMobilePane,
   lineageTransitionLabel,
   lineageVerdictMeta,
   openKeeperDetail,
@@ -335,6 +336,13 @@ describe('KeeperDetailPage', () => {
     expect(container.querySelector('.kw-grid')).toBeTruthy()
     expect(container.querySelector('.kw-roster')).toBeTruthy()
     expect(container.querySelector('.kw-rail')).toBeTruthy()
+    // The grid binds data-mobile-pane to the keeperMobilePane signal — the
+    // load-bearing hook the <=860px CSS pane-switch depends on. Entering a
+    // keeper resets the signal to 'chat', so the attribute must reflect that
+    // (guards against a silent attribute-name regression on the binding).
+    const grid = container.querySelector('.kw-grid')
+    expect(grid?.getAttribute('data-mobile-pane')).toBe('chat')
+    expect(grid?.getAttribute('data-mobile-pane')).toBe(keeperMobilePane.value)
     // The keeper name appears in the roster row and the chat header.
     expect(screen.getAllByText('analyst').length).toBeGreaterThanOrEqual(1)
     // The reused chat engine is mounted in the conversation pane.

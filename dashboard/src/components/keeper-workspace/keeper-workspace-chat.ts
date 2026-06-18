@@ -9,6 +9,7 @@ import type { VNode } from 'preact'
 import type { Keeper } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { KeeperLifecycleButtons } from '../keeper-detail-lifecycle'
+import { keeperMobilePane } from '../keeper-detail-state'
 import { KeeperTurnInspector } from '../keeper-turn-inspector'
 import { ChatArtifactPanel } from '../chat/artifact-panel'
 import { keeperThreads } from '../../keeper-state'
@@ -50,6 +51,14 @@ function ChatHeader({
   // vertical space instead of a redundant metadata sub-row.
   return html`
     <div class="kw-chat-head v2-monitoring-toolbar">
+      <button
+        type="button"
+        class="kw-chat-back kw-act v2-monitoring-action"
+        title="키퍼 목록으로"
+        aria-label="키퍼 목록으로"
+        onClick=${() => { keeperMobilePane.value = 'roster' }}
+        data-testid="kw-chat-back-to-roster"
+      >← 키퍼</button>
       <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${live} />
       <div class="kw-chat-id">
         <div class="kw-chat-name-row">

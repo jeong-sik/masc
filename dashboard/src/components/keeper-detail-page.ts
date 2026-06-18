@@ -17,6 +17,7 @@ import {
   selectedKeeper,
   clearKeeperDetailSelection,
   closeKeeperDetail,
+  keeperMobilePane,
 } from './keeper-detail-state'
 import {
   refreshAfterRuntimeAction,
@@ -136,6 +137,13 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
     selectedKeeper.value = keeper
     selectKeeper(keeper.name)
     void loadKeeperConfig(keeper.name)
+    // Entering a keeper (mount or keeper change) always lands on the chat pane
+    // on mobile. keeperMobilePane is a module-global signal; the back button
+    // sets it to 'roster', but many entry points (command palette, overview
+    // cards, reactivity monitor, …) route straight to a keeper via navigate()
+    // without going through openKeeperDetail/roster-select, so without this
+    // reset a stale 'roster' would hide the chat of the keeper just selected.
+    keeperMobilePane.value = 'chat'
     return () => {
       clearKeeperDetailSelection(keeper.name)
     }
@@ -288,7 +296,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
   `
 
   return html`
-    <div class="kw-grid v2-monitoring-surface" data-detail=${detailOpen ? 'open' : 'closed'} data-route-focused-keeper=${keeper.name}>
+    <div class="kw-grid v2-monitoring-surface" data-detail=${detailOpen ? 'open' : 'closed'} data-mobile-pane=${keeperMobilePane.value} data-route-focused-keeper=${keeper.name}>
       <${KeeperWorkspaceRoster} activeName=${keeper.name} />
       ${detailOpen
         ? html`

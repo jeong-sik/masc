@@ -10,6 +10,7 @@ vi.mock('../../router', async (orig) => ({
 
 import { navigate } from '../../router'
 import { keepers } from '../../store'
+import { keeperMobilePane } from '../keeper-detail-state'
 import { KeeperWorkspaceRoster } from './keeper-workspace-roster'
 import type { Keeper } from '../../types'
 
@@ -63,14 +64,18 @@ describe('KeeperWorkspaceRoster', () => {
     expect(chips.some(c => c?.includes('주의') && c?.includes('1'))).toBe(true)
   })
 
-  it('navigates to the keeper route on row click', () => {
+  it('navigates to the keeper route and reveals the chat pane on row click', () => {
     const onSelect = vi.fn()
+    // Simulate the mobile roster pane being open; selecting a keeper must
+    // switch the single-pane mobile layout over to that keeper's chat.
+    keeperMobilePane.value = 'roster'
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" onSelect=${onSelect} />`, host)
     const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
     const sangsuRow = rows.find(r => r.textContent?.includes('sangsu'))
     sangsuRow?.click()
     expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'sangsu' })
     expect(onSelect).toHaveBeenCalledWith('sangsu')
+    expect(keeperMobilePane.value).toBe('chat')
   })
 
   it('filters by search query', () => {

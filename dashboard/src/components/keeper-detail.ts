@@ -5,6 +5,7 @@ export {
   openKeeperDetail,
   clearKeeperDetailSelection,
   closeKeeperDetail,
+  keeperMobilePane,
 } from './keeper-detail-state'
 export {
   filterCheckpointHistory,

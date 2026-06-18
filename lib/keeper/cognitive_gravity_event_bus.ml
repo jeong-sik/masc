@@ -7,7 +7,9 @@
 
     BLOCKER A fix: uses ordered list instead of Hashtbl to guarantee
     registration-order dispatch.
-    BLOCKER B fix: wires custom equal_decay_trigger for trigger matching. *)
+    BLOCKER B fix: wires custom equal_decay_trigger for trigger matching.
+    BLOCKER 1 fix: re-raises Eio.Cancel.Cancelled instead of absorbing it.
+    BLOCKER 2 fix: matches on constructor only, not full payload values. *)
 
 open Core
 
@@ -30,21 +32,17 @@ type decay_event = {
 }
 
 (* ------------------------------------------------------------------ *)
-(* Custom equality — needed because polymorphic compare fails on      *)
-(* float and string list fields (BLOCKER B)                            *)
+(* Trigger constructor matching — matches on variant only, not        *)
+(* payload values (BLOCKER 2 fix). Used for dispatch/emit to find     *)
+(* handlers registered for a trigger *type*, not a specific value.    *)
 (* ------------------------------------------------------------------ *)
 
-let equal_decay_trigger (a : decay_trigger) (b : decay_trigger) =
-  match a, b with
-  | TurnElapsed { age = a1; min_age = a2 }, TurnElapsed { age = b1; min_age = b2 } ->
-    Int.(a1 = b1 && a2 = b2)
-  | NoNewMentions { turns = a1; min_idle = a2 }, NoNewMentions { turns = b1; min_idle = b2 } ->
-    Int.(a1 = b1 && a2 = b2)
-  | Contradiction { fact_id = a; staleness = b }, Contradiction { fact_id = a'; staleness = b' } ->
-    String.(a = a') && Float.(b = b')
-  | ManualDecay { fact_ids = a; rate = b }, ManualDecay { fact_ids = a'; rate = b' } ->
-    List.equal String.equal a a' && Float.(b = b')
-  | _, _ -> false
+let trigger_constructor (t : decay_trigger) : decay_trigger =
+  match t with
+  | TurnElapsed _ -> TurnElapsed { age = 0; min_age = 0 }
+  | NoNewMentions _ -> NoNewMentions { turns = 0; min_idle = 0 }
+  | Contradiction _ -> Contradiction { fact_id = ""; staleness = 0.0 }
+  | ManualDecay _ -> ManualDecay { fact_ids = []; rate = 0.0 }
 
 (* ------------------------------------------------------------------ *)
 (* Registry — ordered list preserves insertion order (BLOCKER A)      *)
@@ -89,20 +87,25 @@ let dispatch () =
   events
 
 (* ------------------------------------------------------------------ *)
-(* Emit — push a decay event into the processing pipeline             *)
+(* Emit — fire handlers whose trigger *constructor* matches, in       *)
+(* registration order. Uses trigger_constructor to match on variant    *)
+(* only, not payload values (BLOCKER 2 fix).                          *)
 (* ------------------------------------------------------------------ *)
 
 let emit event =
+  let event_ctor = trigger_constructor event.trigger in
   let matching =
     List.filter !registry ~f:(fun (registered, _handler) ->
-      equal_decay_trigger registered event.trigger)
+      trigger_constructor registered = event_ctor)
   in
   let matching_rev = List.rev matching in
   List.iter matching_rev ~f:(fun (_registered, handler) ->
+    (* BLOCKER 1 fix: re-raise Cancelled instead of absorbing it *)
     try handler event
-    with exn ->
-      Log.warn ~mod_name:"cognitive_gravity_event_bus" ~msg:"emit handler raised"
-        ~metadata:[("exn", Exn.to_string exn)]
+    with Eio.Cancel.Cancelled as e -> raise e
+       | exn ->
+           Log.warn ~mod_name:"cognitive_gravity_event_bus" ~msg:"emit handler raised"
+             ~metadata:[("exn", Exn.to_string exn)]
   )
 
 (* ------------------------------------------------------------------ *)

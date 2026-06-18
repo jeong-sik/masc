@@ -94,6 +94,108 @@ let test_nudge_appended_each_retry () =
   let counts = List.rev_map nudge_count !seen in
   check (list int) "one nudge added per retry" [ 0; 1; 2 ] counts
 
+(* Drive [cadence_step] sequentially from a fresh keeper (counter -1) for
+   [turns] turns, collecting the [due] decision each turn. When a turn is due
+   we simulate a successful extraction by resetting the counter to 0, matching
+   the behavior of [run_best_effort] calling [cadence_record_success]. *)
+let run_cadence ~cadence ~turns =
+  let counter = ref (-1) in
+  List.init turns (fun _ ->
+    let next, due = R.cadence_step ~cadence ~counter:!counter in
+    counter := next;
+    if due then counter := 0;
+    due)
+
+let test_cadence_fresh_then_every_cadence () =
+  (* cadence 3: first turn is due immediately, then wait three turns between
+     subsequent extractions. *)
+  check (list bool) "fresh due immediately, then every third turn"
+    [ true; false; false; true; false; false; true; false; false ]
+    (run_cadence ~cadence:3 ~turns:9)
+
+let test_cadence_one_always_due () =
+  (* cadence 1 (and the floored <=1 case) restores per-turn extraction. *)
+  check (list bool) "cadence 1 is due every turn"
+    [ true; true; true; true ]
+    (run_cadence ~cadence:1 ~turns:4);
+  check (pair int bool) "cadence<=1 pins counter at 0"
+    (0, true)
+    (R.cadence_step ~cadence:1 ~counter:5)
+
+let test_cadence_step_transitions () =
+  (* A fresh counter is due immediately and moves to the due threshold. *)
+  check (pair int bool) "fresh keeper is due immediately"
+    (3, true)
+    (R.cadence_step ~cadence:3 ~counter:(-1));
+  (* A due threshold stays due until reset by a successful extraction. *)
+  check (pair int bool) "due counter stays at threshold"
+    (3, true)
+    (R.cadence_step ~cadence:3 ~counter:3);
+  (* Mid-cycle advances without firing. *)
+  check (pair int bool) "mid-cycle advances without firing"
+    (2, false)
+    (R.cadence_step ~cadence:3 ~counter:1)
+
+let test_cadence_record_success_resets () =
+  let kid = "test-cadence-record-success" and tid = "trace-record-success" in
+  check bool "fresh (keeper, trace) is due" true
+    (R.cadence_due ~keeper_id:kid ~trace_id:tid);
+  R.cadence_record_success ~keeper_id:kid ~trace_id:tid;
+  check bool "after success the next turn is not due" false
+    (R.cadence_due ~keeper_id:kid ~trace_id:tid)
+
+(* [cadence_due] drives the real per-(keeper, trace) counter table (the gate
+   [run_best_effort] uses). A fresh pair is due immediately, and failures are
+   left due until [cadence_record_success] is called. Asserted as
+   period-invariants so they hold for any configured cadence. *)
+let test_cadence_due_periodic () =
+  let kid = "test-cadence-due-periodic" and tid = "trace-periodic" in
+  let cadence = R.cadence_turns () in
+  let periods = 4 in
+  let dues = ref 0 in
+  for _ = 1 to cadence * periods do
+    if R.cadence_due ~keeper_id:kid ~trace_id:tid
+    then (
+      incr dues;
+      R.cadence_record_success ~keeper_id:kid ~trace_id:tid)
+  done;
+  check int "exactly one extraction per cadence period" periods !dues
+
+let test_cadence_due_independent_keepers () =
+  let cadence = R.cadence_turns () in
+  if cadence <= 1
+  then () (* cadence 1: both due every turn, independence is trivial *)
+  else (
+    let ka = "test-cadence-due-ind-a" and ta = "trace-a"
+    and kb = "test-cadence-due-ind-b" and tb = "trace-b" in
+    (* Put ka into a persistent due state without recording success. *)
+    ignore (R.cadence_due ~keeper_id:ka ~trace_id:ta);
+    (* Put kb at counter 0 by recording success on its fresh due turn. *)
+    ignore (R.cadence_due ~keeper_id:kb ~trace_id:tb);
+    R.cadence_record_success ~keeper_id:kb ~trace_id:tb;
+    (* ka remains due; kb is mid-cycle and not due. *)
+    check bool "ka stays due after failed/skipped attempt" true
+      (R.cadence_due ~keeper_id:ka ~trace_id:ta);
+    check bool "kb advances on its own counter, not due on ka's schedule" false
+      (R.cadence_due ~keeper_id:kb ~trace_id:tb))
+
+let test_cadence_due_scoped_by_trace () =
+  let cadence = R.cadence_turns () in
+  if cadence <= 1
+  then () (* cadence 1: every trace due every turn *)
+  else (
+    let kid = "test-cadence-scope-trace" and ta = "trace-a" and tb = "trace-b" in
+    (* Advance trace a past its fresh-due turn to a non-due turn. *)
+    if R.cadence_due ~keeper_id:kid ~trace_id:ta
+    then R.cadence_record_success ~keeper_id:kid ~trace_id:ta;
+    ignore (R.cadence_due ~keeper_id:kid ~trace_id:ta);
+    (* Trace b is fresh and should be due immediately regardless of trace a. *)
+    check bool "fresh trace is due immediately" true
+      (R.cadence_due ~keeper_id:kid ~trace_id:tb);
+    (* Trace a remains not due on its own counter. *)
+    check bool "trace a counter is independent" false
+      (R.cadence_due ~keeper_id:kid ~trace_id:ta))
+
 let () =
   run "keeper_librarian_retry"
     [
@@ -104,5 +206,15 @@ let () =
           test_case "bounded then fails" `Quick test_bounded_then_fails;
           test_case "transport not retried" `Quick test_transport_not_retried;
           test_case "nudge appended each retry" `Quick test_nudge_appended_each_retry;
+        ] );
+      ( "cadence",
+        [
+          test_case "fresh then every cadence" `Quick test_cadence_fresh_then_every_cadence;
+          test_case "cadence 1 always due" `Quick test_cadence_one_always_due;
+          test_case "step transitions" `Quick test_cadence_step_transitions;
+          test_case "record success resets" `Quick test_cadence_record_success_resets;
+          test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
+          test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
+          test_case "cadence_due is scoped by trace" `Quick test_cadence_due_scoped_by_trace;
         ] );
     ]

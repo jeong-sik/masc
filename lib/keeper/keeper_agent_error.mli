@@ -3,6 +3,11 @@
 (** Coarse categorisation of [Agent_sdk.Error.sdk_error] (for dashboards). *)
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
+(** User-facing SDK error message for keeper chat/tool surfaces.
+    Keeps low-level SDK prefixes out of persisted keeper replies while
+    telemetry and terminal reason codes continue to use structured errors. *)
+val user_message_of_sdk_error : Agent_sdk.Error.sdk_error -> string
+
 (** Layer-aware termination semantics for SDK errors crossing the OAS ->
     keeper boundary.
 

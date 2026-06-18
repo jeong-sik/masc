@@ -146,6 +146,47 @@ let test_server_parse_rejection_split () =
     ~server:false
 ;;
 
+let test_user_message_of_network_errors () =
+  let api_dns =
+    SdkE.Api
+      (Retry.NetworkError
+         { message = "failed to resolve hostname: ollama.com"
+         ; kind = Http.Dns_failure
+         })
+  in
+  Alcotest.(check string)
+    "api dns user message"
+    "Runtime provider unavailable: DNS lookup failed. Check network/DNS or select another runtime. Detail: failed to resolve hostname: ollama.com"
+    (AE.user_message_of_sdk_error api_dns);
+  Alcotest.(check bool)
+    "api dns hides Agent.run prefix"
+    false
+    (String_util.contains_substring_ci
+       (AE.user_message_of_sdk_error api_dns)
+       "Agent.run failed");
+  let provider_dns =
+    SdkE.Provider
+      (Llm_provider.Error.NetworkError
+         { provider = "ollama_cloud"
+         ; kind = Http.Dns_failure
+         ; timeout_phase = None
+         ; detail = "failed to resolve hostname: ollama.com"
+         })
+  in
+  Alcotest.(check string)
+    "provider dns user message"
+    "Runtime provider 'ollama_cloud' unavailable: DNS lookup failed. Check network/DNS or select another runtime. Detail: failed to resolve hostname: ollama.com"
+    (AE.user_message_of_sdk_error provider_dns);
+  let guardrail =
+    SdkE.Agent
+      (SdkE.GuardrailViolation { validator = "policy"; reason = "blocked" })
+  in
+  Alcotest.(check string)
+    "non-network errors preserve SDK message"
+    (Agent_sdk.Error.to_string guardrail)
+    (AE.user_message_of_sdk_error guardrail)
+;;
+
 let () =
   Alcotest.run
     "keeper_sdk_error_typed_bridge"
@@ -166,6 +207,12 @@ let () =
             "provider and model parse rejections remain distinguishable"
             `Quick
             test_server_parse_rejection_split
+        ] )
+    ; ( "user-facing error message"
+      , [ Alcotest.test_case
+            "network errors are presented as runtime availability failures"
+            `Quick
+            test_user_message_of_network_errors
         ] )
     ]
 ;;

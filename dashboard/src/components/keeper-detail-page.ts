@@ -17,6 +17,7 @@ import {
   selectedKeeper,
   clearKeeperDetailSelection,
   closeKeeperDetail,
+  keeperMobilePane,
 } from './keeper-detail-state'
 import {
   refreshAfterRuntimeAction,
@@ -288,7 +289,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
   `
 
   return html`
-    <div class="kw-grid v2-monitoring-surface" data-detail=${detailOpen ? 'open' : 'closed'} data-route-focused-keeper=${keeper.name}>
+    <div class="kw-grid v2-monitoring-surface" data-detail=${detailOpen ? 'open' : 'closed'} data-mobile-pane=${keeperMobilePane.value} data-route-focused-keeper=${keeper.name}>
       <${KeeperWorkspaceRoster} activeName=${keeper.name} />
       ${detailOpen
         ? html`

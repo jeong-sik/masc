@@ -51,11 +51,18 @@
   .kw-grid { grid-template-columns: var(--kw-roster-w, 248px) minmax(0, 1fr); }
   .kw-grid .kw-rail { display: none; }
 }
-/* Below 860px the rail is already gone; roster + conversation stack in one
- * column. A dedicated mobile pane-switcher is deferred (no JS sets it yet),
- * so we do not ship the unreachable data-mobile-pane hide rules. */
+/* Below 860px the rail is already gone and roster + conversation can no longer
+ * sit side by side. Rather than stacking both in one column (which halves the
+ * grid height — the conversation collapses to ~half a screen behind the full
+ * roster), switch to a single visible pane driven by `data-mobile-pane`
+ * (keeperMobilePane signal). The hidden pane is removed from the grid so the
+ * visible one stretches to the full grid height. Roster row select → 'chat';
+ * the chat header "← 키퍼" back button → 'roster'. */
 @media (max-width: 860px) {
   .kw-grid { grid-template-columns: minmax(0, 1fr); }
+  .kw-grid[data-mobile-pane="chat"] > .kw-roster { display: none; }
+  .kw-grid[data-mobile-pane="roster"] > .kw-chat,
+  .kw-grid[data-mobile-pane="roster"] > .kw-detail { display: none; }
 }
 
 /* ════ ROSTER (left) ════════════════════════════════════════════ */
@@ -170,10 +177,23 @@
   flex: none; padding: 12px 28px;
   border-bottom: 1px solid var(--color-border-default);
   background: var(--color-bg-panel-alt);
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; gap: 10px 14px;
+  /* Wrap when the chat pane is narrow (3-pane laptop widths, ≤860px mobile).
+   * Without this the flex:none actions squeeze the flex:1 identity to width:0
+   * and its name + state pill overflow on top of the buttons. With wrap +
+   * .kw-chat-id min-width, the actions drop to their own row instead. */
+  flex-wrap: wrap;
 }
-.kw-chat-id { min-width: 0; flex: 1; }
+/* min-width (not 0) is load-bearing: it stops the flex algorithm from
+ * collapsing the identity to zero to fit the actions on one row — which is
+ * what made the name + pill overflow onto the buttons. Below this width the
+ * actions wrap to their own row instead (see .kw-chat-head flex-wrap). */
+.kw-chat-id { min-width: 9rem; flex: 1; }
 .kw-chat-name-row { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+/* Back-to-roster affordance: only meaningful on the single-pane mobile layout
+ * (shown at ≤860px in the conversation media block). On desktop the roster is
+ * always visible, so the button is hidden. */
+.kw-chat-back { display: none; flex: none; }
 .kw-chat-name { font-size: var(--fs-20); font-weight: var(--fw-bold); letter-spacing: -0.01em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
 
 .kw-state-pill {
@@ -196,6 +216,33 @@
 .kw-act:hover { color: var(--color-fg-primary); border-color: var(--color-border-strong); background: var(--color-bg-hover); }
 .kw-act:disabled { opacity: 0.5; cursor: not-allowed; }
 .kw-act.danger:hover { color: var(--color-status-err); border-color: rgb(var(--color-status-err-glow) / 0.5); }
+
+/* Mobile conversation header (≤860px). The desktop header is a single flex row
+ * [sigil | identity (flex:1) | actions (flex:none)]. At phone widths the five
+ * action buttons consume the row and squeeze the flex:1 identity to width:0,
+ * whose overflowing name + state pill then paint on top of the buttons. Fix:
+ * let the header wrap, force the actions onto their own full-width row (so the
+ * identity keeps real width and cannot collapse), and make that row a
+ * horizontal scroll strip instead of overflowing. The "← 키퍼" back button
+ * appears here as the pane-switch affordance. */
+@media (max-width: 860px) {
+  .kw-chat-head { flex-wrap: wrap; padding: 9px 14px; gap: 8px 10px; }
+  .kw-chat-back { display: inline-flex; align-items: center; }
+  .kw-chat-id { flex: 1 1 auto; }
+  .kw-chat-actions {
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .kw-chat-actions::-webkit-scrollbar { display: none; }
+  .kw-chat-actions > * { flex: none; }
+  /* Reclaim vertical space for the transcript: tighter composer + insets. */
+  .kw-composer-inner { padding: 0 14px; }
+  .kw-composer-inner .control-textarea { min-height: 56px; }
+  .kw-thread-inner .chat-transcript { padding-left: 16px; padding-right: 16px; padding-top: 12px; }
+}
 
 /* thread: the conversation panel renders ChatTranscript + composer inside.
  * Provide the spacious rhythm + centered max-width column here. */

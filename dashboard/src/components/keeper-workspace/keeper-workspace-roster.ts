@@ -10,6 +10,7 @@ import type { VNode } from 'preact'
 import { keepers } from '../../store'
 import { navigate } from '../../router'
 import { selectKeeper } from '../../keeper-runtime'
+import { keeperMobilePane } from '../keeper-detail-state'
 import { keeperActivityDisplay, keeperWorkPreview } from '../../lib/keeper-runtime-display'
 import type { Keeper } from '../../types'
 import { VirtualList } from '../common/virtual-list'
@@ -145,6 +146,9 @@ export function KeeperWorkspaceRoster({
 
   const select = (name: string) => {
     selectKeeper(name)
+    // On mobile the roster and conversation share one column; picking a keeper
+    // should reveal that keeper's chat (the roster is the "back" target).
+    keeperMobilePane.value = 'chat'
     navigate('monitoring', { section: 'agents', keeper: name })
     onSelect?.(name)
   }

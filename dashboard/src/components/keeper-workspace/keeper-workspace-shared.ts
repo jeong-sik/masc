@@ -45,14 +45,17 @@ export function WorkspaceSigil({
 }): VNode {
   const slot = kSlot(id)
   const sigil = kSigil(id)
+  // B4: expose the slot glow as --sigil-glow so the CSS kw-sigil-beat keyframe
+  // can pulse it (replacing the old static box-shadow). Always set so a
+  // non-beating sigil that later starts beating already has the color wired.
   const style = {
     width: `${size}px`,
     height: `${size}px`,
     fontSize: `${Math.round(size * 0.42)}px`,
     background: `var(--color-keeper-${slot})`,
-    boxShadow: beat ? `0 0 10px rgb(var(--color-keeper-${slot}-glow) / 0.6)` : undefined,
+    '--sigil-glow': `var(--color-keeper-${slot}-glow)`,
   }
-  return html`<span class="kw-sigil" style=${style} title=${id} aria-label=${id}>${sigil}</span>`
+  return html`<span class=${`kw-sigil${beat ? ' kw-sigil-beat' : ''}`} style=${style} title=${id} aria-label=${id}>${sigil}</span>`
 }
 
 /** Friendly (Korean) label per canonical status token. Keyed on the tokens

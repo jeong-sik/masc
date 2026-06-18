@@ -338,7 +338,18 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
       v
     | `Timed_out -> raise (Compute_timeout (key, true))
     | `Wait token ->
-      Time_compat.sleep wait_poll_interval_sec;
+      (* Per-fiber ±20% jitter on the poll interval. Concurrent waiters
+         parked on the same in-flight cache key (e.g. several keepers
+         requesting an expensive execution-surface entry at once) would
+         otherwise wake on the identical 0.25s boundary and re-poll in
+         lockstep — a poll burst independent of the TTL-expiry stampede
+         that [jittered_ttl] already disperses. Spreading wakeups keeps
+         the average interval at [wait_poll_interval_sec] while breaking
+         the synchronization. [Random]'s default state is OCaml-5
+         domain-local and auto-seeded; poll timing is a runtime concern,
+         not a deterministic output, so non-determinism is acceptable
+         here (unlike the deterministic [jittered_ttl]). *)
+      Time_compat.sleep (wait_poll_interval_sec *. (0.8 +. Random.float 0.4));
       try_get ~waited:(waited +. wait_poll_interval_sec) ~watching_token:(Some token)
     | `Stale (stale_value, token) ->
       (* PR-0.2.A: stale-served-from-cache counts as a hit (caller gets

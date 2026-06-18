@@ -1,5 +1,5 @@
 import { marked, type Token, type Tokens } from 'marked'
-import DOMPurify from 'dompurify'
+import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import type { ChatBlock, ChatCalloutSeverity, ChatTableCellValue } from '../../types'
 
 function escapeHtml(raw: string): string {
@@ -21,7 +21,7 @@ function linkifyHtml(raw: string): string {
 }
 
 function sanitizeHtml(raw: string): string {
-  return DOMPurify.sanitize(raw)
+  return purifyHtml(raw)
 }
 
 function inlineHtml(raw: string): string {

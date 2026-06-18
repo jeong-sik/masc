@@ -3,7 +3,7 @@
     The LLM judgment ([run_review]) needs a runtime and is exercised through
     the shared engine elsewhere; here we verify the deterministic part: a [Fail]
     verdict records an attention item for the author keeper, [Pass]/[Warn] do
-    not, and the same rejection deduplicates. *)
+    not, and repeated task-level FAIL verdicts deduplicate. *)
 
 open Alcotest
 module AR = Masc.Keeper_adversarial_review
@@ -60,6 +60,9 @@ let input ~author : AR.review_input =
     evidence_refs = "PR #123";
   }
 
+let input_with_evidence ~author evidence_refs : AR.review_input =
+  { (input ~author) with evidence_refs }
+
 let pending base ~keeper =
   EA.pending_for_keeper ~base_path:base ~keeper_name:keeper ~limit:50 ()
 
@@ -96,13 +99,16 @@ let test_warn_does_not_wake () =
       check int "no pending after warn" 0
         (List.length (pending base ~keeper:author)))
 
-let test_fail_dedup_same_reason () =
+let test_fail_dedup_different_reasons () =
   with_temp_base (fun base ->
       let author = "builder-keeper" in
-      let v = VC.Fail "same reason" in
-      AR.act_on_verdict ~base_path:base ~input:(input ~author) v |> check_ok;
-      AR.act_on_verdict ~base_path:base ~input:(input ~author) v |> check_ok;
-      check int "dedup: still one pending" 1
+      AR.act_on_verdict ~base_path:base ~input:(input ~author)
+        (VC.Fail "error path at foo.ml:10")
+      |> check_ok;
+      AR.act_on_verdict ~base_path:base ~input:(input ~author)
+        (VC.Fail "same bug, different wording at foo.ml:11")
+      |> check_ok;
+      check int "dedup: still one pending for the task" 1
         (List.length (pending base ~keeper:author)))
 
 let test_build_prompt_replaces_variables () =
@@ -133,6 +139,27 @@ let test_build_prompt_fails_closed_on_unresolved_variable () =
       | Ok rendered -> fail ("expected error, got: " ^ rendered)
       | Error msg -> check bool "error reported" true (String.length msg > 0))
 
+let test_build_prompt_preserves_literal_braces_in_values () =
+  with_prompt_dir
+    ~variables:[ "task_title"; "task_description"; "evidence_refs" ]
+    "Evidence: {{evidence_refs}}\n"
+    (fun () ->
+      let evidence_refs = {|snippet: "{{ .Release.Name }}"|} in
+      match
+        AR.build_prompt
+          (input_with_evidence ~author:"builder-keeper" evidence_refs)
+      with
+      | Ok rendered ->
+        check bool "literal braces from value preserved" true
+          (try
+             ignore
+               (Str.search_forward
+                  (Str.regexp_string {|{{ .Release.Name }}|})
+                  rendered 0);
+             true
+           with Not_found -> false)
+      | Error msg -> fail msg)
+
 let () =
   Alcotest.run "keeper-adversarial-review"
     [
@@ -141,7 +168,8 @@ let () =
           test_case "fail wakes author" `Quick test_fail_wakes_author;
           test_case "pass no wake" `Quick test_pass_does_not_wake;
           test_case "warn no wake" `Quick test_warn_does_not_wake;
-          test_case "fail dedup same reason" `Quick test_fail_dedup_same_reason;
+          test_case "fail dedup different reasons" `Quick
+            test_fail_dedup_different_reasons;
         ] );
       ( "render-fail-closed",
         [
@@ -149,5 +177,7 @@ let () =
             test_build_prompt_replaces_variables;
           test_case "build_prompt errors on unresolved variable" `Quick
             test_build_prompt_fails_closed_on_unresolved_variable;
+          test_case "build_prompt preserves literal braces in values" `Quick
+            test_build_prompt_preserves_literal_braces_in_values;
         ] );
     ]

@@ -8,34 +8,13 @@ type review_input = {
 
 let prompt_name = "verification.adversarial_review"
 
-let template_variable_regex = Re.Pcre.re {|\{\{([^}]+)\}\}|} |> Re.compile
-
-let remaining_template_variables rendered =
-  Re.all template_variable_regex rendered
-  |> List.map (fun g -> Re.Group.get g 1 |> String.trim)
-  |> List.filter (fun name -> name <> "")
-  |> List.sort_uniq String.compare
-
-let validate_no_remaining_variables rendered =
-  match remaining_template_variables rendered with
-  | [] -> Ok rendered
-  | vars ->
-    Error
-      (Printf.sprintf
-         "Rendered prompt still contains unreplaced template variables: %s"
-         (String.concat ", " vars))
-
 let build_prompt (input : review_input) : (string, string) result =
-  match
-    Prompt_registry.render_prompt_template prompt_name
-      [
-        ("task_title", input.task_title);
-        ("task_description", input.task_description);
-        ("evidence_refs", input.evidence_refs);
-      ]
-  with
-  | Error msg -> Error msg
-  | Ok rendered -> validate_no_remaining_variables rendered
+  Prompt_registry.render_prompt_template prompt_name
+    [
+      ("task_title", input.task_title);
+      ("task_description", input.task_description);
+      ("evidence_refs", input.evidence_refs);
+    ]
 
 let parse_json_payload text =
   let trimmed = String.trim text in
@@ -129,14 +108,11 @@ let run_review ~runtime_id (input : review_input) :
     | Error err -> Error (Agent_sdk.Error.to_string err)
 
 (* Identity routing: the work's author is known, so waking them is structural,
-   not a judgment. Dedup is content-addressed on (task_id, reason) so a given
-   rejection wakes the author exactly once. *)
+   not a judgment. Dedup is keyed on the stable task-level FAIL outcome so
+   reason wording drift cannot repeatedly wake the author for the same task. *)
 let wake_author ~base_path ~(input : review_input) ~reason :
     (unit, string) result =
-  let dedupe_key =
-    Printf.sprintf "adversarial_review:%s:%s" input.task_id
-      (Digest.to_hex (Digest.string reason))
-  in
+  let dedupe_key = Printf.sprintf "adversarial_review:%s:fail" input.task_id in
   let event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key in
   let conversation_id = Printf.sprintf "review:%s" input.task_id in
   let item : Keeper_external_attention.item =

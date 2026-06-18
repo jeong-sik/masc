@@ -13,8 +13,8 @@
     free-text fallback parses a JSON payload with
     [Verifier_core.parse_verdict_from_json]; it does not use string matching to
     decide pass/fail. The only deterministic parts are identity (which keeper
-    authored the work, hence who to wake) and event-id dedup (a given verdict
-    wakes the author at most once).
+    authored the work, hence who to wake) and event-id dedup (a given task-level
+    FAIL wakes the author at most once).
 
     This module is a proof-of-concept. It is not yet wired to a keeper
     lifecycle trigger; integration with the tool registration in #21357 is the
@@ -31,8 +31,8 @@ type review_input = {
 val build_prompt : review_input -> (string, string) result
 (** Render the adversarial review prompt from
     [config/prompts/verification.adversarial_review.md]. Returns [Error] if
-    template variables cannot be replaced or if any [{{...}}] placeholders
-    remain after rendering (fail-closed). *)
+    the prompt registry cannot replace one of the prompt's declared template
+    variables. Literal [{{...}}] text inside substituted values is preserved. *)
 
 val run_review :
   runtime_id:string -> review_input -> (Verifier_core.verdict, string) result
@@ -46,9 +46,10 @@ val act_on_verdict :
   base_path:string -> input:review_input -> Verifier_core.verdict -> (unit, string) result
 (** On [Fail], record an external-attention item waking [author_keeper] with
     the verdict reason so the author's next turn sees it. [Pass]/[Warn] do
-    nothing and return [Ok ()]. Dedup is by (task_id, reason) so the same
-    rejection wakes once. Returns [Error] if recording the attention item
-    fails, so the caller can decide whether to fail-closed. *)
+    nothing and return [Ok ()]. Dedup is by (task_id, verdict-class), so a
+    repeated FAIL for the same task wakes once even when the model phrases the
+    reason differently. Returns [Error] if recording the attention item fails,
+    so the caller can decide whether to fail-closed. *)
 
 val review_and_wake_on_fail :
   base_path:string ->

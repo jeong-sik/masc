@@ -921,6 +921,21 @@ let make_stale_agent ?(agent_type = "test") config ~name ~age_seconds =
   in
   Workspace.write_json config path (Yojson.Safe.from_string agent_json)
 
+(* Age a bound agent's last_seen while keeping status:active — simulates a live
+   agent that has gone quiet between heartbeats. Unlike make_stale_agent (which
+   marks the agent inactive, so the include_inactive:false load drops it before
+   any threshold check), this exercises the staleness threshold path in
+   audit_orphan_tasks. *)
+let age_active_agent ?(agent_type = "test") config ~name ~age_seconds =
+  let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
+  let path = Filename.concat agents_path (Workspace.safe_filename name ^ ".json") in
+  let stale_ts = iso_ago age_seconds in
+  let agent_json = Printf.sprintf
+    {|{"name":"%s","agent_type":"%s","status":"active","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
+    name agent_type stale_ts stale_ts
+  in
+  Workspace.write_json config path (Yojson.Safe.from_string agent_json)
+
 let test_cleanup_zombies_detects_regular () =
   with_test_env (fun config ->
     (* Create a regular agent idle for 10 minutes (> 300s threshold) *)
@@ -1336,6 +1351,55 @@ let test_audit_orphan_awaiting_verification_tasks () =
               assignee;
             Alcotest.(check string) "verification orphan task id" "task-001"
               task.id))
+
+(* Regression for #21418: a live keeper that has gone quiet between heartbeats
+   (last_seen past the 300s default, but within the 3600s keeper grace) must NOT
+   have its own claimed task classified as an orphan. With the pre-fix
+   [Time.is_stale] (300s flat) predicate this returned 1 orphan, which drove the
+   keeper self-wake loop that #21418 papered over by filtering self from the
+   count. The root fix routes keepers through [Zombie.is_zombie_for_agent]. *)
+let test_audit_orphan_spares_live_keeper_within_grace () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Keeper Task" ~priority:1 ~description:"" in
+    let keeper = "keeper-grace-agent" in
+    let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
+    age_active_agent config ~agent_type:"keeper" ~name:keeper ~age_seconds:600.0;
+    let orphans = Workspace.audit_orphan_tasks config in
+    Alcotest.(check int) "live keeper within grace is not an orphan" 0
+      (List.length orphans)
+  )
+
+(* A keeper quiet beyond the 3600s keeper grace IS still an orphan, so its task
+   remains reclaimable — the fix extends the grace window, it does not exempt
+   keepers permanently. *)
+let test_audit_orphan_detects_dead_keeper_beyond_grace () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Keeper Task" ~priority:1 ~description:"" in
+    let keeper = "keeper-dead-agent" in
+    let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
+    age_active_agent config ~agent_type:"keeper" ~name:keeper ~age_seconds:4000.0;
+    let orphans = Workspace.audit_orphan_tasks config in
+    Alcotest.(check int) "dead keeper beyond grace is an orphan" 1
+      (List.length orphans);
+    let (_, assignee) = List.hd orphans in
+    Alcotest.(check string) "orphan assignee is the dead keeper" keeper assignee
+  )
+
+(* Non-keeper agents keep the 300s default threshold — 10 minutes quiet orphans
+   the task, confirming the keeper grace is scoped to keepers only. *)
+let test_audit_orphan_nonkeeper_uses_default_threshold () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Regular Task" ~priority:1 ~description:"" in
+    let agent = "claude-worker-agent" in
+    let _ = Workspace.bind_session config ~agent_name:agent ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:agent ~task_id:"task-001" in
+    age_active_agent config ~agent_type:"claude" ~name:agent ~age_seconds:600.0;
+    let orphans = Workspace.audit_orphan_tasks config in
+    Alcotest.(check int) "non-keeper past default threshold is an orphan" 1
+      (List.length orphans)
+  )
 
 let test_cleanup_zombies_releases_tasks () =
   with_test_env (fun config ->
@@ -1817,6 +1881,12 @@ let () =
         "audit orphan awaiting verification tasks"
         `Quick
         test_audit_orphan_awaiting_verification_tasks;
+      Alcotest.test_case "audit orphan spares live keeper within grace" `Quick
+        test_audit_orphan_spares_live_keeper_within_grace;
+      Alcotest.test_case "audit orphan detects dead keeper beyond grace" `Quick
+        test_audit_orphan_detects_dead_keeper_beyond_grace;
+      Alcotest.test_case "audit orphan non-keeper uses default threshold" `Quick
+        test_audit_orphan_nonkeeper_uses_default_threshold;
       Alcotest.test_case "cleanup zombies runtime" `Quick test_cleanup_zombies_releases_tasks;
     ];
 

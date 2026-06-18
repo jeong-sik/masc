@@ -114,7 +114,16 @@ let get_all_agents config =
 
 (** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
     Matches assignees by exact name or agent-type prefix (e.g. "<prefix>" matches "<prefix>-xxx").
-    Agents with Inactive status are excluded from the active set. *)
+    Agents with Inactive status are excluded from the active set.
+
+    Staleness uses the canonical keeper-aware predicate
+    {!Workspace_resilience.Zombie.is_zombie_for_agent}: keeper agents get the
+    longer keeper grace ([MASC_KEEPER_ZOMBIE_THRESHOLD_SEC], default 3600s) and
+    ordinary agents the default ([MASC_ZOMBIE_THRESHOLD_SEC], default 300s) —
+    the same policy as [cleanup_zombies]/[status]. A live keeper that has gone
+    quiet between heartbeats (but within its grace) is therefore not classified
+    as inactive, so its own claimed/in-progress task is not mis-reported as an
+    orphan at the source. *)
 let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
@@ -123,7 +132,11 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
     let active_names =
       load_agents_from_dir config agents_path ~include_inactive:false
       |> List.filter (fun (agent : Masc_domain.agent) ->
-          not (Workspace_resilience.Time.is_stale agent.last_seen))
+          not
+            (Workspace_resilience.Zombie.is_zombie_for_agent
+               ~agent_name:agent.name
+               ~agent_type:agent.agent_type
+               agent.last_seen))
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     in
     let is_active_agent assignee =

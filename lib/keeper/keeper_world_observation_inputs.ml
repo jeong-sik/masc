@@ -69,7 +69,6 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
       (* "Failed" here means still-auditable active work. Terminal Cancelled
          tasks are historical evidence, not a reason to wake every keeper. *)
       Workspace.audit_orphan_tasks config
-      |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
       |> List.map fst
       |> List.filter claim_scope_filter
       |> List.length

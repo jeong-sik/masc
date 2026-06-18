@@ -64,8 +64,9 @@ let helloFailed = false
 const pending = new Map<number, PendingRpc>()
 
 // WebSocket close codes that indicate a persistent failure and should stop
-// reconnection attempts (1008 policy violation, 1011 server error).
-const FATAL_CLOSE_CODES = new Set([1008, 1011])
+// reconnection attempts (1008 policy violation). 1011 (server error) is left
+// to the normal reconnect backoff because it is often transient.
+const FATAL_CLOSE_CODES = new Set([1008])
 
 function sessionStorageOrNull(): Storage | null {
   if (typeof sessionStorage === 'undefined') return null

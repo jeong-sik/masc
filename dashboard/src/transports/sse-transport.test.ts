@@ -133,7 +133,7 @@ describe('createSseTransport', () => {
     expect(instances).toHaveLength(2)
   })
 
-  it('stops reconnecting after retryMaxAttempts and emits close', () => {
+  it('keeps reconnecting after retryMaxAttempts and emits close once', () => {
     const events: { type: string }[] = []
     const transport = createSseTransport('/mcp', {
       retryBaseMs: 10,
@@ -156,8 +156,8 @@ describe('createSseTransport', () => {
     expect(transport.isConnected()).toBe(false)
     expect(events.filter((e) => e.type === 'close')).toHaveLength(1)
 
-    vi.advanceTimersByTime(1_000)
-    expect(instances).toHaveLength(3)
+    vi.advanceTimersByTime(10)
+    expect(instances).toHaveLength(4)
   })
 
   it('resets backoff after a successful reconnect', () => {

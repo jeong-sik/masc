@@ -62,7 +62,12 @@ let () =
     in
     let ctrl = get () in
     set { ctrl with
-      minor_heap_size = 2 * 1024 * 1024;  (* 2M words = 16MB on 64-bit; reduces minor->major promotion rate *)
+      (* minor_heap_size is intentionally not set here. [main_eio.ml]
+         sets it to 4M words (32 MiB) to cut stop-the-world minor-GC
+         pressure from JSON parsing and metric encoding; a second 2M
+         setting here would either be dead (if main_eio runs later) or
+         override the intended 4M (if it runs first), depending on init
+         order. Keep a single source in main_eio.ml. *)
       space_overhead = gc_space_overhead;  (* default 120. Configurable via MASC_GC_SPACE_OVERHEAD.
                                              100 = triggers major GC when free > live (was 200/3x).
                                              Lower = shorter individual pauses, more frequent slices.

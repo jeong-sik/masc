@@ -51,6 +51,7 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
       try Ok (Eio_guard.run_in_systhread compute) with
       | exn -> Error (Printexc.to_string exn)
     in
+    (* NDT-OK: moved cache freshness timestamp; wall-clock metadata is boundary output. *)
     let refreshed_at = Unix.gettimeofday () in
     Stdlib.Mutex.lock dashboard_metrics_cache_mu;
     (match result with

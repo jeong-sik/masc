@@ -31,6 +31,17 @@
   height: 100%;
 }
 
+/* Keeper detail is a focused single-keeper view. On mobile the global header's
+ * action chips (Emergency / Copilot / auth / connection / error) wrap onto two
+ * extra rows (~76px) that crowd out the conversation. Hide them and tighten the
+ * header padding here. The brand block + hamburger stay — the hamburger is the
+ * only global-nav escape on mobile in this mode (the bottom bar is hidden), and
+ * the chips remain reachable from the nav drawer and other surfaces. */
+@media (max-width: 768px) {
+  [data-keeper-detail-mode="true"] .v2-shell-header { padding-top: 4px; padding-bottom: 4px; }
+  [data-keeper-detail-mode="true"] .v2-header-actions { display: none; }
+}
+
 .kw-grid {
   display: grid;
   grid-template-columns:

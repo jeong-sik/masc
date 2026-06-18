@@ -2203,3 +2203,10 @@
  (name test_keeper_global_shared_refs_atomic)
  (modules test_keeper_global_shared_refs_atomic)
  (libraries alcotest masc masc.compaction_trigger))
+
+; Adversarial review wake-on-fail routing (PoC).
+
+(test
+ (name test_keeper_adversarial_review)
+ (modules test_keeper_adversarial_review)
+ (libraries masc_test_deps))

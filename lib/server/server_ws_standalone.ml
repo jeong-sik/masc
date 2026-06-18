@@ -296,7 +296,7 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
                spin until the WSD observes the broken socket. *)
             Server_mcp_transport_ws.cleanup_session session_id
           else begin
-            Atomic.set session.missed_pongs (missed + 1);
+            Atomic.incr session.missed_pongs;
             loop ()
           end
         end

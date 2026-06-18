@@ -13,6 +13,7 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let connected = false
   let reconnectAttempts = 0
+  let closeNotified = false
   const retryMaxAttempts = opts.retryMaxAttempts ?? TRANSPORT_RETRY_MAX_ATTEMPTS
   const retryJitterMs = opts.retryJitterMs ?? TRANSPORT_RETRY_JITTER_MS
 
@@ -21,9 +22,9 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
   }
 
   const scheduleReconnect = () => {
-    if (reconnectAttempts >= retryMaxAttempts) {
+    if (reconnectAttempts >= retryMaxAttempts && !closeNotified) {
+      closeNotified = true
       notify({ type: 'close' })
-      return
     }
     reconnectAttempts += 1
     const maxMs = opts.retryMaxMs ?? TRANSPORT_RETRY_MAX_MS
@@ -41,6 +42,7 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
         connected = true
         retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
         reconnectAttempts = 0
+        closeNotified = false
         notify({ type: 'open' })
       }
       source.onmessage = (ev) => {
@@ -71,6 +73,7 @@ export function createSseTransport(url: string, opts: TransportOptions = {}): Tr
     connected = false
     retryMs = opts.retryBaseMs ?? TRANSPORT_RETRY_BASE_MS
     reconnectAttempts = 0
+    closeNotified = false
     source?.close()
     source = null
     notify({ type: 'close' })

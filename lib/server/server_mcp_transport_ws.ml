@@ -950,7 +950,7 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
             if !send_failed
             then cleanup_session session_id
             else begin
-              Atomic.set session.missed_pongs (Atomic.get session.missed_pongs + 1);
+              Atomic.incr session.missed_pongs;
               loop ()
             end
           end

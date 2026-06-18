@@ -18,7 +18,7 @@ let run
   ~inference_telemetry
   ()
   =
-  (* RFC-0252: snapshot the per-keeper tool-emission accumulator synchronously
+  (* RFC-0255: snapshot the per-keeper tool-emission accumulator synchronously
      at turn end, before the memory series detaches onto the memory lane.
      Reading the live accumulator from a detached fiber could fold a later
      turn's emissions into this turn's notes. *)
@@ -32,7 +32,7 @@ let run
     else None
   in
   (* (1) deterministic write, (2) librarian extraction, (3) compaction run on
-     this keeper's memory lane (RFC-0252), detached from the turn lane. All
+     this keeper's memory lane (RFC-0255), detached from the turn lane. All
      three touch the keeper's memory bank (no internal lock); the lane's
      per-keeper mutex serializes them. meta/config are immutable snapshots, so
      using them after the turn returns does not race a later turn.
@@ -125,7 +125,7 @@ let run
        (Keeper_meta_contract.runtime_id_of_meta meta)
        (Printexc.to_string exn))
   in
-  (* RFC-0252: detach (1)-(3) onto the per-keeper memory lane. When the executor
+  (* RFC-0255: detach (1)-(3) onto the per-keeper memory lane. When the executor
      switch is not initialized (tests, early startup) the lane runs them inline,
      so no memory work is lost. *)
   let (_ : Keeper_memory_lane.outcome) =

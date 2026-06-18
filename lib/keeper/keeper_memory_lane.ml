@@ -1,4 +1,4 @@
-(** Per-keeper memory execution lane. See keeper_memory_lane.mli (RFC-0252). *)
+(** Per-keeper memory execution lane. See keeper_memory_lane.mli (RFC-0255). *)
 
 type entry =
   { mem_mu : Eio.Mutex.t

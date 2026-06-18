@@ -1,4 +1,4 @@
-(** Tests for Keeper_memory_lane (RFC-0252).
+(** Tests for Keeper_memory_lane (RFC-0255).
 
     The lane detaches post-turn memory work from the keeper turn lane:
     serialized within a keeper, independent across keepers, bounded, and

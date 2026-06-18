@@ -133,9 +133,13 @@
 .kw-roster-empty { padding: 30px 12px; text-align: center; color: var(--color-fg-secondary); font-size: var(--fs-13); }
 
 .kw-kp-row {
-  display: grid; grid-template-columns: 40px 1fr auto; gap: 11px; align-items: start;
+  display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: start;
   width: 100%; text-align: left;
-  padding: 11px 10px; border-radius: var(--r-2); cursor: pointer;
+  /* B5: tighter vertical rhythm (standalone roster density) — row padding 11→8
+     so more keepers fit on screen. align-items stays `start` (not the
+     standalone's `center`) because the live row carries a 3rd work-preview
+     line the standalone's 2-line row does not. */
+  padding: 8px 9px; border-radius: var(--r-2); cursor: pointer;
   border: 1px solid transparent; background: transparent;
   transition: background .14s, border-color .14s;
   position: relative;
@@ -189,7 +193,9 @@
 .kw-chat-head {
   flex: none; padding: 12px 28px;
   border-bottom: 1px solid var(--color-border-default);
-  background: var(--color-bg-panel-alt);
+  /* B1: subtle panel→deep vertical gradient (standalone .chat-head voice)
+     instead of a flat fill — gives the header a faint lit-from-top depth. */
+  background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-page));
   display: flex; align-items: center; gap: 10px 14px;
   /* Wrap when the chat pane is narrow (3-pane laptop widths, ≤860px mobile).
    * Without this the flex:none actions squeeze the flex:1 identity to width:0
@@ -207,7 +213,11 @@
  * (shown at ≤860px in the conversation media block). On desktop the roster is
  * always visible, so the button is hidden. */
 .kw-chat-back { display: none; flex: none; }
-.kw-chat-name { font-size: var(--fs-20); font-weight: var(--fw-bold); letter-spacing: -0.01em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
+/* B2: display-font name with positive tracking — the standalone's austere
+   "instrument panel" voice (Space Grotesk under [data-skin=v2], theme-aware via
+   --font-display). Weight eased to semi (was bold) so the wider tracking reads
+   engraved rather than heavy; tracking flipped negative→+0.02em. */
+.kw-chat-name { font-family: var(--font-display); font-size: var(--fs-20); font-weight: var(--fw-semi); letter-spacing: 0.02em; color: var(--color-fg-primary); margin: 0; white-space: nowrap; }
 
 .kw-state-pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -438,3 +448,64 @@
 }
 .kw-cmp-snap-lists { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-11); color: var(--color-fg-secondary); }
 .kw-cmp-snap-lists b { color: var(--color-fg-primary); font-weight: var(--fw-semi); margin-right: 4px; }
+
+/* ════ B3 — message bubbles: asymmetric "speech tail" + emboss ═══════
+ * Ported from the standalone v2 .bubble: a sharp corner on the speaker side
+ * (assistant top-left, user top-right) so each bubble points toward its author,
+ * plus a faint inner top-highlight emboss. Scoped to the workspace conversation
+ * (data-keeper-chat-layout="workspace") so the shared ChatTranscript used by
+ * every other surface keeps its symmetric rounded bubbles. The light-highlight
+ * emboss assumes the dark v2 skin; a paper/light theme would want an ink shadow
+ * instead (deferred — workspace is dark-skin today). */
+[data-keeper-chat-layout="workspace"] .chat-bubble {
+  border-radius: 4px 14px 14px 14px;
+  box-shadow: inset 0 1px 0 rgb(247 241 230 / 0.05), 0 2px 6px rgb(0 0 0 / 0.34);
+}
+[data-keeper-chat-layout="workspace"] .chat-bubble.user {
+  border-radius: 14px 4px 14px 14px;
+}
+
+/* ════ B4 — sigil heartbeat: a running keeper's avatar breathes ══════
+ * Replaces WorkspaceSigil's static glow (beat=true) with a 1.5s pulse, matching
+ * the standalone .sigil.heartbeat. --sigil-glow is set inline per keeper slot
+ * color by WorkspaceSigil; the fallback keeps the keyframe valid if it is unset.
+ * Honors prefers-reduced-motion by falling back to a steady glow. */
+@keyframes kw-sigil-beat {
+  0%, 100% { box-shadow: 0 0 6px rgb(var(--sigil-glow, 255 255 255) / 0.45); }
+  50%      { box-shadow: 0 0 14px rgb(var(--sigil-glow, 255 255 255) / 0.85); }
+}
+.kw-sigil-beat { animation: kw-sigil-beat 1.5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .kw-sigil-beat { animation: none; box-shadow: 0 0 8px rgb(var(--sigil-glow, 255 255 255) / 0.5); }
+}
+
+/* ════ C1 — day divider in the transcript ═══════════════════════════
+ * Standalone .daydiv: a centered uppercase date with a hairline rule on each
+ * side. Rendered by ChatTranscript only when showDayDividers (workspace). */
+.kw-daydiv {
+  display: flex; align-items: center; gap: 12px;
+  margin: 4px 0;
+  font-size: var(--fs-10); letter-spacing: 0.18em; text-transform: uppercase;
+  color: var(--color-fg-muted);
+}
+.kw-daydiv::before, .kw-daydiv::after {
+  content: ""; flex: 1; height: 1px; background: var(--color-border-divider);
+}
+
+/* ════ C2 — message source badge ════════════════════════════════════
+ * Distinguishes non-obvious message provenance (world-state / internal /
+ * tool / system) from a plain user/assistant turn. Mirrors the standalone
+ * .src-badge chip; colors are semantic and tied to the dashboard tokens
+ * (the standalone's channel colors don't map to the live transport). */
+.kw-src-badge {
+  display: inline-flex; align-items: center;
+  font-size: var(--fs-10); letter-spacing: 0.08em; text-transform: uppercase;
+  font-weight: var(--fw-semi);
+  padding: 1px 6px; border-radius: var(--r-1);
+  color: var(--color-fg-secondary);
+  background: var(--color-bg-surface); border: 1px solid var(--color-border-default);
+}
+.kw-src-badge.world    { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); }
+.kw-src-badge.internal { color: var(--color-fg-muted); }
+.kw-src-badge.tool     { color: var(--color-status-ok); border-color: rgb(var(--color-status-ok-glow) / 0.4); }
+.kw-src-badge.system   { color: var(--color-status-warn); border-color: rgb(var(--color-status-warn-glow) / 0.4); }

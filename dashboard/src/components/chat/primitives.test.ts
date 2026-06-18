@@ -1230,3 +1230,103 @@ describe('rich block URL safety', () => {
     expect(container.textContent).toContain('unsafe URL')
   })
 })
+
+describe('ChatTranscript — workspace day dividers (C1)', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('inserts one divider before the first message of each calendar day', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'a', text: 'day one', timestamp: '2026-03-24T12:00:00.000Z' }),
+          entry({ id: 'b', text: 'same day', timestamp: '2026-03-24T13:00:00.000Z' }),
+          entry({ id: 'c', text: 'two days later', timestamp: '2026-03-26T12:00:00.000Z' }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showDayDividers=${true}
+      />`,
+      container,
+    )
+    // Two distinct days (a/b share one) → two dividers, not three.
+    const dividers = container.querySelectorAll('.kw-daydiv')
+    expect(dividers.length).toBe(2)
+    // Absolute "M월 D일" label (timezone-independent shape assertion).
+    expect(dividers[0]?.textContent ?? '').toMatch(/\d+월 \d+일/)
+  })
+
+  it('renders no dividers when the flag is off (every non-workspace surface)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'a', text: 'one', timestamp: '2026-03-24T12:00:00.000Z' }),
+          entry({ id: 'c', text: 'two', timestamp: '2026-03-26T12:00:00.000Z' }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+    expect(container.querySelectorAll('.kw-daydiv').length).toBe(0)
+  })
+})
+
+describe('ChatMessageBubble — workspace source badge (C2)', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('badges a non-obvious provenance (world-state) when enabled', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'w', text: 'injected context', role: 'system', source: 'world_state_prompt' })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    const badge = container.querySelector('.kw-src-badge.world')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toContain('월드')
+  })
+
+  it('leaves an ordinary user turn unbadged', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'u', text: 'hi', role: 'user', source: 'direct_user' })]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge')).toBeNull()
+  })
+
+  it('renders no badge when the flag is off', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'w', text: 'injected', role: 'system', source: 'world_state_prompt' })]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+    expect(container.querySelector('.kw-src-badge')).toBeNull()
+  })
+})

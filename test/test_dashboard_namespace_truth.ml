@@ -723,6 +723,23 @@ let test_namespace_truth_snapshot_hash_ignores_generated_at () =
         (Server_dashboard_http.should_broadcast_namespace_truth_snapshot
            (snapshot ~generated_at:"2026-04-09T00:00:10Z" ~active_sessions:2)))
 
+let test_namespace_truth_snapshot_hash_avoids_string_collision () =
+  (* Length-prefixing string fields must keep distinct payloads distinct.
+     The pre-fix hash would collide on these two list-of-string shapes. *)
+  Fun.protect
+    ~finally:(fun () ->
+      Server_dashboard_http.last_namespace_truth_snapshot_hash := None)
+    (fun () ->
+      Server_dashboard_http.last_namespace_truth_snapshot_hash := None;
+      Eio_main.run @@ fun _env ->
+      let payload fields = `Assoc [("items", `List fields)] in
+      let a = payload [ `String "aS"; `String "b" ] in
+      let b = payload [ `String "a"; `String "Sb" ] in
+      check bool "first payload broadcasts" true
+        (Server_dashboard_http.should_broadcast_namespace_truth_snapshot a);
+      check bool "different string concatenation still broadcasts" true
+        (Server_dashboard_http.should_broadcast_namespace_truth_snapshot b))
+
 let () =
   Alcotest.run "Dashboard Namespace Truth"
     [
@@ -750,5 +767,7 @@ let () =
             test_last_good_shell_fallback_preserves_counts;
           test_case "snapshot hash ignores generated_at churn" `Quick
             test_namespace_truth_snapshot_hash_ignores_generated_at;
+          test_case "snapshot hash avoids string concatenation collisions" `Quick
+            test_namespace_truth_snapshot_hash_avoids_string_collision;
         ] );
     ]

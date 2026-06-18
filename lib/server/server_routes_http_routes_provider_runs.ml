@@ -113,6 +113,7 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
         | Error _, _ -> response
       else (
         Eio.Fiber.fork ~sw (fun () ->
+          (* fire-and-forget: stale-while-revalidate background refresh. *)
           ignore (run_compute_and_store entry : (Yojson.Safe.t, string) result * float));
         response)
     else

@@ -285,8 +285,9 @@ let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Digestif.SHA256.t
      The hash value differs from the old string-hash (different bytes fed),
      but it is deterministic for a given structure and is used only for change
      detection (compare current to previous, both via this walker), so the
-     broadcast semantics are preserved. Type tags (S/I/F/...) prevent prefix
-     collisions between scalar kinds. *)
+     broadcast semantics are preserved. Type tags (S/I/F/...) and length
+     prefixes for strings/object keys prevent prefix collisions and make the
+     feed injective. *)
   let rec walk (ctx : Digestif.SHA256.ctx) (json : Yojson.Safe.t) :
       Digestif.SHA256.ctx =
     match json with
@@ -298,8 +299,10 @@ let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Digestif.SHA256.t
                if String.equal key "generated_at" || String.equal key "generated_at_iso"
                then ctx
                else
-                 let ctx = Digestif.SHA256.feed_string ctx key in
+                 let ctx = Digestif.SHA256.feed_string ctx (string_of_int (String.length key)) in
                  let ctx = Digestif.SHA256.feed_string ctx ":" in
+                 let ctx = Digestif.SHA256.feed_string ctx key in
+                 let ctx = Digestif.SHA256.feed_string ctx "=" in
                  walk ctx value)
             ctx fields
         in
@@ -310,6 +313,8 @@ let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Digestif.SHA256.t
         Digestif.SHA256.feed_string ctx "]"
     | `String s ->
         let ctx = Digestif.SHA256.feed_string ctx "S" in
+        let ctx = Digestif.SHA256.feed_string ctx (string_of_int (String.length s)) in
+        let ctx = Digestif.SHA256.feed_string ctx ":" in
         Digestif.SHA256.feed_string ctx s
     | `Int n ->
         let ctx = Digestif.SHA256.feed_string ctx "I" in

@@ -261,9 +261,10 @@ export function normalizeSSEDispatchType(rawType: string): string {
 
 
 // rAF-coalesced ingress: buffer SSE events and flush once per animation
-// frame inside batch(), collapsing a high-frequency burst (keeper streaming
-// emits per-token events) to <=1 signal notification / render per frame.
-// Mirrors dashboard-ws.ts's pendingInbound + scheduleFlush + batch() pattern;
+// frame. Each event is processed in its own batch() so signal writes inside
+// handleEvent stay coalesced per event, while lastEvent is updated per event
+// so subscribers receive every server push.
+// Mirrors dashboard-ws.ts's pendingInbound + scheduleFlush pattern;
 // the two flush bodies differ (WS: processInboundMessage, here: handleEvent),
 // so this is a local copy rather than a shared util — extract if a third
 // consumer appears.
@@ -288,15 +289,17 @@ function scheduleFlush(): void {
 function flushPending(): void {
   if (pendingEvents.length === 0) return
   const events = pendingEvents.splice(0, pendingEvents.length)
-  // Order preserved (splice + for-loop); batch() coalesces all signal writes
-  // across the whole burst into one notification.
-  batch(() => {
-    for (const ev of events) {
+  // Order preserved (splice + for-loop). Process each event in its own
+  // batch() so [handleEvent] signal writes are coalesced per event, while
+  // [lastEvent] is assigned outside the batch so subscribers are notified
+  // once per server push.
+  for (const ev of events) {
+    batch(() => {
       eventCount.value++
-      lastEvent.value = ev
       handleEvent(ev)
-    }
-  })
+    })
+    lastEvent.value = ev
+  }
 }
 
 /** Test-only: synchronously drain pending SSE events. Production code never
@@ -1041,6 +1044,12 @@ function handleEvent(event: SSEEvent): void {
 }
 
 export function disconnectSSE(): void {
+  if (flushHandle) {
+    if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(flushHandle)
+    else clearTimeout(flushHandle)
+    flushHandle = 0
+  }
+  pendingEvents.length = 0
   unsubscribe?.()
   unsubscribe = null
   transport?.disconnect()

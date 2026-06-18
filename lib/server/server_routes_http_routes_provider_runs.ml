@@ -15,9 +15,6 @@ let dashboard_metrics_cache_ttl_s = 60.0
 let dashboard_metrics_cache_mu = Stdlib.Mutex.create ()
 let dashboard_model_metrics_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 let dashboard_cost_latency_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_keeper_costs_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_keeper_decisions_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
-let dashboard_keeper_memory_log_cache : (string, dashboard_json_cache_entry) Hashtbl.t = Hashtbl.create 8
 
 let cache_key parts = String.concat "\x1f" parts
 
@@ -165,23 +162,20 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
          let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int window ] in
          let json =
-           cached_dashboard_json ~sw ~cache:dashboard_keeper_costs_cache ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                  ~keepers:[] ~window_minutes:window)
-             ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                 ~keepers ~window_minutes:window)
+           Eio_guard.run_in_systhread (fun () ->
+             let keeper_names = Keeper_meta_store.keeper_names config in
+             let keepers =
+               List.filter_map (fun name ->
+                 match Keeper_meta_store.read_meta config name with
+                 | Ok (Some m) -> Some m
+                 | _ -> None)
+                 keeper_names
+             in
+             Dashboard_http_keeper.keeper_cost_aggregates_json
+               ~config
+               ~keepers
+               ~window_minutes:window)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -203,66 +197,65 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
          let config = (Mcp_server.workspace_config state) in
-         let keeper_names = Keeper_meta_store.keeper_names config in
-         let keepers =
-           List.filter_map (fun name ->
-             match Keeper_meta_store.read_meta config name with
-             | Ok (Some m) -> Some m
-             | _ -> None
-           ) keeper_names
-         in
          let json =
-           Dashboard_http_keeper.keeper_decisions_json ~config ~keepers ~limit ()
+           Eio_guard.run_in_systhread (fun () ->
+             let keeper_names = Keeper_meta_store.keeper_names config in
+             let keepers =
+               List.filter_map (fun name ->
+                 match Keeper_meta_store.read_meta config name with
+                 | Ok (Some m) -> Some m
+                 | _ -> None)
+                 keeper_names
+             in
+             Dashboard_http_keeper.keeper_decisions_json
+               ~config
+               ~keepers
+               ~limit
+               ())
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions-log" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let limit = dashboard_feed_limit req in
-         let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int limit ] in
-         let json =
-           cached_dashboard_json ~sw
-             ~cache:dashboard_keeper_decisions_log_cache ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_decisions_log_json ~config
-                  ~keepers:[] ~limit ())
-             ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_decisions_log_json ~config
-                 ~keepers ~limit ())
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/keeper-memory-log" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let limit = dashboard_feed_limit req in
-         let config = (Mcp_server.workspace_config state) in
-         let key = cache_key [ config.base_path; string_of_int limit ] in
-         let json =
-           cached_dashboard_json ~sw ~cache:dashboard_keeper_memory_log_cache
-             ~key
-             ~placeholder:
-               (Dashboard_http_keeper.keeper_memory_log_json ~config
-                  ~keepers:[] ~limit ())
-             ~compute:(fun () ->
-               let keeper_names = Keeper_meta_store.keeper_names config in
-               let keepers =
-                 List.filter_map (fun name ->
-                   match Keeper_meta_store.read_meta config name with
-                   | Ok (Some m) -> Some m
-                   | _ -> None
-                 ) keeper_names
-               in
-               Dashboard_http_keeper.keeper_memory_log_json ~config ~keepers
-                 ~limit ())
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
+	       with_public_read (fun state req reqd ->
+	         let limit = dashboard_feed_limit req in
+	         let config = (Mcp_server.workspace_config state) in
+	         let json =
+	           Eio_guard.run_in_systhread (fun () ->
+	             let keeper_names = Keeper_meta_store.keeper_names config in
+	             let keepers =
+	               List.filter_map (fun name ->
+	                 match Keeper_meta_store.read_meta config name with
+	                 | Ok (Some m) -> Some m
+	                 | _ -> None)
+	                 keeper_names
+	             in
+	             Dashboard_http_keeper.keeper_decisions_log_json
+	               ~config
+	               ~keepers
+	               ~limit
+	               ())
+	         in
+	         Http.Response.json_value ~compress:true ~request:req json reqd
+	       ) request reqd)
+	  |> Http.Router.get "/api/v1/dashboard/keeper-memory-log" (fun request reqd ->
+	       with_public_read (fun state req reqd ->
+	         let limit = dashboard_feed_limit req in
+	         let config = (Mcp_server.workspace_config state) in
+	         let json =
+	           Eio_guard.run_in_systhread (fun () ->
+	             let keeper_names = Keeper_meta_store.keeper_names config in
+	             let keepers =
+	               List.filter_map (fun name ->
+	                 match Keeper_meta_store.read_meta config name with
+	                 | Ok (Some m) -> Some m
+	                 | _ -> None)
+	                 keeper_names
+	             in
+	             Dashboard_http_keeper.keeper_memory_log_json
+	               ~config
+	               ~keepers
+	               ~limit
+	               ())
+	         in
+	         Http.Response.json_value ~compress:true ~request:req json reqd
+	       ) request reqd)

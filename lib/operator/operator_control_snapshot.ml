@@ -636,12 +636,11 @@ let snapshot_json
   in
   (* Singleflight cache lookup: check for fresh hit, in-flight compute,
      or start a new compute.  Uses Eio.Mutex for safe Hashtbl access.
-     Waiters await the owner's [Condition] broadcast (the [cond] stored in
-     the [Computing] slot, fired at compute finish), racing a short timer
-     via [Eio.Fiber.first] so they stay cancellable and re-check on a known
-     cadence as a lost-wakeup safety net.  The [Condition]+mutex machinery
-     was always present; the await replaces a prior blind poll-retry that
-     added up to [_poll_interval_s] latency per cache miss. *)
+     Waiters poll outside the lock on [_poll_interval_s] cadence so they
+     stay fully cancellable and re-check the slot, avoiding the
+     cancellation-immune deadlock that [Condition.await] inside
+     [Mutex.use_rw ~protect:true] would create.  The compute fiber still
+     broadcasts its [Condition] when finished; that is harmless. *)
   let _max_wait_s = 60.0 in
   let _poll_interval_s = 0.25 in
   let rec cache_lookup ~waited =
@@ -707,20 +706,16 @@ let snapshot_json
       in
       match action with
       | `Hit value -> value
-      | `Wait cond ->
-        (* Another fiber is computing this key.  Await its broadcast (fired
-           at compute finish) for near-zero wakeup latency, racing a short
-           timer so we stay cancellable and re-check on a known cadence as a
-           lost-wakeup safety net.  [Eio.Fiber.first] cancels whichever fiber
-           loses the race, and [~protect:true] releases the mutex under
-           cancel — so the waiter stays cancellable. *)
-        let () =
-          Eio.Fiber.first
-            (fun () ->
-               Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
-                 Eio.Condition.await cond _snapshot_mu))
-            (fun () -> Eio.Time.sleep ctx.clock _poll_interval_s)
-        in
+      | `Wait _cond ->
+        (* Another fiber is computing this key.  Poll outside the mutex on a
+           short cadence so the waiter stays fully cancellable and re-checks
+           the slot.  We intentionally do not [Condition.await] inside
+           [Mutex.use_rw ~protect:true] because protected awaits mask Eio
+           cancellation, which can leave the waiter hung if the compute owner
+           is slow or its broadcast is missed.  The compute fiber still
+           broadcasts the condition for any waiters using the old path; that
+           is harmless. *)
+        Eio.Time.sleep ctx.clock _poll_interval_s;
         cache_lookup ~waited:(waited +. _poll_interval_s)
       | `Compute cond ->
         (match compute_snapshot () with

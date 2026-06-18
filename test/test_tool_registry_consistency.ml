@@ -37,6 +37,21 @@ let schema_inventory_names () =
   List.map (fun (s : Masc_domain.tool_schema) -> s.name) Config.raw_all_tool_schemas
 ;;
 
+let workspace_schema_names () =
+  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_schemas_workspace.schemas
+;;
+
+let expected_workspace_read_only_names =
+  [ "masc_check"; "masc_goal_list"; "masc_status" ]
+;;
+
+let expected_workspace_hidden_names = [ "masc_reset" ]
+
+let expect_some ~label = function
+  | Some value -> value
+  | None -> Alcotest.fail (label ^ " missing")
+;;
+
 let test_schema_set_equals_tag_registry_set () =
   init ();
   let tags = tag_registry_names () in
@@ -77,8 +92,73 @@ let test_workspace_schemas_route_to_state () =
   |> List.iter (fun (schema : Masc_domain.tool_schema) ->
        Alcotest.(check bool)
          (Printf.sprintf "%s routes to Mod_state" schema.name)
-         true
-         (Unified_tool_registry.tag_of_name schema.name = Some Tool_dispatch.Mod_state))
+       true
+       (Unified_tool_registry.tag_of_name schema.name = Some Tool_dispatch.Mod_state))
+;;
+
+let test_workspace_schemas_match_dispatch_bindings () =
+  init ();
+  assert_same_set
+    ~label:"workspace schema names vs dispatchable names"
+    ~expected:(workspace_schema_names ())
+    ~actual:Tool_workspace.dispatchable_names
+;;
+
+let test_workspace_schemas_have_tool_spec_metadata () =
+  init ();
+  let workspace_names = workspace_schema_names () in
+  let missing_tool_specs =
+    List.filter
+      (fun name -> not (List.mem name (Tool_spec.all_registered_names ())))
+      workspace_names
+  in
+  Alcotest.(check (list string))
+    "workspace schemas registered via Tool_spec"
+    []
+    missing_tool_specs;
+  let unexpected_read_only_contract =
+    List.filter
+      (fun name -> not (List.mem name workspace_names))
+      expected_workspace_read_only_names
+  in
+  Alcotest.(check (list string))
+    "expected read-only workspace tools exist"
+    []
+    unexpected_read_only_contract;
+  let unexpected_hidden_contract =
+    List.filter
+      (fun name -> not (List.mem name workspace_names))
+      expected_workspace_hidden_names
+  in
+  Alcotest.(check (list string))
+    "expected hidden workspace tools exist"
+    []
+    unexpected_hidden_contract;
+  List.iter
+    (fun name ->
+       let meta =
+         Tool_catalog.registered_metadata name
+         |> expect_some ~label:(Printf.sprintf "%s Tool_catalog metadata" name)
+       in
+       let expected_read_only = List.mem name expected_workspace_read_only_names in
+       let expected_hidden = List.mem name expected_workspace_hidden_names in
+       Alcotest.(check (option bool))
+         (Printf.sprintf "%s readonly metadata" name)
+         (Some expected_read_only)
+         meta.Tool_catalog.readonly;
+       Alcotest.(check (option bool))
+         (Printf.sprintf "%s idempotent metadata" name)
+         (Some expected_read_only)
+         meta.Tool_catalog.idempotent;
+       Alcotest.(check bool)
+         (Printf.sprintf "%s hidden visibility" name)
+         expected_hidden
+         (meta.Tool_catalog.visibility = Tool_catalog.Hidden);
+       Alcotest.(check bool)
+         (Printf.sprintf "%s direct hidden call allowance" name)
+         expected_hidden
+         meta.Tool_catalog.allow_direct_call_when_hidden)
+    workspace_names
 ;;
 
 let test_retired_tools_are_absent () =
@@ -141,6 +221,10 @@ let () =
     ; ( "workspace_tools"
       , [ test_case "workspace schemas route to Mod_state" `Quick
             test_workspace_schemas_route_to_state
+        ; test_case "workspace schemas match dispatch bindings" `Quick
+            test_workspace_schemas_match_dispatch_bindings
+        ; test_case "workspace schemas have ToolSpec metadata" `Quick
+            test_workspace_schemas_have_tool_spec_metadata
         ] )
     ; ( "retired_tools"
       , [ test_case "retired tools are absent" `Quick test_retired_tools_are_absent

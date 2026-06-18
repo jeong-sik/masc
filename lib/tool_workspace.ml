@@ -693,40 +693,38 @@ let handle_heartbeat ~tool_name ~start_time ctx _args =
       ~tool_name ~start_time message
 ;;
 
+type dispatch_handler =
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+
+let handle_check ~tool_name ~start_time ctx args =
+  let inspect ctx =
+    let s = inspect_state ctx in
+    { Workspace_assertions.task_claimed = s.task_claimed
+    ; current_task_set = s.current_task_set
+    }
+  in
+  Workspace_assertions.handle_check ~inspect_state:inspect ~tool_name ~start_time ctx args
+;;
+
+let dispatch_bindings : (string * dispatch_handler) list =
+  [ "masc_status", handle_status
+  ; "masc_heartbeat", handle_heartbeat
+  ; "masc_goal_list", Workspace_goals.handle_goal_list
+  ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
+  ; "masc_goal_transition", Workspace_goals.handle_goal_transition
+  ; "masc_goal_verify", Workspace_goals.handle_goal_verify
+  ; "masc_reset", handle_reset
+  ; "masc_check", handle_check
+  ]
+;;
+
+let dispatchable_names = List.map fst dispatch_bindings
+
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start_time = Time_compat.now () in
-  match name with
-  | "masc_status" -> Some (handle_status ~tool_name:name ~start_time ctx args)
-  | "masc_heartbeat" -> Some (handle_heartbeat ~tool_name:name ~start_time ctx args)
-  | "masc_goal_list" ->
-    Some (Workspace_goals.handle_goal_list ~tool_name:name ~start_time ctx args)
-  | "masc_goal_upsert" ->
-    Some (Workspace_goals.handle_goal_upsert ~tool_name:name ~start_time ctx args)
-  | "masc_goal_transition" ->
-    Some
-      (Workspace_goals.handle_goal_transition
-         ~tool_name:name
-         ~start_time
-         ctx
-         args)
-  | "masc_goal_verify" ->
-    Some (Workspace_goals.handle_goal_verify ~tool_name:name ~start_time ctx args)
-  | "masc_reset" -> Some (handle_reset ~tool_name:name ~start_time ctx args)
-  | "masc_check" ->
-    let inspect ctx =
-      let s = inspect_state ctx in
-      { Workspace_assertions.task_claimed = s.task_claimed
-      ; current_task_set = s.current_task_set
-      }
-    in
-    Some
-      (Workspace_assertions.handle_check
-         ~inspect_state:inspect
-         ~tool_name:name
-         ~start_time
-         ctx
-         args)
-  | _ -> None
+  match List.assoc_opt name dispatch_bindings with
+  | Some handle -> Some (handle ~tool_name:name ~start_time ctx args)
+  | None -> None
 ;;
 
 let schemas = Tool_schemas_workspace.schemas
@@ -735,7 +733,7 @@ let schemas = Tool_schemas_workspace.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only = [ "masc_status"; "masc_goal_list" ];;
+let tool_spec_read_only = [ "masc_status"; "masc_check"; "masc_goal_list" ];;
 
 let tool_spec_system_internal = [ "masc_reset" ]
 

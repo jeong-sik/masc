@@ -8,9 +8,10 @@
     idempotent and preserves tags already registered via [Tool_spec]. *)
 
 val tag_of_name : string -> Tool_dispatch.module_tag option
-(** Derive the canonical dispatch tag for a tool name from naming heuristics.
-    Returns [None] for names that have no clear neutral-tool mapping; those
-    must be covered by an explicit [Tool_spec] registration. *)
+(** Derive the canonical dispatch tag for a tool name from naming heuristics
+    and schema-owned closed clusters. Returns [None] for names that have no
+    clear ratchet fallback; those must be covered by an explicit [Tool_spec]
+    registration. *)
 
 val register_all : unit -> unit
 (** Register tags (+ placeholder schemas where needed) for all names in the

@@ -71,6 +71,16 @@ let test_mandatory_tools_are_registered () =
     mandatory
 ;;
 
+let test_workspace_schemas_route_to_state () =
+  init ();
+  Tool_schemas_workspace.schemas
+  |> List.iter (fun (schema : Masc_domain.tool_schema) ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s routes to Mod_state" schema.name)
+         true
+         (Unified_tool_registry.tag_of_name schema.name = Some Tool_dispatch.Mod_state))
+;;
+
 let test_retired_tools_are_absent () =
   init ();
   let retired_front_door_tools =
@@ -127,6 +137,10 @@ let () =
     ; ( "mandatory_tools"
       , [ test_case "mandatory tools are registered" `Quick
             test_mandatory_tools_are_registered
+        ] )
+    ; ( "workspace_tools"
+      , [ test_case "workspace schemas route to Mod_state" `Quick
+            test_workspace_schemas_route_to_state
         ] )
     ; ( "retired_tools"
       , [ test_case "retired tools are absent" `Quick test_retired_tools_are_absent

@@ -68,14 +68,23 @@ let keeper_task_tool_names =
 
 let is_keeper_task_tool_name name = List.mem name keeper_task_tool_names
 
-(** Derive a dispatch tag from a tool name. This is the SSOT heuristic used
-    by the ratchet; any name it returns [None] for must either be invisible
-    or be handled by an explicit [Tool_spec] registration that already
-    populated the tag registry. *)
+(** Workspace state tools are handled by [Tool_workspace.dispatch] and share
+    [Mod_state] even when the module-load [Tool_spec] side effect has not run
+    yet. The schema facade is the owned source for this dispatch cluster. *)
+let workspace_state_tool_names =
+  List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_schemas_workspace.schemas
+
+let is_workspace_state_tool_name name = List.mem name workspace_state_tool_names
+
+(** Derive a dispatch tag from a tool name. This is the ratchet fallback used
+    for naming-rule clusters and schema-owned closed clusters; any name it
+    returns [None] for must either be invisible or be handled by an explicit
+    [Tool_spec] registration that already populated the tag registry. *)
 let tag_of_name name : TD.module_tag option =
   let open TD in
   let prefix p = String.starts_with ~prefix:p name in
-  if prefix "masc_plan_" then Some Mod_plan
+  if is_workspace_state_tool_name name then Some Mod_state
+  else if prefix "masc_plan_" then Some Mod_plan
   else if prefix "masc_run_" then Some Mod_run
   else if prefix "masc_agent_" then Some Mod_agent
   else if prefix "masc_task_" then Some Mod_task

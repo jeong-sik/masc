@@ -15,7 +15,7 @@ The shell-IR path jail (`Exec_policy.validate_shell_ir_paths`) decides whether a
 
 This has two measured consequences:
 
-1. **False rejection of routine read/exploration commands.** Keeper commands such as `ls -la /Users/dancer/me/`, `cat ../../../docs/library/x.md`, `find /Users/dancer/me -maxdepth 4 …` are rejected with `Path blocked: <path> (outside allowed directories for this keeper command)` because their arguments resolve above the keeper's worktree, even though they are read-only. Measured (`~/me/.masc/logs/system_log_2026-06-17.jsonl`, one day): **`shell_ir path_reject` WARN lines = 28; `Path blocked` rejection messages = 111** (the two differ because a single rejection is logged at the WARN audit line and again in the error payload; `path_reject` ≈ 28 is the per-command count). `policy_denied` (approval-floor Deny) = **0** in the same window — the block was the path jail, not the catastrophic floor.
+1. **False rejection of routine read/exploration commands.** Keeper commands such as `ls -la /Users/dancer/me/`, `cat ../../../docs/library/x.md`, `find /Users/dancer/me -maxdepth 4 …` are rejected with `Path blocked: <path> (outside allowed directories for this keeper command)` because their arguments resolve above the keeper's worktree, even though they are read-only. Measured (`<base-path>/.masc/logs/system_log_2026-06-17.jsonl`, one day): **`shell_ir path_reject` WARN lines = 28; `Path blocked` rejection messages = 111** (the two differ because a single rejection is logged at the WARN audit line and again in the error payload; `path_reject` ≈ 28 is the per-command count). `policy_denied` (approval-floor Deny) = **0** in the same window — the block was the path jail, not the catastrophic floor.
 2. **Workaround accretion.** Each over-cut binary gets its own string exemption: `git` (`git_revisionish_token`), then `gh` (#21462). This is the N-of-M pattern CLAUDE.md's workaround bar names — the heuristic over-matches, and the fix is "exempt the next binary" (`sed`, `curl`, `python3`, … remain open). PR #21468 then *widened* the adjacent catastrophic floor (`has_short_flag` so `clean -fd`/`push -fv` Deny) — the opposite of RFC-0254 §10's "narrow the floor" prescription.
 
 The typed substrate to fix this **exists in name but is not soundly wired**: `Path_scope.t` (`path_scope.ml:~1-10`) and `Capability.Read_path`/`Write_path` constructors (`capability.ml:1-7`) exist, but `Capability_check.of_ir` produces them only from **redirects**, never positional argv (`capability_check.ml:~36-49`); and even the redirect-derived scopes are classified against a hardcoded `~cwd:"."` placeholder (`bash_subset.mly:~10`), so their `Inside/Outside_workspace` field is meaningless. The jail therefore **discards the typed scope and re-validates the raw string** with the real `~workdir` (`exec_policy.ml:~697`). The "already-classified scope" is not actually correct — see §4.
@@ -25,7 +25,7 @@ This RFC specifies:
 - **§4.1 / §4.2** Produce **cwd-correct** typed `Path_scope` capabilities for positional argv at the IR boundary, and have the jail consume them — retiring `looks_like_path_token` and the per-binary exemption ladder. This requires threading the keeper cwd/mapped-roots into a currently cwd-blind producer (the obstacle the first draft under-stated).
 - **§4.3** A read/write asymmetry: read-only commands scoped more permissively than mutating commands — **gated on a typed `Sensitive_path` deny-list landing in the same change** (RFC-0254 §13 Q5).
 - **§4.4** Reconcile the two notions of "inside workspace" (`Path_scope.classify`'s cwd-relative one vs the jail's keeper-repo-mapping rule), noting this also perturbs the already-shipped floor's `find_write_escape`.
-- **§4.5** Narrow the catastrophic floor to **irreversible** ops only; demote *reflog-recoverable* local git (`reset --hard`, `branch -D`) to overlay-graded — but keep `clean -f[d]` and `worktree remove` floored (they are **not** recoverable). Resolves RFC-0254 §13 Q1.
+- **§4.5** Keep raw destructive git in the trust-independent floor unless the command path proves recovery preconditions first. `reset --hard` and `branch -D` are only conditionally recoverable, so the raw commands stay floored; future structured recovery tooling may narrow them after clean-worktree/snapshot/reachability checks. Resolves RFC-0254 §13 Q1 conservatively.
 - **§4.6** Add a path-jail kill-switch (the jail has none; §2.4) — a safety valve with an explicit removal obligation, not a fix.
 
 ## 2. Context & problem
@@ -72,11 +72,11 @@ With `workdir = Some wd`, a resolved path is allowed iff it is under `/tmp`, und
 | `push --force` / `push --delete` | **No (remote-irreversible)** | remote ref overwritten/deleted; no local undo |
 | `clean -f[d]` | **No** | deletes **untracked** files — in no commit, no reflog |
 | `worktree remove` | **No (effectively)** | discards uncommitted worktree state; in this repo other keepers/the conveyor mutate worktrees concurrently (externally-active HEAD) |
-| `reset --hard` | **Yes** | prior HEAD in reflog |
-| `branch -D` | **Yes** | branch tip in reflog/refs for the gc window |
+| `reset --hard` | **Partial** | prior HEAD in reflog, but uncommitted tracked changes are not recoverable |
+| `branch -D` | **Conditional** | branch tip may be recoverable, but only after proving reachability/no active worktree or snapshotting |
 | `stash drop` | partial | dangling commit; `git fsck` only |
 
-RFC-0254 §10 prescribes narrowing the floor; §13 Q1 left membership open. The naive "demote all local destructive git" is **wrong**: `clean -fd` and `worktree remove` cause irrecoverable loss and must stay floored. Measured `policy_denied` from this floor is currently 0, but #21468 widened it, raising the probability that routine *recoverable* ops (`reset --hard`) Deny while the *unrecoverable* ones are the real hazard. (`destructive_operation_blocked` in the logs is a *different*, pre-existing deterministic guard in `keeper_tool_deterministic_error.ml`, ~62–107/day with no merge-correlated change — out of scope here.)
+RFC-0254 §10 prescribes narrowing the floor; §13 Q1 left membership open. The naive "demote all local destructive git" is **wrong**: `clean -fd` and `worktree remove` cause irrecoverable loss and must stay floored, and raw `reset --hard` / `branch -D` do not prove the stateful recovery preconditions needed for autonomous execution. (`destructive_operation_blocked` in the logs is a *different*, pre-existing deterministic guard in `keeper_tool_deterministic_error.ml`, ~62–107/day with no merge-correlated change — out of scope here.)
 
 ## 3. Design principle
 
@@ -118,11 +118,11 @@ The jail decision becomes a function of capability *kind*:
 
 Split `Git_op.Destructive` by **recoverability** (§2.6), not by local/remote:
 
-- **Stay floored (trust-independent Deny, irrecoverable):** `push --force`, `push --delete` (remote), **`clean -f[d]`** (untracked deletion, not in reflog), **`worktree remove`** (uncommitted/shared worktree loss).
-- **Demote to overlay-graded (reflog-recoverable):** `reset --hard`, `branch -D`. Under the autonomous `Observe` overlay → `Allow`; under an operator overlay → `Ask`.
+- **Stay floored (trust-independent Deny):** `push --force`, `push --delete` (remote), **`clean -f[d]`** (untracked deletion, not in reflog), **`worktree remove`** (uncommitted/shared worktree loss), **`reset --hard`** (uncommitted tracked changes are not in reflog), **`branch -D`** (requires reachability / active-worktree proof).
+- **Future narrowing path:** expose a structured recovery operation that first proves a clean/snapshotted worktree, no active worktree for the target branch, and branch-tip reachability from an accepted ref or explicit recovery record. Only that structured path may be overlay-graded.
 - **Open (§11):** `stash drop` (dangling-commit only) — default keep floored until decided.
 
-> **Implementation caveat (M1).** The RFC-0254 claim "the compiler forces every match site" does **not** hold at the floor: `find_destructive_git` uses `Git_op.Destructive _ as g` with a `_ :: rest` catch-all under `[@@warning "-4"]` (`approval_policy.ml:~23-34`), so a `Destructive → {Recoverable, Irreversible}` split is **silently absorbed** there, not compile-errored. The producer `Git_op.of_argv` *is* exhaustive (`other -> Error`, `git_op.ml:~78`). **Therefore the split must be paired with a manual edit of `find_destructive_git` to route the recoverable arm out of the floor, plus tests asserting `reset --hard`/`branch -D` no longer reach the floor and `clean -fd`/`worktree remove` still do.** Do not rely on the compiler here.
+> **Implementation caveat (M1).** The RFC-0254 claim "the compiler forces every match site" did **not** hold at the floor: `find_destructive_git` used `Git_op.Destructive _ as g` with a `_ :: rest` catch-all under `[@@warning "-4"]`. This PR keeps raw destructive git floored and adds a closed `git_is_floored : Git_op.t -> bool`, so a future top-level `Git_op.t` constructor must receive an explicit floor decision instead of falling through the capability scan.
 
 ### 4.6 Path-jail kill-switch (closes §2.4) — valve with a removal obligation
 
@@ -141,7 +141,7 @@ Introduce `MASC_SHELL_IR_PATH_JAIL_ENABLED` (default `true`, lifecycle `Active`,
 ## 6. Implementation plan
 
 1. **P1 — kill-switch (§4.6).** Smallest, unblocks operations. Flag + gate + `removal target: P5` + tracking issue. Ship first so a regression has an env-level mitigation.
-2. **P2 — floor narrowing by recoverability (§4.5).** Type-split `Git_op.Destructive`; **manually** update `find_destructive_git` (warning-4 won't catch it); `reset --hard`/`branch -D` → overlay-graded; `clean -fd`/`worktree remove`/`push --force` stay floored. Tests per §4.5. Self-contained in `lib/exec`.
+2. **P2 — floor classifier hardening (§4.5).** Keep raw destructive git floored, add the closed `git_is_floored` classifier so future `Git_op.t` arms cannot fail open, and document the structured-recovery preconditions required before any future narrowing of `reset --hard` / `branch -D`. Tests per §4.5. Self-contained in `lib/exec`.
 3. **P3+P4 — typed cwd-correct producer + jail consumer, ATOMIC (one PR) (§4.1–4.4).** Thread cwd/mapped-roots through the producer; author per-slot direction metadata; resolve cross-lib ownership; rewrite the jail to consume typed scopes; **land the `Sensitive_path` deny-list (§4.3) in the same PR as the read widening**; delete `looks_like_path_token`/`*_token`. P3 and P4 must not land separately — a half-migrated state runs two classifiers (the RFC-0254 §5.4 anti-pattern). Reconcile `find_write_escape` (§4.4).
 4. **P5 — verification (§7) + remove the kill-switch's removal obligation** (or graduate the flag to permanent if soak demands it, with an explicit decision).
 
@@ -150,7 +150,7 @@ P1+P2 resolve the *floor* and the *operational gap* quickly; P3+P4 are the struc
 ## 7. Verification
 
 - **Property test:** routine keeper read commands (`ls`/`cat`/`find`/`grep`/`gh api`/`git -C`) over workspace-parent and mapped-repo paths → no `Path_reject`; reads of `Sensitive_path` (other keepers' `.masc/`, credentials, both relative AND absolute) → denied; writes escaping the workspace → `Path_reject`.
-- **Floor tests (§4.5):** `push --force`/`clean -fd`/`worktree remove` → `Deny` under every overlay incl. autonomous; `reset --hard`/`branch -D` under autonomous → `Allow`. Assert `reset --hard` no longer reaches `find_destructive_git`'s floor arm.
+- **Floor tests (§4.5):** `push --force`/`clean -fd`/`worktree remove`/`reset --hard`/`branch -D` → `Deny` under every overlay incl. autonomous. Future structured recovery tooling must get separate tests for its preconditions before it can be overlay-graded.
 - **TLA+ bug-model** (repo spec-mutation pattern, RFC-0254 §9): model jail as read/write × inside/outside; `BugAction` = out-of-workspace **write** reaching `Allow`; invariant `WriteEscapeNeverAllowed`. Second invariant `SensitiveReadNeverAllowed`. Clean passes; `-buggy.cfg` violates.
 - **No-duplicate-classifier check:** assert (test or grep-gate) that after P4 `looks_like_path_token` and the `*_token` exemptions are *deleted*, not bypassed.
 - **Build:** `DUNE_CACHE=disabled dune build --root .` in the worktree — the `lib/exec`/`lib/exec_policy`/`lib/keeper` boundary has produced stale-cmx cross-lib link issues; full cache-disabled build required, not just `@check`.
@@ -159,7 +159,7 @@ P1+P2 resolve the *floor* and the *operational gap* quickly; P3+P4 are the struc
 
 - P1 kill-switch ships first; if the live false-positive storm recurs, `MASC_SHELL_IR_PATH_JAIL_ENABLED=false` + **restart** is the immediate mitigation (env read at process start; no live flip). Operators must know this also drops the positional write-escape guard (§4.6 M2).
 - P3+P4 graduate behind the same flag: land honoring the flag, soak, then make typed-scope the only path; remove the kill-switch obligation at P5.
-- Post-enable verification (`~/me/.masc/logs/system_log_*.jsonl`): `path_reject` should drop to genuine write-escapes; `policy_denied` should show only irrecoverable git (`push --force`/`clean -fd`/`worktree remove`).
+- Post-enable verification (`<base-path>/.masc/logs/system_log_*.jsonl`): `path_reject` should drop to genuine write-escapes; `policy_denied` should show raw destructive git (`push --force`/`clean -fd`/`worktree remove`/`reset --hard`/`branch -D`) and structured recovery commands should emit their own proof records if added.
 
 ## 9. Alternatives considered
 
@@ -192,5 +192,5 @@ No telemetry-as-fix, no cap/cooldown, no new string classifier, no N-of-M exempt
 ## 12. References
 
 - Code anchors (worktree at `origin/main` `61481411cd`; approximate line numbers): `lib/exec_policy/exec_policy.ml` (`looks_like_path_token` ~339, `git_revisionish_token` ~356, `gh_endpointish_token` ~390, `path_argument_values` ~500, `validate_shell_ir_paths` ~631, ladder ~666-693, raw re-validate ~697), `lib/exec_policy/exec_policy_paths.ml:~51,~67-101,~103-126`, `lib/exec_policy/exec_policy_path_arg_descriptor.ml:~56-71`, `lib/exec_policy/keeper_path_check_error.ml:~18-24`, `lib/exec/capability.ml:1-7`, `lib/exec/capability_check.ml:~20-51`, `lib/exec/path_scope.ml:~1-10,~83-99`, `lib/exec/git_op.ml:~50-78`, `lib/exec/approval_policy.ml:~23-34,~43-49,~100-102`, `lib/exec/parser/bash_subset.mly:~10`, `lib/keeper/keeper_tool_execute_runtime.ml:~406,~429`, `lib/keeper_tooling/keeper_tool_execute_shell_ir.ml:~16,~120-123,~191-207`, `shell_command_gate.ml:~69-73`.
-- Runtime evidence: `~/me/.masc/logs/system_log_2026-06-17.jsonl` (71,762 lines) — `shell_ir path_reject` WARN ×28, `Path blocked` message ×111, `policy_denied` ×0, `destructive_operation_blocked` ×79 (pre-existing deterministic guard, merge-uncorrelated). Per-day `path_reject`: 06-15 ×23, 06-16 ×11, 06-17 ×28 (the earlier "171" figure was a multi-file `rg` substring aggregate and is withdrawn).
+- Runtime evidence: `<base-path>/.masc/logs/system_log_2026-06-17.jsonl` (71,762 lines) — `shell_ir path_reject` WARN ×28, `Path blocked` message ×111, `policy_denied` ×0, `destructive_operation_blocked` ×79 (pre-existing deterministic guard, merge-uncorrelated). Per-day `path_reject`: 06-15 ×23, 06-16 ×11, 06-17 ×28 (the earlier "171" figure was a multi-file `rg` substring aggregate and is withdrawn).
 - Parent: RFC-0208 (path policy), RFC-0254 (§10/§13 Q1/Q4/Q5). Lineage: RFC-0042 (no string classifier), RFC-0005 (typed capability substrate).

@@ -2188,3 +2188,10 @@
  (name test_keeper_misc_mutable_refs)
  (modules test_keeper_misc_mutable_refs)
  (libraries masc_test_deps masc.runtime))
+
+; Remaining unprotected keeper-wide shared callback refs and caches (PR #21487).
+
+(test
+ (name test_keeper_global_shared_refs_atomic)
+ (modules test_keeper_global_shared_refs_atomic)
+ (libraries alcotest masc masc.compaction_trigger))

@@ -9,11 +9,17 @@ open Keeper_types_profile
 open Keeper_meta_contract
 open Keeper_meta_json
 
-let runtime_meta_write_sync_hook : (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) ref =
-  ref (fun _ _ -> ())
+let runtime_meta_write_sync_hook_atomic
+    : (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) Atomic.t
+  =
+  Atomic.make (fun _ _ -> ())
 ;;
 
-let register_runtime_meta_write_sync f = runtime_meta_write_sync_hook := f
+let runtime_meta_write_sync_hook config meta =
+  Atomic.get runtime_meta_write_sync_hook_atomic config meta
+
+let register_runtime_meta_write_sync f =
+  Atomic.set runtime_meta_write_sync_hook_atomic f
 
 let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
 
@@ -281,7 +287,7 @@ let persist_meta config path persisted =
   let json = meta_to_json persisted in
   match Keeper_fs.save_json_atomic path json with
   | Ok () ->
-    !runtime_meta_write_sync_hook config persisted;
+    Atomic.get runtime_meta_write_sync_hook_atomic config persisted;
     refresh_progress_updated_line config persisted.name;
     Ok ()
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)

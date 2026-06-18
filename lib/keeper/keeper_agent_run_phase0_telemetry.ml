@@ -26,7 +26,7 @@ let record_if_enabled
         | [] -> "auto"
       in
       let () =
-        !Keeper_keepalive_signal.record_wake_payload_callback
+        Keeper_keepalive_signal.record_wake_payload
           ~keeper_name:meta.name
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~turn_index:start_turn_count

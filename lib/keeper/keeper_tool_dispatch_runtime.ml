@@ -23,20 +23,15 @@ type keeper_tool_call_recorder =
   tool_name:string -> success:bool -> duration_ms:int -> unit
 
 let default_keeper_tool_call_recorder ~tool_name:_ ~success:_ ~duration_ms:_ = ()
-let keeper_tool_call_recorder_mutex = Stdlib.Mutex.create ()
-let keeper_tool_call_recorder = ref default_keeper_tool_call_recorder
+let keeper_tool_call_recorder : keeper_tool_call_recorder Atomic.t =
+  Atomic.make default_keeper_tool_call_recorder
 
 let set_on_keeper_tool_call (f : keeper_tool_call_recorder) =
-  Stdlib.Mutex.protect keeper_tool_call_recorder_mutex (fun () ->
-    keeper_tool_call_recorder := f)
+  Atomic.set keeper_tool_call_recorder f
 ;;
 
 let record_keeper_tool_call ~tool_name ~success ~duration_ms =
-  let f =
-    Stdlib.Mutex.protect keeper_tool_call_recorder_mutex (fun () ->
-      !keeper_tool_call_recorder)
-  in
-  f ~tool_name ~success ~duration_ms
+  Atomic.get keeper_tool_call_recorder ~tool_name ~success ~duration_ms
 ;;
 
 let search_char c =
@@ -159,17 +154,11 @@ let default_tool_search_fn ~query ~max_results =
 type tool_searcher = query:string -> max_results:int -> Yojson.Safe.t
 
 let default_tool_searcher = default_tool_search_fn
-let tool_searcher_mutex = Stdlib.Mutex.create ()
-let tool_searcher = ref default_tool_searcher
+let tool_searcher : tool_searcher Atomic.t = Atomic.make default_tool_searcher
 
-let set_tool_search_fn (f : tool_searcher) =
-  Stdlib.Mutex.protect tool_searcher_mutex (fun () -> tool_searcher := f)
-;;
+let set_tool_search_fn (f : tool_searcher) = Atomic.set tool_searcher f
 
-let search_tools ~query ~max_results =
-  let f = Stdlib.Mutex.protect tool_searcher_mutex (fun () -> !tool_searcher) in
-  f ~query ~max_results
-;;
+let search_tools ~query ~max_results = Atomic.get tool_searcher ~query ~max_results
 
 type tool_result_payload =
   | Structured_success
@@ -749,3 +738,10 @@ let execute_keeper_tool_call
   in
   result.raw_output
 ;;
+
+module For_testing = struct
+  let set_on_keeper_tool_call = set_on_keeper_tool_call
+  let record_keeper_tool_call = record_keeper_tool_call
+  let set_tool_search_fn = set_tool_search_fn
+  let search_tools = search_tools
+end

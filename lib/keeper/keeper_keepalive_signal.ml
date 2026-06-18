@@ -17,81 +17,151 @@ type grpc_heartbeat_starter_fn = {
   f : 'a. ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option;
 }
 
-let grpc_heartbeat_starter_fn : grpc_heartbeat_starter_fn ref =
-  ref { f = (fun ~ctx:_ ~m:_ ~stop:_ -> None) }
+let grpc_heartbeat_starter_fn : grpc_heartbeat_starter_fn Atomic.t =
+  Atomic.make { f = (fun ~ctx:_ ~m:_ ~stop:_ -> None) }
 
 let register_grpc_heartbeat_starter (f : grpc_heartbeat_starter_fn) =
-  grpc_heartbeat_starter_fn := f
+  Atomic.set grpc_heartbeat_starter_fn f
 ;;
 
 let grpc_heartbeat_starter ~ctx ~m ~stop =
-  (!grpc_heartbeat_starter_fn).f ~ctx ~m ~stop
+  (Atomic.get grpc_heartbeat_starter_fn).f ~ctx ~m ~stop
 
-let record_wake_payload_callback : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> unit) ref =
-  ref (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ())
+let record_wake_payload_callback
+    : (keeper_name:string ->
+       trace_id:string ->
+       turn_index:int ->
+       model_id:string ->
+       context_window:int ->
+       approx_body_bytes:int ->
+       system_prompt_bytes:int ->
+       tool_defs_bytes:int ->
+       messages_bytes:int ->
+       message_count:int ->
+       role_counts:(string * int) list ->
+       tool_count:int ->
+       has_compact_happened:bool ->
+       unit)
+      Atomic.t
+  =
+  Atomic.make
+    (fun ~keeper_name:_
+      ~trace_id:_
+      ~turn_index:_
+      ~model_id:_
+      ~context_window:_
+      ~approx_body_bytes:_
+      ~system_prompt_bytes:_
+      ~tool_defs_bytes:_
+      ~messages_bytes:_
+      ~message_count:_
+      ~role_counts:_
+      ~tool_count:_
+      ~has_compact_happened:_ -> ())
 
-let register_record_wake_payload (f : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> unit)) =
-  record_wake_payload_callback := f
+let record_wake_payload
+    ~keeper_name
+    ~trace_id
+    ~turn_index
+    ~model_id
+    ~context_window
+    ~approx_body_bytes
+    ~system_prompt_bytes
+    ~tool_defs_bytes
+    ~messages_bytes
+    ~message_count
+    ~role_counts
+    ~tool_count
+    ~has_compact_happened
+  =
+  (Atomic.get record_wake_payload_callback)
+    ~keeper_name
+    ~trace_id
+    ~turn_index
+    ~model_id
+    ~context_window
+    ~approx_body_bytes
+    ~system_prompt_bytes
+    ~tool_defs_bytes
+    ~messages_bytes
+    ~message_count
+    ~role_counts
+    ~tool_count
+    ~has_compact_happened
 ;;
 
-let record_tool_skipped_callback : (keeper_name:string -> tool_name:string -> reason_code:string -> unit) ref =
-  ref (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ())
+let register_record_wake_payload f = Atomic.set record_wake_payload_callback f
 
-let register_record_tool_skipped (f : (keeper_name:string -> tool_name:string -> reason_code:string -> unit)) =
-  record_tool_skipped_callback := f
+let record_tool_skipped_callback
+    : (keeper_name:string -> tool_name:string -> reason_code:string -> unit) Atomic.t
+  =
+  Atomic.make (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ())
+
+let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
+  (Atomic.get record_tool_skipped_callback) ~keeper_name ~tool_name ~reason_code
 ;;
+
+let register_record_tool_skipped f = Atomic.set record_tool_skipped_callback f
 
 let record_execute_output_callback
-  : (keeper_name:string ->
-     task_id:string option ->
-     stdout:string ->
-     stderr:string ->
-     status:Yojson.Safe.t ->
-     streamed:bool ->
-     unit)
-      ref
+    : (keeper_name:string ->
+       task_id:string option ->
+       stdout:string ->
+       stderr:string ->
+       status:Yojson.Safe.t ->
+       streamed:bool ->
+       unit)
+      Atomic.t
   =
-  ref
+  Atomic.make
     (fun ~keeper_name:_ ~task_id:_ ~stdout:_ ~stderr:_ ~status:_ ~streamed:_ -> ())
 
-let register_record_execute_output f =
-  record_execute_output_callback := f
+let record_execute_output ~keeper_name ~task_id ~stdout ~stderr ~status ~streamed =
+  (Atomic.get record_execute_output_callback)
+    ~keeper_name
+    ~task_id
+    ~stdout
+    ~stderr
+    ~status
+    ~streamed
 ;;
+
+let register_record_execute_output f = Atomic.set record_execute_output_callback f
 
 let record_execute_stream_chunk_callback
-  : (keeper_name:string ->
-     stream:[ `Stdout | `Stderr ] ->
-     string ->
-     unit)
-      ref
+    : (keeper_name:string -> stream:[ `Stdout | `Stderr ] -> string -> unit) Atomic.t
   =
-  ref (fun ~keeper_name:_ ~stream:_ _chunk -> ())
+  Atomic.make (fun ~keeper_name:_ ~stream:_ _chunk -> ())
+
+let record_execute_stream_chunk ~keeper_name ~stream chunk =
+  (Atomic.get record_execute_stream_chunk_callback) ~keeper_name ~stream chunk
+;;
 
 let register_record_execute_stream_chunk f =
-  record_execute_stream_chunk_callback := f
-;;
+  Atomic.set record_execute_stream_chunk_callback f
 
 let record_execute_stream_start_callback
-  : (keeper_name:string -> task_id:string option -> unit) ref
+    : (keeper_name:string -> task_id:string option -> unit) Atomic.t
   =
-  ref (fun ~keeper_name:_ ~task_id:_ -> ())
+  Atomic.make (fun ~keeper_name:_ ~task_id:_ -> ())
+
+let record_execute_stream_start ~keeper_name ~task_id =
+  (Atomic.get record_execute_stream_start_callback) ~keeper_name ~task_id
+;;
 
 let register_record_execute_stream_start f =
-  record_execute_stream_start_callback := f
-;;
+  Atomic.set record_execute_stream_start_callback f
 
 let record_execute_stream_end_callback
-  : (keeper_name:string ->
-     task_id:string option ->
-     status:Yojson.Safe.t ->
-     unit)
-      ref
+    : (keeper_name:string -> task_id:string option -> status:Yojson.Safe.t -> unit) Atomic.t
   =
-  ref (fun ~keeper_name:_ ~task_id:_ ~status:_ -> ())
+  Atomic.make (fun ~keeper_name:_ ~task_id:_ ~status:_ -> ())
 
-let register_record_execute_stream_end f =
-  record_execute_stream_end_callback := f
+let record_execute_stream_end ~keeper_name ~task_id ~status =
+  (Atomic.get record_execute_stream_end_callback) ~keeper_name ~task_id ~status
 ;;
+
+let register_record_execute_stream_end f = Atomic.set record_execute_stream_end_callback f
 
 (* Skip log throttle removed with manual_reconcile blocker — no more
    sticky reconcile state means no flood of "reconcile pending" skip logs. *)

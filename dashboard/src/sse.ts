@@ -288,12 +288,18 @@ function scheduleFlush(): void {
 function flushPending(): void {
   if (pendingEvents.length === 0) return
   const events = pendingEvents.splice(0, pendingEvents.length)
-  // Order preserved (splice + for-loop); batch() coalesces all signal writes
-  // across the whole burst into one notification.
+  // lastEvent is used as an event bus by several consumers
+  // (setupSSEReaction, reaction bars, connector/status panels, tool telemetry).
+  // Emit every event so intermediate messages are not dropped when multiple
+  // SSE messages arrive in one animation frame.
+  for (const ev of events) {
+    lastEvent.value = ev
+  }
+  // Order preserved (splice + for-loop); batch() coalesces the remaining
+  // signal writes across the whole burst into one notification.
   batch(() => {
     for (const ev of events) {
       eventCount.value++
-      lastEvent.value = ev
       handleEvent(ev)
     }
   })

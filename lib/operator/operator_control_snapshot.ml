@@ -707,20 +707,15 @@ let snapshot_json
       in
       match action with
       | `Hit value -> value
-      | `Wait cond ->
-        (* Another fiber is computing this key.  Await its broadcast (fired
-           at compute finish) for near-zero wakeup latency, racing a short
-           timer so we stay cancellable and re-check on a known cadence as a
-           lost-wakeup safety net.  [Eio.Fiber.first] cancels whichever fiber
-           loses the race, and [~protect:true] releases the mutex under
-           cancel — so the waiter stays cancellable. *)
-        let () =
-          Eio.Fiber.first
-            (fun () ->
-               Eio.Mutex.use_rw ~protect:true _snapshot_mu (fun () ->
-                 Eio.Condition.await cond _snapshot_mu))
-            (fun () -> Eio.Time.sleep ctx.clock _poll_interval_s)
-        in
+      | `Wait _cond ->
+        (* Another fiber is computing this key.  We intentionally do NOT
+           [Eio.Condition.await] inside [Eio.Mutex.use_rw ~protect:true]:
+           [Condition.await] masks cancellation while blocked, so if the
+           short timer wins a [Fiber.first] race the waiter can remain stuck
+           until the original compute broadcasts.  A bounded poll-retry loop
+           keeps the waiter cancellable and preserves the retry cadence.
+           See [dashboard_cache.ml] and docs/spec/10-dashboard.md. *)
+        Eio.Time.sleep ctx.clock _poll_interval_s;
         cache_lookup ~waited:(waited +. _poll_interval_s)
       | `Compute cond ->
         (match compute_snapshot () with

@@ -2,7 +2,7 @@
 
 > Current package version: v0.19.46
 > Latest changelog entry: v0.19.46 (2026-06-18)
-> Latest published GitHub release: v0.19.41 (2026-06-12)
+> Latest published GitHub release: v0.19.45 (2026-06-17)
 > Updated: 2026-06-18
 
 This roadmap is the 6-8 week operating view for `masc`.

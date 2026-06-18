@@ -1,11 +1,11 @@
-# RFC-0257: Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing
+# RFC-0258: Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing
 
 **Status**: Draft
 **Date**: 2026-06-18
-**Verified against HEAD**: `c7a0ff81f6` (worktree base)
+**Verified against base main**: `7a5cc97531` (post-#21401 merge)
 **Builds on**: [RFC-0042](./RFC-0042-keeper-terminal-code-closed-sum.md) (no-string-classifier lineage), [RFC-0199](./RFC-0199-evidence-driven-auto-approval.md) (evidence-driven verdict replaces human bottleneck — same philosophy, different domain)
 **Related**: PR #21401 `feat(keeper): adversarial review verdict + author wake-on-fail (PoC)`; Anti_rationalization (#3067, cross-model adversarial completion gate)
-**Number note**: this RFC was first drafted as `0256`, which collided with PR #21471 (`RFC-0256-mutex-protect-migration.md`, an unrelated topic — not a multi-phase share). #21471 is the older PR and already claims file `0256` and bumps `.next-number` 0255→0257, so the queue-next free number is `0257`; this RFC takes `0257` and advances the ledger to `0258`. This collision is itself an instance of the `.next-number` read-not-reserve race (0255→0256→0257 chain), which the meta-fix in RFC-0078 (number reservation ledger) is meant to close at merge time.
+**Number note**: this RFC was first drafted as `0256`, which collided with PR #21471 (`RFC-0256-mutex-protect-migration.md`, an unrelated topic — not a multi-phase share). It was then renamed to `0257`, but current main now contains `RFC-0257-per-keeper-memory-execution-lane.md`. This RFC therefore takes the queue-next free number `0258` and advances the ledger to `0259`. This collision is itself an instance of the `.next-number` read-not-reserve race, which the meta-fix in RFC-0078 (number reservation ledger) is meant to close at merge time.
 
 ## 1. Summary
 
@@ -28,7 +28,7 @@ The boundary stays exactly where the PoC put it: **judgment = LLM, routing = det
 | `Verifier_oas` (`lib/verifier_oas.ml:73-113`, `.mli:25` `handle_pre_tool_use`) | before action (PreToolUse) | **gate** | wired |
 | `Anti_rationalization` (`lib/task/anti_rationalization.mli:1-16,78`) | on completion | **gate** | wired into `lib/task/task.ml`, `tool_task_handlers.ml` |
 | `Adversarial_eval` (`lib/cdal/adversarial_eval.ml:1-10`) via tool `masc_keeper_adversarial_review` (`lib/keeper/keeper_schema.ml:455`, dispatch `keeper_tool_surface.ml:705-706,820-824`, body `keeper_tool_surface_ops.ml:922`) | post diff | **advisory only — not a gate** | wired (keeper tool) |
-| PoC #21401 `Keeper_adversarial_review` (`act_on_verdict` at `keeper_adversarial_review.ml:231`, `wake_author:185`) | on completion | **wake author** | **unwired** |
+| PoC #21401 `Keeper_adversarial_review` (`act_on_verdict` at `keeper_adversarial_review.ml:156`, `wake_author:113`) | on completion | **wake author** | **unwired** |
 
 All four share `Verifier_core.verdict` (`lib/verifier_core.mli:21-24`). All four use the generic engine `run_named_with_masc_tools` (`lib/keeper/keeper_turn_driver_wrappers.ml:157`). The PoC's own `.ml` comment states it "Mirrors `Verifier_oas.verify`".
 
@@ -36,7 +36,7 @@ All four share `Verifier_core.verdict` (`lib/verifier_core.mli:21-24`). All four
 
 ### 2.2 The real risk this must address: reviewers confabulate
 
-The adversarial reviewer itself hallucinates. Live evidence: PR #21401's own body contains an auto-generated "Adversarial Critique" asserting OCaml-impossible failures ("Eio multi-domain writes a Variant constructor non-atomically", "`Match_failure` from partial type writes"). A separate documented case: a keeper adversarial review narrated *another PR's diff* as this PR's, with zero diff-matched citations.
+The adversarial reviewer itself hallucinates. During #21401 review cleanup, an auto-generated adversarial critique asserted OCaml-impossible failures ("Eio multi-domain writes a Variant constructor non-atomically", "`Match_failure` from partial type writes"); the merged PR body was later cleaned, so this is historical review evidence rather than a current PR-body claim. A separate documented case: a keeper adversarial review narrated *another PR's diff* as this PR's, with zero diff-matched citations.
 
 Consequence: **adding more reviewers or more wake triggers without grounding is an amplifier that pushes wrong findings into rework loops faster.** The 13+ telemetry-as-fix / string-classifier workaround precedents (CLAUDE.md §워크어라운드) show the failure compounds once it lands. Grounding must be a *precondition of a blocking verdict*, not a prompt-level suggestion.
 
@@ -123,7 +123,7 @@ Routing matrix (deterministic, exhaustive — no `_ ->` catch-all, per RFC-0042 
 | `Fail` (grounded) | `On_completion` | `[Wake author]` (PoC's case) + `[Advisory]` |
 | `Fail` (grounded) | `Post_diff` | `[Advisory]` (current `Adversarial_eval` behaviour preserved) |
 
-The four reviewers keep their triggers; each calls `Verdict_router.route` instead of hand-coding its action. PR #21401's `act_on_verdict` (`:231`) becomes the `On_completion + Fail` case. Wake still uses `Keeper_external_attention.record` (`lib/keeper/keeper_external_attention.mli:95,125`; existing caller `server_discord_in_process_gateway.ml` is the only other one today).
+The four reviewers keep their triggers; each calls `Verdict_router.route` instead of hand-coding its action. PR #21401's `act_on_verdict` (`:156`) becomes the `On_completion + Fail` case. Wake still uses `Keeper_external_attention.record` (`lib/keeper/keeper_external_attention.mli:95,125`; existing caller `server_discord_in_process_gateway.ml` is the only other one today).
 
 ## 5. Migration & scope
 

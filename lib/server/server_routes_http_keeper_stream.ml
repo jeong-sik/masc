@@ -33,6 +33,9 @@ let keeper_chat_stream_error_json message =
 let surface_context_to_instructions = Keeper_turn.surface_context_to_instructions
 
 let format_surface_context ctx =
+  (* NDT-OK: sound-partial; the shared formatter returns [None] for absent
+     co-view instructions, while this HTTP helper preserves its legacy
+     string-returning boundary for [turn_instructions_for_request]. *)
   Option.value ~default:"" (surface_context_to_instructions ctx)
 
 let has_connector_context (payload : keeper_chat_stream_request) =

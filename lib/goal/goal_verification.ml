@@ -557,11 +557,50 @@ let emit_event config ~(goal_id : string) ~(event_type : string)
   in
   Fs_compat.append_jsonl path event
 
+let max_resolved_requests () =
+  (* Bounds how many resolved (Approved/Rejected/Cancelled) requests the
+     persistent [state.requests] list retains. The list is append-only
+     (create_request: requests @ [request]) with no prior pruning, so it
+     grew unbounded for the lifetime of the state file — a long-lived
+     allocation source (live_words growth after restart). Open requests
+     are always kept; only terminal resolved entries are capped. *)
+  match Sys.getenv_opt "MASC_GOAL_VERIFICATION_MAX_RESOLVED" with
+  | Some v -> (match int_of_string_opt (String.trim v) with Some n when n > 0 -> n | _ -> 500)
+  | None -> 500
+
+let prune_resolved_requests requests =
+  (* Keep every Open (active quorum) request plus the most recent
+     [max_resolved_requests] resolved entries. Resolved requests are
+     terminal: quorum evaluation only consults Open rows and vote dedup
+     short-circuits on non-Open status, so dropping old resolved entries
+     cannot regress correctness. Append order is chronological, so
+     dropping from the front of the resolved partition drops the oldest.
+     Order across the list is not load-bearing — list_requests_for_goal
+     filters by goal_id and find_request searches by id. *)
+  let opens, resolved = List.partition (fun (r : goal_verification_request) -> r.status = Open) requests in
+  let max_r = max_resolved_requests () in
+  let resolved_len = List.length resolved in
+  if resolved_len <= max_r then requests
+  else
+    (* Skip (resolved_len - max_r) oldest resolved, keep the rest. *)
+    let to_skip = resolved_len - max_r in
+    let rec keep_after_skip n = function
+      | _ :: rest when n > 0 -> keep_after_skip (n - 1) rest
+      | rest -> rest
+    in
+    opens @ keep_after_skip to_skip resolved
+
 let update_state config f =
   let lock_path = requests_path config in
   Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
+      (* Bound long-lived growth: cap resolved requests on every write so
+         the persistent list cannot grow without limit. No-op once the
+         resolved count is within the cap. *)
+      let next_state =
+        { next_state with requests = prune_resolved_requests next_state.requests }
+      in
       write_state config next_state;
       next_state)
 

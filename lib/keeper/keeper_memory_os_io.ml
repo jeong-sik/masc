@@ -110,7 +110,7 @@ let next_generation ~keeper_id ~trace_id =
       if String.starts_with ~prefix name then
         let plen = String.length prefix in
         let rest = String.sub name plen (String.length name - plen) in
-        try Some (int_of_string (String.sub rest 0 4)) with _ -> None
+        if String.length rest >= 4 then int_of_string_opt (String.sub rest 0 4) else None
       else None)
     |> List.fold_left max (-1)
   in

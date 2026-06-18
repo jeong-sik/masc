@@ -18,6 +18,7 @@ val episodes_dir : keeper_id:string -> string
 val tool_results_dir : keeper_id:string -> string
 val tool_result_path : keeper_id:string -> tool_call_id:string -> string
 val episode_path : keeper_id:string -> trace_id:string -> generation:int -> string
+val next_generation : keeper_id:string -> trace_id:string -> int
 
 (** RFC-0247 §2.7: per-keeper association events, alongside the fact store. *)
 val edges_path : keeper_id:string -> string

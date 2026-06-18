@@ -15,6 +15,12 @@ type outcome =
   | Ran_inline
   | Dropped
 
+type reservation =
+  { release_mu : Stdlib.Mutex.t
+  ; mutable released : bool
+  ; mutable switch_hook : Eio.Switch.hook option
+  }
+
 (* Per-keeper reservation bound: 1 in-flight (holding [mem_mu]) plus 1 queued.
    A third concurrent post-turn unit for the same keeper means turns outpace
    extraction; the excess is best-effort and dropped rather than piling up
@@ -112,6 +118,36 @@ let release_reservation ~keeper_name entry =
     dec_pending ~keeper_name ())
 ;;
 
+let make_reservation () =
+  { release_mu = Stdlib.Mutex.create (); released = false; switch_hook = None }
+;;
+
+let reservation_released reservation =
+  Stdlib.Mutex.protect reservation.release_mu (fun () -> reservation.released)
+;;
+
+let release_reservation_once ~keeper_name entry reservation =
+  let should_release =
+    Stdlib.Mutex.protect reservation.release_mu (fun () ->
+      if reservation.released
+      then false
+      else (
+        reservation.released <- true;
+        true))
+  in
+  if should_release then release_reservation ~keeper_name entry
+;;
+
+let disarm_switch_hook reservation =
+  let hook =
+    Stdlib.Mutex.protect reservation.release_mu (fun () ->
+      let hook = reservation.switch_hook in
+      reservation.switch_hook <- None;
+      hook)
+  in
+  Option.iter (fun hook -> ignore (Eio.Switch.try_remove_hook hook)) hook
+;;
+
 let protect_cleanup ~keeper_name label f =
   try f () with
   | exn ->
@@ -122,13 +158,31 @@ let protect_cleanup ~keeper_name label f =
       (Printexc.to_string exn)
 ;;
 
-let release_after_run ~keeper_name entry ~acquired ~in_flight =
+let release_after_run ~keeper_name entry reservation ~acquired ~in_flight =
   if !in_flight
   then protect_cleanup ~keeper_name "dec_in_flight" (fun () -> dec_in_flight ~keeper_name ());
   if !acquired
   then protect_cleanup ~keeper_name "unlock" (fun () -> Eio.Mutex.unlock entry.mem_mu);
   protect_cleanup ~keeper_name "release_reservation" (fun () ->
-    release_reservation ~keeper_name entry)
+    release_reservation_once ~keeper_name entry reservation)
+;;
+
+let arm_switch_release ~keeper_name entry reservation sw =
+  let release_from_switch () =
+    protect_cleanup ~keeper_name "executor_switch_release" (fun () ->
+      release_reservation_once ~keeper_name entry reservation)
+  in
+  try
+    let hook = Eio.Switch.on_release_cancellable sw release_from_switch in
+    Stdlib.Mutex.protect reservation.release_mu (fun () ->
+      if reservation.released
+      then ignore (Eio.Switch.try_remove_hook hook)
+      else reservation.switch_hook <- Some hook)
+  with
+  | _exn ->
+    (* Finished switches can raise while running the release callback; any hook
+       registration failure means the executor cannot own this reservation. *)
+    release_from_switch ()
 ;;
 
 (* Runs on a forked fiber owned by the executor switch. Holds [mem_mu] across
@@ -136,12 +190,13 @@ let release_after_run ~keeper_name entry ~acquired ~in_flight =
    exit, including cancellation at shutdown. No exception escapes: a best-effort
    unit must never propagate into the executor switch — that would cancel the
    fleet. *)
-let run_unit ~keeper_name entry sw f =
+let run_unit ~keeper_name entry reservation sw f =
   let acquired = ref false in
   let in_flight = ref false in
   Eio.Switch.run (fun cleanup_sw ->
     Eio.Switch.on_release cleanup_sw (fun () ->
-      release_after_run ~keeper_name entry ~acquired ~in_flight);
+      release_after_run ~keeper_name entry reservation ~acquired ~in_flight);
+      disarm_switch_hook reservation;
       try
         Eio.Mutex.lock entry.mem_mu;
         (* No suspension point between [lock] returning and this assignment, so
@@ -188,9 +243,32 @@ let submit ~base_path ~keeper_name f =
          (max_pending ());
        Dropped
      | Some _bound ->
-       record_counter ~keeper_name MemoryLaneSubmitted;
-       Eio.Fiber.fork ~sw (fun () -> run_unit ~keeper_name entry sw f);
-       Submitted)
+       let reservation = make_reservation () in
+       arm_switch_release ~keeper_name entry reservation sw;
+       if reservation_released reservation
+       then (
+         record_counter ~keeper_name MemoryLaneDropped;
+         Log.Keeper.warn ~keeper_name
+           "memory lane executor switch unavailable: dropping post-turn memory unit";
+         Dropped)
+       else (
+         try
+           record_counter ~keeper_name MemoryLaneSubmitted;
+           Eio.Fiber.fork ~sw (fun () -> run_unit ~keeper_name entry reservation sw f);
+           Submitted
+         with
+         | Eio.Cancel.Cancelled _ as e ->
+           protect_cleanup ~keeper_name "fork_cancel_release" (fun () ->
+             release_reservation_once ~keeper_name entry reservation);
+           raise e
+         | exn ->
+           protect_cleanup ~keeper_name "fork_failure_release" (fun () ->
+             release_reservation_once ~keeper_name entry reservation);
+           record_counter ~keeper_name MemoryLaneUnitFailures;
+           Log.Keeper.warn ~keeper_name
+             "memory lane fork failed: %s"
+             (Printexc.to_string exn);
+           Dropped))
 ;;
 
 module For_testing = struct

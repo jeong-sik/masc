@@ -182,6 +182,35 @@ let test_releases_on_cancel () =
   | None -> Alcotest.fail "keeper entry missing after cancel"
 ;;
 
+(* Submitting against a finished executor switch must not leak the pending
+   reservation. Eio.Fiber.fork does not raise to the caller for an off switch, so
+   the lane needs its own executor-switch release fallback. *)
+let test_finished_switch_drops_without_leak () =
+  Lane.For_testing.reset ();
+  let finished_sw = ref None in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      finished_sw := Some sw));
+  let sw =
+    match !finished_sw with
+    | Some sw -> sw
+    | None -> Alcotest.fail "missing captured switch"
+  in
+  Lane.init ~sw;
+  let outcome =
+    Lane.submit ~base_path ~keeper_name:"k1" (fun () -> raise Test_boom)
+  in
+  (match outcome with
+   | Lane.Dropped -> ()
+   | Lane.Submitted -> Alcotest.fail "expected Dropped, got Submitted"
+   | Lane.Ran_inline -> Alcotest.fail "expected Dropped, got Ran_inline");
+  match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
+  | Some 0 -> ()
+  | Some n -> Alcotest.failf "pending leaked after finished switch submit: %d" n
+  | None -> Alcotest.fail "keeper entry missing after finished switch submit"
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_lane"
@@ -205,6 +234,10 @@ let () =
         ; Alcotest.test_case "saturation drops" `Quick test_saturation_drops
         ; Alcotest.test_case "releases on raise" `Quick test_releases_on_raise
         ; Alcotest.test_case "releases on cancel" `Quick test_releases_on_cancel
+        ; Alcotest.test_case
+            "finished switch drops without leak"
+            `Quick
+            test_finished_switch_drops_without_leak
         ] )
     ]
 ;;

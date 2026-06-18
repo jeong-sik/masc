@@ -89,6 +89,17 @@ function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
 }
 
 // PipelineStage SSOT: branches aligned to `types/core.ts#PipelineStage`.
+// Tone for the scannable per-row rail (keeper-v2 Fleet design: a left edge
+// keyed to runtime band so keeper state reads down a single column instead of
+// every row looking identical). Maps masc's RuntimeBand onto the v2 tone
+// vocabulary (ok/warn/bad/idle); the CSS in v2-monitoring.css paints the edge.
+const ROSTER_BAND_TONE: Record<RuntimeBand, 'ok' | 'warn' | 'bad' | 'idle'> = {
+  active: 'ok',
+  attention: 'bad',
+  paused: 'warn',
+  offline: 'idle',
+}
+
 // Legacy `tool_use` / `scheduled_autonomous` / `thinking` removed — the
 // backend never emits them as pipeline_stage.
 function stageBadgeClass(stageKey: string): string {
@@ -1098,6 +1109,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   tabIndex=${0}
                   key=${row.key}
                   data-testid="keeper-operations-row"
+                  data-tone=${ROSTER_BAND_TONE[row.band.key]}
                   aria-label=${`${row.displayName} 선택`}
                   aria-pressed=${selected}
                   onClick=${() => setSelectedKey(row.key)}

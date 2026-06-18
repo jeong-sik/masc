@@ -698,6 +698,42 @@ describe('AgentRoster live-only cards', () => {
     expect(text).not.toContain('상세 상태 부분 동기화')
   })
 
+  it('paints a per-row tone rail keyed to runtime band (keeper-v2 Fleet)', async () => {
+    keepers.value = [
+      {
+        name: 'runner', agent_name: 'keeper-runner-agent', status: 'idle',
+        phase: 'Running', pipeline_stage: 'idle', keepalive_running: true,
+      } as Keeper,
+      {
+        name: 'rester', agent_name: 'keeper-rester-agent', status: 'paused',
+        phase: 'Paused', pipeline_stage: 'paused', paused: true, keepalive_running: false,
+      } as Keeper,
+      {
+        name: 'gone', agent_name: 'keeper-gone-agent', status: 'offline',
+        phase: 'Offline', pipeline_stage: 'offline', keepalive_running: false,
+      } as Keeper,
+    ]
+    agents.value = []
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const rows = Array.from(
+      container.querySelectorAll('[data-testid="keeper-operations-row"]'),
+    ) as HTMLElement[]
+    expect(rows.length).toBe(3)
+    // every row carries a tone the rail CSS can paint
+    const valid = new Set(['ok', 'warn', 'bad', 'idle'])
+    expect(rows.every(r => valid.has(r.getAttribute('data-tone') ?? ''))).toBe(true)
+    const toneByName = (name: string) =>
+      rows.find(r => r.textContent?.includes(name))?.getAttribute('data-tone')
+    // band → tone: paused=warn, offline=idle (the unambiguous bands)
+    expect(toneByName('rester')).toBe('warn')
+    expect(toneByName('gone')).toBe('idle')
+  })
+
   it('does not show keeper boot hints on offline non-keeper agent rows', async () => {
     agents.value = [
       makeAgent({

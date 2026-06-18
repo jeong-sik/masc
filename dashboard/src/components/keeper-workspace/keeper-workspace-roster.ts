@@ -23,6 +23,7 @@ import {
 } from './keeper-workspace-shared'
 
 type RosterFilter = 'all' | 'run' | 'att'
+type RosterSort = 'status' | 'name' | 'att'
 
 const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
   { bucket: 'running', label: '실행 중' },
@@ -46,6 +47,22 @@ function attentionCount(keeper: Keeper): number {
 }
 function needsAttention(keeper: Keeper): boolean {
   return keeper.needs_attention === true || attentionCount(keeper) > 0
+}
+
+/** Numeric attention weight for the 'att' sort: attention-needing keepers rank
+ *  above the rest, ordered by blocked-task count (min 1 when only the flag is
+ *  set, so a flagged-but-unblocked keeper still outranks a calm one). Mirrors
+ *  the v2 roster's numeric `k.att` sort key. */
+function attentionScore(keeper: Keeper): number {
+  return needsAttention(keeper) ? Math.max(1, attentionCount(keeper)) : 0
+}
+
+/** Comparator for the flat sort modes ('name'/'att'). 'status' keeps the bucket
+ *  grouping instead and never reaches here. Name ties break alphabetically so
+ *  the order is stable. */
+function compareKeepers(a: Keeper, b: Keeper, sort: Exclude<RosterSort, 'status'>): number {
+  if (sort === 'name') return a.name.localeCompare(b.name)
+  return attentionScore(b) - attentionScore(a) || a.name.localeCompare(b.name)
 }
 
 /** ns proxy: keepers have no namespace field; the skill path is the closest
@@ -111,6 +128,7 @@ export function KeeperWorkspaceRoster({
 }): VNode {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<RosterFilter>('all')
+  const [sort, setSort] = useState<RosterSort>('status')
 
   const all = keepers.value
   const counts = {
@@ -137,13 +155,21 @@ export function KeeperWorkspaceRoster({
     { id: 'att', label: '주의' },
   ]
 
-  // Flatten groups → [{ type: 'header'|'row', ... }] for windowing.
+  // Flatten to [{ type: 'header'|'row', ... }] for windowing. 'status' keeps the
+  // bucket grouping with headers; 'name'/'att' produce a flat sorted list with no
+  // headers, mirroring the v2 roster sort modes (rails.jsx Roster).
   const items: RosterItem[] = []
-  for (const group of GROUP_ORDER) {
-    const rows = visible.filter(k => keeperBucket(k) === group.bucket)
-    if (rows.length === 0) continue
-    items.push({ type: 'header', bucket: group.bucket, label: group.label })
-    for (const keeper of rows) {
+  if (sort === 'status') {
+    for (const group of GROUP_ORDER) {
+      const rows = visible.filter(k => keeperBucket(k) === group.bucket)
+      if (rows.length === 0) continue
+      items.push({ type: 'header', bucket: group.bucket, label: group.label })
+      for (const keeper of rows) {
+        items.push({ type: 'row', keeper })
+      }
+    }
+  } else {
+    for (const keeper of [...visible].sort((a, b) => compareKeepers(a, b, sort))) {
       items.push({ type: 'row', keeper })
     }
   }
@@ -185,6 +211,17 @@ export function KeeperWorkspaceRoster({
             ${chip.label}<span class="n">${counts[chip.id]}</span>
           </button>
         `)}
+        <select
+          class="kw-roster-sort"
+          aria-label="키퍼 정렬 기준"
+          title="정렬 기준"
+          value=${sort}
+          onChange=${(e: Event) => setSort((e.target as HTMLSelectElement).value as RosterSort)}
+        >
+          <option value="status">상태순</option>
+          <option value="name">이름순</option>
+          <option value="att">주의순</option>
+        </select>
       </div>
       ${visible.length === 0
         ? html`<div class="kw-roster-list"><div class="kw-roster-empty v2-monitoring-row">일치하는 키퍼가 없습니다</div></div>`
@@ -197,16 +234,11 @@ export function KeeperWorkspaceRoster({
               getKey=${getKey}
             />`
           : html`<div class="kw-roster-list">
-              ${GROUP_ORDER.map(group => {
-                const rows = visible.filter(k => keeperBucket(k) === group.bucket)
-                if (rows.length === 0) return null
-                return html`
-                  <div>
-                    <div class="kw-roster-group v2-monitoring-row">${group.label}</div>
-                    ${rows.map(k => html`<${RosterRow} key=${k.name} keeper=${k} active=${k.name === activeName} onSelect=${select} style=${rowStyle} />`)}
-                  </div>
-                `
-              })}
+              ${items.map(item =>
+                item.type === 'header'
+                  ? html`<div class="kw-roster-group v2-monitoring-row">${item.label}</div>`
+                  : html`<${RosterRow} key=${item.keeper.name} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} style=${rowStyle} />`,
+              )}
             </div>`}
     </aside>
   `

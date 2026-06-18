@@ -165,7 +165,7 @@
   gap: 7px;
   padding: 4px 10px;
   border: 1px solid var(--ss-border);
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   background: var(--ss-surface-subtle);
   color: var(--ss-text-secondary);
   font-size: 11px;

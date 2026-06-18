@@ -18,9 +18,27 @@ let run
   ~inference_telemetry
   ()
   =
-  (* Post-turn deterministic memory write.
+  (* RFC-0257: snapshot the per-keeper tool-emission accumulator synchronously
+     at turn end, before the memory series detaches onto the memory lane.
+     Reading the live accumulator from a detached fiber could fold a later
+     turn's emissions into this turn's notes. *)
+  let tool_results_snapshot =
+    if Keeper_tool_emission_hook.masc_tool_emission_enabled ()
+    then
+      Some
+        (Keeper_tool_emission_hook.snapshot
+           (Keeper_tool_emission_hook.accumulator_for_keeper
+              meta.Keeper_meta_contract.name))
+    else None
+  in
+  (* (1) deterministic write, (2) librarian extraction, (3) compaction run on
+     this keeper's memory lane (RFC-0257), detached from the turn lane. All
+     three touch the keeper's memory bank (no internal lock); the lane's
+     per-keeper mutex serializes them. meta/config are immutable snapshots, so
+     using them after the turn returns does not race a later turn.
      Uses meta-based fallback when [STATE] parsing fails.
      See RFC #3646 Section 3: Det/NonDet boundary. *)
+  let memory_series () =
   (try
      let notes_written, kinds_written =
        Memory.append_from_reply
@@ -33,18 +51,10 @@ let run
          ()
      in
      let tool_result_notes_written =
-       if Keeper_tool_emission_hook.masc_tool_emission_enabled ()
-       then (
-         let tool_results =
-           Keeper_tool_emission_hook.(
-             snapshot (accumulator_for_keeper meta.name))
-         in
-         Memory.append_from_tool_results
-           config
-           meta
-           ~turn
-           ~results:tool_results)
-       else 0
+       match tool_results_snapshot with
+       | Some tool_results ->
+         Memory.append_from_tool_results config meta ~turn ~results:tool_results
+       | None -> 0
      in
      let notes_written = notes_written + tool_result_notes_written in
      let kinds_written =
@@ -113,8 +123,17 @@ let run
      Log.Keeper.warn ~keeper_name:meta.name
        "runtime=%s compaction failed: %s"
        (Keeper_meta_contract.runtime_id_of_meta meta)
-       (Printexc.to_string exn));
-
+       (Printexc.to_string exn))
+  in
+  (* RFC-0257: detach (1)-(3) onto the per-keeper memory lane. When the executor
+     switch is not initialized (tests, early startup) the lane runs them inline,
+     so no memory work is lost. *)
+  let (_ : Keeper_memory_lane.outcome) =
+    Keeper_memory_lane.submit
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+      memory_series
+  in
   (* Post-turn quality metrics — goal alignment + memory recall.
      Logged to decisions.jsonl for feedback loop analysis. *)
   (try

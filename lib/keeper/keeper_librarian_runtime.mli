@@ -93,6 +93,22 @@ val run_with_parse_retries
     the last error. Pure given a pure [attempt] — the provider side effect lives
     in the [attempt] supplied by {!extract_with_provider}. *)
 
+val global_slot_capacity : unit -> int
+(** Fleet-wide librarian provider gate capacity from
+    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT] (default 1, 0 disables the
+    gate). *)
+
+val with_provider_slot
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> (unit -> 'a)
+  -> 'a option
+(** Run [f] under the fleet-wide librarian provider gate — the #21230
+    storm-guard the per-keeper lane keeps as an optional fleet-wide cap. At
+    capacity N, the (N+1)-th concurrent entrant returns [None] after
+    [provider_slot_wait_sec] when [clock] is supplied (drop, not block);
+    capacity 0 disables the gate so [f] always runs ([Some]). Exposed for
+    storm-guard regression coverage (#21376). *)
+
 val extract_with_provider
   :  ?complete:complete_fn
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

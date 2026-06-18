@@ -15,6 +15,77 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 ;;
 
+(* RFC-0257 adversarial review: the previous process-global slot was removed in
+   favor of per-keeper lanes, but measured production data showed that an
+   unbounded shared flash/glm provider pool can spike empty-response rates.
+   Re-introduce an optional fleet-wide concurrency gate around librarian provider
+   calls only. Per-keeper lanes still serialize ordering and fairness; this slot
+   only caps simultaneous provider round-trips. Default 1 preserves the prior
+   #21230 protection; 0 disables the gate. *)
+let global_slot_capacity () =
+  Keeper_memory_bank_env.memory_env_int_logged
+    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+    ~default:1
+  |> max 0
+;;
+
+let provider_slot_wait_sec = 0.25
+
+type provider_slot_state =
+  { capacity : int
+  ; slot : Eio.Semaphore.t option
+  }
+
+let provider_slot_mu = Stdlib.Mutex.create ()
+let provider_slot_state : provider_slot_state option ref = ref None
+
+let provider_slot_for_capacity capacity =
+  Stdlib.Mutex.protect provider_slot_mu (fun () ->
+    match !provider_slot_state with
+    | Some state when state.capacity = capacity -> state.slot
+    | _ ->
+      let slot =
+        match capacity with
+        | 0 -> None
+        | n -> Some (Eio.Semaphore.make n)
+      in
+      provider_slot_state := Some { capacity; slot };
+      slot)
+;;
+
+let with_provider_slot ?clock f =
+  let capacity = global_slot_capacity () in
+  match provider_slot_for_capacity capacity with
+  | None -> Some (f ())
+  | Some sem ->
+    let acquired = ref false in
+    (try
+       match clock with
+       | None ->
+         Eio.Semaphore.acquire sem;
+         acquired := true
+       | Some clock ->
+         (try
+            Eio.Time.with_timeout_exn clock provider_slot_wait_sec (fun () ->
+              Eio.Semaphore.acquire sem);
+            acquired := true
+          with
+          | Eio.Time.Timeout -> ())
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.warn
+         "librarian provider slot acquisition failed: %s"
+         (Printexc.to_string exn));
+    if !acquired
+    then
+      Some
+        (Eio.Switch.run (fun cleanup_sw ->
+           Eio.Switch.on_release cleanup_sw (fun () -> Eio.Semaphore.release sem);
+           f ()))
+    else None
+;;
+
 let enabled () =
   (* Default on: a keeper without conversation ingestion is the pathology
      the Memory OS exists to fix (2026-06-12 diagnosis, issue #20909).
@@ -119,22 +190,11 @@ let default_timeout_sec () =
     ~default:Env_config_governance.Inference.timeout_seconds
 ;;
 
-let provider_slot_busy = "librarian provider slot busy"
-
-let provider_slot = Eio.Semaphore.make 1
-
-let provider_slot_wait_sec () =
-  Keeper_memory_bank_env.memory_env_float_logged
-    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_SLOT_WAIT_SEC"
-    ~default:0.25
-  |> max 0.001
-;;
-
 let runtime_id_for_librarian ~runtime_id =
-  match Sys.getenv_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" with
-  | Some value ->
-    let value = String.trim value in
-    if String.equal value "" then runtime_id else value
+  match
+    Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+  with
+  | Some value -> value
   | None -> runtime_id
 ;;
 
@@ -276,18 +336,6 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> None)
 ;;
 
-let with_provider_slot ?clock f =
-  match
-    with_timeout ?clock ~timeout_sec:(provider_slot_wait_sec ()) (fun () ->
-      Eio.Semaphore.acquire provider_slot)
-  with
-  | None -> Error provider_slot_busy
-  | Some () ->
-    (* fun-protect-finally-ok: [Eio.Semaphore.release] only returns the
-       provider slot; it does not wait, acquire, or perform I/O. *)
-    Fun.protect ~finally:(fun () -> Eio.Semaphore.release provider_slot) f
-;;
-
 let extract_with_provider
     ?(complete = default_complete)
     ?clock
@@ -301,27 +349,26 @@ let extract_with_provider
   | Error _ as e -> e
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
-    with_provider_slot ?clock (fun () ->
-      let attempt messages =
-        match
-          with_timeout ?clock ~timeout_sec (fun () ->
-            complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
-        with
-        | None -> Transport_failed "librarian provider timed out"
-        | Some (Error err) -> Transport_failed (http_error_message err)
-        | Some (Ok response) ->
-          let raw = Agent_sdk_response.text_of_response response |> String.trim in
-          if String.equal raw ""
-          then Unparseable "librarian provider returned empty response"
-          else (
-            match Keeper_librarian.episode_of_output inp raw with
-            | Some episode -> Parsed episode
-            | None -> Unparseable "librarian provider returned invalid episode JSON")
-      in
-      run_with_parse_retries
-        ~max_retries:librarian_max_parse_retries
-        ~attempt
-        messages)
+    let attempt messages =
+      match
+        with_timeout ?clock ~timeout_sec (fun () ->
+          complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+      with
+      | None -> Transport_failed "librarian provider timed out"
+      | Some (Error err) -> Transport_failed (http_error_message err)
+      | Some (Ok response) ->
+        let raw = Agent_sdk_response.text_of_response response |> String.trim in
+        if String.equal raw ""
+        then Unparseable "librarian provider returned empty response"
+        else (
+          match Keeper_librarian.episode_of_output inp raw with
+          | Some episode -> Parsed episode
+          | None -> Unparseable "librarian provider returned invalid episode JSON")
+    in
+    run_with_parse_retries
+      ~max_retries:librarian_max_parse_retries
+      ~attempt
+      messages
 ;;
 
 let extract_and_append_with_provider
@@ -436,17 +483,28 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                Option.value timeout_sec ~default:(default_timeout_sec ())
              in
              match
-               extract_and_append_with_provider
-                 ?complete
-                 ?clock
-                 ~timeout_sec
-                 ~sw
-                 ~net
-                 ~keeper_id
-                 ~provider_cfg
-                 inp
+               with_provider_slot ?clock (fun () ->
+                 extract_and_append_with_provider
+                   ?complete
+                   ?clock
+                   ~timeout_sec
+                   ~sw
+                   ~net
+                   ~keeper_id
+                   ~provider_cfg
+                   inp)
              with
-             | Ok episode ->
+             | None ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
+                 ~labels:
+                   [ "keeper", keeper_id; "site", "memory_os_librarian_provider_slot" ]
+                 ();
+               Log.Keeper.warn ~keeper_name:keeper_id
+                 "memory os librarian skipped runtime=%s: global provider slot busy (capacity=%d)"
+                 runtime_id
+                 (global_slot_capacity ())
+             | Some (Ok episode) ->
                (* Only a successful write resets the cadence. Skipped or failed
                   attempts leave the keeper due on the next turn. *)
                cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
@@ -455,11 +513,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  episode.Keeper_memory_os_types.trace_id
                  episode.generation
                  (List.length episode.claims)
-             | Error err when String.equal err provider_slot_busy ->
-               Log.Keeper.info ~keeper_name:keeper_id
-                 "memory os librarian skipped runtime=%s: provider slot busy"
-                 runtime_id
-             | Error err ->
+             | Some (Error err) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)
                  ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]

@@ -111,23 +111,41 @@ let dispatch_classified
       envelope
   =
   let ir = envelope.Masc_exec.Shell_ir_risk.ir in
-  let gate_verdict =
-    Shell_gate.gate_typed
-      ~ir
-      ~syntax_policy:{ allow_pipes; redirect_allowed }
-      ~path_policy:Shell_gate.forbid_masc_internal_state_paths
-      ~sandbox:{ target = sandbox }
-      ()
-  in
-  gate_verdict_map
-    gate_verdict
-    ~f_reject:(fun diagnostic -> Error (Gate_reject diagnostic))
-    ~f_cannot_parse:(Error Cannot_parse)
-    ~f_too_complex:(Error Too_complex)
-    ~f_allow:(fun _context ->
-      match validate_paths ?keeper_id ?base_path ~workdir ir with
-      | Error e -> Error (Path_reject e)
-      | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?base_host_env ?on_output_chunk envelope))
+  (* Trust- AND flag-independent catastrophic floor (RFC-0254 §4 lesson (c),
+     §5.4).  [dispatch_classified] is the single chokepoint every executed
+     command passes through — the [MASC_SHELL_IR_APPROVAL_GATE_ENABLED]=off
+     keeper path (keeper_tool_execute_runtime.ml) and the read-ops/evidence
+     paths reach it directly — so enforcing the floor here makes it
+     unconditional: destructive git, redirect write-escape, and [mkfs] are
+     denied even with the approval flag off.  The [_with_approval] wrapper runs
+     the same [catastrophic_floor] first via [Approval_policy.decide] (single
+     source of truth); on its allow path this re-scan returns [None], so there
+     is no double-deny, only one cheap pure scan.  Destructive git has no path
+     argument for [validate_paths] to jail, so this floor is its only enforcer
+     (RFC-0254 §5.4). *)
+  match
+    Masc_exec.Approval_policy.catastrophic_floor (Masc_exec.Capability_check.of_ir ir)
+  with
+  | Some reason ->
+    Error (Policy_denied { reason = Masc_exec.Verdict.deny_reason_to_string reason })
+  | None ->
+    let gate_verdict =
+      Shell_gate.gate_typed
+        ~ir
+        ~syntax_policy:{ allow_pipes; redirect_allowed }
+        ~path_policy:Shell_gate.forbid_masc_internal_state_paths
+        ~sandbox:{ target = sandbox }
+        ()
+    in
+    gate_verdict_map
+      gate_verdict
+      ~f_reject:(fun diagnostic -> Error (Gate_reject diagnostic))
+      ~f_cannot_parse:(Error Cannot_parse)
+      ~f_too_complex:(Error Too_complex)
+      ~f_allow:(fun _context ->
+        match validate_paths ?keeper_id ?base_path ~workdir ir with
+        | Error e -> Error (Path_reject e)
+        | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?base_host_env ?on_output_chunk envelope))
 ;;
 
 (* TEL-OK: wrapper only classifies before delegating to dispatch_classified. *)

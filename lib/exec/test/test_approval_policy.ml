@@ -286,6 +286,37 @@ let test_git_clean_bundled_force_denied () =
   | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Clean_force); _ } -> ()
   | _ -> assert false
 
+(* RFC-0255 §4.5 review response: [reset --hard] is only partly
+   reflog-recoverable.  Uncommitted tracked changes are not recoverable, so it
+   stays in the trust-independent floor until a structured recovery path can
+   prove a clean/snapshotted worktree. *)
+let test_reset_hard_floored_under_autonomous () =
+  let s = simple (bin_ok "git") ~args:[ lit "reset"; lit "--hard"; lit "HEAD~1" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Reset_hard); _ } -> ()
+  | _ -> assert false
+
+(* RFC-0255 §4.5 review response: [branch -D] can only be safely automated
+   after proving the branch is merged/reachable, unused by another worktree, or
+   snapshotted.  The raw command stays floored. *)
+let test_branch_delete_floored_under_autonomous () =
+  let s = simple (bin_ok "git") ~args:[ lit "branch"; lit "-D"; lit "feature-x" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Branch_delete); _ } -> ()
+  | _ -> assert false
+
+(* RFC-0255 §4.5: [worktree remove] is NOT recoverable (discards uncommitted
+   worktree state and races concurrent keepers/the conveyor) — it STAYS in the
+   floor and is [Deny] under every overlay including autonomous. *)
+let test_worktree_remove_floored_under_autonomous () =
+  let s = simple (bin_ok "git") ~args:[ lit "worktree"; lit "remove"; lit "wt" ] in
+  let caps = Capability_check.of_simple s in
+  match Approval_policy.decide default_policy ~overlay:Approval_config.autonomous ~caps ~simple:s with
+  | Verdict.Deny { reason = Destructive_git (Git_op.Destructive `Worktree_remove); _ } -> ()
+  | _ -> assert false
+
 let () =
   test_safe_bin_strict_asks ();
   test_safe_bin_allowed_with_overlay ();
@@ -309,6 +340,10 @@ let () =
   test_mkfs_denied_under_autonomous ();
   test_mkfs_family_denied_under_autonomous ();
   test_git_clean_bundled_force_denied ();
+  (* RFC-0255 §4.5 review response: no raw destructive-git demotion. *)
+  test_reset_hard_floored_under_autonomous ();
+  test_branch_delete_floored_under_autonomous ();
+  test_worktree_remove_floored_under_autonomous ();
   test_rm_root_allowed_at_policy_layer_jailed_downstream ();
   test_autonomous_allows_toolchain ();
   print_endline "[test_approval_policy] all tests passed"

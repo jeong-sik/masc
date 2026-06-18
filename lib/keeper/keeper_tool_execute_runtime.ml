@@ -368,6 +368,19 @@ let handle_tool_execute_typed
           let stream_dispatch =
             Sys.getenv_opt "MASC_STREAM_EXECUTE_OUTPUT" <> Some "false"
           in
+          if not (Env_config_runtime.Shell_ir_path_jail.enabled ())
+          then (
+            Log.Keeper.warn
+              ~keeper_name:meta.name
+              "shell_ir path_jail_disabled keeper=%s sandbox=%s cwd=%s cmd=%s"
+              meta.name
+              (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox_profile)
+              cwd
+              cmd_for_log;
+            Otel_metric_store.inc_counter
+              (Keeper_metrics.to_string Keeper_metrics.ShellIrEffectTotal)
+              ~labels:[ "kind", "path_jail_disabled"; "source", "execute" ]
+              ());
           if stream_dispatch
           then (
             try

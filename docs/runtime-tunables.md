@@ -193,7 +193,7 @@ the categorization roadmap. Newly-added typed getters in
 |---|---|---|---|---|---|
 | `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 99 |  |
 
-## Env_config_runtime (113 knobs; typed classification 4/90)
+## Env_config_runtime (114 knobs; typed classification 4/90)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -274,6 +274,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_SESSION_RATE_LIMIT_WINDOW_SEC` | typed:float | unclassified | unclassified | 40 | Rate limit window (seconds) |
 | `MASC_SESSION_SSE_GRACE_PERIOD_SEC` | typed:float | unclassified | unclassified | 45 | Grace period after SSE disconnect before reaping transport session (seconds). Prevents "Unknown Mcp-Session-Id" error... |
 | `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` | feature_flag | n/a | n/a | 954 | Enable the Shell IR approval policy gate. Default: true (RFC-0254 — the autonomous policy is a strict safety improv... |
+| `MASC_SHELL_IR_PATH_JAIL_ENABLED` | feature_flag | n/a | n/a | 968 | Apply the workspace path jail [Exec_policy.validate_shell_ir_paths] to keeper Execute commands. Default: true. Re-rea... |
 | `MASC_SIDECAR_CONTROL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 887 | Subprocess timeout (seconds) for sidecar control commands — [stop], [tail], and similar quick housekeeping operatio... |
 | `MASC_SIDECAR_RECONCILE_BACKOFF_SEC` | typed:float | unclassified | unclassified | 875 | Backoff window (seconds) between repeated same-generation [running + unavailable] start dispatches. Default: 30 (matc... |
 | `MASC_SIDECAR_SCHEMA_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 903 | Subprocess timeout (seconds) for sidecar Python schema generation. Wraps [Process_eio.run_argv_with_status] at [serve... |

@@ -12,8 +12,9 @@ type t =
       [ `Commit | `Merge | `Rebase | `Pull | `Fetch
       | `Push | `Tag | `Stash_push | `Checkout_branch ]
   | Destructive of
-      [ `Reset_hard | `Push_force | `Branch_delete
-      | `Clean_force | `Stash_drop | `Worktree_remove ]
+      (* Trust-independent catastrophic floor — RFC-0255 §4.5. *)
+      [ `Push_force | `Clean_force | `Stash_drop | `Worktree_remove
+      | `Reset_hard | `Branch_delete ]
 
 val of_argv : string list -> (t, [ `Unknown_subcmd of string ]) result
 (** [of_argv argv] expects [argv] to start with the [git] token.  The

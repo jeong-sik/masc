@@ -9,21 +9,24 @@ type t = {
   summary : string;
 }
 
+let git_is_floored : Git_op.t -> bool = function
+  | Git_op.Destructive _ -> true
+  | Read _ | Mutating _ -> false
+;;
+
 (* Scan the cap list for a Destructive git op.  Returned first because
    it short-circuits the policy — the approval UI cannot "yes" its way
    past this one.
 
    [@@warning "-4"] (on the function below): the [_ :: rest] arm is a
    find-first scan that *intentionally* skips every non-matching
-   capability — including future [Capability.t] ctors and future
-   [Git_op.t] ctors that are not [Destructive]. Forcing an explicit
-   enumeration over both nested variants adds friction with no safety
-   gain (the answer is always "skip and keep scanning"). RFC-0071
-   §3.4.1 — nested find-first scan exemption, not a closed-sum dispatch. *)
+   capability.  Git op membership is decided by [git_is_floored], a closed
+   function over [Git_op.t], so adding a new top-level git op forces an explicit
+   floor decision instead of silently falling through this scan. *)
 let find_destructive_git (caps : Capability.t list) : Git_op.t option =
   let rec scan = function
     | [] -> None
-    | Capability.Git (Git_op.Destructive _ as g) :: _ -> Some g
+    | Capability.Git g :: _ when git_is_floored g -> Some g
     | Capability.Pipeline_fold inner :: rest ->
       (match scan inner with
        | Some _ as found -> found

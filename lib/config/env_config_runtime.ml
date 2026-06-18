@@ -954,4 +954,18 @@ module Shell_ir_approval_gate = struct
     Feature_flag_registry.get_bool "MASC_SHELL_IR_APPROVAL_GATE_ENABLED"
 end
 
+module Shell_ir_path_jail = struct
+  (** Apply the workspace path jail [Exec_policy.validate_shell_ir_paths] to
+      keeper Execute commands. Default: true. Re-readable within the process;
+      set MASC_SHELL_IR_PATH_JAIL_ENABLED=false to disable [path_reject]
+      without recompilation (RFC-0255 section 4.6).
+
+      Trade-off: disabling also removes the only positional write-escape guard
+      on the Host profile ([find_write_escape] covers redirect writes only), so
+      this is a short-lived valve, not a steady state. removal target:
+      RFC-0255 P5 (typed Path-scope landing). *)
+  let enabled () =
+    Feature_flag_registry.get_bool "MASC_SHELL_IR_PATH_JAIL_ENABLED"
+end
+
 (** {1 Internal Safety Configuration} *)

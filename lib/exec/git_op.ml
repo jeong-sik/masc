@@ -6,8 +6,11 @@ type t =
       [ `Commit | `Merge | `Rebase | `Pull | `Fetch
       | `Push | `Tag | `Stash_push | `Checkout_branch ]
   | Destructive of
-      [ `Reset_hard | `Push_force | `Branch_delete
-      | `Clean_force | `Stash_drop | `Worktree_remove ]
+      (* Trust-independent catastrophic floor (RFC-0255 §4.5).  This includes
+         irreversible operations plus raw commands whose recovery preconditions
+         are stateful and unproven at the syntax classifier. *)
+      [ `Push_force | `Clean_force | `Stash_drop | `Worktree_remove
+      | `Reset_hard | `Branch_delete ]
 
 let has_flag args flag = List.mem flag args
 

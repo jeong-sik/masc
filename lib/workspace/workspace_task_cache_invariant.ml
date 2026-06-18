@@ -112,9 +112,7 @@ let backlog_unavailable_message ~from_agent task_ids =
 let remember_invalidation ~module_name ~task_id ~status =
   let key = String.concat "\x00" [ module_name; task_id; status ] in
   let now = Time_compat.now () in
-  Mutex.lock invalidation_memory_lock;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock invalidation_memory_lock)
+  Mutex.protect invalidation_memory_lock
     (fun () ->
        Hashtbl.filter_map_inplace
          (fun _ ts ->

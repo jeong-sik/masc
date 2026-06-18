@@ -25,9 +25,7 @@ type keeper_state = {
 let state : (string, keeper_state) Hashtbl.t = Hashtbl.create 16
 let mu = Stdlib.Mutex.create ()
 
-let with_lock f =
-  Stdlib.Mutex.lock mu;
-  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mu) f
+let with_lock f = Stdlib.Mutex.protect mu f
 
 let get_or_create keeper_name =
   match Hashtbl.find_opt state keeper_name with

@@ -6,9 +6,7 @@ let fallback_triggered_metric = Otel_metric_store.metric_fallback_triggered
 let provider_cache : (string, string) Hashtbl.t = Hashtbl.create 64
 let provider_cache_mu = Stdlib.Mutex.create ()
 
-let with_provider_cache_lock f =
-  Stdlib.Mutex.lock provider_cache_mu;
-  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock provider_cache_mu) f
+let with_provider_cache_lock f = Stdlib.Mutex.protect provider_cache_mu f
 ;;
 
 let contains_substring haystack needle =

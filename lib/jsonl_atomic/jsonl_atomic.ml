@@ -45,9 +45,7 @@ let canonicalize_path path =
   if joined = "" then "/" else joined
 
 let get_or_create_mutex key =
-  Stdlib.Mutex.lock mutex_registry_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock mutex_registry_mu)
+  Stdlib.Mutex.protect mutex_registry_mu
     (fun () ->
       match Hashtbl.find_opt mutex_registry key with
       | Some m -> m

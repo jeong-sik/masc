@@ -39,9 +39,7 @@ let mu = Mutex.create ()
 let table : (string, (sample * float) Queue.t) Hashtbl.t =
   Hashtbl.create 8
 
-let with_lock f =
-  Mutex.lock mu;
-  Fun.protect ~finally:(fun () -> Mutex.unlock mu) f
+let with_lock f = Mutex.protect mu f
 
 let status_to_yojson = function
   | Success -> `Assoc [ ("kind", `String "success") ]

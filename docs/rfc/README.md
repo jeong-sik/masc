@@ -258,7 +258,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0254 | Shell IR Approval Gate — Autonomous Production Policy | Draft | 6a05c3c34e 2026-06-18 | - |
 | 0255 | Shell-IR Path Policy — Typed Path-Scope, Read/Write Asymmetry, and Catastroph... | Draft | d2cfa01646 2026-06-18 | - |
 | 0257 | Per-keeper memory execution lane | Draft | f9635d5b87 2026-06-18 | - |
-| 0258 | Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing | Draft | (untracked) | - |
+| 0258 | Adversarial Review — Grounded Verdict & Unified Verdict→Action Routing | Draft | e75f27fdf6 2026-06-18 | - |
+
+
 
 
 

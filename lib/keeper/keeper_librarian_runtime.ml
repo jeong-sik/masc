@@ -350,7 +350,7 @@ let extract_with_provider
   | Error _ as e -> e
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
-let attempt messages =
+    let attempt messages =
       match
         with_timeout ?clock ~timeout_sec (fun () ->
           complete ~sw ~net ?clock ~config:provider_cfg ~messages ())

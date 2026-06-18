@@ -105,43 +105,95 @@ let direct_owner_conversation_context
       ~limit:8 ~config ~meta ()
     |> Keeper_world_observation_message_scope.render_recent_direct_conversation_context
 
+(* Flatten newlines/tabs to spaces and trim, so a co-view value never breaks
+   the line-oriented instruction block. *)
+let normalized_surface_context_value value =
+  value
+  |> String.to_seq
+  |> Seq.map (function '\n' | '\r' | '\t' -> ' ' | ch -> ch)
+  |> String.of_seq
+  |> String.trim
+
+let surface_context_field_value = function
+  | `String s -> normalized_surface_context_value s
+  | json -> Yojson.Safe.to_string json
+
+(* Accept fields as BOTH the dashboard wire shape [`List of {k,v} objects] and a
+   plain [`Assoc] map. The earlier keeper_turn copy matched only `Assoc and
+   silently dropped the dashboard's list shape on the MCP tool path. *)
+let surface_context_fields fields_json =
+  let lines =
+    match fields_json with
+    | `List items ->
+        List.filter_map
+          (function
+            | `Assoc fields -> (
+                match
+                  (List.assoc_opt "k" fields, List.assoc_opt "v" fields)
+                with
+                | Some (`String k), Some v ->
+                    let k = normalized_surface_context_value k in
+                    if k = "" then None
+                    else
+                      Some
+                        (Printf.sprintf "  - %s: %s" k
+                           (surface_context_field_value v))
+                | _ -> None)
+            | _ -> None)
+          items
+    | `Assoc pairs ->
+        List.filter_map
+          (fun (k, v) ->
+            let k = normalized_surface_context_value k in
+            if k = "" then None
+            else
+              Some
+                (Printf.sprintf "  - %s: %s" k (surface_context_field_value v)))
+          pairs
+    | _ -> []
+  in
+  if lines = [] then None else Some (String.concat "\n" lines)
+
+(* Single SSOT formatter for dashboard co-view context
+   ({label,route,scene,fields}). Shared by the HTTP copilot route
+   ([Server_routes_http_keeper_stream]) and the masc_keeper_msg MCP tool path,
+   so the two surfaces cannot drift. *)
 let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
   match ctx with
   | `Assoc fields ->
-      let string_field key =
+      let get_string key =
         match List.assoc_opt key fields with
         | Some (`String s) ->
-            let s = String.trim s in
+            let s = normalized_surface_context_value s in
             if s = "" then None else Some s
         | _ -> None
       in
-      let json_field key = List.assoc_opt key fields in
-      let parts =
-        (match string_field "label" with
-         | Some s -> [ Printf.sprintf "Surface label: %s" s ]
-         | None -> [])
-        @
-        (match string_field "route" with
-         | Some s -> [ Printf.sprintf "Route: %s" s ]
-         | None -> [])
-        @
-        (match string_field "scene" with
-         | Some s -> [ Printf.sprintf "Scene: %s" s ]
-         | None -> [])
-        @
-        (match json_field "fields" with
-         | Some (`Assoc fs) when fs <> [] ->
-             [ "Fields:\n"
-               ^ String.concat "\n"
-                   (List.map
-                      (fun (k, v) ->
-                        Printf.sprintf "- %s: %s" k (Yojson.Safe.to_string v))
-                      fs) ]
-         | Some _ | None -> [])
+      let fields_block =
+        match List.assoc_opt "fields" fields with
+        | Some fields_json -> surface_context_fields fields_json
+        | None -> None
       in
-      if parts = [] then None
-      else Some (String.concat "\n\n" parts)
-  | _ -> None
+      let lines =
+        List.filter_map
+          (fun (name, value_opt) ->
+            Option.map (fun v -> Printf.sprintf "%s: %s" name v) value_opt)
+          [
+            ("Surface label", get_string "label");
+            ("Route", get_string "route");
+            ("Scene", get_string "scene");
+          ]
+      in
+      let lines =
+        match fields_block with
+        | Some block -> lines @ [ "Fields:"; block ]
+        | None -> lines
+      in
+      if lines = [] then None
+      else Some (String.concat "\n" ("[Co-view context]" :: lines))
+  | json ->
+      Some
+        (Printf.sprintf "[Co-view context]\n%s"
+           (Yojson.Safe.pretty_to_string json))
 
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context

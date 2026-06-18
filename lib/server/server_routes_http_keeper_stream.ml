@@ -24,87 +24,16 @@ let keeper_chat_stream_error_json message =
         `Assoc [ ("message", `String message) ] );
     ]
 
-let normalized_context_value value =
-  value
-  |> String.to_seq
-  |> Seq.map (function
-       | '\n' | '\r' | '\t' -> ' '
-       | ch -> ch)
-  |> String.of_seq
-  |> String.trim
+(* Co-view context formatting is owned by the single SSOT
+   [Keeper_turn.surface_context_to_instructions], shared with the
+   masc_keeper_msg MCP tool path so the HTTP copilot route and the tool path
+   cannot drift (and so both accept the dashboard's `List of {k,v} fields
+   shape). [format_surface_context] keeps the string-returning shape that
+   [turn_instructions_for_request] consumes. *)
+let surface_context_to_instructions = Keeper_turn.surface_context_to_instructions
 
-let format_surface_context_field_value = function
-  | `String s -> normalized_context_value s
-  | json -> Yojson.Safe.to_string json
-
-let format_surface_context_fields fields_json =
-  let lines =
-    match fields_json with
-    | `List items ->
-        List.filter_map
-          (function
-            | `Assoc fields -> (
-                match
-                  ( List.assoc_opt "k" fields,
-                    List.assoc_opt "v" fields )
-                with
-                | Some (`String k), Some v ->
-                    let k = normalized_context_value k in
-                    if k = "" then None
-                    else Some (Printf.sprintf "  - %s: %s" k (format_surface_context_field_value v))
-                | _ -> None)
-            | _ -> None)
-          items
-    | `Assoc pairs ->
-        List.filter_map
-          (fun (k, v) ->
-            let k = normalized_context_value k in
-            if k = "" then None
-            else Some (Printf.sprintf "  - %s: %s" k (format_surface_context_field_value v)))
-          pairs
-    | _ -> []
-  in
-  if lines = [] then None else Some (String.concat "\n" lines)
-
-let format_surface_context = function
-  | `Assoc fields ->
-      let get_string key =
-        match List.assoc_opt key fields with
-        | Some (`String s) ->
-            let s = normalized_context_value s in
-            if s = "" then None else Some s
-        | _ -> None
-      in
-      let label = get_string "label" in
-      let route = get_string "route" in
-      let scene = get_string "scene" in
-      let fields_block =
-        match List.assoc_opt "fields" fields with
-        | Some fields_json -> format_surface_context_fields fields_json
-        | None -> None
-      in
-      let lines =
-        List.filter_map
-          (fun (name, value_opt) ->
-            Option.map (fun v -> Printf.sprintf "%s: %s" name v) value_opt)
-          [
-            ("Surface label", label);
-            ("Route", route);
-            ("Scene", scene);
-          ]
-      in
-      let lines =
-        match fields_block with
-        | Some block -> lines @ [ "Fields:"; block ]
-        | None -> lines
-      in
-      if lines = [] then "" else String.concat "\n" ("[Co-view context]" :: lines)
-  | json ->
-      Printf.sprintf "[Co-view context]\n%s" (Yojson.Safe.pretty_to_string json)
-
-let surface_context_to_instructions ctx =
-  let s = format_surface_context ctx in
-  if s = "" then None else Some s
+let format_surface_context ctx =
+  Option.value ~default:"" (surface_context_to_instructions ctx)
 
 let has_connector_context (payload : keeper_chat_stream_request) =
   payload.channel <> "" && payload.channel_workspace_id <> ""

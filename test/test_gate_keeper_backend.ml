@@ -218,6 +218,29 @@ let test_surface_context_to_instructions_ignores_empty () =
   check (option string) "empty surface_context" None
     (Server_routes_http_keeper_stream.For_testing.surface_context_to_instructions ctx)
 
+(* Regression for #21465: the keeper_turn (MCP tool path) formatter must render
+   the dashboard's `List of {k,v} fields shape rather than silently dropping it,
+   and must agree byte-for-byte with the HTTP copilot route now that both share
+   one SSOT formatter (Keeper_turn.surface_context_to_instructions). *)
+let test_surface_context_mcp_path_renders_list_fields () =
+  let ctx =
+    Yojson.Safe.from_string
+      {|{"label":"Overview","route":"/overview","scene":"fleet view","fields":[{"k":"run","v":"2/5"},{"k":"alert","v":"1"}]}|}
+  in
+  match KT.For_testing.surface_context_to_instructions ctx with
+  | Some instructions ->
+      check bool "renders list-shaped field key" true
+        (String_util.string_contains_substring ~needle:"run: 2/5" instructions);
+      check bool "renders second list-shaped field" true
+        (String_util.string_contains_substring ~needle:"alert: 1" instructions);
+      check bool "includes co-view header" true
+        (String_util.string_contains_substring ~needle:"[Co-view context]" instructions);
+      check (option string) "http route matches mcp formatter (single SSOT)"
+        (Some instructions)
+        (Server_routes_http_keeper_stream.For_testing.surface_context_to_instructions
+           ctx)
+  | None -> fail "expected list-shaped surface_context to format into instructions"
+
 let test_chat_surface_of_request_labels_copilot_gate () =
   let payload =
     { Server_routes_http_keeper_stream.name = "luna";
@@ -438,6 +461,8 @@ let () =
             test_surface_context_to_instructions_formats_copilot_context;
           test_case "surface context ignores empty fields" `Quick
             test_surface_context_to_instructions_ignores_empty;
+          test_case "surface context mcp path renders list fields" `Quick
+            test_surface_context_mcp_path_renders_list_fields;
           test_case "copilot request labels gate surface" `Quick
             test_chat_surface_of_request_labels_copilot_gate;
           test_case "copilot request speaker is owner" `Quick

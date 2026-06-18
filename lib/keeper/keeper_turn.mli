@@ -44,6 +44,15 @@ module For_testing : sig
       into turn instructions when no explicit [turn_instructions] is supplied. *)
 end
 
+(** Format a dashboard co-view context object ({ label, route, scene, fields })
+    into turn instructions. Accepts [fields] as both a [`List] of {k,v} objects
+    (dashboard wire shape) and a plain [`Assoc] map. This is the single SSOT
+    formatter shared by the HTTP copilot route
+    ([Server_routes_http_keeper_stream]) and the masc_keeper_msg MCP tool path,
+    so the two surfaces cannot drift. Returns [None] when there is nothing to
+    render. *)
+val surface_context_to_instructions : Yojson.Safe.t -> string option
+
 val handle_keeper_msg :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->

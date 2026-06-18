@@ -9,6 +9,7 @@ module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
+module Gc = Masc.Keeper_memory_os_gc
 
 let contains substring s =
   let sub_len = String.length substring in
@@ -2236,6 +2237,10 @@ let () =
             "cap_facts keeps top-ranked (RFC-0239 Q4)"
             `Quick
             test_cap_facts_keeps_top_ranked
+        ; Alcotest.test_case
+            "TTL sweep only removes expired rows (RFC-0251)"
+            `Quick
+            test_gc_ttl_sweep_only_removes_expired_facts
         ; Alcotest.test_case
             "merge_and_cap upserts re-observed claim (RFC-0243)"
             `Quick

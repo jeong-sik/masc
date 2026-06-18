@@ -47,7 +47,11 @@ let find_destructive_git (caps : Capability.t list) : Git_op.t option =
 let find_write_escape (caps : Capability.t list) : Path_scope.t option =
   let escapes (ps : Path_scope.t) : bool =
     match Path_scope.scope ps with
-    | Outside_workspace _ | Absolute_unknown _ -> true
+    | Outside_workspace _ | Absolute_unknown _ ->
+      (* /dev/null is the canonical discard sink for typed stdout/stderr
+         redirection; it is already exempted in path validation and handled
+         as a drop target by the native dispatcher. *)
+      not (String.equal (Path_scope.raw ps) "/dev/null")
     | Inside_workspace _ | Inside_sandbox _ -> false
   in
   let rec scan = function

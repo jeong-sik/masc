@@ -360,6 +360,9 @@ let test_librarian_runtime_routing () =
      api-name = \"libr\"\n\
      max-context = 1024\n\
      \n\
+     [models.libr.capabilities]\n\
+     supports-response-format-json = true\n\
+     \n\
      [local.chat]\n\
      \n\
      [local.libr]\n\
@@ -395,6 +398,13 @@ let test_librarian_runtime_routing () =
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Ok _ -> failf "unknown [runtime].cross_verifier id must be rejected at load"
+    | Error _ -> ());
+  with_temp_runtime_toml (base ^ "cross_verifier = \"local.chat\"\n") (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ ->
+      failf
+        "[runtime].cross_verifier must reject models without JSON response \
+         format support"
     | Error _ -> ())
 
 let () =

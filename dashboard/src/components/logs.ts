@@ -59,6 +59,7 @@ const hideFsmTransitions = signal(false)
 
 const POLL_INTERVAL_MS = 3000
 const LOG_ROW_HEIGHT = 92
+const EMPTY_LOG_ENTRIES: LogEntry[] = []
 
 let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let latestRequestId = 0
@@ -758,7 +759,7 @@ export function LogViewer() {
 
   const s = logResource.state.value
   const logData = s.status === 'loaded' ? s.data : undefined
-  const logEntries = logData?.entries ?? []
+  const logEntries = logData?.entries ?? EMPTY_LOG_ENTRIES
   const logTotal = logData?.total ?? 0
   const logLoading = s.status === 'loading'
   const logError = s.status === 'error' ? s.message : null

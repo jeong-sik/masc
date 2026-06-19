@@ -2,7 +2,7 @@
 
 Source reviewed: `/Users/dancer/Downloads/v2 (12)`.
 
-Current implementation surface: `dashboard/src` on branch `codex/keeper-fleet-surface`.
+Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-shell-parity`.
 
 ## Exists In Current Page
 
@@ -11,7 +11,7 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-fleet-su
 - The keeper detail path can hide the mobile bottom bar while reading chat.
 - Board and Keepers are top-level routes rather than only nested Workspace/Monitor sections.
 
-## Implemented In This Pass
+## Implemented In PR #21525
 
 - Mobile primary tabs now follow the prototype's user-facing priority: Overview, Work, Keepers, Board.
 - Monitor and Command remain available through the full navigation drawer instead of occupying the mobile bottom bar.
@@ -19,9 +19,16 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-fleet-su
 - The v2 primary shell now uses the prototype surface set: Overview, Work, Keepers, Board, IDE, Connectors, Settings.
 - Monitor, Command, Lab, and Logs remain routeable operational/diagnostic surfaces, but they no longer occupy first-level v2 shell navigation.
 
+## Implemented In This Pass
+
+- The desktop header no longer renders a duplicate top surface tab strip. Desktop navigation now relies on the left rail, matching the prototype's single primary nav model.
+- Settings moved out of the main surface list and into the rail footer, matching the prototype's bottom-anchored Settings action.
+- The mobile More drawer still exposes operational routes (Monitor, Command, Lab, Logs) while Settings remains footer-anchored.
+- Opening the mobile More drawer suppresses floating status/focus chrome so the rail footer remains visible.
+
 ## Still Missing Vs Prototype
 
-- The desktop shell still has the dashboard header/tooling model around the prototype primary surfaces. The prototype's rail is visually simpler and places Settings at the rail bottom.
+- The desktop shell still has a dashboard header/status/tooling model around the prototype primary surfaces. The prototype top bar is visually quieter and has fewer operational chips.
 - The Work surface is route-compatible with `workspace`, but the app has not fully renamed internal copy, breadcrumbs, fallback labels, or source concepts that still correctly refer to a workspace.
 - The Overview surface does not yet match the v12 prototype's exact composition for attention queue, telemetry histogram, keeper fleet cards, and context density.
 - The Connectors page remains an operator-heavy status console rather than the prototype's simpler connector gate grid plus recent audit/event framing.
@@ -34,5 +41,5 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-fleet-su
 - Mobile primary Monitor and Command tabs should stay removed from the bottom bar; they belong in More while the prototype-first IA is active.
 - The visible primary label Workspace should disappear in favor of Work where the user is navigating the v2 surface. Low-level code and data concepts can keep `workspace` when they refer to runtime scope or API contracts.
 - Duplicate keeper fleet entry points should eventually collapse: Keepers is the v2 primary destination, while Monitor > Keeper Fleet is now a routeable legacy/diagnostic lane.
-- If exact prototype parity becomes the goal, the desktop top surface tab layer should collapse into the single rail model and Settings should move to the rail footer.
-- Stale gap notes under `/Users/dancer/me/memory/keeper-v2-gap-*.md` should be superseded by this repo-local snapshot when PR #21525 lands.
+- The desktop top surface tab layer should stay removed; it is now covered by the single rail model.
+- Stale gap notes under `/Users/dancer/me/memory/keeper-v2-gap-*.md` are superseded by this repo-local snapshot.

@@ -14,6 +14,7 @@ import {
   type BindingInfo,
   type ChannelInfo,
   type ConnectorNames,
+  type DiscordConfiguredBinding,
   type GateConnectorInfo,
   type GateConnectorsData,
   type GateEventInfo,
@@ -648,6 +649,8 @@ type KeeperGroup = {
   unknown: boolean
 }
 
+const EMPTY_CONFIGURED_BINDINGS: DiscordConfiguredBinding[] = []
+
 function ConnectorLivePanel({
   connector,
   gate,
@@ -663,7 +666,7 @@ function ConnectorLivePanel({
   keeperDirectoryError: string | null
   loading: boolean
 }) {
-  const configuredBindings = connector?.configured_bindings ?? []
+  const configuredBindings = connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS
   const names = connector?.names
   const connectorName = connector?.display_name || 'Connector'
   const connectorId = connector?.connector_id ?? ''

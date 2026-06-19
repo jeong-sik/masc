@@ -242,6 +242,42 @@ let test_of_json_rejects_out_of_range_salience () =
   in
   match S.of_json j with Ok _ -> assert false | Error _ -> ()
 
+let expect_of_json_error expected json =
+  match S.of_json json with
+  | Ok _ -> assert false
+  | Error actual -> assert (actual = expected)
+
+let expect_of_json_error_prefix expected_prefix json =
+  match S.of_json json with
+  | Ok _ -> assert false
+  | Error actual -> assert (String.starts_with ~prefix:expected_prefix actual)
+
+let test_of_json_rejects_empty_id_with_error () =
+  let j =
+    `Assoc
+      [
+        ("id", `String "");
+        ("source", `String "user_message");
+        ("payload", `Null);
+        ("salience", `Float 0.5);
+        ("timestamp", `Float 0.0);
+      ]
+  in
+  expect_of_json_error "Stimulus.make: id must be non-empty" j
+
+let test_of_json_rejects_nonfinite_salience_with_error () =
+  let j =
+    `Assoc
+      [
+        ("id", `String "x");
+        ("source", `String "user_message");
+        ("payload", `Null);
+        ("salience", `Float Float.infinity);
+        ("timestamp", `Float 0.0);
+      ]
+  in
+  expect_of_json_error_prefix "Stimulus.make: salience not finite" j
+
 let () =
   test_source_to_tla_symbol ();
   test_all_symbols_count ();
@@ -265,4 +301,6 @@ let () =
   test_of_json_rejects_missing_key ();
   test_of_json_rejects_unknown_source ();
   test_of_json_rejects_out_of_range_salience ();
+  test_of_json_rejects_empty_id_with_error ();
+  test_of_json_rejects_nonfinite_salience_with_error ();
   print_endline "test_autonomous_stimulus: all assertions passed"

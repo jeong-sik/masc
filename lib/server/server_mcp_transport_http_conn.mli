@@ -152,17 +152,18 @@ val make_sse_conn :
 
 val run_sse_pumps :
   sw:Eio.Switch.t ->
-  info:sse_conn_info ->
+  stop_promise:unit Eio.Promise.t ->
   drain:(unit -> unit) ->
   ping:(unit -> unit) ->
   unit
-(** [run_sse_pumps ~sw ~info ~drain ~ping] forks the [drain] and [ping] pumps
-    under a switch scoped to the connection rather than directly on the
+(** [run_sse_pumps ~sw ~stop_promise ~drain ~ping] forks the [drain] and [ping]
+    pumps under a switch scoped to the connection rather than directly on the
     server-lifetime [sw].  A supervisor forked on [sw] opens a child switch,
-    runs both pumps as daemons, and blocks on [info.stop_promise];
-    {!close_sse_conn} resolving that promise releases the child switch and
-    cancels both pumps — including a drain fiber blocked in [Eio.Stream.take]
-    that the [info.stop] flag alone cannot interrupt (#21548). *)
+    runs both pumps as daemons, and blocks on [stop_promise]; resolving that
+    promise (callers pass [info.stop_promise], which {!close_sse_conn} resolves)
+    releases the child switch and cancels both pumps — including a drain fiber
+    blocked in [Eio.Stream.take] that the [info.stop] flag alone cannot
+    interrupt (#21548). *)
 
 val make_inline_sse_conn :
   session_id:string -> Httpun.Body.Writer.t -> sse_conn_info

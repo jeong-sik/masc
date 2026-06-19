@@ -105,7 +105,7 @@ let handle_ag_ui_events ~deps request reqd =
       | Ok runtime ->
           let sw = runtime.sw in
           let clock = runtime.clock in
-          run_sse_pumps ~sw ~info
+          run_sse_pumps ~sw ~stop_promise:info.stop_promise
             ~drain:(fun () ->
               let rec drain () =
                 let event = Eio.Stream.take event_stream in
@@ -203,7 +203,7 @@ let handle_presence_events ~deps request reqd =
           | Ok runtime ->
               let sw = runtime.sw in
               let clock = runtime.clock in
-              run_sse_pumps ~sw ~info
+              run_sse_pumps ~sw ~stop_promise:info.stop_promise
                 ~drain:(fun () ->
                   let rec drain () =
                     let event = Eio.Stream.take event_stream in

@@ -250,7 +250,8 @@ let make_inline_sse_conn ~session_id writer =
    supervisor. If [info] is already closed (connection torn down before the
    pumps started), the promise is already resolved and the supervisor returns
    immediately. *)
-let run_sse_pumps ~sw ~info ~(drain : unit -> unit) ~(ping : unit -> unit) =
+let run_sse_pumps ~sw ~(stop_promise : unit Eio.Promise.t)
+    ~(drain : unit -> unit) ~(ping : unit -> unit) =
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run (fun conn_sw ->
       Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
@@ -259,7 +260,7 @@ let run_sse_pumps ~sw ~info ~(drain : unit -> unit) ~(ping : unit -> unit) =
       Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
         ping ();
         `Stop_daemon);
-      Eio.Promise.await info.stop_promise))
+      Eio.Promise.await stop_promise))
 
 let prune_connect_times ~now times =
   if sse_connect_window_s <= 0.0 then times

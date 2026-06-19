@@ -643,7 +643,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           | Ok runtime ->
               let sw = runtime.sw in
               let clock = runtime.clock in
-              run_sse_pumps ~sw ~info
+              run_sse_pumps ~sw ~stop_promise:info.stop_promise
                 ~drain:(fun () ->
                   let rec drain () =
                     let event = Eio.Stream.take event_stream in

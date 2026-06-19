@@ -377,6 +377,7 @@ let ensure_keeper_meta_with_cause config name =
     | Error detail ->
         Error (profile_defaults_boot_error ~keeper_name:meta.name detail)
     | Ok defaults ->
+    let target_persona = apply_default_opt defaults.persona_name meta.persona in
 
     (* --- Proactive --- *)
     let target_proactive =
@@ -470,6 +471,7 @@ let ensure_keeper_meta_with_cause config name =
     in
     let overlayed =
       { meta with
+        persona = target_persona;
         proactive = {
           enabled = target_proactive;
           idle_sec = target_idle_sec;

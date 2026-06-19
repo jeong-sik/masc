@@ -10,7 +10,29 @@ type sse_conn_info = {
   mutex : Eio.Mutex.t;
   stop : bool ref;
   mutable closed : bool;
+  (* Resolved exactly once by [close_sse_conn]. [run_sse_pumps] forks the
+     drain/ping pumps under a per-connection switch and awaits this promise;
+     resolving it releases that switch, cancelling both pumps — including a
+     drain fiber blocked in [Eio.Stream.take] that the [stop] flag alone
+     cannot interrupt (#21548). *)
+  stop_promise : unit Eio.Promise.t;
+  resolve_stop : unit Eio.Promise.u;
 }
+
+(* Smart constructor: every [sse_conn_info] must carry a fresh stop promise,
+   so callers go through this instead of a record literal. *)
+let make_sse_conn ~session_id ~client_id ~writer ~mutex () =
+  let stop_promise, resolve_stop = Eio.Promise.create () in
+  {
+    session_id;
+    client_id;
+    writer;
+    mutex;
+    stop = ref false;
+    closed = false;
+    stop_promise;
+    resolve_stop;
+  }
 
 module SMap = Set_util.StringMap
 
@@ -80,6 +102,10 @@ let close_sse_conn info =
   if not info.closed then (
     info.closed <- true;
     info.stop := true;
+    (* Release the per-connection pump switch (run_sse_pumps). This body runs
+       once per info (guarded by [closed]), so the promise is resolved exactly
+       once. *)
+    Eio.Promise.resolve info.resolve_stop ();
     (try Httpun.Body.Writer.close info.writer
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
@@ -207,14 +233,34 @@ let send_raw info data =
       false
 
 let make_inline_sse_conn ~session_id writer =
-  {
-    session_id;
-    client_id = -1;
-    writer;
-    mutex = Eio.Mutex.create ();
-    stop = ref false;
-    closed = false;
-  }
+  make_sse_conn ~session_id ~client_id:(-1) ~writer ~mutex:(Eio.Mutex.create ()) ()
+
+(* Run the SSE drain + ping pumps for a connection under a switch scoped to
+   that connection's lifetime, rather than directly on the server-lifetime
+   [sw]. A child [conn_sw] holds both pumps as daemons; the supervisor blocks
+   on [info.stop_promise]. [close_sse_conn] resolves that promise (the single
+   chokepoint for every stop path: disconnect, eviction, server shutdown),
+   which returns the supervisor, releases [conn_sw], and cancels both pumps —
+   including a drain fiber blocked in [Eio.Stream.take] that the [info.stop]
+   flag could not interrupt. Previously both pumps were forked directly on the
+   server switch and a stopped session's drain fiber parked forever (#21548).
+
+   [fork_daemon] means the daemons are cancelled (not awaited) when the
+   supervisor's [conn_sw] body returns, so a blocked pump never wedges the
+   supervisor. If [info] is already closed (connection torn down before the
+   pumps started), the promise is already resolved and the supervisor returns
+   immediately. *)
+let run_sse_pumps ~sw ~(stop_promise : unit Eio.Promise.t)
+    ~(drain : unit -> unit) ~(ping : unit -> unit) =
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Switch.run (fun conn_sw ->
+      Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
+        drain ();
+        `Stop_daemon);
+      Eio.Fiber.fork_daemon ~sw:conn_sw (fun () ->
+        ping ();
+        `Stop_daemon);
+      Eio.Promise.await stop_promise))
 
 let prune_connect_times ~now times =
   if sse_connect_window_s <= 0.0 then times

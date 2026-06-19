@@ -335,6 +335,33 @@ describe('thread history merge & persistence', () => {
     expect(thread.at(-2)?.id).toBe('local-1')
   })
 
+  it('sorts a stale locally-appended error into chronological position, not the bottom', () => {
+    // A live turn failed days ago and appended an error entry, which stayed at
+    // the end of the thread. Newer server history must not leave that days-old
+    // dns_failure floating at the bottom where it reads as the newest message.
+    appendThreadEntry(
+      'echo',
+      entry({ id: 'err-old', text: 'dns_failure', delivery: 'error', timestamp: '2026-06-15T00:00:00.000Z' }),
+    )
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'h-16', text: 'day 16', delivery: 'history', timestamp: '2026-06-16T00:00:00.000Z' }),
+      entry({ id: 'h-19', text: 'day 19', delivery: 'history', timestamp: '2026-06-19T00:00:00.000Z' }),
+    ])
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['err-old', 'h-16', 'h-19'])
+  })
+
+  it('keeps no-timestamp live entries at the bottom of the sorted thread', () => {
+    // A still-streaming/optimistic entry with no timestamp must sort last so the
+    // in-flight tail stays at the bottom even as older history is merged.
+    appendThreadEntry('echo', entry({ id: 'live', text: '응답 연결 중', delivery: 'sending', timestamp: null }))
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'h-19', text: 'day 19', delivery: 'history', timestamp: '2026-06-19T00:00:00.000Z' }),
+    ])
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids.at(-1)).toBe('live')
+  })
+
   it('accepts attachment-only history rows', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

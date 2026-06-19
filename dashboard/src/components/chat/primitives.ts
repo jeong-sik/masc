@@ -9,14 +9,15 @@ import { collectAttachments } from './attachments'
 import { parseMarkdownToBlocks } from './markdown-blocks'
 import { showToast } from '../common/toast'
 import { useVoiceInput } from './voice-input'
+import { Mic, Square } from 'lucide-preact'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
-import { formatCost } from '../../lib/format-number'
+import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
-import type { ToolCallOutputBlob } from '../../api/dashboard'
+import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
@@ -1755,10 +1756,207 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   `
 }
 
+const TOOL_STATUS_TITLE: Record<'pending' | 'ok' | 'bad', string> = {
+  pending: '출력 대기 중',
+  ok: '성공',
+  bad: '실패',
+}
+
+// One step of a grouped tool-trace card: a single tool call rendered from REAL
+// data only. Name + input args come from the chat entry; status, duration and
+// result are joined from the tool-call output store (null until hydration
+// lands, or forever for calls that carried no provider id — surfaced as a muted
+// "pending" dot rather than miscoloured as a failure).
+function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; output: ToolCallEntry | null }) {
+  const [open, setOpen] = useState(false)
+  const name = entry.label || 'tool'
+  const displayArgs = prettyJsonish(entry.text || '')
+  const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
+  const status: 'pending' | 'ok' | 'bad' =
+    output === null
+      ? 'pending'
+      : output.success === false || output.semantic_success === false
+        ? 'bad'
+        : 'ok'
+  const durLabel = output && output.duration_ms > 0 ? formatMsCompact(output.duration_ms) : ''
+  const resultView = output ? toolOutputDisplay(output.output) : null
+  const hasResult = resultView !== null && resultView.text.trim() !== ''
+  // Expandable when there is anything to show: args, a result, or a still-pending
+  // call (so the operator can open it and see "출력 대기 중…").
+  const hasBody = !isEmptyArgs || hasResult || output === null
+
+  return html`
+    <div class="chat-block-tstep tool ${open ? 'exp' : ''}" data-chat-trace-step="tool">
+      <span class="chat-block-tnode"></span>
+      <div class="min-w-0 flex-1">
+        <div
+          class="chat-block-tstep-row ${hasBody ? 'click' : ''}"
+          onClick=${() => { if (hasBody) setOpen((o) => !o) }}
+        >
+          <span class="chat-block-tstep-kind">Tool</span>
+          <span class="chat-block-tstep-name">${name}</span>
+          <span
+            class="chat-block-tstep-status ${status}"
+            title=${TOOL_STATUS_TITLE[status]}
+            aria-label=${TOOL_STATUS_TITLE[status]}
+          ></span>
+          <span class="chat-block-tstep-dur">${durLabel}</span>
+          ${hasBody ? html`<span class="chat-block-tstep-chev">▶</span>` : null}
+        </div>
+        ${open && hasBody
+          ? html`
+              <div class="chat-block-tool-body">
+                ${isEmptyArgs
+                  ? html`<div class="chat-block-tool-label">입력 없음</div>`
+                  : html`
+                      <div class="chat-block-tool-label">args</div>
+                      <pre class="m-0 max-h-48 overflow-y-auto whitespace-pre-wrap break-all text-2xs">${displayArgs}</pre>
+                    `}
+                ${hasResult
+                  ? html`
+                      <div class="chat-block-tool-label">result${resultView.truncated ? ' · 일부' : ''}</div>
+                      <pre class="m-0 max-h-64 overflow-y-auto whitespace-pre-wrap break-all text-2xs">${resultView.text}</pre>
+                    `
+                  : output === null
+                    ? html`<div class="chat-block-tool-label">출력 대기 중…</div>`
+                    : null}
+              </div>
+            `
+          : null}
+      </div>
+    </div>
+  `
+}
+
+// Groups a turn's consecutive tool-call entries into one folded "작업 과정"
+// trace card placed above the answer bubble — the v2 layout, built from live
+// data. Folded by default so a turn with many probes (a dozen keeper_board_list
+// / keeper_tasks_list calls) collapses to a single summary line instead of a
+// wall of raw-JSON rows. No think/reason steps are synthesised: the live
+// transcript has no reasoning channel, so the card omits them rather than
+// fabricate the v2 reference's mock reasoning.
+function ToolTraceCard({ tools }: { tools: KeeperConversationEntry[] }) {
+  const [open, setOpen] = useState(false)
+  const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
+  const failN = steps.filter(
+    (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),
+  ).length
+  const totalMs = steps.reduce((sum, s) => sum + (s.output?.duration_ms ?? 0), 0)
+  const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
+
+  return html`
+    <div class="chat-block-trace ${open ? 'open' : ''}" data-chat-block="trace" data-chat-tool-trace>
+      <button
+        type="button"
+        class="chat-block-trace-hd"
+        onClick=${() => setOpen((o) => !o)}
+        aria-expanded=${open}
+      >
+        <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
+        <span>◈</span>
+        <span class="chat-block-trace-label">작업 과정</span>
+        <span class="chat-block-trace-count">${tools.length}단계</span>
+        <span class="chat-block-trace-meta">
+          <span>도구 ${tools.length}</span>
+          ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
+          ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
+        </span>
+      </button>
+      ${open
+        ? html`
+            <div class="chat-block-trace-steps">
+              <span class="chat-block-trace-rail"></span>
+              ${steps.map(({ entry, output }) => html`<${ToolTraceStep} key=${entry.id} entry=${entry} output=${output} />`)}
+            </div>
+          `
+        : null}
+    </div>
+  `
+}
+
 // A reader within this distance of the bottom is considered "pinned":
 // new content keeps auto-scrolling. Scrolling further up unpins so the
 // transcript stops yanking the viewport while old messages are read.
 const STICK_TO_BOTTOM_THRESHOLD_PX = 80
+
+type ChatRenderUnit =
+  | { kind: 'entry'; entry: KeeperConversationEntry }
+  | { kind: 'toolGroup'; id: string; entries: KeeperConversationEntry[] }
+
+// Fold maximal runs of consecutive tool-call entries into one group so they
+// render as a single "작업 과정" trace card. Adjacency is the only turn signal
+// on the transcript — chat entries carry no turn/trace id (that lives on the
+// separate ToolCallEntry) — and the live stream inserts a turn's tool rows
+// immediately before its assistant bubble (keeper-stream.ts), so a run of
+// role:'tool' entries is exactly that turn's tool set. With grouping off every
+// entry stays its own unit, leaving the flat render unchanged.
+function buildChatRenderUnits(
+  entries: KeeperConversationEntry[],
+  groupToolCalls: boolean,
+): ChatRenderUnit[] {
+  if (!groupToolCalls) return entries.map((entry) => ({ kind: 'entry', entry }))
+  const units: ChatRenderUnit[] = []
+  let run: KeeperConversationEntry[] = []
+  const flush = () => {
+    if (run.length === 0) return
+    units.push({ kind: 'toolGroup', id: `tracegroup-${run[0]!.id}`, entries: run })
+    run = []
+  }
+  for (const entry of entries) {
+    if (entry.role === 'tool') {
+      run.push(entry)
+    } else {
+      flush()
+      units.push({ kind: 'entry', entry })
+    }
+  }
+  flush()
+  return units
+}
+
+function renderChatTranscriptBody(opts: {
+  entries: KeeperConversationEntry[]
+  showDayDividers: boolean
+  groupToolCalls: boolean
+  showMetadata?: boolean
+  variant: ChatTranscriptVariant
+  showSourceBadge: boolean
+  action?: ChatTranscriptAction
+}): VNode[] {
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, action } = opts
+  const units = buildChatRenderUnits(entries, groupToolCalls)
+  const out: VNode[] = []
+  // Track the last NON-NULL calendar day rather than only the immediately
+  // previous entry, so a null-timestamp entry (live placeholder, checkpoint) in
+  // the middle of a day cannot poison the comparison and re-emit a spurious
+  // second divider for a day already shown above.
+  let lastDayKey: string | null = null
+  for (const unit of units) {
+    const ts = unit.kind === 'entry' ? unit.entry.timestamp : unit.entries[0]?.timestamp
+    if (showDayDividers) {
+      const dk = dayKey(ts)
+      if (dk && dk !== lastDayKey) {
+        out.push(html`<div class="kw-daydiv" key=${`day:${dk}`}>${dayDividerLabel(ts)}</div>`)
+        lastDayKey = dk
+      }
+    }
+    if (unit.kind === 'toolGroup') {
+      out.push(html`<${ToolTraceCard} key=${unit.id} tools=${unit.entries} />`)
+    } else if (unit.entry.role === 'tool') {
+      out.push(html`<${ToolCallBubble} key=${unit.entry.id} entry=${unit.entry} />`)
+    } else {
+      out.push(html`<${ChatMessageBubble}
+        key=${unit.entry.id}
+        entry=${unit.entry}
+        showMetadata=${showMetadata !== false}
+        variant=${variant}
+        showSourceBadge=${showSourceBadge}
+        action=${action}
+      />`)
+    }
+  }
+  return out
+}
 
 export function ChatTranscript({
   entries,
@@ -1767,6 +1965,7 @@ export function ChatTranscript({
   variant = 'default',
   size = 'default',
   showDayDividers = false,
+  groupToolCalls = false,
   showSourceBadge = false,
   action,
 }: {
@@ -1778,6 +1977,9 @@ export function ChatTranscript({
   // C1/C2: opt-in workspace polish. Default false so every other chat surface
   // (copilot dock, detail page, etc.) renders unchanged.
   showDayDividers?: boolean
+  // Opt-in: fold a turn's consecutive tool-call rows into one "작업 과정" card.
+  // Default false so non-workspace surfaces keep the flat per-row ToolCallBubble.
+  groupToolCalls?: boolean
   showSourceBadge?: boolean
   action?: ChatTranscriptAction
 }) {
@@ -1845,23 +2047,14 @@ export function ChatTranscript({
                 <div class="mt-3 max-w-[34rem] text-base font-medium leading-airy text-[var(--color-fg-primary)]">${emptyText}</div>
               </div>
             `
-          : entries.flatMap((entry, i) => {
-              const bubble = entry.role === 'tool'
-                ? html`<${ToolCallBubble} key=${entry.id} entry=${entry} />`
-                : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} showSourceBadge=${showSourceBadge} action=${action} />`
-              // C1: emit a day divider before the first message of each calendar
-              // day. Skipped entirely when showDayDividers is off (every non-
-              // workspace surface), so their flat render is byte-identical.
-              if (!showDayDividers) return [bubble]
-              const dk = dayKey(entry.timestamp)
-              const prevDk = i > 0 ? dayKey(entries[i - 1]?.timestamp) : null
-              if (dk && dk !== prevDk) {
-                return [
-                  html`<div class="kw-daydiv" key=${`day:${dk}`}>${dayDividerLabel(entry.timestamp)}</div>`,
-                  bubble,
-                ]
-              }
-              return [bubble]
+          : renderChatTranscriptBody({
+              entries,
+              showDayDividers,
+              groupToolCalls,
+              showMetadata,
+              variant,
+              showSourceBadge,
+              action,
             })}
       </div>
       ${unread
@@ -1989,7 +2182,7 @@ export function ChatComposer({
     ? canQueue
       ? '대기열 추가'
       : `응답 중${elapsed > 0 ? ` ${elapsed}s` : ''}`
-    : '볂이기'
+    : '전송'
   const isStreamWarning = streaming && elapsed > 60
   const hasContent = draft.trim() !== '' || attachments.length > 0
   const sendDisabled = disabled || !hasContent || (streaming && !queueEnabled)
@@ -2162,7 +2355,9 @@ export function ChatComposer({
                 disabled=${voice.state === 'transcribing' || disabled}
                 onClick=${() => (voice.state === 'recording' ? voice.stop() : voice.start())}
               >
-                ${voice.state === 'recording' ? '■ 녹음중' : voice.state === 'transcribing' ? '전사 중…' : '🎤 음성'}
+                ${voice.state === 'recording'
+                  ? html`<${Square} size=${15} aria-hidden="true" />`
+                  : html`<${Mic} size=${15} aria-hidden="true" />`}
               </button>
             ` : null}
             <button

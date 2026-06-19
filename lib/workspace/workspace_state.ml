@@ -157,9 +157,10 @@ let parse_iso_time iso_str =
   | Some t -> t
   | None -> Workspace_resilience.Time.now ()
 
-let is_zombie_agent ?agent_type ~agent_name last_seen_iso =
+let is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen_iso =
   Workspace_resilience.Zombie.is_zombie_for_agent
     ?agent_type
+    ?agent_meta
     ~agent_name
     last_seen_iso
 

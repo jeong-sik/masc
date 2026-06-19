@@ -46,23 +46,35 @@ module Zombie = struct
   let is_zombie ?(threshold=default_zombie_threshold) last_seen_iso =
     Time.is_stale ~threshold last_seen_iso
 
-  (** Check if agent is a keeper by name pattern AND/OR agent_type field.
-      Name-only matching is insufficient: agents with [agent_type="keeper"]
-      but no keeper-shaped name still need the keeper threshold, while
-      legacy keeper-named agents keep the same behavior. *)
-  let is_keeper ~name ~agent_type =
-    is_keeper_name name
-    || String.lowercase_ascii (String.trim agent_type) = "keeper"
+  let agent_type_is_keeper agent_type =
+    (* STR-OK: boundary parser for the file-backed agent_type keeper stamp. *)
+    String.lowercase_ascii (String.trim agent_type) = "keeper"
+
+  (** Check if the file-backed agent record is a real keeper.  Keeper-shaped
+      names are not authority here: spoofed worker names must not inherit the
+      longer keeper grace. *)
+  let is_keeper_record ~agent_type ~(agent_meta : Masc_domain.agent_meta option) =
+    agent_type_is_keeper agent_type
+    ||
+    match agent_meta with
+    | Some { keeper_id = Some _; _ } | Some { keeper_name = Some _; _ } -> true
+    | _ -> false
+
+  (** Backward-compatible wrapper for callers that only have name/type.  The
+      name argument is intentionally ignored for keeper-grace decisions. *)
+  let is_keeper ~name:_ ~agent_type =
+    agent_type_is_keeper agent_type
 
   (** Check if an agent is a zombie, using keeper threshold for keeper agents *)
   let is_zombie_for_agent
       ?(keeper_threshold_sec = Env_config_runtime.Zombie.keeper_threshold_seconds)
       ?(agent_threshold_sec = default_zombie_threshold)
       ?(agent_type = "")
-      ~agent_name
+      ?agent_meta
+      ~agent_name:_
       last_seen_iso =
     let threshold =
-      if is_keeper ~name:agent_name ~agent_type
+      if is_keeper_record ~agent_type ~agent_meta
       then keeper_threshold_sec
       else agent_threshold_sec
     in

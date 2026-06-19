@@ -370,7 +370,10 @@ let handle_keeper_task_tool
        String.concat "\n" (List.filteri (fun i _ -> i < limit + 2) lines))
     | Tasks_audit ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
-    let orphans = Workspace.audit_orphan_tasks config in
+    let orphans =
+      Workspace.audit_orphan_tasks config
+      |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
+    in
     let orphans = List.filteri (fun i _ -> i < limit) orphans in
     let items =
       List.map

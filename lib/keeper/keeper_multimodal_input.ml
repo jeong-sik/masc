@@ -243,13 +243,6 @@ let declared_media_type media (att : Keeper_chat_store.attachment) =
       | mime_type -> Some (normalize_media_type mime_type))
   | mime_type -> Some (normalize_media_type mime_type)
 
-let string_starts_with_ci ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal
-       (String.lowercase_ascii (String.sub value 0 prefix_len))
-       (String.lowercase_ascii prefix)
-
 let split_once ~needle value =
   let needle_len = String.length needle in
   let value_len = String.length value in
@@ -300,9 +293,6 @@ let media_type_of_data_url_header header =
   | Some (media_type, _) -> String.trim media_type
   | None -> value
 
-let media_types_equal left right =
-  String.equal (String.lowercase_ascii left) (String.lowercase_ascii right)
-
 let normalize_media_payload ~kind ~attachment_id ~declared_media_type data =
   let data = String.trim data in
   if data = "" then
@@ -310,7 +300,7 @@ let normalize_media_payload ~kind ~attachment_id ~declared_media_type data =
       (Printf.sprintf
          "empty attachment payload for %s user block %S"
          kind attachment_id)
-  else if string_starts_with_ci ~prefix:data_url_scheme_prefix data then
+  else if String_util.starts_with_ci ~prefix:data_url_scheme_prefix data then
     match split_once_ci ~needle:";base64," data with
     | None ->
         Error
@@ -332,7 +322,7 @@ let normalize_media_payload ~kind ~attachment_id ~declared_media_type data =
                kind attachment_id)
         else (
           match declared_media_type with
-          | Some declared when not (media_types_equal declared media_type) ->
+          | Some declared when not (String_util.equals_ci declared media_type) ->
               Error
                 (Printf.sprintf
                    "attachment MIME mismatch for %s user block %S: declared %s but data URL is %s"

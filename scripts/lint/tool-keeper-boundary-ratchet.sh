@@ -92,7 +92,9 @@ current_callers() {
     done < <(
       {
         find lib \( -name 'tool_*.ml' -o -name 'tool_*.mli' \) ! -name '*test*'
-        printf '%s\n' lib/tools.ml lib/tools.mli
+        for f in lib/tools.ml lib/tools.mli; do
+          [[ -f "$f" ]] && printf '%s\n' "$f"
+        done
       } | sort -u
     )
   ) | sort -u

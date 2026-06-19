@@ -173,6 +173,41 @@ let test_take_drain_cancel_clears_active_without_spin () =
     (match get_drain_cancel t with Closed -> true | _ -> false)
 ;;
 
+let test_background_drain_continues_after_first_poll () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Eio_context.with_test_env
+    ~net:env#net
+    ~clock:env#clock
+    ~mono_clock:env#mono_clock
+    ~sw
+  @@ fun () ->
+  let bus = Agent_sdk.Event_bus.create () in
+  Keeper_event_bus.set bus;
+  let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
+  let interval = Masc.Keeper_turn_helpers.turn_event_bus_drain_interval_sec () in
+  let rec wait_for_event_count expected attempts =
+    if (EB.For_testing.get_state t).summary.event_count >= expected
+    then true
+    else if attempts <= 0
+    then false
+    else (
+      Eio.Time.sleep env#clock interval;
+      wait_for_event_count expected (attempts - 1))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      match EB.For_testing.take_drain_cancel t with
+      | None -> ()
+      | Some cc -> Eio.Cancel.cancel cc (Failure "background_drain_test_done"))
+    (fun () ->
+       Agent_sdk.Event_bus.publish bus (tool_called "first");
+       EB.start_background_drain ~clock:env#clock t;
+       check bool "first event drained" true (wait_for_event_count 1 20);
+       Agent_sdk.Event_bus.publish bus (tool_called "second");
+       check bool "background drain keeps polling" true (wait_for_event_count 2 20))
+;;
+
 let () =
   Alcotest.run
     "keeper-unified-turn-event-bus"
@@ -191,6 +226,10 @@ let () =
     ; ( "concurrency"
       , [ test_case "pure transitions under concurrent domains" `Quick
             test_state_pending_count_integrity_under_concurrent_updates
+        ] )
+    ; ( "background-drain"
+      , [ test_case "continues after first poll" `Quick
+            test_background_drain_continues_after_first_poll
         ] )
     ]
 ;;

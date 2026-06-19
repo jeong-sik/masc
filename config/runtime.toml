@@ -18,6 +18,10 @@ default = "ollama_cloud.deepseek-v4-flash"
 # process with MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each
 # keeper's runtime (legacy).
 librarian = "ollama_cloud.minimax-m3"
+# Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
+# Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
+# this explicit smart lane.
+cross_verifier = "deepseek.deepseek-v4-pro"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
@@ -234,6 +238,8 @@ max-concurrent = 1
 #
 # Seed only nick0cave to the local Gemma 4 canary. Other keepers use the
 # fleet default unless their live config overrides this seed.
+# Do not assign general keeper lanes to Pro here. Pro is reserved for explicit
+# judge/evaluator lanes ([runtime].cross_verifier and [fusion].judge).
 [runtime.assignments]
 nick0cave = "ollama.gemma4-26b-a4b-qat"
 
@@ -272,9 +278,9 @@ per_hour_budget = 20
 # 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
 [fusion.presets.trio]
 panel = [
-  "deepseek.deepseek-v4-pro",
-  "glm-coding.glm-5-turbo",
   "ollama_cloud.deepseek-v4-flash",
+  "glm-coding.glm-5-turbo",
+  "ollama_cloud.minimax-m3",
 ]
 judge = "deepseek.deepseek-v4-pro"
 panel_system_prompt = """

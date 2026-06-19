@@ -435,8 +435,10 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            where OAS surfaces the error directly) should still trigger rotation
            when a different runtime may succeed.
 
-           429 rate-limit (non-hard-quota): the current provider is throttled;
-           a different runtime/provider may have capacity.
+           429 rate-limit (non-hard-quota): rotate only to candidates outside
+           the throttled runtime's credential pool. The filter lives at the
+           candidate boundary below, where runtime/provider credentials are
+           available.
 
            5xx server errors: the provider is unhealthy or overloaded; a
            different runtime may be healthy.
@@ -444,8 +446,10 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            401/403 auth errors: the credential for this runtime is invalid; a
            different runtime with different credentials may succeed.
 
-           Hard-quota 429s are already handled above by sdk_error_is_hard_quota,
-           so only soft (non-hard-quota) rate limits reach this arm. *)
+           Hard-quota 429s are already handled above by sdk_error_is_hard_quota.
+           Soft (non-hard-quota) rate limits intentionally keep [Rate_limit]
+           so pool-aware candidate filtering can preserve independent-provider
+           failover. *)
         (match err with
          | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
              Some Rate_limit
@@ -488,8 +492,8 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              | Llm_provider.Error.UnknownVariant _
              | Llm_provider.Error.ProviderTerminal _) ->
              None
-         (* Sub-500 server errors (4xx already handled above for AuthError /
-            RateLimited) are not classified as recoverable runtime failures. *)
+         (* Sub-500 server errors and remaining 4xx API errors are not
+            classified as recoverable runtime failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
@@ -572,6 +576,21 @@ let degraded_rotation_candidates
   |> List.filter (fun candidate ->
          not (String.equal candidate normalized_effective))
 
+let filter_rate_limit_rotation_candidates
+      ~credential_pool_of_runtime_id
+      ~effective_runtime
+      candidates
+  =
+  match credential_pool_of_runtime_id effective_runtime with
+  | None -> candidates
+  | Some effective_pool ->
+    List.filter
+      (fun candidate ->
+         match credential_pool_of_runtime_id candidate with
+         | None -> true
+         | Some candidate_pool -> not (String.equal candidate_pool effective_pool))
+      candidates
+
 (** [true] when the error is a completion contract violation.
     Contract violations should cap rotation because retrying the same
     or different runtime will not satisfy the contract. Non-contract
@@ -580,10 +599,23 @@ let degraded_rotation_candidates
 let is_completion_contract_violation (_ : Agent_sdk.Error.sdk_error) : bool =
   false
 
+let degraded_reason_allows_candidate_cycle = function
+  | Hard_quota | Rate_limit -> false
+  | Resumable_cli_session
+  | Admission_queue_timeout
+  | Provider_timeout
+  | Turn_timeout
+  | Runtime_candidates_filtered
+  | Runtime_exhausted
+  | Capacity_backpressure
+  | Server_error
+  | Auth_error -> true
+
 let degraded_rotation_after_recoverable_error
-    ?fallback_hint
-    ~(base_runtime : string)
-    ~(effective_runtime : string)
+      ?(credential_pool_of_runtime_id = fun _ -> None)
+      ?fallback_hint
+      ~(base_runtime : string)
+      ~(effective_runtime : string)
     ~(attempted_runtimes : string list)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   match recoverable_runtime_failure_reason err with
@@ -604,6 +636,24 @@ let degraded_rotation_after_recoverable_error
           ~fallback_hint
           ~base_runtime ~effective_runtime
       in
+      let candidates =
+        match fallback_reason with
+        | Rate_limit ->
+          filter_rate_limit_rotation_candidates
+            ~credential_pool_of_runtime_id
+            ~effective_runtime
+            candidates
+        | Hard_quota
+        | Resumable_cli_session
+        | Admission_queue_timeout
+        | Provider_timeout
+        | Turn_timeout
+        | Runtime_candidates_filtered
+        | Runtime_exhausted
+        | Capacity_backpressure
+        | Server_error
+        | Auth_error -> candidates
+      in
       let untried =
         List.find_opt
           (fun candidate ->
@@ -613,18 +663,20 @@ let degraded_rotation_after_recoverable_error
       (match untried with
        | Some next_runtime ->
          Some { next_runtime; fallback_reason }
-       | None when not (is_completion_contract_violation err) ->
-         (* Non-contract errors (provider timeout, rate limit, server error)
-            are transient. Allow cycling through candidates again because
-            the same runtime may succeed on a subsequent attempt. Only
-            contract violations cap rotation — retrying cannot satisfy the
-            contract. #19930 *)
+       | None
+         when (not (is_completion_contract_violation err))
+              && degraded_reason_allows_candidate_cycle fallback_reason ->
+         (* Non-contract transient infrastructure errors (provider timeout,
+            server error, capacity backpressure) may succeed on a later
+            candidate pass. Quota/rate-limit classes cap after all candidates:
+            retrying the same credential pool just amplifies an account-scoped
+            limit. #19930 *)
          (match candidates with
           | [] -> None
           | first_candidate :: _ ->
             Some { next_runtime = first_candidate; fallback_reason })
        | None ->
-         (* Contract violation: all candidates exhausted. Cap rotation. *)
+         (* Contract violation or quota/rate-limit exhaustion: cap rotation. *)
          None)
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =

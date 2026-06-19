@@ -17,6 +17,7 @@
 module AE = Masc.Keeper_agent_error
 module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
+module KTD = Masc.Keeper_turn_driver
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
 module Http = Llm_provider.Http_client
@@ -187,6 +188,178 @@ let test_user_message_of_network_errors () =
     (AE.user_message_of_sdk_error guardrail)
 ;;
 
+let test_ollama_session_limit_is_hard_quota () =
+  let message =
+    "you (yousleepwhen) have reached your session usage limit, add extra usage: \
+     https://ollama.com/settings"
+  in
+  let err = SdkE.Api (Retry.RateLimited { retry_after = None; message }) in
+  Alcotest.(check bool)
+    "session usage limit is hard quota"
+    true
+    (KTD.sdk_error_is_hard_quota err);
+  match EC.recoverable_runtime_failure_reason err with
+  | Some EC.Hard_quota -> ()
+  | Some reason ->
+    Alcotest.failf
+      "expected hard_quota, got %s"
+      (EC.degraded_retry_reason_to_string reason)
+  | None -> Alcotest.fail "expected hard_quota recoverable reason"
+;;
+
+let test_soft_rate_limit_classifies_as_rate_limit () =
+  let api_err =
+    SdkE.Api
+      (Retry.RateLimited
+         { retry_after = Some 30.0; message = "rate limited, retry later" })
+  in
+  let provider_err =
+    SdkE.Provider
+      (Llm_provider.Error.RateLimit
+         { provider = "ollama_cloud"
+         ; retry_after = Some 30.0
+         ; detail = "rate limited, retry later"
+         })
+  in
+  List.iter
+    (fun (label, err) ->
+       Alcotest.(check bool)
+         (label ^ " is not hard quota")
+         false
+         (KTD.sdk_error_is_hard_quota err);
+       match EC.recoverable_runtime_failure_reason err with
+       | Some EC.Rate_limit -> ()
+       | Some reason ->
+         Alcotest.failf
+           "%s expected rate_limit, got %s"
+           label
+           (EC.degraded_retry_reason_to_string reason)
+       | None -> Alcotest.failf "%s expected rate_limit recoverable reason" label)
+    [ "api", api_err; "provider", provider_err ]
+;;
+
+let rate_limit_pool_of_runtime_id = function
+  | "same.a"
+  | "same.b" -> Some "pool:same"
+  | "other.c" -> Some "pool:other"
+  | _ -> Some "pool:same"
+;;
+
+let with_temp_runtime_toml content f =
+  let path = Filename.temp_file "runtime-rate-limit-pool" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | _ -> ())
+    (fun () -> f path)
+;;
+
+let rate_limit_pool_runtime_toml =
+  {|
+[runtime]
+default = "same.a"
+
+[providers.same]
+display-name = "Same Pool"
+protocol = "openai-compatible-http"
+endpoint = "https://same.example/v1"
+
+[providers.same.credentials]
+type = "env"
+key = "SAME_POOL_API_KEY"
+
+[providers.other]
+display-name = "Other Pool"
+protocol = "openai-compatible-http"
+endpoint = "https://other.example/v1"
+
+[providers.other.credentials]
+type = "env"
+key = "OTHER_POOL_API_KEY"
+
+[models.a]
+api-name = "a"
+max-context = 1024
+tools-support = true
+thinking-support = true
+
+[models.b]
+api-name = "b"
+max-context = 1024
+tools-support = true
+thinking-support = true
+
+[models.c]
+api-name = "c"
+max-context = 1024
+tools-support = true
+thinking-support = true
+
+[same.a]
+
+[same.b]
+
+[other.c]
+|}
+;;
+
+let init_rate_limit_pool_runtime () =
+  with_temp_runtime_toml rate_limit_pool_runtime_toml (fun path ->
+    match Runtime.init_default ~config_path:path with
+    | Ok () -> ()
+    | Error msg -> Alcotest.failf "Runtime.init_default failed: %s" msg)
+;;
+
+let soft_rate_limit_err =
+  SdkE.Api
+    (Retry.RateLimited
+       { retry_after = Some 30.0; message = "rate limited, retry later" })
+;;
+
+let test_soft_rate_limit_skips_same_credential_pool () =
+  init_rate_limit_pool_runtime ();
+  let retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
+      ~fallback_hint:"same.b"
+      ~base_runtime:"same.a"
+      ~effective_runtime:"same.a"
+      ~attempted_runtimes:[ "same.a" ]
+      soft_rate_limit_err
+  in
+  Alcotest.(check bool)
+    "same credential pool is not a rotation target"
+    false
+    (Option.is_some retry)
+;;
+
+let test_soft_rate_limit_preserves_independent_pool_failover () =
+  init_rate_limit_pool_runtime ();
+  match
+    EC.degraded_rotation_after_recoverable_error
+      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
+      ~fallback_hint:"other.c"
+      ~base_runtime:"same.a"
+      ~effective_runtime:"same.a"
+      ~attempted_runtimes:[ "same.a" ]
+      soft_rate_limit_err
+  with
+  | Some { EC.next_runtime; fallback_reason = EC.Rate_limit } ->
+    Alcotest.(check string)
+      "independent credential pool remains eligible"
+      "other.c"
+      next_runtime
+  | Some { fallback_reason; next_runtime } ->
+    Alcotest.failf
+      "expected rate_limit -> other.c, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None -> Alcotest.fail "expected independent credential pool failover"
+;;
+
 let () =
   Alcotest.run
     "keeper_sdk_error_typed_bridge"
@@ -213,6 +386,24 @@ let () =
             "network errors are presented as runtime availability failures"
             `Quick
             test_user_message_of_network_errors
+        ] )
+    ; ( "runtime quota guard"
+      , [ Alcotest.test_case
+            "ollama cloud session usage limit is classified as hard quota"
+            `Quick
+            test_ollama_session_limit_is_hard_quota
+        ; Alcotest.test_case
+            "soft rate limits remain rate_limit reasons"
+            `Quick
+            test_soft_rate_limit_classifies_as_rate_limit
+        ; Alcotest.test_case
+            "soft rate limits skip same credential-pool candidates"
+            `Quick
+            test_soft_rate_limit_skips_same_credential_pool
+        ; Alcotest.test_case
+            "soft rate limits preserve independent credential-pool failover"
+            `Quick
+            test_soft_rate_limit_preserves_independent_pool_failover
         ] )
     ]
 ;;

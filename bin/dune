@@ -291,4 +291,36 @@
  (modules gen_tool_descriptors)
  (libraries tool_schemas_specs yojson))
 
+;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
+;; single-model baseline, side by side. Makes live LLM calls (NOT a test —
+;; CI determinism rules forbid network calls in test/). Calls Fusion_panel.run
+;; + Fusion_judge.run directly (bypasses the orchestrator's gate/budget/sink).
+
+(executable
+ (name fusion_run)
+ (modules fusion_run)
+ (public_name masc-fusion-run)
+ (package masc)
+ (libraries
+  masc
+  masc.fusion_core
+  masc.runtime
+  masc.config_dir_resolver
+  masc_core
+  unix
+  yojson
+  fmt
+  eio
+  eio_main
+  time_compat
+  masc_eio_context
+  mirage-crypto-rng.unix
+  httpun
+  cohttp
+  cohttp-eio
+  masc.prompt_registry
+  masc.mcp_transport_protocol
+  agent_sdk
+  agent_sdk.llm_provider))
+
 ; Executable for MASC MCP

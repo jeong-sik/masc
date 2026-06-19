@@ -175,6 +175,52 @@ let test_read_nonexistent_topic () =
       (msg_contains ~needle:"not found" msg || msg_contains ~needle:"no" msg)
   )
 
+(* The list -> read contract: masc_library_list surfaces the frontmatter title,
+   so reading back that exact title must resolve the document. Before the fix,
+   read matched only the slug filename (which drops the title's spaces, colons,
+   and case), so a title query never matched. *)
+let test_read_by_title_roundtrip () =
+  with_temp_base_path (fun ctx ->
+    let title = "Blocker Chain V3: Repos Exists, The Real Blocker" in
+    let add_args = `Assoc [
+      ("title", `String title);
+      ("content", `String "Body of the document for round-trip.");
+      ("source", `String "direct_experience");
+      ("confidence", `Float 0.9);
+    ] in
+    let (added, _) = dispatch_exn ctx ~name:"masc_library_add" ~args:add_args in
+    Alcotest.(check bool) "add succeeds" true added;
+    let read_args = `Assoc [("topic", `String title)] in
+    let (ok, msg) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
+    Alcotest.(check bool) "read by exact title succeeds" true ok;
+    Alcotest.(check bool) "returns the body" true
+      (msg_contains ~needle:"Body of the document" msg)
+  )
+
+let test_read_by_title_case_insensitive_partial () =
+  with_temp_base_path (fun ctx ->
+    let _ = dispatch_exn ctx ~name:"masc_library_add" ~args:(`Assoc [
+      ("title", `String "Root Cause: Orphan Count Analysis");
+      ("content", `String "details about orphan counting");
+    ]) in
+    let read_args = `Assoc [("topic", `String "root cause: orphan count")] in
+    let (ok, _) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
+    Alcotest.(check bool) "case-insensitive partial title match" true ok
+  )
+
+(* Slug queries must keep working — the fix adds title matching, it does not
+   replace filename matching. *)
+let test_read_by_slug_still_works () =
+  with_temp_base_path (fun ctx ->
+    let _ = dispatch_exn ctx ~name:"masc_library_add" ~args:(`Assoc [
+      ("title", `String "Slug Query Doc");
+      ("content", `String "slug body");
+    ]) in
+    let read_args = `Assoc [("topic", `String "slug-query")] in
+    let (ok, _) = dispatch_exn ctx ~name:"masc_library_read" ~args:read_args in
+    Alcotest.(check bool) "slug substring still matches" true ok
+  )
+
 (* ============================================================
    library_add tests
    ============================================================ *)
@@ -391,6 +437,9 @@ let () =
     ("library_read", [
       Alcotest.test_case "empty topic" `Quick test_read_empty_topic;
       Alcotest.test_case "nonexistent topic" `Quick test_read_nonexistent_topic;
+      Alcotest.test_case "read by exact title (list->read contract)" `Quick test_read_by_title_roundtrip;
+      Alcotest.test_case "read by case-insensitive partial title" `Quick test_read_by_title_case_insensitive_partial;
+      Alcotest.test_case "read by slug still works" `Quick test_read_by_slug_still_works;
     ]);
     ("library_add", [
       Alcotest.test_case "missing title" `Quick test_add_missing_title;

@@ -249,19 +249,46 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
     |> Option.value ~default:"" in
   if String.equal topic "" then topic_required ~tool_name ~start_time
   else begin
-    (* Find matching file *)
+    (* Match the query against the filename slug *or* the frontmatter [title].
+       [handle_list] surfaces [fm.title] (a human title with spaces/colons/dashes),
+       so a keeper that reads back a listed title must resolve here too — matching
+       the slug only broke that contract, since none of the title's punctuation
+       survives slugification. The query is lowercased once (it was compared
+       case-sensitively before, so a capitalised title never matched the
+       lowercased basename either). Content read for title-matching is cached so
+       the chosen file is not read twice. *)
+    let topic_lc = String.lowercase_ascii topic in
     let files = list_documents ~include_candidates:true () in
-    let matching = List.filter (fun f ->
-      let base = Filename.basename f in
-      string_contains ~needle:topic (String.lowercase_ascii base)
-    ) files in
-    match matching with
-    | [] ->
+    let title_lc content =
+      match parse_frontmatter content with
+      | Some fm -> String.lowercase_ascii fm.title
+      | None -> ""
+    in
+    let matched =
+      List.find_map
+        (fun path ->
+          let base_lc = String.lowercase_ascii (Filename.basename path) in
+          if string_contains ~needle:topic_lc base_lc
+          then Some (path, None)
+          else (
+            match In_channel.with_open_text path In_channel.input_all with
+            | content when string_contains ~needle:topic_lc (title_lc content) ->
+              Some (path, Some content)
+            | _ -> None
+            | exception Sys_error _ -> None))
+        files
+    in
+    match matched with
+    | None ->
         workflow_err ~tool_name ~start_time
           (sprintf "No document matching '%s'" topic)
-    | path :: _ ->
+    | Some (path, cached) ->
         try
-          let content = In_channel.with_open_text path In_channel.input_all in
+          let content =
+            match cached with
+            | Some c -> c
+            | None -> In_channel.with_open_text path In_channel.input_all
+          in
           text_ok ~tool_name ~start_time
             (sprintf "## %s\n\n%s" (Filename.basename path) content)
         with

@@ -101,14 +101,23 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
         return ['surfaceReadiness']
       }
       return ['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest']
-    case 'workspace':
-      if (routeState.params.section === 'planning') {
+    case 'workspace': {
+      const section = routeState.params.section
+      // 'work' (the default section) and 'planning' are both store-backed
+      // goal/task surfaces: WorkSurfaceV2 (work) and PlanningPanel (planning)
+      // render the flat `goals` + `tasks` signals. Those signals are only
+      // populated by the `goals` (planning fetch) and `execution` refreshers.
+      // Before this branch, landing on the default Work board returned [] and
+      // left both signals empty, so the board showed 0 goals / 0 jobs even
+      // though live planning/execution data existed.
+      if (!section || section === 'work' || section === 'planning') {
         return ['goals', 'execution']
       }
-      if (routeState.params.section === 'board') {
+      if (section === 'board') {
         return ['board']
       }
       return []
+    }
     case 'lab':
       if (routeState.params.section === 'harness') {
         return ['harness']

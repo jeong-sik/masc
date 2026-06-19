@@ -72,6 +72,16 @@ let test_remove_agent () =
   | Error _ -> ()  (* Expected: not found *)
   | Ok _ -> Alcotest.fail "agent should have been removed"
 
+let test_remove_missing_agent_is_noop () =
+  with_eio_env @@ fun config ->
+  (match Workspace_eio.remove_agent config ~name:"missing" with
+   | Ok () -> ()
+   | Error e -> Alcotest.failf "remove_agent failed: %s" e);
+
+  let events = Workspace_eio.get_recent_events config ~limit:10 in
+  Alcotest.(check int) "no leave event for already missing agent" 0
+    (List.length events)
+
 (** {1 Lock Tests} *)
 
 let test_acquire_lock () =
@@ -185,6 +195,10 @@ let () =
       Alcotest.test_case "register agent" `Quick test_register_agent;
       Alcotest.test_case "get agent" `Quick test_get_agent;
       Alcotest.test_case "remove agent" `Quick test_remove_agent;
+      Alcotest.test_case
+        "remove missing agent is no-op"
+        `Quick
+        test_remove_missing_agent_is_noop;
     ];
     "lock", [
       Alcotest.test_case "acquire lock" `Quick test_acquire_lock;

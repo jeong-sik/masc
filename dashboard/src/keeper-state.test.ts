@@ -231,6 +231,35 @@ describe('thread history merge & persistence', () => {
     expect(entries[0]?.blocks).toEqual([{ t: 'image', src: 'https://x.com/a.png' }])
   })
 
+  it('passes a fusion block through with board_post_id required and run_id optional', () => {
+    const withRunId = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'panel concluded',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'fusion', board_post_id: 'post-1', run_id: 'fus-1' }],
+      },
+    ])
+    expect(withRunId[0]?.blocks).toEqual([{ t: 'fusion', board_post_id: 'post-1', run_id: 'fus-1' }])
+
+    const withoutRunId = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'panel concluded',
+        ts: 1_780_000_000,
+        blocks: [{ t: 'fusion', board_post_id: 'post-2' }] as any,
+      },
+    ])
+    expect(withoutRunId[0]?.blocks).toEqual([{ t: 'fusion', board_post_id: 'post-2', run_id: undefined }])
+  })
+
+  it('drops a fusion block missing board_post_id and falls back to the local parser', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'assistant', content: 'panel concluded', ts: 1_780_000_000, blocks: [{ t: 'fusion', run_id: 'fus-orphan' }] as any },
+    ])
+    expect(entries[0]?.blocks).toEqual([{ t: 'p', html: 'panel concluded' }])
+  })
+
   it('falls back to the local parser when server blocks are missing or empty', () => {
     const withMissing = chatHistoryEntriesFromRest('echo', [
       { role: 'assistant', content: 'https://x.com/post', ts: 1_780_000_000 },

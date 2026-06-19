@@ -1193,7 +1193,7 @@ function FusionPanelRow({ entry }: { entry: FusionPanelEntry }) {
         ? html`
           <button
             type="button"
-            class="w-full flex items-center gap-1.5 text-left text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)] ${ringFocusClasses}"
+            class="w-full flex items-center gap-1.5 text-left text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)] ${CHAT_FOCUS_RING}"
             aria-expanded=${open}
             onClick=${() => setOpen((v) => !v)}
           >
@@ -1256,7 +1256,7 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
     <div class="rounded-[var(--r-1,8px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-brass-soft,rgba(216,166,87,0.06))] overflow-hidden" data-fusion-card>
       <button
         type="button"
-        class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs ${ringFocusClasses}"
+        class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs ${CHAT_FOCUS_RING}"
         aria-expanded=${expanded}
         onClick=${() => setExpanded((v) => !v)}
       >

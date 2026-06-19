@@ -11,6 +11,7 @@
 
 module Types = Masc.Keeper_memory_os_types
 module R = Masc.Keeper_memory_os_reconcile
+module GH = Masc.Keeper_memory_os_reconcile_gh
 
 let now = 1_000_000.0
 let horizon = 3600.0
@@ -40,6 +41,18 @@ let verify_by_id table : R.verify_fn =
 ;;
 
 let verdict = Alcotest.testable (fun ppf v -> Format.fprintf ppf "%s" (R.verdict_to_string v)) ( = )
+let external_state =
+  Alcotest.testable
+    (fun ppf v ->
+       Format.fprintf
+         ppf
+         "%s"
+         (match v with
+          | R.Still_open -> "still_open"
+          | R.Terminal -> "terminal"
+          | R.Unverifiable -> "unverifiable"))
+    ( = )
+;;
 
 let check_classify name expected ~verify f =
   Alcotest.check verdict name expected (R.classify ~now ~horizon ~verify f)
@@ -129,6 +142,58 @@ let test_dry_run_aggregates () =
   Alcotest.(check (list string)) "stale claims in order" [ "PR #10"; "PR #11"; "PR #12" ] claims
 ;;
 
+let pr_state_body state =
+  Printf.sprintf {|{"data":{"repository":{"pullRequest":{"state":"%s"}}}}|} state
+;;
+
+let test_github_parse_states () =
+  Alcotest.check
+    external_state
+    "OPEN -> still_open"
+    R.Still_open
+    (GH.parse_state_response ~kind:Types.Pr (pr_state_body "OPEN"));
+  Alcotest.check
+    external_state
+    "MERGED -> terminal"
+    R.Terminal
+    (GH.parse_state_response ~kind:Types.Pr (pr_state_body "MERGED"));
+  Alcotest.check
+    external_state
+    "issue CLOSED -> terminal"
+    R.Terminal
+    (GH.parse_state_response
+       ~kind:Types.Issue
+       {|{"data":{"repository":{"issue":{"state":"CLOSED"}}}}|})
+;;
+
+let test_github_parse_uncertainty_is_unverifiable () =
+  List.iter
+    (fun (label, body) ->
+       Alcotest.check
+         external_state
+         label
+         R.Unverifiable
+         (GH.parse_state_response ~kind:Types.Pr body))
+    [ "null node", {|{"data":{"repository":{"pullRequest":null}}}|}
+    ; "graphql errors", {|{"errors":[{"message":"bad"}]}|}
+    ; "unknown state", pr_state_body "DRAFTED"
+    ; "garbage", "not json"
+    ];
+  Alcotest.check
+    external_state
+    "task refs are not GitHub-verifiable"
+    R.Unverifiable
+    (GH.parse_state_response ~kind:Types.Task (pr_state_body "OPEN"))
+;;
+
+let test_no_token_verify_is_unverifiable () =
+  Alcotest.check
+    external_state
+    "missing token"
+    R.Unverifiable
+    (GH.no_token_verify { Types.kind = Types.Pr; Types.id = "1" })
+;;
+
 let () =
   Alcotest.run
     "rfc0259_reconcile"
@@ -141,5 +206,16 @@ let () =
         ; Alcotest.test_case "ref-time-fallback" `Quick test_no_last_verified_uses_first_seen
         ] )
     ; ("dry_run", [ Alcotest.test_case "aggregates" `Quick test_dry_run_aggregates ])
+    ; ( "github_verify"
+      , [ Alcotest.test_case "parse states" `Quick test_github_parse_states
+        ; Alcotest.test_case
+            "uncertainty is unverifiable"
+            `Quick
+            test_github_parse_uncertainty_is_unverifiable
+        ; Alcotest.test_case
+            "no token is unverifiable"
+            `Quick
+            test_no_token_verify_is_unverifiable
+        ] )
     ]
 ;;

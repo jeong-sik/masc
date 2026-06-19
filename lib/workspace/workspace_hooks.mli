@@ -89,6 +89,13 @@ val active_agents_change_fn : ([ `Inc | `Dec ] -> unit) Atomic.t
 val telemetry_observe_failure_fn : (string -> unit) Atomic.t
 val get_default_runtime_id_fn : (unit -> string) Atomic.t
 
+(** [\[runtime\].cross_verifier] runtime id for the anti-rationalization
+    evaluator, or [None] to use {!get_default_runtime_id_fn}. Wired to
+    [Runtime.cross_verifier_runtime_id] at startup; defaults to [fun () -> None]
+    (use the global default) when not connected, so callers in test contexts
+    fall back rather than crash. *)
+val get_cross_verifier_runtime_id_fn : (unit -> string option) Atomic.t
+
 val record_task_metric_fn :
   (Workspace_utils_backend_setup.config ->
    agent_id:string ->

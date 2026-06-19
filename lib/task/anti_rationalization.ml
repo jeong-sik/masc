@@ -565,9 +565,18 @@ let parse_verdict (text : string) : (verdict, string) result =
     See: Anthropic "Harness Design" blog analysis. *)
 (* Function, not a module-level value: [Runtime.get_default_runtime_id] fail-fasts
    until [Runtime.init_default] runs at startup (RFC-0206 §2.1). A module-level
-   binding evaluates at load time and crashes boot; defer to call time. *)
+   binding evaluates at load time and crashes boot; defer to call time.
+
+   Prefer [\[runtime\].cross_verifier] when set: the evaluator requests a JSON
+   structured verdict, so it must run on a JSON-capable model independent of the
+   fleet default. When the default runtime cannot emit JSON the evaluator returns
+   empty and the gate approves by liveness (#8688); routing it explicitly keeps
+   the gate live and restores cross-model separation. [None] = inherit the global
+   default (legacy). *)
 let default_evaluator_runtime () =
-  (Atomic.get Workspace_hooks.get_default_runtime_id_fn) ()
+  match (Atomic.get Workspace_hooks.get_cross_verifier_runtime_id_fn) () with
+  | Some id -> id
+  | None -> (Atomic.get Workspace_hooks.get_default_runtime_id_fn) ()
 ;;
 
 (* ================================================================ *)

@@ -131,6 +131,8 @@ let set_presence (status : Discord_gateway_state.presence_status) =
 
 let reader_should_continue_after_input = function
   | Discord_gateway_state.Wss_closed _ -> false
+  (* The socket never came up; there is no reader to keep alive. *)
+  | Discord_gateway_state.Connect_failed _ -> false
   | Discord_gateway_state.Connect_requested
   | Discord_gateway_state.Frame_received _
   | Discord_gateway_state.Frame_parse_error _
@@ -250,6 +252,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
               | Discord_gateway_state.Connect_requested
               | Discord_gateway_state.Frame_parse_error _
               | Discord_gateway_state.Wss_closed _
+              | Discord_gateway_state.Connect_failed _
               | Discord_gateway_state.Heartbeat_tick
               | Discord_gateway_state.Heartbeat_ack_timeout
               | Discord_gateway_state.Backoff_elapsed
@@ -283,9 +286,22 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
          Discord_wss_connection.close old_conn;
          conn_ref := None
        | None -> ());
-      let conn = Discord_wss_connection.connect ~sw ~env ~url in
-      conn_ref := Some conn;
-      Eio.Fiber.fork ~sw (fun () -> reader_loop conn)
+      (match Discord_wss_connection.connect ~sw ~env ~url with
+       | conn ->
+         conn_ref := Some conn;
+         Eio.Fiber.fork ~sw (fun () -> reader_loop conn)
+       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+       | exception exn ->
+         (* DNS / connect / TLS handshake failure: the socket never came up.
+            Feed Connect_failed so the FSM schedules a backoff reconnect
+            (reusing backoff_ms), instead of letting the exception unwind out
+            of the drive loop and kill the gateway with no restart. *)
+         let reason = Printexc.to_string exn in
+         log_effect `Warn
+           (Printf.sprintf "WSS connect failed: %s; scheduling reconnect"
+              reason);
+         Eio.Stream.add input_mailbox
+           (Discord_gateway_state.Connect_failed { reason }))
     | Close_wss { code; reason = _ } ->
       (* Phase 1.4b: explicit close. Discord_wss_connection.close
          resolves the inner session switch's close-signal promise,
@@ -393,6 +409,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
      | Discord_gateway_state.Frame_received _
      | Discord_gateway_state.Frame_parse_error _
      | Discord_gateway_state.Wss_closed _
+     | Discord_gateway_state.Connect_failed _
      | Discord_gateway_state.Heartbeat_tick
      | Discord_gateway_state.Heartbeat_ack_timeout
      | Discord_gateway_state.Status_change _ -> ());

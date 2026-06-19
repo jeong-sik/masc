@@ -74,6 +74,43 @@ val is_promotable : category -> bool
     pass) reachable. *)
 val category_valid_until : now:float -> category -> float option
 
+(** RFC-0259 §3.2: the kind of verifiable external state a claim names. Closed sum
+    so the P2 reconciler's [verify_external] must handle every arm at compile
+    time. *)
+type external_ref_kind =
+  | Pr
+  | Issue
+  | Task
+
+(** A parsed external reference: [id] is the bare number ("21515"), [kind] selects
+    the source of truth to re-check it against. *)
+type external_ref =
+  { kind : external_ref_kind
+  ; id : string
+  }
+
+val external_ref_kind_to_string : external_ref_kind -> string
+val external_ref_kind_of_string : string -> external_ref_kind option
+
+(** RFC-0259 §3.2: parse the first PR/issue/task id a claim names. Deterministic;
+    [None] when the claim carries no explicit "PR #/issue #/task-" marker followed
+    by digits. Run once at the producer boundary (parse-don't-validate). *)
+val parse_external_ref : string -> external_ref option
+
+(** RFC-0259 §3.2: the finite decay horizon an externally-referenced (volatile)
+    claim is born with — deliberately shorter than the ephemeral TTL because
+    external status moves faster than coordination boilerplate. *)
+val volatile_ref_ttl_seconds : float
+
+(** Fact-level retention horizon: an [external_ref = Some _] forces
+    [volatile_ref_ttl_seconds] (closing RFC-0259 gap #4 at the producer), and
+    otherwise the category decides via {!category_valid_until}. *)
+val fact_valid_until
+  :  now:float
+  -> external_ref:external_ref option
+  -> category
+  -> float option
+
 (** A single semantic claim extracted from conversation history.
 
     RFC-0247 (purge): the fact carries only structure — claim, typed category,
@@ -89,6 +126,10 @@ type fact =
     (** RFC-0244 Tier 2 (shared semantic store) only: the sorted set of distinct
         keeper ids that have corroborated this claim. Empty for Tier-1 per-keeper
         facts (omitted from their JSON). Populated by the consolidator. *)
+  ; external_ref : external_ref option
+    (** RFC-0259 §3.2: [Some] when the claim names verifiable external state
+        (PR/issue/task id) — such a fact is volatile, never durable, so it is born
+        with a finite [valid_until]. [None] follows the category's retention. *)
   ; first_seen : float
   ; valid_until : float option
   ; last_verified_at : float option

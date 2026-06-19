@@ -93,10 +93,16 @@ let consolidate_into_shared ~now ~min_keepers contribs =
         ; category = rep.fact.category
         ; source = rep.fact.source
         ; observed_by = keepers
+        ; external_ref = rep.fact.external_ref
         ; first_seen =
             List.fold_left (fun acc c -> Float.min acc c.fact.first_seen) rep.fact.first_seen contribs
-        ; valid_until = None
-          (* The consolidation IS the verification of the shared fact. *)
+        ; valid_until =
+            fact_valid_until ~now ~external_ref:rep.fact.external_ref rep.fact.category
+          (* Consolidation corroborates the claim across keepers and so verifies a
+             durable shared fact (last_verified_at = now, no TTL). But an
+             externally-referenced (volatile) claim still gets a finite horizon
+             (RFC-0259 §3.2): keeper agreement is not external-truth verification —
+             the P2 reconciler must re-check it against the source of truth. *)
         ; last_verified_at = Some now
         ; schema_version
         }

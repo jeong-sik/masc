@@ -87,6 +87,7 @@ let mk_fact
   ; Types.category
   ; Types.source = { Types.trace_id = "harness-trace"; Types.turn = 1; Types.tool_call_id = None }
   ; Types.observed_by = []
+  ; Types.external_ref = None
   ; Types.first_seen = now -. age_seconds
   ; Types.valid_until
   ; Types.last_verified_at = Some (now -. age_seconds)

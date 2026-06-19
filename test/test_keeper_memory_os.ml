@@ -55,6 +55,7 @@ let fact_fixture ~now () =
   ; Types.category = Types.Preference
   ; Types.source = { Types.trace_id = "trace-123"; Types.turn = 5; Types.tool_call_id = None }
   ; Types.observed_by = []
+  ; Types.external_ref = None
   ; Types.first_seen = now -. 86400.0
   ; Types.valid_until = None
   ; Types.last_verified_at = Some (now -. 3600.0)

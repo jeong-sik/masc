@@ -11,6 +11,7 @@ let fact
       ?valid_until
       ?last_verified_at
       ?(observed_by = [])
+      ?(external_ref = None)
       claim
   =
   let last_verified_at =
@@ -22,6 +23,7 @@ let fact
   ; category
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by
+  ; external_ref
   ; first_seen
   ; valid_until
   ; last_verified_at

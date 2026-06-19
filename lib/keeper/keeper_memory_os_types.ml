@@ -103,6 +103,120 @@ let category_valid_until ~now = function
   | Validated_approach | Lesson | Unknown _ -> None
 ;;
 
+(* ---------- External reference (RFC-0259 §3.2) ----------
+
+   A claim about volatile external state ("PR #X is merged", "issue #Y blocked")
+   was true when extracted and goes false when the world moves on. RFC-0259
+   classifies such a claim at the producer boundary so it can be (a) given a
+   finite decay horizon now, and (b) re-grounded against the source of truth by
+   the P2 reconciler later. The kind selects which source of truth to check. *)
+type external_ref_kind =
+  | Pr
+  | Issue
+  | Task
+
+(* [id] is the bare number ("21515"); [kind] selects the source of truth. *)
+type external_ref =
+  { kind : external_ref_kind
+  ; id : string
+  }
+
+let external_ref_kind_to_string = function
+  | Pr -> "pr"
+  | Issue -> "issue"
+  | Task -> "task"
+;;
+
+let external_ref_kind_of_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "pr" -> Some Pr
+  | "issue" -> Some Issue
+  | "task" -> Some Task
+  | _ -> None
+;;
+
+(* First index >= [from] at which [needle] occurs in [haystack], else None. Naive
+   scan — claims are short, so O(n*m) is fine and avoids a regex dependency. *)
+let substring_index ~haystack ~needle ~from =
+  let hl = String.length haystack
+  and nl = String.length needle in
+  if nl = 0
+  then Some from
+  else (
+    let rec loop i =
+      if i + nl > hl
+      then None
+      else if String.equal (String.sub haystack i nl) needle
+      then Some i
+      else loop (i + 1)
+    in
+    loop (max 0 from))
+;;
+
+(* Read a bare id at [start] in [s]: skip a leading '#'/space run, then take the
+   ASCII-digit run. None when no digits follow the marker. *)
+let read_ref_id s start =
+  let n = String.length s in
+  let rec skip i =
+    if i < n && (Char.equal s.[i] ' ' || Char.equal s.[i] '#') then skip (i + 1) else i
+  in
+  let j = skip start in
+  let rec digits k = if k < n && s.[k] >= '0' && s.[k] <= '9' then digits (k + 1) else k in
+  let e = digits j in
+  if e > j then Some (String.sub s j (e - j)) else None
+;;
+
+(* Explicit markers only (parse-don't-validate): a bare "#123" is left
+   unclassified because PR vs issue is ambiguous and the reconciler needs the
+   kind. Longest/most-specific markers first so "pull request #" wins over a
+   spurious "pr #" prefix match. *)
+let ref_markers =
+  [ "pull request #", Pr
+  ; "pr #", Pr
+  ; "pr#", Pr
+  ; "issue #", Issue
+  ; "issue#", Issue
+  ; "task-", Task
+  ]
+;;
+
+(* RFC-0259 §3.2: parse the first external reference a claim names. Deterministic;
+   None when the claim names no id. Run once at the producer boundary. *)
+let parse_external_ref claim =
+  let lower = String.lowercase_ascii claim in
+  let candidates =
+    List.filter_map
+      (fun (marker, kind) ->
+        match substring_index ~haystack:lower ~needle:marker ~from:0 with
+        | None -> None
+        | Some pos ->
+          (match read_ref_id lower (pos + String.length marker) with
+           | Some id -> Some (pos, { kind; id })
+           | None -> None))
+      ref_markers
+  in
+  match List.sort (fun (a, _) (b, _) -> compare (a : int) b) candidates with
+  | (_, r) :: _ -> Some r
+  | [] -> None
+;;
+
+(* RFC-0259 §3.2: an externally-referenced claim is volatile and must never be
+   durable. It is born with a finite horizon shorter than [ephemeral_ttl] —
+   external status (open/merged/blocked) moves faster than coordination
+   boilerplate. Trade-off: a still-true ref may be re-extracted after the horizon
+   (cheap), versus a stale ref driving action for ~30 turns (the RFC-0259 §2 bug).
+   When the P2 reconciler lands it advances [last_verified_at] for confirmed refs;
+   until then this TTL is the sole backstop against immortal volatile facts. *)
+let volatile_ref_ttl_seconds = 21_600.0
+
+(* The fact-level retention horizon: an external reference forces a finite TTL
+   (closing gap #4) and otherwise the category decides (RFC-0247). *)
+let fact_valid_until ~now ~external_ref category =
+  match external_ref with
+  | Some _ -> Some (now +. volatile_ref_ttl_seconds)
+  | None -> category_valid_until ~now category
+;;
+
 (* RFC-0247 (purge): the fact carries only structure — the claim, its typed
    category, provenance, the distinct-keeper corroboration set, and three
    timestamps (first_seen, optional last_verified_at, optional Ephemeral
@@ -118,6 +232,11 @@ type fact =
        keeper ids that have corroborated this claim. Empty for Tier-1 per-keeper
        facts — a single keeper's store has no distinct keeper-source to track, so
        it is omitted from their JSON. *)
+  ; external_ref : external_ref option
+    (* RFC-0259 §3.2: [Some] when the claim names verifiable external state
+       (PR/issue/task id). Such a fact is volatile — never durable — so it is
+       born with a finite [valid_until]; [None] for claims with no external
+       referent (those follow the category's retention). *)
   ; first_seen : float
   ; valid_until : float option
   ; last_verified_at : float option
@@ -182,6 +301,25 @@ let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
     if List.length strings = List.length items then Some strings else None
   | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
   | None -> None
+;;
+
+let external_ref_to_json (r : external_ref) =
+  `Assoc
+    [ "kind", `String (external_ref_kind_to_string r.kind)
+    ; "id", `String r.id
+    ]
+;;
+
+let external_ref_of_json (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    (match json_string_field "kind" fields, json_string_field "id" fields with
+     | Some kind_str, Some id ->
+       (match external_ref_kind_of_string kind_str with
+        | Some kind -> Some { kind; id }
+        | None -> None)
+     | (Some _, None) | (None, Some _) | (None, None) -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
 let provenance_event_to_json (e : provenance_event) =
@@ -250,6 +388,11 @@ let fact_to_json f =
     ]
     @ optional_float_field "valid_until" f.valid_until
     @ optional_float_field "last_verified_at" f.last_verified_at
+    (* Omitted when [None] so facts with no external referent stay byte-identical
+       to pre-RFC-0259 rows; only externally-referenced claims emit it. *)
+    @ (match f.external_ref with
+       | Some r -> [ "external_ref", external_ref_to_json r ]
+       | None -> [])
     (* Tier-1 facts carry [], which is omitted so per-keeper stores stay
        byte-identical to pre-RFC-0244; only Tier-2 shared facts emit it. *)
     @ (match f.observed_by with
@@ -285,6 +428,15 @@ let fact_of_json (json : Yojson.Safe.t) =
           let observed_by =
             Option.value (json_string_list_field "observed_by" fields) ~default:[]
           in
+          (* Round-trip only: classification happens once at the producer boundary
+             (Keeper_librarian.fact_of_json), so a legacy row with no key reads as
+             [None] here rather than being re-parsed — keeps the
+             external_ref=Some ⟹ valid_until=Some invariant a producer property. *)
+          let external_ref =
+            match List.assoc_opt "external_ref" fields with
+            | Some json -> external_ref_of_json json
+            | None -> None
+          in
           Some
             { claim
             ; (* Parse-once at the read boundary; legacy free-string categories
@@ -292,6 +444,7 @@ let fact_of_json (json : Yojson.Safe.t) =
               category = category_of_string category_str
             ; source
             ; observed_by
+            ; external_ref
             ; first_seen
             ; valid_until
             ; last_verified_at

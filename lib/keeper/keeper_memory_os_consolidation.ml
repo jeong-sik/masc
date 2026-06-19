@@ -259,8 +259,14 @@ let consolidated_fact ~now ~members (group : merge_group) =
   ; category = group.category
   ; source = earliest.source
   ; observed_by
+  ; external_ref = earliest.external_ref
   ; first_seen
-  ; valid_until = valid_until_for_group ~now ~members group.category
+  ; valid_until =
+      (* RFC-0259 §3.2: a merged claim that names external state stays volatile
+         (never durable); otherwise the group's structural expiry rule applies. *)
+      (match earliest.external_ref with
+       | Some _ as external_ref -> fact_valid_until ~now ~external_ref group.category
+       | None -> valid_until_for_group ~now ~members group.category)
   ; last_verified_at = last_verified_for_members members
   ; schema_version
   }

@@ -11,6 +11,8 @@
     Migration path: Workspace -> Workspace_eio
 *)
 
+open Result.Syntax
+
 (** {1 Types} *)
 
 (** Workspace configuration for Eio backend *)
@@ -69,6 +71,25 @@ let now_iso () =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
     (int_of_float ((t -. floor t) *. 1000.))
+
+(** Convert a backend error to a human-readable string for result payloads.
+    Kept private to this module because different call sites want different
+    prefixes/special cases. *)
+let backend_error_to_string = function
+  | Backend.IOError m -> m
+  | Backend.NotFound k -> "Not found: " ^ k
+  | Backend.AlreadyExists k -> "Already exists: " ^ k
+  | Backend.InvalidKey k -> "Invalid key: " ^ k
+  | Backend.ConnectionFailed m -> "Connection failed: " ^ m
+  | Backend.BackendNotSupported m -> "Not supported: " ^ m
+
+(** [json_decode f] runs [f ()] and turns any raised exception into an
+    [Error (Printexc.to_string exn)], preserving the original
+    [Eio.Cancel.Cancelled] re-raise behaviour. *)
+let json_decode f =
+  try Ok (f ()) with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Printexc.to_string e)
 
 (** {1 Configuration} *)
 
@@ -180,10 +201,7 @@ let log_event config ~event_type ~agent ~payload =
   (match Backend.FileSystem.set config.backend (event_key seq) json_str with
    | Ok () -> ()
    | Error e ->
-       let msg = match e with
-         | Backend.IOError m -> m | Backend.NotFound k -> "not found: " ^ k
-         | Backend.AlreadyExists k -> "already exists: " ^ k | Backend.InvalidKey k -> "invalid key: " ^ k
-         | Backend.ConnectionFailed m -> "connection failed: " ^ m | Backend.BackendNotSupported m -> "not supported: " ^ m in
+       let msg = backend_error_to_string e in
        Log.Workspace.warn "append_event set failed for seq %d: %s" seq msg);
   event
 
@@ -250,8 +268,8 @@ let workspace_state_to_json state =
 
 let workspace_state_of_json json =
   let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
-  try
-    Ok {
+  json_decode (fun () ->
+    {
       protocol_version = (match m "protocol_version" with `String s -> s | _ -> raise (Invalid_argument "protocol_version"));
       started_at = (match m "started_at" with `Float f -> f | `Int i -> float_of_int i | _ -> raise (Invalid_argument "started_at"));
       last_updated = (match m "last_updated" with `Float f -> f | `Int i -> float_of_int i | _ -> raise (Invalid_argument "last_updated"));
@@ -264,19 +282,17 @@ let workspace_state_of_json json =
       paused_by = Json_util.get_string json "paused_by";
       paused_at = Json_util.get_float json "paused_at";
       pause_reason = Json_util.get_string json "pause_reason";
-    }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
+    })
 
 (** Read workspace state *)
 let read_state config =
   match Backend.FileSystem.get config.backend state_key with
   | Ok json_str ->
-      (try
+      json_decode (fun () ->
         let json = Yojson.Safe.from_string json_str in
-        workspace_state_of_json json
-      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
+        match workspace_state_of_json json with
+        | Ok s -> s
+        | Error e -> raise (Invalid_argument e))
   | Error (Backend.NotFound _) ->
       Ok (default_workspace_state ())
   | Error (Backend.IOError msg) -> Error msg
@@ -318,19 +334,14 @@ let atomic_update_state config ~f =
   in
   match Backend.FileSystem.atomic_update config.backend state_key ~f:transform with
   | Ok json_str ->
-      (try
+      json_decode (fun () ->
         let json = Yojson.Safe.from_string json_str in
-        workspace_state_of_json json
-      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
+        match workspace_state_of_json json with
+        | Ok s -> s
+        | Error e -> raise (Invalid_argument e))
   | Error e ->
       Atomic.incr state_update_failures;
-      Error (match e with
-        | Backend.IOError msg -> msg
-        | Backend.NotFound k -> "Not found: " ^ k
-        | Backend.AlreadyExists k -> "Already exists: " ^ k
-        | Backend.InvalidKey k -> "Invalid key: " ^ k
-        | Backend.ConnectionFailed m -> "Connection failed: " ^ m
-        | Backend.BackendNotSupported m -> "Not supported: " ^ m)
+      Error (backend_error_to_string e)
 
 (** {1 Agent Operations} *)
 
@@ -344,16 +355,13 @@ let agent_state_to_json agent =
 
 let agent_state_of_json json =
   let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
-  try
-    Ok {
+  json_decode (fun () ->
+    {
       name = (match m "name" with `String s -> s | _ -> raise (Invalid_argument "name"));
       last_seen = (match m "last_seen" with `Float f -> f | `Int i -> float_of_int i | _ -> raise (Invalid_argument "last_seen"));
       capabilities = (match m "capabilities" with `List items -> List.filter_map (function `String s -> Some s | _ -> None) items | _ -> []);
       status = (match m "status" with `String s -> s | _ -> raise (Invalid_argument "status"));
-    }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
+    })
 
 (** Register agent or update heartbeat
 
@@ -374,79 +382,84 @@ let register_agent config ~name ?(capabilities=[]) () =
     status = "active";
   } in
   let json_str = Yojson.Safe.to_string (agent_state_to_json agent) in
-  match Backend.FileSystem.set config.backend (agent_key name) json_str with
-  | Ok () ->
-      (* Atomically update workspace state to include this agent *)
-      (match atomic_update_state config ~f:(fun state ->
-        let active_agents =
-          if List.mem name state.active_agents then state.active_agents
-          else name :: state.active_agents
-        in
-        { state with active_agents }
-      ) with
-      | Ok _ -> ()
-      | Error msg -> Log.Workspace.warn "join_agent: state update failed for %s: %s" name msg);
+  let* () =
+    match Backend.FileSystem.set config.backend (agent_key name) json_str with
+    | Ok () -> Ok ()
+    | Error (Backend.IOError msg) -> Error msg
+    | Error (Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
+            | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
+        Error "Failed to register agent"
+  in
+  (* Atomically update workspace state to include this agent *)
+  (match atomic_update_state config ~f:(fun state ->
+     let active_agents =
+       if List.mem name state.active_agents then state.active_agents
+       else name :: state.active_agents
+     in
+     { state with active_agents }
+   ) with
+  | Ok _ -> ()
+  | Error msg -> Log.Workspace.warn "join_agent: state update failed for %s: %s" name msg);
 
-      (* Auto-subscribe to Messages for A2A communication (via hook) *)
-      (Atomic.get Workspace_hooks.subscribe_messages_fn) ~subscriber:name;
+  (* Auto-subscribe to Messages for A2A communication (via hook) *)
+  (Atomic.get Workspace_hooks.subscribe_messages_fn) ~subscriber:name;
 
-      (* Log join event only for new agents, skip for re-joins *)
-      if not already_active then begin
-        let _event = log_event config
-          ~event_type:AgentSessionBound
-          ~agent:name
-          ~payload:(`Assoc [
-            ("capabilities", `List (List.map (fun c -> `String c) capabilities))
-          ]) in
-        ()
-      end;
+  (* Log join event only for new agents, skip for re-joins *)
+  if not already_active then begin
+    let _event = log_event config
+      ~event_type:AgentSessionBound
+      ~agent:name
+      ~payload:(`Assoc [
+        ("capabilities", `List (List.map (fun c -> `String c) capabilities))
+      ]) in
+    ()
+  end;
 
-      Ok agent
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Failed to register agent"
+  Ok agent
 
 (** Get agent state *)
 let get_agent config ~name =
-  match Backend.FileSystem.get config.backend (agent_key name) with
-  | Ok json_str ->
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        agent_state_of_json json
-      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-  | Error (Backend.NotFound _) ->
-      Error "Agent not found"
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Failed to get agent"
+  let* json_str =
+    Backend.FileSystem.get config.backend (agent_key name)
+    |> Result.map_error (function
+        | Backend.NotFound _ -> "Agent not found"
+        | Backend.IOError msg -> msg
+        | Backend.AlreadyExists _ | Backend.InvalidKey _
+        | Backend.ConnectionFailed _ | Backend.BackendNotSupported _ ->
+            "Failed to get agent")
+  in
+  json_decode (fun () ->
+    let json = Yojson.Safe.from_string json_str in
+    match agent_state_of_json json with
+    | Ok s -> s
+    | Error e -> raise (Invalid_argument e))
 
 (** Remove agent *)
 let remove_agent config ~name =
-  match Backend.FileSystem.delete config.backend (agent_key name) with
-  | Ok () ->
-      (* Atomically update workspace state to remove this agent *)
-      (match atomic_update_state config ~f:(fun state ->
-        let active_agents = List.filter (fun n -> n <> name) state.active_agents in
-        { state with active_agents }
-      ) with
-      | Ok _ -> ()
-      | Error msg -> Log.Workspace.warn "remove_agent: state update failed for %s: %s" name msg);
+  let* () =
+    match Backend.FileSystem.delete config.backend (agent_key name) with
+    | Ok () -> Ok ()
+    | Error (Backend.NotFound _) -> Ok ()  (* Already removed *)
+    | Error (Backend.IOError msg) -> Error msg
+    | Error (Backend.AlreadyExists _ | Backend.InvalidKey _
+            | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
+        Error "Failed to remove agent"
+  in
+  (* Atomically update workspace state to remove this agent *)
+  (match atomic_update_state config ~f:(fun state ->
+     let active_agents = List.filter (fun n -> n <> name) state.active_agents in
+     { state with active_agents }
+   ) with
+  | Ok _ -> ()
+  | Error msg -> Log.Workspace.warn "remove_agent: state update failed for %s: %s" name msg);
 
-      (* Log leave event *)
-      let _event = log_event config
-        ~event_type:AgentSessionEnded
-        ~agent:name
-        ~payload:`Null in
+  (* Log leave event *)
+  let _event = log_event config
+    ~event_type:AgentSessionEnded
+    ~agent:name
+    ~payload:`Null in
 
-      Ok ()
-  | Error (Backend.NotFound _) ->
-      Ok ()  (* Already removed *)
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Failed to remove agent"
+  Ok ()
 
 (** {1 Lock Operations} *)
 
@@ -515,44 +528,49 @@ let lock_info_of_json json =
 (** Acquire lock on a resource *)
 let acquire_lock config ~resource ~owner =
   let ttl_seconds = config.lock_expiry_minutes * 60 in
-  match Backend.FileSystem.acquire_lock config.backend
-          ~key:resource ~owner ~ttl_seconds with
-  | Ok true ->
-      let lock = {
-        resource;
-        owner;
-        acquired_at = Time_compat.now ();
-        expires_at = Time_compat.now () +. float_of_int ttl_seconds;
-      } in
-      Ok (Some lock)
-  | Ok false ->
-      Ok None  (* Lock held by someone else *)
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Failed to acquire lock"
+  let+ acquired =
+    Backend.FileSystem.acquire_lock config.backend
+      ~key:resource ~owner ~ttl_seconds
+    |> Result.map_error (function
+        | Backend.IOError msg -> msg
+        | Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
+        | Backend.ConnectionFailed _ | Backend.BackendNotSupported _ ->
+            "Failed to acquire lock")
+  in
+  if acquired then
+    Some {
+      resource;
+      owner;
+      acquired_at = Time_compat.now ();
+      expires_at = Time_compat.now () +. float_of_int ttl_seconds;
+    }
+  else
+    None  (* Lock held by someone else *)
 
 (** Release lock *)
 let release_lock config ~resource ~owner =
-  match Backend.FileSystem.release_lock config.backend ~key:resource ~owner with
-  | Ok true -> Ok ()
-  | Ok false -> Error "Not lock owner"
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Failed to release lock"
+  let* released =
+    Backend.FileSystem.release_lock config.backend ~key:resource ~owner
+    |> Result.map_error (function
+        | Backend.IOError msg -> msg
+        | Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
+        | Backend.ConnectionFailed _ | Backend.BackendNotSupported _ ->
+            "Failed to release lock")
+  in
+  if released then Ok () else Error "Not lock owner"
 
 (** Extend lock TTL *)
 let extend_lock config ~resource ~owner =
-  let ttl_seconds = config.lock_expiry_minutes * 60 in
-  match Backend.FileSystem.extend_lock config.backend
-          ~key:resource ~owner ~ttl_seconds with
-  | Ok true -> Ok ()
-  | Ok false -> Error "Not lock owner or lock expired"
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Failed to extend lock"
+  let* extended =
+    Backend.FileSystem.extend_lock config.backend
+      ~key:resource ~owner ~ttl_seconds:(config.lock_expiry_minutes * 60)
+    |> Result.map_error (function
+        | Backend.IOError msg -> msg
+        | Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
+        | Backend.ConnectionFailed _ | Backend.BackendNotSupported _ ->
+            "Failed to extend lock")
+  in
+  if extended then Ok () else Error "Not lock owner or lock expired"
 
 (** {1 Message Operations} *)
 
@@ -575,17 +593,14 @@ let message_to_json msg =
 
 let message_of_json json =
   let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
-  try
-    Ok {
+  json_decode (fun () ->
+    {
       seq = (match m "seq" with `Int i -> i | _ -> raise (Invalid_argument "seq"));
       from_agent = (match m "from" with `String s -> s | _ -> raise (Invalid_argument "from"));
       content = (match m "content" with `String s -> s | _ -> raise (Invalid_argument "content"));
       mention = Json_util.get_string json "mention";
       timestamp = (match m "timestamp" with `Float f -> f | `Int i -> float_of_int i | _ -> raise (Invalid_argument "timestamp"));
-    }
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
+    })
 
 (** Extract @mention from message content
     Uses Mention module for Stateless/Stateful/Broadcast parsing *)
@@ -619,67 +634,69 @@ let broadcast config ~from_agent ~content =
     timestamp = Time_compat.now ();
   } in
   let json_str = Yojson.Safe.to_string (message_to_json msg) in
-  match Backend.FileSystem.set config.backend (message_key seq) json_str with
-  | Ok () ->
-      (* Atomically update state's message_seq for consistency *)
-      (match atomic_update_state config ~f:(fun state ->
-        { state with message_seq = seq }
-      ) with
-      | Ok _ -> ()
-      | Error msg -> Log.Workspace.warn "broadcast: state update failed for seq %d: %s" seq msg);
+  let* () =
+    match Backend.FileSystem.set config.backend (message_key seq) json_str with
+    | Ok () -> Ok ()
+    | Error (Backend.IOError msg) -> Error msg
+    | Error (Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
+            | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
+        Error "Failed to broadcast message"
+  in
+  (* Atomically update state's message_seq for consistency *)
+  (match atomic_update_state config ~f:(fun state ->
+     { state with message_seq = seq }
+   ) with
+  | Ok _ -> ()
+  | Error msg -> Log.Workspace.warn "broadcast: state update failed for seq %d: %s" seq msg);
 
-      (* Log broadcast event *)
-      let _event = log_event config
-        ~event_type:Broadcast
-        ~agent:from_agent
-        ~payload:(`Assoc [
-          ("message_seq", `Int seq);
-          ("mention", Json_util.string_opt_to_json msg.mention);
-          ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
-        ]) in
+  (* Log broadcast event *)
+  let _event = log_event config
+    ~event_type:Broadcast
+    ~agent:from_agent
+    ~payload:(`Assoc [
+      ("message_seq", `Int seq);
+      ("mention", Json_util.string_opt_to_json msg.mention);
+      ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
+    ]) in
 
-      (* Notify keepers about the mention *)
-      (try !Workspace_broadcast.on_broadcast_mention msg.mention
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Log.Workspace.warn "on_broadcast_mention callback failed: %s"
-           (Printexc.to_string exn));
-      Ok msg
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Failed to broadcast message"
+  (* Notify keepers about the mention *)
+  (try !Workspace_broadcast.on_broadcast_mention msg.mention
+   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+     Log.Workspace.warn "on_broadcast_mention callback failed: %s"
+       (Printexc.to_string exn));
+  Ok msg
 
 (** Get message by sequence number *)
 let get_message config ~seq =
-  match Backend.FileSystem.get config.backend (message_key seq) with
-  | Ok json_str ->
-      (try
-        let json = Yojson.Safe.from_string json_str in
-        message_of_json json
-      with Eio.Cancel.Cancelled _ as e -> raise e | e -> Error (Printexc.to_string e))
-  | Error (Backend.NotFound _) ->
-      Error "Message not found"
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Failed to get message"
+  let* json_str =
+    Backend.FileSystem.get config.backend (message_key seq)
+    |> Result.map_error (function
+        | Backend.NotFound _ -> "Message not found"
+        | Backend.IOError msg -> msg
+        | Backend.AlreadyExists _ | Backend.InvalidKey _
+        | Backend.ConnectionFailed _ | Backend.BackendNotSupported _ ->
+            "Failed to get message")
+  in
+  json_decode (fun () ->
+    let json = Yojson.Safe.from_string json_str in
+    match message_of_json json with
+    | Ok s -> s
+    | Error e -> raise (Invalid_argument e))
 
 (** {1 Health Check} *)
 
 let health_check config =
-  match Backend.FileSystem.health_check config.backend with
-  | Ok result -> Ok result
-  | Error (Backend.IOError msg) -> Error msg
-  | Error (Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
-          | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
-      Error "Health check failed"
+  Backend.FileSystem.health_check config.backend
+  |> Result.map_error (function
+      | Backend.IOError msg -> msg
+      | Backend.NotFound _ | Backend.AlreadyExists _ | Backend.InvalidKey _
+      | Backend.ConnectionFailed _ | Backend.BackendNotSupported _ ->
+          "Health check failed")
 
 (** {1 Workspace Status} *)
 
 let status config =
   match read_state config with
-  | Error e ->
-      `Assoc [("error", `String e)]
   | Ok state ->
       `Assoc [
         ("protocol_version", `String state.protocol_version);
@@ -689,3 +706,5 @@ let status config =
         ("mode", `String state.mode);
         ("paused", `Bool state.paused);
       ]
+  | Error e ->
+      `Assoc [("error", `String e)]

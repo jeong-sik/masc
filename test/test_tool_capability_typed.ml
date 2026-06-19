@@ -69,6 +69,10 @@ let test_has_catalog_inferred_capabilities () =
     true
     (Tool_capability.has Read_only "tool_read_file");
   (check bool)
+    "tool_search_files grants Read_only"
+    true
+    (Tool_capability.has Read_only "tool_search_files");
+  (check bool)
     "static inline metadata grants Mcp_context_required"
     true
     (Tool_capability.has Mcp_context_required "masc_messages");

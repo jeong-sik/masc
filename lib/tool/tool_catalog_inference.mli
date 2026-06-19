@@ -13,4 +13,6 @@ type effect_domain =
 val effect_domain_to_string : effect_domain -> string
 
 val inferred_effect_domain : string -> effect_domain option
-(** Always [None]. Effect metadata is descriptor/catalog-owned. *)
+(** Compatibility effect metadata for legacy internal tool names whose
+    descriptor-owned policy is not always visible at lower Tool/OAS bridge
+    layers. Prefer explicit descriptor/catalog metadata for new tools. *)

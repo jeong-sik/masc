@@ -48,7 +48,12 @@ let schema_hash_of_yojson schema =
 let read_only_of_tool_name name =
   (* DET-OK: sound-partial allow — unknown tools default to writer semantics, which
      makes the scheduler use the conservative [write:any] resource key below. *)
-  (Tool_catalog.metadata name).readonly |> Option.value ~default:false
+  let metadata = Tool_catalog.metadata name in
+  match metadata.readonly, metadata.effect_domain with
+  | Some true, _
+  | _, Some Tool_catalog.Read_only -> true
+  | Some false, _
+  | None, _ -> false
 
 let default_resource_keys_of_tool ~read_only ~tool_name:_ ~input_json:_ =
   if read_only then [] else [ "write:any" ]

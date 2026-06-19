@@ -12,6 +12,63 @@ let sdk_error_kind = function
   | Agent_sdk.Error.Internal _ -> "internal"
 ;;
 
+let network_error_kind_user_label = function
+  | Llm_provider.Http_client.Connection_refused -> "connection refused"
+  | Llm_provider.Http_client.Dns_failure -> "DNS lookup failed"
+  | Llm_provider.Http_client.Tls_error -> "TLS handshake failed"
+  | Llm_provider.Http_client.Timeout -> "network timeout"
+  | Llm_provider.Http_client.Local_resource_exhaustion ->
+    "local network resources exhausted"
+  | Llm_provider.Http_client.End_of_file -> "connection closed"
+  | Llm_provider.Http_client.Unknown -> "network error"
+;;
+
+let network_error_kind_user_action = function
+  | Llm_provider.Http_client.Dns_failure ->
+    "Check network/DNS or select another runtime."
+  | Llm_provider.Http_client.Connection_refused ->
+    "Check that the runtime endpoint is running or select another runtime."
+  | Llm_provider.Http_client.Tls_error ->
+    "Check the provider TLS endpoint or select another runtime."
+  | Llm_provider.Http_client.Timeout ->
+    "Check provider health or select another runtime."
+  | Llm_provider.Http_client.Local_resource_exhaustion ->
+    "Reduce concurrent requests or select another runtime."
+  | Llm_provider.Http_client.End_of_file
+  | Llm_provider.Http_client.Unknown ->
+    "Check provider health or select another runtime."
+;;
+
+let runtime_provider_label provider =
+  match Option.map String.trim provider with
+  | Some provider when provider <> "" -> Printf.sprintf "Runtime provider '%s'" provider
+  | _ -> "Runtime provider"
+;;
+
+let detail_suffix detail =
+  match String.trim detail with
+  | "" -> ""
+  | detail -> " Detail: " ^ detail
+;;
+
+let provider_network_user_message ?provider ~kind ~detail () =
+  Printf.sprintf
+    "%s unavailable: %s. %s%s"
+    (runtime_provider_label provider)
+    (network_error_kind_user_label kind)
+    (network_error_kind_user_action kind)
+    (detail_suffix detail)
+;;
+
+let user_message_of_sdk_error = function
+  | Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError { message; kind }) ->
+    provider_network_user_message ~kind ~detail:message ()
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
+    provider_network_user_message ~provider ~kind ~detail ()
+  | err -> Agent_sdk.Error.to_string err
+;;
+
 type sdk_termination_semantics =
   | Provider_wall_clock_timeout
   | Oas_agent_execution_timeout

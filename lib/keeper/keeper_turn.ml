@@ -732,6 +732,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
             match run_result with
             | Error err ->
               let e_str = Agent_sdk.Error.to_string err in
+              let user_message = Keeper_agent_error.user_message_of_sdk_error err in
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    (Trajectory.Failed e_str) in
@@ -740,7 +741,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                  ~label:"trajectory finalize (agent_run error)" exn);
               start_keepalive ctx meta;
               Progress.stop_tracking turn_task_id;
-              tool_result_error (Printf.sprintf "Agent.run failed: %s" e_str)
+              tool_result_error user_message
             | Ok result ->
               let explicit_accountability_claim =
                 Keeper_social_model.extract_accountability_claim result

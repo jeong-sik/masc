@@ -855,6 +855,7 @@
   test_keeper_recurring
   test_evidence_claim_schema
   test_deterministic_evidence_evaluator
+  test_keeper_deterministic_evidence_probe
   test_verification_fsm
   test_governance_yojson_roundtrip
   test_eval_calibration
@@ -1039,6 +1040,7 @@
   test_keeper_recurring
   test_evidence_claim_schema
   test_deterministic_evidence_evaluator
+  test_keeper_deterministic_evidence_probe
   test_verification_fsm
   test_governance_yojson_roundtrip
   test_eval_calibration

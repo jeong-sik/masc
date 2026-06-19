@@ -1,10 +1,48 @@
 (* RFC-0199 Phase B — see .mli. Adapts the keeper sandbox file system into a
    Deterministic_evidence_evaluator.probe and reuses the (tested) pure
-   evaluator. Only file_bytes is backed by real I/O in v1; the other probe
-   functions return None (Indeterminate) so their claim kinds never
-   auto-complete until wired. *)
+   evaluator. File probes and Shell-IR command probes are backed by real I/O;
+   the forge/custom probe functions return None (Indeterminate) so their claim
+   kinds never auto-complete until wired. *)
 
-let make_probe ~(config : Workspace.config)
+type dispatch_target =
+  { sandbox : Masc_exec.Sandbox_target.t
+  ; base_host_env : string array option
+  }
+
+(* TEL-OK: pure dispatch-target selector (no side-effecting action; probe execution + telemetry live in make_probe/the evaluator). *)
+let local_dispatch_target ~(config : Workspace.config)
+    ~(meta : Keeper_meta_contract.keeper_meta) =
+  match
+    Keeper_secret_projection.local_env_for_keeper
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+      ()
+  with
+  | Error _ -> None
+  | Ok base_host_env ->
+    Some { sandbox = Masc_exec.Sandbox_target.host (); base_host_env }
+
+(* TEL-OK: pure dispatch-target selector (no side-effecting action; probe execution + telemetry live in make_probe/the evaluator). *)
+let command_dispatch_target
+    ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
+    ~(config : Workspace.config)
+    ~(meta : Keeper_meta_contract.keeper_meta)
+    ~(cwd : string) =
+  match Keeper_sandbox_runner.effective_sandbox_profile ~meta with
+  | Keeper_types_profile_sandbox.Local, _ -> local_dispatch_target ~config ~meta
+  | Keeper_types_profile_sandbox.Docker, _ -> (
+    match
+      Keeper_sandbox_shell_ir_target.docker_target
+        ~turn_sandbox_factory
+        ~meta
+        ~cwd
+    with
+    | Error _ -> None
+    | Ok sandbox -> Some { sandbox; base_host_env = None })
+
+let make_probe
+    ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
+    ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) :
     Deterministic_evidence_evaluator.probe =
   let file_bytes raw_path =
@@ -28,20 +66,29 @@ let make_probe ~(config : Workspace.config)
       match Exec_policy.parse_string_to_ir ~mode:Tool_execute cmd with
       | Error _ -> None
       | Ok ir -> (
-        let sandbox = Masc_exec.Sandbox_target.host () in
         match
-          Keeper_tool_execute_shell_ir.dispatch
-            ~keeper_id:meta.name
-            ~base_path:config.base_path
-            ~workdir:cwd
-            ~sandbox
-            ir
+          command_dispatch_target
+            ~turn_sandbox_factory
+            ~config
+            ~meta
+            ~cwd
         with
-        | Error _ -> None
-        | Ok res -> (
-          match res.Masc_exec.Exec_dispatch.status with
-          | Unix.WEXITED code -> Some code
-          | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None)))
+        | None -> None
+        | Some { sandbox; base_host_env } -> (
+          match
+            Keeper_tool_execute_shell_ir.dispatch
+              ~keeper_id:meta.name
+              ~base_path:config.base_path
+              ~workdir:cwd
+              ~sandbox
+              ?base_host_env
+              ir
+          with
+          | Error _ -> None
+          | Ok res -> (
+            match res.Masc_exec.Exec_dispatch.status with
+            | Unix.WEXITED code -> Some code
+            | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None))))
   in
   { Deterministic_evidence_evaluator.file_bytes
   ; command_exit
@@ -51,9 +98,11 @@ let make_probe ~(config : Workspace.config)
   }
 
 
-let all_satisfied ~config ~meta claims =
+let all_satisfied ?turn_sandbox_factory ~config ~meta claims =
   match
-    Deterministic_evidence_evaluator.eval_all (make_probe ~config ~meta) claims
+    Deterministic_evidence_evaluator.eval_all
+      (make_probe ~turn_sandbox_factory ~config ~meta)
+      claims
   with
   | Deterministic_evidence_evaluator.Satisfied -> true
   | Deterministic_evidence_evaluator.Unsatisfied _

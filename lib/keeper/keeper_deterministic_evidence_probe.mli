@@ -6,13 +6,16 @@
     non-zero fan-in (the Phase A [required_evidence_typed] field was removed
     for fan-in 0; this re-introduction ships with a real consumer).
 
-    v1 supports file-existence claims ([Artifact_exists] / [File_changed]);
-    other claim kinds ([Tests_pass], [PR_merged], [CI_pass], [Custom_check])
-    resolve to [None] -> [Indeterminate] (never auto-complete) until their
-    probes (Shell-IR command runner, forge queries) are wired. *)
+    v1 supports file-existence claims ([Artifact_exists] / [File_changed])
+    and Shell-IR command claims ([Tests_pass]). Docker command claims require
+    the caller's turn-scoped sandbox factory; without one they resolve to
+    [None] -> [Indeterminate] rather than silently falling back to the host.
+    Other claim kinds ([PR_merged], [CI_pass], [Custom_check]) still resolve to
+    [None] -> [Indeterminate] until their probes are wired. *)
 
 val all_satisfied :
-     config:Workspace.config
+     ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> Evidence_claim.t list
   -> bool

@@ -33,13 +33,15 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-conne
 - Existing operator-heavy Connectors diagnostics (search/readiness tiles, selected live panel, keeper matrix, paths, gate analytics) moved under a collapsed `운영 상세` section so the primary view is the simpler gate grid/audit surface.
 - The Connectors detail drawer now uses the prototype's connection-first layout: gate active toggle, bot field, guild/base URL row, token placeholder, default reply mode segmented control, and inline channel-to-keeper binding editor.
 - The drawer binding editor supports local UI edits for channel, keeper, direction, delete, enabled toggle, and add-binding actions so the visible flow matches the prototype shell before backend persistence is wired.
+- Connector cards now pin the prototype-facing status vocabulary to a closed connected/stale/disconnected/offline domain so pill tone, card state, and border framing cannot drift when the backend advertises an unknown status.
+- Unsaved connector drawer drafts now survive same-connector live refreshes, matching the prototype's local editing feel while the hard persistence contract remains unwired.
 
 ## Still Missing Vs Prototype
 
 - The desktop shell still has a dashboard header/status/tooling model around the prototype primary surfaces. The prototype top bar is visually quieter and has fewer operational chips.
 - The Work surface is route-compatible with `workspace`, but some internal breadcrumbs/source concepts still correctly refer to a workspace when they describe runtime scope or API contracts.
 - The Overview surface now matches the prototype's main section order, but the exact live-data density still differs when no live keeper rows are available and the shell health/status chrome is noisy.
-- The Connectors drawer still needs a hard persistence contract for save/delete/reorder binding edits, reply mode updates, token rotation, and backend-supported per-binding enabled/direction state. The current drawer editor is local draft UI only.
+- The Connectors drawer still needs a hard persistence contract for save/delete/reorder binding edits, reply mode updates, token rotation, and backend-supported per-binding enabled/direction state. The current drawer editor is resilient local draft UI only.
 - The global mobile pane contract from the prototype (`data-mpane`, chat pane hiding rules, and drawer behavior) is not normalized across every surface.
 - Composer parity is incomplete: binary attachments, microphone/STT behavior, and exact command affordance grouping are not implemented as prototype features.
 - Stable message-turn identity linking from board posts to keeper chat turns still needs a hard data contract rather than visual-only alignment.

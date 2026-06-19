@@ -98,15 +98,25 @@ let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
   match cross_verifier_id with
   | None -> Ok ()
   | Some id ->
-    if List.exists (fun (r : t) -> String.equal r.id id) runtimes
-    then Ok ()
-    else
+    (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
+     | None ->
       Error
         (Printf.sprintf
            "%s: [runtime].cross_verifier = %S not found among %d runtimes"
            config_path
            id
            (List.length runtimes))
+     | Some runtime ->
+       (match runtime.model.capabilities with
+        | Some caps when caps.supports_response_format_json -> Ok ()
+        | _ ->
+          Error
+            (Printf.sprintf
+               "%s: [runtime].cross_verifier = %S uses model %S, which does \
+                not declare supports-response-format-json"
+               config_path
+               id
+               runtime.model.id)))
 ;;
 
 (* Pure decision for the capability gate, separated from the global OAS catalog

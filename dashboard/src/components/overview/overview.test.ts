@@ -14,11 +14,13 @@ import {
   deriveKeeperAttentionReason,
   pickAttentionKeepers,
   computeOverviewStats,
-  telemetryBars,
+  buildOverviewTelemetrySnapshot,
+  keeperModelLabel,
   OVERVIEW_TELEMETRY_BAR_COUNT,
   type FunnelCounts,
   Overview,
 } from './overview'
+import type { TelemetryEntry, TelemetrySourceSummary } from '../../api/dashboard'
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
 function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
@@ -618,28 +620,77 @@ describe('computeOverviewStats', () => {
   })
 })
 
-describe('telemetryBars', () => {
-  it('returns 28 deterministic bars', () => {
-    const bars = telemetryBars([])
-    expect(bars).toHaveLength(OVERVIEW_TELEMETRY_BAR_COUNT)
-    expect(bars.every(b => b >= 0 && b <= 1)).toBe(true)
+describe('keeperModelLabel', () => {
+  it('prefers explicit model labels before runtime fallback is needed', () => {
+    expect(keeperModelLabel(makeKeeper({
+      active_model_label: 'deepseek-v4-flash',
+      active_model: 'claude-sonnet-4',
+      model: 'fallback',
+    }))).toBe('deepseek-v4-flash')
   })
 
-  it('produces identical output for identical keeper input', () => {
-    const keepers = [makeKeeper({ name: 'a', total_turns: 42 })]
-    expect(telemetryBars(keepers)).toEqual(telemetryBars(keepers))
+  it('normalizes claude-prefixed model names', () => {
+    expect(keeperModelLabel(makeKeeper({ active_model: 'claude-sonnet-4' }))).toBe('sonnet-4')
   })
 
-  it('produces different output for different trace counts', () => {
-    const a = telemetryBars([makeKeeper({ name: 'a', total_turns: 1 })])
-    const b = telemetryBars([makeKeeper({ name: 'b', total_turns: 999 })])
-    expect(a).not.toEqual(b)
+  it('returns an empty string when no model field is present', () => {
+    expect(keeperModelLabel(makeKeeper({}))).toBe('')
+  })
+})
+
+describe('buildOverviewTelemetrySnapshot', () => {
+  const nowMs = Date.parse('2026-04-18T10:00:00Z')
+  const entry = (minutesAgo: number): TelemetryEntry => ({
+    source: 'oas_event',
+    ts_unix: (nowMs - minutesAgo * 60 * 1000) / 1000,
+  })
+  const sources: TelemetrySourceSummary[] = [
+    {
+      source: 'oas_event',
+      entry_count: 10,
+      latest_age_s: 8,
+      health: 'ok',
+      active_coverage_gap_count: 0,
+    },
+    {
+      source: 'tool_call_io',
+      entry_count: 3,
+      health: 'ok',
+      active_coverage_gap_count: 1,
+    },
+  ]
+
+  it('builds 5-minute buckets from real telemetry timestamps', () => {
+    const snapshot = buildOverviewTelemetrySnapshot({
+      entries: [entry(1), entry(2), entry(8), entry(200)],
+      sources,
+      nowMs,
+      totalMatchingEntries: 4,
+    })
+
+    expect(snapshot.bars).toHaveLength(OVERVIEW_TELEMETRY_BAR_COUNT)
+    expect(snapshot.peakPerBucket).toBe(2)
+    expect(snapshot.averagePerBucket).toBe(0.1)
+    expect(snapshot.eventCount).toBe(4)
+    expect(snapshot.latestAgeSeconds).toBe(8)
+    expect(snapshot.healthySourceCount).toBe(2)
+    expect(snapshot.sourceCount).toBe(2)
+    expect(snapshot.activeCoverageGaps).toBe(1)
+    expect(snapshot.bars.at(-1)).toBe(1)
   })
 
-  it('spikes indices 9 and 22 to 1', () => {
-    const bars = telemetryBars([])
-    expect(bars[9]).toBe(1)
-    expect(bars[22]).toBe(1)
+  it('does not invent bars when there are no matching telemetry rows', () => {
+    const snapshot = buildOverviewTelemetrySnapshot({
+      entries: [],
+      sources: [],
+      nowMs,
+    })
+
+    expect(snapshot.bars).toHaveLength(OVERVIEW_TELEMETRY_BAR_COUNT)
+    expect(snapshot.bars.every(value => value === 0)).toBe(true)
+    expect(snapshot.peakPerBucket).toBe(0)
+    expect(snapshot.averagePerBucket).toBe(0)
+    expect(snapshot.sourceHealth).toBe('unknown')
   })
 })
 

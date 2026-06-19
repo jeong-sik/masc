@@ -45,4 +45,6 @@ val to_oas_blocks :
   user_input_block list ->
   (Agent_sdk.Types.content_block list, string) result
 (** Convert semantic MASC input blocks to OAS provider input blocks.  Media
-    blocks resolve their raw payload through [attachments] by [attachment_id]. *)
+    blocks resolve their payload through [attachments] by [attachment_id].
+    Data URLs are normalized to raw base64 payloads before crossing into OAS,
+    and declared MIME types must match any MIME embedded in a data URL. *)

@@ -86,6 +86,12 @@ const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'code',
   'connectors',
   'settings',
+  // 'logs' is kept in the primary surface set by operator request. #21525 dropped it
+  // from the desktop side rail (reachable only via Settings/command palette); operators
+  // still want the standalone Logs surface in the rail, so this deviates from the codex
+  // v2 prototype set on purpose. Settings is pinned in the rail footer, so logs renders
+  // as the last regular surface in the main list.
+  'logs',
 ]
 
 const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([

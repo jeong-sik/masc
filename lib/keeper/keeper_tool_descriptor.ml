@@ -1457,6 +1457,17 @@ let internal_descriptors : t list =
 
 let all_descriptors () = public_descriptors @ internal_descriptors
 
+let model_visible_descriptors () =
+  let visible_internal_descriptors =
+    internal_descriptors
+    |> List.filter (fun descriptor ->
+      match descriptor.policy.visibility with
+      | Tool_catalog.Default -> true
+      | Tool_catalog.Hidden -> false)
+  in
+  public_descriptors @ visible_internal_descriptors
+;;
+
 let public_names_of_descriptor d = d.public_name :: d.public_aliases
 
 let public_names () = List.concat_map public_names_of_descriptor public_descriptors

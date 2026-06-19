@@ -175,6 +175,35 @@ let test_web_alias_bundle_visible_without_injected_masc_schema () =
           check bool "WebFetch remains bundle-visible" true
             (List.mem "WebFetch" names)))
 
+let test_fusion_default_descriptor_is_bundle_visible () =
+  ignore (init_registry ());
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_fusion_bundle_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir dir with _ -> ())
+    (fun () ->
+      let config = Workspace.default_config dir in
+      let meta = make_meta ~name:"test-fusion-default-descriptor" () in
+      let ctx_snapshot =
+        Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
+      in
+      let bundle =
+        Keeper_tools_oas_bundle.make_tool_bundle ~config ~meta ~ctx_snapshot ()
+      in
+      Fun.protect
+        ~finally:bundle.cleanup
+        (fun () ->
+          let names =
+            bundle.tools
+            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+          in
+          check bool "masc_fusion is in the executable OAS tool bundle" true
+            (List.mem "masc_fusion" names)))
+
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
 let test_atomic_write_not_empty () =
@@ -295,6 +324,8 @@ let () =
             test_core_tools_hidden_by_denylist;
           test_case "web aliases survive missing injected masc schema" `Quick
             test_web_alias_bundle_visible_without_injected_masc_schema;
+          test_case "fusion default descriptor reaches OAS bundle" `Quick
+            test_fusion_default_descriptor_is_bundle_visible;
         ] );
       ( "atomic_agent_json",
         [

@@ -55,13 +55,14 @@ let make_tool_bundle
      names backing public aliases must NOT appear on
      the LLM-visible surface alongside their public alias.  Mirrors the
      pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
+  let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
   let aliased_internal_names =
-    Keeper_tool_descriptor.public_descriptors
+    model_visible_descriptors
     |> List.map Keeper_tool_descriptor.internal_names
     |> List.concat
   in
   let alias_public_names_in_surface =
-    Keeper_tool_descriptor.public_descriptors
+    model_visible_descriptors
     |> List.concat_map (fun descriptor ->
       if
         List.exists
@@ -191,7 +192,7 @@ let make_tool_bundle
                ~description:descriptor.description
                ~input_schema:descriptor.input_schema
                (fun input -> h input))))
-      Keeper_tool_descriptor.public_descriptors
+      model_visible_descriptors
   in
   let bundle =
       { tools = internal_tools @ alias_tools

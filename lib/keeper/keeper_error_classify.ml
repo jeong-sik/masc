@@ -435,8 +435,10 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            where OAS surfaces the error directly) should still trigger rotation
            when a different runtime may succeed.
 
-           429 rate-limit (non-hard-quota): the current provider is throttled;
-           a different runtime/provider may have capacity.
+           429 rate-limit (non-hard-quota): keep it local to provider health
+           and do not rotate in the same turn. In practice this can be
+           account/session-scoped; treating it as fallback-worthy causes
+           all runtimes in the same credential pool to be hammered.
 
            5xx server errors: the provider is unhealthy or overloaded; a
            different runtime may be healthy.
@@ -444,11 +446,11 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            401/403 auth errors: the credential for this runtime is invalid; a
            different runtime with different credentials may succeed.
 
-           Hard-quota 429s are already handled above by sdk_error_is_hard_quota,
-           so only soft (non-hard-quota) rate limits reach this arm. *)
+           Hard-quota 429s are already handled above by sdk_error_is_hard_quota.
+           Soft (non-hard-quota) rate limits intentionally return [None]. *)
         (match err with
          | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
-             Some Rate_limit
+             None
          | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _) ->
              Some Capacity_backpressure
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
@@ -461,7 +463,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              Some Auth_error
          | Agent_sdk.Error.Provider
              (Llm_provider.Error.RateLimit _) ->
-             Some Rate_limit
+             None
          | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted _) ->
              Some Capacity_backpressure
          | Agent_sdk.Error.Provider (Llm_provider.Error.HardQuota _) ->
@@ -580,6 +582,18 @@ let degraded_rotation_candidates
 let is_completion_contract_violation (_ : Agent_sdk.Error.sdk_error) : bool =
   false
 
+let degraded_reason_allows_candidate_cycle = function
+  | Hard_quota | Rate_limit -> false
+  | Resumable_cli_session
+  | Admission_queue_timeout
+  | Provider_timeout
+  | Turn_timeout
+  | Runtime_candidates_filtered
+  | Runtime_exhausted
+  | Capacity_backpressure
+  | Server_error
+  | Auth_error -> true
+
 let degraded_rotation_after_recoverable_error
     ?fallback_hint
     ~(base_runtime : string)
@@ -613,18 +627,20 @@ let degraded_rotation_after_recoverable_error
       (match untried with
        | Some next_runtime ->
          Some { next_runtime; fallback_reason }
-       | None when not (is_completion_contract_violation err) ->
-         (* Non-contract errors (provider timeout, rate limit, server error)
-            are transient. Allow cycling through candidates again because
-            the same runtime may succeed on a subsequent attempt. Only
-            contract violations cap rotation — retrying cannot satisfy the
-            contract. #19930 *)
+       | None
+         when (not (is_completion_contract_violation err))
+              && degraded_reason_allows_candidate_cycle fallback_reason ->
+         (* Non-contract transient infrastructure errors (provider timeout,
+            server error, capacity backpressure) may succeed on a later
+            candidate pass. Quota/rate-limit classes cap after all candidates:
+            retrying the same credential pool just amplifies an account-scoped
+            limit. #19930 *)
          (match candidates with
           | [] -> None
           | first_candidate :: _ ->
             Some { next_runtime = first_candidate; fallback_reason })
        | None ->
-         (* Contract violation: all candidates exhausted. Cap rotation. *)
+         (* Contract violation or quota/rate-limit exhaustion: cap rotation. *)
          None)
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =

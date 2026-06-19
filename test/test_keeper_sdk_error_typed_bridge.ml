@@ -17,6 +17,7 @@
 module AE = Masc.Keeper_agent_error
 module Code = Masc.Keeper_turn_terminal_code
 module EC = Masc.Keeper_error_classify
+module KTD = Masc.Keeper_turn_driver
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
 module Http = Llm_provider.Http_client
@@ -187,6 +188,52 @@ let test_user_message_of_network_errors () =
     (AE.user_message_of_sdk_error guardrail)
 ;;
 
+let test_ollama_session_limit_is_hard_quota () =
+  let message =
+    "you (yousleepwhen) have reached your session usage limit, add extra usage: \
+     https://ollama.com/settings"
+  in
+  let err = SdkE.Api (Retry.RateLimited { retry_after = None; message }) in
+  Alcotest.(check bool)
+    "session usage limit is hard quota"
+    true
+    (KTD.sdk_error_is_hard_quota err);
+  match EC.recoverable_runtime_failure_reason err with
+  | Some EC.Hard_quota -> ()
+  | Some reason ->
+    Alcotest.failf
+      "expected hard_quota, got %s"
+      (EC.degraded_retry_reason_to_string reason)
+  | None -> Alcotest.fail "expected hard_quota recoverable reason"
+;;
+
+let test_soft_rate_limit_stays_on_provider_cooldown () =
+  let api_err =
+    SdkE.Api
+      (Retry.RateLimited
+         { retry_after = Some 30.0; message = "rate limited, retry later" })
+  in
+  let provider_err =
+    SdkE.Provider
+      (Llm_provider.Error.RateLimit
+         { provider = "ollama_cloud"
+         ; retry_after = Some 30.0
+         ; detail = "rate limited, retry later"
+         })
+  in
+  List.iter
+    (fun (label, err) ->
+       Alcotest.(check bool)
+         (label ^ " is not hard quota")
+         false
+         (KTD.sdk_error_is_hard_quota err);
+       Alcotest.(check bool)
+         (label ^ " has no degraded rotation reason")
+         false
+         (Option.is_some (EC.recoverable_runtime_failure_reason err)))
+    [ "api", api_err; "provider", provider_err ]
+;;
+
 let () =
   Alcotest.run
     "keeper_sdk_error_typed_bridge"
@@ -213,6 +260,16 @@ let () =
             "network errors are presented as runtime availability failures"
             `Quick
             test_user_message_of_network_errors
+        ] )
+    ; ( "runtime quota guard"
+      , [ Alcotest.test_case
+            "ollama cloud session usage limit is classified as hard quota"
+            `Quick
+            test_ollama_session_limit_is_hard_quota
+        ; Alcotest.test_case
+            "soft rate limits do not trigger degraded runtime rotation"
+            `Quick
+            test_soft_rate_limit_stays_on_provider_cooldown
         ] )
     ]
 ;;

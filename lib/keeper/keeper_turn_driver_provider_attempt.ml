@@ -185,6 +185,8 @@ let cli_wrapped_hard_quota_indicators = [
   "you've hit your limit";
   "monthly usage limit";
   "org's monthly usage limit";
+  "session usage limit";
+  "add extra usage";
   "resets apr ";
   "reached your specified api usage limits";
   "you will regain access on";

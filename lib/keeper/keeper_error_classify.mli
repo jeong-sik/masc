@@ -133,7 +133,8 @@ val fallback_runtime_for_unavailable_profile :
 
     Status-code-aware rotation: raw API errors that are not wrapped in a MASC
     internal error are also classified when a different runtime may succeed:
-    - [RateLimited] (non-hard-quota) → ["rate_limit"]
+    - [RateLimited] hard-quota messages → ["hard_quota"]
+    - [RateLimited] soft provider throttles → [None] (provider cooldown only)
     - [Overloaded] and Cloudflare 524 → ["capacity_backpressure"]
     - [ServerError] with status >= 500 → ["server_error"]
     - [AuthError] → ["auth_error"]
@@ -161,10 +162,11 @@ val degraded_retry_after_recoverable_error :
     any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
 
-    Non-contract errors (provider timeout, rate limit, server error) allow
-    cycling through candidates again when all are exhausted, because the
-    same runtime may succeed on a subsequent attempt. Contract violations
-    cap rotation — retrying cannot satisfy the contract.
+    Non-contract transient infrastructure errors (provider timeout, server
+    error, capacity backpressure) allow cycling through candidates again when
+    all are exhausted, because the same runtime may succeed on a subsequent
+    attempt. Contract violations and quota/rate-limit classes cap rotation:
+    retrying the same credential pool amplifies account-scoped limits.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?fallback_hint:string ->

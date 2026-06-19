@@ -7,7 +7,12 @@ module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 module Heartbeat_presence = Masc.Keeper_heartbeat_loop_presence
-module Runtime = Masc.Keeper_runtime
+
+(* [Keeper_rt] must NOT be aliased to [Runtime]: the top-level [Runtime] module
+   (masc_runtime, wrapped=false) owns [init_default] used by
+   [init_runtime_default_for_tests] below. Shadowing it with [Keeper_runtime]
+   unbinds [Runtime.init_default]. *)
+module Keeper_rt = Masc.Keeper_runtime
 
 let temp_dir () =
   let path = Filename.temp_file "keeper-effective-meta-" "" in
@@ -365,18 +370,24 @@ active_goal_ids = ["goal-masc-improver"]
    | Ok () -> ()
    | Error err -> Alcotest.failf "write stale meta failed: %s" err);
   let returned =
-    match Runtime.ensure_keeper_meta config name with
+    match Keeper_rt.ensure_keeper_meta config name with
     | Ok meta -> meta
     | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err
   in
-  let disk =
-    match Store.read_meta config name with
+  (* Re-read through the effective overlay, not raw [read_meta]: goal/short_goal
+     and the policy fields are TOML-derived (re-applied on every effective read),
+     not persisted into the raw meta JSON (which carries persona/will/needs/
+     instructions). A raw read would see "" for the derived fields by design, so
+     the consumer-facing guarantee ("a fresh read sees TOML-canonical identity")
+     is what this asserts. *)
+  let effective_reread =
+    match Store.read_effective_meta config name with
     | Ok (Some meta) -> meta
     | Ok None -> Alcotest.fail "expected re-synced keeper meta"
-    | Error err -> Alcotest.failf "read re-synced meta failed: %s" err
+    | Error err -> Alcotest.failf "read re-synced effective meta failed: %s" err
   in
   List.iter
-    (fun (label, meta) ->
+    (fun (label, (meta : Masc.Keeper_meta_contract.keeper_meta)) ->
       Alcotest.(check (option string))
         (label ^ " persona is TOML canonical")
         (Some "masc-improver")
@@ -417,7 +428,7 @@ active_goal_ids = ["goal-masc-improver"]
         (label ^ " active_goal_ids is TOML canonical")
         [ "goal-masc-improver" ]
         meta.active_goal_ids)
-    [ ("returned", returned); ("disk", disk) ]
+    [ ("returned", returned); ("effective reread", effective_reread) ]
 
 let test_turn_setup_uses_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

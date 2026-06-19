@@ -391,6 +391,12 @@ let ensure_keeper_meta_with_cause config name =
       apply_default defaults.social_model meta.social_model
       |> Keeper_social_model.normalize_social_model in
     (* --- Personality --- *)
+    (* persona is an identity field: re-sync from TOML [persona_name] when it is
+       declared (Some), otherwise keep the persisted persona. Without this the
+       drift check below ([current.persona <> target.persona]) always compares a
+       value to itself, so a stale persona (e.g. persona=analyst while TOML
+       declared masc-improver) is detected nowhere and never corrected. *)
+    let target_persona = apply_default_opt defaults.persona_name meta.persona in
     let target_goal =
       match defaults.goal with
       | Some goal -> goal
@@ -470,6 +476,7 @@ let ensure_keeper_meta_with_cause config name =
     in
     let overlayed =
       { meta with
+        persona = target_persona;
         proactive = {
           enabled = target_proactive;
           idle_sec = target_idle_sec;

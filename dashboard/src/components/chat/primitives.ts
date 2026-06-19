@@ -1,8 +1,8 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
 import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
+import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
@@ -420,7 +420,7 @@ function ChatArtifactPreview({
         <div
           class="chat-lightbox-md markdown-body"
           dangerouslySetInnerHTML=${{
-            __html: DOMPurify.sanitize(marked.parse(text) as string),
+            __html: purifyHtml(marked.parse(text) as string),
           }}
         />
       <//>
@@ -444,7 +444,11 @@ function linkifyHtml(raw: string): string {
 }
 
 function sanitizeHtml(raw: string): string {
-  return DOMPurify.sanitize(raw)
+  return purifyHtml(raw)
+}
+
+function sanitizeSvg(raw: string): string {
+  return purifyHtml(raw, { USE_PROFILES: { svg: true } })
 }
 
 function renderInlineHtml(raw: string): { __html: string } {
@@ -741,7 +745,7 @@ function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string
         ${safeSrc
           ? html`<img src=${safeSrc} alt=${name} class="chat-block-attach-img" />`
           : svg
-            ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeHtml(svg) }} />`
+            ? html`<span dangerouslySetInnerHTML=${{ __html: sanitizeSvg(svg) }} />`
             : html`<div class="chat-block-attach-ph">${ph || '첨부 이미지'}${src ? ' (unsafe URL)' : ''}</div>`}
       </div>
       <figcaption class="chat-block-attach-cap">
@@ -1512,7 +1516,7 @@ function ChatMessageBubble({
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
                     dangerouslySetInnerHTML=${{
-                      __html: DOMPurify.sanitize(
+                      __html: purifyHtml(
                         marked.parse(messageText) as string,
                         { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
                       )

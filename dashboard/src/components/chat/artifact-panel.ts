@@ -5,8 +5,8 @@
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
-import DOMPurify from 'dompurify'
 import type { ChatBlock, KeeperConversationEntry, KeeperConversationAttachment } from '../../types'
+import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { copyToClipboard } from '../common/copyable-code'
 import { showToast } from '../common/toast'
 
@@ -211,7 +211,7 @@ function downloadPayload(item: ArtifactItem): void {
 }
 
 function sanitizeHtml(raw: string): string {
-  return DOMPurify.sanitize(raw)
+  return purifyHtml(raw)
 }
 
 function ArtifactPreview({ item }: { item: ArtifactItem }): VNode {

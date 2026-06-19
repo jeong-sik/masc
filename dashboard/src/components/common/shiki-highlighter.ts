@@ -1,4 +1,4 @@
-import DOMPurify from 'dompurify'
+import { sanitizeHtml } from '../../lib/dompurify'
 
 interface DashboardHighlighter {
   getLoadedLanguages(): string[]
@@ -123,7 +123,7 @@ async function ensureShikiLanguage(highlighter: DashboardHighlighter, lang: stri
 }
 
 function sanitizeShikiHtml(raw: string): string {
-  return DOMPurify.sanitize(raw, SHIKI_PURIFY_CONFIG)
+  return sanitizeHtml(raw, SHIKI_PURIFY_CONFIG)
 }
 
 function plainEscapedLines(code: string, expectedLineCount: number): ReadonlyArray<string> {

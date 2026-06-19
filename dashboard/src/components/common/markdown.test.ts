@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { waitFor } from '@testing-library/preact'

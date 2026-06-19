@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'

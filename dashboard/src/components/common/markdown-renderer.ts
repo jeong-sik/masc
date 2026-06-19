@@ -7,10 +7,10 @@
 import { html } from 'htm/preact'
 import { useRef, useEffect, useMemo } from 'preact/hooks'
 import { Marked } from 'marked'
-import DOMPurify from 'dompurify'
 
 import { highlightCodeHtml } from './shiki-highlighter'
 import { loadMermaid, type MermaidApi } from './mermaid-loader'
+import { sanitizeHtml } from '../../lib/dompurify'
 
 // ── Lazy mermaid loader ──────────────────────────────────────
 let mermaidConfigured = false
@@ -59,11 +59,11 @@ const PURIFY_CONFIG = {
 }
 
 function sanitize(raw: string): string {
-  return DOMPurify.sanitize(raw, PURIFY_CONFIG)
+  return sanitizeHtml(raw, PURIFY_CONFIG)
 }
 
 function sanitizeMermaidSvg(raw: string): SVGElement | null {
-  const safeSvg = DOMPurify.sanitize(raw, {
+  const safeSvg = sanitizeHtml(raw, {
     USE_PROFILES: { svg: true },
   })
   if (!safeSvg || !safeSvg.includes('<svg')) {

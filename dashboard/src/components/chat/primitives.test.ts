@@ -1736,4 +1736,59 @@ describe('fusion chat card', () => {
     await flushUi()
     expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('불러오지 못했습니다')
   })
+
+  it('renders judge.synthesis as markdown (not the raw resolved_answer dump)', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [{ model: 'm1', status: 'answered', answer: '## Heading One\n\n- bullet item', output_tokens: 100 }],
+        judge: {
+          status: 'synthesized',
+          decision: 'answer — ok',
+          synthesis: '**Consensus**\n\n- agreed point',
+          resolved_answer: 'PLAIN RESOLVED',
+        },
+        observed_usage: { input_tokens: 712, output_tokens: 3432 },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+
+    const detail = container.querySelector('[data-fusion-detail]')
+    // Panel + judge markdown rendered to real elements, not raw ## / ** text.
+    expect(detail?.querySelector('h2')?.textContent).toBe('Heading One')
+    expect(detail?.querySelector('li')?.textContent).toContain('bullet item')
+    const judge = container.querySelector('[data-fusion-judge]')
+    expect(judge?.querySelector('strong')?.textContent).toBe('Consensus')
+    // synthesis takes precedence over resolved_answer when both present.
+    expect(judge?.textContent).toContain('agreed point')
+    expect(judge?.textContent).not.toContain('PLAIN RESOLVED')
+  })
+
+  it('surfaces token usage and answered count in the header', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [
+          { model: 'm1', status: 'answered', answer: 'a', output_tokens: 1200 },
+          { model: 'm2', status: 'failed', reason: 'timeout' },
+        ],
+        judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'r' },
+        observed_usage: { input_tokens: 712, output_tokens: 3432 },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+
+    const card = container.querySelector('[data-fusion-card]')
+    // 1 of 2 answered, total output tokens formatted with separators.
+    expect(card?.textContent).toContain('패널 1/2 합의')
+    expect(card?.textContent).toContain('3,432 tok')
+    // Per-panel token count present.
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('1,200 tok')
+  })
 })

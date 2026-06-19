@@ -1,9 +1,17 @@
-(** Keeper_memory_os_reconcile — RFC-0259 §3.3 grounding reconciler (P2 core).
+(** Keeper_memory_os_reconcile — RFC-0259 §3.3/§3.4 grounding reconciler.
 
-    See the .mli for the boundary rationale. This module is pure: the only IO (a
-    [gh] call) is the injected {!verify_fn}. *)
+    The classification core (P2) is pure — the only external IO is the injected
+    {!verify_fn}. The retraction write path (P3, [run_reconcile]) persists the
+    result under the per-keeper facts lock. See the .mli for the boundary
+    rationale. *)
 
 open Keeper_memory_os_types
+module Io = Keeper_memory_os_io
+
+(* Raised when the store cannot be fully parsed: preserve over delete — leave a
+   corrupt store untouched and surface the error rather than letting the rewrite
+   erase the rows around one bad line (mirrors GC's Fact_store_corrupt). *)
+exception Fact_store_corrupt of string
 
 type external_state =
   | Still_open
@@ -79,4 +87,56 @@ let dry_run ~now ~horizon ~verify (facts : fact list)
       facts
   in
   report, List.rev rev_items
+;;
+
+type apply_report =
+  { scanned : int
+  ; retracted : int
+  ; advanced : int
+  ; kept : int
+  }
+
+let empty_apply = { scanned = 0; retracted = 0; advanced = 0; kept = 0 }
+
+let reconcile_facts ~now ~horizon ~verify (facts : fact list)
+  : fact list * apply_report
+  =
+  let kept_rev, report =
+    List.fold_left
+      (fun (kept, report) f ->
+        let report = { report with scanned = report.scanned + 1 } in
+        match classify ~now ~horizon ~verify f with
+        | Stale_terminal ->
+          (* Drop: a merged/closed ref backing an in-progress claim. *)
+          kept, { report with retracted = report.retracted + 1 }
+        | Stale_open ->
+          (* Confirmed still live — advance the verification timestamp so it is not
+             re-checked until the next horizon (and survives its volatile TTL). *)
+          let f' = { f with last_verified_at = Some now } in
+          f' :: kept, { report with advanced = report.advanced + 1 }
+        | Fresh | Stale_unknown ->
+          (* Uncertainty (gh failure / Task kind) never deletes; non-volatile and
+             in-horizon facts are untouched. *)
+          f :: kept, { report with kept = report.kept + 1 })
+      ([], empty_apply)
+      facts
+  in
+  List.rev kept_rev, report
+;;
+
+let run_reconcile ?(dry_run = false) ~keeper_id ~now ~horizon ~verify () : apply_report =
+  (* Same per-keeper facts lock as GC/librarian/consolidation: the verify IO runs
+     inside the lock, but it only reads external state (gh) and never touches the
+     store, so unlike the consolidation runtime there is no unlocked read-modify gap
+     to guard with a snapshot CAS — the whole read-classify-rewrite is atomic. *)
+  File_lock_eio.with_lock (Io.facts_path ~keeper_id) (fun () ->
+    match Io.read_facts_all_strict ~keeper_id with
+    | Error message ->
+      raise
+        (Fact_store_corrupt ("memory os reconcile fact store read failed: " ^ message))
+    | Ok facts ->
+      let survivors, report = reconcile_facts ~now ~horizon ~verify facts in
+      if (not dry_run) && (report.retracted > 0 || report.advanced > 0)
+      then Io.rewrite_facts_atomically ~keeper_id survivors;
+      report)
 ;;

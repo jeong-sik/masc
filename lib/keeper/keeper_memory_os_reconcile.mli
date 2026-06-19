@@ -65,3 +65,40 @@ val dry_run
   -> verify:verify_fn
   -> fact list
   -> dry_run_report * (fact * verdict) list
+
+(** RFC-0259 §3.4 (P3): the outcome of applying the verdicts to a keeper's facts. *)
+type apply_report =
+  { scanned : int
+  ; retracted : int (** [Stale_terminal] facts removed (the false-fact class) *)
+  ; advanced : int (** [Stale_open] facts whose [last_verified_at] moved to [now] *)
+  ; kept : int (** [Fresh] / [Stale_unknown] facts left unchanged *)
+  }
+
+(** RFC-0259 §3.4 (P3): the pure retraction core. Classifies each fact and maps the
+    verdict to a fact-list transform:
+    - [Stale_terminal] -> dropped (the merged/closed-PR false-fact class)
+    - [Stale_open]     -> kept, [last_verified_at] advanced to [now]
+    - [Fresh] / [Stale_unknown] -> kept unchanged (uncertainty never deletes)
+    Order-preserving. Pure: the only IO is the injected [verify]. The [run_reconcile]
+    wrapper persists the result under the facts lock. *)
+val reconcile_facts
+  :  now:float
+  -> horizon:float
+  -> verify:verify_fn
+  -> fact list
+  -> fact list * apply_report
+
+(** RFC-0259 §3.4 (P3): apply the reconciler to one keeper's store under the
+    per-keeper facts lock (the lock GC/librarian/consolidation already hold on
+    [facts_path], so no concurrent writer's update is lost). Reads strictly — a
+    corrupt store aborts rather than being partially dropped and overwritten — and
+    rewrites atomically. [dry_run:true] computes the report without writing (the
+    default, mirroring the GC rollout). Must run inside an Eio context. *)
+val run_reconcile
+  :  ?dry_run:bool
+  -> keeper_id:string
+  -> now:float
+  -> horizon:float
+  -> verify:verify_fn
+  -> unit
+  -> apply_report

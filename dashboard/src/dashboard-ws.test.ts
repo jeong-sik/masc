@@ -359,6 +359,32 @@ describe('dashboard websocket route subscriptions', () => {
     expect(mockSockets).toHaveLength(1)
   })
 
+  it('retries discovery when the server withholds ws_url for this host', async () => {
+    vi.useFakeTimers()
+    mockSockets.length = 0
+    vi.stubGlobal('WebSocket', MockWebSocket)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        enabled: true,
+        listening: true,
+        ws_url: null,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(wsDiscoveryResponse())
+    vi.stubGlobal('fetch', fetchMock)
+
+    await connectDashboardWS({ tab: 'overview', params: {} })
+    expect(mockSockets).toHaveLength(0)
+
+    await vi.advanceTimersByTimeAsync(60_000)
+    await flushPromises()
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(mockSockets).toHaveLength(1)
+  })
+
   it('reuses cached websocket discovery across reconnects after a ready socket closes', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()

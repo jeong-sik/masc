@@ -92,6 +92,18 @@ let transport_entries =
     entry ~default:"1048576" "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
       "Skip WS dashboard deltas for authenticated sessions whose last reported \
        WebSocket.bufferedAmount exceeds this many bytes. 0 disables the gate.";
+    entry ~default:"30.0" "MASC_WS_ACK_STALE_THRESHOLD_SEC"
+      "Skip WS dashboard deltas for authenticated sessions that have an \
+       unacknowledged dashboard/delta older than this many seconds. 0 disables \
+       the stale-ack gate.";
+    entry ~default:"1048576" "MASC_WS_MAX_INBOUND_FRAME_BYTES"
+      "Maximum inbound WebSocket frame payload size accepted before the \
+       session is closed with WebSocket close code 1009. 0 disables the \
+       frame-size gate.";
+    entry ~default:"2097152" "MASC_WS_MAX_INBOUND_MESSAGE_BYTES"
+      "Maximum accumulated inbound WebSocket message payload size across \
+       fragments before the session is closed with WebSocket close code 1009. \
+       0 disables the message-size gate.";
     entry ~default:"true" "MASC_WS_SLICE_INDEX_ENABLED"
       "When true (default), slice-scoped events skip the raw-SSE-forward to \
        authenticated WS sessions whose route does not subscribe to the event's \

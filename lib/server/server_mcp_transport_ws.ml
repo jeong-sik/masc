@@ -59,7 +59,16 @@ type ws_session = {
       lands first — gating is a follow-up once thresholds are established
       from production distributions. *)
   mutable dashboard_last_buffered_amount: int;
+  (** Last wall-clock time a [dashboard/ack] notification arrived.  A
+      subscribed dashboard that stops ACKing can keep a low bufferedAmount
+      forever. *)
+  mutable dashboard_last_ack_at: float;
+  (** Last dashboard/delta seq that expects a browser [dashboard/ack].  Snapshot
+      seqs are intentionally excluded because the browser only ACKs deltas. *)
+  mutable dashboard_last_delta_seq: int;
+  mutable dashboard_last_delta_at: float;
   mutable inbound_partial_text: Buffer.t option;
+  mutable inbound_partial_text_bytes: int;
 }
 
 (** [true] when the dashboard handshake has completed for this state. *)
@@ -160,19 +169,26 @@ let log_ws_delivery_dropped ~context session_id =
   Log.Transport.warn "WS %s not delivered for session=%s" context session_id
 
 let new_session ~id ~wsd =
+  (* NDT-OK: session creation stamps wall-clock liveness/ACK metadata only;
+     message ordering and protocol output still come from explicit sequence IDs. *)
+  let now = Unix.gettimeofday () in
   {
     id;
     wsd;
     closed = Atomic.make false;
     write_mutex = Eio.Mutex.create ();
-    last_pong_at = Atomic.make (Unix.gettimeofday ()); (* NDT-OK: wall-clock used only for liveness, not deterministic output. *)
+    last_pong_at = Atomic.make now;
     dashboard_auth = Atomic.make Unauthenticated;
     dashboard_route = None;
     dashboard_slices = Hashtbl.create 8;
     dashboard_seq = 0;
     dashboard_last_ack_seq = 0;
     dashboard_last_buffered_amount = 0;
+    dashboard_last_ack_at = now;
+    dashboard_last_delta_seq = 0;
+    dashboard_last_delta_at = now;
     inbound_partial_text = None;
+    inbound_partial_text_bytes = 0;
   }
 
 (** [true] when the session has been closed locally or the httpun-ws writer has
@@ -491,6 +507,7 @@ let dashboard_ack ~session_id ~seq ?buffered_amount () =
       if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
         Error "dashboard/ack requires dashboard/hello first"
       else begin
+        session.dashboard_last_ack_at <- Time_compat.now ();
         if seq > session.dashboard_last_ack_seq then
           session.dashboard_last_ack_seq <- seq;
         (match buffered_amount with
@@ -648,12 +665,15 @@ let dashboard_delta_for_parsed session parsed =
   | Some { event_type; slice = Some slice; payload; broadcast_ts }
     when Hashtbl.mem session.dashboard_slices slice ->
       Transport_metrics.inc_ws_delta_built ();
+      let seq = next_dashboard_seq session in
+      session.dashboard_last_delta_seq <- seq;
+      session.dashboard_last_delta_at <- Time_compat.now ();
       Some
         (jsonrpc_notification "dashboard/delta"
            (`Assoc
              [
                ("protocol", `String "dashboard-ws.v1");
-               ("seq", `Int (next_dashboard_seq session));
+               ("seq", `Int seq);
                ("slice", `String slice);
                ("event_type", `String event_type);
                ("mode", `String "snapshot");
@@ -699,15 +719,39 @@ let client_buffer_limit_bytes () =
     value
   end
 
+let dashboard_ack_stale_threshold_s () =
+  Env_config_core.get_float_nonneg ~default:30.0
+    "MASC_WS_ACK_STALE_THRESHOLD_SEC"
+
+let dashboard_ack_is_stale
+    ~now
+    ~last_delta_at
+    ~last_delta_seq
+    ~last_ack_seq
+    ~threshold_s =
+  last_delta_seq > last_ack_seq && threshold_s > 0.0
+  && now -. last_delta_at > threshold_s
+
 (** True when the session has reported enough outstanding bytes that
-    another push will only grow the client's buffer further.  Only
-    authenticated dashboard sessions track bufferedAmount; anonymous
-    sessions always pass. *)
+    another push will only grow the client's buffer further, or when the
+    dashboard has stopped sending ACKs for too long.  Only authenticated
+    dashboard sessions participate; anonymous sessions always pass. *)
 let session_is_backpressured session =
   if not (dashboard_auth_is_authenticated (dashboard_auth session)) then false
   else
     let limit = client_buffer_limit_bytes () in
-    limit > 0 && session.dashboard_last_buffered_amount >= limit
+    let buffered_limit_exceeded =
+      limit > 0 && session.dashboard_last_buffered_amount >= limit
+    in
+    let ack_stale =
+      dashboard_ack_is_stale
+        ~now:(Time_compat.now ())
+        ~last_delta_at:session.dashboard_last_delta_at
+        ~last_delta_seq:session.dashboard_last_delta_seq
+        ~last_ack_seq:session.dashboard_last_ack_seq
+        ~threshold_s:(dashboard_ack_stale_threshold_s ())
+    in
+    buffered_limit_exceeded || ack_stale
 
 (** RFC #10119 Phase 2 gate.  When enabled (default since the bandwidth
     burst hardening pass), slice-scoped events skip the raw-SSE-forward
@@ -838,28 +882,123 @@ let read_payload_string payload ~len ~on_complete =
   in
   if len = 0 then complete () else schedule ()
 
+type inbound_size_rejection = {
+  reason: string;
+  limit: int;
+  actual: int;
+}
+
+type inbound_size_decision =
+  | Inbound_accept
+  | Inbound_reject of inbound_size_rejection
+
+let max_inbound_frame_bytes () =
+  Env_config_core.get_int_nonneg ~default:1048576
+    "MASC_WS_MAX_INBOUND_FRAME_BYTES"
+
+let max_inbound_message_bytes () =
+  Env_config_core.get_int_nonneg ~default:2097152
+    "MASC_WS_MAX_INBOUND_MESSAGE_BYTES"
+
+let classify_inbound_frame_size ~len ~max_frame_bytes =
+  if len < 0 then
+    Inbound_reject
+      { reason = "invalid_frame_length"; limit = max_frame_bytes; actual = len }
+  else if max_frame_bytes > 0 && len > max_frame_bytes then
+    Inbound_reject
+      { reason = "frame_too_large"; limit = max_frame_bytes; actual = len }
+  else
+    Inbound_accept
+
+let add_bounded_or_max a b =
+  if a < 0 || b < 0 || b > max_int - a then max_int else a + b
+
+let classify_inbound_message_size ~current_bytes ~chunk_len ~max_message_bytes =
+  let actual = add_bounded_or_max current_bytes chunk_len in
+  if max_message_bytes > 0 && actual > max_message_bytes then
+    Inbound_reject
+      { reason = "message_too_large"; limit = max_message_bytes; actual }
+  else
+    Inbound_accept
+
+let close_session_for_inbound_reject session rejection =
+  Log.Transport.warn
+    "WS inbound message rejected for session=%s reason=%s actual=%d limit=%d"
+    session.id
+    rejection.reason
+    rejection.actual
+    rejection.limit;
+  with_sessions_rw (fun () ->
+      if Hashtbl.mem sessions session.id then begin
+        Atomic.set session.closed true;
+        (try
+           Eio_guard.with_mutex session.write_mutex (fun () ->
+             if not (Httpun_ws.Wsd.is_closed session.wsd) then
+               Httpun_ws.Wsd.close ~code:`Message_too_big session.wsd)
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Log.Server.warn "WS reject close failed for %s: %s" session.id
+               (Printexc.to_string exn));
+        Hashtbl.remove sessions session.id;
+        slice_index_remove_session_locked session.id
+      end);
+  Transport_metrics.set_ws_sessions
+    (with_sessions_rw (fun () -> Hashtbl.length sessions));
+  Sse.unsubscribe_external session.id
+
 let handle_inbound_text session ~on_message ~is_fin text =
-  match session.inbound_partial_text, is_fin with
-  | None, true ->
-      if String.length text > 0 then
-        on_message session.id text
-  | None, false ->
-      let buffer = Buffer.create (max 16 (String.length text * 2)) in
-      Buffer.add_string buffer text;
-      session.inbound_partial_text <- Some buffer
-  | Some buffer, _ ->
-      Buffer.add_string buffer text;
-      if is_fin then begin
-        session.inbound_partial_text <- None;
-        let message = Buffer.contents buffer in
-        if String.length message > 0 then
-          on_message session.id message
-      end
+  let chunk_len = String.length text in
+  let current_bytes =
+    match session.inbound_partial_text with
+    | None -> 0
+    | Some _ -> session.inbound_partial_text_bytes
+  in
+  match
+    classify_inbound_message_size ~current_bytes ~chunk_len
+      ~max_message_bytes:(max_inbound_message_bytes ())
+  with
+  | Inbound_reject rejection ->
+      session.inbound_partial_text <- None;
+      session.inbound_partial_text_bytes <- 0;
+      close_session_for_inbound_reject session rejection
+  | Inbound_accept ->
+      let message_bytes = add_bounded_or_max current_bytes chunk_len in
+      match session.inbound_partial_text, is_fin with
+      | None, true ->
+          if chunk_len > 0 then
+            on_message session.id text
+      | None, false ->
+          let initial_size =
+            if chunk_len > max_int / 2 then chunk_len else chunk_len * 2
+          in
+          let buffer = Buffer.create (max 16 initial_size) in
+          Buffer.add_string buffer text;
+          session.inbound_partial_text <- Some buffer;
+          session.inbound_partial_text_bytes <- message_bytes
+      | Some buffer, _ ->
+          Buffer.add_string buffer text;
+          if is_fin then begin
+            session.inbound_partial_text <- None;
+            session.inbound_partial_text_bytes <- 0;
+            let message = Buffer.contents buffer in
+            if String.length message > 0 then
+              on_message session.id message
+          end
+          else
+            session.inbound_partial_text_bytes <- message_bytes
 
 let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
   Transport_metrics.observe_ws_message_bytes_recv len;
-  read_payload_string payload ~len ~on_complete:(fun text ->
-      handle_inbound_text session ~on_message ~is_fin text)
+  match classify_inbound_frame_size ~len ~max_frame_bytes:(max_inbound_frame_bytes ()) with
+  | Inbound_reject rejection ->
+      Httpun_ws.Payload.close payload;
+      session.inbound_partial_text <- None;
+      session.inbound_partial_text_bytes <- 0;
+      close_session_for_inbound_reject session rejection
+  | Inbound_accept ->
+      read_payload_string payload ~len ~on_complete:(fun text ->
+          handle_inbound_text session ~on_message ~is_fin text)
 
 (** Remove a session and unsubscribe from SSE. *)
 let cleanup_session session_id =
@@ -1131,4 +1270,3 @@ let () =
     ~ping:(fun ~session_id () -> dashboard_ping ~session_id ());
   Mcp_server_eio_protocol.register_dashboard_ack dashboard_ack
 ;;
-

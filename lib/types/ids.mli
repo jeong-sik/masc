@@ -48,6 +48,24 @@ module Execution_id : sig
   val of_yojson : Yojson.Safe.t -> (t, string) result
 end
 
+(** Turn reference — RFC-0233 §7. Canonical per-turn join key derived from
+    [(trace_id, absolute_turn)]; serializes as ["<trace_id>#<absolute_turn>"].
+    The identity keeper chat rows and board posts join on. [of_string]
+    returns [None] on malformed input rather than repairing it. Distinct
+    from {!Turn_id}. *)
+module Turn_ref : sig
+  type t
+  val make : trace_id:string -> absolute_turn:int -> t
+  val to_string : t -> string
+  val of_string : string -> t option
+  val trace_id : t -> string
+  val absolute_turn : t -> int
+  val equal : t -> t -> bool
+  val pp : Format.formatter -> t -> unit
+  val to_yojson : t -> Yojson.Safe.t
+  val of_yojson : Yojson.Safe.t -> (t, string) result
+end
+
 (** Conversation thread identifier — timestamp-prefixed sequence. *)
 module Thread_id : sig
   type t

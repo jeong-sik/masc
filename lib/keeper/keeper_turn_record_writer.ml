@@ -15,6 +15,7 @@ let write
     ; keeper = keeper_name
     ; trace_id
     ; absolute_turn
+    ; turn_ref = Some (Ids.Turn_ref.make ~trace_id ~absolute_turn)
     ; blocks
     ; runtime_profile
     ; sampling

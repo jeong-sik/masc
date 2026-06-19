@@ -37,6 +37,8 @@ let sample_record () : Turn_record.t =
   ; keeper = "sangsu"
   ; trace_id = "trace-1780648779957-00000"
   ; absolute_turn = 4071
+  ; turn_ref =
+      Some (Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn:4071)
   ; blocks =
       [ sample_block Prompt_block_id.Persona "aaaa"
       ; sample_block Prompt_block_id.Dynamic_context "bbbb"
@@ -61,6 +63,11 @@ let test_codec_roundtrip () =
     check string "keeper" record.keeper decoded.keeper;
     check string "trace_id" record.trace_id decoded.trace_id;
     check int "absolute_turn" record.absolute_turn decoded.absolute_turn;
+    check bool "turn_ref preserved" true
+      (match record.turn_ref, decoded.turn_ref with
+       | Some a, Some b -> Ids.Turn_ref.equal a b
+       | None, None -> true
+       | Some _, None | None, Some _ -> false);
     check int "blocks count" 3 (List.length decoded.blocks);
     check bool "blocks preserved in order" true
       (List.for_all2
@@ -87,6 +94,7 @@ let test_codec_optional_fields_absent () =
     { (sample_record ()) with
       sampling = { temperature = None; thinking_budget = None; enable_thinking = None }
     ; usage = { input_tokens = None; output_tokens = None }
+    ; turn_ref = None
     }
   in
   match Turn_record.of_json (Turn_record.to_json record) with
@@ -94,7 +102,8 @@ let test_codec_optional_fields_absent () =
   | Ok decoded ->
     check (option (float 0.0001)) "temperature absent" None
       decoded.sampling.temperature;
-    check (option int) "input_tokens absent" None decoded.usage.input_tokens
+    check (option int) "input_tokens absent" None decoded.usage.input_tokens;
+    check bool "turn_ref absent" true (decoded.turn_ref = None)
 
 let test_codec_rejects_malformed () =
   (match Turn_record.of_json (`String "not a record") with
@@ -195,6 +204,37 @@ let test_entries_with_diffs_same_trace_only () =
     check bool "trace boundary yields no diff" true (third = None)
   | _ -> fail "expected three paired entries"
 
+(* ── Turn_ref (RFC-0233 §7) ───────────────────────────── *)
+
+let turn_ref_t =
+  testable (Fmt.of_to_string Ids.Turn_ref.to_string) Ids.Turn_ref.equal
+
+let test_turn_ref_roundtrip () =
+  let r =
+    Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000" ~absolute_turn:4071
+  in
+  check string "to_string" "trace-1780648779957-00000#4071"
+    (Ids.Turn_ref.to_string r);
+  (match Ids.Turn_ref.of_string (Ids.Turn_ref.to_string r) with
+   | Some back -> check turn_ref_t "of_string roundtrip" r back
+   | None -> fail "of_string returned None on its own output");
+  check string "trace_id accessor" "trace-1780648779957-00000"
+    (Ids.Turn_ref.trace_id r);
+  check int "absolute_turn accessor" 4071 (Ids.Turn_ref.absolute_turn r)
+
+let test_turn_ref_trace_with_hash () =
+  (* trace_id containing '#' still parses: split on the LAST '#'. *)
+  match Ids.Turn_ref.of_string "weird#trace#12" with
+  | Some r ->
+    check string "trace keeps inner '#'" "weird#trace" (Ids.Turn_ref.trace_id r);
+    check int "turn is the last segment" 12 (Ids.Turn_ref.absolute_turn r)
+  | None -> fail "expected Some for a trace_id containing '#'"
+
+let test_turn_ref_rejects_malformed () =
+  check bool "no separator -> None" true (Ids.Turn_ref.of_string "noseparator" = None);
+  check bool "non-int suffix -> None" true (Ids.Turn_ref.of_string "trace#abc" = None);
+  check bool "empty trace -> None" true (Ids.Turn_ref.of_string "#4" = None)
+
 let () =
   run "turn_record"
     [ ( "prompt_block_id"
@@ -215,5 +255,13 @@ let () =
             test_diff_identical_records_is_empty
         ; test_case "entries_with_diffs pairs same-trace only" `Quick
             test_entries_with_diffs_same_trace_only
+        ] )
+    ; ( "turn_ref"
+      , [ test_case "make/to_string/of_string roundtrip" `Quick
+            test_turn_ref_roundtrip
+        ; test_case "trace_id with '#' splits on last separator" `Quick
+            test_turn_ref_trace_with_hash
+        ; test_case "of_string rejects malformed" `Quick
+            test_turn_ref_rejects_malformed
         ] )
     ]

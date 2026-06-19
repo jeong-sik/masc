@@ -376,6 +376,18 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.network_mode).toBeUndefined()
   })
 
+  it('omits compaction_token_gate when unchanged but emits it when edited', () => {
+    const c = makeKeeperConfigForSandbox({})
+    // Unchanged draft → not in payload.
+    expect(buildRuntimePayload(draftFrom(c), c).compaction_token_gate).toBeUndefined()
+    // Editing the token gate (now reachable via the InlineNumberRow) → emitted.
+    const edited = buildRuntimePayload(
+      draftFrom(c, { compaction_token_gate: c.compaction.token_gate + 4096 }),
+      c,
+    )
+    expect(edited.compaction_token_gate).toBe(c.compaction.token_gate + 4096)
+  })
+
   it('emits runtime_id when selected runtime changes', () => {
     const c = makeKeeperConfigForSandbox({
       execution: {

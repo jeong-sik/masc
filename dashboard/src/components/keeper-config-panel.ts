@@ -936,7 +936,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onChange=${(v: number) => updateRuntimeDraft('compaction_message_gate', v)}
           min=${0} max=${500} step=${5}
           dirty=${dirtyFlags.compaction_message_gate} />
-        <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
+        <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
+          onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
+          min=${0} max=${1000000} step=${1000} suffix="tok"
+          dirty=${dirtyFlags.compaction_token_gate} />
         <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
           onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
           min=${0} max=${3600} step=${30} suffix="s"

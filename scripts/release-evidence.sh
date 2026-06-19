@@ -226,20 +226,30 @@ copy_install_smoke() {
   cp config/tool_policy.toml "$base_path/.masc/config/tool_policy.toml"
   cat >"$base_path/.masc/config/runtime.toml" <<'EOF'
 [runtime]
-default = "release_evidence.smoke"
+# The smoke runtime's model id must be known to the OAS capability catalog, or
+# the startup capability gate (validate_runtime_model_capabilities, RFC-0206)
+# refuses to boot (a fixture model named "smoke" is absent from the catalog and
+# was rejected, breaking this evidence step on every OCaml push to main).
+# deepseek-v4-flash is the catalog-known fleet default; the provider endpoint
+# below is an isolated dead port and MASC_KEEPER_BOOTSTRAP_ENABLED=false, so no
+# real provider call is made — this fixture only checks the binary boots and
+# serves /health. The [models.deepseek-v4-flash] block mirrors
+# config/runtime.toml's shape so the runtime resolves; its model id is what the
+# gate matches against the catalog.
+default = "release_evidence.deepseek-v4-flash"
 
 [providers.release_evidence]
 display-name = "Release Evidence Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
-[models.smoke]
-api-name = "smoke"
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
 max-context = 32768
 tools-support = true
 streaming = true
 
-[release_evidence.smoke]
+[release_evidence.deepseek-v4-flash]
 is-default = true
 max-concurrent = 1
 EOF

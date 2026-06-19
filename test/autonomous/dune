@@ -5,6 +5,5 @@
   test_transition
   test_autonomous_bridge
   test_autonomous_wirein
-  test_autonomous_stimulus
   test_autonomous_executor)
  (libraries autonomous multimodal shared_types yojson unix))

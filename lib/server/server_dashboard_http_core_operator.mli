@@ -1,6 +1,5 @@
 (** Operator broadcast and cache state for dashboard HTTP core. *)
 
-val operator_actor_hint : Httpun.Request.t -> string option
 val operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref
 val _operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref
 val operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref

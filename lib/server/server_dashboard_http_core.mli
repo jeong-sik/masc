@@ -68,8 +68,6 @@ val with_projection_diagnostics :
 
 (** {1 Sanitization and Request Helpers} *)
 
-val operator_actor_hint : Httpun.Request.t -> string option
-
 val dashboard_shell_with_request_auth_json :
   request:Httpun.Request.t ->
   Workspace.config ->
@@ -78,11 +76,6 @@ val dashboard_shell_with_request_auth_json :
 (** Inject the request-bound dashboard auth contract into a shell payload.
     Snapshot shell payloads are process-wide and deliberately omit
     per-request auth; HTTP handlers must add it back before responding. *)
-
-(** {1 Batch API} *)
-
-val dashboard_batch_json :
-  ?compact:bool -> Workspace.config -> Yojson.Safe.t
 
 (** {1 Operator Snapshot/Digest} *)
 

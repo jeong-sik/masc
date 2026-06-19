@@ -45,7 +45,6 @@
   workspace_verification_store
   event_kind
   workspace_git
-  playground_repo_cache
   mention
   mention_dedup
   workspace_resilience

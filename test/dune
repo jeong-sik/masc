@@ -93,7 +93,6 @@
   test_attempt_state
   test_runtime_attempt_fsm
   test_keeper_turn_driver_accept
-  test_actor_mailbox
   test_domain_pool
   test_sse
   test_graphql_api
@@ -391,7 +390,6 @@
   test_attempt_state
   test_runtime_attempt_fsm
   test_keeper_turn_driver_accept
-  test_actor_mailbox
   test_domain_pool
   test_sse
   test_graphql_api

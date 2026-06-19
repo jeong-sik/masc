@@ -5,13 +5,6 @@ open Server_auth
 open Server_dashboard_http_cache
 open Dashboard_http_helpers
 
-let operator_actor_hint request =
-  match agent_from_request request with
-  | Some raw ->
-    let sanitized = sanitize_dashboard_actor_name raw in
-    if sanitized = "" then None else Some sanitized
-  | None -> None
-;;
 
 (* --- Operator proactive refresh ---
    Default (no-param) requests are served from a background-refreshed ref.

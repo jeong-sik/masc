@@ -1,7 +1,7 @@
 # MASC
 
 [![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
-[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.207.3-blue.svg)](https://github.com/jeong-sik/oas)
+[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.207.5-blue.svg)](https://github.com/jeong-sik/oas)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 > **개인용 인프라**  
@@ -53,7 +53,7 @@ MASC는 OCaml 5.x + Eio 기반의 다중 AI 코딩 에이전트 워크스페이�
 - OCaml >= 5.4
 - opam >= 2.0
 - dune >= 3.22
-- agent_sdk >= 0.207.3
+- agent_sdk >= 0.207.5
 
 의존성 전체는 [`masc.opam`](masc.opam)을 본다.
 

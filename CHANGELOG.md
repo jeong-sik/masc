@@ -1,6 +1,16 @@
 # Changelog
 
 
+## Unreleased
+
+### Changed
+- `agent_sdk`: bumped the OAS runtime pin from `v0.207.3` (`57ed7272`) to
+  `v0.207.5` (`6fe842bf`, OAS `main` HEAD, release 0.207.5 #2140) and raised
+  the dependency floor to `>= 0.207.5` in `dune-project` / `masc.opam`.
+  Pin metadata, lock metadata, generated docs, and the API surface fingerprint
+  were refreshed for the new OAS release.
+
+
 ## [0.19.46] - 2026-06-18
 
 ### Changed

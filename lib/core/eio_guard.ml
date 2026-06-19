@@ -37,8 +37,37 @@ let with_mutex_ro mutex f =
 (** {1 Systhread Guard} *)
 
 (** Run [f] in a system thread when Eio is active, or directly when
-    no Eio runtime is available (e.g. unit tests). *)
-let run_in_systhread f = if Atomic.get ready then Eio_unix.run_in_systhread f else f ()
+    no Eio runtime is available (e.g. unit tests).
+
+    A pool system thread has no Eio effect handler.  [f] must therefore
+    perform only blocking C/Unix work, never an Eio operation: anything
+    that performs an effect (e.g. [Eio.Mutex.use_rw], whose [Cancel.protect]
+    performs [Get_context] first) raises [Effect.Unhandled] here, and an
+    enclosing [use_rw] then poisons its mutex.  That is the 2026-06-19 keeper
+    stall (a poisoned process-shared [dir_mu]); the structural cure is to
+    offload Eio-touching work via [Executor_pool] instead (PR #21530).
+
+    Defense-in-depth: this wrapper converts that cryptic [Effect.Unhandled]
+    into an actionable [Failure] naming the misuse and the alternative.  It
+    only improves the surfaced error — the poison still happens in the inner
+    [use_rw] frame before control returns here — so it diagnoses the bug
+    faster, it does not prevent it. *)
+let run_in_systhread f =
+  if Atomic.get ready
+  then
+    Eio_unix.run_in_systhread (fun () ->
+      try f () with
+      | Effect.Unhandled _ as exn ->
+        failwith
+          (Printf.sprintf
+             "Eio_guard.run_in_systhread: body performed an unhandled effect (%s) on a \
+              system thread, which has no Eio handler. Eio operations such as \
+              Eio.Mutex.use_rw must not run here (use_rw poisons its mutex on the \
+              resulting Effect.Unhandled). Offload Eio-touching work via Executor_pool \
+              (e.g. Executor_pool_ref.submit_or_inline), not run_in_systhread."
+             (Printexc.to_string exn)))
+  else f ()
+;;
 
 (** {1 Resource Cleanup}
 

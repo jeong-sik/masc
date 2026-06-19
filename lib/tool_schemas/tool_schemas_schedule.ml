@@ -132,7 +132,7 @@ let create_schema =
         "recurrence_second"
     ; string_prop
         ~description:
-          "Required when recurrence_kind is daily. Supported values: UTC, Asia/Seoul, KST, or a fixed offset like +09:00."
+          "Required when recurrence_kind is daily. Fixed-offset only: UTC, Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. DST-aware IANA zones are not supported."
         "recurrence_timezone"
     ; string_prop ~description:"Requester actor id. Defaults to operator." "requested_by_id"
     ; string_prop ~enum:actor_kinds "requested_by_kind"

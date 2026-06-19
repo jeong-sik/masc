@@ -538,6 +538,52 @@ let () = test "get_rhythm returns current rhythm" (fun () ->
   assert (r2.quiet = (2, 5))
 )
 
+(* ── Test: concurrent shutdown does not raise ──────────────── *)
+
+let () = test "concurrent shutdown is safe" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let t = Pulse.create
+    ~clock
+    ~rhythm:{ Pulse.base_s = 10.0; min_s = 5.0; max_s = 20.0; quiet = (1, 6) }
+    ~lifecycle:Pulse.Always_on
+    ~consumers:[]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Pulse.run ~sw t;
+  Eio.Time.sleep clock 0.05;
+  Eio.Fiber.both
+    (fun () -> Pulse.shutdown t)
+    (fun () -> Pulse.shutdown t);
+  Eio.Time.sleep clock 0.1;
+  assert (not (Pulse.is_alive t))
+)
+
+(* ── Test: concurrent nudges do not crash or block ──────────── *)
+
+let () = test "concurrent nudges are safe" (fun () ->
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let t = Pulse.create
+    ~clock
+    ~rhythm:{ Pulse.base_s = 100.0; min_s = 50.0; max_s = 200.0; quiet = (1, 6) }
+    ~lifecycle:Pulse.Always_on
+    ~consumers:[]
+  in
+  Eio.Switch.run @@ fun sw ->
+  Pulse.run ~sw t;
+  Eio.Time.sleep clock 0.05;
+  Eio.Fiber.both
+    (fun () -> Pulse.nudge t ~reason:"a")
+    (fun () -> Pulse.nudge t ~reason:"b");
+  Eio.Time.sleep clock 0.15;
+  Pulse.shutdown t;
+  Eio.Time.sleep clock 0.1;
+  let s = Pulse.stats t in
+  if s.total_nudges < 1 then
+    failwith (Printf.sprintf "expected >=1 nudge, got %d" s.total_nudges)
+)
+
 (* ── Summary ───────────────────────────────────────────────── *)
 
 let () =

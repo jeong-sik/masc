@@ -256,6 +256,11 @@ describe('shouldSuppressFloatingChrome', () => {
       keeperDetailMode: false,
       mobileDrawerOpen: false,
     })).toBe(true)
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'logs',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
+    })).toBe(true)
   })
 
   it('keeps floating chrome for operational surfaces unless a shell overlay is active', () => {

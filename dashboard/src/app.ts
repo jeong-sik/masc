@@ -44,6 +44,7 @@ import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus
 import {
   DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
+  isPrimaryDashboardSurface,
 } from './config/navigation'
 import type { TabId } from './types'
 import { Menu, X } from 'lucide-preact'
@@ -76,15 +77,6 @@ const sidebarCollapsed = persistentSignal<boolean>({
   defaultValue: false,
 })
 const mobileMenuOpen = signal(false)
-const PROTOTYPE_PRIMARY_SURFACE_TABS = new Set<TabId>([
-  'overview',
-  'workspace',
-  'keepers',
-  'board',
-  'code',
-  'connectors',
-  'settings',
-])
 
 export function shouldSuppressFloatingChrome({
   currentTab,
@@ -95,7 +87,7 @@ export function shouldSuppressFloatingChrome({
   keeperDetailMode: boolean
   mobileDrawerOpen: boolean
 }): boolean {
-  return keeperDetailMode || mobileDrawerOpen || PROTOTYPE_PRIMARY_SURFACE_TABS.has(currentTab)
+  return keeperDetailMode || mobileDrawerOpen || isPrimaryDashboardSurface(currentTab)
 }
 
 const LazyAgentDetailOverlay = lazy(async () => ({

@@ -82,6 +82,17 @@ type institution =
 
 type config = Workspace_utils.config
 
+(** {1 Identifiers} *)
+
+let institution_id () = Random_id.prefixed ~prefix:"inst-" ~bytes:8
+let episode_id () = Random_id.prefixed ~prefix:"ep-" ~bytes:8
+let knowledge_id () = Random_id.prefixed ~prefix:"know-" ~bytes:8
+let pattern_id () = Random_id.prefixed ~prefix:"pat-" ~bytes:8
+
+let episode_jsonl_id ~now =
+  Printf.sprintf "ep-%d-%s" (int_of_float now) (Random_id.hex ~bytes:4)
+;;
+
 (** {1 Default Values} *)
 
 let default_succession () : succession_policy =
@@ -105,7 +116,7 @@ let default_succession () : succession_policy =
 let create_institution ~name ~mission () : institution =
   let now = Time_compat.now () in
   { identity =
-      { id = Printf.sprintf "inst-%d" (Process_random.random_int 100000)
+      { id = institution_id ()
       ; name
       ; mission
       ; founded_at = now
@@ -522,7 +533,7 @@ let get_or_create ~fs (config : config) ~name ~mission =
 
 let record_episode ~fs config inst ~event_type ~summary ~participants ~outcome ~learnings =
   let episode : episode =
-    { id = Printf.sprintf "ep-%d" (Process_random.random_int 100000)
+    { id = episode_id ()
     ; timestamp = Time_compat.now ()
     ; participants
     ; event_type
@@ -540,7 +551,7 @@ let record_episode ~fs config inst ~event_type ~summary ~participants ~outcome ~
 let learn_knowledge ~fs config inst ~topic ~content ~source =
   let now = Time_compat.now () in
   let knowledge : knowledge =
-    { id = Printf.sprintf "know-%d" (Process_random.random_int 100000)
+    { id = knowledge_id ()
     ; topic
     ; content
     ; confidence = 0.5
@@ -557,7 +568,7 @@ let learn_knowledge ~fs config inst ~topic ~content ~source =
 
 let codify_pattern ~fs config inst ~name ~description ~trigger ~steps =
   let pattern : pattern =
-    { id = Printf.sprintf "pat-%d" (Process_random.random_int 100000)
+    { id = pattern_id ()
     ; name
     ; description
     ; trigger
@@ -774,13 +785,10 @@ let episodes_jsonl_path () =
 (** Record an episode to JSONL without Eio context.
     This is the primary entry point for Keeper autonomy integration. *)
 let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings =
+  let now = Time_compat.now () in
   let episode : episode =
-    { id =
-        Printf.sprintf
-          "ep-%d-%06d"
-          (int_of_float (Time_compat.now ()))
-          (Process_random.random_int 999999)
-    ; timestamp = Time_compat.now ()
+    { id = episode_jsonl_id ~now
+    ; timestamp = now
     ; participants
     ; event_type
     ; summary

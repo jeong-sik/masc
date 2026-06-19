@@ -187,7 +187,7 @@ let prompt_max_messages () = max_messages () * cadence_turns ()
 let default_timeout_sec () =
   Keeper_memory_bank_env.memory_env_float_logged
     "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
-    ~default:Env_config_governance.Inference.timeout_seconds
+    ~default:600.0
 ;;
 
 let runtime_id_for_librarian ~runtime_id =

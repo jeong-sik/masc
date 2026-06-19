@@ -126,7 +126,7 @@ val record_episode_jsonl :
   learnings:string list ->
   episode
 (** Eio-free episode appender.  Mints an [id]
-    of the form [ep-<wall-secs>-<6 random digits>], stamps
+    of the form [ep-<wall-secs>-<8 hex chars>], stamps
     [timestamp] with the wall clock, sets [context = []],
     and appends the JSON to {!episodes_jsonl_path}.  Append
     failures are logged but {b not} re-raised — the keeper

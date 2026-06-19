@@ -33,7 +33,7 @@ import {
   resumePendingKeeperChatRequests,
   sendKeeperThreadMessage,
 } from '../keeper-runtime'
-import { isVisibleDirectConversationEntry } from '../keeper-state'
+import { isDefaultVisibleConversationEntry } from '../keeper-state'
 import {
   enqueueInput,
   clearInputQueue,
@@ -466,7 +466,7 @@ export function KeeperConversationPanel({
   // unrelated signals; memoizing each stage on its stable upstream skips the
   // refilter when rawThread and the relevant UI flag are unchanged.
   const thread = useMemo(
-    () => showInternal ? rawThread : rawThread.filter(isVisibleDirectConversationEntry),
+    () => showInternal ? rawThread : rawThread.filter(isDefaultVisibleConversationEntry),
     [rawThread, showInternal],
   )
   const hiddenCount = rawThread.length - thread.length
@@ -486,7 +486,7 @@ export function KeeperConversationPanel({
   const transcriptEmptyText =
     hasQuery && visibleThread.length > 0
       ? '검색어와 일치하는 메시지가 없습니다.'
-      : '아직 표시할 대화가 없습니다. 내부 메시지와 도구 호출은 토글로 전환할 수 있습니다.'
+      : '아직 표시할 대화가 없습니다. 내부 메시지는 토글로 볼 수 있습니다.'
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
   const chatAccess = keeperDirectChatAccess(shellAuthSummary.value)
@@ -761,6 +761,7 @@ export function KeeperConversationPanel({
           showMetadata=${showMetadata}
           variant="messenger"
           size="primary"
+          groupToolCalls=${true}
           action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
         />
 
@@ -872,6 +873,7 @@ export function KeeperConversationPanel({
             showMetadata=${showMetadata}
             variant="messenger"
             size="default"
+            groupToolCalls=${true}
             action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
           />
         </div>

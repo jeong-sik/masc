@@ -148,4 +148,49 @@ describe('parseMarkdownToBlocks', () => {
     expect(p.html).toContain('<code>')
     expect(p.html).not.toContain('<script>')
   })
+
+  // Strict-superset of lib/chat-blocks.ts: a URL alone on its line becomes a
+  // card, so this parser can supersede the line-based one on the render path
+  // without losing the link/image affordance.
+  it('turns a standalone URL into a link card', () => {
+    const blocks = parseMarkdownToBlocks('https://example.com/docs/page')
+    expect(blocks).toHaveLength(1)
+    const link = blocks[0] as Extract<ChatBlock, { t: 'link' }>
+    expect(link.t).toBe('link')
+    expect(link.url).toBe('https://example.com/docs/page')
+    expect(link.title).toBe('example.com')
+  })
+
+  it('turns a standalone image URL into an image block', () => {
+    const blocks = parseMarkdownToBlocks('https://example.com/pic.png')
+    expect(blocks).toHaveLength(1)
+    const image = blocks[0] as Extract<ChatBlock, { t: 'image' }>
+    expect(image.t).toBe('image')
+    expect(image.src).toBe('https://example.com/pic.png')
+  })
+
+  it('keeps a URL with surrounding prose as an inline link, not a card', () => {
+    const blocks = parseMarkdownToBlocks('See https://example.com for details')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    expect((blocks[0] as Extract<ChatBlock, { t: 'p' }>).html).toContain('<a')
+  })
+
+  // Per-line superset: a soft-wrapped paragraph (single newlines, no blank line)
+  // that interleaves prose with a standalone-URL line must still yield the card,
+  // matching the line-based parser the render path supersedes.
+  it('splits a soft-wrapped paragraph so a mid-message image URL line stays a card', () => {
+    const blocks = parseMarkdownToBlocks('Here is the chart:\nhttps://cdn.example.com/run/abc.png\nLet me know.')
+    expect(blocks).toHaveLength(3)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    expect(blocks[1]).toMatchObject({ t: 'image', src: 'https://cdn.example.com/run/abc.png' })
+    expect(blocks[2]).toMatchObject({ t: 'p' })
+  })
+
+  it('splits consecutive bare URL lines into separate link cards', () => {
+    const blocks = parseMarkdownToBlocks('https://a.example.com/x\nhttps://b.example.com/y')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toMatchObject({ t: 'link', url: 'https://a.example.com/x' })
+    expect(blocks[1]).toMatchObject({ t: 'link', url: 'https://b.example.com/y' })
+  })
 })

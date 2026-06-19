@@ -120,6 +120,21 @@ export function isVisibleDirectConversationEntry(entry: KeeperConversationEntry)
     && entry.source !== 'system'
 }
 
+/** Tool-call rows (role 'tool', minted live by keeper-stream and persisted to
+ *  history). They are part of the keeper's visible work product, not internal
+ *  prompt plumbing, so the transcript surfaces them (folded into a "작업 과정"
+ *  card by groupToolCalls). */
+export function isToolConversationEntry(entry: KeeperConversationEntry): boolean {
+  return entry.role === 'tool'
+}
+
+/** Entries shown when the internal-message toggle is off: direct user/assistant
+ *  turns plus tool-call rows. Only the truly-internal sources
+ *  (world_state_prompt, internal_assistant, system) stay behind the toggle. */
+export function isDefaultVisibleConversationEntry(entry: KeeperConversationEntry): boolean {
+  return isVisibleDirectConversationEntry(entry) || isToolConversationEntry(entry)
+}
+
 // --- Audio helpers (RFC-0235 P1/P3) ---
 
 /** Canonicalize an audio clip from the wire into the dashboard type.

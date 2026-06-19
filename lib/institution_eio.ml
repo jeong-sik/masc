@@ -105,7 +105,7 @@ let default_succession () : succession_policy =
 let create_institution ~name ~mission () : institution =
   let now = Time_compat.now () in
   { identity =
-      { id = Printf.sprintf "inst-%d" (Level4_config.random_int 100000)
+      { id = Printf.sprintf "inst-%d" (Process_random.random_int 100000)
       ; name
       ; mission
       ; founded_at = now
@@ -522,7 +522,7 @@ let get_or_create ~fs (config : config) ~name ~mission =
 
 let record_episode ~fs config inst ~event_type ~summary ~participants ~outcome ~learnings =
   let episode : episode =
-    { id = Printf.sprintf "ep-%d" (Level4_config.random_int 100000)
+    { id = Printf.sprintf "ep-%d" (Process_random.random_int 100000)
     ; timestamp = Time_compat.now ()
     ; participants
     ; event_type
@@ -540,7 +540,7 @@ let record_episode ~fs config inst ~event_type ~summary ~participants ~outcome ~
 let learn_knowledge ~fs config inst ~topic ~content ~source =
   let now = Time_compat.now () in
   let knowledge : knowledge =
-    { id = Printf.sprintf "know-%d" (Level4_config.random_int 100000)
+    { id = Printf.sprintf "know-%d" (Process_random.random_int 100000)
     ; topic
     ; content
     ; confidence = 0.5
@@ -557,7 +557,7 @@ let learn_knowledge ~fs config inst ~topic ~content ~source =
 
 let codify_pattern ~fs config inst ~name ~description ~trigger ~steps =
   let pattern : pattern =
-    { id = Printf.sprintf "pat-%d" (Level4_config.random_int 100000)
+    { id = Printf.sprintf "pat-%d" (Process_random.random_int 100000)
     ; name
     ; description
     ; trigger
@@ -779,7 +779,7 @@ let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings 
         Printf.sprintf
           "ep-%d-%06d"
           (int_of_float (Time_compat.now ()))
-          (Level4_config.random_int 999999)
+          (Process_random.random_int 999999)
     ; timestamp = Time_compat.now ()
     ; participants
     ; event_type

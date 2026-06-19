@@ -1,6 +1,6 @@
 open Alcotest
 
-module L = Level4_config
+module R = Masc.Process_random
 
 let set_env name value = Unix.putenv name value
 let unset_env name = Unix.putenv name ""
@@ -18,14 +18,14 @@ let with_env name value f =
     f
 
 let first_seeded_random_int seed =
-  L.For_testing.reset_rng_state ();
+  R.For_testing.reset_rng_state ();
   with_env "MASC_RANDOM_SEED" (Some (string_of_int seed)) (fun () ->
-    let value = L.random_int 1_000_000 in
+    let value = R.random_int 1_000_000 in
     check
       int
       "rng state initialized"
-      L.For_testing.initialized_state
-      (L.For_testing.rng_state ());
+      R.For_testing.initialized_state
+      (R.For_testing.rng_state ());
     value)
 
 let test_random_int_seeded_init_is_repeatable () =
@@ -35,7 +35,7 @@ let test_random_int_seeded_init_is_repeatable () =
 
 let () =
   run
-    "level4_config"
+    "process_random"
     [ ( "rng"
       , [ test_case
             "random_int lazily initializes from seed"

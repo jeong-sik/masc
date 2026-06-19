@@ -32,7 +32,6 @@ let noop_observer = {
 let observer = Atomic.make noop_observer
 
 let set_observer hooks = Atomic.set observer hooks
-let reset_for_test () = Atomic.set observer noop_observer
 
 let earn ~base_path ~agent_name ~kind ~reason () =
   (Atomic.get observer).earn ~base_path ~agent_name ~kind ~reason ()

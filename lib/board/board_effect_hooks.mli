@@ -20,7 +20,6 @@ type observer =
   }
 
 val set_observer : observer -> unit
-val reset_for_test : unit -> unit
 
 val earn :
   base_path:string ->

@@ -20,6 +20,8 @@ type SurfaceSectionId =
   | 'agents'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
+  | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
+  | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -259,6 +261,20 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Observatory',
       description: 'Activity and runtime evidence.',
       params: { section: 'observatory' },
+    },
+    {
+      id: 'transport-health',
+      label: 'Transport Health',
+      description: 'Transport diagnostics.',
+      params: { section: 'transport-health' },
+      hidden: true,
+    },
+    {
+      id: 'feature-health',
+      label: 'Feature Flags',
+      description: 'Feature diagnostics.',
+      params: { section: 'feature-health' },
+      hidden: true,
     },
 
   ],

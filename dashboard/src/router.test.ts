@@ -82,6 +82,18 @@ describe('navigate', () => {
     expect(route.value.params.ag_range).toBeUndefined()
   })
 
+  it('keeps runtime diagnostic monitor links routeable while hidden from primary IA', () => {
+    navigate('monitoring', { section: 'transport-health' })
+    expect(route.value.tab).toBe('monitoring')
+    expect(route.value.params.section).toBe('transport-health')
+    expect(window.location.hash).toBe('#monitoring?section=transport-health')
+
+    navigate('monitoring', { section: 'feature-health' })
+    expect(route.value.tab).toBe('monitoring')
+    expect(route.value.params.section).toBe('feature-health')
+    expect(window.location.hash).toBe('#monitoring?section=feature-health')
+  })
+
   it('redirects retired Git graph links into the repository graph view', () => {
     navigate('monitoring', { section: 'git-graph' })
     expect(route.value.tab).toBe('workspace')

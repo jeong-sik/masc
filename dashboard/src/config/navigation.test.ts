@@ -219,9 +219,11 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('sessions')
   })
 
-  it('surfaces four primary Monitor lanes and no hidden diagnostic sections', () => {
+  it('surfaces four primary Monitor lanes and keeps support diagnostics routeable', () => {
     const sections = visibleSectionItemsForTab('monitoring')
+    const allSections = sectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
+    const allIds = allSections.map(item => item.id)
 
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'agents' })
     expect(ids).toEqual([
@@ -231,6 +233,10 @@ describe('monitoring navigation labels', () => {
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
     expect(ids).toContain('observatory')
+    expect(allIds).toContain('transport-health')
+    expect(allIds).toContain('feature-health')
+    expect(ids).not.toContain('transport-health')
+    expect(ids).not.toContain('feature-health')
     // Legacy sections removed in Phase 1
     expect(ids).not.toContain('live')
     expect(ids).not.toContain('git-graph')
@@ -256,11 +262,14 @@ describe('monitoring navigation labels', () => {
     ])
   })
 
-  it('has no hidden diagnostic monitoring sections', () => {
+  it('keeps support diagnostics hidden from the sidebar', () => {
     const sections = sectionItemsForTab('monitoring')
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
-    expect(hiddenIds).toEqual([])
+    expect(hiddenIds).toEqual([
+      'transport-health',
+      'feature-health',
+    ])
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {

@@ -22,17 +22,19 @@ type rate_tracker = {
   last_burst_reset: float;
 }
 
+type 'a resolver = ('a, exn) result Eio.Promise.u
+
 type msg =
-  | Register of string * float * session Eio.Promise.u
+  | Register of string * float * session resolver
   | Unregister of string
   | Update_activity of string * bool option * float
-  | Check_rate_limit_req of string * rate_limit_category * agent_role * float * (bool * int) Eio.Promise.u
-  | Get_rate_limit_status_req of string * agent_role * float * Yojson.Safe.t Eio.Promise.u
-  | Push_message of { from_agent: string; content: string; mention: string option; timestamp: string; reply: string list Eio.Promise.u }
-  | Push_notification of Yojson.Safe.t * int Eio.Promise.u
-  | Get_session of string * session option Eio.Promise.u
-  | Get_sessions of session AgentMap.t Eio.Promise.u
-  | Restore_from_disk_req of string * float * unit Eio.Promise.u
+  | Check_rate_limit_req of string * rate_limit_category * agent_role * float * (bool * int) resolver
+  | Get_rate_limit_status_req of string * agent_role * float * Yojson.Safe.t resolver
+  | Push_message of { from_agent: string; content: string; mention: string option; timestamp: string; reply: string list resolver }
+  | Push_notification of Yojson.Safe.t * int resolver
+  | Get_session of string * session option resolver
+  | Get_sessions of session AgentMap.t resolver
+  | Restore_from_disk_req of string * float * unit resolver
 
 type registry_state = {
   sessions: session AgentMap.t;
@@ -112,7 +114,7 @@ let process_msg config state msg =
         Log.Session.debug "Session refreshed: %s (total: %d)" agent_name total
       else
         Log.Session.info "Session registered: %s (total: %d)" agent_name total;
-      Eio.Promise.resolve p session;
+      Eio.Promise.resolve_ok p session;
       { state with sessions = sessions' }
 
   | Unregister agent_name ->
@@ -130,11 +132,11 @@ let process_msg config state msg =
        | None -> state)
 
   | Get_session (agent_name, p) ->
-      Eio.Promise.resolve p (AgentMap.find_opt agent_name state.sessions);
+      Eio.Promise.resolve_ok p (AgentMap.find_opt agent_name state.sessions);
       state
 
   | Get_sessions p ->
-      Eio.Promise.resolve p state.sessions;
+      Eio.Promise.resolve_ok p state.sessions;
       state
 
   | Push_message { from_agent; content; mention; timestamp; reply } ->
@@ -167,7 +169,7 @@ let process_msg config state msg =
       ) state.sessions;
       if !targets <> [] then
         Log.Session.debug "Pushed to: %s" (String.concat ", " !targets);
-      Eio.Promise.resolve reply !targets;
+      Eio.Promise.resolve_ok reply !targets;
       state
 
   | Push_notification (event, reply) ->
@@ -183,7 +185,7 @@ let process_msg config state msg =
         try_add session.message_queue event;
         incr count
       ) state.sessions;
-      Eio.Promise.resolve reply !count;
+      Eio.Promise.resolve_ok reply !count;
       state
 
   | Check_rate_limit_req (agent_name, category, role, now, p) ->
@@ -214,17 +216,17 @@ let process_msg config state msg =
         if tracker.burst_used < config.burst_allowed then begin
           let tracker' = { tracker with burst_used = tracker.burst_used + 1 } in
           let tracker' = set_timestamps tracker' category (now :: recent) in
-          Eio.Promise.resolve p (true, 0);
+          Eio.Promise.resolve_ok p (true, 0);
           { state with rate_trackers = AgentMap.add agent_name tracker' state.rate_trackers }
         end else begin
           let oldest = List.fold_left min now recent in
           let wait = int_of_float (oldest +. 60.0 -. now) in
-          Eio.Promise.resolve p (false, max 1 wait);
+          Eio.Promise.resolve_ok p (false, max 1 wait);
           { state with rate_trackers = AgentMap.add agent_name tracker state.rate_trackers }
         end
       end else begin
         let tracker' = set_timestamps tracker category (now :: recent) in
-        Eio.Promise.resolve p (true, 0);
+        Eio.Promise.resolve_ok p (true, 0);
         { state with rate_trackers = AgentMap.add agent_name tracker' state.rate_trackers }
       end
 
@@ -258,7 +260,7 @@ let process_msg config state msg =
           status_for_category TaskOpsLimit;
         ]);
       ] in
-      Eio.Promise.resolve p status;
+      Eio.Promise.resolve_ok p status;
       state
 
   | Restore_from_disk_req (agents_path, now, p) ->
@@ -282,7 +284,7 @@ let process_msg config state msg =
         if !restored > 0 then
           Log.Session.info "Restored %d session(s) from disk" !restored
       end;
-      Eio.Promise.resolve p ();
+      Eio.Promise.resolve_ok p ();
       !state'
 
 let process_registry_msg registry msg =
@@ -298,28 +300,61 @@ let await_if_needed promise =
   | Some value -> value
   | None -> Eio.Promise.await promise
 
+let await_exn_if_needed promise =
+  match Eio.Promise.peek promise with
+  | Some (Ok value) -> value
+  | Some (Error exn) -> raise exn
+  | None -> Eio.Promise.await_exn promise
+
+let registry_closed_error =
+  Eio.Cancel.Cancelled (Failure "Session registry loop terminated")
+
+let resolve_msg_error msg =
+  let cancel u = Eio.Promise.resolve_error u registry_closed_error in
+  match msg with
+  | Register (_, _, u) -> cancel u
+  | Unregister _ -> ()
+  | Update_activity _ -> ()
+  | Check_rate_limit_req (_, _, _, _, u) -> cancel u
+  | Get_rate_limit_status_req (_, _, _, u) -> cancel u
+  | Push_message { reply; _ } -> cancel reply
+  | Push_notification (_, u) -> cancel u
+  | Get_session (_, u) -> cancel u
+  | Get_sessions u -> cancel u
+  | Restore_from_disk_req (_, _, u) -> cancel u
+
 let start_loop registry ~sw =
-  if Atomic.compare_and_set registry.loop_started false true then
-  Eio.Fiber.fork_daemon ~sw (fun () ->
-    let rec loop state =
-      let msg = Eio.Stream.take registry.mailbox in
-      let state' =
-        Stdlib.Mutex.protect registry.state_mutex (fun () ->
-          let state' = process_msg registry.config state msg in
-          registry.state := state';
-          state')
+  if Atomic.compare_and_set registry.loop_started false true then begin
+    Eio.Switch.on_release sw (fun () ->
+      Atomic.set registry.loop_started false;
+      let rec drain () =
+        match Eio.Stream.take_nonblocking registry.mailbox with
+        | None -> ()
+        | Some msg -> resolve_msg_error msg; drain ()
       in
-      loop state'
-    in
-    loop !(registry.state)
-  )
+      drain ()
+    );
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      let rec loop state =
+        let msg = Eio.Stream.take registry.mailbox in
+        let state' =
+          Stdlib.Mutex.protect registry.state_mutex (fun () ->
+            let state' = process_msg registry.config state msg in
+            registry.state := state';
+            state')
+        in
+        loop state'
+      in
+      loop !(registry.state)
+    )
+  end
 
 (** Helpers to send messages to the registry *)
 
 let register registry ~agent_name =
   let p, r = Eio.Promise.create () in
   dispatch registry (Register (agent_name, Time_compat.now (), r));
-  await_if_needed p
+  await_exn_if_needed p
 
 let unregister registry ~agent_name =
   dispatch registry (Unregister agent_name)
@@ -330,7 +365,7 @@ let update_activity registry ~agent_name ?is_listening () =
 let check_rate_limit_ex registry ~agent_name ~category ~role =
   let p, r = Eio.Promise.create () in
   dispatch registry (Check_rate_limit_req (agent_name, category, role, Time_compat.now (), r));
-  await_if_needed p
+  await_exn_if_needed p
 
 let check_rate_limit registry ~agent_name =
   check_rate_limit_ex registry ~agent_name ~category:GeneralLimit ~role:Worker
@@ -338,27 +373,27 @@ let check_rate_limit registry ~agent_name =
 let get_rate_limit_status registry ~agent_name ~role =
   let p, r = Eio.Promise.create () in
   dispatch registry (Get_rate_limit_status_req (agent_name, role, Time_compat.now (), r));
-  await_if_needed p
+  await_exn_if_needed p
 
 let push_message registry ~from_agent ~content ~mention =
   let p, r = Eio.Promise.create () in
   dispatch registry (Push_message { from_agent; content; mention; timestamp = now_iso (); reply = r });
-  await_if_needed p
+  await_exn_if_needed p
 
 let push_notification_to_active_agents registry ~(event : Yojson.Safe.t) =
   let p, r = Eio.Promise.create () in
   dispatch registry (Push_notification (event, r));
-  await_if_needed p
+  await_exn_if_needed p
 
 let get_session registry ~agent_name =
   let p, r = Eio.Promise.create () in
   dispatch registry (Get_session (agent_name, r));
-  await_if_needed p
+  await_exn_if_needed p
 
 let get_sessions registry =
   let p, r = Eio.Promise.create () in
   dispatch registry (Get_sessions r);
-  await_if_needed p
+  await_exn_if_needed p
 
 let pop_message registry ~agent_name =
   match get_session registry ~agent_name with
@@ -459,7 +494,7 @@ let connected_agents registry =
 let restore_from_disk registry ~agents_path =
   let p, r = Eio.Promise.create () in
   dispatch registry (Restore_from_disk_req (agents_path, Time_compat.now (), r));
-  await_if_needed p
+  await_exn_if_needed p
 
 (* ============================================ *)
 (* MCP 2025-11-25 Spec: Mcp-Session-Id          *)

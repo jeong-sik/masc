@@ -38,6 +38,7 @@
   test_surface_ref
   test_keeper_turn_outcome
   test_keeper_cycle_channel
+  test_board_collect_pause_gate
   test_keeper_identity_id
   test_keeper_idle_threshold_contract
   test_keeper_context_layers
@@ -334,6 +335,7 @@
   test_surface_ref
   test_keeper_turn_outcome
   test_keeper_cycle_channel
+  test_board_collect_pause_gate
   test_keeper_identity_id
   test_keeper_idle_threshold_contract
   test_keeper_context_layers

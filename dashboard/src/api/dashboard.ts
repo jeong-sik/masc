@@ -2302,8 +2302,6 @@ export type KeeperConfigUpdatePayload = {
   auto_handoff?: boolean
   handoff_threshold?: number
   handoff_cooldown_sec?: number
-  // Tool policy
-  tool_denylist?: string[]
 }
 
 export async function patchKeeperConfig(

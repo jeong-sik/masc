@@ -457,8 +457,9 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.active_goal_ids).toEqual(['goal-b', 'goal-c'])
   })
 
-  it('emits mention targets and tool denylist from line-based drafts', () => {
+  it('normalizes line-based runtime list drafts through one path', () => {
     const c = makeKeeperConfigForSandbox({
+      allowed_paths: ['workspace/masc'],
       workspace: {
         mention_targets: ['sangsu'],
         bound_workspace_ids: [],
@@ -467,22 +468,14 @@ describe('buildRuntimePayload — sandbox diffing', () => {
         active_goal_count: 0,
         missing_active_goal_ids: [],
       },
-      tools: {
-        tool_access: [],
-        resolved_allowlist: [],
-        tool_denylist: ['Execute'],
-        active_masc_tool_count: 0,
-        active_keeper_tool_count: 0,
-        total_active: 0,
-      },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
+      allowed_paths_text: 'workspace/masc\n workspace/oas \nworkspace/oas\n',
       mention_targets_text: 'alpha\n beta \nalpha\n',
-      tool_denylist_text: 'Execute\nRead\nRead\n',
     }), c)
 
+    expect(payload.allowed_paths).toEqual(['workspace/masc', 'workspace/oas'])
     expect(payload.mention_targets).toEqual(['alpha', 'beta'])
-    expect(payload.tool_denylist).toEqual(['Execute', 'Read'])
   })
 
   it('emits explicit empty mention targets when the draft is cleared', () => {
@@ -815,17 +808,13 @@ describe('KeeperConfigPanel', () => {
     )
   })
 
-  it('patches mention targets, tool denylist, and compaction token gate from the dashboard panel', async () => {
+  it('patches mention targets and compaction token gate from the dashboard panel', async () => {
     const base = makeKeeperConfig()
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
         workspace: {
           ...base.workspace,
           mention_targets: ['alpha', 'beta'],
-        },
-        tools: {
-          ...base.tools,
-          tool_denylist: ['Execute', 'Read'],
         },
         compaction: {
           ...base.compaction,
@@ -839,16 +828,12 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     const mentionTargets = container.querySelector('textarea[aria-label="mention_targets"]') as HTMLTextAreaElement | null
-    const toolDenylist = container.querySelector('textarea[aria-label="tool_denylist"]') as HTMLTextAreaElement | null
     const tokenGate = container.querySelector('input[aria-label="토큰 게이트"]') as HTMLInputElement | null
     expect(mentionTargets).not.toBeNull()
-    expect(toolDenylist).not.toBeNull()
     expect(tokenGate).not.toBeNull()
 
     mentionTargets!.value = 'alpha\n beta \nalpha\n'
     mentionTargets!.dispatchEvent(new Event('input', { bubbles: true }))
-    toolDenylist!.value = 'Execute\nRead\nRead\n'
-    toolDenylist!.dispatchEvent(new Event('input', { bubbles: true }))
     tokenGate!.value = '32000'
     tokenGate!.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
@@ -864,7 +849,6 @@ describe('KeeperConfigPanel', () => {
       'keeper-sangsu',
       expect.objectContaining({
         mention_targets: ['alpha', 'beta'],
-        tool_denylist: ['Execute', 'Read'],
         compaction_token_gate: 32000,
       }),
     )

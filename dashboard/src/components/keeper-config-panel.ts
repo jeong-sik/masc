@@ -58,6 +58,12 @@ type EditDraft = {
 
 const editDraft = signal<EditDraft | null>(null)
 const hookFilterQuery = signal<string>('')
+// The hook-slot / deny-list / cost-budget block is keeper-AGNOSTIC — the
+// backend builds it from a global static introspection with no keeper name,
+// so it is identical for every keeper. It is grouped under a collapsible
+// "전역 런타임 아키텍처" section (collapsed by default) to keep the per-keeper
+// editable controls above as the focus, instead of reading as per-keeper state.
+const globalArchExpanded = signal<boolean>(false)
 const lastSavedAt = signal<string | null>(null)
 const promptPreviewTab = signal<'blocks' | 'system' | 'world'>('blocks')
 
@@ -327,6 +333,7 @@ export function resetKeeperConfig(): void {
   runtimeDraft.value = null
   runtimeSaving.value = false
   hookFilterQuery.value = ''
+  globalArchExpanded.value = false
 }
 
 /**
@@ -1137,44 +1144,62 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       ${c.hooks ? (() => {
         const allEntries: readonly HookSlotEntry[] = Object.entries(c.hooks.slots) as HookSlotEntry[]
+        const activeCount = allEntries.filter(([, slot]) => slot.active).length
         const visibleEntries = filterHookSlots(allEntries, hookFilterQuery.value)
         const isFiltering = hookFilterQuery.value.trim() !== ''
+        const expanded = globalArchExpanded.value
         return html`
-          <${SectionHeader} title="훅 슬롯" />
-          <div class="flex items-center justify-between gap-2 mb-2">
-            <span class="text-3xs text-text-muted">${allEntries.length} slots</span>
-            <input
-              type="search"
-              value=${hookFilterQuery.value}
-              placeholder="슬롯 이름 / source / gate 필터"
-              aria-label="훅 슬롯 필터"
-              onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
-            />
-          </div>
-          ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
-            ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allEntries.length} slots)</div>`
-            : visibleEntries.map(([name, slot]) => html`
-                <div class="flex items-start gap-2 py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 mb-1.5">
-                  <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--color-status-ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
-                  <div class="flex-1 min-w-0">
-                    <div class="flex justify-between">
-                      <span class="text-xs font-semibold text-text-strong">${name}</span>
-                      <span class="text-3xs text-text-muted">${slot.source}</span>
-                    </div>
-                    ${hookSlotDetails(slot).length > 0 ? html`
-                      <div class="flex flex-wrap gap-1 mt-1">
-                        ${hookSlotDetails(slot).map((d: string) => html`
-                          <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
-                        `)}
+          <button
+            type="button"
+            onClick=${() => { globalArchExpanded.value = !globalArchExpanded.value }}
+            aria-expanded=${expanded}
+            class="w-full text-left rounded-[var(--r-3)] border border-[var(--accent-20)] bg-[var(--accent-5)] px-4 py-3 mt-8 mb-4 flex items-center gap-2 shadow-[var(--shadow-1)] v2-monitoring-panel"
+          >
+            <span class="text-2xs text-accent-fg w-3 shrink-0" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
+            <span class="text-xs font-bold uppercase tracking-[var(--track-caps)] text-accent-fg">전역 런타임 아키텍처</span>
+            <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]">전역 · 읽기 전용</span>
+            <div class="flex-1"></div>
+            <span class="text-3xs text-text-muted">${activeCount}/${allEntries.length} 슬롯 활성</span>
+          </button>
+          ${expanded ? html`
+            <p class="text-3xs text-text-muted mb-3 px-1 leading-relaxed">
+              모든 keeper에 공통인 런타임 hook 합성입니다. keeper별로 다르지 않으며 이 화면에서 편집할 수 없습니다.
+            </p>
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <span class="text-3xs text-text-muted">${allEntries.length} slots</span>
+              <input
+                type="search"
+                value=${hookFilterQuery.value}
+                placeholder="슬롯 이름 / source / gate 필터"
+                aria-label="훅 슬롯 필터"
+                onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
+                class="min-w-40 max-w-65 flex-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+              />
+            </div>
+            ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
+              ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allEntries.length} slots)</div>`
+              : visibleEntries.map(([name, slot]) => html`
+                  <div class="flex items-start gap-2 py-2 px-3 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 mb-1.5">
+                    <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--color-status-ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex justify-between">
+                        <span class="text-xs font-semibold text-text-strong">${name}</span>
+                        <span class="text-3xs text-text-muted">${slot.source}</span>
                       </div>
-                    ` : null}
+                      ${hookSlotDetails(slot).length > 0 ? html`
+                        <div class="flex flex-wrap gap-1 mt-1">
+                          ${hookSlotDetails(slot).map((d: string) => html`
+                            <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
+                          `)}
+                        </div>
+                      ` : null}
+                    </div>
                   </div>
-                </div>
-              `)}
-          <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list_count)} />
-          <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
-          <${ConfigRow} label="비용 예산" value=${c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '비활성'} />
+                `)}
+            <${ConfigRow} label="거부 목록 수" value=${String(c.hooks.deny_list.length)} />
+            <${ConfigRow} label="파괴 검사 도구" value=${formatHookDestructiveTools(c.hooks.destructive_check_tools)} />
+            <${ConfigRow} label="비용 예산 (텔레메트리 · 미강제)" value=${c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '미설정'} />
+          ` : null}
         `
       })() : null}
 

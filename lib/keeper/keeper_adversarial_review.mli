@@ -10,11 +10,11 @@
 
     The verdict is the LLM's judgment. On the structured [report_verdict] path
     there is no rule, heuristic, or string match deciding pass/fail. The
-    free-text fallback parses a JSON payload with
-    [Verifier_core.parse_verdict_from_json]; it does not use string matching to
-    decide pass/fail. The only deterministic parts are identity (which keeper
-    authored the work, hence who to wake) and event-id dedup (a given task-level
-    FAIL wakes the author at most once).
+    free-text fallback parses a JSON payload with [Verifier_core]; it does not
+    use string matching to decide pass/fail. The grounded entry point requires
+    evidence for WARN/FAIL before wake-on-fail routing. The only deterministic
+    parts are identity (which keeper authored the work, hence who to wake) and
+    event-id dedup (a given task-level FAIL wakes the author at most once).
 
     This module is a proof-of-concept. It is not yet wired to a keeper
     lifecycle trigger; integration with the tool registration in #21357 is the
@@ -36,11 +36,16 @@ val build_prompt : review_input -> (string, string) result
 
 val run_review :
   runtime_id:string -> review_input -> (Verifier_core.verdict, string) result
-(** Run the adversarial reviewer agent and read its structured verdict via the
-    [report_verdict] tool. If the model answers in free text, the fallback
-    attempts to parse a JSON payload and decode it with
-    [Verifier_core.parse_verdict_from_json]; it never uses string matching to
-    decide pass/fail. *)
+(** Compatibility wrapper around {!run_grounded_review}; returns only the
+    public verdict variant. *)
+
+val run_grounded_review :
+  runtime_id:string -> review_input -> (Verifier_core.grounded_verdict, string) result
+(** Run the adversarial reviewer agent and read its structured grounded verdict
+    via the [report_verdict] tool. If the model answers in free text, the
+    fallback attempts to parse a JSON payload and decode it with
+    [Verifier_core.parse_grounded_verdict_from_json]; it never uses string
+    matching to decide pass/fail. *)
 
 val act_on_verdict :
   base_path:string -> input:review_input -> Verifier_core.verdict -> (unit, string) result
@@ -51,9 +56,19 @@ val act_on_verdict :
     reason differently. Returns [Error] if recording the attention item fails,
     so the caller can decide whether to fail-closed. *)
 
+val act_on_grounded_verdict :
+  base_path:string ->
+  input:review_input ->
+  Verifier_core.grounded_verdict ->
+  (unit, string) result
+(** Like {!act_on_verdict}, but failed verdict wake metadata includes the
+    serialized grounded verdict so dashboard/turn surfaces can show the cited
+    code evidence. *)
+
 val review_and_wake_on_fail :
   base_path:string ->
   runtime_id:string ->
   review_input ->
   (Verifier_core.verdict, string) result
-(** [run_review] followed by [act_on_verdict] on the resulting verdict. *)
+(** [run_grounded_review] followed by [act_on_grounded_verdict] on the resulting
+    verdict, returning the compatibility [Verifier_core.verdict]. *)

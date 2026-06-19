@@ -106,6 +106,19 @@ let test_grounded_parser_rejects_bad_line () =
       (String.contains msg 'l')
   | Ok _ -> Alcotest.fail "expected line 0 to be rejected"
 
+let test_grounded_verdict_serializes_evidence () =
+  match VC.grounded_of (VC.Fail "bad") [ evidence ~line:9 ~quote:"let bad = true" () ] with
+  | Error msg -> Alcotest.fail msg
+  | Ok grounded ->
+    let open Yojson.Safe.Util in
+    let json = VC.grounded_verdict_to_yojson grounded in
+    Alcotest.(check string) "verdict" "FAIL" (json |> member "verdict" |> to_string);
+    Alcotest.(check string) "reason" "bad" (json |> member "reason" |> to_string);
+    let first = json |> member "evidence" |> to_list |> List.hd in
+    Alcotest.(check string) "path" "lib/foo.ml" (first |> member "path" |> to_string);
+    Alcotest.(check int) "line" 9 (first |> member "line" |> to_int);
+    Alcotest.(check string) "quote" "let bad = true" (first |> member "quote" |> to_string)
+
 let test_report_schema_keeps_verdict_enum_and_adds_evidence () =
   let schema = VC.report_verdict_schema.input_schema in
   let open Yojson.Safe.Util in
@@ -146,6 +159,8 @@ let () =
             test_grounded_parser_refuses_empty_fail;
           Alcotest.test_case "grounded parser rejects bad line" `Quick
             test_grounded_parser_rejects_bad_line;
+          Alcotest.test_case "grounded verdict serializes evidence" `Quick
+            test_grounded_verdict_serializes_evidence;
           Alcotest.test_case "schema keeps enum and adds evidence" `Quick
             test_report_schema_keeps_verdict_enum_and_adds_evidence;
         ] );

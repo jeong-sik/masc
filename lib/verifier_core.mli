@@ -70,6 +70,12 @@ val parse_verdict : string -> (verdict, string) result
 val grounded_of :
   verdict -> grounded_ref list -> (grounded_verdict, string) result
 
+(** JSON shape shared by review metadata and dashboard evidence. Emits
+    [verdict], optional [reason], and [evidence]. *)
+val grounded_ref_to_yojson : grounded_ref -> Yojson.Safe.t
+
+val grounded_verdict_to_yojson : grounded_verdict -> Yojson.Safe.t
+
 (** {1 Structured Verdict — report_verdict tool} *)
 
 (** MCP tool schema for [report_verdict]: [verdict] (enum of

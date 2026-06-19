@@ -56,12 +56,18 @@ let parse_verdict_from_text text =
     Error "model did not return a structured verdict (no JSON payload found)"
   | Some json -> Verifier_core.parse_verdict_from_json json
 
+let parse_grounded_verdict_from_text text =
+  match parse_json_payload text with
+  | None ->
+    Error "model did not return a structured verdict (no JSON payload found)"
+  | Some json -> Verifier_core.parse_grounded_verdict_from_json json
+
 (* Mirrors [Verifier_oas.verify]: structured verdict via the [report_verdict]
    tool, with a structured JSON fallback if the model answers in free text.
    The judgment itself is the model's; this only routes its structured output
    back as a typed [Verifier_core.verdict]. *)
-let run_review ~runtime_id (input : review_input) :
-    (Verifier_core.verdict, string) result =
+let run_grounded_review ~runtime_id (input : review_input) :
+    (Verifier_core.grounded_verdict, string) result =
   match build_prompt input with
   | Error msg ->
     Log.Keeper.warn "adversarial_review: prompt render/validation failed: %s" msg;
@@ -75,16 +81,17 @@ let run_review ~runtime_id (input : review_input) :
         let msg =
           Printf.sprintf
             "Verdict already recorded (%s); only one report_verdict call is allowed"
-            (Verifier_core.verdict_to_string v)
+            (Verifier_core.verdict_to_string v.Verifier_core.verdict)
         in
         Log.Keeper.warn "adversarial_review: %s" msg;
         Tool_result.error ~tool_name:name ~start_time msg
       | None -> (
-        match Verifier_core.parse_verdict_from_json args with
+        match Verifier_core.parse_grounded_verdict_from_json args with
         | Ok v ->
           verdict_ref := Some v;
           Tool_result.ok ~tool_name:name ~start_time
-            (Printf.sprintf "Verdict recorded: %s" (Verifier_core.verdict_to_string v))
+            (Printf.sprintf "Verdict recorded: %s"
+               (Verifier_core.verdict_to_string v.Verifier_core.verdict))
         | Error msg ->
           Log.Keeper.warn "adversarial_review: verdict parse failed: %s" msg;
           Tool_result.error ~tool_name:name ~start_time
@@ -104,17 +111,35 @@ let run_review ~runtime_id (input : review_input) :
       | None ->
         (* Model answered in text instead of calling report_verdict. *)
         let text = Agent_sdk_response.text_of_response result.response in
-        parse_verdict_from_text text)
+        parse_grounded_verdict_from_text text)
     | Error err -> Error (Agent_sdk.Error.to_string err)
+
+let run_review ~runtime_id (input : review_input) :
+    (Verifier_core.verdict, string) result =
+  match run_grounded_review ~runtime_id input with
+  | Ok grounded -> Ok grounded.Verifier_core.verdict
+  | Error msg -> Error msg
 
 (* Identity routing: the work's author is known, so waking them is structural,
    not a judgment. Dedup is keyed on the stable task-level FAIL outcome so
    reason wording drift cannot repeatedly wake the author for the same task. *)
-let wake_author ~base_path ~(input : review_input) ~reason :
+let wake_author ?grounded ~base_path ~(input : review_input) ~reason () :
     (unit, string) result =
   let dedupe_key = Printf.sprintf "adversarial_review:%s:fail" input.task_id in
   let event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key in
   let conversation_id = Printf.sprintf "review:%s" input.task_id in
+  let grounded_metadata =
+    match grounded with
+    | None -> []
+    | Some grounded ->
+      [
+        ( "grounded_verdict",
+          Yojson.Safe.to_string
+            (Verifier_core.grounded_verdict_to_yojson grounded) );
+        ( "evidence_count",
+          string_of_int (List.length grounded.Verifier_core.evidence) );
+      ]
+  in
   let item : Keeper_external_attention.item =
     {
       event_id;
@@ -140,7 +165,8 @@ let wake_author ~base_path ~(input : review_input) ~reason :
           ("kind", "review_rejected");
           ("task_id", input.task_id);
           ("verdict", "FAIL");
-        ];
+        ]
+        @ grounded_metadata;
     }
   in
   match Keeper_external_attention.record ~base_path item with
@@ -156,12 +182,20 @@ let wake_author ~base_path ~(input : review_input) ~reason :
 let act_on_verdict ~base_path ~(input : review_input)
     (verdict : Verifier_core.verdict) : (unit, string) result =
   match verdict with
-  | Verifier_core.Fail reason -> wake_author ~base_path ~input ~reason
+  | Verifier_core.Fail reason -> wake_author ~base_path ~input ~reason ()
+  | Verifier_core.Pass | Verifier_core.Warn _ -> Ok ()
+
+let act_on_grounded_verdict ~base_path ~(input : review_input)
+    (grounded : Verifier_core.grounded_verdict) : (unit, string) result =
+  match grounded.Verifier_core.verdict with
+  | Verifier_core.Fail reason -> wake_author ~grounded ~base_path ~input ~reason ()
   | Verifier_core.Pass | Verifier_core.Warn _ -> Ok ()
 
 let review_and_wake_on_fail ~base_path ~runtime_id (input : review_input) :
     (Verifier_core.verdict, string) result =
-  match run_review ~runtime_id input with
-  | Error _ as e -> e
-  | Ok verdict ->
-    Result.map (fun () -> verdict) (act_on_verdict ~base_path ~input verdict)
+  match run_grounded_review ~runtime_id input with
+  | Error msg -> Error msg
+  | Ok grounded ->
+    Result.map
+      (fun () -> grounded.Verifier_core.verdict)
+      (act_on_grounded_verdict ~base_path ~input grounded)

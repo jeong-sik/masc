@@ -37,3 +37,11 @@ Then call report_verdict exactly once:
 - WARN — acceptable, but with concerns the author should see.
 - FAIL — a blocker, or you could not verify the work. The reason must name the
   specific problems (with path:line) so the author can fix and resubmit.
+
+For WARN and FAIL, include an `evidence` array in the tool arguments. Each item
+must contain:
+- `path`: repo-relative file path you inspected.
+- `line`: optional 1-based line number.
+- `quote`: verbatim code or text excerpt that grounds the concern.
+
+PASS may omit evidence. WARN and FAIL without grounded evidence are invalid.

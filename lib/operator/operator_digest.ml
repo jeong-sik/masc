@@ -126,6 +126,88 @@ let keeper_attention_summary ~(meta : Keeper_meta_contract.keeper_meta) ~reason
       Printf.sprintf "%s needs operator attention (%s)" meta.name summary
   | None, None -> Printf.sprintf "%s needs operator attention" meta.name
 
+let metadata_string key metadata =
+  match List.assoc_opt key metadata with
+  | Some value ->
+      let value = String.trim value in
+      if String.equal value "" then None else Some value
+  | None -> None
+
+let metadata_json metadata =
+  `Assoc (List.map (fun (key, value) -> (key, `String value)) metadata)
+
+let external_attention_kind (item : Keeper_external_attention.item) =
+  match metadata_string "kind" item.metadata with
+  | Some kind -> "keeper_" ^ kind
+  | None -> "keeper_external_attention"
+
+let external_attention_severity (item : Keeper_external_attention.item) =
+  match item.urgency with
+  | Keeper_external_attention.System -> Sev_bad
+  | Keeper_external_attention.Mention
+  | Keeper_external_attention.Direct_message
+  | Keeper_external_attention.Ambient -> Sev_warn
+
+let external_attention_summary (item : Keeper_external_attention.item) =
+  let preview = String.trim item.content_preview in
+  if String.equal preview "" then
+    Printf.sprintf "%s has external attention from %s" item.keeper_name
+      item.source_label
+  else
+    Printf.sprintf "%s has external attention from %s: %s" item.keeper_name
+      item.source_label preview
+
+let external_attention_evidence (item : Keeper_external_attention.item) =
+  let grounded_fields =
+    match metadata_string "grounded_verdict" item.metadata with
+    | Some value -> [ ("grounded_verdict", `String value) ]
+    | None -> []
+  in
+  `Assoc
+    ([
+       ("source", `String "keeper_external_attention");
+       ("event_id", `String item.event_id);
+       ("dedupe_key", `String item.dedupe_key);
+       ("keeper_name", `String item.keeper_name);
+       ("source_label", `String item.source_label);
+       ("urgency", `String (Keeper_external_attention.urgency_to_string item.urgency));
+       ("content_preview", `String item.content_preview);
+       ("metadata", metadata_json item.metadata);
+     ]
+     @ grounded_fields)
+
+let external_attention_projection item =
+  let severity = external_attention_severity item in
+  let attention_item =
+    {
+      kind = external_attention_kind item;
+      severity;
+      summary = external_attention_summary item;
+      target_type = "keeper";
+      target_id = Some item.keeper_name;
+      actor = Some item.keeper_name;
+      evidence = external_attention_evidence item;
+    }
+  in
+  let recommended_action =
+    {
+      action_type = "keeper_probe";
+      target_type = "keeper";
+      target_id = Some item.keeper_name;
+      severity;
+      reason = "Inspect pending external attention";
+      suggested_payload =
+        `Assoc
+          [
+            ("source", `String "operator_digest");
+            ("keeper", `String item.keeper_name);
+            ("event_id", `String item.event_id);
+            ("conversation_id", `String item.conversation.conversation_id);
+          ];
+    }
+  in
+  (attention_item, recommended_action)
+
 let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta) =
   let attention_fields = Keeper_status_bridge.attention_fields_json config meta in
   if not (assoc_bool_field ~default:false "needs_attention" attention_fields)
@@ -191,11 +273,22 @@ let keeper_attention_projection config (meta : Keeper_meta_contract.keeper_meta)
     Some (attention_item, recommended_action)
 
 let keeper_attention_projection_items config =
-  Keeper_meta_store.keeper_names config
-  |> List.filter_map (fun name ->
-    match Keeper_meta_store.read_meta config name with
-    | Ok (Some meta) -> keeper_attention_projection config meta
-    | Ok None | Error _ -> None)
+  let keeper_names = Keeper_meta_store.keeper_names config in
+  let status_attention =
+    keeper_names
+    |> List.filter_map (fun name ->
+      match Keeper_meta_store.read_meta config name with
+      | Ok (Some meta) -> keeper_attention_projection config meta
+      | Ok None | Error _ -> None)
+  in
+  let external_attention =
+    keeper_names
+    |> List.concat_map (fun keeper_name ->
+      Keeper_external_attention.pending_for_keeper ~base_path:config.base_path
+        ~keeper_name ~limit:3 ()
+      |> List.map external_attention_projection)
+  in
+  status_attention @ external_attention
 
 let workspace_recommendations _config =
   dedup_recommendations []

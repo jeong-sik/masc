@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail } from './dashboard-shell'
+import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail, summarizeAttentionPreview } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
@@ -69,6 +69,38 @@ describe('isKeeperDetailDashboardRoute', () => {
       params: { section: 'agents' },
       postId: null,
     })).toBe(false)
+  })
+})
+
+describe('summarizeAttentionPreview', () => {
+  it('includes grounded evidence in attention tooltip lines', () => {
+    expect(summarizeAttentionPreview([
+      {
+        summary: 'Adversarial review failed',
+        kind: 'review_rejected',
+        grounded_verdict: {
+          verdict: 'FAIL',
+          reason: 'bad branch',
+          evidence: [
+            { path: 'lib/foo.ml', line: 12, quote: 'let bad = true' },
+          ],
+        },
+      },
+    ])).toEqual([
+      'Adversarial review failed | lib/foo.ml:12 let bad = true',
+    ])
+  })
+
+  it('falls back to evidence_preview when no grounded verdict exists', () => {
+    expect(summarizeAttentionPreview([
+      {
+        summary: 'Needs inspection',
+        kind: 'runtime_blocked',
+        evidence_preview: ['runtime_blocker_state=blocked'],
+      },
+    ])).toEqual([
+      'Needs inspection | runtime_blocker_state=blocked',
+    ])
   })
 })
 

@@ -41,8 +41,22 @@ export interface DashboardMissionAttentionQueueItem {
   top_action?: OperatorRecommendedAction | null
   related_session_ids: string[]
   related_agent_names: string[]
+  evidence?: unknown
   evidence_preview: string[]
+  grounded_verdict?: GroundedVerdict | null
   last_seen_at?: string | null
+}
+
+export interface GroundedVerdictEvidenceRef {
+  path: string
+  line?: number | null
+  quote: string
+}
+
+export interface GroundedVerdict {
+  verdict: string
+  reason?: string | null
+  evidence: GroundedVerdictEvidenceRef[]
 }
 
 export interface DashboardMissionSessionBrief {

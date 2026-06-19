@@ -267,7 +267,9 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0263 | Owner-priority cooperative preemption of in-flight autonomous turns | Draft | 8192f516a1 2026-06-19 | - |
 | 0264 | Memory OS recall outcome-anchored eval harness | Draft | 8192f516a1 2026-06-19 | - |
 | 0266 | Fusion async-completion wake + in-progress 가시성 | Draft | 217be11d24 2026-06-20 | - |
-| 0267 | Make task↔goal links visible and explicitly assignable | Draft | (untracked) | - |
+| 0267 | Make task↔goal links visible and explicitly assignable | Draft | d7a9684986 2026-06-20 | - |
+
+
 
 
 

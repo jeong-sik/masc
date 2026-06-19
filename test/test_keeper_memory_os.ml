@@ -421,6 +421,24 @@ let test_librarian_accepts_integer_confidence () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
+let test_librarian_generation_override () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-generation-override"
+    ; generation = 4
+    ; messages = [ text_message "turn-indexed memory" ]
+    }
+  in
+  let raw = valid_librarian_output () |> Yojson.Safe.to_string in
+  match
+    ( Librarian.episode_of_output ~now:1_000_000.0 inp raw
+    , Librarian.episode_of_output ~now:1_000_000.0 ~generation:11 inp raw )
+  with
+  | Some fallback, Some fresh ->
+    Alcotest.(check int) "default keeps input generation" 4 fallback.Types.generation;
+    Alcotest.(check int) "override uses fresh generation" 11 fresh.Types.generation
+  | _ -> Alcotest.fail "expected librarian output to parse"
+;;
+
 (* RFC-0247 §2.3 producer end-to-end: a claim the librarian labels "ephemeral" is
    born with a finite TTL and a fast decay rate, while a durable "fact" carries
    neither — so the forgetting machinery (GC TTL pass, per-fact truth decay) is
@@ -954,6 +972,48 @@ let test_episode_files_do_not_overwrite_generation () =
         second.Types.episode_summary
         newer.Types.episode_summary
     | episodes -> Alcotest.failf "expected two episodes, got %d" (List.length episodes))
+;;
+
+let test_next_generation_scans_episode_files () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-next-generation-keeper" in
+    Alcotest.(check int)
+      "empty trace starts at zero"
+      0
+      (Memory_io.next_generation ~keeper_id ~trace_id:"trace-next");
+    Memory_io.append_episode
+      ~keeper_id
+      (episode_fixture
+         ~now:1_000_000.0
+         ~trace_id:"trace-next"
+         ~generation:0
+         ~summary:"first trace episode");
+    Memory_io.append_episode
+      ~keeper_id
+      (episode_fixture
+         ~now:1_000_001.0
+         ~trace_id:"trace-next"
+         ~generation:2
+         ~summary:"third trace episode");
+    Memory_io.append_episode
+      ~keeper_id
+      (episode_fixture
+         ~now:1_000_002.0
+         ~trace_id:"trace-other"
+         ~generation:9
+         ~summary:"other trace episode");
+    Alcotest.(check int)
+      "same trace advances from max generation"
+      3
+      (Memory_io.next_generation ~keeper_id ~trace_id:"trace-next");
+    Alcotest.(check int)
+      "different trace uses its own max"
+      10
+      (Memory_io.next_generation ~keeper_id ~trace_id:"trace-other");
+    Alcotest.(check int)
+      "missing trace remains zero"
+      0
+      (Memory_io.next_generation ~keeper_id ~trace_id:"trace-missing"))
 ;;
 
 let test_episode_file_tail_uses_created_at_not_filename () =
@@ -2219,6 +2279,10 @@ let () =
             `Quick
             test_librarian_accepts_integer_confidence
         ; Alcotest.test_case
+            "librarian generation override"
+            `Quick
+            test_librarian_generation_override
+        ; Alcotest.test_case
             "librarian-born ephemeral fact has TTL (RFC-0247 §2.3)"
             `Quick
             test_librarian_ephemeral_fact_has_ttl
@@ -2274,6 +2338,10 @@ let () =
             "episode files do not overwrite generation"
             `Quick
             test_episode_files_do_not_overwrite_generation
+        ; Alcotest.test_case
+            "next generation scans episode files"
+            `Quick
+            test_next_generation_scans_episode_files
         ; Alcotest.test_case
             "episode file tail uses created_at"
             `Quick

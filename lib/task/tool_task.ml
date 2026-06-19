@@ -547,7 +547,11 @@ and handle_transition ~tool_name ~start_time ctx args =
       let ev = if attempt = 0 then expected_version else None in
       let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
                 ~task_id ~action ?expected_version:ev ~notes ~reason
-                ~force ?handoff_context ?prepare_verification_request
+                (* RFC-0262: the admin-gated [force] bool (l.164, already
+                   verified against initial_admin) maps to Operator authority;
+                   a non-admin or no-force caller acts as Assignee. *)
+                ~authority:(if force then Masc_domain.Operator else Masc_domain.Assignee)
+                ?handoff_context ?prepare_verification_request
                 ?compensate_verification_request
                 ?prepare_verification_verdict () in
       if is_version_mismatch r && attempt < max_cas_retries then begin

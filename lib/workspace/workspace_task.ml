@@ -32,7 +32,7 @@ let force_release_task_r config ~agent_name ~task_id ?handoff_context ()
     ~task_id
     ~action:Masc_domain.Release
     ?handoff_context
-    ~force:true
+    ~authority:Masc_domain.System
     ()
 ;;
 
@@ -46,7 +46,7 @@ let force_done_task_r config ~agent_name ~task_id ~notes ()
     ~task_id
     ~action:Masc_domain.Done_action
     ~notes
-    ~force:true
+    ~authority:Masc_domain.System
     ()
 ;;
 
@@ -63,9 +63,10 @@ let force_cancel_task_r config ~agent_name ~task_id ~reason ()
     ~task_id
     ~action:Masc_domain.Cancel
     ~reason
-    ~force:true
+    ~authority:Masc_domain.System
     ()
 ;;
+
 let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_result =
   if not (is_initialized config)
   then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)

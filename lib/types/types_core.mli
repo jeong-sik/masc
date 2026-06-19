@@ -71,6 +71,19 @@ val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list
 
+(** RFC-0262: who authorizes a transition that would otherwise require the
+    task's assignee. Replaces the anonymous [~force:bool] (RFC-0262 §3.1). *)
+type completion_authority =
+  | Assignee
+  | Operator
+  | System
+[@@deriving show]
+
+val completion_authority_to_string : completion_authority -> string
+(** Stable lowercase wire label ([assignee] / [operator] / [system]) for
+    transition-log serialization. Distinct from {!show_completion_authority},
+    whose output is a [@@deriving] detail not safe to persist. *)
+
 (* RFC-0220: verification sub-state folded into [task_status] (was a separate
    request_status store) so the illegal Todo+Pending pair is unrepresentable. *)
 type verification_phase =

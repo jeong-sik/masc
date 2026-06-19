@@ -235,6 +235,30 @@ type task_action =
   | Reject_verification
 [@@deriving show]
 
+(** RFC-0262: who authorizes a transition that would otherwise require the
+    task's assignee. Replaces the anonymous [~force:bool] that voided ownership
+    and every completion gate (RFC-0262 §1.2). Resolved once at the tool
+    boundary (Parse, don't validate); never threaded as a bare bool any layer
+    can flip to [true]. The closed sum is extensible by RFC: a new authority
+    forces the compiler to enumerate every guarded [decide] arm. *)
+type completion_authority =
+  | Assignee  (** the task's current claimant acting on its own claim *)
+  | Operator  (** operator control plane / explicit admin override *)
+  | System
+      (** code-path satisfier (RFC-0199 deterministic evidence probe, GC zombie
+          cleanup); never minted by an LLM/keeper turn *)
+[@@deriving show]
+
+(* Stable wire label for transition-log serialization. Deliberately not
+   [show_completion_authority] — [@@deriving show] emits the constructor name and
+   its formatting is an implementation detail; the log schema (and the §9 auditor
+   that reads it) must pin a fixed lowercase token. *)
+let completion_authority_to_string = function
+  | Assignee -> "assignee"
+  | Operator -> "operator"
+  | System -> "system"
+;;
+
 let task_action_of_string s =
   match String.lowercase_ascii s with
   | "claim" -> Ok Claim

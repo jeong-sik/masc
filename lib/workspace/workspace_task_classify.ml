@@ -446,6 +446,8 @@ let transition_log_event
       ?duration_ms
       ?handoff_context
       ?(forced = false)
+      ?(authority = Assignee)
+      ?assignee
       ?(now = now_iso ())
       ()
   : Yojson.Safe.t
@@ -462,8 +464,19 @@ let transition_log_event
      ; "from_status", `String (task_status_to_string from_status)
      ; "to_status", `String (task_status_to_string to_status)
      ; "forced", `Bool forced
+       (* RFC-0262 §9: the typed authority the FSM granted this transition.
+          [forced] is now the derived projection ([authority <> Assignee]); the
+          §9 auditor (Completion_trust_audit) keys off [authority] to tell an
+          Operator override from a System code-path satisfier. *)
+     ; "authority", `String (completion_authority_to_string authority)
      ; "ts", `String now
      ]
+     (* RFC-0262 §9: the task's owner *before* this transition (the [from_status]
+        assignee). Recorded so the §9① foreign-completion check is a direct
+        [actor <> assignee] comparison instead of reconstructing ownership from
+        the claim stream — the latter is blind to any claim outside the audited
+        window. [None] for Todo / Cancelled from-states (no owner). *)
+     @ optional_field "assignee" (Option.map (fun v -> `String v) assignee)
      @ optional_field "action" (Option.map (fun v -> `String v) action)
      @ optional_field "notes" (Option.map (fun v -> `String v) notes)
      @ optional_field "reason" (Option.map (fun v -> `String v) reason)

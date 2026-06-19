@@ -49,7 +49,8 @@ val transition_task_outcome_r :
      (unit, string) result) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
-  ?force:bool -> unit -> transition_outcome Masc_domain.masc_result
+  ?authority:Masc_domain.completion_authority ->
+  unit -> transition_outcome Masc_domain.masc_result
 
 val transition_task_r :
   config -> agent_name:string -> task_id:string -> action:Masc_domain.task_action ->
@@ -68,7 +69,8 @@ val transition_task_r :
      (unit, string) result) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
-  ?force:bool -> unit -> string Masc_domain.masc_result
+  ?authority:Masc_domain.completion_authority ->
+  unit -> string Masc_domain.masc_result
 
 val release_task_r :
   config -> agent_name:string -> task_id:string ->

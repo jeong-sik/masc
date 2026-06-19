@@ -1,6 +1,7 @@
 
 open Masc_domain
 open Server_utils
+open Result.Syntax
 
 let trim_opt = Env_config_core.trim_opt
 
@@ -141,92 +142,88 @@ let internal_keeper_agent_from_request request =
 let resolve_agent_name_for_auth_raw ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =
   match token with
-  | Some t when Auth.verify_internal_keeper_token base_path ~token:t ->
-      (match internal_keeper_agent_from_request request with
-       | Some agent_name -> Ok (Some agent_name)
-       | None ->
-           Error
-             (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                { reason = Missing_token
-                ; message = "Internal keeper auth requires x-masc-keeper-name header."
-                })))
-
-  | Some t -> (
-      match Auth.resolve_agent_from_token base_path ~token:t with
-      | Ok agent_name -> Ok (Some agent_name)
-      | Error err -> Error err)
-  | None ->
-      (match agent_from_request request with
-       | Some raw when String.trim raw <> "" ->
-           Ok (Some (String.trim raw))
-       | _ -> Ok None)
+  | Some t when Auth.verify_internal_keeper_token base_path ~token:t -> (
+      match internal_keeper_agent_from_request request with
+      | Some agent_name -> Ok (Some agent_name)
+      | None ->
+          Error
+            (Masc_domain.Auth
+               (Masc_domain.Auth_error.Unauthorized
+                  { reason = Missing_token
+                  ; message = "Internal keeper auth requires x-masc-keeper-name header."
+                  })))
+  | Some t ->
+      let+ agent_name = Auth.resolve_agent_from_token base_path ~token:t in
+      Some agent_name
+  | None -> (
+      match agent_from_request request with
+      | Some raw when String.trim raw <> "" -> Ok (Some (String.trim raw))
+      | _ -> Ok None)
 
 (** Verify Bearer token for MCP endpoints *)
 let verify_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
-  match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
-  | Error msg -> Error msg
-  | Ok auth_config ->
-      if not auth_config.Masc_domain.enabled then
-        Ok None  (* Auth disabled - allow all *)
-      else
-        match auth_token_from_request request with
-        | None when not auth_config.require_token ->
-            Ok None  (* Token not required *)
+  let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
+  if not auth_config.Masc_domain.enabled then
+    Ok None  (* Auth disabled - allow all *)
+  else
+    match auth_token_from_request request with
+    | None when not auth_config.require_token ->
+        Ok None  (* Token not required *)
+    | None ->
+        Error
+          "Authentication required. Use 'Authorization: Bearer <token>' header."
+    | Some token -> (
+        let* agent_name =
+          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
+          |> Result.map_error Masc_domain.masc_error_to_string
+        in
+        match agent_name with
         | None ->
+            (* Fail-closed: dead branch today (resolver:154-157 returns
+               [Ok (Some _)] or [Error] for [Some token]) but kept
+               explicit so a future [Anonymous] case cannot silently
+               rewrite to "dashboard". Spec:
+               [specs/auth/AuthIdentityFSM.tla] invariant
+               [NoSilentRewrite] (I2). *)
             Error
-              "Authentication required. Use 'Authorization: Bearer <token>' header."
-        | Some token -> (
-            match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
-            | Error err -> Error (Masc_domain.masc_error_to_string err)
-            | Ok None ->
-                (* Fail-closed: dead branch today (resolver:154-157 returns
-                   [Ok (Some _)] or [Error] for [Some token]) but kept
-                   explicit so a future [Anonymous] case cannot silently
-                   rewrite to "dashboard". Spec:
-                   [specs/auth/AuthIdentityFSM.tla] invariant
-                   [NoSilentRewrite] (I2). *)
-                Error
-                  "Authentication required. Bearer token did not resolve to \
-                   any agent."
-            | Ok (Some agent_name) ->
-                (match
-                   Auth.check_permission base_path ~agent_name ~token:(Some token)
-                     ~permission:Masc_domain.CanReadState
-                 with
-                 | Ok () -> Ok None
-                 | Error err -> Error (Masc_domain.masc_error_to_string err)))
+              "Authentication required. Bearer token did not resolve to \
+               any agent."
+        | Some agent_name ->
+            Auth.check_permission base_path ~agent_name ~token:(Some token)
+              ~permission:Masc_domain.CanReadState
+            |> Result.map_error Masc_domain.masc_error_to_string
+            |> Result.map (fun () -> None))
 
 let verify_mcp_observer_stream_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
-  match ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config with
-  | Error msg -> Error msg
-  | Ok auth_config ->
-      if not auth_config.Masc_domain.enabled then
+  let* auth_config = ensure_strict_http_token_auth ~endpoint:"/mcp" auth_config in
+  if not auth_config.Masc_domain.enabled then
+    Ok None
+  else
+    match observer_sse_auth_token_from_request request with
+    | None when not auth_config.require_token ->
         Ok None
-      else
-        match observer_sse_auth_token_from_request request with
-        | None when not auth_config.require_token ->
-            Ok None
+    | None ->
+        Error
+          "Authentication required. Use 'Authorization: Bearer <token>' header \
+           or 'token' query param for the observer/presence SSE stream."
+    | Some token -> (
+        let* agent_name =
+          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
+          |> Result.map_error Masc_domain.masc_error_to_string
+        in
+        match agent_name with
         | None ->
+            (* Fail-closed: see verify_mcp_auth above. *)
             Error
-              "Authentication required. Use 'Authorization: Bearer <token>' header \
-               or 'token' query param for the observer/presence SSE stream."
-        | Some token -> (
-            match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
-            | Error err -> Error (Masc_domain.masc_error_to_string err)
-            | Ok None ->
-                (* Fail-closed: see verify_mcp_auth above. *)
-                Error
-                  "Authentication required. Bearer token did not resolve to \
-                   any agent."
-            | Ok (Some agent_name) ->
-                (match
-                   Auth.check_permission base_path ~agent_name ~token:(Some token)
-                     ~permission:Masc_domain.CanReadState
-                 with
-                 | Ok () -> Ok None
-                 | Error err -> Error (Masc_domain.masc_error_to_string err)))
+              "Authentication required. Bearer token did not resolve to \
+               any agent."
+        | Some agent_name ->
+            Auth.check_permission base_path ~agent_name ~token:(Some token)
+              ~permission:Masc_domain.CanReadState
+            |> Result.map_error Masc_domain.masc_error_to_string
+            |> Result.map (fun () -> None))
 
 let verify_operator_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
@@ -240,20 +237,21 @@ let verify_operator_mcp_auth ~base_path request =
     | None ->
         Error "Authentication required. Use 'Authorization: Bearer <token>' header."
     | Some token -> (
-        match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
-        | Error err -> Error (Masc_domain.masc_error_to_string err)
-        | Ok None ->
+        let* agent_name =
+          resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token)
+          |> Result.map_error Masc_domain.masc_error_to_string
+        in
+        match agent_name with
+        | None ->
             (* Fail-closed: see verify_mcp_auth above. *)
             Error
               "Authentication required. Bearer token did not resolve to \
                any agent."
-        | Ok (Some agent_name) ->
-            (match
-               Auth.check_permission base_path ~agent_name ~token:(Some token)
-                 ~permission:Masc_domain.CanAdmin
-             with
-             | Ok () -> Ok None
-             | Error err -> Error (Masc_domain.masc_error_to_string err)))
+        | Some agent_name ->
+            Auth.check_permission base_path ~agent_name ~token:(Some token)
+              ~permission:Masc_domain.CanAdmin
+            |> Result.map_error Masc_domain.masc_error_to_string
+            |> Result.map (fun () -> None))
 
 let request_actor_hint request =
   match agent_from_request request with
@@ -796,25 +794,29 @@ let authorize_permission_request ~base_path ~permission request :
     (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
-  match ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg with
-  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-      { reason = Generic; message = msg }))
-  | Ok auth_cfg -> (
-      match resolve_agent_name_for_auth ~base_path request ~token with
-      | Error err -> Error err
-      | Ok agent_name_opt ->
-          let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-          if
-            auth_cfg.enabled && auth_cfg.require_token && token <> None
-            && agent_name_opt = None
-          then
-            Error
-              (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                 { reason = Missing_token
-                 ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"
-                 }))
-          else
-            Auth.check_permission base_path ~agent_name ~token ~permission)
+  let* auth_cfg =
+    ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg
+    |> Result.map_error (fun msg ->
+          Masc_domain.Auth
+            (Masc_domain.Auth_error.Unauthorized
+               { reason = Generic; message = msg }))
+  in
+  let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
+  let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+  if
+    auth_cfg.enabled && auth_cfg.require_token && token <> None
+    && agent_name_opt = None
+  then
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Unauthorized
+            { reason = Missing_token
+            ; message =
+                "Agent name required (X-Gate-Agent / X-MASC-Agent or \
+                 token-bound credential)"
+            }))
+  else
+    Auth.check_permission base_path ~agent_name ~token ~permission
 
 let authorize_read_request ~base_path request : (unit, Masc_domain.masc_error) result =
   authorize_permission_request ~base_path ~permission:Masc_domain.CanReadState request
@@ -823,70 +825,73 @@ let authorize_tool_request ~base_path ~tool_name request :
     (unit, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
-  match
+  let* () =
     if Option.is_some token then Ok ()
     else ensure_same_origin_browser_request request
-  with
-  | Error err -> Error err
-  | Ok () ->
-      (match ensure_strict_http_token_auth
-               ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
-       with
-  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-      { reason = Generic; message = msg }))
-  | Ok auth_cfg -> (
-      match resolve_agent_name_for_auth ~base_path request ~token with
-      | Error err -> Error err
-      | Ok agent_name_opt ->
-          let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-          if
-            auth_cfg.enabled && auth_cfg.require_token && token <> None
-            && agent_name_opt = None
-          then
-            Error
-              (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                 { reason = Missing_token
-                 ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"
-                 }))
-          else
-            Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name))
+  in
+  let* auth_cfg =
+    ensure_strict_http_token_auth
+      ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
+    |> Result.map_error (fun msg ->
+          Masc_domain.Auth
+            (Masc_domain.Auth_error.Unauthorized
+               { reason = Generic; message = msg }))
+  in
+  let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
+  let agent_name = Option.value ~default:"dashboard" agent_name_opt in
+  if
+    auth_cfg.enabled && auth_cfg.require_token && token <> None
+    && agent_name_opt = None
+  then
+    Error
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Unauthorized
+            { reason = Missing_token
+            ; message =
+                "Agent name required (X-Gate-Agent / X-MASC-Agent or \
+                 token-bound credential)"
+            }))
+  else
+    Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name
 
 let authorize_token_bound_permission_request ~base_path ~permission request :
     (string, Masc_domain.masc_error) result =
   let auth_cfg = Auth.load_auth_config base_path in
   if not auth_cfg.enabled then
     Error
-      (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-         { reason = Missing_token
-         ; message = "HTTP mutation requires workspace auth enabled with require_token=true."
-         }))
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Unauthorized
+            { reason = Missing_token
+            ; message = "HTTP mutation requires workspace auth enabled with require_token=true."
+            }))
   else if not auth_cfg.require_token then
     Error
-      (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-         { reason = Missing_token
-         ; message = "HTTP mutation requires bearer token auth (require_token=true)."
-         }))
+      (Masc_domain.Auth
+         (Masc_domain.Auth_error.Unauthorized
+            { reason = Missing_token
+            ; message = "HTTP mutation requires bearer token auth (require_token=true)."
+            }))
   else
     match auth_token_from_request request with
     | None ->
         Error
-          (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-             { reason = Missing_token
-             ; message = "Authentication required. Use 'Authorization: Bearer <token>' header."
-             }))
-    | Some token -> (
-        match Auth.find_credential_by_token base_path ~token with
-        | Error err -> Error err
-        | Ok cred ->
-            if Masc_domain.has_permission cred.role permission then
-              Ok cred.agent_name
-            else
-              Error
-                (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden
-                   {
-                     agent = cred.agent_name;
-                     action = Masc_domain.show_permission permission;
-                   })))
+          (Masc_domain.Auth
+             (Masc_domain.Auth_error.Unauthorized
+                { reason = Missing_token
+                ; message =
+                    "Authentication required. Use 'Authorization: Bearer <token>' header."
+                }))
+    | Some token ->
+        let* cred = Auth.find_credential_by_token base_path ~token in
+        if Masc_domain.has_permission cred.role permission then
+          Ok cred.agent_name
+        else
+          Error
+            (Masc_domain.Auth
+               (Masc_domain.Auth_error.Forbidden
+                  { agent = cred.agent_name
+                  ; action = Masc_domain.show_permission permission
+                  }))
 
 let is_dashboard_bootstrap_path path =
   String.starts_with ~prefix:"/api/v1/dashboard/" path

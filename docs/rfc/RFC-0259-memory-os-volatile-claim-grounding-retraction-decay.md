@@ -22,7 +22,7 @@ The boundary stays where RFC-0247 put it — **judgment = LLM, structure = deter
 
 ### 2.1 The lived symptom
 
-A keeper reported (≈30 consecutive turns) that recall kept asserting its research PR was about to merge / its role was done, while the PR was in fact closed. Reproduced directly against the live store at `~/me/.masc/config/keepers/`:
+A keeper reported (≈30 consecutive turns) that recall kept asserting its research PR was about to merge / its role was done, while the PR was in fact closed. Reproduced directly against the live store at `<base-path>/.masc/config/keepers/`:
 
 `issue_king.facts.jsonl` held five mutually-contradictory, now-false **durable** (`category:"fact"`, no `valid_until`) claims about PR #21363:
 

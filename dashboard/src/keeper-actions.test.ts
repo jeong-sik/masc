@@ -74,7 +74,7 @@ import {
 } from './keeper-chat-pending'
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import type { KeeperChatStreamEvent } from './api'
-import type { KeeperStatusDetail } from './types'
+import type { KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
 describe('noteKeeperChatAppended', () => {
   beforeEach(() => {
@@ -243,6 +243,81 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+
+  it('derives text and media user blocks when only attachments are supplied', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TEXT_MESSAGE_END' },
+      { type: 'RUN_FINISHED' },
+    ], true))
+    const attachments: KeeperConversationAttachment[] = [
+      {
+        id: 'att-img',
+        type: 'image',
+        name: 'screen.png',
+        size: 1024,
+        mimeType: 'image/png',
+        data: 'data:image/png;base64,abc123',
+      },
+    ]
+
+    await sendKeeperThreadMessage('echo', 'describe this', { attachments })
+
+    expect(streamKeeperMessage).toHaveBeenCalledWith(
+      'echo',
+      'describe this',
+      expect.objectContaining({
+        attachments,
+        userBlocks: [
+          {
+            type: 'image',
+            attachmentId: 'att-img',
+            name: 'screen.png',
+            mimeType: 'image/png',
+            size: 1024,
+          },
+          { type: 'text', text: 'describe this' },
+        ],
+      }),
+    )
+  })
+
+  it('derives audio user blocks from audio attachments', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TEXT_MESSAGE_END' },
+      { type: 'RUN_FINISHED' },
+    ], true))
+    const attachments: KeeperConversationAttachment[] = [
+      {
+        id: 'att-audio',
+        type: 'file',
+        name: 'voice.webm',
+        size: 2048,
+        mimeType: 'audio/webm',
+        data: 'data:audio/webm;base64,AAAA',
+      },
+    ]
+
+    await sendKeeperThreadMessage('echo', '', { attachments })
+
+    expect(streamKeeperMessage).toHaveBeenCalledWith(
+      'echo',
+      '[첨부 1개: voice.webm]',
+      expect.objectContaining({
+        attachments,
+        userBlocks: [
+          {
+            type: 'audio',
+            attachmentId: 'att-audio',
+            name: 'voice.webm',
+            mimeType: 'audio/webm',
+            size: 2048,
+          },
+        ],
+      }),
+    )
   })
 
   it('mints deterministic non-colliding optimistic entry ids', async () => {

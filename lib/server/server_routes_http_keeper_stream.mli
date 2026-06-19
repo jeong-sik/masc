@@ -40,9 +40,30 @@
 
 (** {1 Request record} *)
 
+type user_media_block = Keeper_multimodal_input.user_media_block = {
+  attachment_id : string;
+  name : string;
+  mime_type : string;
+  size : int option;
+}
+(** Media user input block carried by the dashboard stream request.
+    [attachment_id] points at an entry in [attachments]; raw media stays
+    in the attachment payload for the current dashboard contract and is
+    not mixed into the text [message]. *)
+
+type user_input_block = Keeper_multimodal_input.user_input_block =
+  | User_text of string
+  | User_image of user_media_block
+  | User_document of user_media_block
+  | User_audio of user_media_block
+(** Semantic user-input blocks accepted from the dashboard.  This is a
+    MASC request-boundary type, intentionally distinct from dashboard
+    rich-render [ChatBlock] values and from OAS provider blocks. *)
+
 type keeper_chat_stream_request = {
   name : string;
   message : string;
+  user_blocks : user_input_block list;
   timeout_sec : int option;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
@@ -53,7 +74,9 @@ type keeper_chat_stream_request = {
   attachments : Keeper_chat_store.attachment list;
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
-    [timeout_sec] is clamped to [\[5, 300\]] when
+    [message] is the text fallback used by the existing direct keeper
+    path; [user_blocks] preserves semantic text/media input for the
+    block-aware runtime path.  [timeout_sec] is clamped to [\[5, 300\]] when
     present.  [turn_instructions] and [surface_context]
     are optional copilot context fields; when
     [turn_instructions] is absent but [surface_context]
@@ -70,7 +93,7 @@ val parse_keeper_chat_stream_request :
 (** Parses the HTTP body string into a
     {!keeper_chat_stream_request}.  Returns
     [Error reason] on JSON shape mismatches, missing
-    [name] / [message], partial connector context, or
+    [name] / content, malformed [user_blocks], partial connector context, or
     presence of legacy keeper model args removed by the
     runtime rewrite. *)
 
@@ -122,6 +145,7 @@ val process_single_turn :
   auth_token:string option ->
   thread_id:string ->
   closed:bool ref ->
+  client_disconnects:unit Eio.Stream.t option ->
   payload:keeper_chat_stream_request ->
   run_id:string ->
   message_id:string ->
@@ -145,6 +169,7 @@ module For_testing : sig
   val chat_speaker_of_request : keeper_chat_stream_request -> Keeper_chat_store.speaker
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
+  val modalities_for_request : keeper_chat_stream_request -> string list
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
 end

@@ -20,6 +20,7 @@ import type {
   KeeperConversationEntry,
   KeeperDiagnostic,
   KeeperStatusDetail,
+  KeeperUserInputBlock,
 } from './types'
 import {
   activeKeeperName,
@@ -488,16 +489,72 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   }
 }
 
+function userInputMediaKindForAttachment(
+  attachment: KeeperConversationAttachment,
+): Exclude<KeeperUserInputBlock['type'], 'text'> {
+  if (attachment.type === 'image') return 'image'
+  if (attachment.mimeType.startsWith('audio/')) return 'audio'
+  return 'document'
+}
+
+function attachmentToUserInputBlock(attachment: KeeperConversationAttachment): KeeperUserInputBlock {
+  return {
+    type: userInputMediaKindForAttachment(attachment),
+    attachmentId: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+  }
+}
+
+function deriveUserBlocks(
+  prompt: string,
+  attachments: KeeperConversationAttachment[] | undefined,
+): KeeperUserInputBlock[] | undefined {
+  const blocks = attachments?.map(attachmentToUserInputBlock) ?? []
+  const text = prompt.trim()
+  if (text) blocks.push({ type: 'text', text })
+  return blocks.length > 0 ? blocks : undefined
+}
+
+function fallbackMessageForUserBlocks(blocks: KeeperUserInputBlock[]): string {
+  const text = blocks
+    .filter((block): block is Extract<KeeperUserInputBlock, { type: 'text' }> => block.type === 'text')
+    .map(block => block.text.trim())
+    .filter(Boolean)
+    .join('\n\n')
+  if (text) return text
+
+  const media = blocks.filter(block => block.type !== 'text')
+  if (media.length === 0) return ''
+  const names = media
+    .slice(0, 3)
+    .map(block => block.name.trim())
+    .filter(Boolean)
+    .join(', ')
+  const suffix = media.length > 3 ? ` 외 ${media.length - 3}개` : ''
+  return names
+    ? `[첨부 ${media.length}개: ${names}${suffix}]`
+    : `[첨부 ${media.length}개]`
+}
+
 export async function sendKeeperThreadMessage(
   name: string,
   prompt: string,
-  options: { attachments?: KeeperConversationAttachment[] } = {},
+  options: {
+    attachments?: KeeperConversationAttachment[]
+    userBlocks?: KeeperUserInputBlock[]
+  } = {},
 ): Promise<void> {
   const keeperName = name.trim()
-  const message = prompt.trim()
-  if (!keeperName || !message) return
   const attachments =
     options.attachments && options.attachments.length > 0 ? options.attachments : undefined
+  const userBlocks =
+    options.userBlocks && options.userBlocks.length > 0
+      ? options.userBlocks
+      : deriveUserBlocks(prompt, attachments)
+  const message = prompt.trim() || fallbackMessageForUserBlocks(userBlocks ?? [])
+  if (!keeperName || !message) return
   abortKeeperThreadMessage(keeperName)
   const localId = `local-${++localIdCounter}-${Date.now()}`
   const assistantId = `reply-${++localIdCounter}-${Date.now()}`
@@ -538,6 +595,7 @@ export async function sendKeeperThreadMessage(
     const outcome = await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
       attachments,
+      userBlocks,
       onEvent: event => {
         setRecordValue(keeperStreamLastEventAt, keeperName, Date.now())
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {

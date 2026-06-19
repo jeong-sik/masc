@@ -196,6 +196,13 @@ let redaction_for ~base_dir ~keeper_name =
 let redact_attachment redaction att =
   { att with data = Keeper_secret_redaction.redact_text redaction att.data }
 
+let persisted_attachment_ref (att : attachment) =
+  let digest = Digest.to_hex (Digest.string att.data) in
+  Printf.sprintf "masc://attachment/%s/%s" att.id digest
+
+let persisted_attachment (att : attachment) =
+  { att with data = persisted_attachment_ref att }
+
 let redact_tool_call redaction tc =
   { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }
 
@@ -401,6 +408,9 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     let user_attachments =
       List.map (redact_attachment redaction) user_attachments
     in
+    let persisted_user_attachments =
+      List.map persisted_attachment user_attachments
+    in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let assistant_content =
       Keeper_secret_redaction.redact_text redaction assistant_content
@@ -411,7 +421,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
        assistant lines are the keeper's own output. *)
     let user_line =
       encode_line ~role:Role.User ~content:user_content ~ts
-        ~attachments:user_attachments ?surface ?conversation_id
+        ~attachments:persisted_user_attachments ?surface ?conversation_id
         ?external_message_id ?speaker
         ~mentions:(user_line_mentions ~extra_mentions user_content) ()
     in

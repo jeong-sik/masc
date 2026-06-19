@@ -84,6 +84,7 @@ let run_turn
       ~(build_turn_prompt :
          base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
       ~(user_message : string)
+      ?user_blocks
       ~(runtime_id : string)
       ?world_observation
       ?(turn_affordances = [])
@@ -485,6 +486,7 @@ let run_turn
                   ~runtime_id:runtime_id_string
                     ~keeper_name:meta.name
                     ~goal:user_message
+                    ?goal_blocks:user_blocks
                     ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                     ~system_prompt:turn_system_prompt

@@ -12,6 +12,7 @@ import type {
   KeeperConversationAttachment,
   KeeperConversationEntry,
   KeeperDiagnostic,
+  KeeperUserInputBlock,
 } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -534,7 +535,7 @@ export function KeeperConversationPanel({
     }
   }
 
-  const submit = async ({ blocks }: { blocks: ChatBlock[] }) => {
+  const submit = async ({ blocks, userBlocks }: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => {
     const prompt = draft.trim()
     if (chatAccess.blocked) {
       showToast(chatAccess.message, 'error')
@@ -549,7 +550,7 @@ export function KeeperConversationPanel({
       return
     }
     try {
-      await sendKeeperThreadMessage(keeperName, prompt, { attachments })
+      await sendKeeperThreadMessage(keeperName, prompt, { attachments, userBlocks })
     } catch (err) {
       if (isAbortError(err)) return
       const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
@@ -679,7 +680,7 @@ export function KeeperConversationPanel({
               queueEnabled=${true}
               queueCount=${queueCount}
               onDraftChange=${setDraft}
-              onSend=${(payload: { blocks: ChatBlock[] }) => { void submit(payload) }}
+              onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
               onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
               layout="primary"
             />
@@ -793,7 +794,7 @@ export function KeeperConversationPanel({
             queueEnabled=${true}
             queueCount=${queueCount}
             onDraftChange=${setDraft}
-            onSend=${(payload: { blocks: ChatBlock[] }) => { void submit(payload) }}
+            onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
             layout="primary"
           />
@@ -905,7 +906,7 @@ export function KeeperConversationPanel({
             queueEnabled=${true}
             queueCount=${queueCount}
             onDraftChange=${setDraft}
-            onSend=${(payload: { blocks: ChatBlock[] }) => { void submit(payload) }}
+            onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
           />
         </div>

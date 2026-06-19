@@ -23,6 +23,7 @@ type try_provider_ctx =
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
+  ; goal_blocks : Agent_sdk.Types.content_block list option
   ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string
@@ -410,16 +411,30 @@ let run_try_provider
         in
         let run_fn () =
           Eio_guard.check_if_ready ();
-          Runtime_agent.run
-            ~sw:attempt_sw
-            ~net:ctx.net
-            ~config
-            ?oas_checkpoint:effective_checkpoint
-            ?on_event:ctx.on_event
-            ?on_yield:ctx.on_yield
-            ?on_resume:ctx.on_resume
-            ~agent_ref:local_agent_ref
-            ctx.goal
+          match ctx.goal_blocks with
+          | Some blocks ->
+              Runtime_agent.run_blocks
+                ~sw:attempt_sw
+                ~net:ctx.net
+                ~config
+                ?oas_checkpoint:effective_checkpoint
+                ?on_event:ctx.on_event
+                ?on_yield:ctx.on_yield
+                ?on_resume:ctx.on_resume
+                ~agent_ref:local_agent_ref
+                ~goal_detail:ctx.goal
+                blocks
+          | None ->
+              Runtime_agent.run
+                ~sw:attempt_sw
+                ~net:ctx.net
+                ~config
+                ?oas_checkpoint:effective_checkpoint
+                ?on_event:ctx.on_event
+                ?on_yield:ctx.on_yield
+                ?on_resume:ctx.on_resume
+                ~agent_ref:local_agent_ref
+                ctx.goal
         in
         (* Do not wrap [Runtime_agent.run] in a MASC wall-clock timeout here.
            OAS provider stream/body timeouts and tool-local subprocess budgets

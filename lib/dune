@@ -66,7 +66,7 @@
   keeper_registry_orphan_drops
   keeper_registry_spawn_slots
   keeper_registry_error_tracking
-  keeper_text_processing
+  keeper_text_processing keeper_multimodal_input
   keeper_summarizer
   keeper_context_core_message_json
   keeper_context_core_history

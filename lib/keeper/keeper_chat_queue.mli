@@ -23,6 +23,7 @@ type message_source =
 
 type queued_message = {
   content : string;
+  user_blocks : Keeper_multimodal_input.user_input_block list;
   attachments : Keeper_chat_store.attachment list;
   timestamp : float;
   source : message_source;
@@ -52,10 +53,10 @@ val same_source : message_source -> message_source -> bool
 val dequeue_batch : keeper_name:string -> queued_message list
 
 (** [merge_batch batch] coalesces a same-source batch into one message:
-    contents joined in arrival order with a blank line, attachments
-    concatenated, the first message's timestamp (queueing latency stays
-    measurable), the shared source. [None] on [[]]; a singleton is
-    returned unchanged. *)
+    contents joined in arrival order with a blank line, semantic user blocks
+    and attachments concatenated, the first message's timestamp (queueing
+    latency stays measurable), the shared source. [None] on [[]]; a singleton
+    is returned unchanged. *)
 val merge_batch : queued_message list -> queued_message option
 
 (** [length keeper_name] returns the number of queued messages. *)

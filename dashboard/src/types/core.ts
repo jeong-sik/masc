@@ -735,6 +735,18 @@ export interface KeeperConversationAttachment {
   dims?: string
 }
 
+export type KeeperUserInputMediaKind = 'image' | 'document' | 'audio'
+
+export type KeeperUserInputBlock =
+  | { type: 'text'; text: string }
+  | {
+      type: KeeperUserInputMediaKind
+      attachmentId: string
+      name: string
+      mimeType: string
+      size: number
+    }
+
 // RFC-0235 P1: synthesized voice clip attached to an assistant chat row.
 // `audioUrl` is the absolute/relative URL the dashboard uses for playback;
 // `token` is the capability in `/api/v1/voice/audio/<token>` used as a

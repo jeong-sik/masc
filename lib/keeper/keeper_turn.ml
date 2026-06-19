@@ -215,6 +215,17 @@ let keeper_msg_timeout_override args =
       Ok (Some timeout_sec)
   | Some _ -> Error "timeout_sec must be a positive finite number"
 
+let user_oas_blocks_of_args args =
+  match Keeper_multimodal_input.parse_user_blocks args with
+  | Error err -> Error err
+  | Ok [] -> Ok None
+  | Ok user_blocks ->
+      let attachments = Keeper_multimodal_input.parse_attachments args in
+      match Keeper_multimodal_input.to_oas_blocks ~attachments user_blocks with
+      | Error err -> Error err
+      | Ok [] -> Ok None
+      | Ok blocks -> Ok (Some blocks)
+
 let preflight_keeper_msg ctx args : (unit, string) result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
@@ -240,6 +251,9 @@ let preflight_keeper_msg ctx args : (unit, string) result =
     (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
     | Error e -> Error e
     | Ok () ->
+    (match user_oas_blocks_of_args args with
+    | Error e -> Error e
+    | Ok _ ->
     match ensure_keeper_exists ~ctx ~name with
     | Error e -> Error e
     | Ok meta ->
@@ -256,7 +270,7 @@ let preflight_keeper_msg ctx args : (unit, string) result =
         match Keeper_types_support.ensure_api_keys_for_labels effective_models with
         | Error e -> Error e
         | Ok () ->
-          Keeper_turn_helpers.ensure_local_discovery_ready effective_models)))
+          Keeper_turn_helpers.ensure_local_discovery_ready effective_models))))
 
 (* -- Direct-message turn FSM wrapper ---------------------------------------- *)
 
@@ -416,6 +430,9 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
     (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
     | Error e -> tool_result_error ("" ^ e)
     | Ok () ->
+    (match user_oas_blocks_of_args args with
+    | Error e -> tool_result_error ("" ^ e)
+    | Ok user_blocks ->
     match ensure_keeper_exists
       ~ctx ~name
     with
@@ -712,6 +729,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                          ~max_context:max_runtime_context
                          ~build_turn_prompt
                          ~user_message:message
+                         ?user_blocks
                          ~runtime_id:
                            (                         (turn_runtime_id))
                          ~world_observation
@@ -946,7 +964,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
               in
               tool_result_ok (Yojson.Safe.to_string reply_json)
 
-)))))))
+))))))))
 
 let handle_keeper_msg ?on_text_delta ?on_event ctx args : tool_result =
   let name = get_string args "name" "" in

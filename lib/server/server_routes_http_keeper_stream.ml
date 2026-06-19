@@ -4,9 +4,23 @@ open Server_auth
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
 
+type user_media_block = Keeper_multimodal_input.user_media_block = {
+  attachment_id : string;
+  name : string;
+  mime_type : string;
+  size : int option;
+}
+
+type user_input_block = Keeper_multimodal_input.user_input_block =
+  | User_text of string
+  | User_image of user_media_block
+  | User_document of user_media_block
+  | User_audio of user_media_block
+
 type keeper_chat_stream_request = {
   name : string;
   message : string;
+  user_blocks : user_input_block list;
   timeout_sec : int option;
   turn_instructions : string option;
   surface_context : Yojson.Safe.t option;
@@ -85,15 +99,6 @@ let turn_instructions_for_request payload =
       if ctx_text = "" then Some ti
       else Some (ti ^ "\n\n" ^ ctx_text)
 
-let attachment_json (att : Keeper_chat_store.attachment) =
-  `Assoc
-    [ ("id", `String att.Keeper_chat_store.id);
-      ("type", `String att.att_type);
-      ("name", `String att.name);
-      ("size", `Int att.size);
-      ("mime_type", `String att.mime_type);
-      ("data", `String att.data) ]
-
 let args_of_request payload : Yojson.Safe.t =
   let message = message_for_request payload in
   let base_fields =
@@ -125,9 +130,22 @@ let args_of_request payload : Yojson.Safe.t =
      else [])
   in
   let fields = base_fields @ connector_fields in
+  let fields =
+    if payload.user_blocks = [] then fields
+    else
+      ("user_blocks", Keeper_multimodal_input.user_blocks_to_yojson payload.user_blocks)
+      :: fields
+  in
   `Assoc
     (if payload.attachments = [] then fields
-     else ("attachments", `List (List.map attachment_json payload.attachments)) :: fields)
+     else
+       ("attachments", Keeper_multimodal_input.attachments_to_yojson payload.attachments)
+       :: fields)
+
+let modalities_for_request payload =
+  match Keeper_multimodal_input.modalities payload.user_blocks with
+  | [] -> [ "text" ]
+  | labels -> labels
 
 let keeper_chat_request_prefixes =
   [
@@ -300,7 +318,7 @@ let parse_keeper_chat_stream_request body_str =
       Error "request body must be a JSON object"
     else
       let name = Json_util.get_string_with_default json ~key:"name" ~default:"" |> String.trim in
-      let message =
+      let raw_message =
         Json_util.get_string_with_default json ~key:"message" ~default:""
         |> String.trim
       in
@@ -348,45 +366,16 @@ let parse_keeper_chat_stream_request body_str =
         | Some (`Int _) | Some (`Float _) -> Ok None
         | Some _ -> Error "timeout_sec must be a positive number"
       in
-      let attachments : Keeper_chat_store.attachment list =
-        match Json_util.assoc_member_opt "attachments" json with
-        | Some (`List att_list) ->
-            List.filter_map
-              (fun att_json ->
-                match att_json with
-                | `Assoc _ -> (
-                    try
-                      let id =
-                        Json_util.get_string_with_default att_json ~key:"id" ~default:""
-                      in
-                      let att_type =
-                        Json_util.get_string_with_default att_json ~key:"type" ~default:""
-                      in
-                      let name =
-                        Json_util.get_string_with_default att_json ~key:"name" ~default:""
-                      in
-                      let size =
-                        match Json_util.assoc_member_opt "size" att_json with
-                        | Some (`Int i) -> i
-                        | _ -> 0
-                      in
-                      let mime_type =
-                        Json_util.get_string_with_default att_json ~key:"mime_type" ~default:""
-                      in
-                      let data =
-                        Json_util.get_string_with_default att_json ~key:"data" ~default:""
-                      in
-                      if id = "" || data = "" then None
-                      else Some { Keeper_chat_store.id; att_type; name; size; mime_type; data }
-                    with _ -> None)
-                | _ -> None)
-              att_list
-        | _ -> []
+      let attachments = Keeper_multimodal_input.parse_attachments json in
+      let user_blocks_result = Keeper_multimodal_input.parse_user_blocks json in
+      let message_of_blocks user_blocks =
+        match raw_message with
+        | "" ->
+            Keeper_multimodal_input.fallback_message ~attachments user_blocks
+        | message -> message
       in
       if name = "" then
         Error "name is required"
-      else if message = "" then
-        Error "message is required"
       else if has_connector_context
               && (channel = "" || channel_workspace_id = "")
       then
@@ -398,12 +387,19 @@ let parse_keeper_chat_stream_request body_str =
         with
         | Error err -> Error err
         | Ok () -> (
-          match timeout_sec with
-          | Ok timeout_sec ->
+          match user_blocks_result, timeout_sec with
+          | Error err, _ -> Error err
+          | Ok _, Error err -> Error err
+          | Ok user_blocks, Ok timeout_sec ->
+              let message = message_of_blocks user_blocks in
+              if message = "" then
+                Error "message is required"
+              else
               Ok
                 {
                   name;
                   message;
+                  user_blocks;
                   timeout_sec;
                   turn_instructions;
                   surface_context;
@@ -413,7 +409,7 @@ let parse_keeper_chat_stream_request body_str =
                   channel_workspace_id;
                   attachments;
                 }
-          | Error err -> Error err )
+          )
   with Yojson.Json_error e ->
     Error ("invalid json: " ^ e)
 
@@ -470,9 +466,20 @@ let split_keeper_reply_chunks (text : string) : string list =
       chunks := String.sub text !start (len - !start) :: !chunks;
     List.rev !chunks |> List.filter (fun chunk -> String.trim chunk <> "")
 
-let keeper_stream_send_raw writer mutex closed data =
-  if !closed || Httpun.Body.Writer.is_closed writer then begin
+let notify_closed on_closed =
+  match on_closed with
+  | None -> ()
+  | Some f -> f ()
+
+let mark_closed ?on_closed closed =
+  if not !closed then begin
     closed := true;
+    notify_closed on_closed
+  end
+
+let keeper_stream_send_raw ?on_closed writer mutex closed data =
+  if !closed || Httpun.Body.Writer.is_closed writer then begin
+    mark_closed ?on_closed closed;
     false
   end else
     try
@@ -484,11 +491,11 @@ let keeper_stream_send_raw writer mutex closed data =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Keeper.warn "keeper_stream_send_raw write failed: %s" (Printexc.to_string exn);
-      closed := true;
+      mark_closed ?on_closed closed;
       false
 
-let keeper_stream_send_event writer mutex closed event =
-  keeper_stream_send_raw writer mutex closed (Ag_ui.event_to_sse event)
+let keeper_stream_send_event ?on_closed writer mutex closed event =
+  keeper_stream_send_raw ?on_closed writer mutex closed (Ag_ui.event_to_sse event)
 
 (** Execute keeper dispatch with real-time streaming.
     Calls [dispatch_stream] which forwards MODEL text deltas to [on_text_delta].
@@ -569,9 +576,9 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
   (success, body)
 
 (** Send a Run_error AG-UI event with the given message. *)
-let send_keeper_error writer mutex closed ~thread_id ~run_id err =
+let send_keeper_error ?on_closed writer mutex closed ~thread_id ~run_id err =
   ignore
-    (keeper_stream_send_event writer mutex closed
+    (keeper_stream_send_event ?on_closed writer mutex closed
        Ag_ui.(
          make_event ~thread_id ~run_id:(Some run_id)
            ~custom_name:(Some "KEEPER_CHAT_ERROR")
@@ -635,6 +642,7 @@ type keeper_stream_worker_event =
   | Stream_terminal of bool * string
 
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
+    ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
   let base_path = (Mcp_server.workspace_config state).base_path in
@@ -656,15 +664,27 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
      #20869 history this guards against. *)
   let text_accum = Keeper_stream_text_accum.create () in
   let worker_events = Eio.Stream.create 512 in
+  let terminal_pushed = Atomic.make false in
   let push_worker_event event =
-    if not !closed then
-      try Eio.Stream.add worker_events event
-      with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          Log.Keeper.warn
-            "keeper_stream: worker event push failed: %s"
-            (Printexc.to_string exn)
+    match event with
+    | Stream_terminal _ ->
+        if Atomic.compare_and_set terminal_pushed false true then
+          (try Eio.Stream.add worker_events event
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn ->
+               Log.Keeper.warn
+                 "keeper_stream: worker terminal push failed: %s"
+                 (Printexc.to_string exn))
+    | Stream_event _ ->
+        if not !closed then
+          try Eio.Stream.add worker_events event
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Keeper.warn
+                "keeper_stream: worker event push failed: %s"
+                (Printexc.to_string exn)
   in
   (* Mirror tool-call SDK events flowing through [on_event] so the
      completed turn persists tool lines alongside the user/assistant
@@ -792,6 +812,18 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
       ()
   in
+  (match client_disconnects with
+   | None -> ()
+   | Some disconnects ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let _ = Eio.Stream.take disconnects in
+         if not (Atomic.get terminal_pushed) then begin
+           (* fire-and-forget: disconnect cleanup must not block terminal event emission. *)
+           ignore (Keeper_msg_async.cancel ~base_path request_id);
+           push_worker_event
+             (Stream_terminal
+                (false, "keeper chat stream closed by client"))
+         end));
   Log.Keeper.info
     "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
     payload.name request_id
@@ -809,7 +841,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                   else "dashboard");
                actor_id = Some agent_name;
                status = Gate_protocol.Queued;
-               modalities = [ "text" ];
+               modalities = modalities_for_request payload;
                transport = Some "sse";
                metadata =
                  [
@@ -949,6 +981,14 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let writer = Httpun.Reqd.respond_with_streaming reqd response in
   let mutex = Eio.Mutex.create () in
   let closed = ref false in
+  let client_disconnects = Eio.Stream.create 1 in
+  let disconnect_notified = ref false in
+  let notify_disconnect () =
+    if not !disconnect_notified then begin
+      disconnect_notified := true;
+      Eio.Stream.add client_disconnects ()
+    end
+  in
   let close_stream () =
     if not !closed then begin
       closed := true;
@@ -963,7 +1003,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
 
-  let sse_adapter_loop ~events ~writer ~mutex ~closed =
+  let sse_adapter_loop ~events ~writer ~mutex ~closed ~on_closed =
     let current_thread_id = ref Ag_ui.default_thread_id in
     let current_run_id = ref None in
     let current_message_id = ref None in
@@ -976,11 +1016,11 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
       let message = redact_text message in
       match !current_run_id with
       | Some run_id ->
-          send_keeper_error writer mutex closed ~thread_id:!current_thread_id
-            ~run_id message
+          send_keeper_error ~on_closed writer mutex closed
+            ~thread_id:!current_thread_id ~run_id message
       | None ->
           ignore
-            (keeper_stream_send_event writer mutex closed
+            (keeper_stream_send_event ~on_closed writer mutex closed
                Ag_ui.(
                  make_event ~thread_id:!current_thread_id
                    ~custom_name:(Some "KEEPER_CHAT_ERROR")
@@ -994,13 +1034,13 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             current_thread_id := thread_id;
             current_run_id := Some run_id;
             if
-              keeper_stream_send_event writer mutex closed
+              keeper_stream_send_event ~on_closed writer mutex closed
                 Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_started)
             then loop ()
         | Text_message_start { message_id; role } ->
             current_message_id := Some message_id;
             if
-              keeper_stream_send_event writer mutex closed
+              keeper_stream_send_event ~on_closed writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~message_id:(Some message_id) ~role:(Some (ag_role role))
@@ -1014,7 +1054,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                regex cost with no effect (redact is idempotent on already-
                redacted text).  Do not re-redact. *)
             if
-              keeper_stream_send_event writer mutex closed
+              keeper_stream_send_event ~on_closed writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~message_id:!current_message_id
@@ -1023,14 +1063,14 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             then loop ()
         | Text_message_end ->
             if
-              keeper_stream_send_event writer mutex closed
+              keeper_stream_send_event ~on_closed writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~message_id:!current_message_id Text_message_end)
             then loop ()
         | Custom { name; value } ->
             if
-              keeper_stream_send_event writer mutex closed
+              keeper_stream_send_event ~on_closed writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~custom_name:(Some name)
@@ -1039,7 +1079,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             then loop ()
         | Tool_call_start { tool_call_id; tool_call_name } ->
             if
-              keeper_stream_send_event writer mutex closed
+              keeper_stream_send_event ~on_closed writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~tool_call_id:(Some tool_call_id) ~tool_call_name:(Some tool_call_name)
@@ -1049,7 +1089,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             (* [delta] is already redacted at publish
                ([Tool_call_args { delta = redact_text args; _ }]).  *)
             if
-              keeper_stream_send_event writer mutex closed
+              keeper_stream_send_event ~on_closed writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~tool_call_id:(Some tool_call_id)
@@ -1058,7 +1098,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             then loop ()
         | Tool_call_end { tool_call_id } ->
             if
-              keeper_stream_send_event writer mutex closed
+              keeper_stream_send_event ~on_closed writer mutex closed
                 Ag_ui.(
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~tool_call_id:(Some tool_call_id)
@@ -1072,7 +1112,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
         | Run_finished { run_id } ->
             current_run_id := Some run_id;
             ignore
-              (keeper_stream_send_event writer mutex closed
+              (keeper_stream_send_event ~on_closed writer mutex closed
                  Ag_ui.(
                    make_event ~thread_id:!current_thread_id ~run_id:(Some run_id)
                      Run_finished))
@@ -1081,7 +1121,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   in
 
 
-  ignore (keeper_stream_send_raw writer mutex closed "retry: 1500\n\n");
+  ignore
+    (keeper_stream_send_raw ~on_closed:notify_disconnect writer mutex closed
+       "retry: 1500\n\n");
   Eio.Fiber.fork ~sw (fun () ->
       ignore
         (Eio.Switch.run @@ fun stream_sw ->
@@ -1104,10 +1146,12 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
            let events = Keeper_chat_events.create () in
            Eio.Fiber.fork ~sw:stream_sw (fun () ->
-             sse_adapter_loop ~events ~writer ~mutex ~closed);
-           process_single_turn ~state ~clock ~sw
+             sse_adapter_loop ~events ~writer ~mutex ~closed
+               ~on_closed:notify_disconnect);
+           process_single_turn ~state ~clock ~sw:stream_sw
              ~auth_token:(auth_token_from_request request)
              ~thread_id ~closed
+             ~client_disconnects:(Some client_disconnects)
              ~payload ~run_id ~message_id ~agent_name ~events;
            (* Queue drain is now handled by Keeper_chat_consumer
               (started in server_bootstrap_loops). *)
@@ -1124,6 +1168,7 @@ module For_testing = struct
   let chat_speaker_of_request = chat_speaker_of_request
   let turn_instructions_for_request = turn_instructions_for_request
   let args_of_request = args_of_request
+  let modalities_for_request = modalities_for_request
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
 end

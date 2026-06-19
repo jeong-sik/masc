@@ -54,6 +54,9 @@ val per_provider_timeout_for_turn
      @param build_turn_prompt Callback: receives the base keeper system prompt
             and checkpoint message history, returns the final turn system prompt
      @param user_message The user's message to the keeper
+    @param user_blocks Optional structured user-authored OAS content blocks for
+           the current turn. [user_message] remains the display/history
+           fallback and must not contain raw media payloads.
     @param runtime_id Typed runtime profile name for model selection
      @param world_observation Structured keeper world snapshot used by
             advisory execution-progress checks. When omitted, the progress check
@@ -82,6 +85,7 @@ val run_turn
   -> build_turn_prompt:
        (base_system_prompt:string -> messages:Agent_sdk.Types.message list -> turn_prompt)
   -> user_message:string
+  -> ?user_blocks:Agent_sdk.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list

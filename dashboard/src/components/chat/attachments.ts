@@ -11,6 +11,7 @@ import type { KeeperConversationAttachment } from '../../types'
 
 export const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 export const ALLOWED_FILE_TYPES = ['text/plain', 'text/markdown', 'application/json', 'text/csv']
+export const ALLOWED_AUDIO_TYPES = ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg']
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 export const MAX_FILE_SIZE = 2 * 1024 * 1024
 export const MAX_TOTAL_PAYLOAD = 10 * 1024 * 1024
@@ -20,6 +21,9 @@ export function validateFile(file: File): string | null {
   if (file.type.startsWith('image/')) {
     if (!ALLOWED_IMAGE_TYPES.includes(file.type)) return `지원하지 않는 이미지 형식: ${file.type}`
     if (file.size > MAX_IMAGE_SIZE) return '이미지 크기 초과 (최대 5MB)'
+  } else if (file.type.startsWith('audio/')) {
+    if (!ALLOWED_AUDIO_TYPES.includes(file.type)) return `지원하지 않는 오디오 형식: ${file.type}`
+    if (file.size > MAX_FILE_SIZE) return '오디오 크기 초과 (최대 2MB)'
   } else {
     if (!ALLOWED_FILE_TYPES.includes(file.type)) return `지원하지 않는 파일 형식: ${file.type}`
     if (file.size > MAX_FILE_SIZE) return '파일 크기 초과 (최대 2MB)'

@@ -101,6 +101,13 @@ export const KeeperChatBlockSchema = union([
     desc: optional(string()),
     meta: optional(string()),
   }),
+  // RFC-0252: fusion deliberation card. Must be accepted here or a message
+  // carrying a fusion block (the keeper conclusion) is dropped wholesale.
+  object({
+    t: literal('fusion'),
+    board_post_id: string(),
+    run_id: optional(string()),
+  }),
 ])
 
 export type KeeperChatBlock = InferOutput<typeof KeeperChatBlockSchema>

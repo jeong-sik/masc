@@ -17,10 +17,16 @@ type link_block = {
 
 type text_block = { html : string }
 
+type fusion_block = {
+  board_post_id : string;
+  run_id : string;
+}
+
 type chat_block =
   | Text of text_block
   | Image of image_block
   | Link of link_block
+  | Fusion of fusion_block
 
 let escape_html raw =
   raw
@@ -154,6 +160,12 @@ let block_to_yojson = function
       ; ("title", `String title)
       ; ("meta", `String meta)
       ]
+  | Fusion { board_post_id; run_id } ->
+    `Assoc
+      [ ("t", `String "fusion")
+      ; ("board_post_id", `String board_post_id)
+      ; ("run_id", `String run_id)
+      ]
 ;;
 
 let blocks_to_yojson blocks = `List (List.map block_to_yojson blocks)
@@ -178,6 +190,12 @@ let block_of_yojson json : chat_block option =
          Option.bind (get_string "title") (fun title ->
            let meta = Option.value (get_string "meta") ~default:title in
            Some (Link { url; title; meta })))
+     | Some "fusion" ->
+       (* board_post_id is the lazy-fetch key and is required; run_id is a
+          display/cross-reference convenience and tolerated as empty. *)
+       Option.bind (get_string "board_post_id") (fun board_post_id ->
+         let run_id = Option.value (get_string "run_id") ~default:"" in
+         Some (Fusion { board_post_id; run_id }))
      | _ -> None)
   | _ -> None
 ;;

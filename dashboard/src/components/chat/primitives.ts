@@ -18,6 +18,7 @@ import { isSubmitEnter } from '../../lib/keyboard'
 import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
+import { fetchBoardPost } from '../../api/board'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
@@ -1101,6 +1102,144 @@ function ChatBroadcastBlock(b: ChatBroadcastBlock) {
   `
 }
 
+// RFC-0252: fusion deliberation card. The board post (created by
+// fusion_sink.ml) holds the full panel answers + judge synthesis in its
+// meta_json; the chat message only carries the board_post_id. We lazy-fetch
+// the post the first time the card is expanded so a collapsed transcript does
+// no extra network. meta is a loose Record on the wire, so we narrow defensively.
+type FusionPanelEntry = {
+  model: string
+  status: string
+  answer?: string
+  reason?: string
+}
+
+type FusionJudgeView = {
+  status: string
+  decision?: string
+  resolvedAnswer?: string
+}
+
+function asFusionPanel(meta: unknown): FusionPanelEntry[] {
+  if (!meta || typeof meta !== 'object') return []
+  const panel = (meta as Record<string, unknown>).panel
+  if (!Array.isArray(panel)) return []
+  return panel.flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return []
+    const r = raw as Record<string, unknown>
+    return [{
+      model: typeof r.model === 'string' ? r.model : '?',
+      status: typeof r.status === 'string' ? r.status : 'unknown',
+      answer: typeof r.answer === 'string' ? r.answer : undefined,
+      reason: typeof r.reason === 'string' ? r.reason : undefined,
+    }]
+  })
+}
+
+function asFusionJudge(meta: unknown): FusionJudgeView | null {
+  if (!meta || typeof meta !== 'object') return null
+  const judge = (meta as Record<string, unknown>).judge
+  if (!judge || typeof judge !== 'object') return null
+  const r = judge as Record<string, unknown>
+  return {
+    status: typeof r.status === 'string' ? r.status : 'unknown',
+    decision: typeof r.decision === 'string' ? r.decision : undefined,
+    resolvedAnswer: typeof r.resolved_answer === 'string' ? r.resolved_answer : undefined,
+  }
+}
+
+function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [state, setState] = useState<{
+    status: 'idle' | 'loading' | 'loaded' | 'error'
+    panel: FusionPanelEntry[]
+    judge: FusionJudgeView | null
+    error?: string
+  }>({ status: 'idle', panel: [], judge: null })
+  // Fetch-once guard. state.status must NOT be in the effect deps: the
+  // setState('loading') below would otherwise re-run the effect, whose cleanup
+  // flips `alive` false and drops the in-flight result (the card stays on
+  // "loading" forever). A ref keeps the trigger out of the dependency array.
+  const fetchedRef = useRef(false)
+
+  useEffect(() => {
+    if (!expanded || fetchedRef.current) return
+    fetchedRef.current = true
+    let alive = true
+    setState((s) => ({ ...s, status: 'loading' }))
+    fetchBoardPost(boardPostId)
+      .then((post) => {
+        if (!alive) return
+        setState({ status: 'loaded', panel: asFusionPanel(post.meta), judge: asFusionJudge(post.meta) })
+      })
+      .catch((err: unknown) => {
+        if (!alive) return
+        setState({ status: 'error', panel: [], judge: null, error: err instanceof Error ? err.message : '불러오기 실패' })
+      })
+    return () => { alive = false }
+  }, [expanded, boardPostId])
+
+  const runLabel = runId ? ` · ${runId.slice(0, 12)}` : ''
+  return html`
+    <div class="rounded-[var(--r-1,8px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-brass-soft,rgba(216,166,87,0.06))] overflow-hidden" data-fusion-card>
+      <button
+        type="button"
+        class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs ${ringFocusClasses}"
+        aria-expanded=${expanded}
+        onClick=${() => setExpanded((v) => !v)}
+      >
+        <span aria-hidden="true">${expanded ? '▾' : '▸'}</span>
+        <span class="font-medium">Fusion 심의</span>
+        <span class="text-[var(--color-fg-secondary,#9da7b3)]">패널 합의 상세${runLabel}</span>
+      </button>
+      ${expanded
+        ? html`
+          <div class="px-3 pb-3 flex flex-col gap-3" data-fusion-detail>
+            ${state.status === 'loading'
+              ? html`<div class="text-xs text-[var(--color-fg-secondary,#9da7b3)]">불러오는 중…</div>`
+              : null}
+            ${state.status === 'error'
+              ? html`<div class="text-xs text-[var(--color-danger,#e06c75)]">상세를 불러오지 못했습니다: ${state.error}</div>`
+              : null}
+            ${state.status === 'loaded'
+              ? html`
+                <div class="flex flex-col gap-2">
+                  ${state.panel.map((p, i) => html`
+                    <div key=${i} class="rounded border border-[var(--color-border,#30363d)] px-2 py-1.5">
+                      <div class="text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)]">${p.model} · ${p.status}</div>
+                      ${p.answer
+                        ? html`<div class="text-xs mt-1 whitespace-pre-wrap">${p.answer}</div>`
+                        : null}
+                      ${p.reason
+                        ? html`<div class="text-xs mt-1 text-[var(--color-danger,#e06c75)]">${p.reason}</div>`
+                        : null}
+                    </div>
+                  `)}
+                </div>
+                ${state.judge
+                  ? html`
+                    <div class="rounded border border-[var(--color-brass-border,#3a3a2a)] px-2 py-1.5" data-fusion-judge>
+                      <div class="text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)]">
+                        judge · ${state.judge.status}${state.judge.decision ? html` · ${state.judge.decision}` : null}
+                      </div>
+                      ${state.judge.resolvedAnswer
+                        ? html`<div class="text-xs mt-1 whitespace-pre-wrap">${state.judge.resolvedAnswer}</div>`
+                        : null}
+                    </div>
+                  `
+                  : null}
+                ${state.panel.length === 0 && !state.judge
+                  ? html`<div class="text-xs text-[var(--color-fg-secondary,#9da7b3)]">패널/심판 상세가 비어 있습니다.</div>`
+                  : null}
+              `
+              : null}
+          </div>
+        `
+        : null}
+    </div>
+  `
+}
+
 function ChatBlock({ block }: { block: ChatBlock }) {
   switch (block.t) {
     case 'p': return html`<${ChatTextBlock} html=${block.html} />`
@@ -1119,6 +1258,7 @@ function ChatBlock({ block }: { block: ChatBlock }) {
     case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
+    case 'fusion': return html`<${ChatFusionCard} boardPostId=${block.board_post_id} runId=${block.run_id} />`
     default: return null
   }
 }

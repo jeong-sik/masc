@@ -184,6 +184,38 @@ describe('normalizeMission', () => {
     expect(result.summary.workspace_health).toBe('healthy')
     expect(result.command_focus.health).toBe('ok')
   })
+
+  it('preserves attention queue evidence and parses grounded verdict metadata', () => {
+    const grounded = {
+      verdict: 'FAIL',
+      reason: 'bad branch',
+      evidence: [
+        { path: 'lib/foo.ml', line: 12, quote: 'let bad = true' },
+      ],
+    }
+    const result = normalizeMission({
+      attention_queue: [
+        {
+          id: 'review:keeper:task-42',
+          kind: 'review_rejected',
+          severity: 'bad',
+          summary: 'Adversarial review failed',
+          target_type: 'keeper',
+          target_id: 'builder-keeper',
+          evidence: {
+            grounded_verdict: JSON.stringify(grounded),
+          },
+          evidence_preview: ['legacy preview'],
+        },
+      ],
+    })
+
+    expect(result.attention_queue).toHaveLength(1)
+    expect(result.attention_queue[0]!.evidence).toEqual({
+      grounded_verdict: JSON.stringify(grounded),
+    })
+    expect(result.attention_queue[0]!.grounded_verdict).toEqual(grounded)
+  })
 })
 
 // ================================================================

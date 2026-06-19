@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect, useMemo } from 'preact/hooks'
-import type { RouteState, TabId } from '../types'
+import type { GroundedVerdict, RouteState, TabId } from '../types'
 import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import type { DashboardRuntimeProbePayload } from '../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../api/dashboard'
@@ -931,8 +931,26 @@ export function BuildIdentityBadge() {
     tooltip, Vercel deployment status footer, Gmail "2 unread" with
     sender preview — all reveal the contributing items on hover so the
     operator decides whether to navigate. Exposed for tests. */
-function summarizeAttentionPreview(
-  items: ReadonlyArray<{ summary?: string | null; kind?: string | null }>,
+type AttentionPreviewInput = {
+  summary?: string | null
+  kind?: string | null
+  evidence_preview?: readonly string[] | null
+  grounded_verdict?: GroundedVerdict | null
+}
+
+function clipAttentionLine(raw: string, max: number): string {
+  return raw.length > max ? `${raw.slice(0, Math.max(0, max - 3))}...` : raw
+}
+
+function firstGroundedEvidencePreview(verdict?: GroundedVerdict | null): string | null {
+  const ref = verdict?.evidence.find(item => item.path.trim() !== '' && item.quote.trim() !== '')
+  if (!ref) return null
+  const location = typeof ref.line === 'number' ? `${ref.path}:${ref.line}` : ref.path
+  return `${location} ${ref.quote.trim()}`
+}
+
+export function summarizeAttentionPreview(
+  items: ReadonlyArray<AttentionPreviewInput>,
   max = 3,
 ): string[] {
   // Two-pass: first filter to valid (non-empty summary or kind), then
@@ -944,9 +962,17 @@ function summarizeAttentionPreview(
     if (!item) continue
     const summary = item.summary?.trim()
     const kind = item.kind?.trim()
-    const raw = (summary && summary !== '') ? summary : (kind && kind !== '' ? kind : '')
-    if (raw === '') continue
-    valid.push(raw.length > 60 ? `${raw.slice(0, 57)}...` : raw)
+    const base = (summary && summary !== '') ? summary : (kind && kind !== '' ? kind : '')
+    if (base === '') continue
+    const groundedEvidence = firstGroundedEvidencePreview(item.grounded_verdict)
+    const previewEvidence =
+      groundedEvidence
+      ?? item.evidence_preview?.map(value => value.trim()).find(value => value !== '')
+      ?? null
+    const raw = previewEvidence
+      ? `${clipAttentionLine(base, 45)} | ${clipAttentionLine(previewEvidence, 60)}`
+      : base
+    valid.push(clipAttentionLine(raw, previewEvidence ? 110 : 60))
   }
   if (valid.length <= max) return valid
   return [...valid.slice(0, max), `... +${valid.length - max} more`]

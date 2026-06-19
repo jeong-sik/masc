@@ -163,6 +163,30 @@ let grounded_of verdict evidence =
       | Error _ as e -> e
       | Ok () -> Ok { verdict; evidence }
 
+let reason_field = function
+  | Pass -> []
+  | Warn reason | Fail reason -> [ ("reason", `String reason) ]
+
+let grounded_ref_to_yojson ref_ =
+  `Assoc
+    [
+      ("path", `String ref_.path);
+      ( "line",
+        match ref_.line with
+        | Some line -> `Int line
+        | None -> `Null );
+      ("quote", `String ref_.quote);
+    ]
+
+let grounded_verdict_to_yojson grounded =
+  `Assoc
+    ([
+       ("verdict", `String (verdict_constructor_name grounded.verdict));
+       ( "evidence",
+         `List (List.map grounded_ref_to_yojson grounded.evidence) );
+     ]
+     @ reason_field grounded.verdict)
+
 (* ================================================================ *)
 (* Structured Verdict: Tool Schema + JSON Parsing (ADR D3)          *)
 (* ================================================================ *)

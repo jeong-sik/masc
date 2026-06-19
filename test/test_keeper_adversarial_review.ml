@@ -26,6 +26,37 @@ let with_temp_base f =
   Sys.mkdir base 0o755;
   Fun.protect ~finally:(fun () -> rm_rf base) (fun () -> f base)
 
+let ensure_fs env =
+  Masc.Server_startup_state.mark_state_ready ~backend_mode:"test";
+  Masc_test_deps.init_eio_clock env;
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env)
+
+let operator_ctx env sw config agent_name : _ Operator_control.context =
+  {
+    config;
+    agent_name;
+    sw;
+    clock = Eio.Stdenv.clock env;
+    proc_mgr = Some (Eio.Stdenv.process_mgr env);
+    net = Some (Eio.Stdenv.net env);
+    mcp_session_id = None;
+  }
+
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [
+          ("name", `String name);
+          ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
+          ("trace_id", `String ("trace-" ^ name));
+          ("goal", `String "test keeper");
+          ("autoboot_enabled", `Bool false);
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json failed: " ^ err)
+
 let write_prompt_file dir ~variables body =
   let path = Filename.concat dir "verification.adversarial_review.md" in
   let content =
@@ -111,6 +142,106 @@ let test_fail_dedup_different_reasons () =
       check int "dedup: still one pending for the task" 1
         (List.length (pending base ~keeper:author)))
 
+let test_grounded_fail_carries_evidence_metadata () =
+  with_temp_base (fun base ->
+      let author = "builder-keeper" in
+      let evidence : VC.grounded_ref =
+        { path = "lib/foo.ml"; line = Some 12; quote = "let bad = true" }
+      in
+      let grounded =
+        match VC.grounded_of (VC.Fail "bad branch") [ evidence ] with
+        | Ok value -> value
+        | Error msg -> fail msg
+      in
+      AR.act_on_grounded_verdict ~base_path:base ~input:(input ~author) grounded
+      |> check_ok;
+      let item =
+        match pending base ~keeper:author with
+        | [ item ] -> item
+        | items -> failf "expected one pending item, got %d" (List.length items)
+      in
+      check (option string) "evidence count metadata" (Some "1")
+        (List.assoc_opt "evidence_count" item.EA.metadata);
+      let grounded_json =
+        match List.assoc_opt "grounded_verdict" item.EA.metadata with
+        | Some raw -> Yojson.Safe.from_string raw
+        | None -> fail "missing grounded_verdict metadata"
+      in
+      let open Yojson.Safe.Util in
+      check string "grounded verdict" "FAIL"
+        (grounded_json |> member "verdict" |> to_string);
+      let first = grounded_json |> member "evidence" |> to_list |> List.hd in
+      check string "grounded path" "lib/foo.ml"
+        (first |> member "path" |> to_string);
+      check int "grounded line" 12 (first |> member "line" |> to_int);
+      check string "grounded quote" "let bad = true"
+        (first |> member "quote" |> to_string))
+
+let test_digest_projects_grounded_external_attention () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let author = "builder-keeper" in
+  with_temp_base (fun base ->
+      Fun.protect
+        ~finally:(fun () ->
+          Masc.Keeper_keepalive.stop_keepalive author;
+          Masc.Keeper_registry.clear ();
+          Masc.Keeper_runtime.reset_test_state base)
+        (fun () ->
+          let config = Masc.Workspace.default_config base in
+          ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+          (match Masc.Keeper_meta_store.write_meta config (make_meta author) with
+          | Ok () -> ()
+          | Error err -> fail ("write_meta failed: " ^ err));
+          let evidence : VC.grounded_ref =
+            { path = "lib/foo.ml"; line = Some 12; quote = "let bad = true" }
+          in
+          let grounded =
+            match VC.grounded_of (VC.Fail "bad branch") [ evidence ] with
+            | Ok value -> value
+            | Error msg -> fail msg
+          in
+          AR.act_on_grounded_verdict ~base_path:base ~input:(input ~author)
+            grounded
+          |> check_ok;
+          let digest =
+            match
+              Operator_control.digest_json ~actor:"dashboard"
+                (operator_ctx env sw config "dashboard")
+            with
+            | Ok json -> json
+            | Error err -> fail err
+          in
+          let open Yojson.Safe.Util in
+          let attention_items = digest |> member "attention_items" |> to_list in
+          let review_attention =
+            attention_items
+            |> List.find_opt (fun item ->
+                 let target_id_matches =
+                   match item |> member "target_id" with
+                   | `String value -> String.equal value author
+                   | _ -> false
+                 in
+                 (item |> member "kind" |> to_string)
+                 = "keeper_review_rejected"
+                 && target_id_matches)
+            |> Option.value ~default:`Null
+          in
+          check bool "review attention projected" true
+            (review_attention <> `Null);
+          check string "review attention severity" "bad"
+            (review_attention |> member "severity" |> to_string);
+          let grounded_json =
+            review_attention |> member "evidence" |> member "grounded_verdict"
+            |> to_string |> Yojson.Safe.from_string
+          in
+          let first = grounded_json |> member "evidence" |> to_list |> List.hd in
+          check string "projected grounded path" "lib/foo.ml"
+            (first |> member "path" |> to_string);
+          check int "projected grounded line" 12
+            (first |> member "line" |> to_int)))
+
 let test_build_prompt_replaces_variables () =
   with_prompt_dir
     ~variables:[ "task_title"; "task_description"; "evidence_refs" ]
@@ -170,6 +301,10 @@ let () =
           test_case "warn no wake" `Quick test_warn_does_not_wake;
           test_case "fail dedup different reasons" `Quick
             test_fail_dedup_different_reasons;
+          test_case "grounded fail carries evidence metadata" `Quick
+            test_grounded_fail_carries_evidence_metadata;
+          test_case "digest projects grounded external attention" `Quick
+            test_digest_projects_grounded_external_attention;
         ] );
       ( "render-fail-closed",
         [

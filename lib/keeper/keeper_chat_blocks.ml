@@ -191,8 +191,11 @@ let block_of_yojson json : chat_block option =
            let meta = Option.value (get_string "meta") ~default:title in
            Some (Link { url; title; meta })))
      | Some "fusion" ->
-       (* board_post_id is the lazy-fetch key and is required; run_id is a
-          display/cross-reference convenience and tolerated as empty. *)
+       (* board_post_id is the lazy-fetch key and is required (Option.bind
+          rejects its absence); run_id is a display/cross-reference convenience.
+          NDT-OK / sound-partial: allow — a missing run_id degrades only the
+          card's run label, not identity, so "" is sound rather than a
+          permissive default over unknown input (mirrors the link arm above). *)
        Option.bind (get_string "board_post_id") (fun board_post_id ->
          let run_id = Option.value (get_string "run_id") ~default:"" in
          Some (Fusion { board_post_id; run_id }))

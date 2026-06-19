@@ -53,6 +53,7 @@ let index_of substring s =
 let fact_fixture ~now () =
   { Types.claim = "User prefers concise responses"
   ; Types.category = Types.Preference
+  ; Types.external_ref = None
   ; Types.source = { Types.trace_id = "trace-123"; Types.turn = 5; Types.tool_call_id = None }
   ; Types.observed_by = []
   ; Types.first_seen = now -. 86400.0
@@ -2275,6 +2276,134 @@ let test_librarian_provider_slot_gate_disabled_at_zero () =
         !first))
 ;;
 
+(* ---------- RFC-0259 P1: volatile-claim classification + decay ---------- *)
+
+let kind_id_of_claim claim =
+  match Types.external_ref_of_claim claim with
+  | Some r -> Some (Types.external_ref_kind_to_string r.Types.kind, r.Types.id)
+  | None -> None
+;;
+
+let test_external_ref_of_claim_parses () =
+  Alcotest.(check (option (pair string string)))
+    "PR #21363"
+    (Some ("pr", "21363"))
+    (kind_id_of_claim "PR #21363 is OPEN, MERGEABLE");
+  Alcotest.(check (option (pair string string)))
+    "issue #5"
+    (Some ("issue", "5"))
+    (kind_id_of_claim "blocked by issue #5");
+  Alcotest.(check (option (pair string string)))
+    "pull request #6"
+    (Some ("pr", "6"))
+    (kind_id_of_claim "the pull request #6 was merged");
+  Alcotest.(check (option (pair string string)))
+    "pull/99 slash form"
+    (Some ("pr", "99"))
+    (kind_id_of_claim "see github.com/o/r/pull/99 for context");
+  Alcotest.(check (option (pair string string)))
+    "PK-1234 jira key"
+    (Some ("task", "PK-1234"))
+    (kind_id_of_claim "tracked in PK-1234")
+;;
+
+let test_external_ref_of_claim_ignores_prose () =
+  let has_ref claim = Option.is_some (Types.external_ref_of_claim claim) in
+  Alcotest.(check bool) "bare #3 is prose" false (has_ref "complete step #3 first");
+  Alcotest.(check bool) "no marker at all" false (has_ref "the build uses dune 3.x");
+  Alcotest.(check bool) "number near non-keyword word" false (has_ref "approach #2 failed");
+  Alcotest.(check bool) "keyword without digits" false (has_ref "the pr # was opened")
+;;
+
+let test_fact_valid_until_volatile () =
+  let now = 1_000_000.0 in
+  let pr_ref = Some { Types.kind = Types.Pr; Types.id = "1" } in
+  Alcotest.(check (option (float 0.001)))
+    "external-ref Fact gets the finite volatile horizon"
+    (Some (now +. Types.volatile_external_ttl_seconds))
+    (Types.fact_valid_until ~now ~external_ref:pr_ref Types.Fact);
+  Alcotest.(check bool)
+    "durable Fact with no ref stays durable (None)"
+    true
+    (Option.is_none (Types.fact_valid_until ~now ~external_ref:None Types.Fact));
+  Alcotest.(check bool)
+    "Ephemeral with no ref still finite"
+    true
+    (Option.is_some (Types.fact_valid_until ~now ~external_ref:None Types.Ephemeral))
+;;
+
+let test_fact_of_json_rederives_legacy_volatile () =
+  let now = 2_000_000.0 in
+  (* first_seen two horizons ago: a re-derived row must already be past horizon. *)
+  let first_seen = now -. (Types.volatile_external_ttl_seconds *. 2.0) in
+  let legacy =
+    `Assoc
+      [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
+      ; "category", `String "fact"
+      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
+      ; "first_seen", `Float first_seen
+      ; "schema_version", `String "rfc0231-v2"
+      ]
+  in
+  match Types.fact_of_json legacy with
+  | None -> Alcotest.fail "legacy volatile row failed to decode"
+  | Some f ->
+    Alcotest.(check bool)
+      "external_ref re-derived from claim on read"
+      true
+      (Option.is_some f.Types.external_ref);
+    (match f.Types.valid_until with
+     | None -> Alcotest.fail "re-derived volatile row should carry a valid_until"
+     | Some vu ->
+       Alcotest.(check (float 0.001))
+         "valid_until anchored to first_seen"
+         (first_seen +. Types.volatile_external_ttl_seconds)
+         vu;
+       Alcotest.(check bool) "stale row is already past horizon" true (vu < now))
+;;
+
+let test_fact_to_json_omits_external_ref_when_none () =
+  let now = 1_000_000.0 in
+  let f = fact_fixture ~now () in
+  let json_str = Yojson.Safe.to_string (Types.fact_to_json f) in
+  Alcotest.(check bool)
+    "no external_ref key for a fact with no ref (byte-compat)"
+    false
+    (contains "external_ref" json_str)
+;;
+
+let test_reobserve_refreshes_volatile_horizon () =
+  let now = 5_000_000.0 in
+  let older = now -. 100_000.0 in
+  let volatile =
+    { (fact_fixture ~now:older ()) with
+      Types.claim = "PR #42 is OPEN"
+    ; Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" }
+    ; Types.valid_until = Some (older +. Types.volatile_external_ttl_seconds)
+    }
+  in
+  let refreshed = Policy.reobserve_fact ~now ~existing:volatile ~incoming:volatile in
+  match refreshed.Types.valid_until with
+  | None -> Alcotest.fail "volatile fact lost its horizon on reobserve"
+  | Some vu ->
+    Alcotest.(check (float 0.001))
+      "horizon re-anchored to now on re-observation"
+      (now +. Types.volatile_external_ttl_seconds)
+      vu
+;;
+
+let test_retention_rank_demotes_volatile () =
+  let now = 1_000_000.0 in
+  let durable = { (fact_fixture ~now ()) with Types.category = Types.Fact } in
+  let volatile =
+    { durable with Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "7" } }
+  in
+  Alcotest.(check bool)
+    "a volatile Fact ranks below a durable Fact (dropped first by the cap)"
+    true
+    (Policy.retention_rank ~now volatile < Policy.retention_rank ~now durable)
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -2513,6 +2642,36 @@ let () =
             "provider slot gate disabled at capacity 0"
             `Quick
             test_librarian_provider_slot_gate_disabled_at_zero
+        ] )
+    ; ( "rfc-0259 volatile"
+      , [ Alcotest.test_case
+            "external_ref_of_claim parses PR/issue/task markers"
+            `Quick
+            test_external_ref_of_claim_parses
+        ; Alcotest.test_case
+            "external_ref_of_claim ignores bare # and prose"
+            `Quick
+            test_external_ref_of_claim_ignores_prose
+        ; Alcotest.test_case
+            "fact_valid_until: external ref -> finite, durable -> none"
+            `Quick
+            test_fact_valid_until_volatile
+        ; Alcotest.test_case
+            "fact_of_json re-derives a legacy volatile row past horizon"
+            `Quick
+            test_fact_of_json_rederives_legacy_volatile
+        ; Alcotest.test_case
+            "fact_to_json omits external_ref when none (byte-compat)"
+            `Quick
+            test_fact_to_json_omits_external_ref_when_none
+        ; Alcotest.test_case
+            "reobserve refreshes a volatile claim's horizon"
+            `Quick
+            test_reobserve_refreshes_volatile_horizon
+        ; Alcotest.test_case
+            "retention rank demotes a volatile fact below durable"
+            `Quick
+            test_retention_rank_demotes_volatile
         ] )
     ]
 ;;

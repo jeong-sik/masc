@@ -11,6 +11,7 @@ let now = 1_000_000.0
 let fact claim =
   { Types.claim
   ; category = Types.Fact
+  ; external_ref = None
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by = []
   ; first_seen = now

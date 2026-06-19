@@ -64,6 +64,35 @@ val category_of_string : string -> category
     compile time. *)
 val is_promotable : category -> bool
 
+(** RFC-0259 §3.2(b): the kind of external state a claim references. Closed sum so
+    the grounding reconciler (P2/P3) must handle every kind at compile time. *)
+type external_ref_kind =
+  | Pr
+  | Issue
+  | Task
+
+(** Canonical lowercase token for an external-ref kind (round-trips with
+    [external_ref_kind_of_string]). *)
+val external_ref_kind_to_string : external_ref_kind -> string
+
+(** Parse an external-ref kind token; [None] outside the closed set. *)
+val external_ref_kind_of_string : string -> external_ref_kind option
+
+(** RFC-0259 §3.2(b): a reference to verifiable external state named by a claim.
+    [id] is the numeric id for [Pr]/[Issue] and the full key for [Task]
+    (e.g. ["PK-1234"]). *)
+type external_ref =
+  { kind : external_ref_kind
+  ; id : string
+  }
+
+(** RFC-0259 §3.2(b): parse an external-state reference out of a claim, once, at
+    the producer boundary. CONSERVATIVE — only an explicit marker counts
+    ("PR #123", "pull request #123", "pull/123", "issue #123", "issues/123",
+    "PK-1234"); a bare "#123" with no keyword yields [None] (it is prose, not a
+    reference). Returns the earliest-positioned reference when several are named. *)
+val external_ref_of_claim : string -> external_ref option
+
 (** RFC-0247 §2.3 (forgetting): the hard-expiry timestamp a newly written fact of
     this category should carry, given [now]. Exhaustive over {!category}. Only
     [Ephemeral] (coordination boilerplate) gets a finite TTL — the brain's
@@ -73,6 +102,22 @@ val is_promotable : category -> bool
     producer that makes the previously-inert [valid_until] field (and the GC TTL
     pass) reachable. *)
 val category_valid_until : now:float -> category -> float option
+
+(** RFC-0259 §3.2: the volatile-claim decay horizon (a TIME, not a score). Bounds
+    how long an un-re-observed external-state claim survives before the grounding
+    reconciler (P2) lands. *)
+val volatile_external_ttl_seconds : float
+
+(** RFC-0259 §3.2: the write-side [valid_until] producer. An [external_ref] claim
+    is never durable — it gets [volatile_external_ttl_seconds] regardless of
+    category (so a PR-status claim mislabeled [Fact]/[Unknown] still decays);
+    otherwise the category decides (only [Ephemeral] is finite). [external_ref]
+    takes precedence. *)
+val fact_valid_until
+  :  now:float
+  -> external_ref:external_ref option
+  -> category
+  -> float option
 
 (** A single semantic claim extracted from conversation history.
 
@@ -84,6 +129,10 @@ val category_valid_until : now:float -> category -> float option
 type fact =
   { claim : string
   ; category : category
+  ; external_ref : external_ref option
+    (** RFC-0259 §3.2(b): set by the producer when the claim names a PR/issue/task
+        id. Orthogonal to [category]. Drives [fact_valid_until] (a referenced
+        claim is volatile, never durable). Omitted from JSON when [None]. *)
   ; source : provenance_event
   ; observed_by : string list
     (** RFC-0244 Tier 2 (shared semantic store) only: the sorted set of distinct

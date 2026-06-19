@@ -220,14 +220,18 @@ let max_optional_float values =
     values
 ;;
 
-let valid_until_for_group ~now ~members category =
-  match category with
-  | Ephemeral ->
-    (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
-     | Some _ as valid_until -> valid_until
-     | None -> category_valid_until ~now category)
-  | Fact | Constraint | Preference | Blocker | Goal | Code_change
-  | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category
+let valid_until_for_group ~now ~external_ref ~members category =
+  match external_ref with
+  (* RFC-0259 §3.2(b): a referenced claim is volatile regardless of category. *)
+  | Some _ -> Some (now +. volatile_external_ttl_seconds)
+  | None ->
+    (match category with
+     | Ephemeral ->
+       (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
+        | Some _ as valid_until -> valid_until
+        | None -> category_valid_until ~now category)
+     | Fact | Constraint | Preference | Blocker | Goal | Code_change
+     | Validated_approach | Lesson | Unknown _ -> category_valid_until ~now category)
 ;;
 
 let last_verified_for_members members =
@@ -255,12 +259,16 @@ let consolidated_fact ~now ~members (group : merge_group) =
   let observed_by =
     List.concat_map (fun m -> m.observed_by) members |> List.sort_uniq String.compare
   in
+  (* RFC-0259 §3.2(b): the consolidated claim text differs from any member's, so
+     re-parse the external ref from it rather than trusting a member's. *)
+  let external_ref = external_ref_of_claim group.consolidated_claim in
   { claim = group.consolidated_claim
   ; category = group.category
+  ; external_ref
   ; source = earliest.source
   ; observed_by
   ; first_seen
-  ; valid_until = valid_until_for_group ~now ~members group.category
+  ; valid_until = valid_until_for_group ~now ~external_ref ~members group.category
   ; last_verified_at = last_verified_for_members members
   ; schema_version
   }

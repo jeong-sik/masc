@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { memo } from 'preact/compat'
 import { useState, useRef, useEffect } from 'preact/hooks'
+import { ChevronLeft, ChevronRight } from 'lucide-preact'
 import type { Keeper } from '../types'
 import { route } from '../router'
 import { keepers } from '../store'
@@ -156,7 +157,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   const [clearPending, setClearPending] = useState(false)
   const [purgePending, setPurgePending] = useState(false)
   const [checkpointRefreshToken, setCheckpointRefreshToken] = useState(0)
-  // 3-pane workspace is the default conversation view; "상세 보기" flips to
+  // 3-pane workspace is the default conversation view; "운영 상세" flips to
   // the full tabbed KeeperDetailBody (FSM / 진단 / 정체성 / 설정 / 디버그).
   const [detailOpen, setDetailOpen] = useState(false)
   const [configOverlayKeeper, setConfigOverlayKeeper] = useState<string | null>(null)
@@ -304,7 +305,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   }
 
   // Full tabbed detail (FSM / 진단 / 정체성 / 설정 / 디버그) — the original
-  // detail-page layout, preserved verbatim and surfaced behind "상세 보기".
+  // detail-page layout, preserved verbatim and surfaced behind "운영 상세".
   const detailContent = html`
     <div class="mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8 v2-monitoring-surface" data-route-focused-keeper=${keeper.name}>
       <div class="sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl v2-monitoring-toolbar">
@@ -416,7 +417,11 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
               aria-pressed=${rosterOpen ? 'true' : 'false'}
               title=${rosterOpen ? '로스터 접기' : '로스터 펼치기'}
               onClick=${() => setRosterOpen(open => !open)}
-            >${rosterOpen ? '◂' : '▸'}</button>
+            >
+              ${rosterOpen
+                ? html`<${ChevronLeft} size=${14} aria-hidden="true" />`
+                : html`<${ChevronRight} size=${14} aria-hidden="true" />`}
+            </button>
             <${KeeperWorkspaceChat}
               keeper=${keeper}
               detailOpen=${false}
@@ -438,7 +443,11 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
               aria-pressed=${railOpen ? 'true' : 'false'}
               title=${railOpen ? '컨텍스트 레일 접기' : '컨텍스트 레일 펼치기'}
               onClick=${() => setRailOpen(open => !open)}
-            >${railOpen ? '▸' : '◂'}</button>
+            >
+              ${railOpen
+                ? html`<${ChevronRight} size=${14} aria-hidden="true" />`
+                : html`<${ChevronLeft} size=${14} aria-hidden="true" />`}
+            </button>
             ${!isMobile && railOpen ? html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => setDetailOpen(true)} />` : null}
             ${isMobile && mobileRailOpen
               ? html`

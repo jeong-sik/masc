@@ -170,7 +170,6 @@ export type RuntimeDraft = {
   mention_targets_text: string
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
-  tool_denylist_text: string
   proactive_enabled: boolean
   proactive_idle_sec: number
   proactive_cooldown_sec: number
@@ -213,7 +212,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
-    tool_denylist_text: c.tools.tool_denylist.join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
     proactive_cooldown_sec: c.proactive.cooldown_sec,
@@ -229,9 +227,8 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
 
 export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
-  const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
+  const newPaths = listTextToStrings(draft.allowed_paths_text)
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
-  const newToolDenylist = listTextToStrings(draft.tool_denylist_text)
   const origPaths = orig.allowed_paths ?? []
   const origActiveGoalIds = orig.workspace.active_goal_ids.length > 0
     ? orig.workspace.active_goal_ids
@@ -239,8 +236,7 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
-  if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
-  if (!sameStringArray(newToolDenylist, orig.tools.tool_denylist)) payload.tool_denylist = newToolDenylist
+  if (!sameStringArray(newPaths, origPaths)) payload.allowed_paths = newPaths
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
@@ -285,7 +281,6 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     active_goal_ids: 'active_goal_ids' in payload,
     mention_targets: 'mention_targets' in payload,
     allowed_paths: 'allowed_paths' in payload,
-    tool_denylist: 'tool_denylist' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
@@ -890,9 +885,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   const currentMentionTargets = rd
     ? listTextToStrings(rd.mention_targets_text)
     : c.workspace.mention_targets
-  const currentToolDenylist = rd
-    ? listTextToStrings(rd.tool_denylist_text)
-    : c.tools.tool_denylist
   const knownGoalIds = new Set(goalOptions.map((goal) => goal.id))
   const unknownSelectedGoalIds = goalOptionsLoaded
     ? selectedActiveGoalIds.filter((goalId) => !knownGoalIds.has(goalId))
@@ -986,24 +978,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${SectionHeader} size="xs" class="mb-1">런타임 후보</${SectionHeader}>
         <${RuntimeList} runtimes=${c.execution.models} />
       </div>
-
-      <${SectionHeader} title="툴 정책" />
-      ${rd ? html`
-        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.tool_denylist ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-[var(--color-fg-secondary)]">tool_denylist</span>
-            <span class="text-xs text-[var(--color-fg-muted)]">${currentToolDenylist.length}개</span>
-          </div>
-          <textarea aria-label="tool_denylist" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
-            rows=${3}
-            value=${rd.tool_denylist_text}
-            placeholder="mcp__masc__dangerous_tool"
-            onInput=${(e: Event) => updateRuntimeDraft('tool_denylist_text', (e.target as HTMLTextAreaElement).value)}
-          ></textarea>
-        </div>
-      ` : html`
-        <${ConfigRow} label="tool_denylist" value=${currentToolDenylist.join(', ') || MISSING_DATA_DASH} />
-      `}
 
       <${SectionHeader} title="컴팩션" />
       <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />

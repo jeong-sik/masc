@@ -129,8 +129,8 @@ describe('CopilotDock', () => {
     route.value = { tab: 'code', params: { section: 'ide-shell' }, postId: null }
     const ctx = getSurfaceContext()
     expect(ctx.route).toBe('/code/ide-shell')
-    expect(ctx.label).toBe('IDE · round.ml')
-    expect(ctx.fields.length).toBeGreaterThan(0)
+    expect(ctx.label).toBe('IDE')
+    expect(ctx.fields.length).toBe(0)
   })
 
   it('updates surface context when route changes', async () => {
@@ -140,7 +140,7 @@ describe('CopilotDock', () => {
     await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-coview"]')).not.toBeNull())
 
     const coview = container.querySelector('[data-testid="copilot-dock-coview"]')
-    expect(coview?.textContent).toContain('커넥터 · Gate')
+    expect(coview?.textContent).toContain('Connectors')
     expect(coview?.textContent).toContain('/connectors/connector-status')
   })
 
@@ -222,6 +222,10 @@ describe('CopilotDock', () => {
   })
 
   it('switches keeper via picker', async () => {
+    keepers.value = [
+      { name: 'masc-improver', keeper_id: 'masc-improver', koreanName: 'MASC Improver', status: 'running', phase: 'Running', runtime_id: 'fleet', needs_attention: false, total_turns: 0, context_ratio: 0.2 },
+      { name: 'nick0cave', keeper_id: 'nick0cave', koreanName: 'nick0cave', status: 'running', phase: 'Running', runtime_id: 'ops', needs_attention: false, total_turns: 0, context_ratio: 0.3 },
+    ] as unknown as typeof keepers.value
     const dock = renderDock()
     dock.open()
     await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-picker"]')).not.toBeNull())

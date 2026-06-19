@@ -111,25 +111,26 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('connector-status')
   })
 
-  it('maps cockpit Cognition design deep links into the production keeper surface', () => {
+  it('maps cockpit Cognition design deep links into the Monitor agents lane', () => {
     window.location.hash = '#repo=viewer&branch=wt%2Fsangsu-smoke&mode=Cognition'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
 
     expect(route.value.tab).toBe('monitoring')
-    expect(route.value.params.section).toBe('cognition')
+    expect(route.value.params.section).toBe('agents')
     expect(route.value.params.repo).toBe('viewer')
     expect(route.value.params.branch).toBe('wt/sangsu-smoke')
     expect(route.value.params.mode).toBe('Cognition')
-    expect(window.location.hash).toContain('#monitoring?')
+    expect(window.location.hash).toContain('section=agents')
   })
 
-  it('treats slash-bearing raw cockpit query hashes as queries', () => {
+  it('treats slash-bearing raw cockpit query hashes as queries and redirects Cognition to agents', () => {
     window.location.hash = '#repo=viewer&branch=wt/sangsu-smoke&mode=Cognition'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
 
     expect(route.value.tab).toBe('monitoring')
-    expect(route.value.params.section).toBe('cognition')
+    expect(route.value.params.section).toBe('agents')
     expect(route.value.params.branch).toBe('wt/sangsu-smoke')
+    expect(window.location.hash).toContain('section=agents')
   })
 
   it('maps cockpit IDE split mode links into the Code IDE view state', () => {
@@ -183,13 +184,14 @@ describe('navigate', () => {
     expect(route.value.params.mode).toBe('Cognition')
   })
 
-  it('maps cockpit cognition subtabs to explicit cognition views', () => {
+  it('maps cockpit cognition subtabs to explicit agents views', () => {
     window.location.hash = '#mode=Cognition&tab=dc-str'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
 
     expect(route.value.tab).toBe('monitoring')
-    expect(route.value.params.section).toBe('cognition')
+    expect(route.value.params.section).toBe('agents')
     expect(route.value.params.view).toBe('decisions')
+    expect(window.location.hash).toContain('section=agents')
     expect(window.location.hash).toContain('view=decisions')
   })
 

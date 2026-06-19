@@ -93,9 +93,9 @@
   background: var(--bg-deep); color: var(--text-mid);
 }
 .dock-field .k { color: var(--text-dim); }
-.dock-field.bad .v  { color: var(--status-bad); }
+.dock-field.err .v  { color: var(--status-bad); }
 .dock-field.warn .v { color: var(--status-warn); }
-.dock-field.volt .v { color: var(--volt-strong); }
+.dock-field.brass .v { color: var(--brass-1); }
 .dock-coview .sync { display: flex; align-items: center; gap: 5px; margin-top: var(--sp-2); font-size: 9.5px; color: var(--text-dim); }
 .dock-coview .sync .d { width: 5px; height: 5px; border-radius: 50%; background: var(--status-ok); box-shadow: 0 0 6px var(--status-ok); animation: dot-pulse 2s ease-in-out infinite; }
 

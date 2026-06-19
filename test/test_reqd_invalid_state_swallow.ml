@@ -64,6 +64,17 @@ let assert_contains ~label haystack needle =
           swallow regression: see 2026-05-05 cycle9 FATAL incident"
          label needle)
 
+let count_occurrences haystack needle =
+  let n = String.length needle in
+  let h = String.length haystack in
+  if n = 0 then 0
+  else (
+    let count = ref 0 in
+    for i = 0 to h - n do
+      if String.sub haystack i n = needle then incr count
+    done;
+    !count)
+
 let resolve_path candidates =
   match List.find_opt Sys.file_exists candidates with
   | Some p -> p
@@ -191,14 +202,7 @@ let () =
      We allow up to 2: the docstring reference and the single call inside
      safe_respond_with_string's try body. *)
   let direct_count =
-    let needle = "Httpun.Reqd.respond_with_string" in
-    let n = String.length needle in
-    let h = String.length mcp_http_src in
-    let count = ref 0 in
-    for i = 0 to h - n do
-      if String.sub mcp_http_src i n = needle then incr count
-    done;
-    !count
+    count_occurrences mcp_http_src "Httpun.Reqd.respond_with_string"
   in
   if direct_count > 2 then
     failwith
@@ -208,6 +212,48 @@ let () =
           safe_respond_with_string try body). Regression: 2026-05-05 cycle9 \
           FATAL."
          direct_count);
+
+  (* ---- lib/server/server_routes_http_keeper_stream.ml ------------------- *)
+  let keeper_stream_src =
+    resolve_path
+      [ Filename.concat project_root
+          "lib/server/server_routes_http_keeper_stream.ml"
+      ; "lib/server/server_routes_http_keeper_stream.ml"
+      ; "../lib/server/server_routes_http_keeper_stream.ml"
+      ]
+    |> read_file
+  in
+
+  (* Anchor KS1: client transport disconnect is a stream-consumer event, not
+     a keeper_msg cancellation. The accepted request must remain resumable via
+     request_id polling. *)
+  assert_contains
+    ~label:"KS1: stream disconnect has its own worker event"
+    keeper_stream_src
+    "Stream_client_disconnected";
+  assert_contains
+    ~label:"KS2: disconnect log says request continues"
+    keeper_stream_src
+    "request continues for polling";
+  assert_contains
+    ~label:"KS3: worker uses server switch"
+    keeper_stream_src
+    "process_single_turn ~state ~clock ~sw\n";
+  assert_contains
+    ~label:"KS4: disconnect watcher uses stream switch"
+    keeper_stream_src
+    "~client_disconnects:(Some (stream_sw, client_disconnects))";
+  let keeper_cancel_count =
+    count_occurrences keeper_stream_src "Keeper_msg_async.cancel"
+  in
+  if keeper_cancel_count > 1 then
+    failwith
+      (Printf.sprintf
+         "[KS5] found %d Keeper_msg_async.cancel calls in \
+          server_routes_http_keeper_stream.ml; expected only the explicit \
+          cancel endpoint. Client transport disconnect must not cancel the \
+          accepted keeper_msg request."
+         keeper_cancel_count);
 
   (* ---- lib/server/server_ws_standalone.ml -------------------------------- *)
   let ws_src =
@@ -219,11 +265,15 @@ let () =
     |> read_file
   in
 
-  (* Anchor W1: send_pong is now inside a try/with. *)
+  (* Anchor W1: send_pong is still guarded by the write-failure classifier. *)
   assert_contains
-    ~label:"W1: send_pong wrapped in try/with"
+    ~label:"W1a: send_pong call still present"
     ws_src
-    "try Ws.Wsd.send_pong wsd";
+    "Ws.Wsd.send_pong session.wsd";
+  assert_contains
+    ~label:"W1b: send_pong write failure classifier"
+    ws_src
+    "classify_write_failure exn";
 
   (* Anchor W2: writer-closed-during-cancel race comment is present
      (the wsd-race incident reference travels with the [send_pong]

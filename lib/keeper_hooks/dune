@@ -1,7 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_hooks)
- (wrapped false)
- (modules keeper_hooks_oas_types keeper_event_bus)
- (libraries agent_sdk masc.keeper_tooling masc.types_boundary yojson))

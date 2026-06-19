@@ -659,38 +659,6 @@ let test_keeper_task_claim_accepts_specific_task_id () =
         check string "assignee" meta.agent_name assignee
       | _ -> fail "requested task should be claimed or auto-started")
 
-let test_keeper_task_force_release_noop_is_no_progress () =
-  with_exec_fixture "keeper_tool_dispatch_force_release_noop"
-    (fun ~config ~meta ~ctx_work ->
-      ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
-      ignore
-        (Workspace.add_task config ~title:"todo task" ~priority:1
-           ~description:"release is a no-op while todo");
-      let result =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config
-          ~meta
-          ~ctx_work
-          ~exec_cache:None
-          ~name:"keeper_task_force_release"
-          ~input:
-            (`Assoc
-               [ "task_id", `String "task-001"
-               ; "reason", `String "already todo smoke"
-               ])
-          ()
-      in
-      check string "force release noop outcome" "success"
-        (outcome_label result.outcome);
-      let json = Yojson.Safe.from_string result.raw_output in
-      check bool "force release noop ok" true
-        (json_bool_field ~default:false "ok" json);
-      let typed = Yojson.Safe.Util.member "typed_outcome" json in
-      check string "typed outcome" "No_progress"
-        Yojson.Safe.Util.(member "kind" typed |> to_string);
-      check string "no-progress reason" "No_work_available"
-        Yojson.Safe.Util.(member "reason" typed |> member "kind" |> to_string))
-
 let test_glob_unknown_tool_returns_tutor_guidance () =
   with_exec_fixture "keeper_tool_dispatch_runtime_glob_tutor"
     (fun ~config ~meta ~ctx_work ->
@@ -1368,8 +1336,6 @@ let () =
         test_public_local_aliases_dispatch_to_runtime_handlers;
       test_case "keeper_task_claim accepts explicit task_id" `Quick
         test_keeper_task_claim_accepts_specific_task_id;
-      test_case "keeper_task_force_release todo no-op is no progress" `Quick
-        test_keeper_task_force_release_noop_is_no_progress;
       test_case "Glob returns tutor guidance instead of aliasing to rg" `Quick
         test_glob_unknown_tool_returns_tutor_guidance;
       test_case "public WebSearch alias reaches misc runtime" `Quick

@@ -1220,16 +1220,6 @@ let internal_descriptors : t list =
       "Audit MASC task state for stale claims and verification gaps."
       ~readonly:true
   ; task_descriptor
-      "force_release"
-      "keeper_task_force_release"
-      "Operator-only: release a stuck task claim."
-      ~readonly:false
-  ; task_descriptor
-      "force_done"
-      "keeper_task_force_done"
-      "Operator-only: mark a task done out-of-band."
-      ~readonly:false
-  ; task_descriptor
       "broadcast"
       "keeper_broadcast"
       "Broadcast a workspace message to the MASC workspace."

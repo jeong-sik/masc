@@ -40,7 +40,7 @@ let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.ba
 let active_ownership_conflict_message ~agent_name ~requested_task_id task_ids =
   Printf.sprintf
     "Agent %s has task(s) in progress: %s. Use keeper_task_done (task_id + result) \
-     or keeper_task_force_release (task_id + reason) to finish them before claiming %s."
+     to finish them before claiming %s."
     agent_name
     (String.concat ", " task_ids)
     requested_task_id

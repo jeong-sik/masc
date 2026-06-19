@@ -150,7 +150,7 @@ let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
   | Surface_post | Person_note_set
     -> Medium
   | Fs_edit | Fs_write | Fs_read | Ide_annotate -> High
-  | Board_sub_board_delete | Task_force_done | Task_force_release -> Critical
+  | Board_sub_board_delete -> Critical
 ;;
 
 (* Non-typed names keep explicit overrides when substring matching would

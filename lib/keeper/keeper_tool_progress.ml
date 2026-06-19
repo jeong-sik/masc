@@ -60,7 +60,7 @@ let completion_tool_names : string list =
   "masc_deliver"
   :: List.map
        Keeper_tool_name.to_string
-       Keeper_tool_name.[ Task_done; Task_force_done; Task_force_release ]
+       Keeper_tool_name.[ Task_done ]
 ;;
 
 let is_claim_tool_name name =

@@ -83,7 +83,45 @@ let test_repo_runtime_toml_loads () =
             caps.supports_tool_choice;
           check bool "GLM Coding Plan extended thinking" true
             caps.supports_extended_thinking
-        | None -> fail "expected GLM Coding Plan capabilities"))
+        | None -> fail "expected GLM Coding Plan capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "ollama_cloud.minimax-m3")
+         runtimes
+     with
+     | None -> fail "expected MiniMax M3 Ollama Cloud runtime in seed"
+     | Some runtime ->
+       check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
+       check int "MiniMax M3 context" 524288 runtime.model.max_context;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "MiniMax M3 image input" true caps.supports_image_input;
+          check bool "MiniMax M3 multimodal input" true
+            caps.supports_multimodal_inputs;
+          check bool "MiniMax M3 forced tool_choice disabled" false
+            caps.supports_tool_choice
+        | None -> fail "expected MiniMax M3 capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "ollama_cloud.kimi-k2-6")
+         runtimes
+     with
+     | None -> fail "expected Kimi K2.6 Ollama Cloud runtime in seed"
+     | Some runtime ->
+       check string "Kimi K2.6 api name" "kimi-k2.6" runtime.model.api_name;
+       check int "Kimi K2.6 context" 262144 runtime.model.max_context;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "Kimi K2.6 image input" true caps.supports_image_input;
+          check bool "Kimi K2.6 multimodal input" true
+            caps.supports_multimodal_inputs;
+          check bool "Kimi K2.6 reasoning effort" true
+            (Runtime_schema.equal_thinking_control_format
+               caps.thinking_control_format
+               Runtime_schema.Reasoning_effort)
+        | None -> fail "expected Kimi K2.6 capabilities"))
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =

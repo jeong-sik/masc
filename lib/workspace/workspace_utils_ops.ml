@@ -221,10 +221,12 @@ let write_json_root config path json =
 let delete_path_root config path =
   match root_key_of_path config path with
   | Some key ->
-    backend_delete config ~key
-    |> Result.iter_error (fun e ->
-         Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key (Backend_types.show_error e));
-    (try Sys.remove path with Sys_error _ -> ())
+      backend_delete config ~key
+      |> Result.fold
+           ~ok:(fun _ -> try Sys.remove path with Sys_error _ -> ())
+           ~error:(fun e ->
+             Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key
+               (Backend_types.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists_root config path =
@@ -348,11 +350,13 @@ let write_text config path content =
 let delete_path config path =
   match key_of_path config path with
   | Some key ->
-    backend_delete config ~key
-    |> Result.iter_error (fun e ->
-         Log.Misc.error "delete_path: backend_delete failed for %s: %s" key (Backend_types.show_error e));
-    if should_dual_write_local config then
-      (try Sys.remove path with Sys_error _ -> ())
+      backend_delete config ~key
+      |> Result.fold
+           ~ok:(fun _ ->
+             if should_dual_write_local config then try Sys.remove path with Sys_error _ -> ())
+           ~error:(fun e ->
+             Log.Misc.error "delete_path: backend_delete failed for %s: %s" key
+               (Backend_types.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists config path =

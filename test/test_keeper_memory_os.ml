@@ -1334,6 +1334,51 @@ let test_render_if_enabled_renders_persisted_memory () =
             (contains "Gated recall should surface saved facts" block))))
 ;;
 
+(* RFC-0239 Q4 window invariant: when the store sits in the
+   (fact_recall_window, fact_store_max] band, a retention cap leaves the
+   highest-ranked durable facts at the file head while newer appends land at the
+   tail. Recall must scan fact_store_max (the whole bounded store), not a
+   fact_recall_window-sized tail, or it silently drops the best facts. Seed a head
+   fact verified now, then > fact_recall_window much-older fillers, and assert
+   recall still surfaces the head fact a tail-window scan would start past. *)
+let test_recall_scans_whole_bounded_store () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "window-band-keeper" in
+        let now = 1_000_000.0 in
+        let head =
+          { (fact_fixture ~now ()) with
+            Types.claim = "HEAD durable fact verified most recently"
+          ; Types.last_verified_at = Some now
+          }
+        in
+        (* First append = file head (position 0). *)
+        Memory_io.append_fact ~keeper_id head;
+        let filler_count = Memory_io.fact_recall_window + 20 in
+        for i = 1 to filler_count do
+          let f =
+            { (fact_fixture ~now ()) with
+              Types.claim = Printf.sprintf "filler durable fact %d" i
+            ; Types.last_verified_at = Some (now -. days 30 -. float_of_int i)
+            }
+          in
+          Memory_io.append_fact ~keeper_id f
+        done;
+        let total = List.length (Memory_io.read_facts_all ~keeper_id) in
+        Alcotest.(check bool)
+          "store sits in the (fact_recall_window, fact_store_max] band"
+          true
+          (total > Memory_io.fact_recall_window && total <= Memory_io.fact_store_max);
+        match Recall.render_if_enabled ~keeper_id ~now () with
+        | None -> Alcotest.fail "expected Some recall block for a seeded store"
+        | Some block ->
+          Alcotest.(check bool)
+            "recall surfaces the head fact a tail-window scan would miss"
+            true
+            (contains "HEAD durable fact verified most recently" block))))
+;;
+
 (* An old, never-verified fact is rendered with a worded staleness marker that
    names the age and asks for verification — the anti-confabulation cue. The
    prior [stale=%.2f] annotation was always 0.00 (no producer writes it), so this
@@ -2291,6 +2336,10 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "recall scans the whole bounded store, not just the tail window"
+            `Quick
+            test_recall_scans_whole_bounded_store
         ; Alcotest.test_case
             "stale fact gets a worded staleness marker"
             `Quick

@@ -43,11 +43,18 @@ val read_episodes_tail : keeper_id:string -> n:int -> episode list
 
 (** {1 Retention (RFC-0239 Q4, supersedes RFC-0238 Capped_by_score)} *)
 
-(** Per-keeper fact recall window / retention target. The store is bounded to
-    this many facts; recall reads up to this many candidates (not just the last
-    few), so score ranking selects the globally best facts in the bounded
+(** Per-keeper fact retention target: the size the cap trims the store back to.
+    NOT the recall scan window — the store holds up to {!fact_store_max} between
+    caps, so recall scans {!fact_store_max} (not this) to see the whole bounded
     store. *)
 val fact_recall_window : int
+
+(** Upper bound on a bounded store between caps: the retention cap [trigger]
+    (= [fact_recall_window] + [fact_recall_window]/2). SSOT shared by the
+    librarian write path (cap trigger) and recall (tail scan window) so the read
+    side scans the entire bounded store — including the high-rank rows a fresh cap
+    writes at the file head, which a [fact_recall_window]-sized scan would miss. *)
+val fact_store_max : int
 
 (** Read and parse every fact in the store (unbounded; used by retention). *)
 val read_all_facts : keeper_id:string -> fact list

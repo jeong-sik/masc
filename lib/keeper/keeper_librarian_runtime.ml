@@ -417,7 +417,7 @@ let extract_and_append_with_provider
                ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
                ~incoming:episode.Keeper_memory_os_types.claims
                ~keep:window
-               ~trigger:(window + (window / 2))
+               ~trigger:Keeper_memory_os_io.fact_store_max
                ~rank:(Keeper_memory_os_policy.retention_rank ~now))
          in
          Ok ()

@@ -9,7 +9,6 @@ let default_max_episodes = 2
    own (private-precedence) facts. Kept small so the communal tier informs
    without crowding out keeper-local memory. *)
 let default_max_shared_facts = 4
-let fact_tail_scan = 64
 let episode_tail_scan = 32
 let max_fact_text_len = 260
 let max_episode_text_len = 360
@@ -228,15 +227,17 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
   let facts =
-    (* RFC-0239 Q4: read up to the bounded recall window (the retention sweep
-       caps the store to this many facts), so recency ranking selects from the
-       whole store rather than only the most recent [fact_tail_scan].
-       RFC-0247: order by the structural truth anchor (most-recently-verified
+    (* RFC-0239 Q4: scan the whole bounded store, not a [fact_recall_window]-sized
+       tail. The store holds up to [fact_store_max] facts between caps, and a fresh
+       cap rewrites it in rank order — so the highest-ranked durable rows sit at
+       the file head while new appends land at the tail. Scanning only
+       [fact_recall_window] tail rows would exclude exactly those head rows in the
+       [fact_recall_window]..[fact_store_max] band; scanning [fact_store_max]
+       covers the entire bounded store so recency ranking selects the globally best
+       facts. RFC-0247: order by the structural truth anchor (most-recently-verified
        first); the composite score, lexical seed-rerank, and spreading-activation
        reranking were all removed in the purge. *)
-    Keeper_memory_os_io.read_facts_tail
-      ~keeper_id
-      ~n:(max fact_tail_scan Keeper_memory_os_io.fact_recall_window)
+    Keeper_memory_os_io.read_facts_tail ~keeper_id ~n:Keeper_memory_os_io.fact_store_max
     |> facts_recency_ranked ~now
     |> take max_facts
   in

@@ -69,6 +69,7 @@ type t = {
   mutable consumers : (module Consumer) list;
   (* nudge signaling — Stream is cancellation-safe under Fiber.first *)
   nudge_stream : string Eio.Stream.t;
+  nudge_mutex  : Eio.Mutex.t;           (** protects is_empty + add atomically *)
   (* shutdown signaling — Promise is one-shot and non-blocking *)
   shutdown_p   : unit Eio.Promise.t;
   shutdown_r   : unit Eio.Promise.u;
@@ -207,7 +208,8 @@ let tick t trigger =
    | Bounded pred ->
      if pred beat && not (is_shutdown t) then begin
        Log.Pulse.info "bounded lifecycle condition met at beat #%d" beat.seq;
-       Eio.Promise.resolve t.shutdown_r ()
+       (* fire-and-forget: the bool only reports first-resolver status. *)
+       ignore (Eio.Promise.try_resolve t.shutdown_r () : bool)
      end);
   beat
 
@@ -264,6 +266,7 @@ let create ~clock ~rhythm ~lifecycle ~consumers =
     lifecycle;
     consumers;
     nudge_stream = Eio.Stream.create 1;
+    nudge_mutex  = Eio.Mutex.create ();
     shutdown_p;
     shutdown_r;
     seq         = 0;
@@ -296,15 +299,18 @@ let run ~sw t =
     )
 
 let nudge t ~reason =
-  if t.alive && Eio.Stream.is_empty t.nudge_stream then
-    (* Capacity-1 mailbox: buffer one nudge. If already pending, coalesce
-       (skip the new one — the loop will fire a Nudge beat soon anyway).
-       The is_empty guard avoids blocking on a full stream. *)
-    Eio.Stream.add t.nudge_stream reason
+  Eio.Mutex.use_rw ~protect:true t.nudge_mutex (fun () ->
+    if t.alive && Eio.Stream.is_empty t.nudge_stream then
+      (* Capacity-1 mailbox: buffer one nudge. If already pending, coalesce
+         (skip the new one — the loop will fire a Nudge beat soon anyway).
+         The is_empty guard avoids blocking on a full stream.
+         The mutex makes the empty-check + add atomic so concurrent nudges
+         cannot both see an empty stream and race to fill it. *)
+      Eio.Stream.add t.nudge_stream reason)
 
 let shutdown t =
-  if not (is_shutdown t) then
-    Eio.Promise.resolve t.shutdown_r ()
+  (* fire-and-forget: the bool only reports first-resolver status. *)
+  ignore (Eio.Promise.try_resolve t.shutdown_r () : bool)
 
 let set_rhythm t rhythm =
   t.rhythm <- rhythm;

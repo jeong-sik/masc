@@ -176,7 +176,7 @@ let test_interval_recurrence_next_due () =
   | Some due_at -> check (float 0.001) "next due" 260.0 due_at
 ;;
 
-let test_daily_recurrence_next_due_uses_timezone () =
+let test_daily_recurrence_next_due_uses_fixed_offset_alias () =
   let req =
     request ~risk_class:Read_only
       ~recurrence:
@@ -186,6 +186,35 @@ let test_daily_recurrence_next_due_uses_timezone () =
   match next_due_after ~now:1.0 req with
   | None -> fail "expected next daily due"
   | Some due_at -> check (float 0.001) "next KST 09:00" 86400.0 due_at
+;;
+
+let test_daily_recurrence_next_due_accepts_explicit_fixed_offset () =
+  let req =
+    request ~risk_class:Read_only
+      ~recurrence:
+        (Daily { hour = 9; minute = 0; second = 0; timezone = "+09:00" })
+      ()
+  in
+  match next_due_after ~now:1.0 req with
+  | None -> fail "expected next daily due"
+  | Some due_at -> check (float 0.001) "next +09:00 09:00" 86400.0 due_at
+;;
+
+let test_daily_recurrence_rejects_dst_iana_timezone () =
+  match
+    create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+      ~payload:(payload_json ()) ~risk_class:Read_only
+      ~approval_required:false ~source:Operator_request
+      ~recurrence:
+        (Daily { hour = 9; minute = 0; second = 0; timezone = "America/New_York" })
+      ()
+  with
+  | Ok _ -> fail "expected DST-aware IANA timezone rejection"
+  | Error msg ->
+    check string "timezone error"
+      "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00; DST-aware IANA zones are not supported"
+      msg
 ;;
 
 let test_schedule_roundtrip () =
@@ -276,8 +305,12 @@ let () =
             test_mark_due_only_scheduled;
           test_case "interval recurrence next due" `Quick
             test_interval_recurrence_next_due;
-          test_case "daily recurrence next due uses timezone" `Quick
-            test_daily_recurrence_next_due_uses_timezone;
+          test_case "daily recurrence next due uses fixed-offset alias" `Quick
+            test_daily_recurrence_next_due_uses_fixed_offset_alias;
+          test_case "daily recurrence next due accepts explicit fixed offset" `Quick
+            test_daily_recurrence_next_due_accepts_explicit_fixed_offset;
+          test_case "daily recurrence rejects DST IANA timezone" `Quick
+            test_daily_recurrence_rejects_dst_iana_timezone;
         ] );
       ( "grant",
         [

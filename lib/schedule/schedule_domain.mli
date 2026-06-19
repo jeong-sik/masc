@@ -40,6 +40,12 @@ type schedule_source =
   | Automated_request
   | System_request
 
+(** Recurrence contract.
+
+    [Daily.timezone] is a fixed-offset selector, not full civil-timezone
+    support. It accepts UTC aliases, Asia/Seoul/KST as +09:00 aliases, and
+    explicit fixed offsets such as [+09:00] or [UTC+09:00]. It never consults
+    host local time or DST rules. *)
 type recurrence =
   | One_shot
   | Interval of { interval_sec : int }

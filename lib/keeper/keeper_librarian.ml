@@ -201,7 +201,7 @@ let source_turn_range claims =
     Some (lo, hi)
 ;;
 
-let episode_of_output ?now (inp : input) (raw : string) : episode option =
+let episode_of_output ?now ?generation (inp : input) (raw : string) : episode option =
   let now =
     match now with
     | Some now -> now
@@ -230,7 +230,8 @@ let episode_of_output ?now (inp : input) (raw : string) : episode option =
           | Some claims ->
             Some
               { trace_id = inp.trace_id
-              ; generation = inp.generation
+              (* sound-partial: allow: callers without a fresh generation keep inp.generation. *)
+              ; generation = Option.value generation ~default:inp.generation
               ; episode_summary
               ; claims
               ; open_items

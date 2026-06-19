@@ -91,6 +91,32 @@ let episode_path ~keeper_id ~trace_id ~generation =
     (Printf.sprintf "%s-g%04d.json" trace_id generation)
 ;;
 
+(** Compute the next generation number for a trace's episode files.
+
+    Scans the episodes directory for files matching [trace_id-gNNNN.json]
+    and returns [max_gen + 1].  This is a **single-writer** operation:
+    concurrent callers for the same [trace_id] will race on the directory
+    scan and may produce duplicate generation numbers.  The caller must
+    ensure at most one fiber calls [next_generation] for a given
+    [trace_id] at a time (e.g. via a per-trace sequencer or by running
+    all extractions for one trace on a single fiber). *)
+let next_generation ~keeper_id ~trace_id =
+  let dir = episodes_dir ~keeper_id in
+  let prefix = Printf.sprintf "%s-g" trace_id in
+  let max_gen =
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter_map (fun name ->
+      if String.starts_with ~prefix name then
+        let plen = String.length prefix in
+        let rest = String.sub name plen (String.length name - plen) in
+        if String.length rest >= 4 then int_of_string_opt (String.sub rest 0 4) else None
+      else None)
+    |> List.fold_left max (-1)
+  in
+  max_gen + 1
+;;
+
 let unique_episode_path ~keeper_id episode =
   let created_ms =
     episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float

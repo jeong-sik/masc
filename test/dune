@@ -29,6 +29,7 @@
 
 (tests
  (names
+  test_rfc0259_reconcile
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
   test_broadcast_wakeup_policy
@@ -324,6 +325,7 @@
   test_relation_materializer
   test_keeper_behavior_trace)
  (modules
+  test_rfc0259_reconcile
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate

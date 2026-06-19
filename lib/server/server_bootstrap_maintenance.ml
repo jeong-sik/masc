@@ -170,6 +170,72 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
+  (* RFC-0259 §3.3: memory-os grounding reconciler (P2, dry-run). Off the keeper
+     hot path — every [interval]s it re-checks each Tier-1 fact that names verifiable
+     external state (a PR/issue id, P1's [external_ref]) against the source of truth
+     via [gh], and logs what it WOULD do: a still-open ref is fresh, a merged/closed
+     ref backing an in-progress claim is stale_terminal (the live-store false-fact
+     class that had keepers acting on a closed PR for ~30 turns). P2 only classifies;
+     P3 turns stale_terminal into retraction and stale_open into a last_verified_at
+     advance, under the facts lock. Default OFF + dry-run (mirrors the GC/consolidation
+     rollout): the log is reviewed before any write path is enabled. [Unverifiable]
+     (gh failure / non-PR kind) is never acted on — uncertainty is not contradiction.
+     Skipped entirely when proc_mgr is absent (no gh) or no alert repo is configured. *)
+  (match state.Mcp_server.proc_mgr with
+   | Some proc_mgr
+     when Keeper_memory_bank_env.memory_env_bool_logged
+            "MASC_KEEPER_MEMORY_OS_RECONCILE"
+            ~default:false
+          && String.trim Env_config.KeeperAlert.github_repo <> "" ->
+     let repo = String.trim Env_config.KeeperAlert.github_repo in
+     fork_logged_fiber
+       ~sw
+       ~on_error:(log_server_fiber_crash "memory_os_reconcile")
+       (fun () ->
+       (* Coarsest cadence: grounding shells out to gh per referenced fact, so an
+          hourly fleet rescan bounds external calls while still catching a closed
+          PR well within its volatile TTL. *)
+       let interval = 3600.0 in
+       let horizon = Keeper_memory_os_reconcile.default_grounding_horizon_seconds in
+       let verify = Keeper_memory_os_reconcile_gh.verify_external ~proc_mgr ~repo in
+       let rec loop () =
+         List.iter
+           (fun keeper_id ->
+              try
+                let facts = Keeper_memory_os_io.read_facts_all ~keeper_id in
+                let report, _items =
+                  Keeper_memory_os_reconcile.dry_run
+                    ~now:(Time_compat.now ())
+                    ~horizon
+                    ~verify
+                    facts
+                in
+                if report.Keeper_memory_os_reconcile.stale_terminal > 0
+                   || report.stale_open > 0
+                then
+                  Log.Server.info
+                    "memory_os_reconcile[dry-run]: keeper=%s scanned=%d \
+                     stale_open=%d stale_terminal=%d stale_unknown=%d"
+                    keeper_id
+                    report.scanned
+                    report.stale_open
+                    report.stale_terminal
+                    report.stale_unknown
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Server.warn
+                  "memory_os_reconcile: keeper=%s tick crashed: %s"
+                  keeper_id
+                  (Printexc.to_string exn))
+           (List.filter
+              (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
+              (Keeper_memory_os_io.list_fact_store_keeper_ids ()));
+         Eio.Time.sleep clock interval;
+         loop ()
+       in
+       loop ())
+   | Some _ | None -> ());
   (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
      write-only — strengthen/weaken populated synapses but decay +
      pruning never ran (zero production callers of [consolidate]).

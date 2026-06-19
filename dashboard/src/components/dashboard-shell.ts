@@ -1395,6 +1395,11 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
     && routeState.params.keeper.trim() !== ''
 }
 
+export function shouldRenderSurfaceLead(routeState: RouteState): boolean {
+  if (isKeeperDetailDashboardRoute(routeState)) return false
+  return routeState.tab !== 'connectors'
+}
+
 function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
@@ -1461,6 +1466,7 @@ export function DashboardMain() {
   const soloMode = isWidgetSoloRoute(route.value)
   const immersiveSurface = route.value.tab === 'code' || route.value.tab === 'keepers'
   const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
+  const renderSurfaceLead = shouldRenderSurfaceLead(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`
     <div class=${`v2-shell-panel ${immersiveSurface
       ? 'shrink-0 border-b border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'
@@ -1505,7 +1511,7 @@ export function DashboardMain() {
 
   return html`
     ${warmingBanner}
-    ${keeperDetailRoute ? null : html`<${SurfaceLead} />`}
+    ${renderSurfaceLead ? html`<${SurfaceLead} />` : null}
     ${keeperDetailRoute ? null : html`<${ObservatoryFilterBar} />`}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <div class="animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both">

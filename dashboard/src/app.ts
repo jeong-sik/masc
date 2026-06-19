@@ -257,6 +257,7 @@ export function App() {
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
   const focusMode = dashboardFocusMode.value
   const mobileDrawerOpen = isMobile && mobileMenuOpen.value
+  const suppressFloatingChrome = keeperDetailMode || mobileDrawerOpen || currentTab === 'connectors'
   const compactChromeMode = shouldUseCompactDashboardChrome({
     widgetSoloMode,
     focusMode,
@@ -396,7 +397,7 @@ export function App() {
       ${selectedTask.value
         ? html`<${Suspense} fallback=${null}><${LazyTaskDetailOverlay} /><//>`
         : null}
-      ${keeperDetailMode || mobileDrawerOpen ? null : html`
+      ${suppressFloatingChrome ? null : html`
         <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
         <${DashboardFocusModeToggle} />
       `}

@@ -1009,6 +1009,10 @@
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
+  .v2-connectors-surface {
+    padding-bottom: 118px;
+  }
+
   .cn-surf-head {
     flex-direction: column;
     align-items: flex-start;

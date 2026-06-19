@@ -318,6 +318,13 @@ let consolidate_memory_notes ?summarizer (rows : keeper_memory_row_raw list)
           ("schema_version", `Int keeper_memory_schema_version);
           ("priority", `Int consolidation_recurrence_priority);
           ("text", `String row.text);
+          (* Carry the representative source row's trace_id. [parse_memory_bank_row]
+             rejects rows with an empty trace_id, so omitting it here silently
+             purges this promoted long_term note on the next read/compaction.
+             [row] is one of the input rows (all passed that parse guard), so
+             [row_trace_id row] is non-empty. The note recurred across
+             [recurring_across] traces; this records the highest-priority origin. *)
+          ("trace_id", `String (row_trace_id row));
           ("generation", `Int row.generation);
           ("recurring_across", `Int (List.length tids));
         ] in

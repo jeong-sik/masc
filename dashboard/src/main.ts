@@ -33,9 +33,8 @@ import './styles/styleseed-base.css'
 // Global utilities and layout
 import './styles/global.css'
 import './styles/chat.css'
-import './styles/chat-blocks-v2.css'
-import './styles/surfaces-v2.css'
-import './styles/cockpit-v2.css'
+// chat-blocks-v2.css / surfaces-v2.css / cockpit-v2.css load via the *-v2.css
+// glob below (see ordering note there) — no per-surface import line here.
 
 // Component-specific styles
 import './styles/ui.css'
@@ -50,18 +49,15 @@ import './styles/paper-theme.css'
 import './styles/keeper-workspace.css'
 import './styles/copilot-dock.css'
 import './styles/keeper-turn-inspector.css'
-import './styles/ide-v2.css'
-import './styles/work-v2.css'
 import './styles/design-canvas.css'
 import './styles/states.css'
-import './styles/connectors-v2.css'
-import './styles/telemetry-v2.css'
-import './styles/craft-v2.css'
+// ide-v2.css / work-v2.css / connectors-v2.css / telemetry-v2.css /
+// craft-v2.css load via the *-v2.css glob below.
 
-// v2 skin — cool-charcoal palette + voltage accent (brass/blood/ice) +
-// Space Grotesk display, for the --color-* surfaces. Activated by
-// data-skin="v2" on <html> (index.html), scoped to yield to paper/styleseed.
-import './styles/skin-v2.css'
+// v2 skin (skin-v2.css) — cool-charcoal palette + voltage accent
+// (brass/blood/ice) + Space Grotesk display, for the --color-* surfaces.
+// Activated by data-skin="v2" on <html> (index.html), scoped to yield to
+// paper/styleseed. Loaded via the *-v2.css glob below.
 // StyleSeed → keeper-v2 Dark Fantasy bridge. Re-points the StyleSeed token
 // VALUES (--ss-* / --background / --card / --brand, defined LIGHT by
 // app-shell-v2.css) at the Dark Fantasy spine, so the migrated surfaces render

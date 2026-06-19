@@ -768,45 +768,55 @@ function OverviewHeader({ stats }: { stats: OverviewStats }) {
   useNowSecondsTicker()
   const clock = nowHMKst()
   return html`
-    <header class="v2-overview-head flex flex-wrap items-end justify-between gap-3" data-testid="overview-head">
+    <header class="ov-head v2-overview-head" data-testid="overview-head">
       <div>
-        <h1 class="text-[18px] font-bold tracking-normal text-text-secondary">운영 개요</h1>
-        <p class="m-0 mt-1 text-[12px] text-text-tertiary">
-          <span title="최상위 조정 범위 — 모든 room/keeper를 담는 root namespace">namespace <span class="font-mono text-text-secondary">masc-mcp</span></span>
-          <span class="mx-1 text-text-disabled">·</span>
+        <h1>운영 개요</h1>
+        <p class="ov-sub">
+          <span title="최상위 조정 범위 — 모든 room/keeper를 담는 root namespace">namespace <span class="mono">masc-mcp</span></span>
+          <span> · </span>
           <span title="등록된 keeper 총 수">Keeper ${stats.total}</span>
-          <span class="mx-1 text-text-disabled">·</span>
+          <span> · </span>
           <span title="현재 토큰으로 로그인한 운영자">operator <b class="text-text-secondary">@operator</b></span>
         </p>
       </div>
-      <div class="v2-overview-clock font-mono text-[13px] text-text-secondary" data-testid="overview-clock">
-        ${clock} <span class="text-text-tertiary">KST</span>
+      <div class="ov-clock v2-overview-clock mono" data-testid="overview-clock">
+        ${clock} <span>KST</span>
       </div>
     </header>
   `
 }
 
+function OverviewKpi({
+  label,
+  value,
+  sub,
+  tone,
+  testId,
+}: {
+  label: string
+  value: string
+  sub?: string
+  tone?: 'ok' | 'bad' | 'warn' | 'volt'
+  testId: string
+}) {
+  return html`
+    <div class="ov-kpi" data-testid=${testId}>
+      <div class="ov-kpi-k">${label}</div>
+      <div class=${`ov-kpi-v ${tone ?? ''}`}>${value}${sub !== undefined ? html`<small>${sub}</small>` : null}</div>
+    </div>
+  `
+}
+
 function OverviewKpiStrip({ stats }: { stats: OverviewStats }) {
   return html`
-    <${SectionCard}
-      label="Fleet KPIs"
-      class="v2-overview-kpis ss-card mx-6"
-      variant="standard"
-      data-testid="overview-kpis"
-    >
-      <${KpiStripIsland}
-        ariaLabel="Fleet KPIs"
-        cols=${6}
-        cells=${[
-        { variant: 'stacked', label: '실행 중', value: String(stats.run), caption: `/ ${stats.total}`, kind: 'ok', testId: 'kpi-run' },
-        { variant: 'stacked', label: '주의 필요', value: String(stats.att), kind: stats.att > 0 ? 'err' : undefined, testId: 'kpi-att' },
-        { variant: 'stacked', label: '컨텍스트 압박', value: String(stats.hot), caption: '≥85%', kind: stats.hot > 0 ? 'warn' : undefined, testId: 'kpi-hot' },
-        { variant: 'stacked', label: '평균 컨텍스트', value: `${stats.avgCtx}%`, testId: 'kpi-avg-ctx' },
-        { variant: 'stacked', label: '소유 태스크', value: String(stats.tasks), testId: 'kpi-tasks' },
-        { variant: 'stacked', label: '누적 trace', value: stats.traces.toLocaleString(), testId: 'kpi-traces' },
-      ]}
-      />
-    <//>
+    <section class="ov-kpis v2-overview-kpis" aria-label="Fleet KPIs" data-testid="overview-kpis">
+      <${OverviewKpi} label="실행 중" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" />
+      <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" />
+      <${OverviewKpi} label="컨텍스트 압박" value=${String(stats.hot)} sub=" ≥85%" tone=${stats.hot > 0 ? 'warn' : undefined} testId="kpi-hot" />
+      <${OverviewKpi} label="평균 컨텍스트" value=${`${stats.avgCtx}%`} tone="volt" testId="kpi-avg-ctx" />
+      <${OverviewKpi} label="소유 태스크" value=${String(stats.tasks)} testId="kpi-tasks" />
+      <${OverviewKpi} label="누적 trace" value=${stats.traces.toLocaleString()} testId="kpi-traces" />
+    </section>
   `
 }
 
@@ -828,45 +838,47 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
 
   if (attn.length === 0) {
     return html`
-      <${SectionCard} label="주의 필요" class="v2-overview-attention ss-card" variant="standard" data-testid="overview-attention">
-        <p class="text-[11px] text-text-tertiary italic">모든 keeper 정상</p>
-      <//>
+      <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
+        <div class="ov-card-h">
+          <h3>주의 필요</h3>
+          <span class="ov-count">0</span>
+        </div>
+        <div class="ov-empty">모든 keeper 정상</div>
+      </section>
     `
   }
 
   return html`
-    <${SectionCard}
-      label="주의 필요"
-      class="v2-overview-attention ss-card"
-      variant="standard"
-      right=${html`<span class="text-[12px] text-text-tertiary">${attn.length}</span>`}
-      data-testid="overview-attention"
-    >
-      <div class="v2-overview-attention-list flex flex-col gap-2">
+    <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
+      <div class="ov-card-h">
+        <h3>주의 필요</h3>
+        <span class="ov-count">${attn.length}</span>
+      </div>
+      <div class="ov-attn-list v2-overview-attention-list">
         ${attn.map(k => {
           const reason = deriveKeeperAttentionReason(k)
           const displayName = k.koreanName && k.koreanName !== '' ? k.koreanName : k.name
           return html`
             <div
               key=${k.name}
-              class="v2-overview-attention-row flex cursor-pointer items-center gap-3 rounded-md border border-border bg-card p-2 transition-colors hover:border-strong hover:bg-surface-subtle"
+              class="ov-attn-row v2-overview-attention-row"
               onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
               data-testid=${`attention-row-${k.name}`}
             >
               <${AgentAvatar} name=${k.name} size="sm" status=${keeperDisplayStatus(k)} />
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 text-[13px] font-semibold text-text-primary">
+              <div class="ov-attn-meta">
+                <div class="ov-attn-name">
                   ${displayName}
-                  <span class="font-mono text-[11px] text-text-tertiary">${k.name}</span>
+                  <span class="ov-attn-ns mono">${k.name}</span>
                 </div>
-                <div class="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+                <div class=${`ov-attn-reason sev-${reason.sev}`}>
                   <span class="inline-block size-1.5 rounded-full ${attentionToneClass(reason.sev)}"></span>
-                  <span class=${reason.sev === 'bad' ? 'text-destructive' : 'text-warning'}>${reason.text}</span>
+                  <span>${reason.text}</span>
                 </div>
               </div>
               <button
                 type="button"
-                class="text-[11px] font-medium text-brand hover:underline"
+                class="ov-attn-act"
                 onClick=${(e: MouseEvent) => {
                   e.stopPropagation()
                   navigate('monitoring', { section: 'agents', keeper: k.name })
@@ -878,44 +890,54 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
           `
         })}
       </div>
-    <//>
+    </section>
   `
 }
 
 function OverviewTelemetry({ bars }: { bars: number[] }) {
   return html`
-    <${SectionCard}
-      label="텔레메트리"
-      class="v2-overview-telemetry ss-card"
-      variant="standard"
-      right=${html`<span class="text-[12px] font-mono text-text-tertiary">trace / 5m · last 140m</span>`}
-      data-testid="overview-telemetry"
-    >
-      <div class="v2-overview-bars flex h-24 items-end gap-0.5" role="img" aria-label="Trace telemetry histogram">
+    <section class="ov-card ov-telemetry v2-overview-telemetry" data-testid="overview-telemetry">
+      <div class="ov-card-h">
+        <h3>텔레메트리</h3>
+        <span class="ov-legend mono">trace / 5m · last 140m</span>
+      </div>
+      <div class="ov-bars v2-overview-bars" role="img" aria-label="Trace telemetry histogram">
         ${bars.map((b, i) => html`
           <span
             key=${i}
-            class="v2-overview-bar flex-1 rounded-sm ${b >= 0.95 ? 'is-hot' : ''}"
+            class=${`ov-bar v2-overview-bar ${b >= 0.95 ? 'hot is-hot' : ''}`}
             style=${{ height: `${10 + b * 90}%` }}
           ></span>
         `)}
       </div>
-      <div class="mt-3 grid grid-cols-4 gap-2 text-[11px]">
-        <div><span class="text-text-tertiary">피크</span><span class="ml-2 font-mono text-text-secondary">112/5m</span></div>
-        <div><span class="text-text-tertiary">평균</span><span class="ml-2 font-mono text-text-secondary">47/5m</span></div>
-        <div><span class="text-text-tertiary">오류율</span><span class="ml-2 font-mono text-success">0.4%</span></div>
-        <div><span class="text-text-tertiary">p95 지연</span><span class="ml-2 font-mono text-text-secondary">1.8s</span></div>
+      <div class="ov-tel-foot">
+        <div class="ov-tel-stat"><span class="k">피크</span><span class="v mono">112/5m</span></div>
+        <div class="ov-tel-stat"><span class="k">평균</span><span class="v mono">47/5m</span></div>
+        <div class="ov-tel-stat"><span class="k">오류율</span><span class="v mono text-success">0.4%</span></div>
+        <div class="ov-tel-stat"><span class="k">p95 지연</span><span class="v mono">1.8s</span></div>
       </div>
-    <//>
+    </section>
   `
+}
+
+function keeperNamespaceLabel(keeper: Keeper): string {
+  return keeper.runtime_canonical
+    ?? keeper.selected_runtime_canonical
+    ?? keeper.runtime_id
+    ?? keeper.agent_name
+    ?? 'masc-mcp'
 }
 
 function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
   if (keeperList.length === 0) {
     return html`
-      <${SectionCard} label="Keeper 전체" class="v2-overview-fleet ss-card mx-6" variant="standard" data-testid="overview-fleet">
-        <p class="text-[11px] text-text-tertiary italic">No keepers</p>
-      <//>
+      <section class="ov-card ov-fleet v2-overview-fleet" data-testid="overview-fleet">
+        <div class="ov-card-h">
+          <h3>Keeper 전체</h3>
+          <button type="button" class="ov-link" onClick=${() => navigate('monitoring', { section: 'agents' })}>전체 대화 보기 →</button>
+        </div>
+        <div class="ov-empty">No keepers</div>
+      </section>
     `
   }
 
@@ -932,22 +954,12 @@ function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
   )
 
   return html`
-    <${SectionCard}
-      label="Keeper 전체"
-      class="v2-overview-fleet ss-card mx-6"
-      variant="standard"
-      right=${html`
-        <button
-          type="button"
-          class="text-[11px] text-brand hover:underline"
-          onClick=${() => navigate('monitoring', { section: 'agents' })}
-        >
-          전체 대화 보기 →
-        </button>
-      `}
-      data-testid="overview-fleet"
-    >
-      <div class="v2-overview-fleet-grid grid gap-2 px-6" style="grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));">
+    <section class="ov-card ov-fleet v2-overview-fleet" data-testid="overview-fleet">
+      <div class="ov-card-h">
+        <h3>Keeper 전체</h3>
+        <button type="button" class="ov-link" onClick=${() => navigate('monitoring', { section: 'agents' })}>전체 대화 보기 →</button>
+      </div>
+      <div class="ov-fleet-grid v2-overview-fleet-grid">
         ${sorted.map(k => {
           const displayStatus = keeperDisplayStatus(k)
           const isRunning = keeperRowLooksRunning(k)
@@ -958,37 +970,36 @@ function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
             <button
               key=${k.name}
               type="button"
-              class="v2-overview-keeper text-left rounded-md border border-border bg-card p-3 transition-colors hover:border-strong hover:bg-surface-subtle"
+              class="ov-keeper v2-overview-keeper"
               onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
               data-testid=${`overview-keeper-${k.name}`}
             >
-              <div class="flex items-center gap-2">
+              <div class="ov-keeper-top">
                 <${AgentAvatar} name=${k.name} size="sm" status=${displayStatus} />
-                <div class="min-w-0 flex-1">
-                  <div class="truncate text-[13px] font-semibold text-text-primary">${displayName}</div>
-                  <div class="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+                <div class="ov-keeper-id">
+                  <div class="ov-keeper-name">${displayName}</div>
+                  <div class="ov-keeper-state">
                     <${StatusDot} class=${isRunning ? 'bg-success' : 'bg-text-disabled'} />
                     <span class="truncate">${k.phase ?? k.lifecycle_phase ?? displayStatus}</span>
                   </div>
                 </div>
                 ${pickAttentionKeepers([k]).length > 0
-                  ? html`<span class="v2-overview-keeper-att inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[11px] font-semibold text-white">!</span>`
+                  ? html`<span class="ov-keeper-att v2-overview-keeper-att">!</span>`
                   : null}
               </div>
-              <div class="mt-2 flex items-center justify-between gap-2 text-[11px]">
-                <span class="font-mono text-text-tertiary">${keeperModelLabel(k)}</span>
-                <div class="flex flex-1 items-center gap-2">
-                  <div class="v2-overview-mini-meter h-1 flex-1 rounded-full bg-surface-muted">
-                    <span class="block h-full rounded-full ${ctx >= 0.85 ? 'bg-destructive' : ctx >= 0.6 ? 'bg-warning' : 'bg-success'}" style=${{ width: `${Math.min(100, ctxPct)}%` }}></span>
-                  </div>
-                  <span class="w-8 text-right font-mono text-text-secondary">${ctxPct}%</span>
+              <div class="ov-keeper-ns mono">${keeperNamespaceLabel(k)}</div>
+              <div class="ov-keeper-foot">
+                <span class="mono">${keeperModelLabel(k) || 'model unknown'}</span>
+                <div class="ov-mini-meter v2-overview-mini-meter">
+                  <span class=${ctx >= 0.85 ? 'hot' : ''} style=${{ width: `${Math.min(100, ctxPct)}%` }}></span>
                 </div>
+                <span class="mono ov-keeper-ctx">${ctxPct}%</span>
               </div>
             </button>
           `
         })}
       </div>
-    <//>
+    </section>
   `
 }
 
@@ -1015,20 +1026,28 @@ export function Overview() {
   const bars = useMemo(() => telemetryBars(keeperList), [keeperList])
 
   return html`
-    <div class="v2-overview-surface ss-surface flex flex-col space-y-6 bg-surface-page text-text-primary">
-      <${OverviewHeader} stats=${stats} />
-      <${OverviewKpiStrip} stats=${stats} />
-      <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
-      <div class="grid gap-6 px-6 lg:grid-cols-2">
-        <${OverviewAttentionPanel} keeperList=${keeperList} />
-        <${OverviewTelemetry} bars=${bars} />
+    <main class="ov v2-overview-surface ss-surface text-text-primary" data-testid="overview-surface">
+      <div class="ov-scroll v2-overview-scroll">
+        <${OverviewHeader} stats=${stats} />
+        <${OverviewKpiStrip} stats=${stats} />
+        <div class="ov-grid v2-overview-primary-grid" data-testid="overview-primary-grid">
+          <${OverviewAttentionPanel} keeperList=${keeperList} />
+          <${OverviewTelemetry} bars=${bars} />
+        </div>
+        <${OverviewFleetGrid} keeperList=${keeperList} />
+
+        <details class="v2-overview-rollup" data-testid="overview-rollup">
+          <summary>운영 롤업</summary>
+          <div class="v2-overview-rollup-body">
+            <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
+            <${SurfaceReadinessSummary} />
+            <${FleetTicker} events=${tickerEvents} />
+            <${FunnelCard} counts=${counts} />
+            <${MissionPartyCard} active=${active} />
+            <${KeeperStrip} keeperList=${keeperList} />
+          </div>
+        </details>
       </div>
-      <${SurfaceReadinessSummary} />
-      <${FleetTicker} events=${tickerEvents} />
-      <${FunnelCard} counts=${counts} />
-      <${MissionPartyCard} active=${active} />
-      <${KeeperStrip} keeperList=${keeperList} />
-      <${OverviewFleetGrid} keeperList=${keeperList} />
-    </div>
+    </main>
   `
 }

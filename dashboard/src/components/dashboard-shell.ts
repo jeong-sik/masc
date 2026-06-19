@@ -1046,9 +1046,11 @@ export function SideRail({
 }) {
   const currentTab = route.value.tab
   const currentSection = currentSectionForRoute(route.value)
+  const settingsSurface = DASHBOARD_SURFACES.find(surface => surface.id === 'settings')
   const visibleSurfaces = primaryOnly
-    ? PRIMARY_DASHBOARD_SURFACES
-    : DASHBOARD_SURFACES.filter(surface => surface.hidden !== true)
+    ? PRIMARY_DASHBOARD_SURFACES.filter(surface => surface.id !== 'settings')
+    : DASHBOARD_SURFACES.filter(surface => surface.hidden !== true && surface.id !== 'settings')
+  const settingsActive = currentTab === 'settings'
 
   return html`
     <nav class="v2-shell-surface flex flex-col h-full" aria-label="Dashboard navigation">
@@ -1135,7 +1137,30 @@ export function SideRail({
         </div>
       </div>
 
-      <div class="nav-footer v2-shell-panel shrink-0 border-t border-[var(--color-border-default)] px-2 py-2">
+      <div class="nav-footer v2-shell-panel flex shrink-0 flex-col gap-2 border-t border-[var(--color-border-default)] px-2 py-2">
+        ${settingsSurface ? html`
+          <${RouteLink}
+            tab=${settingsSurface.defaultTab}
+            params=${settingsSurface.defaultParams}
+            class=${collapsed
+              ? `v2-shell-row nav-link-collapsed nav-footer-settings flex h-7 w-full items-center justify-center rounded-[var(--r-0)] border cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${settingsActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}`
+              : `v2-shell-row nav-link nav-footer-settings flex min-h-7 w-full items-center gap-1.5 rounded-[var(--r-0)] border px-1.5 py-1 text-left cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${settingsActive ? 'active border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--color-fg-secondary)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent bg-transparent !text-[var(--color-fg-muted)] hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-elevated)] hover:!text-[var(--color-fg-secondary)]'}`}
+            ariaCurrent=${settingsActive ? 'page' : undefined}
+            title=${settingsSurface.label}
+            aria-label=${settingsSurface.label}
+          >
+            <span class="nav-icon ${collapsed ? '' : 'flex size-5 shrink-0 items-center justify-center rounded-[var(--r-0)]'} ${settingsActive ? 'bg-[var(--select-10)] text-[var(--select)]' : collapsed ? '' : 'bg-[var(--color-bg-surface)] text-[var(--color-fg-muted)]'}" aria-hidden="true">
+              <${SurfaceIcon} icon=${settingsSurface.icon} size=${collapsed ? 15 : 13} />
+            </span>
+            ${collapsed
+              ? html`<span class="sr-only">${settingsSurface.label}</span>`
+              : html`
+                  <div class="nav-label flex-1 min-w-0">
+                    <div class="truncate font-mono text-[var(--fs-11)] font-semibold uppercase leading-4 tracking-[var(--track-caps)] ${settingsActive ? 'text-[var(--select)]' : ''}">${settingsSurface.label}</div>
+                  </div>
+                `}
+          <//>
+        ` : null}
         <${HealthIndicator} collapsed=${collapsed} />
       </div>
     </nav>
@@ -1172,7 +1197,7 @@ function TabContent() {
       `
     case 'workspace':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('Workspace')}>
+        <${Suspense} fallback=${lazyTabFallback('Work')}>
           <${LazyWork} />
         <//>
       `

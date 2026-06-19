@@ -31,7 +31,6 @@ import {
 import { ThemeSwitch } from './components/theme-switch'
 import { EmergencyStopControl } from './components/emergency-stop-control'
 import { TransportBeacon } from './components/transport-beacon'
-import { DashboardSurfaceTabs } from './components/dashboard-surface-tabs'
 import { DashboardNavRail } from './components/mobile-nav'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
@@ -44,7 +43,6 @@ import { DashboardStatusTray } from './components/status-tray'
 import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
 import {
   DASHBOARD_NAV_ITEMS,
-  PRIMARY_DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
 } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
@@ -258,6 +256,7 @@ export function App() {
   const widgetSoloMode = isWidgetSoloRoute(route.value)
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
   const focusMode = dashboardFocusMode.value
+  const mobileDrawerOpen = isMobile && mobileMenuOpen.value
   const compactChromeMode = shouldUseCompactDashboardChrome({
     widgetSoloMode,
     focusMode,
@@ -313,7 +312,6 @@ export function App() {
               </div>
             </div>
 
-            <${DashboardSurfaceTabs} items=${PRIMARY_DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
           </div>
 
           <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
@@ -398,7 +396,7 @@ export function App() {
       ${selectedTask.value
         ? html`<${Suspense} fallback=${null}><${LazyTaskDetailOverlay} /><//>`
         : null}
-      ${keeperDetailMode ? null : html`
+      ${keeperDetailMode || mobileDrawerOpen ? null : html`
         <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
         <${DashboardFocusModeToggle} />
       `}

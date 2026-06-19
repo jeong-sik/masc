@@ -57,7 +57,7 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('.v2-header-crumb')).not.toBeNull()
     expect(container.querySelector('.v2-header-title')).not.toBeNull()
     expect(container.querySelector('.v2-header-actions')).not.toBeNull()
-    expect(container.querySelector('.v2-shell-tabs')).not.toBeNull()
+    expect(container.querySelector('.v2-shell-tabs')).toBeNull()
     expect(container.querySelector('.v2-app-header-status')).not.toBeNull()
     expect(container.querySelector('.v2-statchip.live')).not.toBeNull()
   })
@@ -188,6 +188,8 @@ describe('App v2 header chrome', () => {
     await waitFor(() => {
       expect(rail?.classList.contains('block')).toBe(true)
       expect(rail?.classList.contains('hidden')).toBe(false)
+      expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
+      expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
     })
   })
 

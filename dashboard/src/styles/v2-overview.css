@@ -74,6 +74,17 @@
 
 /* ── Keeper-v2 overview port additions ─────────────────────────────────────── */
 
+.v2-overview-surface.ov {
+  min-height: clamp(36rem, calc(100vh - 13rem), 56rem);
+  overflow: hidden;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+}
+
+.v2-overview-scroll {
+  max-width: none;
+}
+
 .v2-overview-head {
   padding-bottom: var(--sp-1);
   border-bottom: 1px solid var(--color-border-default);
@@ -131,4 +142,85 @@
 
 .v2-overview-keeper:hover {
   background: color-mix(in srgb, var(--color-bg-hover) 50%, transparent);
+}
+
+.v2-overview-rollup {
+  margin-top: 18px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--bg-panel) 72%, transparent);
+}
+
+.v2-overview-rollup > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 14px;
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--text-mid);
+  text-transform: uppercase;
+}
+
+.v2-overview-rollup > summary::-webkit-details-marker {
+  display: none;
+}
+
+.v2-overview-rollup > summary::after {
+  content: "+";
+  float: right;
+  color: var(--text-dim);
+}
+
+.v2-overview-rollup[open] > summary::after {
+  content: "-";
+}
+
+.v2-overview-rollup-body {
+  display: grid;
+  gap: 14px;
+  padding: 0 14px 14px;
+}
+
+.v2-overview-rollup-body .mx-6 {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+@media (max-width: 640px) {
+  .v2-overview-surface.ov {
+    min-height: calc(100vh - 17rem);
+    border-radius: var(--radius-sm);
+  }
+
+  .v2-overview-scroll {
+    padding: 16px 16px 9rem;
+  }
+
+  .v2-overview-head {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .v2-overview-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .v2-overview-primary-grid {
+    gap: 12px;
+  }
+
+  .v2-overview-attention-row {
+    align-items: flex-start;
+  }
+
+  .v2-overview-attention-row .ov-attn-act {
+    padding-inline: 8px;
+  }
+
+  .v2-overview-telemetry .ov-tel-foot {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 14px;
+  }
 }

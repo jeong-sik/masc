@@ -58,14 +58,14 @@ describe('CommandPalette', () => {
     render(html`<${CommandPalette} />`, container)
     await waitFor(() => {
       const palette = container.querySelector('ninja-keys') as (HTMLElement & {
-        data?: Array<{ id: string; handler: () => void; hotkey?: string }>
+        data?: Array<{ id: string; title: string; handler: () => void; hotkey?: string }>
       }) | null
       expect(palette).not.toBeNull()
       expect(palette?.data?.length).toBeGreaterThan(0)
     })
 
     const palette = container.querySelector('ninja-keys') as (HTMLElement & {
-      data?: Array<{ id: string; handler: () => void; hotkey?: string }>
+      data?: Array<{ id: string; title: string; handler: () => void; hotkey?: string }>
     }) | null
 
     expect(palette).not.toBeNull()
@@ -76,6 +76,8 @@ describe('CommandPalette', () => {
     overview?.handler()
 
     expect(navigate).toHaveBeenCalledWith('overview')
+    expect(palette?.data?.find((item) => item.id === 'nav-workspace')?.title)
+      .toBe('작업 화면으로 이동 (Work)')
   })
 
   it('registers a global IDE rails toggle command', async () => {

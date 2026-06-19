@@ -883,12 +883,30 @@ describe('SideRail v2 chrome', () => {
     expect(container.querySelector('.nav-sec')).not.toBeNull()
     expect(container.querySelector('.nav-link.active')).not.toBeNull()
     expect(container.querySelector('.nav-link.active')?.textContent).toContain('Work')
+    expect(container.querySelector('.nav-link.active')?.textContent).not.toContain('Settings')
 
     const sublist = container.querySelector('.nav-sublist')
     expect(sublist).not.toBeNull()
     const activeSublink = sublist?.querySelector('.nav-sublink.active')
     expect(activeSublink).not.toBeNull()
     expect(activeSublink?.textContent).toContain('Work')
+    expect(container.querySelector('.nav-footer .nav-footer-settings')?.textContent).toContain('Settings')
+  })
+
+  it('moves Settings to the rail footer and highlights it there', () => {
+    route.value = {
+      tab: 'settings',
+      params: {},
+      postId: null,
+    }
+
+    render(h(SideRail, { collapsed: false, onToggle: () => {} }), container)
+
+    expect(container.querySelector('.nav-group .nav-link.active')).toBeNull()
+    const settings = container.querySelector('.nav-footer .nav-footer-settings')
+    expect(settings).not.toBeNull()
+    expect(settings?.className).toContain('active')
+    expect(settings?.textContent).toContain('Settings')
   })
 
   it('renders collapsed icon-only links with v2 classes', () => {
@@ -897,6 +915,7 @@ describe('SideRail v2 chrome', () => {
     const links = container.querySelectorAll('.nav-link-collapsed')
     expect(links.length).toBeGreaterThan(0)
     expect(container.querySelector('.nav-link-collapsed.active')).not.toBeNull()
+    expect(container.querySelector('.nav-footer .nav-footer-settings')).not.toBeNull()
   })
 })
 

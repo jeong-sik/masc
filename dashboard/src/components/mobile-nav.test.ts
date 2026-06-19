@@ -121,6 +121,7 @@ describe('DashboardNavRail', () => {
     expect(railText).toContain('Command')
     expect(railText).toContain('Lab')
     expect(railText).toContain('Logs')
+    expect(container.querySelector('.nav-footer .nav-footer-settings')?.textContent).toContain('Settings')
   })
 
   it('does not render mobile tabs in desktop mode', () => {

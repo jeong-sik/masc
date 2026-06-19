@@ -298,6 +298,39 @@ let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
     "runtime_exhausted_no_providers_available"
 ;;
 
+let empty_turn_state : Unified_types.turn_state =
+  { cycle_completed = false
+  ; manifest_seq = 0
+  ; post_commit_failure_reason = None
+  ; paused_meta_override = None
+  ; current_turn_blocker_info = None
+  ; last_execution = None
+  ; last_provider_timeout_budget = None
+  ; degraded_retry_info = None
+  ; runtime_rotation_attempts = []
+  ; failure_reason = None
+  ; retry_phase_started_at = None
+  }
+;;
+
+let test_missing_last_execution_is_typed_error () =
+  match
+    Unified_types.require_last_execution_for_finalize
+      ~keeper_name:"keeper_under_test"
+      empty_turn_state
+  with
+  | Ok _ -> Alcotest.fail "expected missing last_execution to return a typed error"
+  | Error (Agent_sdk.Error.Internal message) ->
+    Alcotest.(check string)
+      "internal error message"
+      "keeper_under_test: last_execution missing at turn finalize"
+      message
+  | Error err ->
+    Alcotest.failf
+      "expected Internal error, got %s"
+      (Agent_sdk.Error.to_string err)
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_disposition"
@@ -346,6 +379,12 @@ let () =
             "structured runtime no-provider reason is preserved"
             `Quick
             test_registry_failure_reason_preserves_no_provider_runtime_reason
+        ] )
+    ; ( "turn finalization"
+      , [ Alcotest.test_case
+            "missing last_execution returns typed Internal"
+            `Quick
+            test_missing_last_execution_is_typed_error
         ] )
     ]
 ;;

@@ -600,12 +600,18 @@ let run_keeper_cycle
                   post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
                   Ok meta, turn_state
                 | Error err ->
-                  let final_execution = Option.get turn_state.last_execution in
-                  finalize_trajectory_acc
-                    ~config
-                    ~keeper_name:meta.name
-                    trajectory_acc
-                    (Trajectory.Failed (Agent_sdk.Error.to_string err));
+                  (match
+                     require_last_execution_for_finalize
+                       ~keeper_name:meta.name
+                       turn_state
+                   with
+                   | Error missing_err -> Error missing_err, turn_state
+                   | Ok final_execution ->
+                     finalize_trajectory_acc
+                       ~config
+                       ~keeper_name:meta.name
+                       trajectory_acc
+                       (Trajectory.Failed (Agent_sdk.Error.to_string err));
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
                   (match Keeper_turn_driver.classify_masc_internal_error err with
@@ -907,14 +913,20 @@ dominant source of the observed CAS race exhaustion after
                     Keeper_metrics.(to_string TurnCompleted)
                     ~labels:[("keeper", meta.name)]
                     ();
-                  Error err, turn_state
+                  Error err, turn_state)
                 | Ok result ->
-                  let final_execution = Option.get turn_state.last_execution in
-                  finalize_trajectory_acc
-                    ~config
-                    ~keeper_name:meta.name
-                    trajectory_acc
-                    Trajectory.Completed;
+                  (match
+                     require_last_execution_for_finalize
+                       ~keeper_name:meta.name
+                       turn_state
+                   with
+                   | Error missing_err -> Error missing_err, turn_state
+                   | Ok final_execution ->
+                     finalize_trajectory_acc
+                       ~config
+                       ~keeper_name:meta.name
+                       trajectory_acc
+                       Trajectory.Completed;
                   (* SSOT: success-path terminal FSM transitions
                      (Streaming -> Completing -> Done) are emitted once inside
                      [Keeper_unified_turn_success.handle]. Do not duplicate them
@@ -942,7 +954,7 @@ dominant source of the observed CAS race exhaustion after
                     { turn_state with cycle_completed = true }
                   in
                   post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                  Ok updated_meta, turn_state))))
+                  Ok updated_meta, turn_state)))))
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
     append_phase_gate_decision turn_state turn_plan

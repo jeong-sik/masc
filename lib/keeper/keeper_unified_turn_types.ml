@@ -23,6 +23,18 @@ type turn_state =
   ; retry_phase_started_at : float option
   }
 
+let require_last_execution_for_finalize ~keeper_name turn_state =
+  match turn_state.last_execution with
+  | Some exec -> Ok exec
+  | None ->
+    let err =
+      Agent_sdk.Error.Internal
+        (Printf.sprintf "%s: last_execution missing at turn finalize" keeper_name)
+    in
+    Log.Keeper.error "%s" (Agent_sdk.Error.to_string err);
+    Error err
+;;
+
 let turn_event_bus_manifest_decision
       (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =

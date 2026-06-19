@@ -22,6 +22,11 @@ type turn_state =
   ; retry_phase_started_at : float option
   }
 
+val require_last_execution_for_finalize :
+  keeper_name:string ->
+  turn_state ->
+  (Keeper_turn_runtime_budget.runtime_execution, Agent_sdk.Error.sdk_error) result
+
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t
 

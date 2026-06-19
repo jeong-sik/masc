@@ -717,11 +717,46 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
-    // Safety: set_policy sets tool_access AND deny atomically, so the current
-    // tool_access must be echoed unchanged; the deny list is trimmed + deduped.
+    // set_policy overwrites tool_access AND deny atomically, so the editor
+    // echoes the current tool_access unchanged (preserving the configured
+    // allowlist record); the deny list is trimmed + deduped.
     expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
       tool_access: ['tool_read_file'],
       deny: ['Execute', 'mcp__masc__masc_board_delete'],
+    })
+  })
+
+  it('echoes an empty tool_access allowlist unchanged (never fabricates access)', async () => {
+    mocks.setKeeperToolPolicy.mockClear()
+    const base = makeKeeperConfig()
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({ tools: { ...base.tools, tool_access: [] } }),
+    )
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    const denylist = container.querySelector(
+      'textarea[aria-label="tool_denylist"]',
+    ) as HTMLTextAreaElement | null
+    expect(denylist).not.toBeNull()
+    denylist!.value = 'Execute\nDangerTool'
+    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('정책 저장'),
+    )
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    // An empty allowlist round-trips as []; the editor must not substitute a
+    // non-empty set. (Runtime gates on the denylist, not tool_access, so [] here
+    // means "all candidates", which the operator's config already chose.)
+    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
+      tool_access: [],
+      deny: ['Execute', 'DangerTool'],
     })
   })
 

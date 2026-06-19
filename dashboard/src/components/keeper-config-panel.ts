@@ -732,8 +732,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     const deny = parseDenylistDraft(text)
     denylistSaving.value = true
     try {
-      // Echo the current tool_access so set_policy (which sets access AND deny
-      // atomically) does not wipe the keeper's tool access.
+      // set_policy overwrites tool_access AND tool_denylist atomically, so echo
+      // the current tool_access to preserve the operator's configured allowlist
+      // record (consumed by tool visibility + assignment telemetry). Runtime
+      // EXECUTION gating keys only off the denylist, not tool_access — see
+      // keeper_tool_policy.ml ("tool_access does NOT gate execution"; empty
+      // tool_access means "all candidates", not "no access").
       const updated = await setKeeperToolPolicy(keeperName, {
         tool_access: c.tools.tool_access,
         deny,

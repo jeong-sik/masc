@@ -18,6 +18,15 @@ type t =
 val id_of_binding : binding -> string
 val of_binding : config -> binding -> t option
 
+val decide_capability_gate :
+  config_path:string -> (string * bool) list -> (unit, string) result
+(** Pure capability-gate decision used by [load_list]/[materialize_config],
+    exposed for testing. [entries] is [(label, known_to_oas_catalog)] per runtime
+    binding. Returns [Error] when any configured model is unknown to the OAS
+    capability catalog: an unknown model resolves to [provider_default] and
+    silently drops thinking/sampling control (corrupted the memory-os librarian for
+    minimax-m3, 2026-06-19). Empty entries are allowed for focused config probes. *)
+
 val load_list :
   config_path:string
   -> ( t list * t * (string * string) list * string option * string option

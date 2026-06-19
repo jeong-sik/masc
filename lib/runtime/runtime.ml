@@ -109,6 +109,52 @@ let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
            (List.length runtimes))
 ;;
 
+(* Pure decision for the capability gate, separated from the global OAS catalog
+   lookup so it is unit-testable. [entries] is [(label, known_to_oas)] per runtime.
+
+   An unknown model resolves to OAS [provider_default], whose guessed capabilities
+   (notably [thinking_control_format = No_thinking_control]) silently drop
+   thinking/sampling control a binding may require — that guess corrupted the
+   memory-os librarian for minimax-m3 (2026-06-19, before it was catalogued).
+   Reject such a binding at load instead of discovering corruption at runtime
+   (Unknown->Permissive anti-pattern; mirrors [runtime].default validation,
+   RFC-0206 §2.1 no-silent-fallback).
+
+   An empty runtime list is allowed for focused unit tests/config probes, but any
+   configured runtime whose model is absent from the catalog is rejected before it
+   can inherit guessed provider_default capabilities. *)
+let decide_capability_gate ~(config_path : string) (entries : (string * bool) list)
+  : (unit, string) result
+  =
+  let unknown = List.filter (fun (_, known) -> not known) entries in
+  match unknown with
+  | [] -> Ok ()
+  | _ ->
+    Error
+      (Printf.sprintf
+         "%s: %d runtime model(s) absent from the OAS capability catalog; they \
+          would use provider_default and silently drop thinking/sampling control. \
+          Add them to models.toml (OAS catalog): %s"
+         config_path
+         (List.length unknown)
+         (String.concat ", " (List.map fst unknown)))
+;;
+
+(* Every runtime binding's model must be known to the OAS capability catalog
+   ({!Llm_provider.Capabilities.for_model_id}). *)
+let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
+  : (unit, string) result
+  =
+  decide_capability_gate
+    ~config_path
+    (List.map
+       (fun (r : t) ->
+          ( Printf.sprintf "%s (model=%s)" r.id r.provider_config.model_id
+          , Option.is_some
+              (Llm_provider.Capabilities.for_model_id r.provider_config.model_id) ))
+       runtimes)
+;;
+
 let materialize_config ~(config_path : string) (cfg : config)
   : ( t list * t * (string * string) list * string option * string option
     , string )
@@ -148,12 +194,15 @@ let materialize_config ~(config_path : string) (cfg : config)
               with
               | Error _ as e -> e
               | Ok () ->
-                Ok
-                  ( runtimes
-                  , rt
-                  , assignments
-                  , cfg.librarian_runtime_id
-                  , cfg.cross_verifier_runtime_id )))))
+                (match validate_runtime_model_capabilities ~config_path runtimes with
+                 | Error _ as e -> e
+                 | Ok () ->
+                   Ok
+                     ( runtimes
+                     , rt
+                     , assignments
+                     , cfg.librarian_runtime_id
+                     , cfg.cross_verifier_runtime_id ))))))
 ;;
 
 let load_list ~(config_path : string)

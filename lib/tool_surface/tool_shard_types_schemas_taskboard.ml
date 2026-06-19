@@ -47,7 +47,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
     ; description =
         "Find orphaned tasks: claimed/in_progress tasks assigned to agents that are \
          offline (no heartbeat >10 min). Returns orphan list with assignee and \
-         last_seen. Use keeper_task_force_release to reassign orphaned tasks."
+         last_seen. The workspace GC auto-releases orphaned tasks; this audit is read-only."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -66,62 +66,6 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ; "default", `Int 20
                       ] )
                 ] )
-          ]
-    }
-  ; { name = "keeper_task_force_release"
-    ; description =
-        "Release a stuck task back to Todo status, removing the current assignee. \
-         Applies when the assignee is offline (no heartbeat >10 min). Broadcasts the \
-         release to the workspace."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "task_id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String "Task ID from keeper_tasks_list or keeper_tasks_audit" )
-                      ; "minLength", `Int 1
-                      ] )
-                ; ( "reason"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String "Why this task is being released (audit trail)" )
-                      ; "minLength", `Int 1
-                      ] )
-                ] )
-          ; "required", `List [ `String "task_id"; `String "reason" ]
-          ]
-    }
-  ; { name = "keeper_task_force_done"
-    ; description =
-        "Mark a task Done when the assignee completed the work but did not transition it \
-         (e.g. went offline after finishing). Broadcasts completion to workspace."
-    ; input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "task_id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String "Task ID from keeper_tasks_list or keeper_tasks_audit" )
-                      ; "minLength", `Int 1
-                      ] )
-                ; ( "notes"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; ( "description"
-                        , `String "Completion evidence: PR merged, test output, file diff"
-                        )
-                      ; "minLength", `Int 1
-                      ] )
-                ] )
-          ; "required", `List [ `String "task_id"; `String "notes" ]
           ]
     }
   ; { name = "keeper_broadcast"

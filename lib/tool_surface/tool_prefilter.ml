@@ -178,16 +178,6 @@ let synonyms : (string * string list) list =
       ; "task finished"
       ; "done with task"
       ] )
-  ; ( "keeper_task_force_release"
-    , [ "release task"
-      ; "unassign task"
-      ; "free task"
-      ; "orphaned task"
-      ; "stuck task"
-      ; "unclaim task"
-      ] )
-  ; ( "keeper_task_force_done"
-    , [ "force complete"; "mark task done by force"; "force finish task" ] )
   ; ( "keeper_memory_search"
     , [ "remember"
       ; "recall"

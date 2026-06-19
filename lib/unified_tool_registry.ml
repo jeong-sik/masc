@@ -58,8 +58,6 @@ let keeper_task_tool_names =
     Keeper_tool_name.
       [ Tasks_list
       ; Tasks_audit
-      ; Task_force_release
-      ; Task_force_done
       ; Broadcast
       ; Task_create
       ; Task_claim

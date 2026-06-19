@@ -321,8 +321,6 @@ let sync_keeper_meta_current_task
 type task_op =
   | Tasks_list
   | Tasks_audit
-  | Task_force_release
-  | Task_force_done
   | Broadcast
   | Task_create
   | Task_claim
@@ -331,8 +329,6 @@ type task_op =
 let task_op_of_keeper_tool = function
   | Keeper_tool_name.Tasks_list -> Some Tasks_list
   | Keeper_tool_name.Tasks_audit -> Some Tasks_audit
-  | Keeper_tool_name.Task_force_release -> Some Task_force_release
-  | Keeper_tool_name.Task_force_done -> Some Task_force_done
   | Keeper_tool_name.Broadcast -> Some Broadcast
   | Keeper_tool_name.Task_create -> Some Task_create
   | Keeper_tool_name.Task_claim -> Some Task_claim
@@ -391,7 +387,7 @@ let handle_keeper_task_tool
       if orphans = [] then
         "ACTION: STOP calling keeper_tasks_audit — no orphans found. Move on to other work or end your turn."
       else
-        Printf.sprintf "ACTION: %d orphan(s) found. Use keeper_task_force_release or keeper_task_force_done to resolve, then STOP re-auditing."
+        Printf.sprintf "ACTION: %d orphan(s) found. The workspace GC auto-releases zombie tasks — no keeper action required. STOP re-auditing."
           (List.length orphans)
     in
     Yojson.Safe.to_string
@@ -405,92 +401,6 @@ let handle_keeper_task_tool
                 then Keeper_tool_outcome.No_progress { reason = No_work_available }
                 else Keeper_tool_outcome.Progress) )
          ])
-    | Task_force_release ->
-    let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
-    let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
-    if task_id = ""
-    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
-    else if reason = ""
-    then
-      (* Schema (tool_shard_types.ml:1363) declares [reason] as a
-         required, minLength:1 field for audit-trail reasons: this is
-         an admin override of the normal release path and the operator
-         must record why. The previous implementation accepted an empty
-         reason and emitted "(reason: no reason given)" to the workspace,
-         which both contradicted the schema and left a silent audit
-         gap. Enforce the schema here. *)
-      error_json
-        "reason is required. Audit trail: record why this task is being \
-         force-released. Example: reason='assignee offline >10 min, no heartbeat'."
-    else (
-      let agent = keeper_agent_sender ~meta in
-      let outcome_result =
-        Workspace.force_release_task_outcome_r config ~agent_name:agent ~task_id ()
-      in
-      let result =
-        Result.map
-          (fun (o : Workspace.transition_outcome) -> o.message)
-          outcome_result
-      in
-      let is_noop =
-        match outcome_result with
-        | Ok outcome -> outcome.noop
-        | Error _ -> false
-      in
-      let () =
-        if not is_noop then
-          let _ =
-            Workspace.broadcast
-              config
-              ~from_agent:agent
-              ~content:
-                (Printf.sprintf
-                   "Force-releasing task %s (reason: %s)"
-                   task_id
-                   reason)
-          in
-          ()
-        else ()
-      in
-      let typed_outcome =
-        match result with
-        | Ok _ when is_noop ->
-          Keeper_tool_outcome.No_progress
-            { reason = Keeper_tool_outcome.No_work_available }
-        | Ok _ -> Keeper_tool_outcome.Progress
-        | Error e ->
-          Keeper_tool_outcome.Error
-            { reason = Masc_domain.masc_error_to_string e }
-      in
-      keeper_task_result_json
-        ~typed_outcome:(Some typed_outcome)
-        result)
-    | Task_force_done ->
-    let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
-    let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
-    if task_id = ""
-    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
-    else if notes = ""
-    then
-      (* Schema (tool_shard_types.ml:1391) declares [notes] as a
-         required, minLength:1 field — this is an admin override of
-         the normal done path and the operator must record completion
-         evidence. The previous implementation accepted an empty
-         [notes] and silently passed it through to Workspace, contradicting
-         the schema and leaving a silent audit gap. Enforce the
-         schema here. *)
-      error_json
-        "notes is required. Audit trail: record completion evidence. \
-         Example: notes='PR #12345 merged, all tests green'."
-    else
-      keeper_task_result_json
-        ~typed_outcome:(Some Keeper_tool_outcome.Progress)
-        (Workspace.force_done_task_r
-           config
-           ~agent_name:(keeper_agent_sender ~meta)
-           ~task_id
-           ~notes
-           ())
     | Broadcast ->
     let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
     if message = ""

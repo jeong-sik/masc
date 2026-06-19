@@ -40,8 +40,6 @@ type t =
   | Task_claim
   | Task_create
   | Task_done
-  | Task_force_done
-  | Task_force_release
   | Tasks_audit
   | Tasks_list
   | Time_now

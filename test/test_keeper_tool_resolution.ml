@@ -189,7 +189,6 @@ let policy_tool_names =
       "keeper_task_claim";
       "keeper_task_create";
       "keeper_task_done";
-      "keeper_task_force_release";
       "keeper_tasks_audit";
       "keeper_tasks_list";
       "keeper_time_now";

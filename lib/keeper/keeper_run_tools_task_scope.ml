@@ -6,8 +6,6 @@
 let task_scope_tool_names =
   [ "masc_transition"
   ; "keeper_task_done"
-  ; "keeper_task_force_done"
-  ; "keeper_task_force_release"
   ]
 ;;
 

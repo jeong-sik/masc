@@ -77,8 +77,7 @@ let tools_for_affordance = function
   | Task_claim ->
     [ "keeper_task_claim" ]
   | Task_audit ->
-    [ "keeper_tasks_audit"; "keeper_task_force_release"; "keeper_task_force_done";
-      "keeper_tasks_list"; "masc_tasks" ]
+    [ "keeper_tasks_audit"; "keeper_tasks_list"; "masc_tasks" ]
   | Task_verify ->
     [ "keeper_tasks_list"; "keeper_tasks_audit";
       "keeper_task_done"; "masc_transition" ]
@@ -115,8 +114,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        | Task_claim ->
          [ "keeper_task_claim" ]
        | Task_audit ->
-         [ "keeper_tasks_audit"; "keeper_task_force_release";
-           "keeper_task_force_done" ]
+         [ "keeper_tasks_audit" ]
        | Task_verify ->
          [ "keeper_task_done"; "masc_transition" ]
        )
@@ -208,8 +206,6 @@ let tool_search_alias_entries =
   ; "keeper_task_claim", "태스크 가져오기 할당"
   ; "keeper_task_create", "태스크 생성 만들기 일감"
   ; "keeper_task_done", "태스크 완료 마감"
-  ; "keeper_task_force_release", "태스크 강제해제 반환"
-  ; "keeper_task_force_done", "태스크 강제완료"
   ; "keeper_voice_speak", "음성 말하기 보이스"
   ; "keeper_voice_agent", "음성 설정 보이스"
   ; "keeper_voice_sessions", "음성 세션 목록"

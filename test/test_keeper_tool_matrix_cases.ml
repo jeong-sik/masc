@@ -233,14 +233,12 @@ let prepare_keeper_name fixture name =
   if
     List.mem name
       [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_tasks_audit";
-        "keeper_task_force_release"; "keeper_task_force_done";
         "keeper_task_done" ]
   then
     ignore (Generic.ensure_task fixture.generic);
   if
     List.mem name
-      [ "keeper_task_force_release"; "keeper_task_force_done";
-        "keeper_task_done" ]
+      [ "keeper_task_done" ]
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
@@ -344,18 +342,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         [ ("speaker_id", `String "98791450001");
           ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
-  | "keeper_task_force_release" ->
-      `Assoc
-        [
-          ("task_id", `String (Generic.ensure_task fixture.generic));
-          ("reason", `String "tool matrix release");
-        ]
-  | "keeper_task_force_done" ->
-      `Assoc
-        [
-          ("task_id", `String (Generic.ensure_task fixture.generic));
-          ("notes", `String "tool matrix done");
-        ]
   | "keeper_broadcast" ->
       `Assoc [ ("message", `String "tool matrix broadcast") ]
   | "keeper_task_done" ->

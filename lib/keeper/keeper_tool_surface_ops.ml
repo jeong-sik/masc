@@ -12,6 +12,7 @@ open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_runtime
+open Result.Syntax
 module Turn = Keeper_turn
 module Status = Keeper_status
 module Persona = Keeper_persona
@@ -104,6 +105,9 @@ let annotate_keeper_json ~runtime_class json =
 let attach_assoc_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: fields)
   | other -> other
+
+let json_of_body body =
+  try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : keeper_meta) =
   let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
@@ -112,70 +116,74 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
   else
     let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
     let new_trace_id_raw = Keeper_identity.generate_trace_id () in
-    match Keeper_id.Trace_id.of_string new_trace_id_raw with
-    | Error err ->
-        Error
-          (Printf.sprintf
-             "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
-             meta.name new_trace_id_raw err)
-    | Ok new_trace_id ->
-        let base_dir = Keeper_types_profile.session_base_dir config in
-        let _session =
-          Keeper_context_runtime.create_session ~session_id:new_trace_id_raw
-            ~base_dir
-        in
-        let updated_meta =
-          { meta with
-            agent_name = expected_agent_name;
-            updated_at = Keeper_meta_contract.now_iso ();
-            runtime = { meta.runtime with
-              trace_id = new_trace_id;
-              trace_history = Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
-              generation = meta.runtime.generation + 1 } }
-        in
-        (match
-           Keeper_meta_store.write_meta_with_merge
-             ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
-         with
-         | Ok () ->
-             Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
-             Ok
-               ( updated_meta,
-                 Some
-                   (`Assoc
-                      [
-                        ("reason", `String "agent_name_mismatch"); ("keeper_name", `String updated_meta.name);
-                        ("previous_agent_name", `String meta.agent_name);
-                        ("expected_agent_name", `String expected_agent_name);
-                        ("previous_trace_id", `String previous_trace_id); ("new_trace_id", `String new_trace_id_raw);
-                      ]) )
-         | Error err ->
-             Error
-               (Printf.sprintf
-                  "failed to persist reseeded keeper identity for %s: %s"
-                  meta.name err))
+    let* new_trace_id =
+      Keeper_id.Trace_id.of_string new_trace_id_raw
+      |> Result.map_error (fun err ->
+          Printf.sprintf
+            "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
+            meta.name new_trace_id_raw err)
+    in
+    let base_dir = Keeper_types_profile.session_base_dir config in
+    let _session =
+      Keeper_context_runtime.create_session ~session_id:new_trace_id_raw ~base_dir
+    in
+    let updated_meta =
+      { meta with
+        agent_name = expected_agent_name;
+        updated_at = Keeper_meta_contract.now_iso ();
+        runtime =
+          { meta.runtime with
+            trace_id = new_trace_id;
+            trace_history =
+              Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
+            generation = meta.runtime.generation + 1;
+          };
+      }
+    in
+    let* () =
+      Keeper_meta_store.write_meta_with_merge
+        ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
+      |> Result.map_error (fun err ->
+          Printf.sprintf
+            "failed to persist reseeded keeper identity for %s: %s"
+            meta.name err)
+    in
+    Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
+    Ok
+      ( updated_meta,
+        Some
+          (`Assoc
+             [
+               ("reason", `String "agent_name_mismatch");
+               ("keeper_name", `String updated_meta.name);
+               ("previous_agent_name", `String meta.agent_name);
+               ("expected_agent_name", `String expected_agent_name);
+               ("previous_trace_id", `String previous_trace_id);
+               ("new_trace_id", `String new_trace_id_raw);
+             ]) )
 
 let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
   maybe_reseed_keeper_identity_config ~config:ctx.config meta
 
 let prepare_keeper_up_identity ctx args =
   let name = String.trim (get_string args "name" "") in
-  match read_meta_resolved ctx.config name with
-  | Ok (Some (_resolved_name, meta)) -> (
-      match maybe_reseed_keeper_identity ctx meta with
-      | Ok (updated_meta, identity_reseed) ->
-          let prepared_args =
-            match args with
-            | `Assoc fields ->
-                `Assoc
-                  (("name", `String updated_meta.name)
-                  :: List.remove_assoc "name" fields)
-            | other -> other
-          in
-          Ok (prepared_args, identity_reseed)
-      | Error _ as err -> err)
-  | Ok None -> Ok (args, None)
-  | Error err -> Error (Printf.sprintf "%s" err)
+  let* resolved =
+    read_meta_resolved ctx.config name
+    |> Result.map_error (fun err -> Printf.sprintf "%s" err)
+  in
+  match resolved with
+  | None -> Ok (args, None)
+  | Some (_resolved_name, meta) ->
+      let* updated_meta, identity_reseed = maybe_reseed_keeper_identity ctx meta in
+      let prepared_args =
+        match args with
+        | `Assoc fields ->
+            `Assoc
+              (("name", `String updated_meta.name)
+              :: List.remove_assoc "name" fields)
+        | other -> other
+      in
+      Ok (prepared_args, identity_reseed)
 let startup_not_ready_error_json elapsed =
   `Assoc [ ("error", `String "server_initializing"); ("message", `String (Printf.sprintf "MASC server is still starting (%.0fs elapsed). Retry in a few seconds." elapsed)); ("retry_after_ms", `Int 3000) ]
   |> Yojson.Safe.pretty_to_string
@@ -187,28 +195,29 @@ let with_keeper_startup_gate f =
   end else
     f ()
 let execute_keeper_up ctx args : tool_result =
-  match prepare_keeper_up_identity ctx args with
+  match
+    let* prepared_args, identity_reseed = prepare_keeper_up_identity ctx args in
+    let result = Turn.handle_keeper_up ctx prepared_args in
+    if not (tool_result_success result) then
+      Ok result
+    else
+      let body = tool_result_body result in
+      let json = json_of_body body in
+      let json =
+        match identity_reseed with
+        | Some note -> attach_assoc_field "identity_reseed" note json
+        | None -> json
+      in
+      invalidate_keeper_list_cache ();
+      Keeper_status_detail.invalidate_status_cache_for
+        (get_string prepared_args "name" "");
+      Ok
+        (tool_result_ok
+           (Yojson.Safe.pretty_to_string
+              (annotate_keeper_json ~runtime_class:"keeper" json)))
+  with
+  | Ok result -> result
   | Error err -> tool_result_error err
-  | Ok (prepared_args, identity_reseed) ->
-      let result = Turn.handle_keeper_up ctx prepared_args in
-      if not (tool_result_success result) then
-        result
-      else
-        let body = tool_result_body result in
-        let json =
-          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-        in
-        let json =
-          match identity_reseed with
-          | Some note -> attach_assoc_field "identity_reseed" note json
-          | None -> json
-        in
-        invalidate_keeper_list_cache ();
-        Keeper_status_detail.invalidate_status_cache_for
-          (get_string prepared_args "name" "");
-        tool_result_ok
-          (Yojson.Safe.pretty_to_string
-             (annotate_keeper_json ~runtime_class:"keeper" json))
 let keeper_brief_meta_json (meta : keeper_meta) =
   `Assoc
     [
@@ -386,14 +395,17 @@ let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_
   if String.equal requested_name "" then
     Ok (args, None)
   else
-    match read_meta_resolved config requested_name with
-    | Ok (Some (_resolved_name, meta)) -> (
-        match maybe_reseed_keeper_identity_config ~config meta with
-        | Ok (updated_meta, identity_reseed) ->
-            Ok (with_keeper_name args updated_meta.name, identity_reseed)
-        | Error _ as err -> err)
-    | Ok None -> Ok (args, None)
-    | Error err -> Error (Printf.sprintf "%s" err)
+    let* resolved =
+      read_meta_resolved config requested_name
+      |> Result.map_error (fun err -> Printf.sprintf "%s" err)
+    in
+    match resolved with
+    | None -> Ok (args, None)
+    | Some (_resolved_name, meta) ->
+        let* updated_meta, identity_reseed =
+          maybe_reseed_keeper_identity_config ~config meta
+        in
+        Ok (with_keeper_name args updated_meta.name, identity_reseed)
 
 let prepare_passive_keeper_identity ctx args =
   prepare_passive_keeper_identity_config
@@ -410,47 +422,61 @@ let handle_keeper_create_from_persona ctx args : tool_result =
     Log.Keeper.warn "create_from_persona rejected: server not ready (%.1fs)" elapsed;
     tool_result_error (startup_not_ready_error_json elapsed)
   end else
-  match Keeper_tool_persona_runtime.resolved_keeper_args_from_persona args with
-  | Error e -> tool_result_error ("" ^ e)
-  | Ok (persona, resolved_args) ->
+    match
+      let* persona, resolved_args =
+        Keeper_tool_persona_runtime.resolved_keeper_args_from_persona args
+        |> Result.map_error (fun e -> "" ^ e)
+      in
       let dry_run = get_bool args "dry_run" false in
       if dry_run then
-        let json =
-          `Assoc
-            [
-              ("persona", Keeper_tool_persona_runtime.persona_summary_to_json persona); ("created", `Bool false);
-              ("resolved_args", resolved_args);
-            ]
-        in
-        tool_result_ok (Yojson.Safe.to_string json)
+        Ok
+          (tool_result_ok
+             (Yojson.Safe.to_string
+                (`Assoc
+                   [
+                     ( "persona",
+                       Keeper_tool_persona_runtime.persona_summary_to_json persona );
+                     ("created", `Bool false);
+                     ("resolved_args", resolved_args);
+                   ])))
       else
-        match Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args resolved_args with
-        | Error e -> tool_result_error ("" ^ e)
-        | Ok _ ->
-        let result = with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) in
+        let* _rendered_toml =
+          Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args
+            resolved_args
+          |> Result.map_error (fun e -> "" ^ e)
+        in
+        let result =
+          with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args)
+        in
         if not (tool_result_success result) then
-          result
+          Ok result
         else
           let body = tool_result_body result in
-          match Keeper_tool_persona_runtime.persist_keeper_toml_from_resolved_args resolved_args with
-          | Error e ->
-              tool_result_error ("keeper created but durable config write failed: " ^ e)
-          | Ok durable_config ->
-          let created_json =
-            try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
+          let* durable_config =
+            Keeper_tool_persona_runtime.persist_keeper_toml_from_resolved_args
+              resolved_args
+            |> Result.map_error (fun e ->
+                "keeper created but durable config write failed: " ^ e)
           in
+          let created_json = json_of_body body in
           let json =
             `Assoc
               [
-                ("persona", Keeper_tool_persona_runtime.persona_summary_to_json persona); ("created", `Bool true);
+                ( "persona",
+                  Keeper_tool_persona_runtime.persona_summary_to_json persona );
+                ("created", `Bool true);
                 ("durable_config", durable_config);
-                ("result", annotate_keeper_json ~runtime_class:"keeper" created_json);
+                ( "result",
+                  annotate_keeper_json ~runtime_class:"keeper" created_json );
                 ("resolved_args", resolved_args);
               ]
           in
           invalidate_keeper_list_cache ();
           invalidate_status_cache (get_string resolved_args "name" "");
-          tool_result_ok (Yojson.Safe.to_string json)
+          Ok (tool_result_ok (Yojson.Safe.to_string json))
+    with
+    | Ok result -> result
+    | Error err -> tool_result_error err
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
 
@@ -473,27 +499,30 @@ let keeper_up_body
 ;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
-  match prepare_passive_keeper_identity_config ~config ~agent_name args with
-  | Error err -> tool_result_error err
-  | Ok (prepared_args, identity_reseed) ->
-      let result =
-        Keeper_status_detail.handle_keeper_status_config
-          ~config
-          ~agent_name
-          prepared_args
+  match
+    let* prepared_args, identity_reseed =
+      prepare_passive_keeper_identity_config ~config ~agent_name args
+    in
+    let result =
+      Keeper_status_detail.handle_keeper_status_config
+        ~config
+        ~agent_name
+        prepared_args
+    in
+    if not (tool_result_success result) then
+      Ok result
+    else
+      let body = tool_result_body result in
+      let json = json_of_body body in
+      let json =
+        json
+        |> annotate_keeper_json ~runtime_class:"keeper"
+        |> attach_identity_reseed ?identity_reseed
       in
-      if not (tool_result_success result) then result
-      else
-        let body = tool_result_body result in
-        let json =
-          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-        in
-        let json =
-          json
-          |> annotate_keeper_json ~runtime_class:"keeper"
-          |> attach_identity_reseed ?identity_reseed
-        in
-        tool_result_ok (Yojson.Safe.pretty_to_string json)
+      Ok (tool_result_ok (Yojson.Safe.pretty_to_string json))
+  with
+  | Ok result -> result
+  | Error err -> tool_result_error err
 
 let handle_keeper_status ctx args : tool_result =
   keeper_status_body ~config:ctx.config ~agent_name:ctx.agent_name args
@@ -514,13 +543,14 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
   let rec loop = function
     | [] -> Error (Printf.sprintf "keeper not found: %s" name)
-    | candidate :: rest -> (
-        match read_meta_resolved config candidate with
-        | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
-        | Ok None -> loop rest
-        | Error err -> Error (Printf.sprintf "%s" err))
+    | candidate :: rest ->
+        let* resolved = read_meta_resolved config candidate in
+        (match resolved with
+         | Some (resolved_name, _meta) -> Ok resolved_name
+         | None -> loop rest)
   in
   loop (keeper_name_lookup_candidates name)
+
 
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
@@ -604,99 +634,97 @@ let keeper_msg_body
   let keeper_ctx : _ Keeper_types_profile.context =
     { config; agent_name; sw; clock; proc_mgr; net }
   in
-  match resolve_keeper_name_config ~config args with
+  match
+    let* name = resolve_keeper_name_config ~config args in
+    let resolved_args = with_keeper_name args name in
+    let* () = Turn.preflight_keeper_msg keeper_ctx resolved_args in
+    let timeout_sec =
+      Turn.keeper_msg_timeout_override resolved_args
+      |> Result.value ~default:None
+    in
+    let request_id =
+      Keeper_msg_async.submit
+        ?timeout_sec
+        ~clock
+        ~sw
+        ~base_path:config.base_path
+        ~keeper_name:name
+        ~f:(fun () ->
+          let result = Turn.handle_keeper_msg keeper_ctx resolved_args in
+          if tool_result_success result
+          then begin
+            append_direct_chat_pair_if_reply
+              ~config
+              ~name
+              ~args:resolved_args
+              result;
+            invalidate_keeper_list_cache ();
+            invalidate_status_cache name
+          end;
+          result)
+        ()
+    in
+    let json =
+      `Assoc
+        [ "request_id", `String request_id
+        ; "keeper_name", `String name
+        ; "status", `String "queued"
+        ; ( "message"
+          , `String
+              "Keeper turn submitted. Poll with keeper_msg_result." )
+        ]
+    in
+    Ok (tool_result_ok (Yojson.Safe.to_string json))
+  with
+  | Ok result -> result
   | Error err -> tool_result_error err
-  | Ok name ->
-      let resolved_args = with_keeper_name args name in
-      (match Turn.preflight_keeper_msg keeper_ctx resolved_args with
-       | Error err -> tool_result_error err
-       | Ok () ->
-         let timeout_sec =
-           match Turn.keeper_msg_timeout_override resolved_args with
-           | Ok value -> value
-           | Error _ -> None
-         in
-         let request_id =
-           Keeper_msg_async.submit
-             ?timeout_sec
-             ~clock
-             ~sw
-             ~base_path:config.base_path
-             ~keeper_name:name
-             ~f:(fun () ->
-               let result = Turn.handle_keeper_msg keeper_ctx resolved_args in
-               if tool_result_success result
-               then begin
-                 append_direct_chat_pair_if_reply
-                   ~config
-                   ~name
-                   ~args:resolved_args
-                   result;
-                 invalidate_keeper_list_cache ();
-                 invalidate_status_cache name
-               end;
-               result)
-             ()
-         in
-         let json =
-           `Assoc
-             [ "request_id", `String request_id
-             ; "keeper_name", `String name
-             ; "status", `String "queued"
-             ; ( "message"
-               , `String
-                   "Keeper turn submitted. Poll with keeper_msg_result." )
-             ]
-         in
-         tool_result_ok (Yojson.Safe.to_string json))
 ;;
 
 let handle_keeper_msg ctx args : tool_result =
-  match resolve_keeper_name ctx args with
+  match
+    let* name = resolve_keeper_name ctx args in
+    let resolved_args = with_keeper_name args name in
+    let* () = Turn.preflight_keeper_msg ctx resolved_args in
+    let timeout_sec =
+      Turn.keeper_msg_timeout_override resolved_args
+      |> Result.value ~default:None
+    in
+    let request_id =
+      Keeper_msg_async.submit
+        ?timeout_sec
+        ~clock:ctx.clock
+        ~sw:ctx.sw
+        ~base_path:ctx.config.base_path
+        ~keeper_name:name
+        ~f:(fun () ->
+          let result = Turn.handle_keeper_msg ctx resolved_args in
+          if tool_result_success result
+          then begin
+            append_direct_chat_pair_if_reply
+              ~config:ctx.config
+              ~name
+              ~args:resolved_args
+              result;
+            invalidate_keeper_list_cache ();
+            invalidate_status_cache name
+          end;
+          result)
+        ()
+    in
+    let json =
+      `Assoc
+        [ "request_id", `String request_id
+        ; "keeper_name", `String name
+        ; "status", `String "queued"
+        ; ( "message"
+          , `String
+              "Keeper turn submitted. Poll with keeper_msg_result." )
+        ]
+    in
+    Ok (tool_result_ok (Yojson.Safe.to_string json))
+  with
+  | Ok result -> result
   | Error err -> tool_result_error err
-  | Ok name ->
-      let resolved_args = with_keeper_name args name in
-      (match Turn.preflight_keeper_msg ctx resolved_args with
-       | Error err -> tool_result_error err
-       | Ok () ->
-         let timeout_sec =
-           match Turn.keeper_msg_timeout_override resolved_args with
-           | Ok value -> value
-           | Error _ -> None
-         in
-         let request_id =
-           Keeper_msg_async.submit
-             ?timeout_sec
-             ~clock:ctx.clock
-             ~sw:ctx.sw
-             ~base_path:ctx.config.base_path
-             ~keeper_name:name
-             ~f:(fun () ->
-               let result = Turn.handle_keeper_msg ctx resolved_args in
-               if tool_result_success result
-               then begin
-                 append_direct_chat_pair_if_reply
-                   ~config:ctx.config
-                   ~name
-                   ~args:resolved_args
-                   result;
-                 invalidate_keeper_list_cache ();
-                 invalidate_status_cache name
-               end;
-               result)
-             ()
-         in
-         let json =
-           `Assoc
-             [ "request_id", `String request_id
-             ; "keeper_name", `String name
-             ; "status", `String "queued"
-             ; ( "message"
-               , `String
-                   "Keeper turn submitted. Poll with keeper_msg_result." )
-             ]
-         in
-         tool_result_ok (Yojson.Safe.to_string json))
 ;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_msg_result_body ~(config : Workspace.config) args : tool_result =
@@ -761,39 +789,43 @@ let handle_keeper_msg_queue ctx args : tool_result =
   keeper_msg_queue_body ~config:ctx.config args
 
 let handle_keeper_msg_stream ?on_text_delta ?on_event ctx args : tool_result =
-  match resolve_keeper_name ctx args with
+  match
+    let* name = resolve_keeper_name ctx args in
+    let resolved_args = with_keeper_name args name in
+    let result =
+      Turn.handle_keeper_msg ?on_text_delta ?on_event ctx resolved_args
+    in
+    if not (tool_result_success result) then
+      Ok result
+    else begin
+      let body = tool_result_body result in
+      invalidate_keeper_list_cache ();
+      invalidate_status_cache name;
+      let json = json_of_body body in
+      Ok
+        (tool_result_ok
+           (Yojson.Safe.pretty_to_string
+              (annotate_keeper_json ~runtime_class:"keeper" json)))
+    end
+  with
+  | Ok result -> result
   | Error err -> tool_result_error err
-  | Ok name ->
-      let resolved_args = with_keeper_name args name in
-      let result = Turn.handle_keeper_msg ?on_text_delta ?on_event ctx resolved_args in
-      if not (tool_result_success result) then result
-      else begin
-        let body = tool_result_body result in
-        invalidate_keeper_list_cache ();
-        invalidate_status_cache name;
-        let json =
-          try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
-        in
-        tool_result_ok
-          (Yojson.Safe.pretty_to_string
-             (annotate_keeper_json ~runtime_class:"keeper" json))
-      end
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
-  match read_effective_meta_resolved config name with
-  | Ok (Some (_resolved_name, meta)) -> Ok meta
-  | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
-  | Error err -> Error (Printf.sprintf "%s" err)
+  let* resolved =
+    read_effective_meta_resolved config name
+    |> Result.map_error (fun err -> Printf.sprintf "%s" err)
+  in
+  match resolved with
+  | Some (_resolved_name, meta) -> Ok meta
+  | None -> Error (Printf.sprintf "keeper not found: %s" name)
 
 let resolve_keeper_meta ctx args =
   resolve_keeper_meta_config ~config:ctx.config args
 let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
-  let parsed =
-    try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
-  in
-  match parsed with
-  | Some (`Assoc fields) ->
+  match json_of_body body with
+  | `Assoc fields ->
       Yojson.Safe.pretty_to_string
         (`Assoc
           ((match identity_reseed with
@@ -816,105 +848,86 @@ let resolve_playground_working_dir =
    ctx.config)] line was warning-suppression scaffolding for a future
    real implementation. *)
 let keeper_repair_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
-  match resolve_keeper_meta_config ~config args with
+  match
+    let* meta = resolve_keeper_meta_config ~config args in
+    let* meta, identity_reseed = maybe_reseed_keeper_identity_config ~config meta in
+    let task_spec = get_string args "task_spec" "" in
+    if String.equal (String.trim task_spec) "" then
+      Ok (tool_result_error "task_spec is required")
+    else
+      let* working_dir =
+        resolve_playground_working_dir
+          ~agent_name
+          ~base_path:config.base_path
+          ~working_dir_arg:(get_string args "working_dir" "")
+      in
+      let* validated_target_file =
+        validate_target_file
+          ~working_dir
+          ~target_file:(get_string_opt args "target_file")
+      in
+      let target_mode = get_string args "target_mode" "snippet" in
+      let validator_profile =
+        get_string args "validator_profile"
+          (if String.equal (String.lowercase_ascii target_mode) "repo"
+           then "repo_dune_build"
+           else "snippet_ocamlc")
+      in
+      let max_attempts = min 10 (max 1 (get_int args "max_attempts" 2)) in
+      let fields =
+        [
+          ("plugin_id", `String (get_string args "plugin_id" "ocaml"));
+          ("task_spec", `String task_spec);
+          ("target_mode", `String target_mode);
+          ("working_dir", `String working_dir);
+          ("validator_profile", `String validator_profile);
+          ("model_label", `String (get_string args "model_label" "runtime"));
+          ("max_attempts", `Int max_attempts);
+          ( "artifact_session_id",
+            `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) );
+        ]
+      in
+      let fields =
+        match validated_target_file with
+        | Some target_file -> ("target_file", `String target_file) :: fields
+        | None -> fields
+      in
+      let fields =
+        match get_string_opt args "source_text" with
+        | Some source_text -> ("source_text", `String source_text) :: fields
+        | None -> fields
+      in
+      let body_json =
+        `Assoc
+          [ ( "error",
+              `String
+                "masc_keeper_repair execution path is \
+                 not yet implemented; the tool advertises its schema \
+                 for future migration but currently returns this typed \
+                 unsupported response." )
+          ; ("unsupported", `Bool true)
+          ; ("tool", `String "masc_keeper_repair")
+          ; ("validated_fields", `Assoc fields)
+          ; ( "operator_guidance",
+              `String
+                "All input arguments were validated successfully \
+                 (keeper identity, playground working_dir, validator \
+                 profile, max_attempts, optional target_file / \
+                 source_text). If this tool is critical for your \
+                 workflow, please file a tracking issue requesting \
+                 implementation rather than retrying." )
+          ]
+      in
+      invalidate_status_cache meta.name;
+      Ok
+        (tool_result_error
+           (annotate_keeper_repair_json
+              ?identity_reseed
+              ~keeper_name:meta.name
+              (Yojson.Safe.to_string body_json)))
+  with
+  | Ok result -> result
   | Error err -> tool_result_error err
-  | Ok meta -> (
-      match maybe_reseed_keeper_identity_config ~config meta with
-      | Error err -> tool_result_error err
-      | Ok (meta, identity_reseed) ->
-          let task_spec = get_string args "task_spec" "" in
-          if String.equal (String.trim task_spec) "" then
-            tool_result_error "task_spec is required"
-          else
-            let target_mode = get_string args "target_mode" "snippet" in
-            let working_dir_arg = get_string args "working_dir" "" in
-            let plugin_id = get_string args "plugin_id" "ocaml" in
-            let target_file_opt = get_string_opt args "target_file" in
-            match
-              resolve_playground_working_dir
-                ~agent_name
-                ~base_path:config.base_path
-                ~working_dir_arg
-            with
-            | Error msg -> tool_result_error msg
-            | Ok working_dir ->
-                match
-                  validate_target_file ~working_dir
-                    ~target_file:target_file_opt
-                with
-                | Error msg -> tool_result_error msg
-                | Ok validated_target_file ->
-                    let validator_profile =
-                      get_string args "validator_profile"
-                        (if
-                           String.equal (String.lowercase_ascii target_mode)
-                             "repo"
-                         then
-                           "repo_dune_build"
-                         else
-                           "snippet_ocamlc")
-                    in
-                    let max_attempts =
-                      min 10 (max 1 (get_int args "max_attempts" 2))
-                    in
-                    let fields =
-                      [
-                        ("plugin_id", `String plugin_id); ("task_spec", `String task_spec);
-                        ("target_mode", `String target_mode); ("working_dir", `String working_dir);
-                        ("validator_profile", `String validator_profile);
-                        ( "model_label",
-                          `String (get_string args "model_label" "runtime") );
-                        ("max_attempts", `Int max_attempts);
-                        ( "artifact_session_id",
-                          `String
-                            (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                        );
-                      ]
-                    in
-                    let fields =
-                      match validated_target_file with
-                      | Some target_file ->
-                          ("target_file", `String target_file) :: fields
-                      | None -> fields
-                    in
-                    let fields =
-                      match get_string_opt args "source_text" with
-                      | Some source_text ->
-                          ("source_text", `String source_text) :: fields
-                      | None -> fields
-                    in
-                    let body_json =
-                      `Assoc
-                        [ ( "error"
-                          , `String
-                              "masc_keeper_repair execution path is \
-                               not yet implemented; the tool \
-                               advertises its schema for future \
-                               migration but currently returns this \
-                               typed unsupported response." )
-                        ; ("unsupported", `Bool true)
-                        ; ("tool", `String "masc_keeper_repair")
-                        ; ("validated_fields", `Assoc fields)
-                        ; ( "operator_guidance"
-                          , `String
-                              "All input arguments were validated \
-                               successfully (keeper identity, \
-                               playground working_dir, validator \
-                               profile, max_attempts, optional \
-                               target_file / source_text). If this \
-                               tool is critical for your workflow, \
-                               please file a tracking issue \
-                               requesting implementation rather than \
-                               retrying." )
-                        ]
-                    in
-                    invalidate_status_cache meta.name;
-                    tool_result_error
-                      (annotate_keeper_repair_json
-                         ?identity_reseed
-                         ~keeper_name:meta.name
-                         (Yojson.Safe.to_string body_json))
-)
 
 let handle_keeper_repair ctx args : tool_result =
   keeper_repair_body ~config:ctx.config ~agent_name:ctx.agent_name args
@@ -925,38 +938,39 @@ let adversarial_review_body ~(config : Workspace.config) ~(agent_name : string) 
   if String.equal (String.trim diff) ""
   then tool_result_error {|{"error":"diff is required"}|}
   else
-    let inputs =
-      match get_string_opt args "path" with
-      | Some path -> [ Adversarial_eval.Changed_file { path; content = diff } ]
-      | None -> [ Adversarial_eval.Diff diff ]
-    in
-    match Adversarial_eval.validate_inputs inputs with
-    | Error (path, kind) ->
-        let kind_str =
-          match (kind : Adversarial_eval.banned_input_kind) with
-          | Readme -> "readme"
-          | Design_doc -> "design_doc"
-          | State_history -> "state_history"
-          | Task_history -> "task_history"
-          | Governance_history -> "governance_history"
-        in
-        tool_result_error
-          (Printf.sprintf
-             {|{"error":"banned input: %s (%s)"}|}
-             path
-             kind_str)
-    | Ok valid_inputs ->
-        let session_id =
-          Printf.sprintf "%s-%s-%.0f"
-            agent_name
-            "adversarial-review"
-            (Time_compat.now ())
-        in
-        let ctx =
-          Adversarial_eval.create_context ~session_id ~inputs:valid_inputs
-        in
-        let result = Adversarial_eval.evaluate ctx in
-        tool_result_ok (Yojson.Safe.to_string (Adversarial_eval.result_to_yojson result))
+    match
+      let inputs =
+        match get_string_opt args "path" with
+        | Some path -> [ Adversarial_eval.Changed_file { path; content = diff } ]
+        | None -> [ Adversarial_eval.Diff diff ]
+      in
+      let* valid_inputs =
+        Adversarial_eval.validate_inputs inputs
+        |> Result.map_error (fun (path, kind) ->
+            let kind_str =
+              match (kind : Adversarial_eval.banned_input_kind) with
+              | Readme -> "readme"
+              | Design_doc -> "design_doc"
+              | State_history -> "state_history"
+              | Task_history -> "task_history"
+              | Governance_history -> "governance_history"
+            in
+            Printf.sprintf {|{"error":"banned input: %s (%s)"}|} path kind_str)
+      in
+      let session_id =
+        Printf.sprintf "%s-%s-%.0f"
+          agent_name
+          "adversarial-review"
+          (Time_compat.now ())
+      in
+      let ctx =
+        Adversarial_eval.create_context ~session_id ~inputs:valid_inputs
+      in
+      let result = Adversarial_eval.evaluate ctx in
+      Ok (tool_result_ok (Yojson.Safe.to_string (Adversarial_eval.result_to_yojson result)))
+    with
+    | Ok result -> result
+    | Error err -> tool_result_error err
 
 let handle_keeper_adversarial_review ctx args : tool_result =
   adversarial_review_body ~config:ctx.config ~agent_name:ctx.agent_name args

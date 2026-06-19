@@ -26,6 +26,7 @@ import { BoardCurationPanel } from './board-curation-panel'
 import { BoardKarmaPanel } from './board-karma-panel'
 import { extractMentionTargets, MentionInbox, MentionInboxPanel } from './mention-inbox'
 import { PostDetail, CommentThread, CommentForm } from './post-detail'
+import { FusionBoardEvidence } from './fusion-evidence'
 import { ReactionBar } from './reaction-bar'
 import { StateBlockMessages } from './state-block-messages'
 import {
@@ -584,6 +585,7 @@ function BdThreadDetail({ post, onClose }: { post: BoardPost; onClose: () => voi
 
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
+  const evidencePost = detailPostId.value === post.id && detailPost.value ? detailPost.value : post
 
   return html`
     <aside class="bd-detail has-post" data-testid="bd-thread-detail">
@@ -599,6 +601,7 @@ function BdThreadDetail({ post, onClose }: { post: BoardPost; onClose: () => voi
             <div class="bd-th-body">
               <div class="text-sm font-semibold mb-1">${stripInlineMarkdown(post.title)}</div>
               <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
+              <${FusionBoardEvidence} post=${evidencePost} class="mt-3" />
             </div>
           </div>
         </div>

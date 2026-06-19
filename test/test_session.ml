@@ -41,10 +41,16 @@ let test_mcp_session_get_updates_activity () =
 let test_mcp_session_get_increments_request () =
   let session = Session.McpSessionStore.create () in
   check int "initial count" 0 session.request_count;
-  let _ = Session.McpSessionStore.get session.id in
-  check int "count after first get" 1 session.request_count;
-  let _ = Session.McpSessionStore.get session.id in
-  check int "count after second get" 2 session.request_count
+  (* [get] returns a fresh immutable record carrying the incremented count
+     (with-copy, not in-place): the store advances but the original [session]
+     binding does not. Assert on the returned record — the real consumer
+     [get_or_create_mcp_session] likewise uses get's return value. *)
+  let count_of = function
+    | Some (s : Session.McpSessionStore.mcp_session) -> s.request_count
+    | None -> -1
+  in
+  check int "count after first get" 1 (count_of (Session.McpSessionStore.get session.id));
+  check int "count after second get" 2 (count_of (Session.McpSessionStore.get session.id))
 
 let test_mcp_session_remove () =
   let session = Session.McpSessionStore.create () in

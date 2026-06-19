@@ -248,7 +248,7 @@ export function useCopilotDockShortcuts(dock: CopilotDockApi): void {
       globalShortcutManager.register({
         id: 'copilot-dock.toggle',
         chord: { key: 'j', modifiers: ['Mod'] },
-        description: 'Toggle Copilot Dock',
+        description: 'Toggle Chat Dock',
         scope: 'global',
         preserveInInputs: false,
         action: () => { dock.toggle() },
@@ -258,7 +258,7 @@ export function useCopilotDockShortcuts(dock: CopilotDockApi): void {
       globalShortcutManager.register({
         id: 'copilot-dock.close',
         chord: { key: 'Escape', modifiers: [] },
-        description: 'Close Copilot Dock',
+        description: 'Close Chat Dock',
         scope: 'global',
         preserveInInputs: false,
         action: () => { dock.close() },
@@ -418,14 +418,14 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
       ref=${rootRef}
       class=${`v2-shell-surface dock ${docked ? 'docked' : 'float'}`}
       style=${floatStyle}
-      data-screen-label="Copilot 도크"
+      data-screen-label="Chat 도크"
       data-testid="copilot-dock"
     >
       <div
         class=${`dock-head ${docked ? '' : 'drag'}`}
         onMouseDown=${docked ? undefined : drag}
       >
-        <div class="dock-title"><span class="dock-spark">${SPARK_SVG}</span>Copilot</div>
+        <div class="dock-title"><span class="dock-spark">${SPARK_SVG}</span>Chat</div>
         <div class="spacer"></div>
         <button
           type="button"
@@ -570,10 +570,10 @@ export function CopilotDockFab({ dock }: { dock: CopilotDockApi }) {
       class="v2-shell-action dock-fab"
       onClick=${dock.open}
       data-testid="copilot-dock-fab"
-      aria-label="Open Copilot Dock"
+      aria-label="Open Chat Dock"
     >
       <span class="spark">${SPARK_SVG}</span>
-      <span>Copilot</span>
+      <span>Chat</span>
       <kbd>⌘J</kbd>
     </button>
   `
@@ -587,10 +587,10 @@ export function CopilotDockTopBarButton({ dock }: { dock: CopilotDockApi }) {
       class=${`v2-shell-action topbar-copilot ${on ? 'on' : ''}`}
       onClick=${dock.toggle}
       data-testid="copilot-dock-topbar-button"
-      aria-label="Toggle Copilot Dock"
+      aria-label="Toggle Chat Dock"
     >
       <span class="spark">${SPARK_SVG}</span>
-      <span>Copilot</span>
+      <span>Chat</span>
       <kbd>⌘J</kbd>
     </button>
   `

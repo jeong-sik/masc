@@ -118,12 +118,12 @@ Check in an outcome-labeled trace corpus under `test/fixtures/recall_outcome/` (
 | Phase | Scope | Dep |
 |-------|-------|-----|
 | **P0 (genuinely immediate)** | cron that runs the existing `measure` against the live store (already works — removes "never runs"); pure unit tests for `noise_rate`/parsers in CI | none |
-| **P1** | P-a trace linkage: emit `trace_id`/`task_id` onto the cost/turn-outcome record | none (smallest producer change) |
-| **P2** | recall injection ledger (§3.2) — requires `render_context_exn` signature change + bounded write | P1 (trace_id) |
-| **P3** | forge outcome collector + `recall_outcome_eval` with `recall_harm` and *approximate* `recall_relevance` | P1, P2 |
+| **P1** | trace linkage — **already satisfied**: `execution_receipt` records `trace_id` + `current_task_id` per turn (verified against live receipts 2026-06-19). No code needed. | — |
+| **P2** | recall injection ledger (§3.2) — requires `render_context_exn` signature change + bounded write | trace_id (from `execution_receipt`/facts) |
+| **P3** | forge outcome collector (reads `execution_receipt` for trace↔task, queries `gh` for PR/CI merge state) + `recall_outcome_eval` with `recall_harm` and *approximate* `recall_relevance` | P2 |
 | **P4** | precise `recall_relevance@merged` (RFC-0259 `external_ref`) + ship-gate as required check | P3, RFC-0259 P1 merged |
 
-Reordered from the first draft: there is no "P0 = none, code exists" win beyond the live-measure cron. The real sequence is plumbing (P1) → ledger (P2) → metric (P3) → precision+gate (P4).
+Reordered from the first draft: the only "P0 = none, code exists" win is the live-measure cron. P1 (trace linkage) turned out to be **already provided by `execution_receipt`** — grounding against live data dropped a planned producer change. The real remaining sequence is ledger (P2) → forge metric (P3) → precision+gate (P4).
 
 ## §8 Done criteria
 

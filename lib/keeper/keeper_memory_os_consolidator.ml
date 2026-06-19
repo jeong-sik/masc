@@ -51,7 +51,10 @@ type contribution =
 (* RFC-0247 (purge): eligibility is purely structural — a promotable category.
    The prior confidence floor (only claims above 0.5 count as corroboration) was
    a score gate and is gone. *)
-let eligible fact = is_promotable fact.category
+(* RFC-0259 §3.2(b): a volatile (external-ref) claim is per-keeper status, not
+   durable cross-keeper knowledge — exclude it from promotion so it cannot be
+   resurrected as an immortal shared fact (the #21363 shape). *)
+let eligible fact = is_promotable fact.category && Option.is_none fact.external_ref
 
 (* Pick the representative fact for a claim group by a structural total order:
    earliest first_seen, then lexically smallest claim, then keeper id — so
@@ -91,11 +94,16 @@ let consolidate_into_shared ~now ~min_keepers contribs =
       Some
         { claim = rep.fact.claim
         ; category = rep.fact.category
+        ; external_ref = rep.fact.external_ref
         ; source = rep.fact.source
         ; observed_by = keepers
         ; first_seen =
             List.fold_left (fun acc c -> Float.min acc c.fact.first_seen) rep.fact.first_seen contribs
-        ; valid_until = None
+          (* RFC-0259 §3.2(b): route through [fact_valid_until] as a structural
+             backstop — [eligible] already excludes external-ref claims, so this is
+             [None] for promotable facts, but a volatile claim could never become an
+             immortal shared fact even if that filter regressed. *)
+        ; valid_until = fact_valid_until ~now ~external_ref:rep.fact.external_ref rep.fact.category
           (* The consolidation IS the verification of the shared fact. *)
         ; last_verified_at = Some now
         ; schema_version

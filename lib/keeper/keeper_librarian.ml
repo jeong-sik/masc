@@ -216,15 +216,20 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          with a short TTL, durable knowledge with none. RFC-0247 also stopped
          parsing the LLM's [confidence] number: the score it fed is gone. *)
       let category = category_of_string category_str in
+      (* RFC-0259 §3.2(b): a claim naming a PR/issue/task id is volatile — route
+         its [valid_until] through [fact_valid_until] so it gets a finite horizon
+         instead of a durable [None]. *)
+      let external_ref = external_ref_of_claim claim in
       Some
         { claim
         ; category
+        ; external_ref
          ; source = claim_source ~trace_id turn tool_call_id
          (* Tier-1 (per-keeper) facts carry no distinct-keeper corroboration set;
             the consolidator populates observed_by only on promotion (RFC-0244). *)
          ; observed_by = []
          ; first_seen = now
-         ; valid_until = category_valid_until ~now category
+         ; valid_until = fact_valid_until ~now ~external_ref category
          ; last_verified_at = Some now
          ; schema_version
          }

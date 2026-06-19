@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
+import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-preact'
 import { fetchLogs, fetchProviderLogsCatalog, fetchProviderLogTail } from '../api/dashboard.js'
 import type {
   LogEntry,
@@ -13,6 +14,7 @@ import { asRecord, asNullableString, mergeRouteRecord, hasRouteContext, type Mut
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
+import { LogFilter } from './common/log-filter'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
 import { StatusChip } from './common/status-chip'
@@ -56,9 +58,10 @@ const providerLogLines = signal(200)
 const latestSeq = signal<number | null>(null)
 const categoryFilter = signal('')
 const hideFsmTransitions = signal(false)
+const expandedLogSeq = signal<number | null>(null)
 
 const POLL_INTERVAL_MS = 3000
-const LOG_ROW_HEIGHT = 92
+const ESTIMATED_LOG_ROW_HEIGHT = 78
 const EMPTY_LOG_ENTRIES: LogEntry[] = []
 
 let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -83,21 +86,6 @@ const SOURCE_LABELS: Record<string, string> = {
   sse: 'sse',
 }
 
-const CATEGORIES: readonly string[] = [
-  'fsm',
-  'lifecycle',
-  'directive',
-  'heartbeat',
-  'presence',
-  'task',
-  'tool',
-  'memory',
-  'telemetry',
-  'routine',
-  'boundary',
-  'uncategorized',
-]
-
 const CATEGORY_LABELS: Record<string, string> = {
   fsm: 'FSM',
   lifecycle: 'Lifecycle',
@@ -113,9 +101,39 @@ const CATEGORY_LABELS: Record<string, string> = {
   uncategorized: 'Uncategorized',
 }
 
+const LOG_CATEGORY_FILTERS: readonly { value: string; label: string }[] = [
+  { value: '', label: '전체' },
+  { value: 'tool', label: 'Tool' },
+  { value: 'task', label: 'Task' },
+  { value: 'lifecycle', label: 'Lifecycle' },
+  { value: 'directive', label: 'Directive' },
+  { value: 'telemetry', label: 'Telemetry' },
+]
+
 function categoryLabel(category: string | null | undefined): string | null {
   if (!category) return null
   return CATEGORY_LABELS[category] ?? category
+}
+
+type LogDisplayKind =
+  | 'tool'
+  | 'turn'
+  | 'lifecycle'
+  | 'approval'
+  | 'broadcast'
+  | 'telemetry'
+  | 'task'
+  | 'log'
+
+const LOG_KIND_LABELS: Record<LogDisplayKind, string> = {
+  tool: 'TOOL',
+  turn: 'TURN',
+  lifecycle: 'LIFECYCLE',
+  approval: 'DIRECTIVE',
+  broadcast: 'BROADCAST',
+  telemetry: 'TELEMETRY',
+  task: 'TASK',
+  log: 'LOG',
 }
 
 type LoadMode = 'reset' | 'delta'
@@ -176,6 +194,113 @@ function detailLabel(details: Record<string, unknown> | null, key: string): stri
   if (typeof value === 'string' && value.trim() !== '') return value.trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return null
+}
+
+function logDisplayKind(entry: LogEntry): LogDisplayKind {
+  const details = entryDetails(entry)
+  const toolName = detailLabel(details, 'tool_name') ?? detailLabel(details, 'tool')
+  if (toolName) return 'tool'
+  switch (entry.category) {
+    case 'tool':
+      return 'tool'
+    case 'task':
+      return 'task'
+    case 'lifecycle':
+    case 'fsm':
+    case 'heartbeat':
+    case 'presence':
+      return 'lifecycle'
+    case 'directive':
+    case 'boundary':
+      return 'approval'
+    case 'telemetry':
+    case 'memory':
+      return 'telemetry'
+    case 'routine':
+      return entry.turn_id ? 'turn' : 'log'
+    default:
+      return entry.turn_id ? 'turn' : 'log'
+  }
+}
+
+function logSeverity(entry: LogEntry): 'ok' | 'warn' | 'bad' | 'busy' | 'info' {
+  const level = normalizedLevel(entry)
+  if (level === 'ERROR') return 'bad'
+  if (level === 'WARN') return 'warn'
+  const kind = logDisplayKind(entry)
+  if (kind === 'tool') return 'busy'
+  if (kind === 'telemetry' || kind === 'broadcast') return 'info'
+  return 'ok'
+}
+
+function keeperLabel(entry: LogEntry, details: Record<string, unknown> | null): string {
+  const keeper = entry.keeper_name?.trim()
+  if (keeper) return keeper
+  const clientName = detailLabel(details, 'client_name')
+  if (clientName) return clientName
+  const moduleName = entry.module?.trim()
+  if (moduleName) return moduleName
+  return '(root)'
+}
+
+function keeperInitial(label: string): string {
+  const normalized = label.replace(/^\(|\)$/g, '').trim()
+  if (!normalized) return '?'
+  const [first, second] = normalized.split(/[-_\s]+/).filter(Boolean)
+  if (first && second) return `${first[0] ?? ''}${second[0] ?? ''}`.toUpperCase()
+  return normalized.slice(0, Math.min(2, normalized.length)).toUpperCase()
+}
+
+function formatLogClock(ts: string): string {
+  const match = ts.match(/T(\d{2}:\d{2}:\d{2})/)
+  if (match?.[1]) return match[1]
+  const date = new Date(ts)
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleTimeString('ko-KR', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  }
+  return ts
+}
+
+function logTimestampMs(entry: LogEntry): number | null {
+  const ms = Date.parse(entry.ts)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function logWindowMinutes(entries: readonly LogEntry[]): number {
+  const times = entries
+    .map(logTimestampMs)
+    .filter((value): value is number => value !== null)
+  if (times.length < 2) return 1
+  const span = Math.max(...times) - Math.min(...times)
+  return Math.max(1, span / 60000)
+}
+
+function logWindowLabel(entries: readonly LogEntry[]): string {
+  if (entries.length === 0) return 'waiting'
+  const minutes = logWindowMinutes(entries)
+  if (minutes < 2) return 'last 1m'
+  if (minutes < 90) return `last ${Math.round(minutes)}m`
+  return `last ${(minutes / 60).toFixed(1)}h`
+}
+
+function eventRatePerMinute(entries: readonly LogEntry[]): string {
+  if (entries.length === 0) return '0.0'
+  return (entries.length / logWindowMinutes(entries)).toFixed(1)
+}
+
+function logActiveIdentityCount(entries: readonly LogEntry[]): number {
+  const ids = new Set<string>()
+  for (const entry of entries) {
+    const details = entryDetails(entry)
+    const id = keeperLabel(entry, details)
+    if (id !== '(root)') ids.add(id)
+  }
+  return ids.size
 }
 
 function interpolateStructuredMessage(
@@ -430,98 +555,96 @@ function renderLogRow(entry: LogEntry) {
   const renderedMessage = renderLogMessage(entry)
   const routeLinks = logRouteLinks(entry)
   const category = categoryLabel(entry.category)
+  const displayKind = logDisplayKind(entry)
+  const severity = logSeverity(entry)
+  const identity = keeperLabel(entry, details)
+  const isExpanded = expandedLogSeq.value === entry.seq
+  const routeLinkButtons = routeLinks.length > 0
+    ? html`
+      ${routeLinks.map(link => html`
+        <button
+          key=${link.id}
+          type="button"
+          data-testid=${link.label === 'Code' ? 'logs-code-link' : undefined}
+          class="logs-route-link"
+          title=${link.evidence}
+          aria-label=${`Open ${link.evidence}`}
+          onClick=${() => openIdeContextRouteLink(link)}
+        >${link.label}</button>
+      `)}
+    `
+    : null
   const diagnosticChip = failure
     ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
     : null
   const fallbackDiagnosticChip = !failure && diagnosticCause
     ? html`<${StatusChip} tone=${level === 'ERROR' ? 'bad' : 'warn'} uppercase=${false}>${diagnosticCause}</${StatusChip}>`
     : null
-  let backgroundClass = 'bg-[var(--color-bg-surface)]'
-  if (level === 'ERROR') {
-    backgroundClass = 'bg-[var(--bad-6)]'
-  } else if (level === 'WARN') {
-    backgroundClass = 'bg-[var(--warn-soft)]'
-  }
-
   return html`
     <div
       key=${entry.seq}
-      class="logs-row v2-logs-row grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 rounded-[var(--r-1)] border border-[var(--color-border-divider)] px-3 py-3 ${backgroundClass}"
+      class=${`logs-row v2-logs-row ${isExpanded ? 'is-open' : ''}`}
+      data-sev=${severity}
+      data-kind=${displayKind}
     >
-      <div class="font-mono text-2xs whitespace-nowrap text-[color:var(--color-fg-muted)]">
-        ${entry.ts.replace('T', ' ').replace('Z', '')}
-      </div>
-      <div class="font-mono text-2xs font-semibold whitespace-nowrap" style="color: ${LEVEL_COLORS[level] ?? 'inherit'}">
-        ${level}
-      </div>
-      <div class="min-w-0 font-mono text-2xs text-[color:var(--color-accent-fg)] truncate" title=${entry.module || '(root)'}>
-        ${entry.module || '(root)'}
-      </div>
-      <div class="flex flex-wrap items-start gap-1">
-        <${StatusChip} tone=${sourceClass}>${sourceLabel(source)}</${StatusChip}>
-        ${category
-          ? html`<${MetaTag}>${category}</${MetaTag}>`
-          : null}
-        ${clientName
-          ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[var(--color-accent-fg)]" uppercase=${false}>${clientName}</${StatusChip}>`
-          : null}
-        ${toolName
-          ? html`<${StatusChip} tone="neutral" uppercase=${false} class="gap-1"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span>${toolName}</span></${StatusChip}>`
-          : null}
-        ${fixes
-          ? html`<${MetaTag}>fixes ${fixes}</${MetaTag}>`
-          : null}
-        ${phase
-          ? html`<${MetaTag}>${phase}</${MetaTag}>`
-          : null}
-        ${event
-          ? html`<${MetaTag}>event ${event}</${MetaTag}>`
-          : null}
-        ${requestId
-          ? html`<${MetaTag}>req ${requestId}</${MetaTag}>`
-          : null}
-        ${sessionId
-          ? html`<${MetaTag}>session ${sessionId}</${MetaTag}>`
-          : null}
-        ${diagnosticChip}
-        ${fallbackDiagnosticChip}
-        ${failure
-          ? html`<${StatusChip} tone="info" uppercase=${false}>${failure.surface}</${StatusChip}>`
-          : null}
-        ${failure
-          ? html`<${MetaTag}>${failure.recoverability}</${MetaTag}>`
-          : null}
-        ${failure?.operator_action
-          ? html`<${StatusChip} tone="info" uppercase=${false}>next ${failure.operator_action}</${StatusChip}>`
-          : null}
-        ${routeLinks.length > 0
-          ? html`
-            ${routeLinks.map(link => html`
-              <button
-                key=${link.id}
-                type="button"
-                data-testid=${link.label === 'Code' ? 'logs-code-link' : undefined}
-                class="logs-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)]"
-                title=${link.evidence}
-                aria-label=${`Open ${link.evidence}`}
-                onClick=${() => openIdeContextRouteLink(link)}
-              >${link.label}</button>
-            `)}
-          `
-          : null}
-      </div>
-      <div
-        class="text-xs leading-relaxed text-[var(--color-fg-primary)]"
-        title=${failure ? `${renderedMessage}\n${failure.summary}` : renderedMessage}
-        style=${{
-          display: '-webkit-box',
-          overflow: 'hidden',
-          WebkitBoxOrient: 'vertical',
-          WebkitLineClamp: 2,
+      <button
+        type="button"
+        class="v2-logs-line"
+        aria-expanded=${isExpanded}
+        onClick=${() => {
+          expandedLogSeq.value = isExpanded ? null : entry.seq
         }}
       >
-        ${renderedMessage}
-      </div>
+        <span class="v2-logs-time mono">${formatLogClock(entry.ts)}</span>
+        <span class="v2-logs-who">
+          <span class="v2-logs-sigil" aria-hidden="true">${keeperInitial(identity)}</span>
+          <span class="v2-logs-identity" title=${identity}>${identity}</span>
+        </span>
+        <span class="v2-logs-kind" data-kind=${displayKind}>${LOG_KIND_LABELS[displayKind]}</span>
+        <span class="v2-logs-message" title=${failure ? `${renderedMessage}\n${failure.summary}` : renderedMessage}>
+          ${renderedMessage}
+        </span>
+        <span class="v2-logs-caret" aria-hidden="true">
+          ${isExpanded ? html`<${ChevronDown} size=${14} />` : html`<${ChevronRight} size=${14} />`}
+        </span>
+      </button>
+      ${routeLinkButtons
+        ? html`<div class="v2-logs-inline-links">${routeLinkButtons}</div>`
+        : null}
+      ${isExpanded
+        ? html`
+          <div class="v2-logs-detail">
+            <div class="v2-logs-detail-grid">
+              <div><span>level</span><b style=${{ color: LEVEL_COLORS[level] ?? 'inherit' }}>${level}</b></div>
+              <div><span>module</span><b>${entry.module || '(root)'}</b></div>
+              <div><span>source</span><b>${sourceLabel(source)}</b></div>
+              <div><span>timestamp</span><b>${entry.ts.replace('T', ' ').replace('Z', '')}</b></div>
+            </div>
+            <div class="v2-logs-tags">
+              <${StatusChip} tone=${sourceClass}>${sourceLabel(source)}</${StatusChip}>
+              ${category ? html`<${MetaTag}>${category}</${MetaTag}>` : null}
+              ${clientName
+                ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[var(--color-accent-fg)]" uppercase=${false}>${clientName}</${StatusChip}>`
+                : null}
+              ${toolName
+                ? html`<${StatusChip} tone="neutral" uppercase=${false} class="gap-1"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span>${toolName}</span></${StatusChip}>`
+                : null}
+              ${fixes ? html`<${MetaTag}>fixes ${fixes}</${MetaTag}>` : null}
+              ${phase ? html`<${MetaTag}>${phase}</${MetaTag}>` : null}
+              ${event ? html`<${MetaTag}>event ${event}</${MetaTag}>` : null}
+              ${requestId ? html`<${MetaTag}>req ${requestId}</${MetaTag}>` : null}
+              ${sessionId ? html`<${MetaTag}>session ${sessionId}</${MetaTag}>` : null}
+              ${diagnosticChip}
+              ${fallbackDiagnosticChip}
+              ${failure ? html`<${StatusChip} tone="info" uppercase=${false}>${failure.surface}</${StatusChip}>` : null}
+              ${failure ? html`<${MetaTag}>${failure.recoverability}</${MetaTag}>` : null}
+              ${failure?.operator_action
+                ? html`<${StatusChip} tone="info" uppercase=${false}>next ${failure.operator_action}</${StatusChip}>`
+                : null}
+            </div>
+          </div>
+        `
+        : null}
     </div>
   `
 }
@@ -537,7 +660,7 @@ function renderSummaryChip(label: string, value: string | number, tone = 'neutra
 
 function renderLogSummary(summary: LogWindowSummary) {
   return html`
-    <div class="v2-logs-summary mx-3 mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2 text-2xs">
+    <div class="v2-logs-summary flex flex-wrap items-center gap-2 text-2xs">
       ${renderSummaryChip('ERROR', summary.errors, summary.errors > 0 ? 'bad' : 'neutral')}
       ${renderSummaryChip('WARN', summary.warnings, summary.warnings > 0 ? 'warn' : 'neutral')}
       ${renderSummaryChip('failure envelope', summary.failureEnvelopes, summary.failureEnvelopes > 0 ? 'info' : 'neutral')}
@@ -598,7 +721,7 @@ function renderProviderLogPanel() {
   }
 
   return html`
-    <div class="v2-logs-provider-panel mx-3 mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
+    <div class="v2-logs-provider-panel rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-divider)] px-3 py-2">
         <div class="flex flex-wrap items-center gap-2 text-2xs">
           <${StatusChip} tone="info" uppercase=${false}>provider logs</${StatusChip}>
@@ -769,88 +892,120 @@ export function LogViewer() {
   // memoizing on [logEntries] skips the recount. In the loading state logEntries
   // is a fresh `[]` so the memo misses, but the derivation is cheap then.
   const summary = useMemo(() => summarizeLogWindow(logEntries), [logEntries])
+  const toolCalls = useMemo(
+    () => logEntries.filter(entry => logDisplayKind(entry) === 'tool').length,
+    [logEntries],
+  )
+  const errRate = logEntries.length > 0
+    ? ((summary.errors / logEntries.length) * 100).toFixed(1)
+    : '0.0'
+  const currentFilterLabel =
+    LOG_CATEGORY_FILTERS.find(filter => filter.value === categoryFilter.value)?.label ?? 'Custom'
 
   return html`
-    <div class="logs-viewer v2-logs-surface flex h-full min-h-0 flex-col gap-4">
-      <section class="v2-logs-panel contain-content flex min-h-0 flex-1 flex-col overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" aria-label="로그 뷰어">
-        <div class="logs-toolbar v2-logs-toolbar flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-[var(--color-border-divider)] px-4 py-4">
-          <div class="logs-filters flex flex-wrap gap-2 items-center">
-            <${Select}
-              class="logs-select px-3 py-2 text-xs"
-              name="log-level"
-              ariaLabel="로그 레벨"
-              value=${levelFilter.value}
-              options=${[
-                { value: 'DEBUG', label: 'DEBUG+' },
-                { value: 'INFO', label: 'INFO+' },
-                { value: 'WARN', label: 'WARN+' },
-                { value: 'ERROR', label: 'ERROR' },
-              ]}
-              onInput=${(v: string) => { levelFilter.value = v }}
-            />
+    <div class="logs-viewer v2-logs-surface">
+      <section class="v2-logs-panel" aria-label="로그 뷰어">
+        <header class="v2-logs-head">
+          <div class="v2-logs-head-main">
+            <h1>이벤트 로그</h1>
+            <p class="v2-logs-sub mono">live trace stream · masc runtime · ${logWindowLabel(logEntries)}</p>
+          </div>
+          <div class="v2-logs-stats" aria-label="로그 요약">
+            <div class="v2-logs-stat"><span class="k">이벤트/분</span><span class="v mono">${eventRatePerMinute(logEntries)}</span></div>
+            <div class="v2-logs-stat"><span class="k">오류율</span><span class=${`v mono ${summary.errors > 0 ? 'bad' : ''}`}>${errRate}%</span></div>
+            <div class="v2-logs-stat"><span class="k">Tool 호출</span><span class="v mono">${toolCalls}</span></div>
+            <div class="v2-logs-stat"><span class="k">활성 소스</span><span class="v mono">${logActiveIdentityCount(logEntries)}</span></div>
+          </div>
+        </header>
 
-            <${TextInput}
-              class="min-w-55"
-              name="log-module-filter"
-              ariaLabel="모듈 필터"
-              placeholder="모듈 필터"
-              value=${moduleInput.value}
-              onInput=${(e: Event) => {
-                moduleInput.value = (e.target as HTMLInputElement).value
-                if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
-                moduleDebounceTimer = setTimeout(() => {
-                  appliedModuleFilter.value = moduleInput.value
-                }, 300)
-              }}
-              onKeyDown=${(e: KeyboardEvent) => {
-                if (e.key === 'Enter') {
-                  if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
-                  moduleDebounceTimer = null
-                  appliedModuleFilter.value = moduleInput.value
-                }
-              }}
-            />
-
-            <${Select}
-              class="logs-select px-3 py-2 text-xs"
-              name="log-limit"
-              ariaLabel="로그 개수"
-              value=${String(logLimit.value)}
-              options=${['100', '200', '500', '1000', '3000']}
-              onInput=${(v: string) => { logLimit.value = parseInt(v, 10) }}
-            />
-
-            <${Select}
-              class="logs-select px-3 py-2 text-xs"
-              name="log-category"
-              ariaLabel="Category"
-              value=${categoryFilter.value}
-              options=${[
-                { value: '', label: 'All categories' },
-                ...CATEGORIES.map(category => ({
-                  value: category,
-                  label: CATEGORY_LABELS[category] ?? category,
-                })),
-              ]}
-              onInput=${(v: string) => { categoryFilter.value = v }}
-            />
-
-            <label class="logs-hide-fsm-label flex items-center gap-1.5 cursor-pointer text-2xs text-[var(--color-fg-muted)]">
-              <${Checkbox}
-                name="log-hide-fsm"
-                ariaLabel="Hide FSM transitions"
-                checked=${hideFsmTransitions.value}
-                onChange=${(checked: boolean) => { hideFsmTransitions.value = checked }}
-              />
-              Hide FSM transitions
-            </label>
+        <div class="logs-toolbar v2-logs-toolbar">
+          <div class="logs-filters v2-logs-filters">
+            ${LOG_CATEGORY_FILTERS.map(filter => html`
+              <${LogFilter}
+                key=${filter.value || 'all'}
+                active=${categoryFilter.value === filter.value}
+                class="v2-logs-filter-chip"
+                onClick=${() => {
+                  categoryFilter.value = filter.value
+                }}
+              >${filter.label}<//>
+            `)}
           </div>
 
-          <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
+          <div class="v2-logs-toolbar-break"></div>
+
+          <div class="logs-actions v2-logs-actions">
             ${renderLogProvenance(logData)}
-            <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1 tabular-nums">
+            <button
+              type="button"
+              class=${`v2-logs-attention ${levelFilter.value === 'WARN' ? 'on' : ''}`}
+              aria-pressed=${levelFilter.value === 'WARN'}
+              onClick=${() => { levelFilter.value = levelFilter.value === 'WARN' ? 'INFO' : 'WARN' }}
+            >
+              주의·실패만
+            </button>
+            <span class="v2-logs-count mono" title=${`현재 필터: ${currentFilterLabel}`}>
               ${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}
             </span>
+            <details class="v2-logs-advanced-menu">
+              <summary>필터</summary>
+              <div class="v2-logs-advanced">
+                <${Select}
+                  class="logs-select px-3 py-2 text-xs"
+                  name="log-level"
+                  ariaLabel="로그 레벨"
+                  value=${levelFilter.value}
+                  options=${[
+                    { value: 'DEBUG', label: 'DEBUG+' },
+                    { value: 'INFO', label: 'INFO+' },
+                    { value: 'WARN', label: 'WARN+' },
+                    { value: 'ERROR', label: 'ERROR' },
+                  ]}
+                  onInput=${(v: string) => { levelFilter.value = v }}
+                />
+
+                <${TextInput}
+                  class="min-w-55"
+                  name="log-module-filter"
+                  ariaLabel="모듈 필터"
+                  placeholder="모듈 필터"
+                  value=${moduleInput.value}
+                  onInput=${(e: Event) => {
+                    moduleInput.value = (e.target as HTMLInputElement).value
+                    if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
+                    moduleDebounceTimer = setTimeout(() => {
+                      appliedModuleFilter.value = moduleInput.value
+                    }, 300)
+                  }}
+                  onKeyDown=${(e: KeyboardEvent) => {
+                    if (e.key === 'Enter') {
+                      if (moduleDebounceTimer) clearTimeout(moduleDebounceTimer)
+                      moduleDebounceTimer = null
+                      appliedModuleFilter.value = moduleInput.value
+                    }
+                  }}
+                />
+
+                <${Select}
+                  class="logs-select px-3 py-2 text-xs"
+                  name="log-limit"
+                  ariaLabel="로그 개수"
+                  value=${String(logLimit.value)}
+                  options=${['100', '200', '500', '1000', '3000']}
+                  onInput=${(v: string) => { logLimit.value = parseInt(v, 10) }}
+                />
+
+                <label class="logs-hide-fsm-label flex items-center gap-1.5 cursor-pointer text-2xs text-[var(--color-fg-muted)]">
+                  <${Checkbox}
+                    name="log-hide-fsm"
+                    ariaLabel="Hide FSM transitions"
+                    checked=${hideFsmTransitions.value}
+                    onChange=${(checked: boolean) => { hideFsmTransitions.value = checked }}
+                  />
+                  Hide FSM transitions
+                </label>
+              </div>
+            </details>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
               <${Checkbox}
                 name="log-auto-refresh"
@@ -860,9 +1015,11 @@ export function LogViewer() {
               />
               자동
             </label>
+            <span class="v2-logs-live mono"><span class="dot" />${autoRefresh.value ? 'live poll · 3s' : 'poll paused'}</span>
             <button
               type="button"
-              class="logs-refresh-btn rounded-[var(--r-1)] border border-[var(--accent-22)] bg-[var(--accent-10)] px-3 py-2 text-2xs font-medium text-[var(--color-accent-fg)]"
+              class="logs-refresh-btn v2-logs-refresh"
+              aria-label="새로고침"
               onClick=${() => {
                 latestSeq.value = null
                 logResource.reset()
@@ -872,7 +1029,7 @@ export function LogViewer() {
               }}
               disabled=${logLoading}
             >
-              ${logLoading ? '...' : '새로고침'}
+              <${RefreshCw} size=${14} class=${logLoading ? 'animate-spin' : ''} />
             </button>
           </div>
         </div>
@@ -881,17 +1038,17 @@ export function LogViewer() {
           <div class="mx-4 mt-4 rounded-[var(--r-1)] border border-solid border-[var(--err-border)] bg-[var(--brick-soft)] px-4 py-3 text-xs text-[var(--err-fg)]">${logError}</div>
         ` : null}
 
-        ${renderLogSummary(summary)}
-        ${renderProviderLogPanel()}
+        <div class="v2-logs-support">
+          ${renderLogSummary(summary)}
+          ${renderProviderLogPanel()}
+        </div>
 
-        <div class="px-3 pt-3">
-          <div class="v2-logs-table-header grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">
-            <div>timestamp</div>
-            <div>level</div>
-            <div>module</div>
-            <div>source</div>
-            <div>message</div>
-          </div>
+        <div class="v2-logs-table-header">
+          <span>시각</span>
+          <span>소스</span>
+          <span>유형</span>
+          <span>이벤트</span>
+          <span></span>
         </div>
 
         ${logEntries.length === 0
@@ -903,11 +1060,11 @@ export function LogViewer() {
           : html`
               <${VirtualList}
                 items=${logEntries}
-                itemHeight=${LOG_ROW_HEIGHT}
+                estimatedItemHeight=${ESTIMATED_LOG_ROW_HEIGHT}
                 overscan=${6}
                 getKey=${(entry: LogEntry) => String(entry.seq)}
                 renderItem=${(entry: LogEntry) => renderLogRow(entry)}
-                className="min-h-0 flex-1 overflow-auto px-3 pb-3"
+                className="v2-logs-stream"
               />
             `}
       </section>

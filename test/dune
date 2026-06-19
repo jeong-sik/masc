@@ -1094,6 +1094,12 @@
  (modules test_json_field)
  (libraries alcotest masc.json_field yojson))
 
+; RFC-0264 P2: recall-injection ledger record serialiser unit tests.
+(test
+ (name test_keeper_recall_injection_ledger)
+ (modules test_keeper_recall_injection_ledger)
+ (libraries masc_test_deps yojson))
+
 ; Lock-free atomic CAS helper leaf.
 
 (test

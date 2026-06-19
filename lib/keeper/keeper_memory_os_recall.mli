@@ -24,8 +24,14 @@ val enabled : unit -> bool
 val render_if_enabled
   :  keeper_id:string
   -> now:float
+  -> trace_id:string
+  -> turn:int
+  -> masc_root:string
   -> unit
   -> string option
-(** [render_if_enabled ~keeper_id ~now ()] is [Some block] when the
-    flag is on and the store yields advisory content, [None] otherwise.
-    Intended for the [extra_system_context] assembly site. *)
+(** [render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root ()] is
+    [Some block] when the flag is on and the store yields advisory content,
+    [None] otherwise. Intended for the [extra_system_context] assembly site.
+    As a side effect (RFC-0264 P2) it appends a best-effort recall-injection
+    record — which fact/episode keys reached the prompt — keyed by
+    [trace_id]/[turn]; the write never affects the returned block. *)

@@ -37,14 +37,13 @@ type ws_session = {
       through [write_mutex] so fibers sharing one connection cannot interleave
       frames or race with a concurrent close. *)
   write_mutex: Eio.Mutex.t;
-  (** Last time a WebSocket pong frame was received from the client.  Used by
-      the standalone heartbeat to detect dead peers after a configurable number
-      of missed pongs. *)
+  (** Last time a WebSocket pong frame was received from the client (or the
+      time the connection opened, before any pong).  The heartbeat closes the
+      session once it has gone [threshold] whole intervals without a pong; a
+      client that keeps answering refreshes this and is never closed.  This is
+      the single liveness signal — there is no separate tick counter that a
+      responsive client could accumulate against (#21509). *)
   last_pong_at: float Atomic.t;
-  (** Number of consecutive protocol pings sent without receiving a pong.
-      Reset to zero on every pong; the standalone heartbeat closes the session
-      once this reaches [pong_timeout_intervals]. *)
-  missed_pongs: int Atomic.t;
   dashboard_auth: dashboard_auth_state Atomic.t;
   mutable dashboard_route: string option;
   dashboard_slices: (string, unit) Hashtbl.t;
@@ -167,7 +166,6 @@ let new_session ~id ~wsd =
     closed = Atomic.make false;
     write_mutex = Eio.Mutex.create ();
     last_pong_at = Atomic.make (Unix.gettimeofday ()); (* NDT-OK: wall-clock used only for liveness, not deterministic output. *)
-    missed_pongs = Atomic.make 0;
     dashboard_auth = Atomic.make Unauthenticated;
     dashboard_route = None;
     dashboard_slices = Hashtbl.create 8;
@@ -183,11 +181,12 @@ let new_session ~id ~wsd =
 let is_session_closed session =
   Atomic.get session.closed || Httpun_ws.Wsd.is_closed session.wsd
 
-(** Record a client pong: refresh [last_pong_at] and reset the missed-pong
-    counter.  Called from the WS frame handler on every [Pong] frame. *)
+(** Record a client pong: refresh [last_pong_at].  Called from the WS frame
+    handler on every [Pong] frame; this is the liveness signal the heartbeat
+    reads via {!heartbeat_should_close} (#21509). *)
 let record_pong session =
-  Atomic.set session.last_pong_at (Unix.gettimeofday ()); (* NDT-OK: wall-clock used only for liveness, not deterministic output. *)
-  Atomic.set session.missed_pongs 0
+  Atomic.set session.last_pong_at (Unix.gettimeofday ())
+(* NDT-OK: wall-clock used only for liveness, not deterministic output. *)
 
 (** Send a pre-allocated frame to a WebSocket client.
 
@@ -894,6 +893,17 @@ let session_count () =
 
 let heartbeat_interval_s = 30.0
 
+(** Whether the heartbeat should close a session for pong-timeout.  Liveness is
+    keyed on the last answered pong, not a per-tick counter: a client that keeps
+    answering refreshes [last_pong_at] via {!record_pong} and is therefore never
+    closed, fixing the conflation where a responsive client sat one tick from
+    closure every interval (#21509).  Closes only after [threshold] whole
+    [interval_s] periods with no pong.  [threshold = 0] (or negative) disables
+    the guard. *)
+let heartbeat_should_close ~now ~last_pong_at ~threshold ~interval_s =
+  threshold > 0 && now -. last_pong_at > float_of_int threshold *. interval_s
+;;
+
 (** Configurable missed-pong threshold for the /ws upgrade heartbeat.
 
     A value of [0] disables the pong-timeout guard.  Negative values are
@@ -918,12 +928,18 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
           Eio.Time.sleep clock heartbeat_interval_s;
           if is_session_closed session
           then ()
-          else if threshold > 0 && Atomic.get session.missed_pongs >= threshold
+          else if
+            (* NDT-OK: wall-clock compared for liveness only, not output *)
+            heartbeat_should_close
+              ~now:(Unix.gettimeofday ())
+              ~last_pong_at:(Atomic.get session.last_pong_at)
+              ~threshold
+              ~interval_s:heartbeat_interval_s
           then begin
             Log.Server.debug
-              "[ws-upgrade] session %s missed %d pongs; closing"
+              "[ws-upgrade] session %s pong timeout (no pong in %d intervals); closing"
               session_id
-              (Atomic.get session.missed_pongs);
+              threshold;
             cleanup_session session_id
           end
           else begin
@@ -949,10 +965,7 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
                     (Printexc.to_string exn)));
             if !send_failed
             then cleanup_session session_id
-            else begin
-              Atomic.incr session.missed_pongs;
-              loop ()
-            end
+            else loop ()
           end
         in
         loop ()))

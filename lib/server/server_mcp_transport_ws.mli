@@ -76,7 +76,6 @@ type ws_session = {
   closed : bool Atomic.t;
   write_mutex : Eio.Mutex.t;
   last_pong_at : float Atomic.t;
-  missed_pongs : int Atomic.t;
   dashboard_auth : dashboard_auth_state Atomic.t;
   mutable dashboard_route : string option;
   dashboard_slices : (string, unit) Hashtbl.t;
@@ -94,7 +93,7 @@ type ws_session = {
     [#10648] / dashboard-ws.v1 protocol notes in the .ml
     for the field semantics.
 
-    Cross-fiber scalar state ([closed], [last_pong_at], [missed_pongs]) is
+    Cross-fiber scalar state ([closed], [last_pong_at]) is
     held in [Atomic.t] values; all writes to [wsd] are serialized through
     [write_mutex]. *)
 
@@ -162,6 +161,17 @@ val is_session_closed : ws_session -> bool
     has shut down.  Safe to call from any fiber. *)
 
 val record_pong : ws_session -> unit
+(** Refresh [last_pong_at] on a received pong; the single liveness signal read
+    by {!heartbeat_should_close} (#21509). *)
+
+val heartbeat_should_close :
+  now:float -> last_pong_at:float -> threshold:int -> interval_s:float -> bool
+(** [true] when a session should be closed for pong-timeout: it has gone
+    [threshold] whole [interval_s]-second intervals with no pong (i.e.
+    [now -. last_pong_at > threshold * interval_s]).  A client that keeps
+    answering refreshes [last_pong_at] and is never closed.  [threshold <= 0]
+    disables the guard.  Shared by the /ws upgrade heartbeat and the standalone
+    heartbeat so liveness is single-source (#21509). *)
 (** Refresh [last_pong_at] and reset the missed-pong counter.  Called by the
     WS frame handler on every [Pong] frame. *)
 

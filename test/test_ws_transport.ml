@@ -655,21 +655,46 @@ let test_dashboard_auth_authenticated_tokenless () =
 let test_new_session_initializes_pong_state () =
   let session = Ws.new_session ~id:"pong-state-init" ~wsd:(Obj.magic ()) in
   Alcotest.(check bool) "closed starts false" false (Atomic.get session.closed);
-  Alcotest.(check int) "missed_pongs starts at 0" 0 (Atomic.get session.missed_pongs);
   Alcotest.(check bool) "last_pong_at is in the recent past"
     true
     (Atomic.get session.last_pong_at <= Unix.gettimeofday ())
 
-let test_record_pong_resets_missed_pongs () =
-  let session = Ws.new_session ~id:"pong-reset" ~wsd:(Obj.magic ()) in
-  Atomic.set session.missed_pongs 5;
+let test_record_pong_refreshes_last_pong_at () =
+  let session = Ws.new_session ~id:"pong-refresh" ~wsd:(Obj.magic ()) in
   let before = Atomic.get session.last_pong_at in
   Unix.sleepf 0.005;
   Ws.record_pong session;
-  Alcotest.(check int) "missed_pongs reset to 0" 0 (Atomic.get session.missed_pongs);
-  Alcotest.(check bool) "last_pong_at advanced"
+  Alcotest.(check bool) "last_pong_at advanced on pong"
     true
     (Atomic.get session.last_pong_at > before)
+
+(* #21509 regression: liveness is keyed on the last answered pong, not a tick
+   counter, so a client that just answered must never be closed — even at the
+   most aggressive threshold=1.  Before the fix the per-tick missed counter sat
+   one short of the threshold every interval and closed responsive clients. *)
+let test_heartbeat_responsive_client_not_closed () =
+  let now = 1_000.0 in
+  Alcotest.(check bool) "answered 1s ago at threshold=1 stays open"
+    false
+    (Ws.heartbeat_should_close ~now ~last_pong_at:(now -. 1.0) ~threshold:1
+       ~interval_s:30.0)
+
+let test_heartbeat_silent_client_closed () =
+  let now = 1_000.0 in
+  Alcotest.(check bool) "no pong for >3 intervals closes"
+    true
+    (Ws.heartbeat_should_close ~now ~last_pong_at:(now -. 100.0) ~threshold:3
+       ~interval_s:30.0);
+  Alcotest.(check bool) "within 3 intervals stays open"
+    false
+    (Ws.heartbeat_should_close ~now ~last_pong_at:(now -. 80.0) ~threshold:3
+       ~interval_s:30.0)
+
+let test_heartbeat_threshold_zero_disables () =
+  Alcotest.(check bool) "threshold=0 never closes"
+    false
+    (Ws.heartbeat_should_close ~now:1e9 ~last_pong_at:0.0 ~threshold:0
+       ~interval_s:30.0)
 
 let test_missed_pong_threshold_default () =
   (* Clear any inherited value so the default (3) is exercised. *)
@@ -792,8 +817,16 @@ let () =
     ("pong_state", [
       Alcotest.test_case "new session initializes pong atomics" `Quick
         test_new_session_initializes_pong_state;
-      Alcotest.test_case "record_pong resets missed_pongs" `Quick
-        test_record_pong_resets_missed_pongs;
+      Alcotest.test_case "record_pong refreshes last_pong_at" `Quick
+        test_record_pong_refreshes_last_pong_at;
+    ]);
+    ("heartbeat_liveness", [
+      Alcotest.test_case "responsive client not closed (#21509)" `Quick
+        test_heartbeat_responsive_client_not_closed;
+      Alcotest.test_case "silent client closed past threshold" `Quick
+        test_heartbeat_silent_client_closed;
+      Alcotest.test_case "threshold=0 disables guard" `Quick
+        test_heartbeat_threshold_zero_disables;
     ]);
     ("pong_threshold", [
       Alcotest.test_case "default missed-pong threshold is 3" `Quick

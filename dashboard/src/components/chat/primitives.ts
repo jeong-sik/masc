@@ -1509,6 +1509,22 @@ function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
   `
 }
 
+// Block types that parseMarkdownToBlocks cannot reproduce from message text:
+// synthesized voice clips, attachments, fusion deliberation cards, artifacts,
+// broadcasts, traces, shell transcripts. When an assistant/system message
+// carries one of these the server blocks are rendered as-is; otherwise the
+// prose is re-parsed richly. (Complement of the markdown-derived block set:
+// p/h4/ul/callout/table/code/mermaid/image/svg/link.)
+const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
+  'voice',
+  'attach',
+  'fusion',
+  'artifact',
+  'broadcast',
+  'trace',
+  'shell',
+])
+
 function ChatMessageBubble({
   entry,
   showMetadata = true,
@@ -1527,24 +1543,26 @@ function ChatMessageBubble({
   const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
-  const hasBlocks = entry.blocks && entry.blocks.length > 0
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
   const isFailureMessage =
     (entry.delivery === 'error' || entry.delivery === 'timeout' || entry.delivery === 'interrupted')
     && !!entry.error?.trim()
+  const richTextRole = entry.role === 'assistant' || entry.role === 'system'
+  const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
+  const hasCardBlock = (entry.blocks ?? []).some((b) => CARD_BLOCK_TYPES.has(b.t))
+  // Re-parse assistant/system prose so markdown (code fences, tables, callouts)
+  // renders as structured blocks. The backend persists only a line-based parse
+  // (lib/keeper/keeper_chat_blocks.ml -> escaped <p>), so without this the rich
+  // renderer never receives a code/table block. Skipped when the message owns a
+  // card/clip the text cannot reproduce (CARD_BLOCK_TYPES) — those server blocks
+  // render as-is.
   const parsedBlocks = useMemo(() => {
-    if (isFailureMessage) return null
-    if (hasBlocks) return null
-    if (entry.role !== 'assistant' && entry.role !== 'system') return null
-    return parseMarkdownToBlocks(messageText)
-  }, [hasBlocks, isFailureMessage, entry.role, messageText])
-  const effectiveBlocks = isFailureMessage
-    ? []
-    : entry.blocks && entry.blocks.length > 0
-      ? entry.blocks
-      : (parsedBlocks ?? [])
+    if (isFailureMessage || !richTextRole || !hasRealText || hasCardBlock) return null
+    return parseMarkdownToBlocks(entry.text ?? '')
+  }, [isFailureMessage, richTextRole, hasRealText, hasCardBlock, entry.text])
+  const effectiveBlocks = isFailureMessage ? [] : (parsedBlocks ?? entry.blocks ?? [])
   const hasEffectiveBlocks = effectiveBlocks.length > 0
   const collapseThreshold = 1200
   const isCollapsible = !hasEffectiveBlocks && messageLength > collapseThreshold

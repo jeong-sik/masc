@@ -6,6 +6,8 @@ import {
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   insertThreadEntryBefore,
+  isDefaultVisibleConversationEntry,
+  isToolConversationEntry,
   isVisibleDirectConversationEntry,
   keeperThreads,
   mergeServerHistoryEntries,
@@ -77,6 +79,46 @@ describe('normalizeStatusDetail', () => {
     })
 
     expect(detail.history.every(isVisibleDirectConversationEntry)).toBe(true)
+  })
+})
+
+describe('default conversation visibility (tool calls vs internal)', () => {
+  function mk(partial: Partial<KeeperConversationEntry>): KeeperConversationEntry {
+    return {
+      id: 'e',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: '2026-06-19T00:00:00.000Z',
+      delivery: 'history',
+      streamState: null,
+      details: null,
+      ...partial,
+    }
+  }
+
+  it('surfaces tool-call rows by default but keeps them out of direct comms', () => {
+    const tool = mk({ role: 'tool', source: 'tool_result', text: '{"path":"x"}' })
+    // The "direct conversation" predicate is unchanged: tool rows are not direct comms.
+    expect(isVisibleDirectConversationEntry(tool)).toBe(false)
+    expect(isToolConversationEntry(tool)).toBe(true)
+    // The default-visible predicate (toggle off) does include them.
+    expect(isDefaultVisibleConversationEntry(tool)).toBe(true)
+  })
+
+  it('keeps truly-internal sources behind the toggle', () => {
+    for (const source of ['world_state_prompt', 'internal_assistant', 'system'] as const) {
+      const internal = mk({ source })
+      expect(isToolConversationEntry(internal)).toBe(false)
+      expect(isDefaultVisibleConversationEntry(internal)).toBe(false)
+    }
+  })
+
+  it('keeps direct user/assistant turns visible', () => {
+    expect(isDefaultVisibleConversationEntry(mk({ role: 'user', source: 'direct_user' }))).toBe(true)
+    expect(isDefaultVisibleConversationEntry(mk({ role: 'assistant', source: 'direct_assistant' }))).toBe(true)
   })
 })
 

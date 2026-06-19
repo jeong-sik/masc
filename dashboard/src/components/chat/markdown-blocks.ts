@@ -6,6 +6,37 @@ function escapeHtml(raw: string): string {
   return raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
+// A standalone URL occupying the whole paragraph renders as a link/image card,
+// matching the line-based parser in lib/chat-blocks.ts so this rich parser is a
+// strict superset of it (no link-card regression when it supersedes the simple
+// parser on the assistant/system render path).
+const STANDALONE_URL_RE = /^https?:\/\/\S+$/i
+const IMAGE_URL_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'])
+
+function isImageUrl(url: string): boolean {
+  try {
+    const ext = new URL(url).pathname.toLowerCase().split('.').pop() ?? ''
+    return IMAGE_URL_EXTENSIONS.has(ext)
+  } catch {
+    return false
+  }
+}
+
+function hostnameTitle(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
+function standaloneUrlBlock(text: string): ChatBlock | null {
+  const trimmed = text.trim()
+  if (!STANDALONE_URL_RE.test(trimmed)) return null
+  if (isImageUrl(trimmed)) return { t: 'image', src: trimmed }
+  return { t: 'link', url: trimmed, title: hostnameTitle(trimmed), meta: hostnameTitle(trimmed) }
+}
+
 /** Linkify plain URLs without touching existing HTML tags. */
 function linkifyHtml(raw: string): string {
   if (!raw || raw.indexOf('http') === -1) return raw
@@ -66,7 +97,7 @@ function parseList(token: Tokens.List): ChatBlock {
   return { t: 'ul', items }
 }
 
-function parseParagraph(token: Tokens.Paragraph): ChatBlock | null {
+function parseParagraph(token: Tokens.Paragraph): ChatBlock | ChatBlock[] | null {
   if (token.tokens.length === 1 && token.tokens[0]?.type === 'image') {
     const img = token.tokens[0] as Tokens.Image
     return { t: 'image', src: img.href, cap: img.text || img.title || undefined }
@@ -74,6 +105,38 @@ function parseParagraph(token: Tokens.Paragraph): ChatBlock | null {
   const trimmed = token.text.trim()
   if (/^<svg\b[\s\S]*<\/svg>$/i.test(trimmed)) {
     return { t: 'svg', svg: trimmed, cap: undefined }
+  }
+  const urlBlock = standaloneUrlBlock(trimmed)
+  if (urlBlock) return urlBlock
+  // marked folds soft-wrapped lines into one paragraph, but the line-based
+  // parser (lib/chat-blocks.ts / keeper_chat_blocks.ml) emits a link/image card
+  // for any standalone-URL *line* even when adjacent prose shares the paragraph.
+  // Split so each such line becomes a card and prose runs stay paragraphs; this
+  // keeps the parser a true superset, so the render path can supersede the
+  // line-based blocks without dropping a mid-message image/link card.
+  if (token.text.includes('\n')) {
+    const lines = token.text.split('\n')
+    if (lines.some((line) => standaloneUrlBlock(line.trim()))) {
+      const blocks: ChatBlock[] = []
+      let prose: string[] = []
+      const flushProse = () => {
+        if (prose.length === 0) return
+        const html = inlineHtml(prose.join('\n')).trim()
+        if (html) blocks.push({ t: 'p', html })
+        prose = []
+      }
+      for (const line of lines) {
+        const card = standaloneUrlBlock(line.trim())
+        if (card) {
+          flushProse()
+          blocks.push(card)
+        } else {
+          prose.push(line)
+        }
+      }
+      flushProse()
+      return blocks
+    }
   }
   const html = inlineHtml(token.text).trim()
   return html ? { t: 'p', html } : null

@@ -1792,3 +1792,72 @@ describe('fusion chat card', () => {
     expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('1,200 tok')
   })
 })
+
+describe('ChatMessageBubble — rich markdown rendering of assistant prose', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderEntries(entries: KeeperConversationEntry[]) {
+    render(html`<${ChatTranscript} entries=${entries} emptyText="empty" />`, container)
+  }
+
+  it('renders a code fence in assistant prose as a code block', () => {
+    renderEntries([
+      entry({
+        id: 'a1',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'Here you go:\n\n```ts\nconst x = 1\n```',
+      }),
+    ])
+    const code = container.querySelector('[data-chat-block="code"]')
+    expect(code).not.toBeNull()
+    expect(code?.textContent).toContain('const x = 1')
+  })
+
+  it('re-parses richly even when the backend supplied a degraded p-only block', () => {
+    // The backend persists a line-based parse (escaped <p>); the render path
+    // must still recover the structured code block from the message text.
+    renderEntries([
+      entry({
+        id: 'a2',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: '```sh\nls -la\n```',
+        blocks: [
+          { t: 'p', html: '```sh' },
+          { t: 'p', html: 'ls -la' },
+          { t: 'p', html: '```' },
+        ],
+      }),
+    ])
+    expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull()
+  })
+
+  it('keeps server blocks as-is when the message carries a non-text card/clip', () => {
+    // A voice clip cannot be reconstructed from text, so the message renders its
+    // server block and does not re-parse the (secondary) transcript prose.
+    renderEntries([
+      entry({
+        id: 'a3',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'transcript mentioning ```code``` inline',
+        blocks: [
+          { t: 'voice', secs: 3, wave: [0.2, 0.4], src: 'https://example.com/v.mp3', transcript: 'note' },
+        ],
+      }),
+    ])
+    expect(container.querySelector('[data-chat-block="voice"]')).not.toBeNull()
+    expect(container.querySelector('[data-chat-block="code"]')).toBeNull()
+  })
+})

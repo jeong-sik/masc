@@ -20,15 +20,18 @@ val of_binding : config -> binding -> t option
 
 val load_list :
   config_path:string
-  -> (t list * t * (string * string) list * string option, string) result
+  -> ( t list * t * (string * string) list * string option * string option
+     , string )
+     result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
-    keeper_assignments, librarian_runtime_id)]. Fails ([Error]) if
-    [\[runtime\].default] is missing / unresolved, if any
+    keeper_assignments, librarian_runtime_id, cross_verifier_runtime_id)]. Fails
+    ([Error]) if [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target does not resolve to a configured runtime, or
-    if [\[runtime\].librarian] is set to an unresolved id (mirrors default
-    validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→runtime-id list; [librarian_runtime_id] is the optional memory-os
-    librarian runtime. *)
+    if [\[runtime\].librarian] / [\[runtime\].cross_verifier] is set to an
+    unresolved id (mirrors default validation — no silent fallback for a typo'd
+    id). [keeper_assignments] is the keeper→runtime-id list; the two trailing
+    options are the memory-os librarian and the anti-rationalization evaluator
+    runtimes. *)
 
 val runtime_ids : t list -> string list
 
@@ -57,6 +60,11 @@ val keeper_assignments : unit -> (string * string) list
     every runtime id in the returned snapshot resolves to a configured runtime.
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
+
+val cross_verifier_runtime_id : unit -> string option
+(** [\[runtime\].cross_verifier] runtime id for the anti-rationalization
+    evaluator, or [None] when unset (the evaluator uses [\[runtime\].default]).
+    Validated at load so a [Some] always resolves to a configured runtime. *)
 
 val librarian_runtime_id : unit -> string option
 (** [\[runtime\].librarian] runtime id for the memory-os librarian, or [None]

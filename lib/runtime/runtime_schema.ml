@@ -192,6 +192,11 @@ type config =
         [None] = the librarian inherits each keeper's runtime (legacy). An
         unknown id is rejected at load like [\[runtime\].default]. The
         [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] env var overrides this. *)
+  ; cross_verifier_runtime_id : string option
+    (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
+        evaluator. Like the librarian it requests JSON mode and must run on a
+        model declaring [supports-response-format-json]; [None] = inherit
+        [\[runtime\].default]. Unknown id rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
         runtime.toml is the sole SSOT for keeper→runtime assignment (persona⊥

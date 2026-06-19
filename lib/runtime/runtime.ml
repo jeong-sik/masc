@@ -89,8 +89,30 @@ let validate_librarian_runtime ~(config_path : string) (runtimes : t list)
            (List.length runtimes))
 ;;
 
+(* [runtime].cross_verifier mirrors [runtime].librarian validation: an unknown
+   id is an operator typo rejected at load, not a silent fallback
+   (Unknown→Permissive anti-pattern). [None] is the designed "inherit
+   [runtime].default" case. *)
+let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
+    (cross_verifier_id : string option) : (unit, string) result =
+  match cross_verifier_id with
+  | None -> Ok ()
+  | Some id ->
+    if List.exists (fun (r : t) -> String.equal r.id id) runtimes
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "%s: [runtime].cross_verifier = %S not found among %d runtimes"
+           config_path
+           id
+           (List.length runtimes))
+;;
+
 let materialize_config ~(config_path : string) (cfg : config)
-  : (t list * t * (string * string) list * string option, string) result
+  : ( t list * t * (string * string) list * string option * string option
+    , string )
+    result
   =
   let runtimes = List.filter_map (of_binding cfg) cfg.bindings in
   let assignments = cfg.keeper_assignments in
@@ -120,11 +142,24 @@ let materialize_config ~(config_path : string) (cfg : config)
            with
            | Error _ as e -> e
            | Ok () ->
-             Ok (runtimes, rt, assignments, cfg.librarian_runtime_id))))
+             (match
+                validate_cross_verifier_runtime ~config_path runtimes
+                  cfg.cross_verifier_runtime_id
+              with
+              | Error _ as e -> e
+              | Ok () ->
+                Ok
+                  ( runtimes
+                  , rt
+                  , assignments
+                  , cfg.librarian_runtime_id
+                  , cfg.cross_verifier_runtime_id )))))
 ;;
 
 let load_list ~(config_path : string)
-  : (t list * t * (string * string) list * string option, string) result
+  : ( t list * t * (string * string) list * string option * string option
+    , string )
+    result
   =
   match Runtime_toml.parse_file config_path with
   | Error errs ->
@@ -156,15 +191,21 @@ let keeper_assignments_ref : (string * string) list Atomic.t = Atomic.make []
    [librarian_runtime_id]; validated at load so a [Some] always resolves. *)
 let librarian_runtime_id_ref : string option Atomic.t = Atomic.make None
 
+(* [runtime].cross_verifier — runtime id for the anti-rationalization evaluator,
+   or [None] to inherit [runtime].default. Populated by [init_default], read by
+   [cross_verifier_runtime_id]; validated at load so a [Some] always resolves. *)
+let cross_verifier_runtime_id_ref : string option Atomic.t = Atomic.make None
+
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let init_default ~config_path =
   match load_list ~config_path with
-  | Ok (runtimes, rt, assignments, librarian_id) ->
+  | Ok (runtimes, rt, assignments, librarian_id, cross_verifier_id) ->
     Atomic.set runtimes_ref runtimes;
     Atomic.set default_runtime_ref (Some rt);
     Atomic.set keeper_assignments_ref assignments;
     Atomic.set librarian_runtime_id_ref librarian_id;
+    Atomic.set cross_verifier_runtime_id_ref cross_verifier_id;
     Ok ()
   | Error _ as e -> e
 
@@ -188,6 +229,11 @@ let keeper_assignments () = Atomic.get keeper_assignments_ref
    librarian inherits each keeper's runtime (legacy). Reads the Atomic ref set by
    [init_default]; the env override lives in keeper_librarian_runtime. *)
 let librarian_runtime_id () = Atomic.get librarian_runtime_id_ref
+
+(* [runtime].cross_verifier routing for the anti-rationalization evaluator.
+   [None] = the evaluator inherits [runtime].default. Reads the Atomic ref set by
+   [init_default]. *)
+let cross_verifier_runtime_id () = Atomic.get cross_verifier_runtime_id_ref
 
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the *requested* runtime (a keeper's persona

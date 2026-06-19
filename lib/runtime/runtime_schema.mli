@@ -138,6 +138,14 @@ type config =
         inherit each keeper's runtime. Unknown id rejected at load like
         [\[runtime\].default]; [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID]
         overrides. *)
+  ; cross_verifier_runtime_id : string option
+    (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
+        evaluator (cross-model task verification). The evaluator requests JSON
+        mode (a structured verdict tool call), so it must run on a model
+        declaring [supports-response-format-json]; otherwise it returns empty
+        output and the gate approves by liveness. [None] = inherit
+        [\[runtime\].default]. Unknown id rejected at load like
+        [\[runtime\].default]. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
         Sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). A

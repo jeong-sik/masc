@@ -659,6 +659,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let librarian_runtime_id =
     Otoml.find_opt toml Otoml.get_string [ "runtime"; "librarian" ]
   in
+  let cross_verifier_runtime_id =
+    Otoml.find_opt toml Otoml.get_string [ "runtime"; "cross_verifier" ]
+  in
   if all_errors <> []
   then Error all_errors
   else (
@@ -678,6 +681,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; bindings
       ; default_runtime_id
       ; librarian_runtime_id
+      ; cross_verifier_runtime_id
       ; keeper_assignments
       })
 ;;

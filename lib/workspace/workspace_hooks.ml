@@ -286,6 +286,13 @@ let get_default_runtime_id_fn
   : (unit -> string) Atomic.t
   = Atomic.make (fun () -> failwith "Workspace_hooks: get_default_runtime_id_fn not connected")
 
+(* Optional: [None] means "use the global default runtime". Defaults to a
+   None-returning thunk (not a failwith) so unconnected test contexts fall back
+   to the default instead of crashing. *)
+let get_cross_verifier_runtime_id_fn
+  : (unit -> string option) Atomic.t
+  = Atomic.make (fun () -> None)
+
 let record_task_metric_fn
   : (Workspace_utils_backend_setup.config ->
      agent_id:string ->

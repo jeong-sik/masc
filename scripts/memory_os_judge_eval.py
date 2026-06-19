@@ -123,7 +123,10 @@ def load_runtime_cfg(runtime_config: str) -> dict:
 
 def _split_runtime_id(runtime_id: str) -> tuple[str, str]:
     """ "provider.model" -> (provider, model). Provider names contain no dot, so the
-    FIRST dot splits; the model keeps its own dashes/dots."""
+    FIRST dot splits; the model keeps its own dashes/dots.
+
+    CLI config-resolution helper: aborts (sys.exit) on a dot-less id, consistent
+    with resolve_judge_target's fail-fast on unresolvable config."""
     if "." not in runtime_id:
         sys.exit(f"runtime id {runtime_id!r} is not in 'provider.model' form")
     provider, model = runtime_id.split(".", 1)

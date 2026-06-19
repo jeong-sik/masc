@@ -1,4 +1,4 @@
-# RFC-0259 — Provider health gate and audited failover
+# RFC-0260 — Provider health gate and audited failover
 
 - Status: Draft
 - Date: 2026-06-19

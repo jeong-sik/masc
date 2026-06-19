@@ -20,6 +20,7 @@ type t =
   ; keeper : string
   ; trace_id : string
   ; absolute_turn : int
+  ; turn_ref : Ids.Turn_ref.t option
   ; blocks : prompt_block list
   ; runtime_profile : string
   ; sampling : sampling
@@ -50,6 +51,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("blocks", `List (List.map prompt_block_to_json r.blocks))
      ; ("runtime_profile", `String r.runtime_profile)
      ]
+    @ opt_field "turn_ref" Ids.Turn_ref.to_yojson r.turn_ref
     @ opt_field "temperature" (fun v -> `Float v) r.sampling.temperature
     @ opt_field "thinking_budget" (fun v -> `Int v) r.sampling.thinking_budget
     @ opt_field "enable_thinking" (fun v -> `Bool v) r.sampling.enable_thinking
@@ -89,6 +91,11 @@ let opt_member name fields decode =
 let as_bool name = function
   | `Bool b -> Ok b
   | _ -> Error (Printf.sprintf "turn_record: field %S is not a bool" name)
+
+let as_turn_ref name json =
+  match Ids.Turn_ref.of_yojson json with
+  | Ok t -> Ok t
+  | Error e -> Error (Printf.sprintf "turn_record: field %S: %s" name e)
 
 let prompt_block_of_json (json : Yojson.Safe.t) : (prompt_block, string) result =
   match json with
@@ -133,6 +140,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
       in
       let* profile_json = require "runtime_profile" fields in
       let* runtime_profile = as_string "runtime_profile" profile_json in
+      let* turn_ref = opt_member "turn_ref" fields as_turn_ref in
       let* temperature = opt_member "temperature" fields as_float in
       let* thinking_budget = opt_member "thinking_budget" fields as_int in
       let* enable_thinking = opt_member "enable_thinking" fields as_bool in
@@ -145,6 +153,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; keeper
         ; trace_id
         ; absolute_turn
+        ; turn_ref
         ; blocks
         ; runtime_profile
         ; sampling = { temperature; thinking_budget; enable_thinking }

@@ -33,6 +33,9 @@ type t =
   ; keeper : string
   ; trace_id : string
   ; absolute_turn : int
+  ; turn_ref : Ids.Turn_ref.t option
+    (* RFC-0233 §7 — "<trace_id>#<absolute_turn>" join key for chat/board.
+       [option] so pre-§7 rows decode as [None]. *)
   ; blocks : prompt_block list (* assembly order *)
   ; runtime_profile : string
   ; sampling : sampling

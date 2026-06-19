@@ -95,6 +95,57 @@ end = struct
              (Json_util.kind_name other))
 end
 
+(** Turn reference — RFC-0233 §7. Canonical per-turn join key, derived
+    deterministically from the [(trace_id, absolute_turn)] pair already
+    recorded on {!Turn_record.t}. Serializes as ["<trace_id>#<absolute_turn>"]
+    so keeper chat rows and board posts join on one stable value across
+    reloads, with no mapping table. Distinct from {!Turn_id} (a
+    thread-relative ["<thread>-turn-N"] label); the name collision is
+    avoided on purpose. *)
+module Turn_ref : sig
+  type t
+  val make : trace_id:string -> absolute_turn:int -> t
+  val to_string : t -> string
+  val of_string : string -> t option
+  val trace_id : t -> string
+  val absolute_turn : t -> int
+  val equal : t -> t -> bool
+  val pp : Format.formatter -> t -> unit
+  val to_yojson : t -> Yojson.Safe.t
+  val of_yojson : Yojson.Safe.t -> (t, string) result
+end = struct
+  type t = { trace_id : string; absolute_turn : int }
+  let make ~trace_id ~absolute_turn = { trace_id; absolute_turn }
+  let to_string t = Printf.sprintf "%s#%d" t.trace_id t.absolute_turn
+  (* Split on the LAST '#': the absolute_turn suffix is always an int, so a
+     trace_id that itself contains '#' still parses unambiguously. *)
+  let of_string s =
+    match String.rindex_opt s '#' with
+    | None -> None
+    | Some i ->
+      let trace = String.sub s 0 i in
+      let suffix = String.sub s (i + 1) (String.length s - i - 1) in
+      (match int_of_string_opt suffix with
+       | Some absolute_turn when trace <> "" ->
+         Some { trace_id = trace; absolute_turn }
+       | Some _ | None -> None)
+  let trace_id t = t.trace_id
+  let absolute_turn t = t.absolute_turn
+  let equal a b =
+    String.equal a.trace_id b.trace_id && a.absolute_turn = b.absolute_turn
+  let pp fmt t = Format.fprintf fmt "%s" (to_string t)
+  let to_yojson t = `String (to_string t)
+  let of_yojson = function
+    | `String s -> (
+      match of_string s with
+      | Some t -> Ok t
+      | None -> Error (Printf.sprintf "Invalid Turn_ref (received %S)" s))
+    | other ->
+      Error
+        (Printf.sprintf "Expected string for Turn_ref (received %s)"
+           (Json_util.kind_name other))
+end
+
 (** Thread identifier - conversation thread ID *)
 module Thread_id : sig
   type t

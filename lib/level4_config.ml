@@ -26,13 +26,36 @@ let get_env_int name default =
 (** {1 Random Number Generator} *)
 
 (** Initialize RNG with seed for reproducibility *)
-let rng_initialized = Atomic.make false
+let rng_uninitialized = 0
+let rng_initializing = 1
+let rng_initialized = 2
+
+let rng_state = Atomic.make rng_uninitialized
 
 let ensure_rng_init () =
-  if Atomic.compare_and_set rng_initialized false true then begin
-    let seed = get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0)) in
-    Random.init seed
-  end
+  let rec loop () =
+    match Atomic.get rng_state with
+    | state when state = rng_initialized -> ()
+    | state when state = rng_uninitialized ->
+      if Atomic.compare_and_set rng_state rng_uninitialized rng_initializing
+      then (
+        try
+          let seed =
+            get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0))
+          in
+          Random.init seed;
+          Atomic.set rng_state rng_initialized
+        with
+        | exn ->
+          Atomic.set rng_state rng_uninitialized;
+          raise exn)
+      else loop ()
+    | state when state = rng_initializing ->
+      Domain.cpu_relax ();
+      loop ()
+    | _ -> ()
+  in
+  loop ()
 
 (** Get random float with guaranteed initialization *)
 let random_float max =

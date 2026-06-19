@@ -9,6 +9,7 @@ type dispatch_target =
   ; base_host_env : string array option
   }
 
+(* TEL-OK: pure dispatch-target selector (no side-effecting action; probe execution + telemetry live in make_probe/the evaluator). *)
 let local_dispatch_target ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   match
@@ -21,6 +22,7 @@ let local_dispatch_target ~(config : Workspace.config)
   | Ok base_host_env ->
     Some { sandbox = Masc_exec.Sandbox_target.host (); base_host_env }
 
+(* TEL-OK: pure dispatch-target selector (no side-effecting action; probe execution + telemetry live in make_probe/the evaluator). *)
 let command_dispatch_target
     ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
     ~(config : Workspace.config)

@@ -1395,9 +1395,14 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
     && routeState.params.keeper.trim() !== ''
 }
 
+// Surfaces that render their own primary header and therefore do not need the
+// generic dashboard section lead above them. Keep this in sync with the route
+// registry; currently only the Connectors prototype surface uses its own header.
+const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set(['connectors'])
+
 export function shouldRenderSurfaceLead(routeState: RouteState): boolean {
   if (isKeeperDetailDashboardRoute(routeState)) return false
-  return routeState.tab !== 'connectors'
+  return !SURFACE_OWN_LEAD_IDS.has(routeState.tab)
 }
 
 function SurfaceLead() {

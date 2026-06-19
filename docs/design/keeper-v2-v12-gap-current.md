@@ -1,6 +1,6 @@
 # Keeper v2 v12 Gap Snapshot
 
-Source reviewed: `/Users/dancer/Downloads/v2 (12)`.
+Source reviewed: design hand-off asset "v2 (12)".
 
 Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-connectors-visual-followup`.
 
@@ -60,4 +60,4 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-conne
 - The generic dashboard `Connectors > All` section lead should stay removed from the Connectors primary view; the prototype `Gate / 커넥터` header owns that page title.
 - The floating status tray/focus toggle should stay hidden on prototype primary surfaces; the top shell already carries connection/status controls, and those surfaces keep the bottom edge free for primary content.
 - The old read-only drawer binding summary should stay replaced by the inline editor shell; the lower-level config form can remain available under the drawer's `config` tab until persistence is fully wired.
-- Stale gap notes under `/Users/dancer/me/memory/keeper-v2-gap-*.md` are superseded by this repo-local snapshot.
+- Stale personal gap notes are superseded by this repo-local snapshot.

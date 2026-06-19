@@ -54,7 +54,7 @@ let rec parse_args cfg = function
   | ("-h" | "--help") :: _ ->
     print_string usage;
     exit 0
-  | "--events-dir" :: dir :: rest -> parse_args { cfg with events_dir = dir } rest
+  | "--events-dir" :: dir :: rest -> parse_args { cfg with events_dir = Some dir } rest
   | "--month" :: m :: rest -> parse_args { cfg with month = Some m } rest
   | "--json" :: rest -> parse_args { cfg with json = true } rest
   | "--strict" :: rest -> parse_args { cfg with strict = true } rest

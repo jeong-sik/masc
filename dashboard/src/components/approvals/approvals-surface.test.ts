@@ -78,6 +78,8 @@ describe('ApprovalsSurface', () => {
     const { ApprovalsSurface } = await loadSurface([
       queueItem({ id: 'appr-1', keeper_name: 'masc-improver', tool_name: 'fs_write', risk_level: 'critical' }),
       queueItem({ id: 'appr-2', keeper_name: 'issue-king', tool_name: 'shell', risk_level: 'low', waiting_s: 12 }),
+      queueItem({ id: 'appr-3', keeper_name: 'risk-checker', tool_name: 'shell', risk_level: 'high' }),
+      queueItem({ id: 'appr-4', keeper_name: 'risk-checker', tool_name: 'shell', risk_level: 'medium' }),
     ])
 
     render(html`<${ApprovalsSurface} />`, container)
@@ -85,12 +87,18 @@ describe('ApprovalsSurface', () => {
 
     expect(container.querySelector('[data-testid="approvals-surface"]')).not.toBeNull()
     const cards = container.querySelectorAll('[data-testid="approval-card"]')
-    expect(cards.length).toBe(2)
+    expect(cards.length).toBe(4)
     expect(container.textContent).toContain('masc-improver')
     expect(container.textContent).toContain('fs_write')
     // risk_level is surfaced uppercased on the .ap-kind badge
     expect(container.textContent).toContain('CRITICAL')
+    expect(container.textContent).toContain('HIGH')
+    expect(container.textContent).toContain('MEDIUM')
     expect(container.textContent).toContain('LOW')
+    expect(container.querySelector('[data-approval-id="appr-1"]')?.className).toContain('sev-bad')
+    expect(container.querySelector('[data-approval-id="appr-3"]')?.className).toContain('sev-warn')
+    expect(container.querySelector('[data-approval-id="appr-4"]')?.className).toContain('sev-accent')
+    expect(container.querySelector('[data-approval-id="appr-2"]')?.className).toContain('sev-info')
     // the three live decisions are exposed; the prototype's defer/undo are not
     expect(container.textContent).toContain('승인')
     expect(container.textContent).toContain('항상 승인')

@@ -16,6 +16,11 @@ import { useEffect, useMemo } from 'preact/hooks'
 import type { KeeperApprovalQueueItem } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import {
+  isHighOrCriticalKeeperApprovalRisk,
+  keeperApprovalRiskVisualBand,
+  type KeeperApprovalRiskVisualBand,
+} from '../../lib/governance-risk-level'
 import { navigate } from '../../router'
 import { AgentAvatar } from '../overview/agent-avatar'
 import {
@@ -26,16 +31,8 @@ import {
   respondToKeeperApproval,
 } from '../governance-store'
 
-type Sev = 'bad' | 'warn' | 'info'
-
-// risk_level → prototype severity rail. critical/high are the irreversible-risk
-// band; medium warns; low/unknown is informational. Mirrors the live
-// approvalRiskToneClass banding (governance.ts) but emits the .ap- sev token.
-function apSev(riskLevel: string | null | undefined): Sev {
-  const r = (riskLevel ?? '').trim().toLowerCase()
-  if (r === 'critical' || r === 'high') return 'bad'
-  if (r === 'medium') return 'warn'
-  return 'info'
+function apSev(riskLevel: string | null | undefined): KeeperApprovalRiskVisualBand {
+  return keeperApprovalRiskVisualBand(riskLevel)
 }
 
 // seconds-waited → "N분 N초 대기" (prototype apAge).
@@ -145,7 +142,7 @@ export function ApprovalsSurface() {
   const error = governanceError.value
 
   const stats = useMemo(() => {
-    const risky = items.filter(i => apSev(i.risk_level) === 'bad').length
+    const risky = items.filter(i => isHighOrCriticalKeeperApprovalRisk(i.risk_level)).length
     const longest = items.reduce((max, i) => Math.max(max, i.waiting_s ?? 0), 0)
     const keepers = new Set(items.map(i => i.keeper_name)).size
     return { risky, longest, keepers }

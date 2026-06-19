@@ -16,6 +16,11 @@ import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { TimeAgo } from './common/time-ago'
 import {
+  isHighOrCriticalKeeperApprovalRisk,
+  keeperApprovalRiskVisualBand,
+  maxKeeperApprovalRiskLevel,
+} from '../lib/governance-risk-level'
+import {
   governanceData,
   governanceError,
   governanceLoading,
@@ -311,11 +316,16 @@ function filterApprovalQueue(
 }
 
 export function approvalRiskToneClass(riskLevel: string): string {
-  const normalized = riskLevel.trim().toLowerCase()
-  if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
-  if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
-  if (normalized === 'medium') return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg'
-  return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
+  switch (keeperApprovalRiskVisualBand(riskLevel)) {
+    case 'bad':
+      return 'border-bad/30 bg-bad/10 text-bad'
+    case 'warn':
+      return 'border-warn/30 bg-warn/10 text-warn'
+    case 'accent':
+      return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-accent-fg'
+    case 'info':
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
+  }
 }
 
 function approvalDispositionToneClass(disposition?: string | null): string {
@@ -326,25 +336,8 @@ function approvalDispositionToneClass(disposition?: string | null): string {
   return 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
 }
 
-const RISK_RANK: Record<string, number> = {
-  critical: 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-}
-
 export function maxApprovalRisk(items: readonly { risk_level?: string | null }[]): string | null {
-  let topRank = 0
-  let topLabel: string | null = null
-  for (const item of items) {
-    const raw = item.risk_level?.trim().toLowerCase()
-    const rank = raw ? (RISK_RANK[raw] ?? 0) : 0
-    if (rank > topRank) {
-      topRank = rank
-      topLabel = raw ?? null
-    }
-  }
-  return topLabel
+  return maxKeeperApprovalRiskLevel(items)
 }
 
 function scrollToKeeperApprovalSection(): void {
@@ -358,7 +351,7 @@ function KeeperApprovalAlertBanner() {
   if (items.length === 0) return null
 
   const maxRisk = maxApprovalRisk(items)
-  const isCritical = maxRisk === 'critical' || maxRisk === 'high'
+  const isCritical = isHighOrCriticalKeeperApprovalRisk(maxRisk)
   const tone = isCritical
     ? 'border-bad/40 bg-bad/10 text-bad'
     : 'border-warn/40 bg-warn/10 text-warn'

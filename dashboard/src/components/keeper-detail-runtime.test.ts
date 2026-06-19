@@ -31,7 +31,7 @@ describe('resolveKeeperToolPolicy', () => {
   it('uses keeper config as the authoritative policy source', () => {
     const keeperConfig = {
       tools: {
-        tool_access: {},
+        tool_access: [],
         resolved_allowlist: ['mcp__masc__masc_board_post'],
         tool_denylist: ['mcp__masc__masc_board_delete'],
         active_masc_tool_count: 1,

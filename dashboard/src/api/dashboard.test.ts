@@ -1554,6 +1554,9 @@ describe('fetchKeeperConfig', () => {
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
     // deny_list count is derived from the array (deny_list_count field dropped).
     expect(result.hooks?.deny_list).toEqual(['Execute'])
+    // tool_access is a string list (was mistyped as unknown/{}); needed so the
+    // denylist editor can echo it back to set_policy unchanged.
+    expect(result.tools.tool_access).toEqual(['tool_read_file'])
     expect(result.sources.precedence).toEqual(['live_meta'])
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')

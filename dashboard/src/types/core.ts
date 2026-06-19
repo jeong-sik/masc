@@ -1443,7 +1443,10 @@ interface KeeperConfigWorkspace {
 }
 
 export interface KeeperConfigTools {
-  tool_access: unknown
+  // Raw configured tool-access allowlist (tool-name strings). The backend
+  // serialises this as a JSON string list (Json_util.json_string_list); the
+  // earlier `unknown` typing masked that and left it unread.
+  tool_access: string[]
   resolved_allowlist: string[]
   tool_denylist: string[]
   active_masc_tool_count: number

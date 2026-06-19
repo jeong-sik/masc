@@ -9,6 +9,7 @@ import {
   fetchDashboardGoalsTree,
   fetchKeeperConfig,
   patchKeeperConfig,
+  setKeeperToolPolicy,
 } from '../api/dashboard'
 import type { KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode, SharedMemoryScope } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
@@ -182,6 +183,11 @@ export type RuntimeDraft = {
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
+// Tool denylist is saved via the separate /tools set_policy endpoint (not the
+// /config PATCH), so it has its own draft/saving state. null draft = "show the
+// live denylist"; a string = the operator's in-progress edit.
+const denylistDraftText = signal<string | null>(null)
+const denylistSaving = signal(false)
 
 export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
   return raw === 'docker' ? 'docker' : 'local'
@@ -332,6 +338,8 @@ export function resetKeeperConfig(): void {
   promptPreviewTab.value = 'blocks'
   runtimeDraft.value = null
   runtimeSaving.value = false
+  denylistDraftText.value = null
+  denylistSaving.value = false
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
 }
@@ -702,6 +710,33 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
   function resetRuntimeDraft() {
     runtimeDraft.value = initRuntimeDraftFromConfig(c)
+  }
+
+  // Parse the denylist textarea into a deduped, trimmed tool-name list.
+  function parseDenylistDraft(text: string): string[] {
+    return [...new Set(text.split('\n').map((s) => s.trim()).filter(Boolean))]
+  }
+
+  async function saveToolDenylist() {
+    const text = denylistDraftText.value
+    if (text === null) return
+    const deny = parseDenylistDraft(text)
+    denylistSaving.value = true
+    try {
+      // Echo the current tool_access so set_policy (which sets access AND deny
+      // atomically) does not wipe the keeper's tool access.
+      const updated = await setKeeperToolPolicy(keeperName, {
+        tool_access: c.tools.tool_access,
+        deny,
+      })
+      configState.value = loaded(updated)
+      denylistDraftText.value = null
+      showToast('도구 거부 목록 저장 완료', 'success')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '저장 실패', 'error')
+    } finally {
+      denylistSaving.value = false
+    }
   }
 
   function enterEditMode() {
@@ -1144,6 +1179,41 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           >초기화하기</button>
         </div>
       ` : null}
+
+      ${(() => {
+        const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
+        const deduped = parseDenylistDraft(denyText)
+        const changed = JSON.stringify(deduped) !== JSON.stringify(c.tools.tool_denylist)
+        return html`
+          <${SectionHeader} title="도구 거부 목록 (정책)" />
+          <p class="text-3xs text-text-muted mb-2 px-1 leading-relaxed">
+            이 keeper가 사용할 수 없는 도구 이름(한 줄에 하나). 저장 시 set_policy 로 적용되며 현재 도구 접근(tool_access ${c.tools.tool_access.length}개)은 보존됩니다.
+          </p>
+          <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${changed ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+            <textarea aria-label="tool_denylist" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+              rows=${4}
+              value=${denyText}
+              placeholder="예: Execute"
+              onInput=${(e: Event) => { denylistDraftText.value = (e.target as HTMLTextAreaElement).value }}
+            ></textarea>
+            <div class="flex items-center gap-2 mt-2">
+              <span class="text-3xs text-text-muted">${deduped.length} deny</span>
+              <div class="flex-1"></div>
+              <button type="button"
+                class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-xs"
+                onClick=${saveToolDenylist}
+                disabled=${denylistSaving.value || !changed}
+              >${denylistSaving.value ? '저장 중...' : '정책 저장'}</button>
+              <button type="button"
+                class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-xs"
+                title="초기화: 편집한 거부 목록을 서버 값으로 되돌립니다"
+                onClick=${() => { denylistDraftText.value = null }}
+                disabled=${denylistSaving.value || !changed}
+              >초기화하기</button>
+            </div>
+          </div>
+        `
+      })()}
 
       ${c.hooks ? (() => {
         const allEntries: readonly HookSlotEntry[] = Object.entries(c.hooks.slots) as HookSlotEntry[]

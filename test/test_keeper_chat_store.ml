@@ -1100,6 +1100,54 @@ let test_blocks_roundtrip_and_drop_malformed () =
           | None -> Alcotest.fail "blocks missing")
       | messages -> Alcotest.failf "expected 1 row, got %d" (List.length messages))
 
+(* RFC-0233 §7: append_turn stamps the supplied turn_ref on every row of the
+   completed turn, it round-trips through load, and to_json_array exposes it
+   for the history endpoint. *)
+let test_turn_ref_persisted_on_turn_rows () =
+  let base_dir = temp_base_path "keeper-chat-store-turnref" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-turnref" in
+      let tref = Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:7 in
+      K.append_turn ~base_dir ~keeper_name ~user_content:"do it"
+        ~user_attachments:[]
+        ~tool_calls:[ { K.call_id = "t1"; call_name = "Read"; args = "{}" } ]
+        ~turn_ref:tref ~assistant_content:"done" ();
+      let messages = K.load ~base_dir ~keeper_name in
+      List.iter
+        (fun (m : K.chat_message) ->
+          match m.turn_ref with
+          | Some tr ->
+              Alcotest.(check string)
+                (Printf.sprintf "turn_ref on %s row" (K.Role.to_label m.role))
+                "trace-abc#7"
+                (Ids.Turn_ref.to_string tr)
+          | None -> Alcotest.fail "missing turn_ref on a completed-turn row")
+        messages;
+      let s = Yojson.Safe.to_string (K.to_json_array messages) in
+      Alcotest.(check bool) "turn_ref present in to_json_array" true
+        (contains_substring s "trace-abc#7"))
+
+(* A malformed persisted turn_ref is surfaced as a read drop and reads as
+   [None] — never repaired — while the row itself stays valid. *)
+let test_turn_ref_malformed_reads_none () =
+  let base_dir = temp_base_path "keeper-chat-store-turnref-bad" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-turnref-bad" in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"role":"assistant","content":"x","ts":1.0,"turn_ref":"no-separator"}|}
+        ^ "\n");
+      match K.load ~base_dir ~keeper_name with
+      | [ m ] ->
+          Alcotest.(check bool) "malformed turn_ref reads as None" true
+            (m.turn_ref = None)
+      | messages ->
+          Alcotest.failf "expected 1 message, got %d" (List.length messages))
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -1189,5 +1237,9 @@ let () =
             test_orphan_leading_tool_lines_trimmed;
           Alcotest.test_case "tail-bounded load matches full-scan window (RFC-0226 P2)"
             `Quick test_tail_bounded_load_matches_full_scan_window;
+          Alcotest.test_case "turn_ref stamped on turn rows + json (RFC-0233 §7)"
+            `Quick test_turn_ref_persisted_on_turn_rows;
+          Alcotest.test_case "malformed turn_ref reads as None (RFC-0233 §7)"
+            `Quick test_turn_ref_malformed_reads_none;
         ] );
     ]

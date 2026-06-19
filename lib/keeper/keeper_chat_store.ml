@@ -188,6 +188,13 @@ type chat_message = {
          unknown label is reported as a persistence read drop and the
          row reads as [Utterance] (the conservative arm: it renders and
          advances the watermark like any reply). *)
+  turn_ref : Ids.Turn_ref.t option;
+      (* RFC-0233 §7: "<trace_id>#<absolute_turn>" join key for the turn
+         that produced this row.  Stamped by [append_turn] /
+         [append_assistant_message] when the caller supplies it; [None] on
+         inbound user lines (no turn yet) and rows written before §7.  A
+         malformed persisted value is reported as a persistence read drop
+         and reads as [None]; the row stays valid. *)
 }
 
 let redaction_for ~base_dir ~keeper_name =
@@ -294,7 +301,7 @@ let legacy_message_id ~ts ~content =
 
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
-    ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ()
+    ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref ()
     : string =
   (* RFC-0232 P5: the label is a derivation of the typed surface — the
      single site that turns a [Surface_ref.t] into the legacy [source]
@@ -372,6 +379,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     @ speaker_fields speaker
     @ audio_fields audio
     @ blocks_fields blocks
+    @ opt_string_field "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
@@ -397,6 +405,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
     ?(assistant_kind = Row_kind.Utterance)
     ?blocks
+    ?turn_ref
     ~(assistant_content : string)
     () =
   try
@@ -422,7 +431,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     let user_line =
       encode_line ~role:Role.User ~content:user_content ~ts
         ~attachments:persisted_user_attachments ?surface ?conversation_id
-        ?external_message_id ?speaker
+        ?external_message_id ?speaker ?turn_ref
         ~mentions:(user_line_mentions ~extra_mentions user_content) ()
     in
     let tool_lines =
@@ -433,12 +442,12 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
             ~ts
             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
             ~tool_call_name:tc.call_name
-            ?surface ?conversation_id ())
+            ?surface ?conversation_id ?turn_ref ())
         tool_calls
     in
     let asst_line =
       encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?surface
-        ?conversation_id ~kind:assistant_kind ?blocks ()
+        ?conversation_id ~kind:assistant_kind ?blocks ?turn_ref ()
     in
     let payload =
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
@@ -457,7 +466,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?audio ?blocks () =
+    ?surface ?conversation_id ?audio ?blocks ?turn_ref () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -465,7 +474,7 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ?audio ?blocks ()
+      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ?audio ?blocks ?turn_ref ()
     in
     Fs_compat.append_file path (line ^ "\n")
   with
@@ -694,6 +703,21 @@ let parse_line ~file_path (line : string) : chat_message option =
                 ~detail:(Printf.sprintf "unknown chat row kind %S" label);
               Row_kind.Utterance)
     in
+    let turn_ref =
+      (* RFC-0233 §7: parse the join key; a malformed value is surfaced as
+         a read drop and reads as [None] — never repaired. *)
+      match opt_string "turn_ref" with
+      | None -> None
+      | Some s -> (
+          match Ids.Turn_ref.of_string s with
+          | Some _ as tr -> tr
+          | None ->
+              report_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path:file_path
+                ~detail:(Printf.sprintf "invalid turn_ref %S" s);
+              None)
+    in
     if role_label = "" || content = "" then (
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
@@ -726,7 +750,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           Some
             { id; role; content; ts; attachments; tool_call_id; tool_call_name;
               source; surface; conversation_id; external_message_id; speaker;
-              audio; blocks; mentions; kind }
+              audio; blocks; mentions; kind; turn_ref }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -961,5 +985,7 @@ let to_json_array ?base_dir (messages : chat_message list) : Yojson.Safe.t =
                      ) atts in
                      [("attachments", `List att_json)])
               @ audio_fields_with_expired ~base_dir m.audio
-              @ blocks_fields m.blocks))
+              @ blocks_fields m.blocks
+              @ opt_string_field "turn_ref"
+                  (Option.map Ids.Turn_ref.to_string m.turn_ref)))
        messages)

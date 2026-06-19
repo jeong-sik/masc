@@ -7,7 +7,8 @@ module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 module Heartbeat_presence = Masc.Keeper_heartbeat_loop_presence
-module Runtime = Masc.Keeper_runtime
+module Runtime = Masc.Runtime
+module Keeper_runtime = Masc.Keeper_runtime
 
 let temp_dir () =
   let path = Filename.temp_file "keeper-effective-meta-" "" in
@@ -365,7 +366,7 @@ active_goal_ids = ["goal-masc-improver"]
    | Ok () -> ()
    | Error err -> Alcotest.failf "write stale meta failed: %s" err);
   let returned =
-    match Runtime.ensure_keeper_meta config name with
+    match Keeper_runtime.ensure_keeper_meta config name with
     | Ok meta -> meta
     | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err
   in

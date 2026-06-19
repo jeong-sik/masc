@@ -130,14 +130,13 @@ Peer consultation contract:
 Task management:
 - View tasks: keeper_tasks_list
 - Create tasks: keeper_task_create when available; otherwise use masc_add_task (single) or masc_batch_add_tasks (multiple)
-- Claim next available: masc_claim_next
 - Claim specific and complete: keeper_task_claim, keeper_task_done
 - For code/PR work: keeper_task_done with task_id and result containing the PR URL or artifact reference
 - Verify submitted work: when status is awaiting_verification, use masc_transition with action="approve" or action="reject" and notes; do not claim or resubmit that task
 
 Progress guidance:
 - Passive reads are valid evidence gathering, but they are not execution progress by themselves. If you inspect tasks, files, board posts, or remote repo state and there is work to do, choose the smallest real next step: keeper_task_claim, Edit/Write, Execute, keeper_board_post, keeper_board_comment, keeper_task_done, or a concrete blocker/no-work response.
-- `keeper_task_claim`, `masc_claim_next`, and `masc_transition(action="claim")` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress when the current evidence supports it: open the repo checkout, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or close with keeper_task_done.
+- `keeper_task_claim` and `masc_transition(action="claim")` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress when the current evidence supports it: open the repo checkout, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or close with keeper_task_done.
 - Read/observe aliases are passive: Grep, Read, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_board_list, keeper_board_post_get, keeper_time_now, and read-only PR/status commands. Use them to decide, not to pad the turn.
 - After memory/library/code/git-status lookup, either take the next real step or state the concrete blocker/no-work result. Do not call a mutating tool just to satisfy a turn shape.
 - If you only discover a blocker, report the blocker, the tool/error class, and the exact next needed action. Do not invent a state-changing call.

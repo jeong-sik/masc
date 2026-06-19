@@ -1122,7 +1122,7 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     vi.doUnmock('./common/toast')
   })
 
-  it('renders the keeper-v2 surface header, toolbar, and gate strip', async () => {
+  it('renders the keeper-v2 surface header, gate grid, audit log, and collapsed operator rollup', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse())
     const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
@@ -1138,11 +1138,18 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     await flushUi()
 
     expect(container.querySelector('.cn-surf-head')).not.toBeNull()
+    expect(container.querySelector('[data-testid="connector-gate-grid"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-testid="connector-gate-card"]').length).toBe(4)
+    expect(container.querySelector('[data-testid="connector-audit-log"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="connector-operations-rollup"]')).not.toBeNull()
     expect(container.querySelector('.cn-toolbar')).not.toBeNull()
     expect(container.querySelector('[data-testid="connector-search-input"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="connector-add-button"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="connector-gate-strip"]')).not.toBeNull()
     expect(container.textContent).toContain('Gate')
+    expect(container.textContent).toContain('외부 게이트 4개')
+    expect(container.textContent).toContain('최근 감사 로그')
+    expect(container.textContent).toContain('운영 상세')
     expect(container.textContent).toContain('Add connector')
   })
 

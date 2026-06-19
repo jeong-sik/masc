@@ -48,7 +48,19 @@ let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
   let now = Unix.gettimeofday () in
   let run_compute_and_store entry =
     let result =
-      try Ok (Eio_guard.run_in_systhread compute) with
+      (* Offload via the Executor_pool, NOT [Eio_guard.run_in_systhread].
+         The keeper-* computes transitively reach [Keeper_fs.ensure_dir],
+         which takes the shared [dir_mu] through [Eio.Mutex.use_rw ~protect].
+         On a bare systhread there is no Eio effect handler, so [Cancel.protect]
+         performs [Get_context] with no handler -> [Effect.Unhandled], which
+         [use_rw] turns into a poison of [dir_mu] -> every file write in the
+         process then fails with [Eio.Mutex.Poisoned] (keeper persistence dies).
+         Executor_pool workers run [f] inside [Eio.Switch.run] (a real fiber
+         with a [Get_context] handler), so [use_rw] resolves normally; when no
+         pool is set [submit_or_inline] runs inline in the calling fiber, which
+         also carries an Eio context. *)
+      try Ok (Executor_pool_ref.submit_or_inline compute) with
+      | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Printexc.to_string exn)
     in
     (* NDT-OK: moved cache freshness timestamp; wall-clock metadata is boundary output. *)

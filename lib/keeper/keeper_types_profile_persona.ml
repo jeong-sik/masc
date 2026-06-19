@@ -103,6 +103,16 @@ let personas_root_opt () =
     None
 ;;
 
+let persona_profile_path_opt_in_dirs dirs name =
+  (* Search the resolved persona roots only.
+     Config_dir_resolver.personas_dirs now returns a single source of truth:
+     explicit MASC_PERSONAS_DIR or resolved CONFIG_ROOT/personas. *)
+  dirs
+  |> List.find_map (fun root ->
+    let path = Filename.concat (Filename.concat root name) "profile.json" in
+    if Fs_compat.file_exists path then Some path else None)
+;;
+
 let persona_profile_path_opt name =
   let dirs =
     try
@@ -118,13 +128,7 @@ let persona_profile_path_opt name =
       Log.Keeper.warn "personas_dirs unexpected: %s" (Printexc.to_string exn);
       []
   in
-  (* Search the resolved persona roots only.
-     Config_dir_resolver.personas_dirs now returns a single source of truth:
-     explicit MASC_PERSONAS_DIR or resolved CONFIG_ROOT/personas. *)
-  dirs
-  |> List.find_map (fun root ->
-    let path = Filename.concat (Filename.concat root name) "profile.json" in
-    if Fs_compat.file_exists path then Some path else None)
+  persona_profile_path_opt_in_dirs dirs name
 ;;
 
 (** Load extended persona description from AGENT.md if present.

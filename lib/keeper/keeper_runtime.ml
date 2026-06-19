@@ -121,6 +121,21 @@ let boot_meta_failure_for ~base_path ~name =
       Hashtbl.find_opt boot_meta_failures
         (boot_meta_failure_key ~base_path ~name))
 
+let profile_defaults_for_config config name =
+  load_keeper_profile_defaults_for_base_path
+    ~base_path:config.Workspace.base_path
+    name
+
+let profile_defaults_result_for_config config name =
+  load_keeper_profile_defaults_result_for_base_path
+    ~base_path:config.Workspace.base_path
+    name
+
+let keeper_toml_path_opt_for_config config name =
+  keeper_toml_path_opt_for_base_path
+    ~base_path:config.Workspace.base_path
+    name
+
 let remember_boot_meta_result ctx name result =
   let base_path = ctx.config.base_path in
   match result with
@@ -141,13 +156,13 @@ let autoboot_exclusion_reason config name =
   | Ok (Some meta) ->
     if meta.paused then Some "paused"
     else
-      (match (load_keeper_profile_defaults name).autoboot_enabled with
+      (match (profile_defaults_for_config config name).autoboot_enabled with
        | Some true -> None
        | Some false -> Some "declarative_autoboot_disabled"
        | None ->
          if meta.autoboot_enabled then None else Some "autoboot_disabled")
   | Ok None ->
-    (match (load_keeper_profile_defaults name).autoboot_enabled with
+    (match (profile_defaults_for_config config name).autoboot_enabled with
      | Some false -> Some "declarative_autoboot_disabled"
      | Some true | None -> None)
   | Error _ ->
@@ -180,7 +195,7 @@ let auto_recoverable_paused_keeper_names ?now config =
        | Ok (Some meta)
          when meta.paused
               &&
-              (match (load_keeper_profile_defaults name).autoboot_enabled with
+              (match (profile_defaults_for_config config name).autoboot_enabled with
                | Some value -> value
                | None -> meta.autoboot_enabled)
               && Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta ->
@@ -356,7 +371,7 @@ let ensure_keeper_meta_with_cause config name =
        persona config (TOML) plus explicit env overrides are the source of truth.
        Fields where TOML has [Some v] are overwritten; [None] keeps runtime value. *)
     let defaults_result =
-      Keeper_types_profile.load_keeper_profile_defaults_result meta.name
+      profile_defaults_result_for_config config meta.name
     in
     match defaults_result with
     | Error detail ->
@@ -542,8 +557,8 @@ let declarative_materialization_args name defaults =
   in
   `Assoc (List.rev fields)
 
-let declarative_materialization_defaults name =
-  match load_keeper_profile_defaults_result name with
+let declarative_materialization_defaults config name =
+  match profile_defaults_result_for_config config name with
   | Error detail -> Error (profile_defaults_boot_error ~keeper_name:name detail)
   | Ok defaults -> (
       match defaults.sandbox_profile with
@@ -578,13 +593,13 @@ let load_or_materialize_boot_meta (ctx : _ context) name
     match ensure_keeper_meta_with_cause ctx.config name with
     | Ok meta -> Ok { meta; materialized = false }
     | Error original_error -> (
-        match Config_dir_resolver.keeper_toml_path_opt name with
+        match keeper_toml_path_opt_for_config ctx.config name with
         | None -> Error original_error
         | Some toml_path -> (
             Log.Keeper.info
               "bootstrapping declarative keeper %s from %s"
               name toml_path;
-            match declarative_materialization_defaults name with
+            match declarative_materialization_defaults ctx.config name with
             | Error err -> Error err
             | Ok defaults -> (
                 match declarative_materialization_goal defaults with
@@ -784,7 +799,7 @@ let start_supervisor_sweep ctx =
                      reconcile and let any [Error] flow through the
                      standard back-off. *)
                   let toml_mtime =
-                    match Config_dir_resolver.keeper_toml_path_opt entry.name with
+                    match keeper_toml_path_opt_for_config ctx.config entry.name with
                     | None -> 0.0
                     | Some path ->
                         (try (Unix.stat path).Unix.st_mtime

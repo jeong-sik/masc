@@ -21,8 +21,13 @@ let empty_paused_keeper_scan =
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
-let effective_autoboot_enabled name (meta : Keeper_meta_contract.keeper_meta) =
-  match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with
+let effective_autoboot_enabled config name (meta : Keeper_meta_contract.keeper_meta) =
+  match
+    (Keeper_types_profile.load_keeper_profile_defaults_for_base_path
+       ~base_path:config.Workspace.base_path
+       name)
+      .autoboot_enabled
+  with
   | Some value -> value
   | None -> meta.autoboot_enabled
 
@@ -122,7 +127,7 @@ let durable_paused_keeper_scan ?(include_details = true) config =
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) when meta.paused ->
-             let autoboot_enabled = effective_autoboot_enabled name meta in
+             let autoboot_enabled = effective_autoboot_enabled config name meta in
              {
                acc with
                names = meta.name :: acc.names;
@@ -265,7 +270,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
            in
            match Keeper_meta_store.read_meta config name with
            | Ok (Some meta) ->
-             let autoboot_enabled = effective_autoboot_enabled name meta in
+             let autoboot_enabled = effective_autoboot_enabled config name meta in
              let acc =
                if autoboot_enabled && should_count_autoboot_target meta.name
                then add_autoboot acc meta.name
@@ -304,7 +309,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
            | Ok None ->
              if
                should_count_autoboot_target name
-               && Keeper_meta_store.declarative_autoboot_enabled_by_default name
+               && Keeper_meta_store.declarative_autoboot_enabled_by_default config name
              then add_autoboot acc name |> fun acc -> add_bootable acc name
              else acc
            | Error err ->
@@ -371,11 +376,11 @@ let autoboot_enabled_keeper_scan config =
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) ->
-             if effective_autoboot_enabled name meta then
+             if effective_autoboot_enabled config name meta then
                { acc with autoboot_names = meta.name :: acc.autoboot_names }
              else acc
          | Ok None ->
-             if Keeper_meta_store.declarative_autoboot_enabled_by_default name then
+             if Keeper_meta_store.declarative_autoboot_enabled_by_default config name then
                { acc with autoboot_names = name :: acc.autoboot_names }
              else acc
          | Error err ->

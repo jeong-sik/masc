@@ -9,15 +9,10 @@
    independently force the supervisor up.  This is what protects
    us from a degenerate bootstrap.
 
-   Note on test isolation: [Keeper_runtime.has_boot_entries] reads
-   keeper TOML profiles via [Config_dir_resolver.keepers_dir ()],
-   which is the active resolved config root independent of the
-   [Workspace.config.base_path].  So in every test environment with an
-   active operator profile present,
-   [bootable_keeper_names] returns non-empty.  The tests below
-   exploit that — they verify the post-fix path
-   ([enabled = false] still triggers sweep) without trying to
-   construct an empty profile environment. *)
+   Note on test isolation: keeper TOML discovery must be scoped to the
+   supplied [Workspace.config.base_path].  The tests below pin that
+   path ownership so an ambient [MASC_BASE_PATH] from another runtime
+   cannot silently redirect supervisor boot decisions. *)
 
 open Alcotest
 
@@ -53,9 +48,14 @@ let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
 
-let write_keeper_toml config_root ~name =
+let write_keeper_toml ?autoboot_enabled config_root ~name =
   let keepers_dir = Filename.concat config_root "keepers" in
   mkdir_p keepers_dir;
+  let autoboot_line =
+    match autoboot_enabled with
+    | None -> ""
+    | Some value -> Printf.sprintf "autoboot_enabled = %s\n" (string_of_bool value)
+  in
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
@@ -63,8 +63,10 @@ let write_keeper_toml config_root ~name =
 [keeper]
 name = "%s"
 goal = "test keeper"
+%s
 |}
-       name)
+       name
+       autoboot_line)
 
 let iso_of_unix ts =
   let t = Unix.gmtime ts in
@@ -102,15 +104,19 @@ let write_meta_exn config meta =
   | Ok () -> ()
   | Error err -> fail ("write_meta failed: " ^ err)
 
+let fresh_temp_dir prefix =
+  let path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ())
+         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
+  in
+  Unix.mkdir path 0o755;
+  path
+
 let with_temp_masc_dir ?(keeper_names = [ "operator" ]) f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-10125-%d-%d" (Unix.getpid ())
-         (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
-  in
-  Unix.mkdir base 0o755;
+  let base = fresh_temp_dir "masc-10125" in
   let config = Workspace.default_config base in
   let config_root = Filename.concat (Workspace.masc_root_dir config) "config" in
   let original_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
@@ -128,6 +134,42 @@ let with_temp_masc_dir ?(keeper_names = [ "operator" ]) f =
       Config_dir_resolver.reset ();
       rm_rf base)
     (fun () -> f config)
+
+let test_configured_keeper_names_uses_workspace_base_path () =
+  let base_a = fresh_temp_dir "masc-config-a" in
+  let base_b = fresh_temp_dir "masc-config-b" in
+  let config_a = Workspace.default_config base_a in
+  let config_b = Workspace.default_config base_b in
+  let config_root_a = Filename.concat (Workspace.masc_root_dir config_a) "config" in
+  let config_root_b = Filename.concat (Workspace.masc_root_dir config_b) "config" in
+  let original_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  let original_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original_config_dir;
+      restore_env "MASC_BASE_PATH" original_base_path;
+      Config_dir_resolver.reset ();
+      rm_rf base_a;
+      rm_rf base_b)
+    (fun () ->
+      write_keeper_toml config_root_a ~name:"alpha";
+      write_keeper_toml config_root_b ~name:"bravo";
+      write_keeper_toml config_root_a ~name:"shared" ~autoboot_enabled:true;
+      write_keeper_toml config_root_b ~name:"shared" ~autoboot_enabled:false;
+      Unix.putenv "MASC_CONFIG_DIR" "";
+      Unix.putenv "MASC_BASE_PATH" base_b;
+      Config_dir_resolver.reset ();
+      check (list string) "global resolver sees ambient base path"
+        [ "bravo"; "shared" ]
+        (Masc.Keeper_types_profile.discover_keepers_toml
+           (Config_dir_resolver.keepers_dir ())
+         |> List.map fst);
+      check (list string) "configured keepers use Workspace.config base path"
+        [ "alpha"; "shared" ]
+        (Keeper_meta_store.configured_keeper_names config_a);
+      check (list string) "boot policy uses Workspace.config defaults"
+        [ "alpha"; "shared" ]
+        (KR.bootable_keeper_names config_a))
 
 (* The regression case the fix is for: bootstrap reported [enabled
    = false] AND [started = 0]. Pre-fix this killed the supervisor
@@ -243,6 +285,8 @@ let test_turn_timeout_pause_without_explicit_policy_starts_sweep () =
 let () =
   run "supervisor_start_predicate_10125" [
     "predicate", [
+      test_case "configured keeper names use workspace base path" `Quick
+        test_configured_keeper_names_uses_workspace_base_path;
       test_case "disabled bootstrap + disk keeper → true (regression fix)" `Quick
         test_disabled_bootstrap_with_disk_keepers_starts_sweep;
       test_case "stats.started > 0 even when enabled = false → true" `Quick

@@ -78,6 +78,23 @@ val personas_dirs_with : inputs -> resolution -> string list
 val keeper_toml_path_opt : string -> string option
 (** [keeper_toml_path_opt name] checks for [keepers/<name>.toml]. *)
 
+val resolve_for_base_path : base_path:string -> resolution
+(** Resolve the config root for an explicit workspace [base_path]. Explicit
+    [MASC_CONFIG_DIR] and [MASC_PERSONAS_DIR] overrides are still honored, but
+    ambient [MASC_BASE_PATH] and process cwd do not replace the caller's
+    workspace. *)
+
+val keepers_dir_for_base_path : base_path:string -> string
+(** [keepers_dir_for_base_path ~base_path] returns the keepers directory for an
+    explicit workspace base path. *)
+
+val personas_dirs_for_base_path : base_path:string -> string list
+(** Base-path-scoped variant of {!personas_dirs}. *)
+
+val keeper_toml_path_opt_for_base_path :
+  base_path:string -> string -> string option
+(** Base-path-scoped variant of {!keeper_toml_path_opt}. *)
+
 (** {1 .masc/ root sub-directory accessors (RFC-0121)}
 
     All non-config artifacts under [<base>/.masc/<sub>/] route through these

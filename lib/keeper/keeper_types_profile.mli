@@ -115,7 +115,11 @@ val log_toml_skip_once : file:string -> error:string -> bool
 val reset_logged_toml_skip_for_test : unit -> unit
 val discover_keepers_toml : string -> (string * keeper_profile_defaults) list
 val keeper_toml_path_opt : string -> string option
+val keeper_toml_path_opt_for_base_path :
+  base_path:string -> string -> string option
 val load_keeper_profile_defaults_from_persona : string -> keeper_profile_defaults
+val load_keeper_profile_defaults_result_for_base_path :
+  base_path:string -> string -> (keeper_profile_defaults, string) result
 val resolved_persona_name : keeper_name:string -> keeper_profile_defaults -> string
 val load_keeper_profile_defaults_result : string -> (keeper_profile_defaults, string) result
 val invalidate_keeper_profile_defaults_cache : string -> unit
@@ -145,6 +149,8 @@ val keeper_toml_config_errors : unit -> keeper_toml_config_error list
 val keeper_toml_unknown_keys : unit -> keeper_toml_unknown_keys list
 val keeper_toml_config_errors_json : unit -> Yojson.Safe.t
 val keeper_toml_config_error_for_name : string -> keeper_toml_config_error option
+val load_keeper_profile_defaults_for_base_path :
+  base_path:string -> string -> keeper_profile_defaults
 val load_keeper_profile_defaults : string -> keeper_profile_defaults
 val clamp_max_turns_override : int option -> int option
 val effective_max_turns_per_call : keeper_profile_defaults -> int

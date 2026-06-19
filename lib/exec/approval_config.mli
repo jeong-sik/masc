@@ -6,7 +6,7 @@
     lib/exec to keep the sub-library closed to storage concerns.
 
     The per-agent bag is looked up at decide time; keys are agent
-    names matching [Approval_context.t.actor].  Missing agent keys
+    names (agent identity).  Missing agent keys
     fall through to [defaults]. *)
 
 type trust_level =

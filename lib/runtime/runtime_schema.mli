@@ -40,10 +40,6 @@ type capabilities =
   }
 [@@deriving show, eq]
 
-(** All-false / empty / [None] defaults; used when [\[providers.<id>.capabilities\]]
-    is absent. *)
-val capabilities_default : capabilities
-
 type provider =
   { id : string
   ; display_name : string

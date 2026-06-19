@@ -96,12 +96,6 @@ module Timeouts = struct
       Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
   let neo4j_timeout_sec =
     Float.max 1.0 (get_float ~default:60.0 "MASC_NEO4J_TIMEOUT_SEC")
-
-  (** SSE keepalive interval (seconds).
-      Frequency of `: keepalive` frames on command-plane SSE streams.
-      Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
-  let sse_keepalive_sec =
-    Float.max 1.0 (get_float ~default:30.0 "MASC_SSE_KEEPALIVE_SEC")
 end
 
 (** {1 Operator Judge Configuration} *)

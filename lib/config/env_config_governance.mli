@@ -88,8 +88,6 @@ module Timeouts : sig
       prevents tight-loop when misconfigured.  Controls the
       zero-zombie Pulse rhythm in the orchestrator. *)
 
-  val sse_keepalive_sec : float
-  (** [MASC_SSE_KEEPALIVE_SEC] (default [30.0]).  Floor [1.0]. *)
 end
 
 (** {1 Operator judge} *)

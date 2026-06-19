@@ -120,27 +120,21 @@ let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
    (Unknown->Permissive anti-pattern; mirrors [runtime].default validation,
    RFC-0206 §2.1 no-silent-fallback).
 
-   Catalog-presence guard: if EVERY model is unknown, the OAS catalog is almost
-   certainly not loaded in this environment (e.g. CI / a process without
-   ~/.config/oas/models.toml). Aborting the whole process over a missing catalog
-   would be worse than the gap, and the per-request OAS guard
-   ([Complete_common.validate_thinking_control_request]) still fails loud on the
-   actual unsatisfiable call. So abort only on a PARTIAL miss (some models resolved,
-   others did not) — the signature of a real catalog gap rather than an absent
-   catalog. *)
+   An empty runtime list is allowed for focused unit tests/config probes, but any
+   configured runtime whose model is absent from the catalog is rejected before it
+   can inherit guessed provider_default capabilities. *)
 let decide_capability_gate ~(config_path : string) (entries : (string * bool) list)
   : (unit, string) result
   =
   let unknown = List.filter (fun (_, known) -> not known) entries in
   match unknown with
   | [] -> Ok ()
-  | _ when List.for_all (fun (_, known) -> not known) entries -> Ok ()
   | _ ->
     Error
       (Printf.sprintf
-         "%s: %d runtime model(s) absent from the OAS capability catalog while \
-          others resolved — they would use provider_default and silently drop \
-          thinking/sampling control. Add them to models.toml (OAS catalog): %s"
+         "%s: %d runtime model(s) absent from the OAS capability catalog; they \
+          would use provider_default and silently drop thinking/sampling control. \
+          Add them to models.toml (OAS catalog): %s"
          config_path
          (List.length unknown)
          (String.concat ", " (List.map fst unknown)))

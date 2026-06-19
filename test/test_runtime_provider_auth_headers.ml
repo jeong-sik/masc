@@ -960,12 +960,12 @@ let test_capability_gate_partial_unknown_aborts () =
   | Error msg ->
     check bool "error names the missing model" true (mentions ~sub:"missing-model" msg)
 
-let test_capability_gate_all_unknown_passes () =
-  (* all-unknown => OAS catalog not loaded in this env => pass (do not abort the
-     whole process; the per-request OAS guard still fails loud). *)
+let test_capability_gate_all_unknown_aborts () =
   match Runtime.decide_capability_gate ~config_path:"cfg" [ "a", false; "b", false ] with
-  | Ok () -> ()
-  | Error msg -> failf "expected Ok for all-unknown (catalog absent), got: %s" msg
+  | Ok () -> fail "expected Error when all configured models are missing"
+  | Error msg ->
+    check bool "error names first missing model" true (mentions ~sub:"a" msg);
+    check bool "error names second missing model" true (mentions ~sub:"b" msg)
 
 let () =
   run "runtime_provider_auth_headers"
@@ -977,9 +977,9 @@ let () =
             `Quick
             test_capability_gate_partial_unknown_aborts
         ; test_case
-            "all unknown -> pass (catalog absent)"
+            "all unknown -> abort"
             `Quick
-            test_capability_gate_all_unknown_passes
+            test_capability_gate_all_unknown_aborts
         ] )
     ; ( "provider_config"
       , [ test_case

@@ -22,12 +22,10 @@ val decide_capability_gate :
   config_path:string -> (string * bool) list -> (unit, string) result
 (** Pure capability-gate decision used by [load_list]/[materialize_config],
     exposed for testing. [entries] is [(label, known_to_oas_catalog)] per runtime
-    binding. Returns [Error] when SOME (but not all) models are unknown to the OAS
+    binding. Returns [Error] when any configured model is unknown to the OAS
     capability catalog: an unknown model resolves to [provider_default] and
     silently drops thinking/sampling control (corrupted the memory-os librarian for
-    minimax-m3, 2026-06-19). An ALL-unknown result is treated as "OAS catalog not
-    loaded in this environment" and passes — the per-request OAS guard still fails
-    loud on the actual unsatisfiable call. *)
+    minimax-m3, 2026-06-19). Empty entries are allowed for focused config probes. *)
 
 val load_list :
   config_path:string

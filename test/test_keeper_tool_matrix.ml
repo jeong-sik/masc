@@ -277,6 +277,34 @@ let test_keeper_inventory_has_cases () =
     failf "keeper matrix missing contracts:\n%s"
       (missing |> List.map (fun name -> "  - " ^ name) |> String.concat "\n")
 
+let test_keeper_inventory_materializes_masc_fusion_schema () =
+  check bool "masc_fusion schema is materialized" true
+    (List.mem "masc_fusion" Cases.all_keeper_tool_names)
+
+let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
+  let marker = Filename.temp_file "keeper-fusion-schema-" ".tmp" in
+  Sys.remove marker;
+  Unix.mkdir marker 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists marker then Cases.cleanup_dir marker)
+    (fun () ->
+      let config = Masc.Workspace.default_config marker in
+      let meta = Cases.make_meta ~name:"keeper-fusion-schema" () in
+      let ctx_snapshot =
+        Masc.Keeper_context_runtime.create
+          ~system_prompt:"keeper fusion schema regression"
+          ~max_tokens:4000
+      in
+      let tools =
+        Masc.Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot ()
+      in
+      let names =
+        List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
+      in
+      check bool "masc_fusion Tool.t is materialized" true
+        (List.mem "masc_fusion" names))
+
 let selected_schemas () =
   let requested = requested_tool_names () in
   match requested with
@@ -314,6 +342,10 @@ let () =
             test_keeper_inventory_is_unique;
           test_case "keeper inventory has case contracts" `Quick
             test_keeper_inventory_has_cases;
+          test_case "keeper inventory materializes masc_fusion schema" `Quick
+            test_keeper_inventory_materializes_masc_fusion_schema;
+          test_case "keeper OAS bundle materializes masc_fusion tool" `Quick
+            test_keeper_oas_bundle_materializes_masc_fusion_tool;
         ] );
       ("matrix", matrix_cases);
     ]

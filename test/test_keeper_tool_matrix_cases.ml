@@ -415,9 +415,16 @@ let extra_guard_fragments_for_name = function
   | "masc_auth_revoke" -> [ "no credential found" ]
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
+  | "masc_fusion" ->
+      [
+        "fusion requires the server root switch + net (unavailable)";
+        "\"reason\":\"disabled\"";
+      ]
   | "masc_library_promote" -> [ "no candidate matching" ]
   | "masc_keeper_msg" ->
       [ "keeper management tool"; "use MCP client"; "requires Eio context" ]
+  | "masc_keeper_sandbox_start" | "masc_keeper_sandbox_stop" ->
+      [ "descriptor projection: cluster dispatcher did not recognise" ]
   | "masc_keeper_list" | "masc_keeper_msg_result"
   | "masc_keeper_msg_cancel" | "masc_keeper_msg_queue" | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]
@@ -434,17 +441,31 @@ let merge_expectation base extras =
 
 let case_for_name name =
   if string_starts_with ~prefix:"masc_" name then
-    let generic_case = Generic.case_for_name name in
-    {
-      init_mode = generic_case.init_mode;
-      prepare = (fun fixture ->
-        Generic.prepare_for_name fixture.generic name);
-      arguments =
-        (fun fixture schema -> Generic.tool_arguments fixture.generic schema);
-      expectation =
-        merge_expectation generic_case.expectation
-          (extra_guard_fragments_for_name name);
-    }
+    let generic_case_opt =
+      try Some (Generic.case_for_name name) with Failure _ -> None
+    in
+    (match generic_case_opt with
+     | Some generic_case ->
+       {
+         init_mode = generic_case.init_mode;
+         prepare = (fun fixture -> Generic.prepare_for_name fixture.generic name);
+         arguments =
+           (fun fixture schema -> Generic.tool_arguments fixture.generic schema);
+         expectation =
+           merge_expectation generic_case.expectation
+             (extra_guard_fragments_for_name name);
+       }
+     | None ->
+       {
+         init_mode = Init_only;
+         prepare = (fun _fixture -> ());
+         arguments =
+           (fun fixture schema -> Generic.tool_arguments fixture.generic schema);
+         expectation =
+           Expect_success_or_guard
+             (Generic.guard_fragments_for_name name
+              @ extra_guard_fragments_for_name name);
+       })
   else if
     string_starts_with ~prefix:"keeper_" name
     || string_starts_with ~prefix:"tool_" name

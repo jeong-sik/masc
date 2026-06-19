@@ -203,6 +203,15 @@ function normalizeBlocks(raw: unknown): ChatBlock[] | undefined {
             }
           : null
       }
+      // RFC-0252: fusion deliberation card. board_post_id is the lazy-fetch key
+      // and is required; dropping it here would silently strip the card and let
+      // the text fallback overwrite blocks.
+      if (t === 'fusion') {
+        const boardPostId = asString(item.board_post_id)
+        return boardPostId
+          ? { t: 'fusion', board_post_id: boardPostId, run_id: asString(item.run_id) ?? undefined }
+          : null
+      }
       return null
     })
     .filter((b): b is ChatBlock => b !== null)

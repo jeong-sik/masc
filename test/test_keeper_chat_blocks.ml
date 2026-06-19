@@ -156,6 +156,41 @@ let test_blocks_of_yojson_rejects_malformed () =
     true
     (B.blocks_of_yojson (`List [ `Assoc [ ("t", `String "unknown") ] ]) = None)
 
+(* RFC-0252: the fusion block wire shape is the contract the dashboard zod
+   schema mirrors (t=fusion, snake_case ids). Pin it so a drift breaks here. *)
+let test_fusion_block_roundtrip () =
+  let original = [ B.Fusion { board_post_id = "p-abc123"; run_id = "fus-2583b65c" } ] in
+  Alcotest.(check (list yojson_testable))
+    "fusion block json shape"
+    [
+      `Assoc
+        [
+          ("t", `String "fusion");
+          ("board_post_id", `String "p-abc123");
+          ("run_id", `String "fus-2583b65c");
+        ];
+    ]
+    (blocks_to_json_list original);
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some parsed ->
+    Alcotest.(check (list yojson_testable))
+      "fusion roundtrip json"
+      (blocks_to_json_list original)
+      (blocks_to_json_list parsed)
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid fusion block"
+
+let test_fusion_block_requires_board_post_id () =
+  Alcotest.(check bool) "missing board_post_id rejected"
+    true
+    (B.blocks_of_yojson (`List [ `Assoc [ ("t", `String "fusion"); ("run_id", `String "fus-1") ] ])
+     = None)
+
+let test_fusion_block_tolerates_missing_run_id () =
+  (* run_id is a display convenience; board_post_id alone is a valid card. *)
+  match B.blocks_of_yojson (`List [ `Assoc [ ("t", `String "fusion"); ("board_post_id", `String "p-1") ] ]) with
+  | Some [ B.Fusion { board_post_id = "p-1"; run_id = "" } ] -> ()
+  | _ -> Alcotest.fail "fusion block with board_post_id only should decode with empty run_id"
+
 let () =
   Alcotest.run "keeper_chat_blocks"
     [
@@ -192,5 +227,11 @@ let () =
             test_blocks_of_yojson_roundtrip;
           Alcotest.test_case "blocks_of_yojson rejects malformed" `Quick
             test_blocks_of_yojson_rejects_malformed;
+          Alcotest.test_case "fusion block roundtrip" `Quick
+            test_fusion_block_roundtrip;
+          Alcotest.test_case "fusion block requires board_post_id" `Quick
+            test_fusion_block_requires_board_post_id;
+          Alcotest.test_case "fusion block tolerates missing run_id" `Quick
+            test_fusion_block_tolerates_missing_run_id;
         ] );
     ]

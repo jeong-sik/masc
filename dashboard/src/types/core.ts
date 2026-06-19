@@ -816,6 +816,11 @@ export type ChatLinkBlock = { t: 'link'; url: string; title: string; desc?: stri
 export type ChatBroadcastAck = 'acked' | 'read' | 'delivered' | string
 export type ChatBroadcastRecipient = { id: string; ack: ChatBroadcastAck; at?: string }
 export type ChatBroadcastBlock = { t: 'broadcast'; scope: string; via?: string; note: string; recipients: ChatBroadcastRecipient[] }
+// RFC-0252: a reference from a keeper chat message to a fusion deliberation's
+// board post. Carries only ids (snake_case to match the backend wire shape in
+// keeper_chat_blocks.ml); ChatFusionCard lazy-fetches the board post by
+// board_post_id and renders its meta_json (panel answers + judge synthesis).
+export type ChatFusionBlock = { t: 'fusion'; board_post_id: string; run_id?: string }
 
 export type ChatBlock =
   | ChatTextBlock
@@ -834,6 +839,7 @@ export type ChatBlock =
   | ChatTraceBlock
   | ChatLinkBlock
   | ChatBroadcastBlock
+  | ChatFusionBlock
 export type KeeperConversationStreamState =
   | 'opening'
   | 'thinking'

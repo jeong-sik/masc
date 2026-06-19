@@ -9,9 +9,14 @@ import type { ToolCallEntry } from '../../api/dashboard'
 import { ChatComposer, ChatTranscript } from './primitives'
 import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
+import { fetchBoardPost } from '../../api/board'
 
 vi.mock('./attachments', () => ({
   collectAttachments: vi.fn(),
+}))
+
+vi.mock('../../api/board', () => ({
+  fetchBoardPost: vi.fn(),
 }))
 
 const flushUi = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
@@ -1555,5 +1560,80 @@ describe('ChatMessageBubble — workspace source badge (C2)', () => {
       container,
     )
     expect(container.querySelector('.kw-src-badge')).toBeNull()
+  })
+})
+
+describe('fusion chat card', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    vi.mocked(fetchBoardPost).mockReset()
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function fusionEntry(): KeeperConversationEntry {
+    return {
+      id: 'fusion-1',
+      role: 'assistant',
+      source: 'internal_assistant',
+      label: 'sangsu',
+      text: 'Fusion deliberation (run fus-1) — answer — done',
+      rawText: 'Fusion deliberation (run fus-1) — answer — done',
+      timestamp: '2026-06-19T00:00:00.000Z',
+      delivery: 'history',
+      streamState: null,
+      details: null,
+      error: null,
+      blocks: [{ t: 'fusion', board_post_id: 'p-1', run_id: 'fus-1' }],
+    }
+  }
+
+  it('renders a collapsed fusion card without fetching the board post', () => {
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    const card = container.querySelector('[data-fusion-card]')
+    expect(card).not.toBeNull()
+    expect(card?.textContent).toContain('Fusion 심의')
+    // Collapsed: no detail rendered and no network call yet.
+    expect(container.querySelector('[data-fusion-detail]')).toBeNull()
+    expect(fetchBoardPost).not.toHaveBeenCalled()
+  })
+
+  it('lazy-fetches the board post and renders panel answers + judge on expand', async () => {
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [
+          { model: 'ollama_cloud.kimi-k2-6', status: 'answered', answer: 'PANEL ONE ANSWER' },
+          { model: 'ollama_cloud.minimax-m3', status: 'failed', reason: 'timeout' },
+        ],
+        judge: { status: 'synthesized', decision: 'answer — ok', resolved_answer: 'JUDGE RESOLVED ANSWER' },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    const toggle = container.querySelector('[data-fusion-card] button') as HTMLButtonElement | null
+    expect(toggle).not.toBeNull()
+    fireEvent.click(toggle as HTMLButtonElement)
+    await flushUi()
+
+    expect(fetchBoardPost).toHaveBeenCalledWith('p-1')
+    const detail = container.querySelector('[data-fusion-detail]')
+    expect(detail?.textContent).toContain('PANEL ONE ANSWER')
+    expect(detail?.textContent).toContain('timeout')
+    expect(detail?.textContent).toContain('JUDGE RESOLVED ANSWER')
+  })
+
+  it('shows an error message when the board post fetch fails', async () => {
+    vi.mocked(fetchBoardPost).mockRejectedValue(new Error('boom'))
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('불러오지 못했습니다')
   })
 })

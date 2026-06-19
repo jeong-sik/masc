@@ -113,26 +113,6 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
     (unit, string) result =
   try
-    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
-       상세 트랜스크립트(패널 답변 N개)는 아래 board post 증거로만 남기고, 키퍼 chat
-       lane에는 judge 결론(decision + resolved_answer)만 키퍼 *메인* conversation
-       (conversation_id 생략)에 append한다. → 키퍼 observation(recent_direct_conversation)이
-       패널 답변으로 도배되지 않고, librarian이 메인 chat 결론을 fact로 추출한다(memory-os
-       fact 타입에 직접 의존하지 않음 = 강결합 없는 통합). judge 실패 시에는 메인 흐름을
-       오염시키지 않으려 결론을 남기지 않는다(board에는 실패도 증거로 남는다). *)
-    (match judge with
-     | Ok j ->
-       let content =
-         Printf.sprintf "Fusion deliberation (run %s) — %s\n\n%s" run_id
-           (render_decision j.Fusion_types.decision) j.Fusion_types.resolved_answer
-       in
-       Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper
-         ~content
-         ();
-       Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
-         ~content
-         ()
-     | Error _ -> ());
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
        남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
        완성이 없어 0(usage_of가 완성 응답에서만 토큰을 뽑음). *)
@@ -170,11 +150,45 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
                  ] )
            ])
     in
-    (match
-       Board_dispatch.create_post ~author:keeper ~content:board_headline
-         ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
-         ~ttl_hours:board_post_ttl_hours ()
-     with
+    (* board post를 *먼저* 만들어 post id를 확보한다 — 이 id가 키퍼 chat의 fusion block
+       lazy-fetch 키이기 때문이다(대시보드가 board meta_json에서 패널/심판을 펼친다). *)
+    let board_result =
+      Board_dispatch.create_post ~author:keeper ~content:board_headline
+        ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
+        ~ttl_hours:board_post_ttl_hours ()
+    in
+    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
+       상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat
+       lane에는 judge 결론(decision + resolved_answer)만 키퍼 *메인* conversation
+       (conversation_id 생략)에 append한다. board가 생성됐으면 그 post를 가리키는
+       [Fusion] block을 함께 첨부해 대시보드가 결론 카드를 패널/심판 상세로 펼치게 한다.
+       block은 content가 아니므로 키퍼 observation(recent_direct_conversation, role/content만
+       읽음)을 도배하지 않는다 → librarian은 메인 chat 결론(content)을 fact로 추출하고,
+       사용자만 카드 상세를 본다(강결합 없는 통합). judge 실패 시에는 메인 흐름을
+       오염시키지 않으려 결론을 남기지 않는다(board에는 실패도 증거로 남는다). *)
+    (match judge with
+     | Ok j ->
+       let content =
+         Printf.sprintf "Fusion deliberation (run %s) — %s\n\n%s" run_id
+           (render_decision j.Fusion_types.decision) j.Fusion_types.resolved_answer
+       in
+       let blocks =
+         match board_result with
+         | Ok (post : Board.post) ->
+           Some
+             [ Keeper_chat_blocks.Fusion
+                 { board_post_id = Board.Post_id.to_string post.id; run_id }
+             ]
+         | Error _ -> None
+         (* board 생성 실패 시 카드 링크를 생략하되 결론은 남긴다(키퍼가 인지). *)
+       in
+       Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper
+         ~content ?blocks ();
+       Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
+         ~content
+         ()
+     | Error _ -> ());
+    (match board_result with
      | Ok _post -> Ok ()
      | Error e -> Error (Board.show_board_error e))
   with

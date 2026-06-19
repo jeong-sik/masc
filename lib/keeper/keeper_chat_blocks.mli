@@ -23,10 +23,21 @@ type link_block = {
 
 type text_block = { html : string }
 
+(** A reference from a keeper chat message to a fusion deliberation's board
+    post (RFC-0252). Carries only ids — the dashboard lazy-fetches the board
+    post by [board_post_id] and renders the panel answers + judge synthesis
+    from its [meta_json]. Kept out of [content] so the keeper observation
+    projection (which reads role/content only) is not polluted. *)
+type fusion_block = {
+  board_post_id : string;
+  run_id : string;
+}
+
 type chat_block =
   | Text of text_block
   | Image of image_block
   | Link of link_block
+  | Fusion of fusion_block
 
 val parse_text_to_blocks : string -> chat_block list
 val block_to_yojson : chat_block -> Yojson.Safe.t

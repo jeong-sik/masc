@@ -16,6 +16,10 @@ import type {
   KeeperStatusDetail,
   SurfaceRef,
   ChatBlock,
+  ChatBroadcastRecipient,
+  ChatShellLine,
+  ChatTableCellValue,
+  ChatTraceStep,
 } from './types'
 
 // --- Signals ---
@@ -173,39 +177,327 @@ function normalizeAttachments(raw: unknown): KeeperConversationAttachment[] | un
   return atts.length > 0 ? atts : undefined
 }
 
-/** Normalize server-provided rich chat blocks. Only the block types the
- *  backend currently emits (text, image, link) are accepted; unknown
- *  shapes are dropped so the caller can fall back to the local parser. */
-function normalizeBlocks(raw: unknown): ChatBlock[] | undefined {
+function normalizeStringArray(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null
+  const values = raw.map((value) => asString(value))
+  if (values.some((value) => value === undefined)) return null
+  return values as string[]
+}
+
+function withoutUndefined<const T extends Record<string, unknown>>(record: T): T {
+  const next: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(record)) {
+    if (value !== undefined) next[key] = value
+  }
+  return next as T
+}
+
+function normalizeTableCell(raw: unknown): ChatTableCellValue | null {
+  const text = asString(raw)
+  if (text !== undefined) return text
+  if (!isRecord(raw)) return null
+  const v = asString(raw.v)
+  if (v === undefined) return null
+  return withoutUndefined({
+    v,
+    num: asBoolean(raw.num) ?? undefined,
+    muted: asBoolean(raw.muted) ?? undefined,
+  })
+}
+
+function normalizeTableCells(raw: unknown): ChatTableCellValue[] | null {
+  if (!Array.isArray(raw)) return null
+  const cells = raw.map(normalizeTableCell)
+  if (cells.some((cell) => cell === null)) return null
+  return cells as ChatTableCellValue[]
+}
+
+function normalizeTableRows(raw: unknown): ChatTableCellValue[][] | null {
+  if (!Array.isArray(raw)) return null
+  const rows = raw.map(normalizeTableCells)
+  if (rows.some((row) => row === null)) return null
+  return rows as ChatTableCellValue[][]
+}
+
+function normalizeShellLine(raw: unknown): ChatShellLine | null {
+  if (!isRecord(raw)) return null
+  const v = asString(raw.v)
+  if (v === undefined) return null
+  const t = asString(raw.t)
+  const lineType: ChatShellLine['t'] = t === 'cmd' || t === 'out' || t === 'err' ? t : undefined
+  return withoutUndefined({
+    v,
+    t: lineType,
+  })
+}
+
+function normalizeShellLines(raw: unknown): ChatShellLine[] | null {
+  if (!Array.isArray(raw)) return null
+  const lines = raw.map(normalizeShellLine)
+  if (lines.some((line) => line === null)) return null
+  return lines as ChatShellLine[]
+}
+
+function normalizeNumberArray(raw: unknown): number[] | null {
+  if (!Array.isArray(raw)) return null
+  const values = raw.map(asNumber)
+  if (values.some((value) => value === undefined)) return null
+  return values as number[]
+}
+
+function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  if (kind === 'think') {
+    const text = asString(raw.text)
+    return text !== undefined ? { kind, text } : null
+  }
+  if (kind === 'reason') {
+    const text = asString(raw.text)
+    return text !== undefined
+      ? withoutUndefined({ kind: 'reason', text, detail: asString(raw.detail) ?? undefined })
+      : null
+  }
+  if (kind === 'tool') {
+    const name = asString(raw.name)
+    if (name === undefined) return null
+    const status = asString(raw.status)
+    const toolStatus: 'ok' | 'err' | undefined =
+      status === 'ok' || status === 'err' ? status : undefined
+    return withoutUndefined({
+      kind: 'tool',
+      name,
+      status: toolStatus,
+      dur: asString(raw.dur) ?? undefined,
+      args: raw.args,
+      result: asString(raw.result) ?? undefined,
+    })
+  }
+  return null
+}
+
+function normalizeTraceSteps(raw: unknown): ChatTraceStep[] | null {
+  if (!Array.isArray(raw)) return null
+  const steps = raw.map(normalizeTraceStep)
+  if (steps.some((step) => step === null)) return null
+  return steps as ChatTraceStep[]
+}
+
+function normalizeBroadcastRecipient(raw: unknown): ChatBroadcastRecipient | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id)
+  const ack = asString(raw.ack)
+  if (id === undefined || ack === undefined) return null
+  return withoutUndefined({ id, ack, at: asString(raw.at) ?? undefined })
+}
+
+function normalizeBroadcastRecipients(raw: unknown): ChatBroadcastRecipient[] | null {
+  if (!Array.isArray(raw)) return null
+  const recipients = raw.map(normalizeBroadcastRecipient)
+  if (recipients.some((recipient) => recipient === null)) return null
+  return recipients as ChatBroadcastRecipient[]
+}
+
+function normalizeUserChatBlock(block: ChatBlock): ChatBlock | null {
+  if (block.t === 'image' || block.t === 'voice') return block
+  if (block.t === 'attach') {
+    return withoutUndefined({
+      t: 'attach',
+      name: block.name,
+      dims: block.dims,
+      src: block.src,
+      ph: block.ph,
+      via: block.via,
+      size: block.size,
+      sizeBytes: block.sizeBytes,
+      id: block.id,
+      kind: block.kind,
+    })
+  }
+  return null
+}
+
+function isUserChatBlockType(t: string): boolean {
+  return t === 'attach' || t === 'image' || t === 'voice'
+}
+
+/** Normalize server-provided rich chat blocks. Keep the accepted wire shape
+ *  aligned with the renderer's ChatBlock union; unknown or malformed shapes
+ *  are dropped so the caller can fall back to local text parsing. User rows are
+ *  constrained to attachment/media blocks because history is untrusted input at
+ *  the dashboard boundary. */
+function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const blocks = raw
     .map((item): ChatBlock | null => {
       if (!isRecord(item)) return null
       const t = asString(item.t)
+      if (t === undefined) return null
+      if (role === 'user' && !isUserChatBlockType(t)) return null
+      if (role !== 'user' && role !== 'assistant' && role !== 'system') return null
       if (t === 'p') {
         const html = asString(item.html)
         return html ? { t: 'p', html } : null
       }
+      if (t === 'h4') {
+        const html = asString(item.html)
+        return html ? { t: 'h4', html } : null
+      }
+      if (t === 'ul') {
+        const items = normalizeStringArray(item.items)
+        return items && items.length > 0 ? { t: 'ul', items } : null
+      }
+      if (t === 'callout') {
+        const html = asString(item.html)
+        const severity = asString(item.severity)
+        return html
+          ? withoutUndefined({
+              t: 'callout',
+              severity: severity === 'info' || severity === 'warn' || severity === 'bad'
+                ? severity
+                : undefined,
+              html,
+            })
+          : null
+      }
+      if (t === 'table') {
+        const head = normalizeTableCells(item.head)
+        const rows = normalizeTableRows(item.rows)
+        return head && rows ? { t: 'table', head, rows } : null
+      }
+      if (t === 'code') {
+        const html = asString(item.html)
+        return html !== undefined
+          ? withoutUndefined({
+              t: 'code',
+              cap: asString(item.cap) ?? undefined,
+              html,
+              source: asString(item.source) ?? undefined,
+            })
+          : null
+      }
+      if (t === 'shell') {
+        const lines = normalizeShellLines(item.lines)
+        return lines && lines.length > 0
+          ? withoutUndefined({
+              t: 'shell',
+              title: asString(item.title) ?? undefined,
+              lines,
+              exit: asNumber(item.exit) ?? undefined,
+              dur: asString(item.dur) ?? undefined,
+            })
+          : null
+      }
+      if (t === 'artifact') {
+        const name = asString(item.name)
+        return name
+          ? withoutUndefined({
+              t: 'artifact',
+              kind: asString(item.kind) ?? undefined,
+              name,
+              size: asString(item.size) ?? undefined,
+              note: asString(item.note) ?? undefined,
+              data: asString(item.data) ?? undefined,
+              mimeType: asString(item.mimeType) ?? undefined,
+            })
+          : null
+      }
+      if (t === 'attach') {
+        const name = asString(item.name)
+        return name
+          ? withoutUndefined({
+              t: 'attach',
+              name,
+              dims: asString(item.dims) ?? undefined,
+              src: asString(item.src) ?? undefined,
+              svg: asString(item.svg) ?? undefined,
+              ph: asString(item.ph) ?? undefined,
+              via: asString(item.via) ?? undefined,
+              size: asString(item.size) ?? undefined,
+              data: asString(item.data) ?? undefined,
+              mimeType: asString(item.mimeType) ?? undefined,
+              sizeBytes: asNumber(item.sizeBytes) ?? undefined,
+              id: asString(item.id) ?? undefined,
+              kind: asString(item.kind) ?? undefined,
+            })
+          : null
+      }
+      if (t === 'voice') {
+        return withoutUndefined({
+          t: 'voice',
+          secs: asNumber(item.secs) ?? undefined,
+          wave: normalizeNumberArray(item.wave) ?? undefined,
+          via: asString(item.via) ?? undefined,
+          size: asString(item.size) ?? undefined,
+          transcript: asString(item.transcript) ?? undefined,
+          src: asString(item.src) ?? undefined,
+        })
+      }
       if (t === 'image') {
         const src = asString(item.src)
-        return src ? { t: 'image', src, cap: asString(item.cap) ?? undefined } : null
+        const ph = asString(item.ph)
+        return src || ph
+          ? withoutUndefined({
+              t: 'image',
+              src: src ?? undefined,
+              ph: ph ?? undefined,
+              cap: asString(item.cap) ?? undefined,
+            })
+          : null
+      }
+      if (t === 'svg') {
+        const svg = asString(item.svg)
+        return svg ? withoutUndefined({ t: 'svg', svg, cap: asString(item.cap) ?? undefined }) : null
+      }
+      if (t === 'mermaid') {
+        const source = asString(item.source)
+        return source
+          ? withoutUndefined({ t: 'mermaid', source, caption: asString(item.caption) ?? undefined })
+          : null
+      }
+      if (t === 'trace') {
+        const trace = normalizeTraceSteps(item.trace)
+        return trace && trace.length > 0 ? { t: 'trace', trace } : null
       }
       if (t === 'link') {
         const url = asString(item.url)
         const title = asString(item.title)
         return url && title
-          ? {
+          ? withoutUndefined({
               t: 'link',
               url,
               title,
               desc: asString(item.desc) ?? undefined,
               meta: asString(item.meta) ?? undefined,
-            }
+              fav: asString(item.fav) ?? undefined,
+              kind: asString(item.kind) ?? undefined,
+            })
+          : null
+      }
+      if (t === 'broadcast') {
+        const scope = asString(item.scope)
+        const note = asString(item.note)
+        const recipients = normalizeBroadcastRecipients(item.recipients)
+        return scope && note && recipients
+          ? withoutUndefined({
+              t: 'broadcast',
+              scope,
+              via: asString(item.via) ?? undefined,
+              note,
+              recipients,
+            })
           : null
       }
       return null
     })
     .filter((b): b is ChatBlock => b !== null)
+  if (role === 'user') {
+    const userBlocks = blocks
+      .map(normalizeUserChatBlock)
+      .filter((b): b is ChatBlock => b !== null)
+    return userBlocks.length > 0 ? userBlocks : undefined
+  }
+  if (role !== 'assistant' && role !== 'system') return undefined
   return blocks.length > 0 ? blocks : undefined
 }
 
@@ -386,10 +678,11 @@ function normalizeHistoryEntry(
   // the bubble renders the error label/styling instead of a saved reply.
   const delivery: KeeperConversationDelivery =
     asString(raw.kind) === 'transport_failure' ? 'error' : 'history'
-  const blocks =
-    role === 'assistant'
-      ? (normalizeBlocks(raw.blocks) ?? (text ? parseTextToChatBlocks(text) : []))
-      : undefined
+  const serverBlocks = normalizeBlocks(raw.blocks, role)
+  const blocks = serverBlocks
+    ?? ((role === 'assistant' || role === 'system') && text
+      ? parseTextToChatBlocks(text)
+      : undefined)
   return {
     // R3: key off the producer-assigned server id when present so the
     // render key is stable across history-page merges (the former

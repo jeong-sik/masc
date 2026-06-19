@@ -734,7 +734,7 @@ function ChatArtifactBlock({
 }
 
 function ChatAttachBlock({ name, dims, src, svg, ph, via, size }: { name: string; dims?: string; src?: string; svg?: string; ph?: string; via?: string; size?: string }) {
-  const safeSrc = src && isSafeUrl(src) ? src : null
+  const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
   return html`
     <figure class="chat-block-attach" data-chat-block="attach">
       <div class="chat-block-attach-hd">
@@ -765,11 +765,17 @@ function isSafeUrl(url: string): boolean {
   }
 }
 
+function isSafeMediaUrl(url: string, dataPrefixes: string[]): boolean {
+  if (isSafeUrl(url)) return true
+  const lower = url.slice(0, 64).toLowerCase()
+  return dataPrefixes.some((prefix) => lower.startsWith(prefix))
+}
+
 function ChatVoiceBlock(b: ChatVoiceBlock) {
   const secs = b.secs ?? 14
   const [playing, setPlaying] = useState(false)
   const [prog, setProg] = useState(0)
-  const safeSrc = b.src && isSafeUrl(b.src) ? b.src : null
+  const safeSrc = b.src && isSafeMediaUrl(b.src, ['data:audio/']) ? b.src : null
 
   useEffect(() => {
     if (!playing) return
@@ -848,7 +854,7 @@ function ChatVoiceBlock(b: ChatVoiceBlock) {
 
 function ChatImageBlock({ src, ph, cap }: { src?: string; ph?: string; cap?: string }) {
   const [open, setOpen] = useState(false)
-  const safeSrc = src && isSafeUrl(src) ? src : null
+  const safeSrc = src && isSafeMediaUrl(src, ['data:image/']) ? src : null
   return html`
     <figure class="chat-block-media" data-chat-block="image">
       <div class="chat-block-media-frame ${safeSrc ? 'cursor-zoom-in' : ''}" onClick=${() => safeSrc && setOpen(true)}>

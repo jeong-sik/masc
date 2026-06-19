@@ -233,13 +233,119 @@ let find_attachment ~attachments attachment_id =
        String.equal att.id attachment_id)
     attachments
 
-let media_type_for media (att : Keeper_chat_store.attachment) =
+let normalize_media_type value = String.trim value |> String.lowercase_ascii
+
+let declared_media_type media (att : Keeper_chat_store.attachment) =
   match String.trim media.mime_type with
-  | "" -> (
-      match String.trim att.mime_type with
-      | "" -> "application/octet-stream"
-      | mime_type -> mime_type)
-  | mime_type -> mime_type
+  | "" ->
+      (match String.trim att.mime_type with
+      | "" -> None
+      | mime_type -> Some (normalize_media_type mime_type))
+  | mime_type -> Some (normalize_media_type mime_type)
+
+let string_starts_with_ci ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal
+       (String.lowercase_ascii (String.sub value 0 prefix_len))
+       (String.lowercase_ascii prefix)
+
+let split_once ~needle value =
+  let needle_len = String.length needle in
+  let value_len = String.length value in
+  let rec loop index =
+    if index + needle_len > value_len then
+      None
+    else if String.sub value index needle_len = needle then
+      let before = String.sub value 0 index in
+      let after_index = index + needle_len in
+      let after =
+        String.sub value after_index (value_len - after_index)
+      in
+      Some (before, after)
+    else
+      loop (index + 1)
+  in
+  loop 0
+
+let split_once_ci ~needle value =
+  let needle_lower = String.lowercase_ascii needle in
+  let value_lower = String.lowercase_ascii value in
+  let needle_len = String.length needle in
+  let value_len = String.length value in
+  let rec loop index =
+    if index + needle_len > value_len then
+      None
+    else if String.sub value_lower index needle_len = needle_lower then
+      let before = String.sub value 0 index in
+      let after_index = index + needle_len in
+      let after =
+        String.sub value after_index (value_len - after_index)
+      in
+      Some (before, after)
+    else
+      loop (index + 1)
+  in
+  loop 0
+
+let data_url_scheme_prefix = "data:"
+
+let media_type_of_data_url_header header =
+  let prefix_len = String.length data_url_scheme_prefix in
+  let value =
+    String.sub header prefix_len (String.length header - prefix_len)
+    |> normalize_media_type
+  in
+  match split_once ~needle:";" value with
+  | Some (media_type, _) -> String.trim media_type
+  | None -> value
+
+let media_types_equal left right =
+  String.equal (String.lowercase_ascii left) (String.lowercase_ascii right)
+
+let normalize_media_payload ~kind ~attachment_id ~declared_media_type data =
+  let data = String.trim data in
+  if data = "" then
+    Error
+      (Printf.sprintf
+         "empty attachment payload for %s user block %S"
+         kind attachment_id)
+  else if string_starts_with_ci ~prefix:data_url_scheme_prefix data then
+    match split_once_ci ~needle:";base64," data with
+    | None ->
+        Error
+          (Printf.sprintf
+             "malformed data URL for %s user block %S: expected data:<mime>;base64,<payload>"
+             kind attachment_id)
+    | Some (header, payload) ->
+        let media_type = media_type_of_data_url_header header in
+        let payload = String.trim payload in
+        if media_type = "" then
+          Error
+            (Printf.sprintf
+               "malformed data URL for %s user block %S: missing MIME type"
+               kind attachment_id)
+        else if payload = "" then
+          Error
+            (Printf.sprintf
+               "empty attachment payload for %s user block %S"
+               kind attachment_id)
+        else (
+          match declared_media_type with
+          | Some declared when not (media_types_equal declared media_type) ->
+              Error
+                (Printf.sprintf
+                   "attachment MIME mismatch for %s user block %S: declared %s but data URL is %s"
+                   kind attachment_id declared media_type)
+          | Some declared -> Ok (declared, payload)
+          | None -> Ok (media_type, payload))
+  else
+    let media_type =
+      match declared_media_type with
+      | Some media_type -> media_type
+      | None -> "application/octet-stream"
+    in
+    Ok (media_type, data)
 
 let media_block_to_oas ~attachments kind make_block media =
   match find_attachment ~attachments media.attachment_id with
@@ -249,14 +355,11 @@ let media_block_to_oas ~attachments kind make_block media =
            "missing attachment payload for %s user block %S"
            kind media.attachment_id)
   | Some att ->
-      let data = String.trim att.data in
-      if data = "" then
-        Error
-          (Printf.sprintf
-             "empty attachment payload for %s user block %S"
-             kind media.attachment_id)
-      else
-        Ok (make_block ~media_type:(media_type_for media att) ~data ())
+      let declared = declared_media_type media att in
+      Result.map
+        (fun (media_type, data) -> make_block ~media_type ~data ())
+        (normalize_media_payload ~kind ~attachment_id:media.attachment_id
+           ~declared_media_type:declared att.data)
 
 let to_oas_blocks ~attachments blocks =
   let rec loop acc = function

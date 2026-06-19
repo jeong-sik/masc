@@ -930,6 +930,56 @@ describe('Keeper v2 chat blocks', () => {
     expect(img?.getAttribute('src')).toBe('https://example.com/screen.png')
   })
 
+  it('renders a data-url attach image src', () => {
+    const src = 'data:image/png;base64,aGVsbG8='
+    renderBlocks([
+      {
+        t: 'attach',
+        name: 'screen.png',
+        dims: '100×100',
+        src,
+        via: 'vision',
+        size: '12 KB',
+      },
+    ])
+
+    const img = container.querySelector('[data-chat-block="attach"] img')
+    expect(img?.getAttribute('src')).toBe(src)
+  })
+
+  it('renders server-provided media blocks on user rows', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'u-rich',
+            role: 'user',
+            label: '사용자',
+            text: 'uploaded',
+            blocks: [
+              {
+                t: 'attach',
+                name: 'screen.png',
+                dims: '100×100',
+                src: 'https://example.com/screen.png',
+                via: 'vision',
+                size: '12 KB',
+              },
+            ],
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const blocks = container.querySelector('[data-chat-blocks]')
+    const attach = container.querySelector('[data-chat-block="attach"]')
+    expect(blocks).not.toBeNull()
+    expect(attach?.textContent).toContain('screen.png')
+    expect(attach?.querySelector('img')?.getAttribute('src')).toBe('https://example.com/screen.png')
+  })
+
   it('blocks unsafe attach image src and falls back to placeholder', () => {
     renderBlocks([
       {
@@ -1305,6 +1355,23 @@ describe('rich block URL safety', () => {
     )
     const img = container.querySelector('img')
     expect(img?.getAttribute('src')).toBe('https://example.com/x.png')
+  })
+
+  it('renders data-url image and audio block sources', () => {
+    const imageSrc = 'data:image/png;base64,aGVsbG8='
+    const audioSrc = 'data:audio/webm;base64,aGVsbG8='
+    const blocks: ChatBlock[] = [
+      { t: 'image', src: imageSrc },
+      { t: 'voice', src: audioSrc, transcript: 'voice memo' },
+    ]
+    render(
+      html`<${ChatTranscript}
+        entries=${[entry({ id: 'e1', role: 'assistant', text: '', blocks })]}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-chat-block="image"] img')?.getAttribute('src')).toBe(imageSrc)
+    expect(container.querySelector('[data-chat-block="voice"] audio')?.getAttribute('src')).toBe(audioSrc)
   })
 
   it('blocks javascript: image src and shows placeholder', () => {

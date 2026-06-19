@@ -29,10 +29,9 @@ let get_env_int name default =
 let rng_initialized = Atomic.make false
 
 let ensure_rng_init () =
-  if not (Atomic.get rng_initialized) then begin
+  if Atomic.compare_and_set rng_initialized false true then begin
     let seed = get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0)) in
-    Random.init seed;
-    Atomic.set rng_initialized true
+    Random.init seed
   end
 
 (** Get random float with guaranteed initialization *)

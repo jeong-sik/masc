@@ -108,6 +108,14 @@ describe('filterConversationEntries', () => {
     const entries = [entry({ id: 'a', label: '사용자', text: 'plain' })]
     expect(filterConversationEntries(entries, '사용자')).toEqual([])
   })
+
+  it('matches tool rows by visible tool label', () => {
+    const entries = [
+      entry({ id: 'tool-a', role: 'tool', source: 'tool_result', label: 'keeper_board_list', text: '{}' }),
+      entry({ id: 'b', text: 'plain' }),
+    ]
+    expect(filterConversationEntries(entries, 'board_list').map(e => e.id)).toEqual(['tool-a'])
+  })
 })
 
 describe('KeeperConversationPanel', () => {

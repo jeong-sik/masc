@@ -1554,6 +1554,8 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(cards[0]?.textContent).toContain('작업 과정')
     expect(cards[0]?.textContent).toContain('2단계')
     expect(cards[0]?.textContent).toContain('도구 2')
+    expect(cards[0]?.textContent).toContain('keeper_board_list')
+    expect(cards[0]?.textContent).toContain('keeper_tasks_list')
     // Grouped surface keeps no standalone per-row tool bubbles.
     expect(container.querySelectorAll('[data-chat-variant="tool-call"]').length).toBe(0)
   })
@@ -1586,8 +1588,6 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
       container,
     )
     expect(container.querySelector('[data-chat-tool-trace]')?.textContent).toContain('실패 1')
-    ;(container.querySelector('.chat-block-trace-hd') as HTMLButtonElement).click()
-    await flushUi()
     const step = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
     expect(step.querySelector('.chat-block-tstep-status.bad')).not.toBeNull()
     ;(step.querySelector('.chat-block-tstep-row') as HTMLElement).click()

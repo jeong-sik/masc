@@ -83,6 +83,9 @@ const TEST_FILES = [
   'src/runtime-counts.test.ts',
   'src/schemas/sse.test.ts',
   'src/sse-store.test.ts',
+  'src/styles/chat-blocks-v2.test.ts',
+  'src/styles/paper-theme.test.ts',
+  'src/styles/skin-v2-paper.test.ts',
 ]
 
 const DEFAULT_PROJECT_FILES = [

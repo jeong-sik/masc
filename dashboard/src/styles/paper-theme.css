@@ -16,7 +16,7 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
-[data-theme="paper"] {
+html[data-theme="paper"] {
   color-scheme: light;
 
   /* ───── Paper & ink (design system source of truth) ──────── */
@@ -37,7 +37,7 @@
   --brass:        #8C6A1E;   --brass-fill: #E9DDB8;  --brass-line: #B8933A;
   --brick:        #8B3A3A;   --brick-fill: #E8CFCB;  --brick-line: #B45C5C;
   --ember:        #B35A1F;   --ember-fill: #ECD5BD;  --ember-line: #D07A3A;
-  --slate:        #3E4A5C;   --slate-fill: #D6DBE2;  --slate-line: #6B7A8E;
+  --slate-accent: #3E4A5C;   --slate-accent-fill: #D6DBE2;  --slate-accent-line: #6B7A8E;
   --plum:         #5C3E56;   --plum-fill:  #E0D4DE;  --plum-line:  #855E7D;
   --teal:         #236874;   --teal-fill:  #CEDEE2;  --teal-line:  #4C94A3;
 
@@ -62,14 +62,29 @@
   --color-bg-3: var(--paper-3);
   --color-bg-4: var(--paper-4);
 
+  --color-bg-page: var(--paper);
+  --color-bg-surface: var(--paper-2);
+  --color-bg-panel-alt: var(--paper-3);
+  --color-bg-elevated: var(--paper-2);
+  --color-bg-hover: var(--paper-3);
+
   --color-fg-1: var(--ink);
   --color-fg-2: var(--ink-2);
   --color-fg-3: var(--ink-4);
   --color-fg-4: var(--ink-6);
 
+  --color-fg-primary: var(--ink);
+  --color-fg-secondary: var(--ink-2);
+  --color-fg-muted: var(--ink-4);
+  --color-fg-disabled: var(--ink-6);
+
   --color-line-1: var(--border-3-paper);
   --color-line-2: var(--border-4-paper);
   --color-line-3: var(--border-5-paper);
+
+  --color-border-default: var(--border-3-paper);
+  --color-border-strong: var(--border-2-paper);
+  --color-border-divider: var(--border-4-paper);
 
   --color-brass-1: var(--brass);
   --color-brass-2: var(--brass-line);
@@ -79,9 +94,21 @@
   --color-ok: var(--forest);
   --color-warn: var(--ember);
   --color-err: var(--brick);
-  --color-info: var(--slate);
+  --color-info: var(--slate-accent);
   --color-idle: var(--ink-5);
   --color-stalled: var(--plum);
+
+  --color-status-ok: var(--forest);
+  --color-status-warn: var(--ember);
+  --color-status-err: var(--brick);
+  --color-status-info: var(--slate-accent);
+
+  --color-ok-fg: var(--forest);
+  --color-warn-fg: var(--ember);
+  --color-err-fg: var(--brick);
+  --color-info-fg: var(--slate-accent);
+  --color-idle-fg: var(--ink-5);
+  --color-stalled-fg: var(--plum);
 
   --color-ok-glow: 45 95 78;
   --color-warn-glow: 179 90 31;
@@ -95,6 +122,88 @@
   --color-info-soft: rgb(var(--color-info-glow) / .12);
   --color-stalled-soft: rgb(var(--color-stalled-glow) / .12);
   --color-idle-soft: rgba(135, 131, 121, 0.10);
+
+  --ok-fg: var(--forest);
+  --ok-border: var(--forest-line);
+  --warn-fg: var(--ember);
+  --warn-border: var(--ember-line);
+  --err-fg: var(--brick);
+  --err-border: var(--brick-line);
+  --info-fg: var(--slate-accent);
+  --info-border: var(--slate-accent-line);
+  --idle-fg: var(--ink-5);
+  --idle-border: var(--border-3-paper);
+  --stalled-fg: var(--plum);
+  --stalled-border: var(--plum-line);
+
+  /* StyleSeed / v2 app-shell bridge. Later v2 styles define these at
+     :root; the html[data-theme="paper"] selector intentionally outranks
+     that default so paper mode recolors migrated shell surfaces too. */
+  --background: var(--paper);
+  --surface-page: var(--paper);
+  --card: var(--paper-2);
+  --surface-subtle: var(--paper-3);
+  --surface-muted: var(--paper-4);
+  --text-primary: var(--ink);
+  --text-secondary: var(--ink-3);
+  --text-tertiary: var(--ink-5);
+  --text-disabled: var(--ink-6);
+  --icon-default: var(--ink-4);
+  --border: var(--border-3-paper);
+  --brand: var(--brass);
+  --brand-dim: var(--brass-line);
+  --brand-wash: rgba(140, 106, 30, 0.12);
+  --brand-tint: rgba(140, 106, 30, 0.16);
+  --success: var(--forest);
+  --warning: var(--ember);
+  --destructive: var(--brick);
+  --info: var(--slate-accent);
+
+  --ss-page: var(--paper);
+  --ss-card: var(--paper-2);
+  --ss-card-raised: var(--paper-2);
+  --ss-card-hover: var(--paper-3);
+  --ss-surface: var(--paper-3);
+  --ss-surface-subtle: var(--paper-3);
+  --ss-surface-muted: var(--paper-4);
+  --ss-sunken: var(--paper-4);
+
+  --ss-text-strong: var(--ink);
+  --ss-text-primary: var(--ink-2);
+  --ss-text-secondary: var(--ink-4);
+  --ss-text-tertiary: var(--ink-5);
+  --ss-text-disabled: var(--ink-6);
+
+  --ss-border: var(--border-3-paper);
+  --ss-border-subtle: var(--border-4-paper);
+  --ss-border-strong: var(--border-2-paper);
+  --ss-border-1: var(--border-5-paper);
+  --ss-border-2: var(--border-4-paper);
+  --ss-border-3: var(--border-3-paper);
+
+  --ss-brand: var(--brass);
+  --ss-brand-tint: rgba(140, 106, 30, 0.16);
+  --ss-brand-dim: rgba(140, 106, 30, 0.08);
+  --ss-brand-glow: 140 106 30;
+  --ss-success: var(--forest);
+  --ss-warning: var(--ember);
+  --ss-destructive: var(--brick);
+  --ss-shadow-card: 0 1px 2px rgba(21, 21, 21, 0.06);
+  --ss-shadow-card-hover: 0 2px 5px rgba(21, 21, 21, 0.10);
+  --ss-shadow-elevated: 0 8px 18px rgba(21, 21, 21, 0.10);
+  --ss-shadow-modal: 0 12px 30px rgba(21, 21, 21, 0.16);
+  --ss-radius-card: 8px;
+  --ss-radius-input: 6px;
+
+  --chat-operator-bg: var(--brass-fill);
+  --chat-operator-border: var(--brass-line);
+  --chat-operator-fg: var(--brass);
+  --chat-keeper-bg: var(--teal-fill);
+  --chat-keeper-border: var(--teal-line);
+  --chat-keeper-fg: var(--teal);
+  --chat-tool-bg: var(--slate-accent-fill);
+  --chat-tool-border: var(--slate-accent-line);
+  --chat-tool-fg: var(--slate-accent);
 
   /* =====================================================================
      Bridge to existing MASC semantic tokens.
@@ -147,19 +256,19 @@
 
   /* accent — Working / Info, slate-group.
      #8284 sweep collapsed sky/blue/cyan/teal/indigo/violet/... here. */
-  --accent: var(--slate);
-  --accent-10: var(--slate-fill);
-  --accent-20: var(--slate-fill);
-  --accent-soft: var(--slate-fill);
+  --accent: var(--slate-accent);
+  --accent-10: var(--slate-accent-fill);
+  --accent-20: var(--slate-accent-fill);
+  --accent-soft: var(--slate-accent-fill);
 
   /* Legacy FF-namespaced tokens — kept for any component the
      sweeps haven't reached yet. */
-  --color-accent: var(--slate);
-  --color-accent-soft: var(--slate-fill);
+  --color-accent: var(--slate-accent);
+  --color-accent-soft: var(--slate-accent-fill);
   --color-ff-gold: var(--brass);
   --color-ff-gold-bright: var(--brass-line);
   --color-ff-gold-dim: var(--brass-fill);
-  --color-ff-crystal: var(--slate);
+  --color-ff-crystal: var(--slate-accent);
   --color-ok: var(--forest);
   --color-warn: var(--ember);
   --color-bad: var(--brick);
@@ -191,7 +300,7 @@
   --blue-400-15: rgba(130, 126, 118, 0.15);
 
   /* Sky-family names now use the same neutral tone family. */
-  --sky-400: var(--slate);
+  --sky-400: var(--slate-accent);
   --sky-4: rgba(131, 120, 104, 0.04);
   --sky-8: rgba(131, 120, 104, 0.08);
   --sky-28: rgba(131, 120, 104, 0.28);
@@ -205,7 +314,7 @@
   --slate-fill: var(--paper-3);
 
   /* Indigo and related variants: waiting / dependency-blocking states. */
-  --indigo: var(--slate);
+  --indigo: var(--slate-accent);
   --indigo-4: rgba(62, 74, 92, 0.04);
   --indigo-40: rgba(62, 74, 92, 0.40);
   --indigo-45: rgba(62, 74, 92, 0.45);

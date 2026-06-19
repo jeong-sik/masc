@@ -2,6 +2,20 @@
 
 /* ── Chat (merged from chat.css) ───────────────────────── */
 
+:root {
+  --chat-operator-bg: var(--color-brass-soft);
+  --chat-operator-border: var(--brass-border, var(--color-accent-fg-dim));
+  --chat-operator-fg: var(--color-brass-fg, var(--color-accent-fg));
+
+  --chat-keeper-bg: var(--color-info-soft);
+  --chat-keeper-border: var(--info-border, var(--color-border-strong));
+  --chat-keeper-fg: var(--color-info-fg, var(--color-fg-secondary));
+
+  --chat-tool-bg: var(--color-bg-panel-alt);
+  --chat-tool-border: var(--info-border, var(--color-border-default));
+  --chat-tool-fg: var(--color-info-fg, var(--color-fg-secondary));
+}
+
 @utility chat-transcript {
   background:
     radial-gradient(circle at top left, rgb(var(--color-accent-glow) / .12), transparent 38%),
@@ -19,13 +33,18 @@
   box-shadow: var(--elev-4-shadow);
   &.user {
     align-self: flex-end;
-    background: linear-gradient(180deg, rgb(var(--color-accent-glow) / .12), var(--color-bg-elevated));
-    border-color: var(--color-accent-fg-dim);
+    background: linear-gradient(180deg, var(--chat-operator-bg), var(--color-bg-elevated));
+    border-color: var(--chat-operator-border);
   }
   &.assistant {
     align-self: flex-start;
-    background: linear-gradient(180deg, rgb(var(--color-accent-glow) / .08), var(--color-bg-panel-alt));
-    border-color: var(--color-accent-fg-dim);
+    background: linear-gradient(180deg, var(--chat-keeper-bg), var(--color-bg-panel-alt));
+    border-color: var(--chat-keeper-border);
+  }
+  &.tool {
+    align-self: stretch;
+    background: linear-gradient(180deg, var(--chat-tool-bg), var(--color-bg-surface));
+    border-color: var(--chat-tool-border);
   }
   &.system,
   &.error {
@@ -43,14 +62,14 @@
   border-style: solid;
   border-color: var(--color-border-default);
   &.user {
-    border-color: var(--color-accent-fg-dim);
-    background: var(--color-accent-soft);
-    color: var(--chat-user-avatar);
+    border-color: var(--chat-operator-border);
+    background: var(--chat-operator-bg);
+    color: var(--chat-operator-fg);
   }
   &.assistant {
-    border-color: var(--color-accent-fg-dim);
-    background: rgb(var(--color-accent-glow) / .18);
-    color: var(--chat-assistant-avatar);
+    border-color: var(--chat-keeper-border);
+    background: var(--chat-keeper-bg);
+    color: var(--chat-keeper-fg);
   }
   &.error {
     border-color: var(--color-status-err);
@@ -64,14 +83,14 @@
   border-style: solid;
   border-color: var(--color-border-default);
   &.user {
-    border-color: var(--color-accent-fg-dim);
-    color: var(--chat-user-chip);
-    background: rgb(var(--color-accent-glow) / .14);
+    border-color: var(--chat-operator-border);
+    color: var(--chat-operator-fg);
+    background: var(--chat-operator-bg);
   }
   &.assistant {
-    border-color: var(--color-accent-fg-dim);
-    color: var(--chat-assistant-chip);
-    background: rgb(var(--color-accent-glow) / .10);
+    border-color: var(--chat-keeper-border);
+    color: var(--chat-keeper-fg);
+    background: var(--chat-keeper-bg);
   }
   &.error {
     border-color: var(--color-status-err);

@@ -103,13 +103,19 @@ let is_shutting_down_global () = Atomic.get shutting_down_flag
    making the keeper supervisor's graceful-shutdown branch unreachable. *)
 let mark_shutting_down () = Atomic.set shutting_down_flag true
 
-let hooks : hook list ref = ref []
+let hooks : hook list Atomic.t = Atomic.make []
 
 let register ~name ?(priority = 50) action =
-  hooks := { name; priority; action } :: !hooks
+  let new_hook = { name; priority; action } in
+  let rec loop () =
+    let old = Atomic.get hooks in
+    if not (Atomic.compare_and_set hooks old (new_hook :: old)) then loop ()
+  in
+  loop ()
 
 let sorted_hooks () =
-  List.sort (fun a b -> compare a.priority b.priority) !hooks
+  let snapshot = Atomic.get hooks in
+  List.sort (fun a b -> compare a.priority b.priority) snapshot
 
 let run_registered_hooks () =
   let all_hooks = sorted_hooks () in

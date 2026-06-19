@@ -1112,12 +1112,21 @@ type FusionPanelEntry = {
   status: string
   answer?: string
   reason?: string
+  outputTokens?: number
 }
 
 type FusionJudgeView = {
   status: string
   decision?: string
+  // synthesis is render_judge's markdown (consensus/contradictions/blind-spots
+  // + resolved answer) — the actual deliberation value. Prefer it; fall back to
+  // resolvedAnswer for older posts written before synthesis was serialized.
+  synthesis?: string
   resolvedAnswer?: string
+}
+
+function numOrUndef(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
 
 function asFusionPanel(meta: unknown): FusionPanelEntry[] {
@@ -1132,6 +1141,7 @@ function asFusionPanel(meta: unknown): FusionPanelEntry[] {
       status: typeof r.status === 'string' ? r.status : 'unknown',
       answer: typeof r.answer === 'string' ? r.answer : undefined,
       reason: typeof r.reason === 'string' ? r.reason : undefined,
+      outputTokens: numOrUndef(r.output_tokens),
     }]
   })
 }
@@ -1144,8 +1154,25 @@ function asFusionJudge(meta: unknown): FusionJudgeView | null {
   return {
     status: typeof r.status === 'string' ? r.status : 'unknown',
     decision: typeof r.decision === 'string' ? r.decision : undefined,
+    synthesis: typeof r.synthesis === 'string' ? r.synthesis : undefined,
     resolvedAnswer: typeof r.resolved_answer === 'string' ? r.resolved_answer : undefined,
   }
+}
+
+function asFusionTotalOutputTokens(meta: unknown): number | undefined {
+  if (!meta || typeof meta !== 'object') return undefined
+  const usage = (meta as Record<string, unknown>).observed_usage
+  if (!usage || typeof usage !== 'object') return undefined
+  return numOrUndef((usage as Record<string, unknown>).output_tokens)
+}
+
+// Render untrusted model/judge markdown through the same sanitized path the rest
+// of the transcript uses (DOMPurify over marked) — never inject raw model output.
+function FusionMarkdown({ text }: { text: string }) {
+  return html`<div
+    class="markdown-body text-xs leading-relaxed"
+    dangerouslySetInnerHTML=${{ __html: purifyHtml(marked.parse(text) as string) }}
+  />`
 }
 
 function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: string }) {
@@ -1154,6 +1181,7 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
     status: 'idle' | 'loading' | 'loaded' | 'error'
     panel: FusionPanelEntry[]
     judge: FusionJudgeView | null
+    totalOutputTokens?: number
     error?: string
   }>({ status: 'idle', panel: [], judge: null })
   // Fetch-once guard. state.status must NOT be in the effect deps: the
@@ -1170,7 +1198,12 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
     fetchBoardPost(boardPostId)
       .then((post) => {
         if (!alive) return
-        setState({ status: 'loaded', panel: asFusionPanel(post.meta), judge: asFusionJudge(post.meta) })
+        setState({
+          status: 'loaded',
+          panel: asFusionPanel(post.meta),
+          judge: asFusionJudge(post.meta),
+          totalOutputTokens: asFusionTotalOutputTokens(post.meta),
+        })
       })
       .catch((err: unknown) => {
         if (!alive) return
@@ -1180,6 +1213,9 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
   }, [expanded, boardPostId])
 
   const runLabel = runId ? ` · ${runId.slice(0, 12)}` : ''
+  const answeredCount = state.panel.filter((p) => p.status === 'answered').length
+  const usageLabel =
+    state.totalOutputTokens !== undefined ? ` · ${state.totalOutputTokens.toLocaleString()} tok` : ''
   return html`
     <div class="rounded-[var(--r-1,8px)] border border-[var(--color-brass-border,#3a3a2a)] bg-[var(--color-brass-soft,rgba(216,166,87,0.06))] overflow-hidden" data-fusion-card>
       <button
@@ -1190,7 +1226,11 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
       >
         <span aria-hidden="true">${expanded ? '▾' : '▸'}</span>
         <span class="font-medium">Fusion 심의</span>
-        <span class="text-[var(--color-fg-secondary,#9da7b3)]">패널 합의 상세${runLabel}</span>
+        <span class="text-[var(--color-fg-secondary,#9da7b3)]">
+          ${state.status === 'loaded'
+            ? `패널 ${answeredCount}/${state.panel.length} 합의${runLabel}${usageLabel}`
+            : `패널 합의 상세${runLabel}`}
+        </span>
       </button>
       ${expanded
         ? html`
@@ -1204,17 +1244,21 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
             ${state.status === 'loaded'
               ? html`
                 <div class="flex flex-col gap-2">
-                  ${state.panel.map((p, i) => html`
-                    <div key=${i} class="rounded border border-[var(--color-border,#30363d)] px-2 py-1.5">
-                      <div class="text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)]">${p.model} · ${p.status}</div>
-                      ${p.answer
-                        ? html`<div class="text-xs mt-1 whitespace-pre-wrap">${p.answer}</div>`
-                        : null}
-                      ${p.reason
-                        ? html`<div class="text-xs mt-1 text-[var(--color-danger,#e06c75)]">${p.reason}</div>`
-                        : null}
-                    </div>
-                  `)}
+                  ${state.panel.map((p, i) => {
+                    const tok = p.outputTokens !== undefined ? ` · ${p.outputTokens.toLocaleString()} tok` : ''
+                    const failed = p.status !== 'answered'
+                    return html`
+                      <div key=${i} class="rounded border ${failed ? 'border-[var(--color-danger,#e06c75)]/40' : 'border-[var(--color-border,#30363d)]'} px-2 py-1.5">
+                        <div class="text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)]">${p.model} · ${p.status}${tok}</div>
+                        ${p.answer
+                          ? html`<div class="mt-1 max-h-64 overflow-y-auto"><${FusionMarkdown} text=${p.answer} /></div>`
+                          : null}
+                        ${p.reason
+                          ? html`<div class="text-xs mt-1 text-[var(--color-danger,#e06c75)]">${p.reason}</div>`
+                          : null}
+                      </div>
+                    `
+                  })}
                 </div>
                 ${state.judge
                   ? html`
@@ -1222,9 +1266,11 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
                       <div class="text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)]">
                         judge · ${state.judge.status}${state.judge.decision ? html` · ${state.judge.decision}` : null}
                       </div>
-                      ${state.judge.resolvedAnswer
-                        ? html`<div class="text-xs mt-1 whitespace-pre-wrap">${state.judge.resolvedAnswer}</div>`
-                        : null}
+                      ${state.judge.synthesis
+                        ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.synthesis} /></div>`
+                        : state.judge.resolvedAnswer
+                          ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
+                          : null}
                     </div>
                   `
                   : null}

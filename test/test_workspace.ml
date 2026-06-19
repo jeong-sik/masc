@@ -1488,6 +1488,28 @@ let test_read_backlog_counts_excludes_self_owned_orphan () =
     Alcotest.(check int) "keeper's own orphan excluded from failed count" 0 failed
   )
 
+let test_keeper_tasks_audit_excludes_self_owned_orphan () =
+  with_test_env (fun config ->
+    let keeper = "keeper-task-audit-self-filter-agent" in
+    let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
+    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
+    (* Remove the agent file to simulate a keeper with no active registry record. *)
+    let _ = Workspace.end_session config ~agent_name:keeper in
+    let meta = keeper_meta_for_self_filter keeper in
+    let payload =
+      Keeper_tool_task_runtime.handle_keeper_task_tool
+        ~config
+        ~meta
+        ~name:"keeper_tasks_audit"
+        ~args:(`Assoc [])
+      |> Yojson.Safe.from_string
+    in
+    let orphan_count =
+      Yojson.Safe.Util.(payload |> member "orphan_count" |> to_int)
+    in
+    Alcotest.(check int) "keeper's own orphan excluded from audit" 0 orphan_count
+  )
+
 let test_cleanup_zombies_releases_tasks () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
@@ -1980,6 +2002,8 @@ let () =
         test_audit_orphan_spares_keeper_owned_meta_within_grace;
       Alcotest.test_case "read backlog counts excludes self-owned orphan" `Quick
         test_read_backlog_counts_excludes_self_owned_orphan;
+      Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
+        test_keeper_tasks_audit_excludes_self_owned_orphan;
       Alcotest.test_case "cleanup zombies runtime" `Quick test_cleanup_zombies_releases_tasks;
     ];
 

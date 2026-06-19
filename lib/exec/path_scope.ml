@@ -100,6 +100,7 @@ let classify ~raw ~cwd =
 
 let scope t = t.scope
 let raw t = t.raw
+let is_discard_sink t = String.equal t.raw "/dev/null"
 
 let pp fmt t =
   let tag =

@@ -20,4 +20,8 @@ val classify : raw:string -> cwd:string -> t
 
 val scope : t -> scope
 val raw : t -> string
+val is_discard_sink : t -> bool
+(** [is_discard_sink t] is true for the canonical stdout/stderr discard
+    target.  Policy and dispatch consumers use this predicate instead of
+    matching the raw path themselves. *)
 val pp : Format.formatter -> t -> unit

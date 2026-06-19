@@ -1018,7 +1018,7 @@ let () =
     { bin
     ; args = [ Lit ("push", default_meta); Lit ("--force", default_meta) ]
     ; env = []
-    ; cwd = None
+    ; cwd = Some (Masc_exec.Path_scope.classify ~raw:"/tmp" ~cwd:"/tmp")
     ; redirects = []
     ; sandbox = Masc_exec.Sandbox_target.host ()
     }
@@ -1032,9 +1032,9 @@ let () =
      Before §5.3.1 it skipped the catastrophic floor, so [git push --force]
      (no path argument, so [validate_paths] cannot jail it — §5.4) executed.
      The floor must now deny it here as [Policy_denied], identically to the
-     _with_approval path, proving the floor is flag-independent.  ([Ok _] would
-     mean the floor was skipped — a regression; [git push --force] in /tmp is a
-     non-repo no-op even if it ran, so no filesystem effect.) *)
+     _with_approval path, proving the floor is flag-independent.  We set the
+     IR cwd to /tmp so that if the floor were ever skipped, [git push --force]
+     would run in a non-repo directory rather than the test checkout. *)
   match
     Keeper_tool_execute_shell_ir.dispatch_classified
       ~workdir:"/tmp"

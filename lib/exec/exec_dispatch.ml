@@ -36,8 +36,6 @@ let set_redirect_target plan fd target =
   | 2 -> Ok { plan with stderr_target = target }
   | fd -> Error (Printf.sprintf "unsupported redirect fd: %d" fd)
 
-let is_dev_null target = String.equal (Path_scope.raw target) "/dev/null"
-
 let redirect_plan_of_redirects redirects =
   let step plan = function
     | Redirect_scope.Fd_to_fd { src; dst } ->
@@ -45,7 +43,7 @@ let redirect_plan_of_redirects redirects =
         set_redirect_target plan src target
     | Redirect_scope.File
         { fd; target; mode = (Redirect_scope.Write | Redirect_scope.Append) }
-      when is_dev_null target ->
+      when Path_scope.is_discard_sink target ->
         set_redirect_target plan fd Drop
     | Redirect_scope.File { fd; target; mode = Redirect_scope.Read } ->
         Error

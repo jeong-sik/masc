@@ -250,8 +250,9 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
           session_id;
         Server_mcp_transport_ws.cleanup_session session_id))
     ();
-  (* Heartbeat fiber: ping every [heartbeat_interval_s], count missed pongs,
-     and close the session once the threshold is reached. *)
+  (* Heartbeat fiber: ping every [heartbeat_interval_s] and close the session
+     once it has gone [threshold] whole intervals with no pong, via the shared
+     Server_mcp_transport_ws.heartbeat_should_close (#21509). *)
   let threshold = missed_pong_threshold () in
   Eio.Fiber.fork ~sw (fun () ->
     let send_ping () =
@@ -264,13 +265,18 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
       if Server_mcp_transport_ws.is_session_closed session
       then ()
       else begin
-        let missed = Atomic.get session.missed_pongs in
-        if threshold > 0 && missed >= threshold
+        if
+          (* NDT-OK: wall-clock compared for liveness only, not output *)
+          Server_mcp_transport_ws.heartbeat_should_close
+            ~now:(Unix.gettimeofday ())
+            ~last_pong_at:(Atomic.get session.last_pong_at)
+            ~threshold
+            ~interval_s:heartbeat_interval_s
         then begin
           Log.Server.debug
-            "[ws-standalone] session %s missed %d pongs; closing"
+            "[ws-standalone] session %s pong timeout (no pong in %d intervals); closing"
             session_id
-            missed;
+            threshold;
           Server_mcp_transport_ws.cleanup_session session_id
         end
         else begin
@@ -295,10 +301,7 @@ let make_websocket_handler ~sw ~clock ~on_message _client_addr (wsd : Ws.Wsd.t)
             (* Drop the half-open session immediately so the loop does not
                spin until the WSD observes the broken socket. *)
             Server_mcp_transport_ws.cleanup_session session_id
-          else begin
-            Atomic.incr session.missed_pongs;
-            loop ()
-          end
+          else loop ()
         end
       end
     in

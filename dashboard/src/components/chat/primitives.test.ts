@@ -119,6 +119,39 @@ describe('ChatTranscript', () => {
     expect(bubble?.textContent).toContain('✓')
   })
 
+  it('preserves structured failure messages as preformatted text', () => {
+    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress","last_tool_effect":"mutating"}'
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'err-1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text,
+            rawText: text,
+            delivery: 'error',
+            error: text,
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const pre = container.querySelector('[data-chat-structured-error]')
+    expect(pre?.tagName).toBe('PRE')
+    expect(pre?.classList.contains('chat-error-text')).toBe(true)
+    expect(pre?.classList.contains('break-words')).toBe(false)
+    expect(pre?.textContent).toContain('ollama_cloud.deepseek-v4-flash')
+    expect(Array.from(pre?.querySelectorAll('.chat-error-token') ?? []).some(node =>
+      node.textContent?.includes('ollama_cloud.deepseek-v4-flash'),
+    )).toBe(true)
+    expect(container.querySelector('[data-chat-blocks]')).toBeNull()
+  })
+
   it('marks a failed tool call with the error status glyph', () => {
     recordToolCallOutputs([
       toolCallOutput({ tool_use_id: 'toolu_y', success: false, output: 'boom' }),

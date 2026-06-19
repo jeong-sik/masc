@@ -98,6 +98,24 @@
   background: linear-gradient(180deg, rgb(var(--color-accent-glow) / .10), var(--color-bg-surface));
 }
 
+.chat-error-text {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--color-fg-primary);
+}
+
+.chat-error-token {
+  white-space: nowrap;
+}
+
 /* ════ Keeper v2 multimodal composer ════ */
 
 .composer {

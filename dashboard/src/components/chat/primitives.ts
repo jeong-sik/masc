@@ -1147,6 +1147,13 @@ function LiveMessagePlaceholder({ label }: { label: string }) {
   `
 }
 
+function renderStructuredFailureText(text: string): Array<string | VNode> {
+  return text.split(/(\s+)/).map((part, index) => {
+    if (!part || /^\s+$/.test(part)) return part
+    return html`<span class="chat-error-token" key=${index}>${part}</span>`
+  })
+}
+
 function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachment }) {
   const [open, setOpen] = useState(false)
   const canDownload = isSafeAttachmentHref(attachment)
@@ -1338,12 +1345,20 @@ function ChatMessageBubble({
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
+  const isFailureMessage =
+    (entry.delivery === 'error' || entry.delivery === 'timeout' || entry.delivery === 'interrupted')
+    && !!entry.error?.trim()
   const parsedBlocks = useMemo(() => {
+    if (isFailureMessage) return null
     if (hasBlocks) return null
     if (entry.role !== 'assistant' && entry.role !== 'system') return null
     return parseMarkdownToBlocks(messageText)
-  }, [hasBlocks, entry.role, messageText])
-  const effectiveBlocks = entry.blocks && entry.blocks.length > 0 ? entry.blocks : (parsedBlocks ?? [])
+  }, [hasBlocks, isFailureMessage, entry.role, messageText])
+  const effectiveBlocks = isFailureMessage
+    ? []
+    : entry.blocks && entry.blocks.length > 0
+      ? entry.blocks
+      : (parsedBlocks ?? [])
   const hasEffectiveBlocks = effectiveBlocks.length > 0
   const collapseThreshold = 1200
   const isCollapsible = !hasEffectiveBlocks && messageLength > collapseThreshold
@@ -1525,7 +1540,14 @@ function ChatMessageBubble({
       ${liveLabel
         ? html`<${LiveMessagePlaceholder} label=${liveLabel} />`
         : html`
-            ${hasEffectiveBlocks
+            ${isFailureMessage
+              ? html`
+                  <pre
+                    class="chat-error-text"
+                    data-chat-structured-error
+                  >${renderStructuredFailureText(messageText)}</pre>
+                `
+              : hasEffectiveBlocks
               ? html`<${ChatBlocks} blocks=${effectiveBlocks} />`
               : html`
                   <div

@@ -203,6 +203,13 @@ Legend: ✅ supported · ⚠️ partial / degraded · ❌ silently dropped / uns
 
 **Finding:** MASC can start and observe turns through multiple channel paths, but those paths do not share one connector-facing turn contract. The composite observer exposes a typed turn FSM, while chat events, AG-UI, Discord, Slack, sidecars, CLI, and TUI receive different partial projections. The SSE adapter explicitly drops `Link_block`, `Image_block`, `Audio_block`, and `Tool_context_block` with the comment “Rich blocks are Discord-specific”. `Tool_context_block` is defined but never published. Sidecars have zero progress visibility and must infer completion from the final `reply` string.
 
+**Identity contract:** connector-facing `turn_id` is the serialized `Ids.Turn_ref.t`
+from RFC-0233 §7 (`"<trace_id>#<absolute_turn>"`), not a second connector-local
+turn identifier. `request_id` exists only before a MASC turn is accepted; the
+`Turn_accepted` event binds `request_id` to the canonical `turn_id`. Producers
+must derive `turn_id` from the backend-minted `Turn_ref`, and consumers must not
+fabricate or reinterpret it.
+
 **Required MASC-owned event envelope:**
 
 ```text
@@ -221,6 +228,7 @@ Poll_snapshot         { request_id; turn_id option; status; latest_event_seq }
 
 **Improvements (`lib/keeper/keeper_chat_events.mli`, `lib/ag_ui/ag_ui.ml`, `lib/server/server_routes_http_keeper_stream.ml`, `lib/gate/*`, dashboard, TUI, sidecars):**
 - Add `Turn_requested`, `Turn_accepted`, `Turn_waiting`, `Turn_phase_changed`, `Tool_call_started`, `Tool_call_finished`, `Content_block`, `Turn_finished`, `Turn_failed`, and `Poll_snapshot` equivalents to the MASC connector event stream.
+- Use `Ids.Turn_ref` / RFC-0233 §7 as the single cross-surface turn identity; expose it as the connector `turn_id` string and keep raw `keeper_turn_id` as an internal numeric field only where needed.
 - Emit events from the runtime boundary once, then project them into AG-UI/SSE, channel gate responses, Discord, Slack, Telegram, iMessage, CLI, TUI, and Dashboard.
 - Stop dropping rich blocks in the SSE adapter; serialize them as AG-UI `Custom` payloads until AG-UI-native block support exists.
 - Publish `Tool_context_block` / `Tool_call_finished` when a tool call finishes, with a concise redacted summary.
@@ -255,9 +263,9 @@ Poll_snapshot         { request_id; turn_id option; status; latest_event_seq }
 **Finding:** Gate `inbound_message` only carries a `content` string, so external photos/files/voice cannot become multimodal user blocks. Outbound `structured` blocks are unused by every connector. Dashboard attachment whitelist excludes SVG, PDF, HTML, source-code files, and video.
 
 **Improvements:**
-- Extend `Gate_protocol.inbound_message` with `attachments` and `user_blocks`; update `Channel_gate` validation and `Gate_keeper_backend.dispatch`.
+- Extend `Gate_protocol.inbound_message` with `attachments` and `user_blocks`; update `Channel_gate` validation and `Gate_keeper_backend.dispatch` in `lib/gate_keeper_backend.ml`.
 - Parse attachment metadata in Discord gateway, Slack events, Telegram messages, and iMessage bridge; download bytes and forward as data URLs or blob-store refs.
-- Populate `GateResponse.structured` in `gate_keeper_backend.ml` with parsed `ChatBlock[]`.
+- Populate `GateResponse.structured` in `lib/gate_keeper_backend.ml` with parsed `ChatBlock[]`.
 - Add a connector capability manifest and fallback policy (see §6).
 - Expand dashboard whitelist: add SVG, PDF, HTML, common code MIMEs; add a video bucket with strict size limits; reject archives with a clear message.
 
@@ -308,7 +316,7 @@ A new module `lib/gate/connector_capabilities.ml` (or `config/connector-formats.
 ## 7. Implementation Priority
 
 ### P0 — Runtime safety and visible state
-1. Add the MASC-owned turn surface event envelope (`request_id`, `turn_id`, phase, progress, final status).
+1. Add the MASC-owned turn surface event envelope (`request_id`, RFC-0233 `Turn_ref` as `turn_id`, phase, progress, final status).
 2. Stop dropping rich blocks in SSE/AG-UI projection; unknown blocks must become escaped fallback blocks.
 3. Add connector capability manifest and downgrade/drop telemetry.
 4. Enforce connector size limits before send (Discord, Slack, Telegram, iMessage).
@@ -360,7 +368,7 @@ Create fixtures under `test/fixtures/rich_content/`:
 
 Add tests:
 - `test_keeper_chat_blocks.ml` — parse code/table/callout blocks.
-- `test_keeper_chat_events.ml` — turn lifecycle event JSON round-trip and stable `request_id`/`turn_id` correlation.
+- `test_keeper_chat_events.ml` — turn lifecycle event JSON round-trip and stable `request_id`/RFC-0233 `Turn_ref` correlation.
 - `test_keeper_chat_discord.ml` — chunk boundary preserves code fences; embed budget splits messages.
 - `test_keeper_chat_slack.ml` — inline image → Block Kit image block; mrkdwn escape; long reply chunks.
 - `test_channel_gate_metrics.ml` — every unsupported block emits a downgrade/drop metric.
@@ -373,7 +381,7 @@ Add tests:
 - `dashboard/src/components/chat/attachments.test.ts` — video rejection, audio metadata.
 
 Acceptance criteria:
-- Every connector final response includes a stable `request_id` or `turn_id`.
+- Every connector final response includes a stable `request_id` or RFC-0233 `Turn_ref`-derived `turn_id`.
 - Waiting/polling flows can report progress without inventing connector-local state.
 - No silent truncation; truncation is chunked or visibly marked.
 - Code fences are never split without fence repair.
@@ -443,7 +451,7 @@ Acceptance criteria:
 
 - [ ] No keeper phase, board semantics, fusion concept, or connector policy is added to OAS.
 - [ ] OAS changes, if any, are limited to generic multimodal blocks, content folding, and structured tool-result storage that are useful outside MASC.
-- [ ] MASC connector event names, `request_id`, `turn_id`, polling, sidecar progress, and live runtime paths remain in MASC.
+- [ ] MASC connector event names, `request_id`, RFC-0233 `Turn_ref`-derived `turn_id`, polling, sidecar progress, and live runtime paths remain in MASC.
 - [ ] All connector-specific rendering stays under `masc/lib/keeper`, `masc/lib/gate`, `masc/sidecars`, `masc/dashboard`, and `masc/bin`.
 - [ ] The shared block schema is owned by MASC; OAS continues to use its own `content_block` sum.
 - [ ] Live runtime claims are checked against `<base-path>/.masc` before being described as deployed.

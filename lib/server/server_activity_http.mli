@@ -53,6 +53,16 @@ val slice_default_events_to_limit :
     ["limit"], and ["next_after_seq"] accordingly.  Pure —
     exposed for unit testing ({!Test_server_activity_http}). *)
 
+val run_keepalive_loop :
+  sleep:(unit -> unit) -> stop:bool ref -> send:(unit -> bool) -> unit
+(** [run_keepalive_loop ~sleep ~stop ~send] runs the SSE keepalive loop:
+    [sleep ()] then [send ()], repeating until [stop] is set or [send] returns
+    [false] (the client disconnected), at which point [stop] is set so a
+    disconnected client terminates the loop instead of spinning on the
+    server-lifetime switch until shutdown (#21562).  The blocking wait is
+    injected as [sleep] so the control flow is deterministic — exposed for unit
+    testing ({!Test_server_activity_http}). *)
+
 (** {1 JSON dispatchers}
 
     All three take [~deps ~state request] and return a

@@ -115,9 +115,44 @@ let test_count_and_limit_updated () =
   check (option int) "count updated" (Some 2) (get_int_field "count" got);
   check (option int) "limit updated" (Some 2) (get_int_field "limit" got)
 
+(* #21562 regression: the keepalive loop must terminate when the client is
+   gone ([send] returns [false]) instead of spinning on the server-lifetime
+   switch until shutdown.  [sleep] is injected as a no-op so the control flow
+   is exercised deterministically without a clock. *)
+let test_keepalive_loop_terminates_on_client_gone () =
+  let stop = ref false in
+  let sends = ref 0 in
+  let send () =
+    incr sends;
+    (* client alive for two keepalives, disconnected on the third *)
+    !sends < 3
+  in
+  Server_activity_http.run_keepalive_loop ~sleep:(fun () -> ()) ~stop ~send;
+  check bool "stop is set once the client is gone" true !stop;
+  check int "loop halts on the failing send (no further iterations)" 3 !sends
+
+(* The loop must also honour an externally-set [stop] (e.g. [close_stream]
+   from the disconnect path) at the top guard. *)
+let test_keepalive_loop_honours_external_stop () =
+  let stop = ref false in
+  let sends = ref 0 in
+  let send () =
+    incr sends;
+    stop := true;
+    true
+  in
+  Server_activity_http.run_keepalive_loop ~sleep:(fun () -> ()) ~stop ~send;
+  check int "loop halts at the top guard after external stop" 1 !sends
+
 let () =
   run "Server_activity_http"
-    [ ( "slice_default_events_to_limit"
+    [ ( "keepalive_loop"
+      , [ test_case "terminates when client is gone" `Quick
+            test_keepalive_loop_terminates_on_client_gone
+        ; test_case "honours external stop" `Quick
+            test_keepalive_loop_honours_external_stop
+        ] )
+    ; ( "slice_default_events_to_limit"
       , [ test_case "len < limit" `Quick test_len_lt_limit
         ; test_case "len == limit" `Quick test_len_eq_limit
         ; test_case "len > limit" `Quick test_len_gt_limit

@@ -254,6 +254,30 @@ let close_stream info =
           Httpun.Body.Writer.close info.writer
       end)
 
+(* Keepalive loop for an activity SSE stream. Sleeps [interval_s] then calls
+   [send]; repeats until [stop] is set or [send] returns [false] (the client is
+   gone — writer closed / write failed). Setting [stop] on a [false] send makes
+   a disconnected client terminate the loop instead of spinning on the
+   server-lifetime switch until shutdown.
+
+   Root cause of #21562: the previous loop did [ignore (send_raw …)] and only
+   re-checked [info.stop], which nothing on the disconnect path ever set — so
+   one fiber leaked per disconnected SSE client. [Eio.Time.sleep] is a
+   cancellation point, so cancelling the owning switch still interrupts a
+   parked loop promptly and [Eio.Cancel.Cancelled] propagates to the caller for
+   fiber teardown. The blocking wait is injected as [sleep] so the loop's
+   control flow is deterministic and unit-testable in isolation from the clock.
+   Exposed for unit testing. *)
+let run_keepalive_loop ~sleep ~stop ~send =
+  let rec loop () =
+    if not !stop
+    then begin
+      sleep ();
+      if not !stop then if send () then loop () else stop := true
+    end
+  in
+  loop ()
+
 let handle_stream ~deps ~state request reqd =
   let origin = deps.get_origin request in
   let session_id =
@@ -307,22 +331,21 @@ let handle_stream ~deps ~state request reqd =
   (match (deps.get_switch (), deps.get_clock ()) with
   | Some sw, Some clock ->
       Eio.Fiber.fork ~sw (fun () ->
-          let is_cancelled = function
-            | Eio.Cancel.Cancelled _ -> true
-            | _ -> false
-          in
-          let rec loop () =
-            if not !(info.stop) then begin
-              (try Eio.Time.sleep clock keepalive_interval_s
-               with Eio.Cancel.Cancelled _ as e -> raise e | exn -> if is_cancelled exn then raise exn);
-              if not !(info.stop) then
-                ignore (send_raw info ": keepalive\n\n");
-              loop ()
-            end
-          in
-          try loop ()
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            if not (is_cancelled exn) then close_stream info;
-            Activity_graph.unregister_if_current info.session_id info.client_id)
+          Fun.protect
+            ~finally:(fun () ->
+              Activity_graph.unregister_if_current info.session_id info.client_id)
+            (fun () ->
+              match
+                run_keepalive_loop
+                  ~sleep:(fun () -> Eio.Time.sleep clock keepalive_interval_s)
+                  ~stop:info.stop
+                  ~send:(fun () -> send_raw info ": keepalive\n\n")
+              with
+              | () -> close_stream info
+              | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+              | exception exn ->
+                  Log.Social.warn "activity keepalive fiber exception: %s"
+                    (Printexc.to_string exn);
+                  close_stream info))
   | None, _ | Some _, None -> ());
   ()

@@ -181,7 +181,6 @@ lib/workspace/event_kind.ml:56
 lib/workspace/event_kind.ml:79
 lib/workspace/event_kind.ml:105
 lib/workspace/nickname.ml:94
-lib/workspace/playground_repo_cache.ml:35
 lib/core/json_util.ml:19
 lib/core/json_util.ml:34
 lib/core/json_util.ml:40

@@ -1,0 +1,30 @@
+name: Memory OS Eval Tests
+# RFC-0264 P0: run the Memory OS eval harness pure-function unit tests in CI.
+# These functions (noise_rate, _parse_index, deterministic_sample,
+# _split_runtime_id, _looks_like_answer_array, _extract_json_array) are
+# deterministic and make no network call, so this job needs no judge endpoint
+# or secret. The live judge path (calibrate/measure) stays off CI by design.
+on:
+  pull_request:
+    paths:
+      - 'scripts/memory_os_judge_eval.py'
+      - 'test/test_memory_os_judge_eval.py'
+      - '.github/workflows/memory-os-eval-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/memory_os_judge_eval.py'
+      - 'test/test_memory_os_judge_eval.py'
+      - '.github/workflows/memory-os-eval-tests.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  judge-eval-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: judge_eval pure-function unit tests (deterministic, no network)
+        run: python3 test/test_memory_os_judge_eval.py

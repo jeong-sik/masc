@@ -1,7 +1,9 @@
-(** RFC-0259 P2 — grounding reconciler core (pure classify / dry_run).
+(** RFC-0259 P2/P3 — grounding reconciler core (pure classify / dry_run /
+    reconcile_facts).
 
     Drives the classifier with a fake [verify_fn] so Confirmed/Contradicted/Unknown
-    paths are deterministic. Pins:
+    paths are deterministic. P2 pins classification; P3 pins the retraction
+    transform (terminal->drop, open->advance, unknown/fresh->keep). Pins:
     - no external_ref           -> Fresh (never grounded)
     - referenced but in-horizon -> Fresh (not re-checked yet)
     - past horizon, open        -> Stale_open
@@ -194,6 +196,81 @@ let test_no_token_verify_is_unverifiable () =
     (GH.no_token_verify { Types.kind = Types.Pr; Types.id = "1" })
 ;;
 
+(* ---------- P3: reconcile_facts (pure retraction core) ---------- *)
+
+let test_reconcile_retracts_terminal () =
+  (* a merged/closed PR backing an in-progress claim is dropped *)
+  let facts =
+    [ fact ~external_ref:(pr "21515") ~first_seen:(now -. 100_000.0) "PR #21515 blocked, needs fix"
+    ; fact ~first_seen:(now -. 100_000.0) "deployment uses blue-green"
+    ]
+  in
+  let survivors, report =
+    R.reconcile_facts ~now ~horizon ~verify:(verify_const R.Terminal) facts
+  in
+  Alcotest.(check int) "scanned" 2 report.R.scanned;
+  Alcotest.(check int) "retracted" 1 report.R.retracted;
+  Alcotest.(check int) "advanced" 0 report.R.advanced;
+  Alcotest.(check int) "kept" 1 report.R.kept;
+  (* the durable non-ref claim survives; the terminal ref is gone *)
+  Alcotest.(check (list string))
+    "only durable survives"
+    [ "deployment uses blue-green" ]
+    (List.map (fun f -> f.Types.claim) survivors)
+;;
+
+let test_reconcile_advances_open () =
+  (* a still-open ref is kept, last_verified_at advanced to now *)
+  let f =
+    fact ~external_ref:(pr "2") ~first_seen:(now -. 100_000.0) "PR #2 in review"
+  in
+  let survivors, report =
+    R.reconcile_facts ~now ~horizon ~verify:(verify_const R.Still_open) [ f ]
+  in
+  Alcotest.(check int) "advanced" 1 report.R.advanced;
+  Alcotest.(check int) "retracted" 0 report.R.retracted;
+  (match survivors with
+   | [ s ] ->
+     Alcotest.(check (option (float 0.001)))
+       "last_verified advanced to now"
+       (Some now)
+       s.Types.last_verified_at
+   | _ -> Alcotest.fail "expected exactly one survivor")
+;;
+
+let test_reconcile_keeps_unknown_and_fresh () =
+  (* uncertainty never deletes; in-horizon and non-ref are untouched *)
+  let facts =
+    [ fact ~external_ref:(pr "3") ~first_seen:(now -. 100_000.0) "PR #3 unknown state"
+    ; fact ~external_ref:(pr "4") ~last_verified_at:(now -. 5.0) ~first_seen:(now -. 5.0) "PR #4 recent"
+    ; fact ~first_seen:(now -. 100_000.0) "user prefers concise"
+    ]
+  in
+  let survivors, report =
+    R.reconcile_facts ~now ~horizon ~verify:(verify_const R.Unverifiable) facts
+  in
+  Alcotest.(check int) "nothing retracted" 0 report.R.retracted;
+  Alcotest.(check int) "nothing advanced" 0 report.R.advanced;
+  Alcotest.(check int) "all kept" 3 report.R.kept;
+  Alcotest.(check int) "all survive" 3 (List.length survivors)
+;;
+
+let test_reconcile_order_preserved () =
+  (* survivors keep input order after a middle retraction *)
+  let facts =
+    [ fact ~first_seen:(now -. 100_000.0) "A durable"
+    ; fact ~external_ref:(pr "21515") ~first_seen:(now -. 100_000.0) "B terminal ref"
+    ; fact ~first_seen:(now -. 100_000.0) "C durable"
+    ]
+  in
+  let survivors, _ =
+    R.reconcile_facts ~now ~horizon ~verify:(verify_const R.Terminal) facts
+  in
+  Alcotest.(check (list string))
+    "order preserved minus retracted"
+    [ "A durable"; "C durable" ]
+    (List.map (fun f -> f.Types.claim) survivors)
+;;
 let () =
   Alcotest.run
     "rfc0259_reconcile"
@@ -216,6 +293,12 @@ let () =
             "no token is unverifiable"
             `Quick
             test_no_token_verify_is_unverifiable
+        ] )
+    ; ( "reconcile_facts"
+      , [ Alcotest.test_case "retract-terminal" `Quick test_reconcile_retracts_terminal
+        ; Alcotest.test_case "advance-open" `Quick test_reconcile_advances_open
+        ; Alcotest.test_case "keep-unknown-fresh" `Quick test_reconcile_keeps_unknown_and_fresh
+        ; Alcotest.test_case "order-preserved" `Quick test_reconcile_order_preserved
         ] )
     ]
 ;;

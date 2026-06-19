@@ -180,18 +180,20 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* RFC-0259 §3.3: memory-os grounding reconciler (P2, dry-run). Off the keeper
-     hot path — every [interval]s it re-checks each Tier-1 fact that names
-     verifiable external state (a PR/issue id, P1's [external_ref]) against the
-     source of truth through GitHub GraphQL, and logs what it WOULD do: a
-     still-open ref is fresh, a merged/closed ref backing an in-progress claim is
-     stale_terminal (the live-store false-fact class that had keepers acting on a
-     closed PR for ~30 turns). P2 only classifies; P3 turns stale_terminal into
-     retraction and stale_open into a last_verified_at advance, under the facts
-     lock. Default OFF + dry-run (mirrors the GC/consolidation rollout): the log
-     is reviewed before any write path is enabled. [Unverifiable] (GitHub
-     failure / missing token / non-PR kind) is never acted on — uncertainty is
-     not contradiction. Skipped entirely when no alert repo is configured. *)
+  (* RFC-0259 §3.3/§3.4: memory-os grounding reconciler. Off the keeper hot path —
+     every [interval]s it re-checks each Tier-1 fact that names verifiable external
+     state (a PR/issue id, P1's [external_ref]) against the source of truth through
+     GitHub GraphQL: a still-open ref has its [last_verified_at] advanced; a
+     merged/closed ref backing an in-progress claim is retracted (the live-store
+     false-fact class that had keepers acting on a closed PR for ~30 turns);
+     [Unverifiable] (GitHub failure / missing token / non-GitHub kind) is never acted
+     on — uncertainty is not contradiction. The write happens under the per-keeper
+     facts lock ({!Keeper_memory_os_reconcile.run_reconcile}).
+
+     Two gates (mirrors the GC rollout): RECONCILE turns the fiber on; APPLY flips it
+     from dry-run (log what it WOULD do, default) to actually rewriting. An operator
+     reviews the dry-run log before enabling APPLY. Skipped entirely when no alert
+     repo is configured. *)
   if
     Keeper_memory_bank_env.memory_env_bool_logged
       "MASC_KEEPER_MEMORY_OS_RECONCILE"
@@ -199,6 +201,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     && String.trim Env_config.KeeperAlert.github_repo <> ""
   then (
      let repo = String.trim Env_config.KeeperAlert.github_repo in
+     let apply =
+       Keeper_memory_bank_env.memory_env_bool_logged
+         "MASC_KEEPER_MEMORY_OS_RECONCILE_APPLY"
+         ~default:false
+     in
      fork_logged_fiber
        ~sw
        ~on_error:(log_server_fiber_crash "memory_os_reconcile")
@@ -222,29 +229,32 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
               Unverifiable";
            Keeper_memory_os_reconcile_gh.no_token_verify
        in
+       let mode = if apply then "apply" else "dry-run" in
        let rec loop () =
          List.iter
            (fun keeper_id ->
               try
-                let facts = Keeper_memory_os_io.read_facts_all ~keeper_id in
-                let report, _items =
-                  Keeper_memory_os_reconcile.dry_run
+                let report =
+                  Keeper_memory_os_reconcile.run_reconcile
+                    ~dry_run:(not apply)
+                    ~keeper_id
                     ~now:(Time_compat.now ())
                     ~horizon
                     ~verify
-                    facts
+                    ()
                 in
-                if report.Keeper_memory_os_reconcile.stale_terminal > 0
-                   || report.stale_open > 0
+                if report.Keeper_memory_os_reconcile.retracted > 0
+                   || report.advanced > 0
                 then
                   Log.Server.info
-                    "memory_os_reconcile[dry-run]: keeper=%s scanned=%d \
-                     stale_open=%d stale_terminal=%d stale_unknown=%d"
+                    "memory_os_reconcile[%s]: keeper=%s scanned=%d retracted=%d \
+                     advanced=%d kept=%d"
+                    mode
                     keeper_id
                     report.scanned
-                    report.stale_open
-                    report.stale_terminal
-                    report.stale_unknown
+                    report.retracted
+                    report.advanced
+                    report.kept
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->

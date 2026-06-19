@@ -21,6 +21,7 @@ val create :
   payload:Yojson.Safe.t ->
   risk_class:Schedule_domain.risk_class ->
   source:Schedule_domain.schedule_source ->
+  ?recurrence:Schedule_domain.recurrence ->
   unit ->
   (Schedule_domain.schedule_request, service_error) result
 

@@ -46,12 +46,17 @@ let payload_json () =
     ]
 ;;
 
-let make_request ?(schedule_id = "sched-1") ?(risk_class = Workspace_write) () =
+let make_request
+  ?(schedule_id = "sched-1")
+  ?(risk_class = Workspace_write)
+  ?recurrence
+  ()
+  =
   match
     create_request ~schedule_id ~requested_by:(human "requester")
       ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
       ~payload:(payload_json ()) ~risk_class ~approval_required:false
-      ~source:Operator_request ()
+      ~source:Operator_request ?recurrence ()
   with
   | Ok request -> request
   | Error msg -> fail msg
@@ -189,6 +194,37 @@ let test_read_only_due_candidate_does_not_need_grant () =
     (List.length (due_execution_candidates (read_state config)))
 ;;
 
+let test_reschedule_due_recurring_advances_only_matching_recurring_rows () =
+  with_workspace
+  @@ fun config ->
+  let recurring =
+    make_request ~schedule_id:"loop-1" ~risk_class:Read_only
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  let one_shot = make_request ~schedule_id:"once-1" ~risk_class:Read_only () in
+  ignore (insert_ok config recurring);
+  ignore (insert_ok config one_shot);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "both due" 2 changed
+   | Error err -> fail (store_error_to_string err));
+  (match
+     reschedule_due_recurring config ~now:201.0
+       ~schedule_ids:[ "loop-1"; "once-1"; "missing" ]
+   with
+   | Error err -> fail (store_error_to_string err)
+   | Ok (_, changed) -> check int "one rescheduled" 1 changed);
+  match
+    get_schedule config ~schedule_id:"loop-1",
+    get_schedule config ~schedule_id:"once-1"
+  with
+  | Some loop, Some once ->
+    check_status "loop scheduled" Scheduled loop.status;
+    check (float 0.001) "loop next due" 260.0 loop.due_at;
+    check_status "one-shot left due" Due once.status
+  | _ -> fail "schedules missing"
+;;
+
 let test_recovers_from_last_good () =
   with_workspace
   @@ fun config ->
@@ -220,7 +256,54 @@ let test_load_fresh_when_file_absent () =
    | Corrupt _ -> fail "absent ledger reported as Corrupt");
   let state = read_state config in
   check int "fresh store has no schedules" 0 (List.length state.schedules);
-  check int "fresh store has no grants" 0 (List.length state.grants)
+  check int "fresh store has no grants" 0 (List.length state.grants);
+  check int "fresh store has no executions" 0 (List.length state.executions)
+;;
+
+let test_start_and_complete_persist_execution_record () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"exec-1" ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "became due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id with
+   | Ok running -> check_status "running" Running running.status
+   | Error err -> fail (store_error_to_string err));
+  let running_state = read_state config in
+  check int "one execution" 1 (List.length running_state.executions);
+  let execution = List.hd running_state.executions in
+  check string "execution status" "running"
+    (execution_status_to_string execution.status);
+  check string "execution schedule" req.schedule_id execution.schedule_id;
+  check (float 0.001) "started at" 202.0 execution.started_at;
+  check (float 0.001) "execution due" 200.0 execution.due_at;
+  check string "payload digest" (payload_digest req.payload)
+    execution.payload_digest;
+  (match
+     complete_running config ~now:203.0 ~schedule_id:req.schedule_id
+       ~detail:(`Assoc [ "kind", `String "test.done" ])
+       ()
+   with
+   | Ok stored -> check_status "succeeded" Succeeded stored.status
+   | Error err -> fail (store_error_to_string err));
+  let completed_state = read_state config in
+  match
+    last_execution_for_schedule completed_state ~schedule_id:req.schedule_id
+  with
+  | None -> fail "missing completed execution"
+  | Some completed ->
+    check string "completed status" "succeeded"
+      (execution_status_to_string completed.status);
+    check (option (float 0.001)) "finished at" (Some 203.0)
+      completed.finished_at;
+    (match completed.detail with
+     | Some (`Assoc fields) ->
+       (match List.assoc_opt "kind" fields with
+        | Some (`String kind) -> check string "detail kind" "test.done" kind
+        | _ -> fail "detail kind missing")
+     | _ -> fail "detail missing")
 ;;
 
 let test_load_corrupt_when_both_unparseable () =
@@ -337,6 +420,10 @@ let () =
             test_due_candidates_require_approval_grant;
           test_case "read-only due candidate does not need grant" `Quick
             test_read_only_due_candidate_does_not_need_grant;
+          test_case "reschedule due recurring rows" `Quick
+            test_reschedule_due_recurring_advances_only_matching_recurring_rows;
+          test_case "start and complete persist execution record" `Quick
+            test_start_and_complete_persist_execution_record;
         ] );
     ]
 ;;

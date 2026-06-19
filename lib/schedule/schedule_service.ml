@@ -49,6 +49,7 @@ let create
   ~payload
   ~risk_class
   ~source
+  ?recurrence
   ()
   =
   (* NDT-OK: API boundary default; callers may provide requested_at explicitly. *)
@@ -57,7 +58,7 @@ let create
   let* request =
     Schedule_domain.create_request ~schedule_id ~requested_by ~scheduled_by
       ~requested_at ~due_at ?expires_at ~payload ~risk_class
-      ~approval_required ~source ()
+      ~approval_required ~source ?recurrence ()
     |> function
     | Ok request -> Ok request
     | Error msg -> Error (Invalid_request msg)

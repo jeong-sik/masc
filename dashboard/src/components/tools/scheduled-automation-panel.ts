@@ -41,6 +41,35 @@ function CountChip({ name, count }: { name: string; count: number }) {
   `
 }
 
+function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
+  const recurrence = request.recurrence
+  const kind = recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
+  if (kind === 'interval' && typeof recurrence?.interval_sec === 'number') {
+    return `every ${recurrence.interval_sec}s`
+  }
+  if (kind === 'daily') {
+    const hour = recurrence?.hour
+    const minute = recurrence?.minute
+    const second = recurrence?.second ?? 0
+    const timezone = recurrence?.timezone
+    if (typeof hour === 'number' && typeof minute === 'number') {
+      const hh = String(hour).padStart(2, '0')
+      const mm = String(minute).padStart(2, '0')
+      const ss = String(second).padStart(2, '0')
+      return `${hh}:${mm}:${ss}${timezone ? ` ${timezone}` : ''}`
+    }
+  }
+  return enumLabel(kind)
+}
+
+function lastExecutionLabel(request: DashboardScheduledAutomationRequest): string {
+  const execution = request.last_execution
+  if (!execution) return '-'
+  const status = enumLabel(execution.status)
+  const finishedAt = formatDateTimeKo(execution.finished_at_iso ?? execution.started_at_iso ?? null)
+  return finishedAt === '-' ? status : `${status} ${finishedAt}`
+}
+
 function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest }) {
   return html`
     <tr class="v2-lab-row border-t border-[var(--color-border-default)]">
@@ -50,6 +79,8 @@ function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest
       </td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(request.risk_class)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${request.payload_kind ?? '-'}</td>
+      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${recurrenceLabel(request)}</td>
+      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${lastExecutionLabel(request)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${formatDateTimeKo(request.due_at_iso ?? null)}</td>
       <td class="py-2 text-xs text-[var(--color-fg-muted)]">${request.approval_required ? 'required' : 'not required'}</td>
     </tr>
@@ -114,6 +145,8 @@ export function ScheduledAutomationPanel({
                     <th class="pb-2 pr-3 font-medium">status</th>
                     <th class="pb-2 pr-3 font-medium">risk</th>
                     <th class="pb-2 pr-3 font-medium">payload</th>
+                    <th class="pb-2 pr-3 font-medium">recurrence</th>
+                    <th class="pb-2 pr-3 font-medium">last run</th>
                     <th class="pb-2 pr-3 font-medium">due</th>
                     <th class="pb-2 font-medium">approval</th>
                   </tr>

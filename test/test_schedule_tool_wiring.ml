@@ -101,6 +101,32 @@ let test_dispatch_create_persists_schedule () =
       (Schedule_domain.schedule_status_to_string request.status)
 ;;
 
+let test_dispatch_create_persists_recurrence () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      ([ "schedule_id", `String "sched-loop"
+       ; "recurrence_kind", `String "interval"
+       ; "recurrence_interval_sec", `Int 900
+       ]
+       @ create_fields)
+  in
+  match
+    Tool_schedule.dispatch (schedule_ctx config)
+      ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+      ~args
+  with
+  | None -> fail "dispatch returned None"
+  | Some result ->
+    check bool "create succeeds" true (Tool_result.is_success result);
+    (match Schedule_store.get_schedule config ~schedule_id:"sched-loop" with
+     | None -> fail "schedule missing"
+     | Some request ->
+       check string "recurrence" "interval"
+         (Schedule_domain.recurrence_kind_to_string request.recurrence))
+;;
+
 let test_dispatch_cancel_persists_status () =
   with_config
   @@ fun config ->
@@ -137,16 +163,18 @@ let test_dispatch_cancel_persists_status () =
 
 let create_schedule_exn
   config
+  ?recurrence
   ~schedule_id
   ~due_at
   ~risk_class
   ~requested_by
   ~scheduled_by
+  ()
   =
   match
     Schedule_service.create config ~schedule_id ~requested_at:100.0
       ~requested_by ~scheduled_by ~due_at ~payload ~risk_class
-      ~source:Schedule_domain.Operator_request ()
+      ~source:Schedule_domain.Operator_request ?recurrence ()
   with
   | Ok request -> request
   | Error err ->
@@ -157,14 +185,38 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
   with_config
   @@ fun config ->
   ignore
+    (create_schedule_exn config ~schedule_id:"sched-exec" ~due_at:50.0
+       ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+       ()
+      : Schedule_domain.schedule_request);
+  (match Schedule_store.refresh_due config ~now:51.0 with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  (match Schedule_store.start_due_candidate config ~now:52.0 ~schedule_id:"sched-exec" with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  (match
+     Schedule_store.complete_running config ~now:53.0 ~schedule_id:"sched-exec"
+       ~detail:(`Assoc [ "kind", `String "test.exec" ])
+       ()
+   with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  ignore
     (create_schedule_exn config ~schedule_id:"sched-due" ~due_at:1.0
        ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
        ~scheduled_by:(automated "scheduler-agent")
+       ~recurrence:
+         (Schedule_domain.Daily
+            { hour = 9; minute = 0; second = 0; timezone = "Asia/Seoul" })
+       ()
       : Schedule_domain.schedule_request);
   ignore
     (create_schedule_exn config ~schedule_id:"sched-approval" ~due_at:300.0
        ~risk_class:Schedule_domain.Workspace_write ~requested_by:(human "operator")
        ~scheduled_by:(automated "scheduler-agent")
+       ()
       : Schedule_domain.schedule_request);
   let json =
     Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
@@ -172,7 +224,7 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
   let open Yojson.Safe.Util in
   check string "schema" "masc.dashboard.scheduled_automation.v1"
     (json |> member "schema" |> to_string);
-  check int "request count" 2 (json |> member "request_count" |> to_int);
+  check int "request count" 3 (json |> member "request_count" |> to_int);
   check string "fsm state" "pending_approval"
     (json |> member "fsm" |> member "state" |> to_string);
   check int "pending count" 1
@@ -180,7 +232,27 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
   check int "scheduled count" 1
     (json |> member "counts" |> member "scheduled" |> to_int);
   check int "due effective count" 1
-    (json |> member "derived_counts" |> member "due_effective" |> to_int)
+    (json |> member "derived_counts" |> member "due_effective" |> to_int);
+  let requests = json |> member "requests" |> to_list in
+  (match requests with
+   | first :: _ ->
+     check string "recurrence kind" "daily"
+       (first |> member "recurrence_kind" |> to_string);
+     check string "recurrence object kind" "daily"
+       (first |> member "recurrence" |> member "kind" |> to_string)
+   | [] -> fail "expected dashboard requests");
+  let exec_row =
+    List.find_opt
+      (fun row -> String.equal (row |> member "schedule_id" |> to_string) "sched-exec")
+      requests
+  in
+  match exec_row with
+  | None -> fail "sched-exec missing from dashboard projection"
+  | Some row ->
+    check string "last execution status" "succeeded"
+      (row |> member "last_execution" |> member "status" |> to_string);
+    check string "last execution detail" "test.exec"
+      (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string)
 ;;
 
 let () =
@@ -190,6 +262,8 @@ let () =
             test_schema_and_descriptor_exposed
         ; test_case "dispatch create persists schedule" `Quick
             test_dispatch_create_persists_schedule
+        ; test_case "dispatch create persists recurrence" `Quick
+            test_dispatch_create_persists_recurrence
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
         ; test_case "dashboard projection surfaces schedule FSM" `Quick

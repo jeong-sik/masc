@@ -1,8 +1,9 @@
-(** Due scanner and generic wake-signal feed for scheduled automation.
+(** Due scanner, generic wake-signal feed, and optional consumer dispatch for
+    scheduled automation.
 
-    This module does not dispatch work and does not know consumer domains. It
-    refreshes due schedule state, emits durable generic schedule signals, and
-    leaves interpretation to consumers. *)
+    This module refreshes due schedule state and emits durable generic schedule
+    signals. When a consumer is installed, dispatch remains consumer-opaque and
+    the store records only generic execution evidence. *)
 
 type signal_kind =
   | Due_candidate
@@ -22,6 +23,26 @@ type wake_signal =
 type tick_result =
   { due_changed : int
   ; emitted : wake_signal list
+  ; rescheduled : int
+  ; dispatches : dispatch_result list
+  }
+
+and dispatch_status =
+  | Dispatch_succeeded
+  | Dispatch_failed
+  | Dispatch_unsupported
+  | Dispatch_start_rejected
+
+and dispatch_result =
+  { schedule_id : string
+  ; status : dispatch_status
+  ; detail : Yojson.Safe.t option
+  ; error : string option
+  }
+
+type consumer =
+  { accepts : Schedule_domain.schedule_request -> (unit, string) result
+  ; dispatch : Schedule_domain.schedule_request -> (Yojson.Safe.t, string) result
   }
 
 type runner_error =
@@ -32,6 +53,7 @@ val runner_error_to_string : runner_error -> string
 
 val signal_kind_to_string : signal_kind -> string
 val signal_kind_of_string : string -> (signal_kind, string) result
+val dispatch_status_to_string : dispatch_status -> string
 
 val signals_dir : Workspace_utils.config -> string
 val signal_seen_path : Workspace_utils.config -> string
@@ -44,6 +66,11 @@ val read_recent_signals :
 (** Read at most [n] recent durable wake signals in chronological order. *)
 
 val tick :
-  Workspace_utils.config -> now:float -> (tick_result, runner_error) result
+  ?consumer:consumer ->
+  Workspace_utils.config ->
+  now:float ->
+  (tick_result, runner_error) result
 (** Refresh due state and append at-most-once generic wake signals for newly
-    observable due work or due approval blockers. No consumer is invoked. *)
+    observable due work or due approval blockers. Recurring due work is advanced
+    after the generic due signal path succeeds when no consumer is installed; a
+    consumer dispatch can instead complete/fail the request. *)

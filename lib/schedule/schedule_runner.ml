@@ -1,3 +1,7 @@
+(* TEL-OK: this library returns structured [dispatch_result] values and persists
+   generic execution records through [Schedule_store]. The server maintenance
+   loop owns runtime Log telemetry when it installs a concrete consumer. *)
+
 type signal_kind =
   | Due_candidate
   | Due_blocked_approval
@@ -16,6 +20,26 @@ type wake_signal =
 type tick_result =
   { due_changed : int
   ; emitted : wake_signal list
+  ; rescheduled : int
+  ; dispatches : dispatch_result list
+  }
+
+and dispatch_status =
+  | Dispatch_succeeded
+  | Dispatch_failed
+  | Dispatch_unsupported
+  | Dispatch_start_rejected
+
+and dispatch_result =
+  { schedule_id : string
+  ; status : dispatch_status
+  ; detail : Yojson.Safe.t option
+  ; error : string option
+  }
+
+type consumer =
+  { accepts : Schedule_domain.schedule_request -> (unit, string) result
+  ; dispatch : Schedule_domain.schedule_request -> (Yojson.Safe.t, string) result
   }
 
 type runner_error =
@@ -38,6 +62,13 @@ let signal_kind_of_string = function
   | "schedule.due_candidate" -> Ok Due_candidate
   | "schedule.due_blocked_approval" -> Ok Due_blocked_approval
   | other -> Error ("unknown schedule signal kind: " ^ other)
+;;
+
+let dispatch_status_to_string = function
+  | Dispatch_succeeded -> "succeeded"
+  | Dispatch_failed -> "failed"
+  | Dispatch_unsupported -> "unsupported"
+  | Dispatch_start_rejected -> "start_rejected"
 ;;
 
 let schedules_dir config =
@@ -211,6 +242,55 @@ let blocked_approval_signals ~now (state : Schedule_store.state) =
   |> List.map (make_signal ~now Due_blocked_approval)
 ;;
 
+let dispatch_result ?detail ?error schedule_id status =
+  { schedule_id; status; detail; error }
+;;
+
+let finish_failed_dispatch config ~now ~schedule_id error =
+  match Schedule_store.fail_running config ~now ~schedule_id ~error with
+  | Ok _ -> dispatch_result ~error schedule_id Dispatch_failed
+  | Error err ->
+    let error =
+      Printf.sprintf
+        "%s; failed to mark schedule failed: %s"
+        error
+        (Schedule_store.store_error_to_string err)
+    in
+    dispatch_result ~error schedule_id Dispatch_failed
+;;
+
+let safe_consumer_dispatch consumer request =
+  try consumer.dispatch request with
+  | exn -> Error (Printexc.to_string exn)
+;;
+
+let dispatch_candidate config ~now consumer (request : Schedule_domain.schedule_request) =
+  let schedule_id = request.Schedule_domain.schedule_id in
+  match consumer.accepts request with
+  | Error reason ->
+    dispatch_result ~error:reason schedule_id Dispatch_unsupported
+  | Ok () ->
+    (match Schedule_store.start_due_candidate config ~now ~schedule_id with
+     | Error err ->
+       dispatch_result ~error:(Schedule_store.store_error_to_string err) schedule_id
+         Dispatch_start_rejected
+     | Ok running_request ->
+       (match safe_consumer_dispatch consumer running_request with
+        | Error error -> finish_failed_dispatch config ~now ~schedule_id error
+        | Ok detail ->
+          (match Schedule_store.complete_running config ~now ~schedule_id ~detail () with
+           | Ok _ -> dispatch_result ~detail schedule_id Dispatch_succeeded
+           | Error err ->
+             dispatch_result ~detail
+               ~error:(Schedule_store.store_error_to_string err)
+               schedule_id Dispatch_failed)))
+;;
+
+let dispatch_candidates config ~now consumer state =
+  Schedule_store.due_execution_candidates state
+  |> List.map (dispatch_candidate config ~now consumer)
+;;
+
 let read_recent_signals config n =
   Dated_jsonl.read_recent (signal_store config) n
   |> List.filter_map (fun json ->
@@ -219,13 +299,22 @@ let read_recent_signals config n =
     | Error _ -> None)
 ;;
 
-let tick config ~now =
+let tick ?consumer config ~now =
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Service_error (Schedule_service.Store_error err))
   | Ok (state, due_changed) ->
-    let signals =
-      candidate_signals ~now state @ blocked_approval_signals ~now state
-    in
+    let candidate_signals = candidate_signals ~now state in
+    let signals = candidate_signals @ blocked_approval_signals ~now state in
     let* emitted = append_new_signals config signals in
-    Ok { due_changed; emitted }
+    (match consumer with
+     | Some consumer ->
+       let dispatches = dispatch_candidates config ~now consumer state in
+       Ok { due_changed; emitted; rescheduled = 0; dispatches }
+     | None ->
+       let schedule_ids =
+         List.map (fun (signal : wake_signal) -> signal.schedule_id) candidate_signals
+       in
+       (match Schedule_store.reschedule_due_recurring config ~now ~schedule_ids with
+        | Error err -> Error (Service_error (Schedule_service.Store_error err))
+        | Ok (_, rescheduled) -> Ok { due_changed; emitted; rescheduled; dispatches = [] }))
 ;;

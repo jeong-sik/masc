@@ -51,26 +51,45 @@ let create_ok
   ?(schedule_id = "sched-1")
   ?(risk_class = Read_only)
   ?approval_required
+  ?recurrence
   config
   =
   match
     create config ~schedule_id ?approval_required ~requested_at:100.0
       ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
       ~due_at:200.0 ~payload:(payload_json "wake me") ~risk_class
-      ~source:Operator_request ()
+      ~source:Operator_request ?recurrence ()
   with
   | Ok request -> request
   | Error err -> fail (service_error_to_string err)
 ;;
 
-let tick_ok config ~now =
-  match tick config ~now with
+let tick_ok ?consumer config ~now =
+  match tick ?consumer config ~now with
   | Ok result -> result
   | Error err -> fail (runner_error_to_string err)
 ;;
 
 let check_kind label expected actual =
   check string label (signal_kind_to_string expected) (signal_kind_to_string actual)
+;;
+
+let check_dispatch_status label expected actual =
+  check string label (dispatch_status_to_string expected) (dispatch_status_to_string actual)
+;;
+
+let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
+  let dispatch_result =
+    Option.value
+      ~default:(Ok (`Assoc [ "ok", `Bool true ]))
+      dispatch_result
+  in
+  { accepts = (fun _request -> accept)
+  ; dispatch =
+      (fun request ->
+        calls := request.schedule_id :: !calls;
+        dispatch_result)
+  }
 ;;
 
 let test_tick_emits_due_candidate_once () =
@@ -82,6 +101,7 @@ let test_tick_emits_due_candidate_once () =
   let due = tick_ok config ~now:201.0 in
   check int "one signal" 1 (List.length due.emitted);
   check int "one status transition" 1 due.due_changed;
+  check int "one-shot not rescheduled" 0 due.rescheduled;
   let signal = List.hd due.emitted in
   check_kind "kind" Due_candidate signal.kind;
   check string "schedule id" request.schedule_id signal.schedule_id;
@@ -91,6 +111,58 @@ let test_tick_emits_due_candidate_once () =
   let repeated = tick_ok config ~now:202.0 in
   check int "dedupe repeated tick" 0 (List.length repeated.emitted);
   check int "durable signal count" 1 (List.length (read_recent_signals config 10))
+;;
+
+let test_tick_dispatches_due_candidate_to_success () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request = create_ok ~schedule_id:"dispatch-1" config in
+  let result =
+    tick_ok config ~now:201.0 ~consumer:(accepting_consumer calls)
+  in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check_dispatch_status "dispatch status" Dispatch_succeeded
+    (List.hd result.dispatches).status;
+  check Alcotest.(list string) "consumer called" [ request.schedule_id ] !calls;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing after dispatch"
+   | Some stored ->
+     check string "stored succeeded" "succeeded"
+       (schedule_status_to_string stored.status));
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing execution record"
+   | Some execution ->
+     check string "execution status" "succeeded"
+       (Schedule_domain.execution_status_to_string execution.status);
+     (match execution.detail with
+      | Some (`Assoc fields) ->
+        (match List.assoc_opt "ok" fields with
+         | Some (`Bool true) -> ()
+         | _ -> fail "execution detail missing ok=true")
+      | _ -> fail "execution detail missing"))
+;;
+
+let test_tick_leaves_unsupported_candidate_due () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request = create_ok ~schedule_id:"unsupported-1" config in
+  let result =
+    tick_ok config ~now:201.0
+      ~consumer:(accepting_consumer ~accept:(Error "unsupported") calls)
+  in
+  check int "one dispatch decision" 1 (List.length result.dispatches);
+  check_dispatch_status "unsupported" Dispatch_unsupported
+    (List.hd result.dispatches).status;
+  check Alcotest.(list string) "consumer not called" [] !calls;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing after unsupported"
+   | Some stored ->
+     check string "still due" "due" (schedule_status_to_string stored.status))
 ;;
 
 let test_tick_emits_approval_blocker_then_candidate_after_grant () =
@@ -115,13 +187,108 @@ let test_tick_emits_approval_blocker_then_candidate_after_grant () =
   check int "two durable signals" 2 (List.length (read_recent_signals config 10))
 ;;
 
+let test_tick_reschedules_recurring_candidate_after_signal () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    create_ok ~schedule_id:"loop-1"
+      ~recurrence:(Interval { interval_sec = 60 })
+      config
+  in
+  let due = tick_ok config ~now:201.0 in
+  check int "first signal" 1 (List.length due.emitted);
+  check int "first reschedule" 1 due.rescheduled;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing after first tick"
+   | Some stored ->
+     check string "first status" "scheduled"
+       (schedule_status_to_string stored.status);
+     check (float 0.001) "first next due" 260.0 stored.due_at);
+  let before_next_due = tick_ok config ~now:259.0 in
+  check int "no early repeat" 0 (List.length before_next_due.emitted);
+  check int "no early reschedule" 0 before_next_due.rescheduled;
+  let second_due = tick_ok config ~now:260.0 in
+  check int "second signal" 1 (List.length second_due.emitted);
+  check int "second reschedule" 1 second_due.rescheduled;
+  check int "two durable signals" 2 (List.length (read_recent_signals config 10))
+;;
+
+let test_tick_dispatches_recurring_candidate_to_next_due () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request =
+    create_ok ~schedule_id:"loop-dispatch-1"
+      ~recurrence:(Interval { interval_sec = 60 })
+      config
+  in
+  let result =
+    tick_ok config ~now:201.0 ~consumer:(accepting_consumer calls)
+  in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check int "consumer mode does not separately reschedule" 0 result.rescheduled;
+  check Alcotest.(list string) "consumer called" [ request.schedule_id ] !calls;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing after recurring dispatch"
+   | Some stored ->
+     check string "stored scheduled" "scheduled"
+       (schedule_status_to_string stored.status);
+     check (float 0.001) "next due" 260.0 stored.due_at);
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing recurring execution"
+   | Some execution ->
+     check string "recurring execution status" "succeeded"
+       (Schedule_domain.execution_status_to_string execution.status);
+     check (float 0.001) "recurring execution due" 200.0 execution.due_at)
+;;
+
+let test_tick_marks_dispatch_failure_failed () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request = create_ok ~schedule_id:"dispatch-fail-1" config in
+  let result =
+    tick_ok config ~now:201.0
+      ~consumer:(accepting_consumer ~dispatch_result:(Error "boom") calls)
+  in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check_dispatch_status "failed" Dispatch_failed (List.hd result.dispatches).status;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing after failed dispatch"
+   | Some stored ->
+     check string "stored failed" "failed" (schedule_status_to_string stored.status));
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing failed execution"
+   | Some execution ->
+     check string "failed execution status" "failed"
+       (Schedule_domain.execution_status_to_string execution.status);
+     check (option string) "failed execution error" (Some "boom")
+       execution.error)
+;;
+
 let () =
   run "Schedule_runner"
     [ ( "tick",
         [ test_case "emits due candidate once" `Quick
             test_tick_emits_due_candidate_once
+        ; test_case "dispatches due candidate to success" `Quick
+            test_tick_dispatches_due_candidate_to_success
+        ; test_case "leaves unsupported candidate due" `Quick
+            test_tick_leaves_unsupported_candidate_due
         ; test_case "emits approval blocker then candidate after grant" `Quick
             test_tick_emits_approval_blocker_then_candidate_after_grant
+        ; test_case "reschedules recurring candidate after signal" `Quick
+            test_tick_reschedules_recurring_candidate_after_signal
+        ; test_case "dispatches recurring candidate to next due" `Quick
+            test_tick_dispatches_recurring_candidate_to_next_due
+        ; test_case "marks dispatch failure failed" `Quick
+            test_tick_marks_dispatch_failure_failed
         ] )
     ]
 ;;

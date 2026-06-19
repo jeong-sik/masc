@@ -46,6 +46,16 @@ type schedule_source =
   | Automated_request
   | System_request
 
+type recurrence =
+  | One_shot
+  | Interval of { interval_sec : int }
+  | Daily of
+      { hour : int
+      ; minute : int
+      ; second : int
+      ; timezone : string
+      }
+
 type payload =
   { kind : string
   ; schema_version : int
@@ -64,6 +74,7 @@ type schedule_request =
   ; approval_required : bool
   ; status : schedule_status
   ; source : schedule_source
+  ; recurrence : recurrence
   }
 
 type execution_decision =
@@ -84,6 +95,23 @@ type execution_grant =
   ; approved_at : float
   ; decision : execution_decision
   ; evidence : execution_evidence
+  }
+
+type execution_status =
+  | Execution_running
+  | Execution_succeeded
+  | Execution_failed
+
+type execution_record =
+  { execution_id : string
+  ; schedule_id : string
+  ; started_at : float
+  ; finished_at : float option
+  ; due_at : float
+  ; payload_digest : string
+  ; status : execution_status
+  ; detail : Yojson.Safe.t option
+  ; error : string option
   }
 
 type grant_error =
@@ -174,6 +202,25 @@ let schedule_source_of_string = function
   | other -> Error ("unknown schedule_source: " ^ other)
 ;;
 
+let recurrence_kind_to_string = function
+  | One_shot -> "one_shot"
+  | Interval _ -> "interval"
+  | Daily _ -> "daily"
+;;
+
+let execution_status_to_string = function
+  | Execution_running -> "running"
+  | Execution_succeeded -> "succeeded"
+  | Execution_failed -> "failed"
+;;
+
+let execution_status_of_string = function
+  | "running" -> Ok Execution_running
+  | "succeeded" -> Ok Execution_succeeded
+  | "failed" -> Ok Execution_failed
+  | other -> Error ("unknown execution_status: " ^ other)
+;;
+
 let grant_error_to_string = function
   | Grant_schedule_id_mismatch -> "grant schedule_id does not match request"
   | Approver_not_human -> "approver must be a human operator"
@@ -199,6 +246,11 @@ let is_side_effecting = function
 
 let requires_separate_human_grant request =
   request.approval_required || is_side_effecting request.risk_class
+;;
+
+let is_recurring = function
+  | One_shot -> false
+  | Interval _ | Daily _ -> true
 ;;
 
 let rec canonical_json = function
@@ -279,6 +331,108 @@ let bool_field name fields =
   | Error err -> Error (name ^ ": " ^ err)
 ;;
 
+let validate_interval interval_sec =
+  if interval_sec <= 0 then Error "recurrence.interval_sec must be positive"
+  else Ok interval_sec
+;;
+
+let timezone_offset_seconds timezone =
+  let parse_fixed_offset raw =
+    let len = String.length raw in
+    if len <> 6 || raw.[3] <> ':' then
+      None
+    else (
+      let sign =
+        match raw.[0] with
+        | '+' -> Some 1
+        | '-' -> Some (-1)
+        | _ -> None
+      in
+      match sign with
+      | None -> None
+      | Some sign ->
+        let int_sub start len =
+          try Some (int_of_string (String.sub raw start len)) with
+          | Failure _ -> None
+        in
+        match int_sub 1 2, int_sub 4 2 with
+        | Some hour, Some minute when hour <= 23 && minute <= 59 ->
+          Some (sign * ((hour * 3600) + (minute * 60)))
+        | _ -> None)
+  in
+  match String.trim timezone with
+  | "UTC" | "Etc/UTC" | "Z" -> Some 0
+  | "Asia/Seoul" | "KST" -> Some (9 * 3600)
+  | raw ->
+    if String.length raw > 3 && String.sub raw 0 3 = "UTC" then
+      parse_fixed_offset (String.sub raw 3 (String.length raw - 3))
+    else
+      parse_fixed_offset raw
+;;
+
+let validate_daily ~hour ~minute ~second ~timezone =
+  let* timezone = nonempty "recurrence.timezone" timezone in
+  if hour < 0 || hour > 23 then Error "recurrence.hour must be in 0..23"
+  else if minute < 0 || minute > 59 then
+    Error "recurrence.minute must be in 0..59"
+  else if second < 0 || second > 59 then
+    Error "recurrence.second must be in 0..59"
+  else (
+    match timezone_offset_seconds timezone with
+    | Some _ -> Ok (Daily { hour; minute; second; timezone })
+    | None ->
+      Error
+        "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00")
+;;
+
+let validate_recurrence = function
+  | One_shot -> Ok One_shot
+  | Interval { interval_sec } ->
+    let* interval_sec = validate_interval interval_sec in
+    Ok (Interval { interval_sec })
+  | Daily { hour; minute; second; timezone } ->
+    validate_daily ~hour ~minute ~second ~timezone
+;;
+
+let recurrence_to_yojson = function
+  | One_shot -> `Assoc [ "kind", `String "one_shot" ]
+  | Interval { interval_sec } ->
+    `Assoc [ "kind", `String "interval"; "interval_sec", `Int interval_sec ]
+  | Daily { hour; minute; second; timezone } ->
+    `Assoc
+      [ "kind", `String "daily"
+      ; "hour", `Int hour
+      ; "minute", `Int minute
+      ; "second", `Int second
+      ; "timezone", `String timezone
+      ]
+;;
+
+let recurrence_of_yojson = function
+  | `Assoc fields ->
+    let* kind = string_field "kind" fields in
+    (match kind with
+     | "one_shot" -> Ok One_shot
+     | "interval" ->
+       let* interval_sec = int_field "interval_sec" fields in
+       validate_recurrence (Interval { interval_sec })
+     | "daily" ->
+       let* hour = int_field "hour" fields in
+       let* minute = int_field "minute" fields in
+       let* second =
+         match List.assoc_opt "second" fields with
+         | None -> Ok 0
+         | Some value ->
+           (match int_of_yojson value with
+            | Ok value -> Ok value
+            | Error err -> Error ("second: " ^ err))
+       in
+       let* timezone = string_field "timezone" fields in
+       validate_recurrence (Daily { hour; minute; second; timezone })
+     | other -> Error ("unknown recurrence kind: " ^ other))
+  | _ -> Error "expected recurrence object"
+;;
+
 let actor_to_yojson (actor : actor) =
   `Assoc
     [ "id", `String actor.id
@@ -331,6 +485,54 @@ let evidence_of_request (request : schedule_request) =
   ; due_at = request.due_at
   ; risk_class = request.risk_class
   }
+;;
+
+let seconds_per_day = 86400.0
+
+let next_periodic_due_after ~period ~now ~anchor =
+  if period <= 0.0 then
+    None
+  else if anchor > now then
+    Some anchor
+  else
+    let missed = floor ((now -. anchor) /. period) +. 1.0 in
+    Some (anchor +. (missed *. period))
+;;
+
+let next_daily_due_after ~hour ~minute ~second ~timezone ~now =
+  match timezone_offset_seconds timezone with
+  | None -> None
+  | Some offset ->
+    let local_now = now +. float_of_int offset in
+    let day_start = floor (local_now /. seconds_per_day) *. seconds_per_day in
+    let target_second =
+      float_of_int ((hour * 3600) + (minute * 60) + second)
+    in
+    let target_utc = day_start +. target_second -. float_of_int offset in
+    if target_utc > now then Some target_utc else Some (target_utc +. seconds_per_day)
+;;
+
+let next_due_after ~now (request : schedule_request) =
+  match request.recurrence with
+  | One_shot -> None
+  | Interval { interval_sec } ->
+    next_periodic_due_after
+      ~period:(float_of_int interval_sec)
+      ~now
+      ~anchor:request.due_at
+  | Daily { hour; minute; second; timezone } ->
+    next_daily_due_after ~hour ~minute ~second ~timezone ~now
+;;
+
+let reschedule_after_due_signal ~now (request : schedule_request) =
+  match request.status with
+  | Due ->
+    (match next_due_after ~now request with
+     | None -> None
+     | Some due_at -> Some { request with status = Scheduled; due_at })
+  | Pending_approval | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled
+  | Expired ->
+    None
 ;;
 
 let execution_decision_to_yojson = function
@@ -396,6 +598,60 @@ let execution_grant_of_yojson = function
   | _ -> Error "expected execution_grant object"
 ;;
 
+let execution_record_to_yojson (execution : execution_record) =
+  `Assoc
+    [ "execution_id", `String execution.execution_id
+    ; "schedule_id", `String execution.schedule_id
+    ; "started_at", float_to_yojson execution.started_at
+    ; "finished_at", option_to_yojson float_to_yojson execution.finished_at
+    ; "due_at", float_to_yojson execution.due_at
+    ; "payload_digest", `String execution.payload_digest
+    ; "status", `String (execution_status_to_string execution.status)
+    ; "detail", option_to_yojson (fun value -> value) execution.detail
+    ; "error", option_to_yojson (fun value -> `String value) execution.error
+    ]
+;;
+
+let execution_record_of_yojson = function
+  | `Assoc fields ->
+    let* execution_id = string_field "execution_id" fields in
+    let* schedule_id = string_field "schedule_id" fields in
+    let* started_at = float_field "started_at" fields in
+    let* finished_at =
+      match List.assoc_opt "finished_at" fields with
+      | None | Some `Null -> Ok None
+      | Some value ->
+        let* value = float_of_yojson value in
+        Ok (Some value)
+    in
+    let* due_at = float_field "due_at" fields in
+    let* payload_digest = string_field "payload_digest" fields in
+    let* status_name = string_field "status" fields in
+    let* status = execution_status_of_string status_name in
+    let detail =
+      match List.assoc_opt "detail" fields with
+      | None | Some `Null -> None
+      | Some value -> Some value
+    in
+    let* error =
+      match List.assoc_opt "error" fields with
+      | None -> Ok None
+      | Some value -> string_option_of_yojson value
+    in
+    Ok
+      { execution_id
+      ; schedule_id
+      ; started_at
+      ; finished_at
+      ; due_at
+      ; payload_digest
+      ; status
+      ; detail
+      ; error
+      }
+  | _ -> Error "expected execution_record object"
+;;
+
 let schedule_request_to_yojson (request : schedule_request) =
   `Assoc
     [ "schedule_id", `String request.schedule_id
@@ -409,6 +665,7 @@ let schedule_request_to_yojson (request : schedule_request) =
     ; "approval_required", `Bool request.approval_required
     ; "status", `String (schedule_status_to_string request.status)
     ; "source", `String (schedule_source_to_string request.source)
+    ; "recurrence", recurrence_to_yojson request.recurrence
     ]
 ;;
 
@@ -437,6 +694,11 @@ let schedule_request_of_yojson = function
     let* status = schedule_status_of_string status_name in
     let* source_name = string_field "source" fields in
     let* source = schedule_source_of_string source_name in
+    let* recurrence =
+      match List.assoc_opt "recurrence" fields with
+      | None -> Ok One_shot
+      | Some value -> recurrence_of_yojson value
+    in
     Ok
       { schedule_id
       ; requested_by
@@ -449,6 +711,7 @@ let schedule_request_of_yojson = function
       ; approval_required
       ; status
       ; source
+      ; recurrence
       }
   | _ -> Error "expected schedule_request object"
 ;;
@@ -464,12 +727,14 @@ let create_request
   ~risk_class
   ~approval_required
   ~source
+  ?(recurrence = One_shot)
   ()
   =
   let* schedule_id = nonempty "schedule_id" schedule_id in
   let* _ = nonempty "requested_by.id" requested_by.id in
   let* _ = nonempty "scheduled_by.id" scheduled_by.id in
   let* payload = payload_of_yojson payload in
+  let* recurrence = validate_recurrence recurrence in
   let approval_required = approval_required || is_side_effecting risk_class in
   let status = if approval_required then Pending_approval else Scheduled in
   Ok
@@ -484,6 +749,7 @@ let create_request
     ; approval_required
     ; status
     ; source
+    ; recurrence
     }
 ;;
 

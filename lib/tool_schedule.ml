@@ -70,6 +70,33 @@ let status_of_arg args =
      | Error msg -> Error msg)
 ;;
 
+let required_int args key =
+  match optional_int args key with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s is required" key)
+;;
+
+let recurrence_of_arg args =
+  match string_opt args "recurrence_kind" with
+  | None | Some "one_shot" -> Ok Schedule_domain.One_shot
+  | Some "interval" ->
+    let* interval_sec = required_int args "recurrence_interval_sec" in
+    Ok (Schedule_domain.Interval { interval_sec })
+  | Some "daily" ->
+    let* hour = required_int args "recurrence_hour" in
+    let* minute = required_int args "recurrence_minute" in
+    let second =
+      (* DET-OK: missing seconds means the explicit daily schedule default at
+         the API boundary, not provider/model-derived guessing. *)
+      match optional_int args "recurrence_second" with
+      | None -> 0
+      | Some second -> second
+    in
+    let* timezone = required_string args "recurrence_timezone" in
+    Ok (Schedule_domain.Daily { hour; minute; second; timezone })
+  | Some other -> Error ("unknown recurrence_kind: " ^ other)
+;;
+
 let actor_from_args args ~prefix ~default_id ~default_kind =
   let id =
     match string_opt args (prefix ^ "_id") with
@@ -118,7 +145,7 @@ let payload_from_args args =
         ])
 ;;
 
-let schedule_request_json (request : Schedule_domain.schedule_request) =
+let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
   match Schedule_domain.schedule_request_to_yojson request with
   | `Assoc fields ->
     `Assoc
@@ -130,6 +157,11 @@ let schedule_request_json (request : Schedule_domain.schedule_request) =
          ; ( "requires_separate_human_grant"
            , `Bool (Schedule_domain.requires_separate_human_grant request) )
          ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
+         ; ( "last_execution"
+           , match last_execution with
+             | None -> `Null
+             | Some execution -> Schedule_domain.execution_record_to_yojson execution
+           )
          ])
   | other -> other
 ;;
@@ -171,6 +203,7 @@ let handle_create ~tool_name ~start_time ctx args =
     let* payload = payload_from_args args in
     let* risk_class = risk_class_of_arg args in
     let* source = source_of_arg args in
+    let* recurrence = recurrence_of_arg args in
     let* requested_by =
       actor_from_args args ~prefix:"requested_by" ~default_id:"operator"
         ~default_kind:Schedule_domain.Human_operator
@@ -189,7 +222,7 @@ let handle_create ~tool_name ~start_time ctx args =
     in
     Schedule_service.create ctx.config ?schedule_id ?requested_at ?expires_at
       ~approval_required ~requested_by ~scheduled_by ~due_at ~payload ~risk_class
-      ~source ()
+      ~source ~recurrence ()
     |> Result.map_error Schedule_service.service_error_to_string
   in
   match result with
@@ -216,10 +249,22 @@ let handle_list ~tool_name ~start_time ctx args =
       optional_int args "limit" |> Option.value ~default:50
     in
     let limit = min 200 (max 1 raw_limit) in
+    let state = Schedule_store.read_state ctx.config in
     let schedules =
-      Schedule_service.list ctx.config ?status ()
+      (match status with
+       | None -> state.Schedule_store.schedules
+       | Some expected ->
+         List.filter
+           (fun (request : Schedule_domain.schedule_request) ->
+             request.status = expected)
+           state.schedules)
       |> take limit
-      |> List.map schedule_request_json
+      |> List.map (fun (request : Schedule_domain.schedule_request) ->
+        let last_execution =
+          Schedule_store.last_execution_for_schedule state
+            ~schedule_id:request.Schedule_domain.schedule_id
+        in
+        schedule_request_json ?last_execution request)
     in
     ok ~tool_name ~start_time
       (`Assoc
@@ -233,9 +278,15 @@ let handle_get ~tool_name ~start_time ctx args =
   match required_string args "schedule_id" with
   | Error msg -> workflow_error ~tool_name ~start_time msg
   | Ok schedule_id ->
+    let state = Schedule_store.read_state ctx.config in
     (match Schedule_service.get ctx.config ~schedule_id with
      | None -> workflow_error ~tool_name ~start_time "schedule not found"
-     | Some request -> ok ~tool_name ~start_time (schedule_request_json request))
+     | Some request ->
+       let last_execution =
+         Schedule_store.last_execution_for_schedule state
+           ~schedule_id:request.Schedule_domain.schedule_id
+       in
+       ok ~tool_name ~start_time (schedule_request_json ?last_execution request))
 ;;
 
 let handle_cancel ~tool_name ~start_time ctx args =

@@ -1175,6 +1175,42 @@ function FusionMarkdown({ text }: { text: string }) {
   />`
 }
 
+// One panel model's contribution. Collapsed by default so three verbose model
+// answers stay scannable — the judge synthesis above is the conclusion, these
+// are the evidence the reader opens on demand. Failed panels show their short
+// reason inline (nothing to collapse).
+function FusionPanelRow({ entry }: { entry: FusionPanelEntry }) {
+  const [open, setOpen] = useState(false)
+  const failed = entry.status !== 'answered'
+  const tok = entry.outputTokens !== undefined ? ` · ${entry.outputTokens.toLocaleString()} tok` : ''
+  const canToggle = !!entry.answer
+  return html`
+    <div
+      class="rounded border ${failed ? 'border-[var(--color-danger,#e06c75)]/40' : 'border-[var(--color-border,#30363d)]'} px-2 py-1.5"
+      data-fusion-panel
+    >
+      ${canToggle
+        ? html`
+          <button
+            type="button"
+            class="w-full flex items-center gap-1.5 text-left text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)] ${ringFocusClasses}"
+            aria-expanded=${open}
+            onClick=${() => setOpen((v) => !v)}
+          >
+            <span aria-hidden="true">${open ? '▾' : '▸'}</span>
+            <span>${entry.model} · ${entry.status}${tok}</span>
+          </button>`
+        : html`<div class="text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)]">${entry.model} · ${entry.status}${tok}</div>`}
+      ${entry.answer && open
+        ? html`<div class="mt-1 max-h-64 overflow-y-auto"><${FusionMarkdown} text=${entry.answer} /></div>`
+        : null}
+      ${entry.reason
+        ? html`<div class="text-xs mt-1 text-[var(--color-danger,#e06c75)]">${entry.reason}</div>`
+        : null}
+    </div>
+  `
+}
+
 function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: string }) {
   const [expanded, setExpanded] = useState(false)
   const [state, setState] = useState<{
@@ -1243,23 +1279,6 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
               : null}
             ${state.status === 'loaded'
               ? html`
-                <div class="flex flex-col gap-2">
-                  ${state.panel.map((p, i) => {
-                    const tok = p.outputTokens !== undefined ? ` · ${p.outputTokens.toLocaleString()} tok` : ''
-                    const failed = p.status !== 'answered'
-                    return html`
-                      <div key=${i} class="rounded border ${failed ? 'border-[var(--color-danger,#e06c75)]/40' : 'border-[var(--color-border,#30363d)]'} px-2 py-1.5">
-                        <div class="text-2xs font-mono text-[var(--color-fg-secondary,#9da7b3)]">${p.model} · ${p.status}${tok}</div>
-                        ${p.answer
-                          ? html`<div class="mt-1 max-h-64 overflow-y-auto"><${FusionMarkdown} text=${p.answer} /></div>`
-                          : null}
-                        ${p.reason
-                          ? html`<div class="text-xs mt-1 text-[var(--color-danger,#e06c75)]">${p.reason}</div>`
-                          : null}
-                      </div>
-                    `
-                  })}
-                </div>
                 ${state.judge
                   ? html`
                     <div class="rounded border border-[var(--color-brass-border,#3a3a2a)] px-2 py-1.5" data-fusion-judge>
@@ -1271,6 +1290,14 @@ function ChatFusionCard({ boardPostId, runId }: { boardPostId: string; runId?: s
                         : state.judge.resolvedAnswer
                           ? html`<div class="mt-1"><${FusionMarkdown} text=${state.judge.resolvedAnswer} /></div>`
                           : null}
+                    </div>
+                  `
+                  : null}
+                ${state.panel.length > 0
+                  ? html`
+                    <div class="flex flex-col gap-2">
+                      <div class="text-2xs font-mono uppercase tracking-wide text-[var(--color-fg-secondary,#9da7b3)]">패널 ${state.panel.length}</div>
+                      ${state.panel.map((p, i) => html`<${FusionPanelRow} key=${i} entry=${p} />`)}
                     </div>
                   `
                   : null}

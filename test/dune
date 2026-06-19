@@ -1109,6 +1109,13 @@
  (modules test_lockfree_atomic)
  (libraries alcotest masc.lockfree_atomic))
 
+; RFC-0262 §9 completion-trust audit (foreign-completion regression oracle).
+
+(test
+ (name test_completion_trust_audit)
+ (modules test_completion_trust_audit)
+ (libraries alcotest yojson masc.completion_trust_audit))
+
 ; Scheduled internal automation domain guardrails.
 
 (test

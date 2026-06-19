@@ -514,6 +514,8 @@ let transition_task_outcome_r
                ~to_status:new_status
                ~action:action_s
                ~forced:forced
+               ~authority
+               ?assignee:(Masc_domain.task_assignee_of_status task.task_status)
                ?notes:(trim_opt (Some notes))
                ?reason:(trim_opt (Some reason))
                ?handoff_context:backlog_update.persisted_handoff_context

@@ -139,6 +139,16 @@
  (package masc)
  (libraries masc masc_core unix eio eio_main))
 
+;; Completion-trust audit CLI (RFC-0262 §9): fold .masc/events/ transition log
+;; for foreign-task completions. Pure auditor only — no masc runtime link.
+
+(executable
+ (name masc_completion_trust_audit)
+ (modules masc_completion_trust_audit)
+ (public_name masc-completion-trust-audit)
+ (package masc)
+ (libraries unix yojson masc.completion_trust_audit))
+
 ;; RFC-0232 P4: offline mention backfill for keeper chat lanes.
 ;; Stamps the [mentions] field onto pre-P4 user rows; run with the
 ;; server stopped.

@@ -60,7 +60,7 @@ describe('dashboard surface navigation', () => {
     expect(workspace?.defaultTab).toBe('workspace')
   })
 
-  it('keeps the v2 primary shell aligned to the prototype surface set', () => {
+  it('keeps the v2 primary shell aligned to the prototype surface set plus the operator-restored Logs surface', () => {
     expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
       'overview',
       'workspace',
@@ -69,6 +69,7 @@ describe('dashboard surface navigation', () => {
       'code',
       'connectors',
       'settings',
+      'logs',
     ])
     expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
       'Overview',
@@ -78,6 +79,7 @@ describe('dashboard surface navigation', () => {
       'IDE',
       'Connectors',
       'Settings',
+      'Logs',
     ])
   })
 

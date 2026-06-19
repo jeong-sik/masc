@@ -479,7 +479,7 @@ let minimum_review_time_s = 180.0
 let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
   let decision_str = approval_decision_to_string decision in
   let elapsed = Unix.gettimeofday () -. entry.requested_at in
-  if decision = Approve && elapsed < minimum_review_time_s then begin
+  if decision = Agent_sdk.Hooks.Approve && elapsed < minimum_review_time_s then begin
     let remaining = int_of_float (minimum_review_time_s -. elapsed) in
     Log.Keeper.warn
       "HITL_RUBBER_STAMP_REJECTED: id=%s keeper=%s tool=%s elapsed=%.1fs min=%.1fs remaining=%ds"

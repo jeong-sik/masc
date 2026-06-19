@@ -267,9 +267,14 @@ let librarian_max_parse_retries = 2
 let parse_retry_nudge =
   "Your previous response could not be parsed as the required JSON episode \
    object. Respond with ONLY a single JSON object — no markdown fences, no \
-   prose — containing: episode_summary (string), claims (array of objects with \
-   claim, confidence, category, source_turn), open_items, constraints, \
-   preserved_tool_refs."
+   prose. Required shape:\n\
+   {\"episode_summary\": \"string\",\n\
+   \"claims\": [{\"claim\": \"string\", \"category\": \"fact|preference|blocker|goal|constraint|ephemeral|validated_approach|lesson|code_change\", \"source_turn\": 0, \"source_tool_call_id\": \"optional-string\"}],\n\
+   \"open_items\": [\"string\"],\n\
+   \"constraints\": [\"string\"],\n\
+   \"preserved_tool_refs\": [\"string\"]}\n\
+   source_turn must be an integer. Do not include a confidence field and do not \
+   add any fields not shown above."
 
 type attempt_outcome =
   | Parsed of Keeper_memory_os_types.episode

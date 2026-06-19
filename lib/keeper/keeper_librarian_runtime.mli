@@ -49,9 +49,9 @@ val max_messages : unit -> int
     turns are not evicted before the next due extraction. *)
 
 val default_timeout_sec : unit -> float
-(** Provider timeout for post-turn extraction. Defaults to governance inference
-    timeout and can be overridden with
-    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC]. *)
+(** Provider timeout for post-turn extraction. Defaults to
+    [librarian_default_timeout_sec] (600 s, aligned with the keeper turn budget)
+    and can be overridden with [MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC]. *)
 
 val runtime_id_for_librarian : runtime_id:string -> string
 (** Runtime id after applying the optional

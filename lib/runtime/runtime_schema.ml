@@ -192,6 +192,13 @@ type config =
         ({!Runtime.load_list}), mirroring [\[runtime\].default] validation. The
         id is an opaque binding key here — only the OAS adapter parses it into
         provider/model/spec. *)
+  ; media_failover : string list
+    (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
+        when a turn's input modality (image/audio/document) exceeds the assigned
+        runtime's declared capabilities; the turn reroutes to the first that
+        admits it. [[]] = derive capable runtimes from declared
+        [\[models.*.capabilities\]] in declaration order. Each id must resolve to
+        a configured runtime (rejected at load like [\[runtime\].default]). *)
   }
 [@@deriving show, eq]
 

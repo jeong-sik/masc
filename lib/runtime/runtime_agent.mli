@@ -190,6 +190,46 @@ val runtime_observation_for_terminal_config :
   config ->
   Runtime_observation.runtime_observation
 
+(** {1 RFC-0265 — capability-driven proactive runtime reroute} *)
+
+type reroute_decision =
+  | No_reroute_needed
+  | Reroute of { to_runtime_id : string; reason : string }
+  | No_capable_runtime of { required : string list }
+
+val decide_modality_reroute :
+  assigned_caps:Llm_provider.Capabilities.capabilities ->
+  required_modalities:string list ->
+  candidates:(string * Llm_provider.Capabilities.capabilities) list ->
+  reroute_decision
+(** Pure pre-dispatch reroute decision. [No_reroute_needed] when [assigned_caps]
+    already admit [required_modalities]; [Reroute] to the first [candidates] entry
+    whose capabilities admit them (declaration/[media_failover] order is the
+    caller's responsibility); [No_capable_runtime] when none qualify (caller keeps
+    the loud capability rejection as the floor). Deterministic: no I/O, no provider
+    liveness (deferred to RFC-0260). *)
+
+val input_capabilities_of_runtime :
+  Runtime.t -> Llm_provider.Capabilities.capabilities
+(** Effective input capabilities of a materialized runtime: provider caps overlaid
+    with the model's declared media capabilities (the MASC SSOT). Used to score the
+    assigned runtime and reroute candidates. *)
+
+val media_reroute_candidates :
+  exclude:string -> (string * Llm_provider.Capabilities.capabilities) list
+(** Ordered [(runtime_id, input_caps)] reroute candidates: [\[runtime\].media_failover]
+    order first, then remaining configured runtimes in declaration order, excluding
+    [exclude]. Reads the runtime cache; deterministic (no provider liveness). *)
+
+val decide_modality_reroute_for_runtime :
+  assigned:Runtime.t ->
+  Agent_sdk.Types.content_block list ->
+  reroute_decision
+(** Keeper-dispatch convenience: gather candidates from the runtime cache and
+    decide a reroute for [assigned] given the turn's content blocks. Composes
+    [input_capabilities_of_runtime] / [media_reroute_candidates] /
+    [decide_modality_reroute]. *)
+
 module For_testing : sig
   val request_runtime_fields_on_base_config :
     base:Llm_provider.Provider_config.t ->
@@ -211,6 +251,9 @@ module For_testing : sig
 
   val required_modalities_of_content_blocks :
     Agent_sdk.Types.content_block list -> string list
+
+  val caps_admit_required_modalities :
+    Llm_provider.Capabilities.capabilities -> string list -> bool
 
   val validate_content_blocks_against_capabilities :
     provider_label:string ->

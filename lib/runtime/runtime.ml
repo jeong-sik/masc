@@ -120,6 +120,28 @@ let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
                runtime.model.id)))
 ;;
 
+(* [runtime].media_failover (RFC-0265) mirrors [runtime].librarian validation for
+   each id in the ordered list: an unknown id is an operator typo rejected at
+   load, not a silent drop (Unknown→Permissive anti-pattern). [[]] is the designed
+   "derive capable runtimes from declared capabilities" case. *)
+let validate_media_failover ~(config_path : string) (runtimes : t list)
+    (media_failover : string list) : (unit, string) result =
+  match
+    List.find_opt
+      (fun id ->
+        not (List.exists (fun (r : t) -> String.equal r.id id) runtimes))
+      media_failover
+  with
+  | None -> Ok ()
+  | Some id ->
+    Error
+      (Printf.sprintf
+         "%s: [runtime].media_failover entry %S not found among %d runtimes"
+         config_path
+         id
+         (List.length runtimes))
+;;
+
 (* Pure decision for the capability gate, separated from the global OAS catalog
    lookup so it is unit-testable. [entries] is [(label, known_to_oas)] per runtime.
 
@@ -167,7 +189,12 @@ let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t li
 ;;
 
 let materialize_config ~(config_path : string) (cfg : config)
-  : ( t list * t * (string * string) list * string option * string option
+  : ( t list
+      * t
+      * (string * string) list
+      * string option
+      * string option
+      * string list
     , string )
     result
   =
@@ -200,6 +227,9 @@ let materialize_config ~(config_path : string) (cfg : config)
     validate_cross_verifier_runtime ~config_path runtimes
       cfg.cross_verifier_runtime_id
   in
+  let* () =
+    validate_media_failover ~config_path runtimes cfg.media_failover
+  in
   (* The OAS catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Production startup applies the stricter gate via [init_default_strict]. *)
@@ -208,11 +238,17 @@ let materialize_config ~(config_path : string) (cfg : config)
     , rt
     , assignments
     , cfg.librarian_runtime_id
-    , cfg.cross_verifier_runtime_id )
+    , cfg.cross_verifier_runtime_id
+    , cfg.media_failover )
 ;;
 
 let load_list ~(config_path : string)
-  : ( t list * t * (string * string) list * string option * string option
+  : ( t list
+      * t
+      * (string * string) list
+      * string option
+      * string option
+      * string list
     , string )
     result
   =
@@ -252,14 +288,22 @@ let librarian_runtime_id_ref : string option Atomic.t = Atomic.make None
    [cross_verifier_runtime_id]; validated at load so a [Some] always resolves. *)
 let cross_verifier_runtime_id_ref : string option Atomic.t = Atomic.make None
 
+(* [runtime].media_failover (RFC-0265) — ordered runtime ids for modality-gated
+   reroute, or [[]] to derive capable runtimes from declared capabilities.
+   Populated by [init_default], read by [media_failover]; every id is validated at
+   load so each resolves to a configured runtime. *)
+let media_failover_ref : string list Atomic.t = Atomic.make []
+
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
-let set_loaded (runtimes, rt, assignments, librarian_id, cross_verifier_id) =
+let set_loaded
+    (runtimes, rt, assignments, librarian_id, cross_verifier_id, media_failover) =
   Atomic.set runtimes_ref runtimes;
   Atomic.set default_runtime_ref (Some rt);
   Atomic.set keeper_assignments_ref assignments;
   Atomic.set librarian_runtime_id_ref librarian_id;
-  Atomic.set cross_verifier_runtime_id_ref cross_verifier_id
+  Atomic.set cross_verifier_runtime_id_ref cross_verifier_id;
+  Atomic.set media_failover_ref media_failover
 
 let init_default ~config_path =
   let* loaded = load_list ~config_path in
@@ -274,7 +318,7 @@ let init_default ~config_path =
 let init_default_strict ~config_path =
   match load_list ~config_path with
   | Error _ as e -> e
-  | Ok ((runtimes, _, _, _, _) as loaded) ->
+  | Ok ((runtimes, _, _, _, _, _) as loaded) ->
     (match validate_runtime_model_capabilities ~config_path runtimes with
      | Error _ as e -> e
      | Ok () ->
@@ -306,6 +350,11 @@ let librarian_runtime_id () = Atomic.get librarian_runtime_id_ref
    [None] = the evaluator inherits [runtime].default. Reads the Atomic ref set by
    [init_default]. *)
 let cross_verifier_runtime_id () = Atomic.get cross_verifier_runtime_id_ref
+
+(* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
+   reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
+   Atomic ref set by [init_default]. *)
+let media_failover () = Atomic.get media_failover_ref
 
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the *requested* runtime (a keeper's persona
@@ -594,7 +643,13 @@ let validate_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  let* (_ : t list * t * (string * string) list * string option * string option) =
+  let* (_
+         : t list
+           * t
+           * (string * string) list
+           * string option
+           * string option
+           * string list) =
     materialize_config ~config_path cfg
   in
   Ok ()

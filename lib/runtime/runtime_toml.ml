@@ -662,6 +662,20 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let cross_verifier_runtime_id =
     Otoml.find_opt toml Otoml.get_string [ "runtime"; "cross_verifier" ]
   in
+  let media_failover =
+    (* RFC-0265 — ordered runtime ids for modality-gated reroute. RFC-0145:
+       narrow to the [Otoml.get_array] wrong-type exception; a malformed value
+       degrades to [] (→ derive-from-declared-caps), and any id typo is caught
+       loudly at load by {!Runtime.validate_media_failover}. *)
+    match Otoml.find_opt toml Fun.id [ "runtime"; "media_failover" ] with
+    | None -> []
+    | Some v ->
+      (try Otoml.get_array Otoml.get_string v with
+       | Otoml.Type_error _ ->
+         Log.Runtime.warn
+           "runtime_toml: [runtime].media_failover — expected string array, ignoring";
+         [])
+  in
   if all_errors <> []
   then Error all_errors
   else (
@@ -683,6 +697,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; librarian_runtime_id
       ; cross_verifier_runtime_id
       ; keeper_assignments
+      ; media_failover
       })
 ;;
 

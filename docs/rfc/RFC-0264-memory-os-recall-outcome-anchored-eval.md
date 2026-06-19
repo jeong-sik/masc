@@ -1,5 +1,5 @@
 ---
-rfc: 0263
+rfc: 0264
 title: "Memory OS recall outcome-anchored eval harness"
 status: Draft
 authors: [vincent, claude]
@@ -9,7 +9,7 @@ related: [RFC-0199, RFC-0222, RFC-0247, RFC-0259, RFC-0244, RFC-0252]
 implementation_prs: []
 ---
 
-# RFC-0263: Memory OS recall outcome-anchored eval harness
+# RFC-0264: Memory OS recall outcome-anchored eval harness
 
 Status: Draft · Harness-first · The bottleneck is not a missing measurement tool — it is the missing *plumbing* that connects a recall to the outcome that followed.
 
@@ -24,7 +24,7 @@ Today (`scripts/memory_os_judge_eval.py`): `noise_rate = ephemeral / (ephemeral 
 But the gap is deeper than a missing metric. Three substrates the obvious design would assume **do not exist**, verified at HEAD:
 
 1. **No outcome evaluator is wired.** The typed evidence schema is RFC-0199 `Evidence_claim.t` (`PR_merged {repo;pr_number} | CI_pass | Tests_pass | Artifact_exists | File_changed | Custom_check`). Its `.mli` states: *"this schema is currently UNWIRED … the `t list` was removed (fan-in 0: never populated, never read, no Phase B evaluator)"*. The RFC-0222 `acceptance` type (`Pr_merged`/`Command_exits_zero`/`Manual_review`) is a **proposal only** — `rg 'type acceptance' lib/` → 0 hits, RFC-0222 `implementation_prs: []`. So there is no live producer of objective outcomes to join against.
-2. **No trace↔outcome join key exists in live data.** `costs.jsonl`: `task_id` is null in **14531/14531 (100%)** entries, no `trace_id` field at all. Only `facts.jsonl`/episodes carry `source.trace_id`. There is no live key linking a keeper's trace to the PR/CI it produced.
+2. **The trace↔task join key exists; only the PR-outcome lookup is missing.** `execution_receipt` (`~/.masc/keepers/<k>/execution-receipts/YYYY-MM/DD.jsonl`) already records `trace_id` + `current_task_id` + turn `outcome` + `goal_ids` every turn (verified against live receipts 2026-06-19). `costs.jsonl` lacks it (`task_id` null in 14531/14531, no `trace_id`) but that is a billing stream, irrelevant. So a trace can be joined to its task today; what is absent is the **PR/CI merge state** for that task — a forge lookup (P-b), not a producer change. (The first draft mis-stated this as "no join key", having looked only at `costs.jsonl`.)
 3. **The measurement tool is not CI-safe.** `calibrate` runs unconditionally in every mode and POSTs to a live judge endpoint (`_chat → urllib.request.urlopen → /chat/completions`); it `sys.exit`s without endpoint+credentials. "Run measure/calibrate in CI, no live LLM" is false.
 
 So "Harness First" is violated *and* the harness cannot simply be turned on — its inputs are not plumbed. This RFC builds the plumbing first, then the metric. It is the gate for all other Memory OS work (`consolidate` wiring, recall rerank, GC default-on); none of those can prove improvement until this lands.
@@ -37,18 +37,18 @@ So "Harness First" is violated *and* the harness cannot simply be turned on — 
 | What "done" means for a checkable task (task contract) | RFC-0222 (`acceptance` **proposal, unimplemented**) |
 | Recall ordering (structural, no learned number) | RFC-0247 (edge/activation organ removed by RFC-0251) |
 | Volatile claim grounding / retraction / decay; `external_ref` field | RFC-0259 (Draft; `external_ref` is option (b), **unimplemented**) |
-| **Whether recall changed the outcome — measurement + the plumbing for it** | **This RFC (0263)** |
+| **Whether recall changed the outcome — measurement + the plumbing for it** | **This RFC (0264)** |
 
-0263 introduces **no behavior change to recall or write** (its ledger is append-only, never read on the hot path). The trace-linkage emit (§3.0 P-a) is the one new producer-side field; it is observability metadata, not a control input.
+0264 introduces **no behavior change to recall or write** (its injection ledger, §3.2, is append-only, never read on the hot path). It adds **no producer-side field at all**: trace linkage already exists in `execution_receipt`. 0264 is pure measurement — a read-only forge collector plus offline metrics.
 
 ## §3 Design
 
-### §3.0 Prerequisites (the real first work — none of these exist today)
+### §3.0 Prerequisites (P-a already exists; P-b/P-c are the real first work)
 
 | Prereq | Gap (verified) | This RFC's resolution |
 |--------|----------------|------------------------|
-| **P-a trace linkage** | `costs.jsonl` task_id 100% null, no trace_id; no trace→PR key | Emit `trace_id` (and `task_id` when claimed) onto the cost/turn-outcome record. Smallest possible producer change; everything downstream joins on it. |
-| **P-b outcome producer** | `Evidence_claim.t` UNWIRED, fan-in 0; no Phase B evaluator; RFC-0222 acceptance unimplemented | 0263 does **not** wait for RFC-0199 Phase B. It adds an independent, read-only **forge collector**: extract PR numbers a trace touched (from `events.jsonl` claims, structured), query the forge (`gh`) for terminal merge/CI state. Converges with RFC-0199 Phase B later (same `Evidence_claim.t` shape). |
+| **P-a trace linkage** | **already present** in `execution_receipt` (trace_id + current_task_id + outcome + goal_ids per turn; verified against live receipts 2026-06-19). Only `costs.jsonl` lacks it (billing, irrelevant). | No new emit needed. The forge collector (P-b) reads `execution_receipt` as the trace↔task join source. P1 was dropped to "already satisfied". |
+| **P-b outcome producer** | `Evidence_claim.t` UNWIRED, fan-in 0; no Phase B evaluator; RFC-0222 acceptance unimplemented | 0264 does **not** wait for RFC-0199 Phase B. It adds an independent, read-only **forge collector**: extract PR numbers a trace touched (from `events.jsonl` claims, structured), query the forge (`gh`) for terminal merge/CI state. Converges with RFC-0199 Phase B later (same `Evidence_claim.t` shape). |
 | **P-c external_ref** | RFC-0259 option (b) `external_ref : {kind;id} option`, `rg external_ref lib/` → 0 hits | Precise `recall_relevance` join needs it. Until it ships, use a coarser `normalize_claim` ⨝ PR-body/path match, explicitly labelled approximate. Hard dep for the precise metric. |
 
 ### §3.1 Ground truth = forge terminal state (objective, no judge)
@@ -111,7 +111,7 @@ Check in an outcome-labeled trace corpus under `test/fixtures/recall_outcome/` (
 ## §6 Limitations (stated, not hidden)
 
 1. **Observational, not causal.** `recall_relevance@merged` rising does not prove recall *caused* the merge (confounds: task difficulty, keeper, provider availability). The causal version is A/B trace replay (recall on/off on the same trace), needing deterministic replay — **explicit future RFC**.
-2. **Depends on absent substrate.** The objective-outcome path needs P-a (trace linkage) and a forge collector before any number is produced; the precise relevance metric needs RFC-0259 `external_ref`. 0263's honest claim: *after the prerequisites land, we can see whether recalled context tracks real outcomes and catch regressions* — strictly more than today's zero, but not free.
+2. **Depends on absent substrate.** The objective-outcome path needs P-a (trace linkage) and a forge collector before any number is produced; the precise relevance metric needs RFC-0259 `external_ref`. 0264's honest claim: *after the prerequisites land, we can see whether recalled context tracks real outcomes and catch regressions* — strictly more than today's zero, but not free.
 
 ## §7 Phases
 
@@ -136,6 +136,6 @@ Reordered from the first draft: there is no "P0 = none, code exists" win beyond 
 
 ## §9 Open questions (owner decision)
 
-1. P-b: independent forge collector (this RFC) vs first wiring RFC-0199 Phase B (`Evidence_claim` producer)? — recommend independent collector now, converge later; do not block 0263 on RFC-0199.
+1. P-b: independent forge collector (this RFC) vs first wiring RFC-0199 Phase B (`Evidence_claim` producer)? — recommend independent collector now, converge later; do not block 0264 on RFC-0199.
 2. P-a placement: trace_id on `costs.jsonl` vs a dedicated `turn_outcome.jsonl` linkage record? — recommend a dedicated record (costs is a billing stream; overloading it couples concerns).
 3. P4 gate: required check vs annotation? — annotate first, ratchet to required after one release of data.

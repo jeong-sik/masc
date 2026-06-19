@@ -1,5 +1,5 @@
 name: Memory OS Eval Tests
-# RFC-0263 P0: run the Memory OS eval harness pure-function unit tests in CI.
+# RFC-0264 P0: run the Memory OS eval harness pure-function unit tests in CI.
 # These functions (noise_rate, _parse_index, deterministic_sample,
 # _split_runtime_id, _looks_like_answer_array, _extract_json_array) are
 # deterministic and make no network call, so this job needs no judge endpoint

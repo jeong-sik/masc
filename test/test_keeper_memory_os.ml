@@ -1028,6 +1028,7 @@ let test_jsonl_tail_reads_last_entries () =
    score-threshold discard, so this asserts only the structural outcomes. The
    duplicate winner is chosen by [last_verified_at] recency, not by confidence. *)
 let test_gc_dry_run_and_rewrite () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
   with_temp_keepers_dir (fun _keepers_dir ->
     let keeper_id = "gc-keeper" in
     let now = 1_000_000.0 in
@@ -1080,7 +1081,43 @@ let test_gc_dry_run_and_rewrite () =
     Alcotest.(check bool)
       "drops expired"
       false
-      (List.exists (fun f -> String.equal f.Types.claim "expired fact") survivors))
+      (List.exists (fun f -> String.equal f.Types.claim "expired fact") survivors)))
+;;
+
+(* RFC-0247 forgetting safety: a malformed JSONL row must not be silently dropped
+   and the surrounding facts overwritten. GC now reads strictly under the facts
+   lock, so a corrupt store is left byte-for-byte untouched and the error
+   surfaces. Regression for the pre-fix lenient [read_facts_all] + unconditional
+   [rewrite_facts_atomically], which erased every unparseable row on the next
+   sweep — silent, permanent loss on a durability path. *)
+let test_gc_preserves_corrupt_store () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "gc-corrupt-keeper" in
+    let now = 1_000_000.0 in
+    let valid = { (fact_fixture ~now ()) with Types.claim = "durable knowledge" } in
+    Memory_io.append_fact ~keeper_id valid;
+    (* Append a torn / non-JSON line, as a crash mid-append or disk corruption
+       would leave behind. *)
+    let path = Memory_io.facts_path ~keeper_id in
+    let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
+    output_string oc "{ broken json\n";
+    close_out oc;
+    let read_raw () = In_channel.with_open_bin path In_channel.input_all in
+    let before = read_raw () in
+    (match GC.run_gc ~keeper_id ~now () with
+     | _report -> Alcotest.fail "expected run_gc to raise on a corrupt store"
+     | exception Invalid_argument _ -> ());
+    Alcotest.(check string)
+      "corrupt store left untouched (no silent drop + overwrite)"
+      before
+      (read_raw ());
+    (* The valid fact is still recoverable — GC did not erase it alongside the
+       bad line. *)
+    Alcotest.(check int)
+      "valid fact still on disk"
+      1
+      (List.length (Memory_io.read_facts_all ~keeper_id))))
 ;;
 
 let test_recall_context_empty_without_memory () =
@@ -2286,6 +2323,10 @@ let () =
             "gc dry-run and rewrite"
             `Quick
             test_gc_dry_run_and_rewrite
+        ; Alcotest.test_case
+            "gc preserves a corrupt store instead of erasing it"
+            `Quick
+            test_gc_preserves_corrupt_store
         ] )
     ; ( "recall"
       , [ Alcotest.test_case

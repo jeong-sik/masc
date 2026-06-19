@@ -167,8 +167,10 @@ export type RuntimeDraft = {
   runtime_id: string
   sandbox_profile: SandboxProfile
   active_goal_ids: string[]
+  mention_targets_text: string
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
+  tool_denylist_text: string
   proactive_enabled: boolean
   proactive_idle_sec: number
   proactive_cooldown_sec: number
@@ -208,8 +210,10 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     active_goal_ids: c.workspace.active_goal_ids.length > 0
       ? c.workspace.active_goal_ids
       : c.active_goal_ids,
+    mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
+    tool_denylist_text: c.tools.tool_denylist.join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
     proactive_cooldown_sec: c.proactive.cooldown_sec,
@@ -226,13 +230,17 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
 export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
   const newPaths = draft.allowed_paths_text.split('\n').map(s => s.trim()).filter(Boolean)
+  const newMentionTargets = listTextToStrings(draft.mention_targets_text)
+  const newToolDenylist = listTextToStrings(draft.tool_denylist_text)
   const origPaths = orig.allowed_paths ?? []
   const origActiveGoalIds = orig.workspace.active_goal_ids.length > 0
     ? orig.workspace.active_goal_ids
     : orig.active_goal_ids
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
+  if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
+  if (!sameStringArray(newToolDenylist, orig.tools.tool_denylist)) payload.tool_denylist = newToolDenylist
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
@@ -266,12 +274,18 @@ function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
   return a.every((value, index) => value === b[index])
 }
 
+function listTextToStrings(text: string): string[] {
+  return dedupeStrings(text.split('\n'))
+}
+
 function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<string, boolean> {
   const payload = buildRuntimePayload(rd, c)
   return {
     runtime_id: 'runtime_id' in payload,
     active_goal_ids: 'active_goal_ids' in payload,
+    mention_targets: 'mention_targets' in payload,
     allowed_paths: 'allowed_paths' in payload,
+    tool_denylist: 'tool_denylist' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
@@ -873,6 +887,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   const selectedActiveGoalIds = rd
     ? rd.active_goal_ids
     : (c.workspace.active_goal_ids.length > 0 ? c.workspace.active_goal_ids : c.active_goal_ids)
+  const currentMentionTargets = rd
+    ? listTextToStrings(rd.mention_targets_text)
+    : c.workspace.mention_targets
+  const currentToolDenylist = rd
+    ? listTextToStrings(rd.tool_denylist_text)
+    : c.tools.tool_denylist
   const knownGoalIds = new Set(goalOptions.map((goal) => goal.id))
   const unknownSelectedGoalIds = goalOptionsLoaded
     ? selectedActiveGoalIds.filter((goalId) => !knownGoalIds.has(goalId))
@@ -966,6 +986,24 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${SectionHeader} size="xs" class="mb-1">런타임 후보</${SectionHeader}>
         <${RuntimeList} runtimes=${c.execution.models} />
       </div>
+
+      <${SectionHeader} title="툴 정책" />
+      ${rd ? html`
+        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.tool_denylist ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-[var(--color-fg-secondary)]">tool_denylist</span>
+            <span class="text-xs text-[var(--color-fg-muted)]">${currentToolDenylist.length}개</span>
+          </div>
+          <textarea aria-label="tool_denylist" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+            rows=${3}
+            value=${rd.tool_denylist_text}
+            placeholder="mcp__masc__dangerous_tool"
+            onInput=${(e: Event) => updateRuntimeDraft('tool_denylist_text', (e.target as HTMLTextAreaElement).value)}
+          ></textarea>
+        </div>
+      ` : html`
+        <${ConfigRow} label="tool_denylist" value=${currentToolDenylist.join(', ') || MISSING_DATA_DASH} />
+      `}
 
       <${SectionHeader} title="컴팩션" />
       <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
@@ -1126,17 +1164,30 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           </div>
         ` : null}
       </div>
-      ${isVerifierRoleKeeper(c.workspace.mention_targets) ? html`
+      ${isVerifierRoleKeeper(currentMentionTargets) ? html`
       <div class="mb-2 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-3 py-2">
         <span class="rounded-[var(--r-1)] border border-[var(--accent-40)] bg-[var(--accent-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-accent-fg">검증자</span>
         <span class="text-2xs text-text-body">이 keeper는 task completion_contract를 독립 실측하는 검증자 역할입니다.</span>
       </div>
       ` : null}
-      ${c.workspace.mention_targets.length > 0 ? html`
-      <div class="mt-1.5">
-        <${SectionHeader} size="xs" class="mb-1">멘션 대상</${SectionHeader}>
-        <${ModelList} models=${c.workspace.mention_targets} />
-      </div>
+      ${rd ? html`
+        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.mention_targets ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-[var(--color-fg-secondary)]">mention_targets</span>
+            <span class="text-xs text-[var(--color-fg-muted)]">${currentMentionTargets.length}개</span>
+          </div>
+          <textarea aria-label="mention_targets" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+            rows=${3}
+            value=${rd.mention_targets_text}
+            placeholder="sangsu"
+            onInput=${(e: Event) => updateRuntimeDraft('mention_targets_text', (e.target as HTMLTextAreaElement).value)}
+          ></textarea>
+        </div>
+      ` : currentMentionTargets.length > 0 ? html`
+        <div class="mt-1.5">
+          <${SectionHeader} size="xs" class="mb-1">멘션 대상</${SectionHeader}>
+          <${ModelList} models=${currentMentionTargets} />
+        </div>
       ` : null}
       <div class="mt-1.5">
         <${SectionHeader} size="xs" class="mb-1">참여 네임스페이스</${SectionHeader}>

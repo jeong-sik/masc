@@ -5,6 +5,8 @@ open Result.Syntax
 
 (* ── Source taxonomy ─────────────────────────────────────────────── *)
 
+open Result.Syntax
+
 type source =
   | User_message [@tla.symbol "user_message"]
   | Memory_recall [@tla.symbol "memory_recall"]
@@ -51,20 +53,24 @@ let validate_salience s =
   else if s < 0.0 || s > 1.0 then
     Error (Printf.sprintf "Stimulus.make: salience out of range [0,1]: %f" s)
   else Ok ()
+;;
 
 let validate_id id =
-  if String.length id = 0 then Error "Stimulus.make: id must be non-empty"
-  else Ok ()
+  if String.length id = 0 then Error "Stimulus.make: id must be non-empty" else Ok ()
+;;
+
+let make_result ~id ~source ~payload ~salience ~timestamp =
+  let open Result.Syntax in
+  let* () = validate_id id in
+  let* () = validate_salience salience in
+  Ok { id; source; payload; salience; timestamp }
+;;
 
 let make ~id ~source ~payload ~salience ~timestamp =
-  let () =
-    match validate_id id with
-    | Error msg -> invalid_arg msg
-    | Ok () -> ()
-  in
-  match validate_salience salience with
+  match make_result ~id ~source ~payload ~salience ~timestamp with
+  | Ok t -> t
   | Error msg -> invalid_arg msg
-  | Ok () -> { id; source; payload; salience; timestamp }
+;;
 
 (* ── Scoring ─────────────────────────────────────────────────────── *)
 
@@ -159,9 +165,7 @@ let of_json (j : Yojson.Safe.t) : (t, string) result =
       in
       (* Re-run construction-time invariants so [of_json |> to_json]
          and [make ...] enforce the same range. *)
-      let* () = validate_id id in
-      let* () = validate_salience salience in
-      Ok { id; source; payload; salience; timestamp }
+      make_result ~id ~source ~payload ~salience ~timestamp
   | other ->
       Error
         (Printf.sprintf

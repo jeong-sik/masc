@@ -219,7 +219,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('sessions')
   })
 
-  it('surfaces four primary Monitor lanes and keeps remaining diagnostics routeable', () => {
+  it('surfaces four primary Monitor lanes and keeps support diagnostics routeable', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const allSections = sectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
@@ -235,11 +235,8 @@ describe('monitoring navigation labels', () => {
     expect(ids).toContain('observatory')
     expect(allIds).toContain('transport-health')
     expect(allIds).toContain('feature-health')
-    expect(allIds).toContain('cognition')
-    expect(ids).not.toContain('journey')
     expect(ids).not.toContain('transport-health')
     expect(ids).not.toContain('feature-health')
-    expect(ids).not.toContain('cognition')
     // Legacy sections removed in Phase 1
     expect(ids).not.toContain('live')
     expect(ids).not.toContain('git-graph')
@@ -265,15 +262,13 @@ describe('monitoring navigation labels', () => {
     ])
   })
 
-  it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {
+  it('keeps support diagnostics hidden from the sidebar', () => {
     const sections = sectionItemsForTab('monitoring')
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
     expect(hiddenIds).toEqual([
       'transport-health',
       'feature-health',
-      'journey',
-      'cognition',
     ])
   })
 

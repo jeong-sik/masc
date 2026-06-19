@@ -92,7 +92,7 @@ export const COCKPIT_MODE_TARGETS: Record<CockpitMode, CockpitRouteTarget> = {
   work: { tab: 'workspace', params: { section: 'planning' } },
   comms: { tab: 'board' },
   observe: { tab: 'monitoring', params: { section: 'runtime' } },
-  cognition: { tab: 'monitoring', params: { section: 'cognition' } },
+  cognition: { tab: 'monitoring', params: { section: 'agents' } },
   ide: COGNITIVE_MODE_TARGETS.code,
   code: COGNITIVE_MODE_TARGETS.code,
   split: COGNITIVE_MODE_TARGETS.split,
@@ -152,7 +152,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   {
     mode: 'cognition',
     aliases: ['keeper-cognition'],
-    target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper' } },
+    target: { tab: 'monitoring', params: { section: 'agents', view: 'keeper' } },
     coverage: 'covered',
   },
   {
@@ -198,13 +198,13 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'observe', aliases: ['ct-lat', 'cost-latency'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'latency' } }, coverage: 'covered' },
 
   // Cognition Plane legacy design subtabs.
-  { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'bdi' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ki-acc', 'keeper-tool-access'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'tool-access' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ki-stat', 'keeper-token-stats'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'token-stats' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['dc-str', 'decisions-stream'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'decisions' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['dc-mem', 'memory-entries'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'memory', focus: 'entries' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ep-card', 'episodes-cards'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'episodes' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ep-lrn', 'episodes-learnings'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'episodes' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'agents', view: 'keeper', focus: 'bdi' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['ki-acc', 'keeper-tool-access'], target: { tab: 'monitoring', params: { section: 'agents', view: 'keeper', focus: 'tool-access' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['ki-stat', 'keeper-token-stats'], target: { tab: 'monitoring', params: { section: 'agents', view: 'token-stats' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['dc-str', 'decisions-stream'], target: { tab: 'monitoring', params: { section: 'agents', view: 'decisions' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['dc-mem', 'memory-entries'], target: { tab: 'monitoring', params: { section: 'agents', view: 'memory', focus: 'entries' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['ep-card', 'episodes-cards'], target: { tab: 'monitoring', params: { section: 'agents', view: 'episodes' } }, coverage: 'covered' },
+  { mode: 'cognition', aliases: ['ep-lrn', 'episodes-learnings'], target: { tab: 'monitoring', params: { section: 'agents', view: 'episodes' } }, coverage: 'covered' },
 
   // IDE Plane legacy design subtabs.
   { mode: 'ide', aliases: ['edit'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } }, coverage: 'covered' },

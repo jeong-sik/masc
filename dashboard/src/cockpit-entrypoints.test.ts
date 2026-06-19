@@ -142,7 +142,7 @@ describe('cockpit entrypoint registry', () => {
     })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'keeper-cognition' })).toEqual({
       tab: 'monitoring',
-      params: { section: 'cognition', view: 'keeper' },
+      params: { section: 'agents', view: 'keeper' },
     })
     expect(cockpitTargetForParams({ mode: 'IDE', tab: 'source' })).toEqual({
       tab: 'code',
@@ -165,19 +165,19 @@ describe('cockpit entrypoint registry', () => {
     })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'dc-str' })).toEqual({
       tab: 'monitoring',
-      params: { section: 'cognition', view: 'decisions' },
+      params: { section: 'agents', view: 'decisions' },
     })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'ki-bdi' })).toEqual({
       tab: 'monitoring',
-      params: { section: 'cognition', view: 'keeper', focus: 'bdi' },
+      params: { section: 'agents', view: 'keeper', focus: 'bdi' },
     })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'keeper-tool-access' })).toEqual({
       tab: 'monitoring',
-      params: { section: 'cognition', view: 'keeper', focus: 'tool-access' },
+      params: { section: 'agents', view: 'keeper', focus: 'tool-access' },
     })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'dc-mem' })).toEqual({
       tab: 'monitoring',
-      params: { section: 'cognition', view: 'memory', focus: 'entries' },
+      params: { section: 'agents', view: 'memory', focus: 'entries' },
     })
     expect(cockpitTargetForParams({ mode: 'Observe', tab: 'sa-dash' })).toEqual({
       tab: 'command',

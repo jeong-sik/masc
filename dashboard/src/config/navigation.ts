@@ -17,13 +17,11 @@ export type DashboardSurfaceIcon =
 type SurfaceSectionId =
   // monitoring
   | 'observatory'
-  | 'journey'
   | 'agents'
-  | 'cognition'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
-  | 'transport-health' // Dedicated entry for /api/v1/dashboard/transport-health (was 5-hop buried inside Command → Operations → Inspector → "서버 설정" → ServerConfig → TransportHealthPanel)
-  | 'feature-health' // Dedicated entry for /api/v1/dashboard/feature-health (was 4-hop buried inside Command → Operations → Inspector → "피처 플래그" sub-tab)
+  | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
+  | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -267,40 +265,18 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'transport-health',
       label: 'Transport Health',
-      description: 'SSE/gRPC/WebSocket/WebRTC transport state.',
+      description: 'Transport diagnostics.',
       params: { section: 'transport-health' },
       hidden: true,
     },
     {
       id: 'feature-health',
       label: 'Feature Flags',
-      description: 'Feature flag rollout and health snapshot.',
+      description: 'Feature diagnostics.',
       params: { section: 'feature-health' },
       hidden: true,
     },
-    {
-      id: 'journey',
-      label: 'Journey Map',
-      description: 'Legacy execution-flow drill-down.',
-      params: { section: 'journey' },
-      hidden: true,
-    },
-    {
-      id: 'cognition',
-      // Distinguish from sibling labels in Monitor sidebar; the section id
-      // (used in URLs, deep links from KeeperCognitionInspector, and the
-      // backend nav-event allowlist) remains 'cognition'.
-      label: 'Keeper Cognition',
-      description: 'Keeper cognition drill-down.',
-      params: { section: 'cognition' },
-      hidden: true,
-      // Hidden 2026-05-20: FilterChips (overview, keeper, token-stats,
-      // decisions, memory, episodes) and KeeperCognitionInspector
-      // deep links remain functional, but the sidebar entry is intentionally
-      // suppressed pending the cognition→keeper-detail Cognition section
-      // absorption (tracked in the Monitor IA review). The earlier 2026-05-17
-      // promotion was reverted by #16977 (Improve dashboard monitor IA).
-    },
+
   ],
   keepers: [],
   board: [],
@@ -463,6 +439,7 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'monitoring:governance':   { section: 'fleet-health', view: 'governance' },
   'monitoring:attribution':   { section: 'fleet-health', view: 'attribution' },
   'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
+  'monitoring:cognition':    { section: 'agents' },
   'monitoring:metrics':      { section: 'runtime' },
   'monitoring:cost': { section: 'runtime', view: 'cost' },
 
@@ -536,7 +513,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   // drops view); instead, direct `replaceRoute` callers pass `view: 'default'`
   // as the canonical planning entry point (see router.test.ts replaceRoute case).
   const SECTIONS_WITH_VIEW = new Set([
-    'fleet-health', 'runtime', 'agents', 'cognition', 'observatory',
+    'fleet-health', 'runtime', 'agents', 'observatory',
     'repositories', 'operations', 'ide-shell', 'planning',
   ])
   if (!next.section || !SECTIONS_WITH_VIEW.has(next.section)) {

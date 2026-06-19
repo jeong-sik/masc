@@ -600,7 +600,7 @@ function StatusTrayPopover({
       data-testid="dashboard-status-tray-popover"
       role="dialog"
       aria-label=${`${item.label} details`}
-      class=${`v2-shell-panel tray-popover tone-${item.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] backdrop-blur-xl max-[520px]:w-full`}
+      class=${`v2-shell-panel tray-popover tone-${item.tone} absolute bottom-full left-0 mb-2 w-[22rem] max-w-[calc(100vw-1rem)] rounded-[var(--r-2)] border border-solid bg-[var(--color-bg-panel)] p-3 text-[var(--color-fg-primary)] shadow-[var(--shadow-panel)] max-[520px]:w-full`}
     >
       <div class="v2-shell-toolbar tray-popover-head mb-3 flex min-w-0 items-start justify-between gap-3">
         <div class="min-w-0">
@@ -663,7 +663,7 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
     >
       ${activeKey ? html`<${StatusTrayPopover} activeKey=${activeKey} onClose=${() => setActiveKey(null)} />` : null}
 
-      <div class="v2-tray-bar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-header-bg)] p-1 shadow-[var(--shadow-panel)] backdrop-blur-xl [scrollbar-width:none]">
+      <div class="v2-tray-bar inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-header-bg)] p-1 shadow-[var(--shadow-panel)] [scrollbar-width:none]">
         <${TransportChip} active=${activeKey === 'transport'} onActivate=${() => activate('transport')} />
         <${FleetChips} activeKey=${activeKey} onActivate=${activate} />
       </div>

@@ -300,7 +300,6 @@ aside.v2-status-tray .v2-tray-bar {
   border-radius: 10px;
   background: var(--v2-card);
   box-shadow: var(--ss-shadow-elevated);
-  backdrop-filter: blur(12px);
 }
 
 aside.v2-status-tray .tray-button {

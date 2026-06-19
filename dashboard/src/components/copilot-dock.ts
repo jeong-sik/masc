@@ -5,6 +5,7 @@ import { persistentSignal } from '../lib/persistent-signal'
 import { globalShortcutManager } from '../lib/global-shortcut-manager'
 import { route } from '../router'
 import { keepers } from '../store'
+import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
 import { streamKeeperMessage } from '../api/keeper'
 import { currentDashboardActor } from '../api/core'
@@ -22,7 +23,7 @@ interface SurfaceContext {
   label: string
   route: string
   scene: string
-  fields: Array<{ k: string; v: string; tone?: 'bad' | 'warn' | 'volt' }>
+  fields: Array<{ k: string; v: string; tone?: 'err' | 'warn' | 'brass' }>
 }
 
 interface DockMessage {
@@ -46,15 +47,11 @@ const SPARK_SVG = html`
   </svg>
 `
 
-const DOCK_STARTERS: Record<string, string[]> = {
-  overview: ['주의 큐 4건 정리해줘', '평균 컨텍스트가 왜 높아?', '지금 가장 급한 건 뭐야?'],
-  monitoring: ['이 keeper 지금 뭐 하고 있어?', '소유 태스크 요약', '컨텍스트 압박 풀어줘'],
-  workspace: ['멘션 인박스 정리해줘', 'drifter 상태 블록 뭐야?'],
-  code: ['이 lock 재진입 설명해줘', 'PR #7741 요약', '회귀 위험 어디야?'],
-  connectors: ['stale 게이트 왜 그래?', '바인딩 현황 요약해줘'],
-  command: ['다음 승인 대기 항목 뭐야?', 'governance 큐 요약'],
-  lab: ['도구 등록 상태 요약', 'harness 결과 요약'],
-}
+const DOCK_STARTERS: string[] = [
+  '이 화면 요약해줘',
+  '다음 액션 추천',
+  '주의 항목 정리해줘',
+]
 
 function nowHM(): string {
   const d = new Date()
@@ -74,7 +71,7 @@ function keeperColor(name: string): string {
     'qa-king': 'var(--k-qa)',
     rama: 'var(--k-rama)',
   }
-  return map[name] ?? 'var(--volt-strong)'
+  return map[name] ?? 'var(--brass-1)'
 }
 
 function keeperGlow(name: string): string {
@@ -104,28 +101,19 @@ function Para({ text }: { text: string }) {
 export function getSurfaceContext(): SurfaceContext {
   const tab = route.value.tab
   const section = route.value.params.section ?? ''
-  const labelMap: Record<string, string> = {
-    overview: '운영 개요',
-    monitoring: 'Keeper 대화',
-    workspace: '보드 · 전체 피드',
-    code: 'IDE · round.ml',
-    connectors: '커넥터 · Gate',
-    command: 'Command · Actions',
-    lab: 'Lab · Tools',
-    logs: 'Logs',
-  }
+  const navItem = DASHBOARD_NAV_ITEMS.find(item => item.id === tab)
   const sceneMap: Record<string, string> = {
     overview: '함대 전체 상태를 함께 보는 중',
-    monitoring: ' keeper와 1:1 스레드',
+    monitoring: 'keeper와 1:1 스레드',
     workspace: '네임스페이스 보드를 함께 보는 중',
-    code: 'fix/round-lock-reentry 브랜치를 함께 보는 중',
+    code: '코드 모드에서 함께 보는 중',
     connectors: '외부 게이트 상태를 함께 보는 중',
     command: '운영 액션 패널을 함께 보는 중',
     lab: '실험 도구 패널을 함께 보는 중',
     logs: '시스템 로그 스트림을 함께 보는 중',
   }
   const base: SurfaceContext = {
-    label: labelMap[tab] ?? tab,
+    label: navItem?.label ?? tab,
     route: `/${tab}${section ? `/${section}` : ''}`,
     scene: sceneMap[tab] ?? `${tab} 화면을 함께 보는 중`,
     fields: [],
@@ -141,8 +129,8 @@ export function getSurfaceContext(): SurfaceContext {
     case 'overview':
       base.fields = [
         { k: '실행', v: `${run}/${total}` },
-        { k: '주의', v: String(att), tone: att > 0 ? 'bad' : undefined },
-        { k: 'ctx', v: `${total > 0 ? Math.round((live.reduce((a, k) => a + (typeof k.context_ratio === 'number' ? k.context_ratio : 0), 0) / total) * 100) : 0}%`, tone: 'volt' },
+        { k: '주의', v: String(att), tone: att > 0 ? 'err' : undefined },
+        { k: 'ctx', v: `${total > 0 ? Math.round((live.reduce((a, k) => a + (typeof k.context_ratio === 'number' ? k.context_ratio : 0), 0) / total) * 100) : 0}%`, tone: 'brass' },
         { k: 'trace', v: traces.toLocaleString() },
       ]
       break
@@ -154,33 +142,12 @@ export function getSurfaceContext(): SurfaceContext {
         base.scene = `${sel.koreanName ?? sel.name}와 1:1 스레드`
         base.fields = [
           { k: 'state', v: sel.phase ?? sel.status },
-          { k: 'ctx', v: `${Math.round(ctx * 100)}%`, tone: ctx >= 0.85 ? 'warn' : 'volt' },
+          { k: 'ctx', v: `${Math.round(ctx * 100)}%`, tone: ctx >= 0.85 ? 'warn' : 'brass' },
           { k: 'ns', v: sel.runtime_canonical ?? sel.runtime_id ?? '-' },
         ]
       }
       break
     }
-    case 'workspace':
-      base.fields = [
-        { k: '포스트', v: '5' },
-        { k: '멘션', v: '3', tone: 'volt' },
-        { k: '모더', v: '1', tone: 'warn' },
-      ]
-      break
-    case 'code':
-      base.fields = [
-        { k: 'PR', v: '#7741', tone: 'volt' },
-        { k: 'test', v: '84/84' },
-        { k: 'risk', v: '1', tone: 'bad' },
-      ]
-      break
-    case 'connectors':
-      base.fields = [
-        { k: 'gate', v: '4' },
-        { k: 'active', v: '3', tone: 'volt' },
-        { k: 'stale', v: '1', tone: 'warn' },
-      ]
-      break
   }
   return base
 }
@@ -194,24 +161,19 @@ interface DockKeeper {
 }
 
 function deriveDockKeepers(keeperRows: Keeper[]): DockKeeper[] {
-  const defaults: DockKeeper[] = [
-    { id: 'masc-improver', kr: 'MASC Improver', ns: 'fleet', phase: 'Running', status: 'run' },
-    { id: 'nick0cave', kr: 'nick0cave', ns: 'ops', phase: 'Running', status: 'run' },
-    { id: 'sangsu', kr: 'sangsu', ns: 'code', phase: 'Running', status: 'run' },
-    { id: 'qa-king', kr: 'qa-king', ns: 'qa', phase: 'Idle', status: 'idle' },
-    { id: 'rama', kr: 'rama', ns: 'memory', phase: 'Running', status: 'run' },
-  ]
-  if (keeperRows.length === 0) return defaults
-  const mapped = keeperRows.map(k => ({
+  if (keeperRows.length === 0) {
+    // Minimal fallback only when the store has not hydrated yet.
+    return [
+      { id: 'masc-improver', kr: 'MASC Improver', ns: 'fleet', phase: 'Running', status: 'run' },
+    ]
+  }
+  return keeperRows.map(k => ({
     id: k.keeper_id ?? k.name,
     kr: k.koreanName ?? k.name,
     ns: k.runtime_canonical ?? k.runtime_id ?? 'fleet',
     phase: k.phase ?? k.lifecycle_phase ?? k.status,
     status: statusLooksRunning(k.status) ? 'run' : k.status.toLowerCase(),
   }))
-  // Merge defaults for any missing canonical keepers so the picker is never empty.
-  const seen = new Set(mapped.map(k => k.id))
-  return [...mapped, ...defaults.filter(d => !seen.has(d.id))]
 }
 
 const dockOpen = persistentSignal<DockState>({
@@ -547,7 +509,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
                 <div class="t">${ctx.label}</div>
                 <div class="s">이 화면에 대해 ${keeper.kr}에게 바로 물어보세요. 같은 맥락을 보고 답합니다.</div>
                 <div class="dsug" style=${{ width: '100%' }}>
-                  ${(DOCK_STARTERS[route.value.tab] ?? ['이 화면 요약해줘', '다음 액션 추천']).map((s, i) => html`
+                  ${DOCK_STARTERS.map((s, i) => html`
                     <button key=${i} onClick=${() => doSend(s)}><span class="pre">›</span>${s}</button>
                   `)}
                 </div>

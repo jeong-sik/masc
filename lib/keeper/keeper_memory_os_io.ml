@@ -70,6 +70,14 @@ let events_path ~keeper_id =
   Filename.concat (keepers_dir ()) (keeper_id ^ ".events.jsonl")
 ;;
 
+let episode_bundle_lock_path ~keeper_id =
+  Filename.concat (keepers_dir ()) (keeper_id ^ ".episode-bundle")
+;;
+
+let with_episode_bundle_lock ?clock ~keeper_id f =
+  File_lock_eio.with_lock ?clock (episode_bundle_lock_path ~keeper_id) f
+;;
+
 let episodes_dir ~keeper_id =
   let d = Filename.concat (keepers_dir ()) (Filename.concat keeper_id "episodes") in
   ensure_dir d;
@@ -241,9 +249,11 @@ let append_episode ~keeper_id episode =
 ;;
 
 let append_episode_bundle ~keeper_id episode =
-  append_episode ~keeper_id episode;
-  append_event ~keeper_id episode;
-  List.iter (append_fact ~keeper_id) episode.claims
+  with_episode_bundle_lock ~keeper_id (fun () ->
+    File_lock_eio.with_lock (facts_path ~keeper_id) (fun () ->
+      List.iter (append_fact ~keeper_id) episode.claims);
+    append_episode ~keeper_id episode;
+    append_event ~keeper_id episode)
 ;;
 
 let rewrite_facts_atomically ~keeper_id facts =

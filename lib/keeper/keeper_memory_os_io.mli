@@ -35,6 +35,13 @@ val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:strin
 val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
+
+(** Serialize a cross-file episode bundle write for one keeper. Callers that
+    write facts plus episode/event artifacts should take this before the facts
+    lock, then publish [events_path] last as the reader-visible commit marker. *)
+val with_episode_bundle_lock :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t -> keeper_id:string -> (unit -> 'a) -> 'a
+
 val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
 val save_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t -> unit

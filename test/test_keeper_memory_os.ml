@@ -927,7 +927,15 @@ let test_librarian_runtime_reports_fact_upsert_failure () =
           Alcotest.(check bool)
             "fact upsert error returned to caller"
             true
-            (contains "memory os fact upsert failed" msg))))
+            (contains "memory os fact upsert failed" msg);
+          Alcotest.(check int)
+            "episode file not published on fact failure"
+            0
+            (json_episode_file_count ~keeper_id);
+          Alcotest.(check int)
+            "event not published on fact failure"
+            0
+            (List.length (Memory_io.read_events_tail ~keeper_id ~n:10)))))
 ;;
 
 
@@ -1131,6 +1139,58 @@ let test_jsonl_tail_reads_last_entries () =
         second.Types.episode_summary
         event.Types.episode_summary
     | events -> Alcotest.failf "expected one event, got %d" (List.length events))
+;;
+
+let test_append_episode_bundle_waits_for_fact_lock () =
+  with_eio (fun ~sw ~net:_ ~clock ->
+    with_eio_guard (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let keeper_id = "bundle-lock-keeper" in
+        let episode =
+          episode_fixture
+            ~now:1_000_000.0
+            ~trace_id:"trace-bundle"
+            ~generation:1
+            ~summary:"locked bundle"
+        in
+        let result = ref None in
+        let started, resolve_started = Eio.Promise.create () in
+        File_lock_eio.with_lock (Memory_io.facts_path ~keeper_id) (fun () ->
+          Eio.Fiber.fork ~sw (fun () ->
+            Eio.Promise.resolve resolve_started ();
+            Memory_io.append_episode_bundle ~keeper_id episode;
+            result := Some ());
+          Eio.Promise.await started;
+          Eio.Time.sleep clock 0.02;
+          Alcotest.(check bool)
+            "bundle waits while fact store lock is held"
+            true
+            (Option.is_none !result);
+          Alcotest.(check int)
+            "facts not visible before lock release"
+            0
+            (List.length (Memory_io.read_facts_tail ~keeper_id ~n:10));
+          Alcotest.(check int)
+            "events not visible before lock release"
+            0
+            (List.length (Memory_io.read_events_tail ~keeper_id ~n:10));
+          Alcotest.(check int)
+            "episodes not visible before lock release"
+            0
+            (List.length (Memory_io.read_episodes_tail ~keeper_id ~n:10)));
+        wait_for_ref ~clock "bundle append after fact lock" result;
+        Alcotest.(check int)
+          "fact visible after lock release"
+          1
+          (List.length (Memory_io.read_facts_tail ~keeper_id ~n:10));
+        Alcotest.(check int)
+          "event visible after lock release"
+          1
+          (List.length (Memory_io.read_events_tail ~keeper_id ~n:10));
+        Alcotest.(check int)
+          "episode visible after lock release"
+          1
+          (List.length (Memory_io.read_episodes_tail ~keeper_id ~n:10)))))
 ;;
 
 (* RFC-0247 (purge): GC is two structural passes — hard-expire past-TTL facts and
@@ -2603,6 +2663,10 @@ let () =
             "jsonl tail reads last entries"
             `Quick
             test_jsonl_tail_reads_last_entries
+        ; Alcotest.test_case
+            "episode bundle waits for fact lock"
+            `Quick
+            test_append_episode_bundle_waits_for_fact_lock
         ; Alcotest.test_case
             "gc dry-run and rewrite"
             `Quick

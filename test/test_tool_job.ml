@@ -31,7 +31,16 @@ let test_make_reads_tool_metadata () =
   Alcotest.(check bool) "masc_status is read-only" true job.read_only;
   Alcotest.(check (list string)) "read-only default has no writer lock" [] job.resource_keys;
   Alcotest.(check string) "batch_id carried" "batch_1" job.batch_id;
-  Alcotest.(check bool) "schema hash is non-empty" true (String.length job.schema_hash > 0)
+  Alcotest.(check bool) "schema hash is non-empty" true (String.length job.schema_hash > 0);
+  let grep_job =
+    make
+      ~batch_id:"batch_1"
+      ~tool_name:"tool_search_files"
+      ~input_json:(`Assoc [ "pattern", `String "Tool_batch"; "path", `String "lib" ])
+      ()
+  in
+  Alcotest.(check bool) "tool_search_files is read-only" true grep_job.read_only;
+  Alcotest.(check (list string)) "Grep has no writer lock by default" [] grep_job.resource_keys
 ;;
 
 let test_policy_verdict_roundtrip () =
@@ -111,6 +120,94 @@ let test_resource_key_inference () =
     ~expected:[ "write:any" ]
 ;;
 
+let job_ids jobs = List.map (fun (job : Tool_job.t) -> job.job_id) jobs
+
+let synthetic_job ?(batch_id = "batch_1") ?(read_only = true)
+      ?(resource_keys = []) ?(approval = Approved) job_id =
+  { (make ~job_id ~batch_id ~tool_name:"__synthetic_tool__" ~input_json:(`Assoc []) ())
+    with read_only = read_only
+       ; resource_keys = resource_keys
+       ; approval = approval
+  }
+;;
+
+let check_batch_kinds msg expected batches =
+  let actual =
+    List.map
+      (fun (batch : Tool_batch.t) ->
+         Tool_batch.execution_kind_to_string batch.execution_kind)
+      batches
+  in
+  Alcotest.(check (list string)) msg expected actual
+;;
+
+let test_tool_batch_groups_parallel_reads () =
+  let batches =
+    Tool_batch.plan
+      [ synthetic_job "read_1"; synthetic_job "read_2"; synthetic_job "read_3" ]
+  in
+  check_batch_kinds "one parallel batch" [ "parallel_read" ] batches;
+  match batches with
+  | [ batch ] ->
+    Alcotest.(check (list string))
+      "job order preserved"
+      [ "read_1"; "read_2"; "read_3" ]
+      (job_ids batch.jobs)
+  | _ -> Alcotest.fail "expected one batch"
+;;
+
+let test_tool_batch_serializes_writes_and_resumes_reads () =
+  let batches =
+    Tool_batch.plan
+      [ synthetic_job "read_1"
+      ; synthetic_job ~read_only:false ~resource_keys:[ "write:any" ] "write_1"
+      ; synthetic_job "read_2"
+      ]
+  in
+  check_batch_kinds
+    "write flushes parallel batch"
+    [ "parallel_read"; "sequential_workspace"; "parallel_read" ]
+    batches
+;;
+
+let test_tool_batch_blocks_policy_verdicts () =
+  let batches =
+    Tool_batch.plan
+      [ synthetic_job "read_1"
+      ; synthetic_job ~approval:(Pending "operator") "pending_1"
+      ; synthetic_job "read_2"
+      ; synthetic_job ~approval:(Denied "policy") "denied_1"
+      ]
+  in
+  check_batch_kinds
+    "blocked jobs are singleton boundaries"
+    [ "parallel_read"; "blocked"; "parallel_read"; "blocked" ]
+    batches;
+  match batches with
+  | _ :: pending :: _ :: denied :: [] ->
+    Alcotest.(check (list string)) "pending singleton" [ "pending_1" ] (job_ids pending.jobs);
+    Alcotest.(check (list string)) "denied singleton" [ "denied_1" ] (job_ids denied.jobs)
+  | _ -> Alcotest.fail "expected four batches"
+;;
+
+let test_tool_batch_does_not_cross_batch_id_boundary () =
+  let batches =
+    Tool_batch.plan
+      [ synthetic_job ~batch_id:"batch_1" "read_1"
+      ; synthetic_job ~batch_id:"batch_2" "read_2"
+      ]
+  in
+  check_batch_kinds
+    "batch ids stay isolated"
+    [ "parallel_read"; "parallel_read" ]
+    batches;
+  match batches with
+  | [ first; second ] ->
+    Alcotest.(check string) "first batch id" "batch_1" first.batch_id;
+    Alcotest.(check string) "second batch id" "batch_2" second.batch_id
+  | _ -> Alcotest.fail "expected two batches"
+;;
+
 let test_event_roundtrip () =
   let events =
     [ Batch_created { batch_id = "batch_1"; parent_turn_id = Some "turn_1"; parent_goal_id = None }
@@ -177,6 +274,21 @@ let () =
         ] )
     ; ( "resource_keys"
       , [ Alcotest.test_case "inference for known patterns" `Quick test_resource_key_inference ] )
+    ; ( "batch_plan"
+      , [ Alcotest.test_case "groups parallel reads" `Quick test_tool_batch_groups_parallel_reads
+        ; Alcotest.test_case
+            "serializes writes and resumes reads"
+            `Quick
+            test_tool_batch_serializes_writes_and_resumes_reads
+        ; Alcotest.test_case
+            "blocks policy verdicts"
+            `Quick
+            test_tool_batch_blocks_policy_verdicts
+        ; Alcotest.test_case
+            "does not cross batch_id boundary"
+            `Quick
+            test_tool_batch_does_not_cross_batch_id_boundary
+        ] )
     ; ( "event_helpers"
       , [ Alcotest.test_case "batch id helper is explicit" `Quick test_event_batch_id_exhaustive_helpers ]
       )

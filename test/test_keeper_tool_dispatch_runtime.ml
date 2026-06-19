@@ -1154,6 +1154,10 @@ let test_read_oas_descriptor_is_parallel_read () =
   check_descriptor ~msg:"tool_read_file" "tool_read_file" "parallel_read" "read_only"
 ;;
 
+let test_grep_oas_descriptor_is_parallel_read () =
+  check_descriptor ~msg:"tool_search_files" "tool_search_files" "parallel_read" "read_only"
+;;
+
 let find_tool_by_name tools name =
   List.find_opt
     (fun (t : Agent_sdk.Tool.t) -> String.equal t.Agent_sdk.Tool.schema.Agent_sdk.Types.name name)
@@ -1189,10 +1193,7 @@ let test_public_alias_oas_descriptors () =
        in
        check_bundle_concurrency ~msg:"WebSearch" tools "WebSearch" "exclusive_external";
        check_bundle_concurrency ~msg:"WebFetch" tools "WebFetch" "exclusive_external";
-       (* Read is a direct internal tool and is correctly classified as
-          [Parallel_read] by [Tool_bridge.oas_descriptor_of_masc_tool].
-          Grep is currently not marked read-only in [Tool_catalog], so it
-          carries no descriptor and defaults to sequential execution. *)
+       check_bundle_concurrency ~msg:"Grep" tools "Grep" "parallel_read";
        check_bundle_concurrency ~msg:"Read" tools "Read" "parallel_read")
 ;;
 
@@ -1378,6 +1379,8 @@ let () =
         test_web_fetch_oas_descriptor_is_exclusive_external;
       test_case "tool_read_file is Parallel_read" `Quick
         test_read_oas_descriptor_is_parallel_read;
+      test_case "tool_search_files is Parallel_read" `Quick
+        test_grep_oas_descriptor_is_parallel_read;
       test_case "public aliases carry correct concurrency class" `Quick
         test_public_alias_oas_descriptors;
       test_case "parallel read tools reorder results" `Quick

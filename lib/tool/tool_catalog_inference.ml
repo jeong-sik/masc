@@ -22,6 +22,7 @@ let effect_domain_to_string = function
 
 let inferred_effect_domain name =
   match name with
-  | "tool_read_file" -> Some Read_only
+  | "tool_read_file"
+  | "tool_search_files" -> Some Read_only
   | _ -> None
 ;;

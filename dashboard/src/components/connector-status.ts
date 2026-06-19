@@ -14,6 +14,7 @@ import {
   type BindingInfo,
   type ChannelInfo,
   type ConnectorNames,
+  type DiscordConfiguredBinding,
   type GateConnectorInfo,
   type GateConnectorsData,
   type GateEventInfo,
@@ -45,6 +46,8 @@ import { ConnectorPathsStrip } from './connector-paths-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 import { Tk } from './tk'
+
+const EMPTY_CONFIGURED_BINDINGS: DiscordConfiguredBinding[] = []
 
 function MutedSpan({ children }: { children: unknown }) {
   return html`<span class="text-[var(--color-fg-disabled)]">${children}</span>`
@@ -663,7 +666,7 @@ function ConnectorLivePanel({
   keeperDirectoryError: string | null
   loading: boolean
 }) {
-  const configuredBindings = connector?.configured_bindings ?? []
+  const configuredBindings = connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS
   const names = connector?.names
   const connectorName = connector?.display_name || 'Connector'
   const connectorId = connector?.connector_id ?? ''

@@ -134,8 +134,44 @@ let test_websocket_discovery_uses_standalone_url () =
             Yojson.Safe.Util.(json |> member "upgrade_path" |> to_string);
           check string "ws_url uses standalone listener" "ws://127.0.0.1:8937/"
             Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
+          check string "standalone bind host is explicit" "127.0.0.1"
+            Yojson.Safe.Util.(json |> member "standalone_bind_host" |> to_string);
+          check bool "same-origin upgrade is marked disabled" false
+            Yojson.Safe.Util.(json |> member "same_origin_upgrade_enabled" |> to_bool);
           check string "same-origin retained for diagnostics" "ws://127.0.0.1:8935/ws"
             Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string)))
+
+let test_websocket_discovery_does_not_advertise_loopback_ws_to_remote_host () =
+  with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+      TM.set_ws_runtime_listening true;
+      Fun.protect
+        ~finally:(fun () -> TM.set_ws_runtime_listening false)
+        (fun () ->
+          let ctx =
+            TRM.make_http_context
+              ~base_url:"http://192.0.2.10:8935"
+              ~host:"192.0.2.10"
+              ()
+          in
+          let json = TRM.websocket_discovery_json ctx in
+          check bool "standalone process is listening" true
+            Yojson.Safe.Util.(json |> member "listening" |> to_bool);
+          check bool "remote host cannot reach loopback standalone listener" false
+            Yojson.Safe.Util.(json |> member "reachable" |> to_bool);
+          check bool "request host reachability is explicit" false
+            Yojson.Safe.Util.(
+              json |> member "request_host_can_reach_standalone" |> to_bool);
+          check string "standalone diagnostic still reports bind URL"
+            "ws://127.0.0.1:8937/"
+            Yojson.Safe.Util.(json |> member "standalone_ws_url" |> to_string);
+          check bool "primary client ws_url is withheld"
+            true
+            (match Yojson.Safe.Util.member "ws_url" json with
+             | `Null -> true
+             | _ -> false);
+          check string "reason explains mismatch"
+            "standalone_ws_loopback_only"
+            Yojson.Safe.Util.(json |> member "unavailable_reason" |> to_string)))
 
 let test_websocket_discovery_does_not_treat_enabled_as_reachable () =
   with_env "MASC_WS_ENABLED" (Some "true") (fun () ->
@@ -217,6 +253,8 @@ let () =
              test_transport_status_reports_streamable_http_protocol;
            test_case "websocket standalone URL" `Quick
              test_websocket_discovery_uses_standalone_url;
+           test_case "websocket remote host does not get loopback URL" `Quick
+             test_websocket_discovery_does_not_advertise_loopback_ws_to_remote_host;
            test_case "websocket enabled is not reachability" `Quick
              test_websocket_discovery_does_not_treat_enabled_as_reachable;
            test_case "websocket HTTPS diagnostic URL" `Quick

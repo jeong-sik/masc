@@ -408,6 +408,108 @@ let test_backpressure_gate_throttle_counter_increments () =
     "throttle counter advances per drop" 2.0
     (read_counter name -. before)
 
+let test_backpressure_ack_stale_predicate () =
+  Alcotest.(check bool) "fresh unacked delta is not stale"
+    false
+    (Ws.dashboard_ack_is_stale ~now:100.0 ~last_delta_at:95.0
+       ~last_delta_seq:7 ~last_ack_seq:6 ~threshold_s:10.0);
+  Alcotest.(check bool) "old unacked delta is stale past threshold"
+    true
+    (Ws.dashboard_ack_is_stale ~now:100.0 ~last_delta_at:80.0
+       ~last_delta_seq:7 ~last_ack_seq:6 ~threshold_s:10.0);
+  Alcotest.(check bool) "idle or fully acked dashboard is not stale"
+    false
+    (Ws.dashboard_ack_is_stale ~now:100.0 ~last_delta_at:0.0
+       ~last_delta_seq:7 ~last_ack_seq:7 ~threshold_s:10.0);
+  Alcotest.(check bool) "zero threshold disables stale gate"
+    false
+    (Ws.dashboard_ack_is_stale ~now:100.0 ~last_delta_at:0.0
+       ~last_delta_seq:7 ~last_ack_seq:6 ~threshold_s:0.0)
+
+let test_backpressure_ack_stale_threshold_reads_env () =
+  with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0" (fun () ->
+    Alcotest.(check (float 0.001)) "env=0 disables stale-ack gate"
+      0.0 (Ws.dashboard_ack_stale_threshold_s ()));
+  with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.25" (fun () ->
+    Alcotest.(check (float 0.001)) "env float is read"
+      0.25 (Ws.dashboard_ack_stale_threshold_s ()))
+
+let test_backpressure_gate_stale_ack_throttles_delivery () =
+  let name = MetricStore.metric_ws_throttled_deliveries in
+  let before = read_counter name in
+  with_env_var "MASC_WS_ACK_STALE_THRESHOLD_SEC" "0.001" (fun () ->
+    let session = Ws.new_session ~id:"stale-ack" ~wsd:(Obj.magic ()) in
+    Atomic.set session.dashboard_auth (Ws.Authenticated { agent = None });
+    session.dashboard_last_delta_seq <- 1;
+    session.dashboard_last_delta_at <- Unix.gettimeofday () -. 10.0;
+    Alcotest.(check bool) "stale ack skips send without closing session"
+      true
+      (Ws.send_dashboard_or_raw_sse session
+         "{\"type\":\"execution_snapshot\",\"payload\":{}}");
+    Alcotest.(check bool) "session remains open after throttle"
+      false
+      (Atomic.get session.closed));
+  Alcotest.(check (float 0.001)) "throttle counter increments"
+    1.0 (read_counter name -. before)
+
+(* ====== Inbound payload size gates ====== *)
+
+let test_inbound_frame_size_accepts_limit_and_disable () =
+  Alcotest.(check bool) "at limit accepted"
+    true
+    (match Ws.classify_inbound_frame_size ~len:1024 ~max_frame_bytes:1024 with
+     | Ws.Inbound_accept -> true
+     | Ws.Inbound_reject _ -> false);
+  Alcotest.(check bool) "zero disables frame gate"
+    true
+    (match Ws.classify_inbound_frame_size ~len:4096 ~max_frame_bytes:0 with
+     | Ws.Inbound_accept -> true
+     | Ws.Inbound_reject _ -> false)
+
+let test_inbound_frame_size_rejects_before_allocation () =
+  match Ws.classify_inbound_frame_size ~len:1025 ~max_frame_bytes:1024 with
+  | Ws.Inbound_accept -> Alcotest.fail "expected oversized frame rejection"
+  | Ws.Inbound_reject r ->
+      Alcotest.(check string) "reason" "frame_too_large" r.reason;
+      Alcotest.(check int) "limit" 1024 r.limit;
+      Alcotest.(check int) "actual" 1025 r.actual
+
+let test_inbound_frame_size_rejects_negative_length () =
+  match Ws.classify_inbound_frame_size ~len:(-1) ~max_frame_bytes:1024 with
+  | Ws.Inbound_accept -> Alcotest.fail "expected invalid frame length rejection"
+  | Ws.Inbound_reject r ->
+      Alcotest.(check string) "reason" "invalid_frame_length" r.reason;
+      Alcotest.(check int) "actual" (-1) r.actual
+
+let test_inbound_message_size_rejects_accumulated_fragments () =
+  match
+    Ws.classify_inbound_message_size ~current_bytes:900 ~chunk_len:200
+      ~max_message_bytes:1024
+  with
+  | Ws.Inbound_accept -> Alcotest.fail "expected accumulated message rejection"
+  | Ws.Inbound_reject r ->
+      Alcotest.(check string) "reason" "message_too_large" r.reason;
+      Alcotest.(check int) "limit" 1024 r.limit;
+      Alcotest.(check int) "actual" 1100 r.actual
+
+let test_inbound_message_size_rejects_overflow_sum () =
+  match
+    Ws.classify_inbound_message_size ~current_bytes:(max_int - 10) ~chunk_len:20
+      ~max_message_bytes:1024
+  with
+  | Ws.Inbound_accept -> Alcotest.fail "expected overflow-sized message rejection"
+  | Ws.Inbound_reject r ->
+      Alcotest.(check string) "reason" "message_too_large" r.reason;
+      Alcotest.(check int) "overflow sum saturates" max_int r.actual
+
+let test_inbound_size_env_defaults () =
+  with_env_var "MASC_WS_MAX_INBOUND_FRAME_BYTES" "" (fun () ->
+    Alcotest.(check int) "default frame cap is 1 MiB"
+      1048576 (Ws.max_inbound_frame_bytes ()));
+  with_env_var "MASC_WS_MAX_INBOUND_MESSAGE_BYTES" "" (fun () ->
+    Alcotest.(check int) "default message cap is 2 MiB"
+      2097152 (Ws.max_inbound_message_bytes ()))
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -657,7 +759,17 @@ let test_new_session_initializes_pong_state () =
   Alcotest.(check bool) "closed starts false" false (Atomic.get session.closed);
   Alcotest.(check bool) "last_pong_at is in the recent past"
     true
-    (Atomic.get session.last_pong_at <= Unix.gettimeofday ())
+    (Atomic.get session.last_pong_at <= Unix.gettimeofday ());
+  Alcotest.(check bool) "dashboard ack timestamp is initialized"
+    true
+    (session.dashboard_last_ack_at <= Unix.gettimeofday ());
+  Alcotest.(check int) "no delta is pending ack"
+    0 session.dashboard_last_delta_seq;
+  Alcotest.(check bool) "delta timestamp is initialized"
+    true
+    (session.dashboard_last_delta_at <= Unix.gettimeofday ());
+  Alcotest.(check int) "partial inbound byte count starts empty"
+    0 session.inbound_partial_text_bytes
 
 let test_record_pong_refreshes_last_pong_at () =
   let session = Ws.new_session ~id:"pong-refresh" ~wsd:(Obj.magic ()) in
@@ -771,6 +883,26 @@ let () =
         test_backpressure_gate_default_is_one_mib;
       Alcotest.test_case "throttle counter advances per skipped delivery" `Quick
         test_backpressure_gate_throttle_counter_increments;
+      Alcotest.test_case "ack stale predicate" `Quick
+        test_backpressure_ack_stale_predicate;
+      Alcotest.test_case "ack stale threshold reads env" `Quick
+        test_backpressure_ack_stale_threshold_reads_env;
+      Alcotest.test_case "stale ack throttles delivery before send" `Quick
+        test_backpressure_gate_stale_ack_throttles_delivery;
+    ]);
+    ("inbound_size_gate", [
+      Alcotest.test_case "frame cap accepts limit and disabled mode" `Quick
+        test_inbound_frame_size_accepts_limit_and_disable;
+      Alcotest.test_case "frame cap rejects before allocation" `Quick
+        test_inbound_frame_size_rejects_before_allocation;
+      Alcotest.test_case "frame cap rejects negative lengths" `Quick
+        test_inbound_frame_size_rejects_negative_length;
+      Alcotest.test_case "message cap rejects accumulated fragments" `Quick
+        test_inbound_message_size_rejects_accumulated_fragments;
+      Alcotest.test_case "message cap rejects overflow sums" `Quick
+        test_inbound_message_size_rejects_overflow_sum;
+      Alcotest.test_case "size cap env defaults" `Quick
+        test_inbound_size_env_defaults;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

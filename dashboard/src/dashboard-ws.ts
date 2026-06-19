@@ -38,7 +38,7 @@ type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
 interface DashboardWsDiscovery {
   enabled?: boolean
   listening?: boolean
-  ws_url?: string
+  ws_url?: string | null
 }
 
 interface DashboardWsDiscoveryResult {

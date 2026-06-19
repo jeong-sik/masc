@@ -9,6 +9,8 @@
       {!read_inbound_message_frame} /
       {!send_dashboard_or_raw_sse} and reaches the live
       {!sessions} table directly.
+    - {b inbound size decisions}
+      ({!inbound_size_rejection}, {!inbound_size_decision}).
     - {b SSE parse record} ({!parsed_sse_event}) — exposed
       so the regression test at
       [test/test_transport_integration] can pattern-match
@@ -53,6 +55,10 @@
     [client_buffer_limit_cache] /
     [client_buffer_limit_bytes],
     [session_is_backpressured],
+    [max_inbound_frame_bytes] /
+    [max_inbound_message_bytes],
+    [classify_inbound_frame_size] /
+    [classify_inbound_message_size],
     [slice_index_enabled_cache] /
     [slice_index_enabled],
     [__test_reset_env_caches],
@@ -82,7 +88,11 @@ type ws_session = {
   mutable dashboard_seq : int;
   mutable dashboard_last_ack_seq : int;
   mutable dashboard_last_buffered_amount : int;
+  mutable dashboard_last_ack_at : float;
+  mutable dashboard_last_delta_seq : int;
+  mutable dashboard_last_delta_at : float;
   mutable inbound_partial_text : Buffer.t option;
+  mutable inbound_partial_text_bytes : int;
 }
 (** Per-WS session state.  Concrete record because
     [server_ws_standalone] threads the value through
@@ -186,6 +196,20 @@ val close_all : unit -> int
     hook (timing telemetry) and the WS regression test. *)
 
 (** {1 Inbound framing} *)
+
+type inbound_size_rejection = {
+  reason : string;
+  limit : int;
+  actual : int;
+}
+(** Structured reject reason for inbound frame/message size gates.  [limit = 0]
+    means the corresponding gate is disabled and is therefore never emitted. *)
+
+type inbound_size_decision =
+  | Inbound_accept
+  | Inbound_reject of inbound_size_rejection
+(** Pure decision used before allocating inbound payload buffers and before
+    appending fragmented messages. *)
 
 val read_inbound_message_frame :
   ws_session ->
@@ -310,6 +334,39 @@ val client_buffer_limit_bytes : unit -> int
     {!session_is_backpressured}.  Cached for
     [env_cache_ttl_s] seconds; the test resets the
     cache via {!__test_reset_env_caches}. *)
+
+val dashboard_ack_stale_threshold_s : unit -> float
+(** Resolved max age for the latest [dashboard/ack] before outbound dashboard
+    sends are considered stale.  [0.0] disables stale-ACK backpressure. *)
+
+val dashboard_ack_is_stale :
+  now:float ->
+  last_delta_at:float ->
+  last_delta_seq:int ->
+  last_ack_seq:int ->
+  threshold_s:float ->
+  bool
+(** Pure stale-ACK predicate used by the dashboard backpressure gate.  Only
+    unacknowledged dashboard/delta seqs can become stale; subscribe snapshots
+    are excluded because the browser does not ACK them. *)
+
+val max_inbound_frame_bytes : unit -> int
+(** Maximum single inbound WebSocket frame payload size.  [0] disables the
+    frame gate. *)
+
+val max_inbound_message_bytes : unit -> int
+(** Maximum accumulated inbound WebSocket message size across fragments.
+    [0] disables the message gate. *)
+
+val classify_inbound_frame_size :
+  len:int -> max_frame_bytes:int -> inbound_size_decision
+(** Rejects a single frame whose declared payload [len] exceeds
+    [max_frame_bytes]. *)
+
+val classify_inbound_message_size :
+  current_bytes:int -> chunk_len:int -> max_message_bytes:int -> inbound_size_decision
+(** Rejects an accumulated fragmented message when adding [chunk_len] to
+    [current_bytes] would exceed [max_message_bytes]. *)
 
 val slice_index_enabled : unit -> bool
 (** Whether the per-slice fanout side index is active.

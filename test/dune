@@ -1089,6 +1089,13 @@
  (modules memory_os_brain_harness)
  (libraries masc_test_deps))
 
+; RFC-0259 P2: standalone observe-only grounding dry-run runner (network tool,
+; not a CI test — executable so `dune test`/@runtest never runs it).
+(executable
+ (name eval_grounding_dry_run)
+ (modules eval_grounding_dry_run)
+ (libraries masc_test_deps eio_main masc_eio_context))
+
 (test
  (name test_json_field)
  (modules test_json_field)

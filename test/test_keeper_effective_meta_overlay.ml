@@ -7,7 +7,9 @@ module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 module Heartbeat_presence = Masc.Keeper_heartbeat_loop_presence
-module Runtime = Masc.Runtime
+(* [Runtime] (init_default) lives in the unwrapped [masc_runtime] library, so it
+   is referenced directly (not via [Masc.]); [Keeper_runtime] (ensure_keeper_meta)
+   lives in the main [masc] library. Same pattern as test_keeper_lifecycle_registry_dispatch. *)
 module Keeper_runtime = Masc.Keeper_runtime
 
 let temp_dir () =

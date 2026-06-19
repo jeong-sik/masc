@@ -1,7 +1,11 @@
 (* Stimulus — Cycle 23 / Tier B6.
    See stimulus.mli for the design rationale. *)
 
+open Result.Syntax
+
 (* ── Source taxonomy ─────────────────────────────────────────────── *)
+
+open Result.Syntax
 
 type source =
   | User_message [@tla.symbol "user_message"]
@@ -45,20 +49,28 @@ let source_of_string = function
    and violate the "Unknown → Permissive Default" anti-pattern. *)
 let validate_salience s =
   if not (Float.is_finite s) then
-    invalid_arg
-      (Printf.sprintf "Stimulus.make: salience not finite (%f)" s);
-  if s < 0.0 || s > 1.0 then
-    invalid_arg
-      (Printf.sprintf "Stimulus.make: salience out of range [0,1]: %f" s)
+    Error (Printf.sprintf "Stimulus.make: salience not finite (%f)" s)
+  else if s < 0.0 || s > 1.0 then
+    Error (Printf.sprintf "Stimulus.make: salience out of range [0,1]: %f" s)
+  else Ok ()
+;;
 
 let validate_id id =
-  if String.length id = 0 then
-    invalid_arg "Stimulus.make: id must be non-empty"
+  if String.length id = 0 then Error "Stimulus.make: id must be non-empty" else Ok ()
+;;
+
+let make_result ~id ~source ~payload ~salience ~timestamp =
+  let open Result.Syntax in
+  let* () = validate_id id in
+  let* () = validate_salience salience in
+  Ok { id; source; payload; salience; timestamp }
+;;
 
 let make ~id ~source ~payload ~salience ~timestamp =
-  validate_id id;
-  validate_salience salience;
-  { id; source; payload; salience; timestamp }
+  match make_result ~id ~source ~payload ~salience ~timestamp with
+  | Ok t -> t
+  | Error msg -> invalid_arg msg
+;;
 
 (* ── Scoring ─────────────────────────────────────────────────────── *)
 
@@ -94,7 +106,6 @@ let json_kind_name : Yojson.Safe.t -> string = function
    maps to [Error msg] with a localised reason. The salience and id
    validations re-use the construction-time invariants. *)
 let of_json (j : Yojson.Safe.t) : (t, string) result =
-  let ( let* ) = Result.bind in
   match j with
   | `Assoc fields ->
       let lookup k =
@@ -154,8 +165,7 @@ let of_json (j : Yojson.Safe.t) : (t, string) result =
       in
       (* Re-run construction-time invariants so [of_json |> to_json]
          and [make ...] enforce the same range. *)
-      (try Ok (make ~id ~source ~payload ~salience ~timestamp)
-       with Invalid_argument msg -> Error msg)
+      make_result ~id ~source ~payload ~salience ~timestamp
   | other ->
       Error
         (Printf.sprintf

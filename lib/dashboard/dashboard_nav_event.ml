@@ -13,6 +13,7 @@ let valid_surfaces =
   ; "monitoring"
   ; "keepers"
   ; "board"
+  ; "fusion"
   ; "command"
   ; "connectors"
   ; "workspace"

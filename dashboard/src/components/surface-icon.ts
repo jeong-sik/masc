@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   SquareKanban,
   UsersRound,
+  Workflow,
 } from 'lucide-preact'
 import type { DashboardSurfaceIcon } from '../config/navigation'
 
@@ -31,6 +32,8 @@ export function SurfaceIcon({ icon, size = 16 }: SurfaceIconProps) {
       return html`<${UsersRound} ...${props} />`
     case 'board':
       return html`<${SquareKanban} ...${props} />`
+    case 'fusion':
+      return html`<${Workflow} ...${props} />`
     case 'approvals':
       return html`<${ShieldCheck} ...${props} />`
     case 'command':

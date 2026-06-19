@@ -1,0 +1,480 @@
+.v2-fusion-surface {
+  --fus-line: var(--color-border-default);
+  --fus-panel: color-mix(in srgb, var(--color-bg-elevated) 72%, transparent);
+  --fus-panel-strong: color-mix(in srgb, var(--color-bg-elevated) 88%, var(--color-bg-surface));
+  --fus-text: var(--color-fg-primary);
+  --fus-muted: var(--color-fg-muted);
+}
+
+.v2-fusion-surface .fus-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.v2-fusion-surface .fus-head {
+  align-items: flex-start;
+}
+
+.v2-fusion-surface .fus-refresh,
+.v2-fusion-surface .fus-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-2);
+  background: var(--fus-panel);
+  color: var(--fus-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0 12px;
+}
+
+.v2-fusion-surface .fus-refresh:hover,
+.v2-fusion-surface .fus-action:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-hover);
+}
+
+.v2-fusion-surface .fus-refresh:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.v2-fusion-surface .fus-action.primary {
+  border-color: var(--ok-border);
+  background: var(--ok-soft);
+  color: var(--ok-fg);
+}
+
+.v2-fusion-surface .fus-top-kpis,
+.v2-fusion-surface .fus-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.v2-fusion-surface .fus-kpi {
+  min-width: 0;
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-3);
+  background: var(--fus-panel);
+  padding: 11px 12px;
+}
+
+.v2-fusion-surface .fus-kpi-k {
+  color: var(--fus-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.v2-fusion-surface .fus-kpi-v {
+  margin-top: 4px;
+  color: var(--fus-text);
+  font-size: 22px;
+  font-weight: 760;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.v2-fusion-surface .fus-kpi.tone-ok .fus-kpi-v {
+  color: var(--ok-fg);
+}
+
+.v2-fusion-surface .fus-kpi.tone-warn .fus-kpi-v {
+  color: var(--warn-fg);
+}
+
+.v2-fusion-surface .fus-kpi.tone-bad .fus-kpi-v {
+  color: var(--bad-light);
+}
+
+.v2-fusion-surface .fus-kpi.tone-volt .fus-kpi-v {
+  color: var(--volt-strong);
+}
+
+.v2-fusion-surface .fus-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  min-height: 0;
+}
+
+.v2-fusion-surface .fus-list,
+.v2-fusion-surface .fus-detail,
+.v2-fusion-surface .fus-empty {
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-3);
+  background: var(--fus-panel);
+}
+
+.v2-fusion-surface .fus-list {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 180px);
+  min-height: 420px;
+  overflow: hidden;
+}
+
+.v2-fusion-surface .fus-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--fus-line);
+  color: var(--fus-muted);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 12px 14px;
+  text-transform: uppercase;
+}
+
+.v2-fusion-surface .fus-run-scroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  padding: 10px;
+}
+
+.v2-fusion-surface .fus-run-row {
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--fus-text);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-height: 96px;
+  padding: 11px;
+  text-align: left;
+}
+
+.v2-fusion-surface .fus-run-row:hover {
+  border-color: var(--fus-line);
+  background: var(--color-bg-hover);
+}
+
+.v2-fusion-surface .fus-run-row.active {
+  border-color: var(--ok-border);
+  background: color-mix(in srgb, var(--ok-soft) 72%, var(--fus-panel));
+}
+
+.v2-fusion-surface .fus-row-top,
+.v2-fusion-surface .fus-row-meta,
+.v2-fusion-surface .fus-detail-meta,
+.v2-fusion-surface .fus-panel-head,
+.v2-fusion-surface .fus-panel-foot,
+.v2-fusion-surface .fus-section-head,
+.v2-fusion-surface .fus-sink {
+  display: flex;
+  align-items: center;
+}
+
+.v2-fusion-surface .fus-row-top,
+.v2-fusion-surface .fus-panel-head,
+.v2-fusion-surface .fus-section-head,
+.v2-fusion-surface .fus-sink {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.v2-fusion-surface .fus-row-meta,
+.v2-fusion-surface .fus-detail-meta,
+.v2-fusion-surface .fus-panel-foot {
+  color: var(--fus-muted);
+  font-size: 11px;
+  gap: 8px;
+}
+
+.v2-fusion-surface .fus-run-id {
+  color: var(--fus-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v2-fusion-surface .fus-row-question {
+  color: var(--fus-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.v2-fusion-surface .fus-status,
+.v2-fusion-surface .fus-mini-status {
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-1);
+  background: var(--color-bg-surface);
+  color: var(--fus-muted);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 4px 6px;
+  text-transform: uppercase;
+}
+
+.v2-fusion-surface .fus-status.tone-ok,
+.v2-fusion-surface .fus-mini-status.ok {
+  border-color: var(--ok-border);
+  background: var(--ok-soft);
+  color: var(--ok-fg);
+}
+
+.v2-fusion-surface .fus-status.tone-warn {
+  border-color: var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn-fg);
+}
+
+.v2-fusion-surface .fus-status.tone-bad,
+.v2-fusion-surface .fus-mini-status.bad {
+  border-color: var(--bad-30);
+  background: var(--bad-10);
+  color: var(--bad-light);
+}
+
+.v2-fusion-surface .fus-status.tone-volt {
+  border-color: color-mix(in srgb, var(--volt-strong) 38%, transparent);
+  background: var(--volt-wash);
+  color: var(--volt-strong);
+}
+
+.v2-fusion-surface .fus-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 16px;
+}
+
+.v2-fusion-surface .fus-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.v2-fusion-surface .fus-detail-title {
+  min-width: 0;
+}
+
+.v2-fusion-surface .fus-detail-title h2 {
+  color: var(--fus-text);
+  font-size: 24px;
+  font-weight: 780;
+  line-height: 1.12;
+  margin: 8px 0 0;
+}
+
+.v2-fusion-surface .fus-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.v2-fusion-surface .fus-question,
+.v2-fusion-surface .fus-judge,
+.v2-fusion-surface .fus-resolved,
+.v2-fusion-surface .fus-sink {
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-3);
+  background: var(--fus-panel-strong);
+  padding: 14px;
+}
+
+.v2-fusion-surface .fus-question p,
+.v2-fusion-surface .fus-resolved p,
+.v2-fusion-surface .fus-sink p {
+  color: var(--fus-text);
+  font-size: 14px;
+  line-height: 1.55;
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.v2-fusion-surface .fus-label {
+  color: var(--fus-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.v2-fusion-surface .fus-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.v2-fusion-surface .fus-section-head h3 {
+  color: var(--fus-text);
+  font-size: 14px;
+  font-weight: 800;
+  margin: 0;
+}
+
+.v2-fusion-surface .fus-section-head span {
+  color: var(--fus-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.v2-fusion-surface .fus-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.v2-fusion-surface .fus-panel-card {
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-3);
+  background: var(--fus-panel-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 180px;
+  min-width: 0;
+  padding: 13px;
+}
+
+.v2-fusion-surface .fus-panel-card.answered {
+  border-top-color: var(--ok-border);
+}
+
+.v2-fusion-surface .fus-panel-card.failed {
+  border-top-color: var(--bad-30);
+}
+
+.v2-fusion-surface .fus-panel-model {
+  color: var(--fus-text);
+  font-size: 13px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v2-fusion-surface .fus-panel-body {
+  color: var(--fus-text);
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.52;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.v2-fusion-surface .fus-panel-foot {
+  border-top: 1px solid var(--fus-line);
+  justify-content: flex-start;
+  padding-top: 8px;
+}
+
+.v2-fusion-surface .fus-synthesis {
+  color: var(--fus-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 10px 0 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.v2-fusion-surface .fus-empty-inline,
+.v2-fusion-surface .fus-empty {
+  color: var(--fus-muted);
+}
+
+.v2-fusion-surface .fus-empty-inline {
+  border: 1px dashed var(--fus-line);
+  border-radius: var(--r-3);
+  padding: 18px;
+}
+
+.v2-fusion-surface .fus-empty {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: center;
+  min-height: 300px;
+  padding: 32px;
+  text-align: center;
+}
+
+.v2-fusion-surface .fus-empty-mark {
+  align-items: center;
+  border: 1px solid var(--ok-border);
+  border-radius: var(--r-3);
+  background: var(--ok-soft);
+  color: var(--ok-fg);
+  display: inline-flex;
+  font-size: 22px;
+  font-weight: 800;
+  height: 48px;
+  justify-content: center;
+  width: 48px;
+}
+
+.v2-fusion-surface .fus-empty h2 {
+  color: var(--fus-text);
+  font-size: 22px;
+  font-weight: 780;
+  margin: 0;
+}
+
+.v2-fusion-surface .fus-empty p {
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+  max-width: 520px;
+}
+
+@media (max-width: 1100px) {
+  .v2-fusion-surface .fus-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .v2-fusion-surface .fus-list {
+    position: static;
+    max-height: none;
+    min-height: 0;
+  }
+
+  .v2-fusion-surface .fus-run-scroll {
+    max-height: 360px;
+  }
+
+  .v2-fusion-surface .fus-panel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .v2-fusion-surface .fus-top-kpis,
+  .v2-fusion-surface .fus-kpis,
+  .v2-fusion-surface .fus-panel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .v2-fusion-surface .fus-detail-head,
+  .v2-fusion-surface .fus-actions {
+    flex-direction: column;
+  }
+
+  .v2-fusion-surface .fus-action,
+  .v2-fusion-surface .fus-refresh {
+    width: 100%;
+  }
+}

@@ -167,6 +167,13 @@ type chat_message = {
           an unknown label is reported as a persistence read drop and
           reads as [Utterance] — the conservative arm: the row renders
           and advances the watermark like any reply. *)
+  turn_ref : Ids.Turn_ref.t option;
+      (** RFC-0233 §7: ["<trace_id>#<absolute_turn>"] join key for the turn
+          that produced this row.  Stamped by {!append_turn} /
+          {!append_assistant_message} when the caller supplies it; [None]
+          on inbound user lines (no turn yet) and rows written before §7.
+          A malformed persisted value is reported as a persistence read
+          drop and reads as [None]; the row stays valid. *)
 }
 
 (** {1 I/O} *)
@@ -196,6 +203,7 @@ val append_turn :
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   ?assistant_kind:Row_kind.t ->
   ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
   assistant_content:string ->
   unit ->
   unit
@@ -213,6 +221,7 @@ val append_assistant_message :
   ?conversation_id:string ->
   ?audio:audio_clip ->
   ?blocks:chat_block list ->
+  ?turn_ref:Ids.Turn_ref.t ->
   unit ->
   unit
 

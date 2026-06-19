@@ -64,6 +64,7 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
   ; blocks = None
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
   ; kind
+  ; turn_ref = None
   }
 ;;
 
@@ -203,6 +204,7 @@ let tool_line : Store.chat_message =
   ; blocks = None
   ; mentions = []
   ; kind = Store.Row_kind.Utterance
+  ; turn_ref = None
   }
 ;;
 

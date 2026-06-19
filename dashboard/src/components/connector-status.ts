@@ -118,6 +118,17 @@ export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
   telegram: 'Telegram',
 }
 
+const CONNECTOR_STATE_LABELS = ['offline', 'stale', 'connected', 'disconnected'] as const
+export type ConnectorStateLabel = (typeof CONNECTOR_STATE_LABELS)[number]
+
+function isConnectorStateLabel(value: string | undefined): value is ConnectorStateLabel {
+  return value === 'offline' || value === 'stale' || value === 'connected' || value === 'disconnected'
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled connector state label: ${String(value)}`)
+}
+
 // Sidecar directories — only for connectors that actually run as
 // external sidecar processes. Discord is intentionally absent
 // (RFC-0203 §Phase 3 deleted sidecars/discord-bot/).
@@ -377,7 +388,7 @@ function dotClass(state: LivenessState): string {
   }
 }
 
-function dotClassForLabel(label: string): string {
+function dotClassForLabel(label: ConnectorStateLabel): string {
   switch (label) {
     case 'connected':
       return 'bg-[var(--ok-10)]'
@@ -385,8 +396,10 @@ function dotClassForLabel(label: string): string {
       return 'bg-[var(--warn-10)]'
     case 'disconnected':
       return 'bg-[var(--bad-10)]'
-    default:
+    case 'offline':
       return 'bg-[var(--color-fg-disabled)]'
+    default:
+      return assertNever(label)
   }
 }
 
@@ -408,9 +421,9 @@ function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): strin
   return runtime
 }
 
-export function connectorStateLabel(connector: GateConnectorInfo | null): string {
+export function connectorStateLabel(connector: GateConnectorInfo | null): ConnectorStateLabel {
   const advertised = connector?.status?.trim().toLowerCase()
-  if (advertised === 'offline' || advertised === 'stale' || advertised === 'connected' || advertised === 'disconnected') {
+  if (isConnectorStateLabel(advertised)) {
     return advertised
   }
   if (!connector?.available) return 'offline'
@@ -425,7 +438,7 @@ export function connectorStateLabel(connector: GateConnectorInfo | null): string
     status pill required. Mapping matches Portainer's container state
     palette: emerald for connected, amber for stale (intermittent),
     rose for disconnected (broken), muted for offline (not running). */
-export function connectorCardBorderClass(label: string): string {
+export function connectorCardBorderClass(label: ConnectorStateLabel): string {
   switch (label) {
     case 'connected':
       return 'border-l-4 border-l-emerald-500'
@@ -434,8 +447,9 @@ export function connectorCardBorderClass(label: string): string {
     case 'disconnected':
       return 'border-l-4 border-l-rose-500'
     case 'offline':
-    default:
       return 'border-l-4 border-l-[var(--color-border-default)]'
+    default:
+      return assertNever(label)
   }
 }
 
@@ -1749,22 +1763,46 @@ function GateStatusStrip({
   `
 }
 
-function connectorCardStateClass(label: string): string {
-  if (label === 'connected') return ''
-  if (label === 'stale') return 'stale'
-  return 'down'
+function connectorCardStateClass(label: ConnectorStateLabel): string {
+  switch (label) {
+    case 'connected':
+      return ''
+    case 'stale':
+      return 'stale'
+    case 'offline':
+    case 'disconnected':
+      return 'down'
+    default:
+      return assertNever(label)
+  }
 }
 
-function connectorStatusPillClass(label: string): string {
-  if (label === 'connected') return 'run'
-  if (label === 'stale') return 'pause'
-  return 'off'
+function connectorStatusPillClass(label: ConnectorStateLabel): string {
+  switch (label) {
+    case 'connected':
+      return 'run'
+    case 'stale':
+      return 'pause'
+    case 'offline':
+    case 'disconnected':
+      return 'off'
+    default:
+      return assertNever(label)
+  }
 }
 
-function connectorStatusPillLabel(label: string): string {
-  if (label === 'connected') return 'Connected'
-  if (label === 'stale') return 'Stale'
-  return 'Down'
+function connectorStatusPillLabel(label: ConnectorStateLabel): string {
+  switch (label) {
+    case 'connected':
+      return 'Connected'
+    case 'stale':
+      return 'Stale'
+    case 'offline':
+    case 'disconnected':
+      return 'Down'
+    default:
+      return assertNever(label)
+  }
 }
 
 function connectorDisplayValue(value: string | number | null | undefined): string {
@@ -1810,6 +1848,7 @@ function ConnectorGateCard({
       class=${`cn-card ${connectorCardStateClass(label)}`}
       data-testid="connector-gate-card"
       data-connector-card=${connectorId}
+      data-connector-card-state=${label}
     >
       <div class="cn-h">
         <span class="cn-glyph" aria-hidden="true">${channelIcon(connector?.channel ?? connectorId)}</span>
@@ -2105,17 +2144,32 @@ function ConnectorDetailDrawer({
     openConnectorConfig(connectorId)
   }, [connectorId])
 
+  return html`
+    <${ConnectorDetailDrawerBody}
+      key=${connectorId}
+      connectorId=${connectorId}
+      connector=${connector}
+      keepers=${keepers}
+      onClose=${onClose}
+    />
+  `
+}
+
+function ConnectorDetailDrawerBody({
+  connectorId,
+  connector,
+  keepers,
+  onClose,
+}: {
+  connectorId: KnownConnectorId
+  connector: GateConnectorInfo | null
+  keepers: GateKeeperInfo[]
+  onClose: () => void
+}) {
   const [enabled, setEnabled] = useState(() => connectorStateLabel(connector) === 'connected')
   const [botDraft, setBotDraft] = useState(() => connectorBotValue(connector))
   const [replyMode, setReplyMode] = useState(() => connector?.reply_mode || 'manual')
   const [bindingDrafts, setBindingDrafts] = useState(() => connectorBindingDrafts(connectorId, connector))
-
-  useEffect(() => {
-    setEnabled(connectorStateLabel(connector) === 'connected')
-    setBotDraft(connectorBotValue(connector))
-    setReplyMode(connector?.reply_mode || 'manual')
-    setBindingDrafts(connectorBindingDrafts(connectorId, connector))
-  }, [connectorId, connector])
 
   const displayName = CONNECTOR_DISPLAY_NAMES[connectorId] ?? connectorId
   const tab = configDrawerTab.value
@@ -2198,6 +2252,7 @@ function ConnectorDetailDrawer({
                 <div class="cn-set-row-c">
                   <input
                     class="cn-set-input mono"
+                    aria-label="connector bot"
                     value=${botDraft}
                     onInput=${(e: Event) => { setBotDraft((e.target as HTMLInputElement).value) }}
                   />

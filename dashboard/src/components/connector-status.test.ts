@@ -1153,6 +1153,73 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     expect(container.textContent).toContain('Add connector')
   })
 
+  it('pins connector status pill mapping across the closed four-state domain', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const base = sampleConnectorsResponse().connectors[0]
+    const connector = (
+      connector_id: string,
+      display_name: string,
+      status: 'connected' | 'stale' | 'disconnected' | 'offline',
+      available: boolean,
+      connected: boolean,
+      stale: boolean,
+    ) => ({
+      ...base,
+      connector_id,
+      display_name,
+      channel: connector_id,
+      status,
+      available,
+      connected,
+      stale,
+      configured_bindings: [],
+      recent_audit: [],
+    })
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
+      connectors: [
+        connector('discord', 'Discord', 'connected', true, true, false),
+        connector('imessage', 'iMessage', 'stale', true, false, true),
+        connector('slack', 'Slack', 'disconnected', true, false, false),
+        connector('telegram', 'Telegram', 'offline', false, false, false),
+      ],
+      total: 4,
+      active_count: 1,
+    }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: signal(null),
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const card = (id: string) => container.querySelector(`[data-connector-card="${id}"]`) as HTMLElement | null
+    const pill = (id: string) => card(id)?.querySelector('.cn-status-pill') as HTMLElement | null
+
+    expect(card('discord')?.getAttribute('data-connector-card-state')).toBe('connected')
+    expect(pill('discord')?.className).toContain('run')
+    expect(pill('discord')?.textContent).toContain('Connected')
+
+    expect(card('imessage')?.getAttribute('data-connector-card-state')).toBe('stale')
+    expect(card('imessage')?.className).toContain('stale')
+    expect(pill('imessage')?.className).toContain('pause')
+    expect(pill('imessage')?.textContent).toContain('Stale')
+
+    expect(card('slack')?.getAttribute('data-connector-card-state')).toBe('disconnected')
+    expect(card('slack')?.className).toContain('down')
+    expect(pill('slack')?.className).toContain('off')
+    expect(pill('slack')?.textContent).toContain('Down')
+
+    expect(card('telegram')?.getAttribute('data-connector-card-state')).toBe('offline')
+    expect(card('telegram')?.className).toContain('down')
+    expect(pill('telegram')?.className).toContain('off')
+    expect(pill('telegram')?.textContent).toContain('Down')
+  })
+
   it('filters connector tiles from the toolbar search input', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const discord = sampleConnectorsResponse().connectors[0]
@@ -1246,5 +1313,60 @@ describe('ConnectorStatusPanel v2 surface layout', () => {
     await flushUi()
 
     expect(drawer!.textContent).toContain('server in-process')
+  })
+
+  it('preserves connector config drafts across same-connector refreshes', async () => {
+    const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
+    const firstConnector = {
+      ...sampleConnectorsResponse().connectors[0],
+      bot_user_name: 'server bot initial',
+    }
+    const refreshedConnector = {
+      ...firstConnector,
+      bot_user_name: 'server bot refreshed',
+      updated_at: '2026-04-03T00:01:00Z',
+    }
+    const fetchGateConnectors = vi.fn<() => Promise<unknown>>()
+      .mockResolvedValueOnce(sampleConnectorsResponse({
+        connectors: [firstConnector],
+        total: 1,
+        active_count: 1,
+      }))
+      .mockResolvedValueOnce(sampleConnectorsResponse({
+        connectors: [refreshedConnector],
+        total: 1,
+        active_count: 1,
+      }))
+    const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleKeepersResponse())
+    const last = signal<unknown>(null)
+
+    const { ConnectorStatusPanel } = await loadComponentWithApi({
+      fetchGateStatus,
+      fetchGateConnectors,
+      fetchGateKeepers,
+      lastEvent: last,
+    })
+
+    render(html`<${ConnectorStatusPanel} />`, container)
+    await flushUi()
+
+    const configButton = container.querySelector<HTMLButtonElement>('button[aria-label="Discord 설정 열기"]')
+    expect(configButton).not.toBeNull()
+    configButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushUi()
+
+    const botInput = container.querySelector<HTMLInputElement>('input[aria-label="connector bot"]')
+    expect(botInput).not.toBeNull()
+    expect(botInput!.value).toBe('server bot initial')
+    botInput!.value = 'operator unsaved draft'
+    botInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+
+    last.value = { type: 'connector_refresh' }
+    await new Promise(resolve => setTimeout(resolve, 2100))
+    await flushUi()
+
+    expect(fetchGateConnectors).toHaveBeenCalledTimes(2)
+    expect(botInput!.value).toBe('operator unsaved draft')
   })
 })

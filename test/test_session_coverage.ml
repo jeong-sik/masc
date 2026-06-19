@@ -315,6 +315,29 @@ let test_registry_works_before_actor_loop_starts () =
   let agents = Session.connected_agents registry |> List.sort String.compare in
   check (list string) "registered before start_loop" [ "alice" ] agents
 
+let with_bounded_await clock label f =
+  try Eio.Time.with_timeout_exn clock 1.0 f with
+  | Eio.Time.Timeout -> failf "%s timed out" label
+
+let test_registry_actor_loop_restarts_after_switch_release () =
+  Eio_main.run @@ fun env ->
+  let registry = Session.create () in
+  let register_with_timeout agent_name =
+    with_bounded_await env#clock
+      (Printf.sprintf "register %s through registry actor" agent_name)
+      (fun () ->
+        let (_ : Session.session) = Session.register registry ~agent_name in
+        ())
+  in
+  Eio.Switch.run (fun sw ->
+    Session.start_loop registry ~sw;
+    register_with_timeout "alice");
+  Eio.Switch.run (fun sw ->
+    Session.start_loop registry ~sw;
+    register_with_timeout "bob");
+  let agents = Session.connected_agents registry |> List.sort String.compare in
+  check (list string) "registered after actor restart" [ "alice"; "bob" ] agents
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -377,5 +400,7 @@ let () =
       test_case "empty" `Quick test_connected_agents_empty;
       test_case "pre-loop registry calls do not hang" `Quick
         test_registry_works_before_actor_loop_starts;
+      test_case "actor loop restarts after switch release" `Quick
+        test_registry_actor_loop_restarts_after_switch_release;
     ];
   ]

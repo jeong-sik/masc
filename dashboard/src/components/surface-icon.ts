@@ -9,6 +9,7 @@ import {
   Plug,
   ScrollText,
   Settings,
+  ShieldCheck,
   SquareKanban,
   UsersRound,
 } from 'lucide-preact'
@@ -30,6 +31,8 @@ export function SurfaceIcon({ icon, size = 16 }: SurfaceIconProps) {
       return html`<${UsersRound} ...${props} />`
     case 'board':
       return html`<${SquareKanban} ...${props} />`
+    case 'approvals':
+      return html`<${ShieldCheck} ...${props} />`
     case 'command':
       return html`<${Gauge} ...${props} />`
     case 'connectors':

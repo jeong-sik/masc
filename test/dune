@@ -667,6 +667,11 @@
   test_board_metrics_labels)
  (libraries masc_test_deps))
 
+(tests
+ (names test_executor_pool_eio_mutex)
+ (modules test_executor_pool_eio_mutex)
+ (libraries masc_test_deps))
+
 ; Focused single-module tests
 
 ; Group 3: Eio-native tests (single-module, standard deps)

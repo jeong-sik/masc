@@ -1,0 +1,74 @@
+open Alcotest
+
+(** Regression for the 2026-06-19 keeper stall.
+
+    The dashboard metrics cache compute was offloaded via
+    [Eio_guard.run_in_systhread] — a bare OS thread with no Eio effect handler.
+    The compute reached [Keeper_fs.ensure_dir], which takes the process-shared
+    [dir_mu] through [Eio.Mutex.use_rw ~protect:true].  [Cancel.protect]
+    performs [Get_context] as its first action; with no handler on the systhread
+    that raises [Effect.Unhandled], which [use_rw] converts into a poison of
+    [dir_mu].  Every file write in the process then failed with
+    [Eio.Mutex.Poisoned], so no keeper could persist and the fleet stalled.
+
+    The fix routes such compute through [Executor_pool_ref.submit_or_inline],
+    which runs the closure as a real Eio fiber (under [Eio.Switch.run], on a
+    worker domain or inline), so [use_rw] keeps its [Get_context] handler and
+    the mutex is never poisoned.  These tests pin both directions. *)
+
+(* True iff taking [mu] raises [Eio.Mutex.Poisoned] (i.e. the mutex is dead). *)
+let poisons mu =
+  try
+    Eio.Mutex.use_rw ~protect:true mu (fun () -> ());
+    false
+  with
+  | Eio.Mutex.Poisoned _ -> true
+
+(* The bug: a bare systhread has no Eio handler, so [use_rw] inside it raises
+   [Effect.Unhandled(Get_context)] and poisons the mutex. This is exactly why
+   the dashboard cache compute must NOT use [Eio_guard.run_in_systhread]. *)
+let test_systhread_offload_poisons_mutex () =
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun _sw ->
+      Eio_guard.enable ();
+      Fun.protect ~finally:Eio_guard.disable (fun () ->
+        let mu = Eio.Mutex.create () in
+        let raised =
+          try
+            Eio_guard.run_in_systhread (fun () ->
+              Eio.Mutex.use_rw ~protect:true mu (fun () -> ()));
+            false
+          with
+          | _ -> true
+        in
+        check bool "use_rw inside a bare systhread raises" true raised;
+        check bool "and leaves the mutex poisoned" true (poisons mu))))
+
+(* The fix: [submit_or_inline] runs the closure with a live Eio context, so the
+   same [use_rw] resolves and the mutex stays usable afterwards. *)
+let test_submit_or_inline_preserves_mutex () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Eio_guard.enable ();
+      Fun.protect ~finally:Eio_guard.disable (fun () ->
+        let dm = Eio.Stdenv.domain_mgr env in
+        let pool = Domain_pool.create ~sw ~domain_count:1 dm in
+        Executor_pool_ref.set (Domain_pool.executor_pool pool);
+        let mu = Eio.Mutex.create () in
+        let v =
+          Executor_pool_ref.submit_or_inline (fun () ->
+            Eio.Mutex.use_rw ~protect:true mu (fun () -> 7))
+        in
+        check int "use_rw inside offloaded closure returns its value" 7 v;
+        check bool "shared mutex is not poisoned after offload" false
+          (poisons mu))))
+
+let () =
+  Alcotest.run "Executor_pool_ref Eio mutex safety"
+    [ ( "offload"
+      , [ test_case "systhread offload poisons the mutex (bug)" `Quick
+            test_systhread_offload_poisons_mutex
+        ; test_case "submit_or_inline preserves the mutex (fix)" `Quick
+            test_submit_or_inline_preserves_mutex
+        ] )
+    ]

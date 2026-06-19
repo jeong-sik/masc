@@ -295,11 +295,6 @@ let dispatch registry msg =
   if Atomic.get registry.loop_started then Eio.Stream.add registry.mailbox msg
   else process_registry_msg registry msg
 
-let await_if_needed promise =
-  match Eio.Promise.peek promise with
-  | Some value -> value
-  | None -> Eio.Promise.await promise
-
 let await_exn_if_needed promise =
   match Eio.Promise.peek promise with
   | Some (Ok value) -> value

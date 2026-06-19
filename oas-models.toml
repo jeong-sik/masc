@@ -114,3 +114,936 @@ supports_native_streaming = true
 supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
+
+# Ollama Cloud Models (canonical 2026-06 seed)
+# Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
+# Provider-qualified entries preserve Ollama Cloud wire behavior when a model id overlaps another provider.
+
+[[models]]
+id_prefix = "ollama_cloud/deepseek-v3.1:671b"
+base = "ollama_cloud"
+max_context_tokens = 163840
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/deepseek-v3.2"
+base = "ollama_cloud"
+max_context_tokens = 163840
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/deepseek-v4-flash"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/deepseek-v4-pro"
+base = "ollama_cloud"
+max_context_tokens = 524288
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/devstral-2:123b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/devstral-small-2:24b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/gemini-3-flash-preview"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/gemma3:4b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/gemma3:12b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/gemma3:27b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/gemma4:31b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/glm-4.7"
+base = "ollama_cloud"
+max_context_tokens = 202752
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/glm-5"
+base = "ollama_cloud"
+max_context_tokens = 202752
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/glm-5.1"
+base = "ollama_cloud"
+max_context_tokens = 202752
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/glm-5.2"
+base = "ollama_cloud"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/gpt-oss:20b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/gpt-oss:120b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/kimi-k2.5"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/kimi-k2.6"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/kimi-k2.7-code"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/minimax-m2.1"
+base = "ollama_cloud"
+max_context_tokens = 204800
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/minimax-m2.5"
+base = "ollama_cloud"
+max_context_tokens = 196608
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/minimax-m2.7"
+base = "ollama_cloud"
+max_context_tokens = 196608
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/minimax-m3"
+base = "ollama_cloud"
+max_context_tokens = 524288
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/ministral-3:3b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/ministral-3:8b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/ministral-3:14b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/mistral-large-3:675b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/nemotron-3-nano:30b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/nemotron-3-super"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/nemotron-3-ultra"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/qwen3-coder:480b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/qwen3-coder-next"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/qwen3.5:397b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ollama_cloud/rnj-1:8b"
+base = "ollama_cloud"
+max_context_tokens = 32768
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+# Bare entries for Cloud models not already represented above by a direct-provider seed.
+# Runtime startup still checks bare model membership before OAS provider-qualified dispatch.
+
+[[models]]
+id_prefix = "deepseek-v3.1:671b"
+base = "ollama_cloud"
+max_context_tokens = 163840
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "deepseek-v3.2"
+base = "ollama_cloud"
+max_context_tokens = 163840
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "devstral-2:123b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "devstral-small-2:24b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "gemini-3-flash-preview"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "gemma3:4b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "gemma3:12b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "gemma3:27b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = false
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "gemma4:31b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5"
+base = "ollama_cloud"
+max_context_tokens = 202752
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5.1"
+base = "ollama_cloud"
+max_context_tokens = 202752
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-5.2"
+base = "ollama_cloud"
+max_context_tokens = 1000000
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "gpt-oss:20b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "gpt-oss:120b"
+base = "ollama_cloud"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "kimi-k2.5"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "kimi-k2.6"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "kimi-k2.7-code"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "minimax-m2.1"
+base = "ollama_cloud"
+max_context_tokens = 204800
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "minimax-m2.5"
+base = "ollama_cloud"
+max_context_tokens = 196608
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "minimax-m2.7"
+base = "ollama_cloud"
+max_context_tokens = 196608
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ministral-3:3b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ministral-3:8b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "ministral-3:14b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "mistral-large-3:675b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "nemotron-3-nano:30b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "nemotron-3-super"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "nemotron-3-ultra"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "qwen3-coder:480b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "qwen3-coder-next"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "qwen3.5:397b"
+base = "ollama_cloud"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "reasoning_effort"
+supports_multimodal_inputs = true
+supports_image_input = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "rnj-1:8b"
+base = "ollama_cloud"
+max_context_tokens = 32768
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true

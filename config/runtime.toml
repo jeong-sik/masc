@@ -224,6 +224,642 @@ supports-multimodal-inputs = true
 
 [ollama_cloud.kimi-k2-6]
 
+# Ollama Cloud canonical model seeds
+# Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
+# Runtime model keys are TOML-safe slugs; api-name preserves the official Cloud model id.
+
+[models.ollama-cloud-deepseek-v3-1-671b]
+api-name = "deepseek-v3.1:671b"
+max-context = 163840
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-deepseek-v3-1-671b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-deepseek-v3-1-671b]
+
+[models.ollama-cloud-deepseek-v3-2]
+api-name = "deepseek-v3.2"
+max-context = 163840
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-deepseek-v3-2.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-deepseek-v3-2]
+
+[models.ollama-cloud-deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-deepseek-v4-flash.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-deepseek-v4-flash]
+
+[models.ollama-cloud-deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 524288
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-deepseek-v4-pro.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-deepseek-v4-pro]
+
+[models.ollama-cloud-devstral-2-123b]
+api-name = "devstral-2:123b"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-devstral-2-123b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-devstral-2-123b]
+
+[models.ollama-cloud-devstral-small-2-24b]
+api-name = "devstral-small-2:24b"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-devstral-small-2-24b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-devstral-small-2-24b]
+
+[models.ollama-cloud-gemini-3-flash-preview]
+api-name = "gemini-3-flash-preview"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-gemini-3-flash-preview.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-gemini-3-flash-preview]
+
+[models.ollama-cloud-gemma3-4b]
+api-name = "gemma3:4b"
+max-context = 131072
+tools-support = false
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-gemma3-4b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-gemma3-4b]
+
+[models.ollama-cloud-gemma3-12b]
+api-name = "gemma3:12b"
+max-context = 131072
+tools-support = false
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-gemma3-12b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-gemma3-12b]
+
+[models.ollama-cloud-gemma3-27b]
+api-name = "gemma3:27b"
+max-context = 131072
+tools-support = false
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-gemma3-27b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-gemma3-27b]
+
+[models.ollama-cloud-gemma4-31b]
+api-name = "gemma4:31b"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-gemma4-31b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-gemma4-31b]
+
+[models.ollama-cloud-glm-4-7]
+api-name = "glm-4.7"
+max-context = 202752
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-4-7.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-glm-4-7]
+
+[models.ollama-cloud-glm-5]
+api-name = "glm-5"
+max-context = 202752
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-5.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-glm-5]
+
+[models.ollama-cloud-glm-5-1]
+api-name = "glm-5.1"
+max-context = 202752
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-5-1.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-glm-5-1]
+
+[models.ollama-cloud-glm-5-2]
+api-name = "glm-5.2"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-glm-5-2.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-glm-5-2]
+
+[models.ollama-cloud-gpt-oss-20b]
+api-name = "gpt-oss:20b"
+max-context = 131072
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-gpt-oss-20b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-gpt-oss-20b]
+
+[models.ollama-cloud-gpt-oss-120b]
+api-name = "gpt-oss:120b"
+max-context = 131072
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-gpt-oss-120b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-gpt-oss-120b]
+
+[models.ollama-cloud-kimi-k2-5]
+api-name = "kimi-k2.5"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-kimi-k2-5.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-kimi-k2-5]
+
+[models.ollama-cloud-kimi-k2-6]
+api-name = "kimi-k2.6"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-kimi-k2-6.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-kimi-k2-6]
+
+[models.ollama-cloud-kimi-k2-7-code]
+api-name = "kimi-k2.7-code"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-kimi-k2-7-code.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-kimi-k2-7-code]
+
+[models.ollama-cloud-minimax-m2-1]
+api-name = "minimax-m2.1"
+max-context = 204800
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-minimax-m2-1.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-minimax-m2-1]
+
+[models.ollama-cloud-minimax-m2-5]
+api-name = "minimax-m2.5"
+max-context = 196608
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-minimax-m2-5.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-minimax-m2-5]
+
+[models.ollama-cloud-minimax-m2-7]
+api-name = "minimax-m2.7"
+max-context = 196608
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-minimax-m2-7.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-minimax-m2-7]
+
+[models.ollama-cloud-minimax-m3]
+api-name = "minimax-m3"
+max-context = 524288
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-minimax-m3.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-minimax-m3]
+
+[models.ollama-cloud-ministral-3-3b]
+api-name = "ministral-3:3b"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-ministral-3-3b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-ministral-3-3b]
+
+[models.ollama-cloud-ministral-3-8b]
+api-name = "ministral-3:8b"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-ministral-3-8b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-ministral-3-8b]
+
+[models.ollama-cloud-ministral-3-14b]
+api-name = "ministral-3:14b"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-ministral-3-14b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-ministral-3-14b]
+
+[models.ollama-cloud-mistral-large-3-675b]
+api-name = "mistral-large-3:675b"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-mistral-large-3-675b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-mistral-large-3-675b]
+
+[models.ollama-cloud-nemotron-3-nano-30b]
+api-name = "nemotron-3-nano:30b"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-nemotron-3-nano-30b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-nemotron-3-nano-30b]
+
+[models.ollama-cloud-nemotron-3-super]
+api-name = "nemotron-3-super"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-nemotron-3-super.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-nemotron-3-super]
+
+[models.ollama-cloud-nemotron-3-ultra]
+api-name = "nemotron-3-ultra"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-nemotron-3-ultra.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-nemotron-3-ultra]
+
+[models.ollama-cloud-qwen3-coder-480b]
+api-name = "qwen3-coder:480b"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-qwen3-coder-480b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-qwen3-coder-480b]
+
+[models.ollama-cloud-qwen3-coder-next]
+api-name = "qwen3-coder-next"
+max-context = 262144
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-qwen3-coder-next.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-qwen3-coder-next]
+
+[models.ollama-cloud-qwen3-5-397b]
+api-name = "qwen3.5:397b"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.ollama-cloud-qwen3-5-397b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.ollama-cloud-qwen3-5-397b]
+
+[models.ollama-cloud-rnj-1-8b]
+api-name = "rnj-1:8b"
+max-context = 32768
+tools-support = true
+thinking-support = false
+streaming = true
+
+[models.ollama-cloud-rnj-1-8b.capabilities]
+supports-tool-choice = false
+supports-extended-thinking = false
+supports-reasoning-budget = false
+thinking-control-format = "none"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
+
+[ollama_cloud.ollama-cloud-rnj-1-8b]
+
 [ollama.gemma4-26b-a4b-qat]
 max-concurrent = 1
 

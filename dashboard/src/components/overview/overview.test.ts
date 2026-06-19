@@ -652,8 +652,9 @@ describe('Overview v2 marker classes', () => {
     const { container } = render(h(Overview, null))
 
     expect(container.querySelector('.v2-overview-surface')).not.toBeNull()
-    expect(container.querySelector('.v2-overview-funnel')).not.toBeNull()
-    expect(container.querySelector('.v2-overview-keepers')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-rollup')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-rollup .v2-overview-funnel')).not.toBeNull()
+    expect(container.querySelector('.v2-overview-rollup .v2-overview-keepers')).not.toBeNull()
   })
 
   it('renders keeper-v2 port marker classes', () => {
@@ -676,22 +677,30 @@ describe('Overview StyleSeed surfaces', () => {
     const { container } = render(h(Overview, null))
     const root = container.querySelector('.v2-overview-surface')
     expect(root?.classList.contains('ss-surface')).toBe(true)
-    expect(root?.classList.contains('bg-surface-page')).toBe(true)
-    expect(root?.classList.contains('space-y-6')).toBe(true)
+    expect(root?.classList.contains('ov')).toBe(true)
+    expect(root?.classList.contains('text-text-primary')).toBe(true)
   })
 
-  it('wraps major sections in ss-card with mx-6', () => {
+  it('renders the prototype primary sequence before the legacy rollup', () => {
     const { container } = render(h(Overview, null))
-    expect(container.querySelector('.v2-overview-kpis')?.classList.contains('ss-card')).toBe(true)
-    expect(container.querySelector('.v2-overview-kpis')?.classList.contains('mx-6')).toBe(true)
-    expect(container.querySelector('.v2-overview-funnel')?.classList.contains('ss-card')).toBe(true)
-    expect(container.querySelector('.v2-overview-keepers')?.classList.contains('ss-card')).toBe(true)
-    expect(container.querySelector('.v2-overview-fleet')?.classList.contains('ss-card')).toBe(true)
+    const sequence = [...container.querySelectorAll(
+      '[data-testid="overview-kpis"], [data-testid="overview-primary-grid"], [data-testid="overview-fleet"], [data-testid="overview-rollup"]',
+    )].map(el => el.getAttribute('data-testid'))
+
+    expect(sequence).toEqual([
+      'overview-kpis',
+      'overview-primary-grid',
+      'overview-fleet',
+      'overview-rollup',
+    ])
+    expect(container.querySelector('.v2-overview-kpis')?.classList.contains('ov-kpis')).toBe(true)
+    expect(container.querySelector('.v2-overview-fleet')?.classList.contains('ov-card')).toBe(true)
   })
 
-  it('uses px-6 on the two-column grid container', () => {
+  it('uses the prototype two-column overview grid container', () => {
     const { container } = render(h(Overview, null))
-    const grid = container.querySelector('.lg\\:grid-cols-2')
-    expect(grid?.classList.contains('px-6')).toBe(true)
+    const grid = container.querySelector('[data-testid="overview-primary-grid"]')
+    expect(grid?.classList.contains('ov-grid')).toBe(true)
+    expect(grid?.classList.contains('v2-overview-primary-grid')).toBe(true)
   })
 })

@@ -513,7 +513,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   // drops view); instead, direct `replaceRoute` callers pass `view: 'default'`
   // as the canonical planning entry point (see router.test.ts replaceRoute case).
   const SECTIONS_WITH_VIEW = new Set([
-    'fleet-health', 'runtime', 'agents', 'cognition', 'observatory',
+    'fleet-health', 'runtime', 'agents', 'observatory',
     'repositories', 'operations', 'ide-shell', 'planning',
   ])
   if (!next.section || !SECTIONS_WITH_VIEW.has(next.section)) {

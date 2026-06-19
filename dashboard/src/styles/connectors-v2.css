@@ -856,6 +856,130 @@
   margin: 0 0 10px;
 }
 
+.cn-set-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.cn-set-row:first-of-type {
+  border-top: 0;
+}
+
+.cn-set-row-l {
+  flex: 1;
+  min-width: 0;
+}
+
+.cn-set-row-c {
+  flex: none;
+  min-width: 0;
+}
+
+.cn-set-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.cn-set-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 3px 0 10px;
+  line-height: 1.45;
+}
+
+.cn-set-static {
+  display: block;
+  max-width: 220px;
+  color: var(--text-mid);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cn-set-input {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 7px 10px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  outline: none;
+  width: min(230px, 100%);
+}
+
+.cn-set-input.short {
+  width: 150px;
+}
+
+.cn-set-input:focus {
+  border-color: var(--volt-dim);
+  box-shadow: 0 0 0 2px var(--volt-wash);
+}
+
+.cn-set-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cn-set-seg {
+  display: inline-flex;
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.cn-set-seg-b {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 11px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 0;
+  border-left: 1px solid var(--border-main);
+  cursor: pointer;
+  transition: 0.14s;
+  white-space: nowrap;
+}
+
+.cn-set-seg-b:first-child {
+  border-left: 0;
+}
+
+.cn-set-seg-b:hover {
+  color: var(--text-mid);
+  background: var(--bg-card);
+}
+
+.cn-set-seg-b.on {
+  color: var(--volt-ink);
+  background: var(--volt);
+}
+
+.cn-set-add {
+  margin-top: 10px;
+  width: 100%;
+  padding: 9px;
+  background: var(--bg-sunken);
+  border: 1px dashed var(--border-highlight);
+  border-radius: var(--radius-sm);
+  color: var(--text-mid);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  transition: 0.14s;
+}
+
+.cn-set-add:hover {
+  border-color: var(--volt-dim);
+  color: var(--volt);
+}
+
 .cn-test-btn {
   font-family: var(--font-ui);
   font-size: 11px;

@@ -2,6 +2,12 @@
 
 let librarian_max_tokens = 1024
 
+(* Memory extraction runs against a JSON-capable model with a long context
+   window and is not constrained by the generic inference API budget (30s).
+   600s aligns with the keeper turn budget so that provider cold starts or
+   model loading do not silently drop episodes. *)
+let librarian_default_timeout_sec = 600.0
+
 type complete_fn =
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
@@ -187,7 +193,7 @@ let prompt_max_messages () = max_messages () * cadence_turns ()
 let default_timeout_sec () =
   Keeper_memory_bank_env.memory_env_float_logged
     "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
-    ~default:Env_config_governance.Inference.timeout_seconds
+    ~default:librarian_default_timeout_sec
 ;;
 
 let runtime_id_for_librarian ~runtime_id =
@@ -346,7 +352,7 @@ let with_timeout ?clock ~timeout_sec f =
 let extract_with_provider
     ?(complete = default_complete)
     ?clock
-    ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
+    ?(timeout_sec = librarian_default_timeout_sec)
     ~sw
     ~net
     ~provider_cfg

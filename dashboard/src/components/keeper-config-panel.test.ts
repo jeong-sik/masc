@@ -88,7 +88,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     hooks: {
       slots: {},
       deny_list: [],
-      deny_list_count: 0,
       destructive_check_tools: ['dynamic_boundary (Tool_dispatch.is_destructive)'],
       cost_budget: {
         active: false,
@@ -576,6 +575,17 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('활성 런타임')
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
+
+    // The "전역 런타임 아키텍처" block is keeper-agnostic and collapsed by
+    // default; its content (deny list / destructive tools / cost budget) is
+    // hidden until the operator expands it.
+    expect(container.textContent).not.toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
+    const archToggle = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('전역 런타임 아키텍처'),
+    )
+    expect(archToggle).toBeTruthy()
+    archToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
     expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
 
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>

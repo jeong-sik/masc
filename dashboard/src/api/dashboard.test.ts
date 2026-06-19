@@ -1465,7 +1465,6 @@ describe('fetchKeeperConfig', () => {
           },
         },
         deny_list: 'Execute',
-        deny_list_count: '1',
         destructive_check_tools: 'dynamic_boundary (Tool_dispatch.is_destructive)',
         cost_budget: {
           active: 'false',
@@ -1553,6 +1552,8 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.per_provider_timeout_mode).toBe('override')
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
+    // deny_list count is derived from the array (deny_list_count field dropped).
+    expect(result.hooks?.deny_list).toEqual(['Execute'])
     expect(result.sources.precedence).toEqual(['live_meta'])
     expect(result.metrics.total_cost_usd).toBe(0.12)
     expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')

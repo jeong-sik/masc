@@ -2197,7 +2197,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       ? {
           slots: normalizeKeeperHookSlots(hooks.slots),
           deny_list: normalizeStringList(hooks.deny_list),
-          deny_list_count: asInt(hooks.deny_list_count) ?? 0,
+          // deny_list_count is derived (deny_list.length); not stored.
           destructive_check_tools: normalizeStringList(hooks.destructive_check_tools),
           cost_budget: {
             max_cost_usd: asLooseNullableNumber(isRecord(hooks.cost_budget) ? hooks.cost_budget.max_cost_usd : undefined),

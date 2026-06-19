@@ -73,6 +73,16 @@ let bool_field kvs key =
   | Some _ | None -> None
 ;;
 
+(* NDT-OK: read-side parse of an append-only transition log. These two wrappers
+   are the single boundary at which a default is applied to a missing *optional*
+   field — a benign default, not silent data loss: the required keys ([task],
+   [to_status], and [agent] for completions) are matched/bound before these run,
+   an unknown [authority] is surfaced as [Unknown] (never defaulted), and the §9
+   verdict is conservative ("indeterminate dominates"). Call sites read the typed
+   value, so no default leaks past this boundary. *)
+let str_or kvs key ~default = Option.value (str_field kvs key) ~default
+let bool_or kvs key ~default = Option.value (bool_field kvs key) ~default
+
 (* RFC-0262 wire label -> typed authority. Pre-0262 lines have no [authority]
    field, so we recover the legacy distinction from [forced]. An unrecognised
    label is surfaced as [Unknown], not folded into a convenient default
@@ -180,13 +190,19 @@ let process_event acc (ev : Yojson.Safe.t) =
      | Some task_id, Some "cancelled" ->
        { acc with claimant = SMap.remove task_id acc.claimant }
      | Some task_id, Some "done" ->
-       let actor = Option.value actor ~default:"" in
-       let forced = Option.value (bool_field kvs "forced") ~default:false in
-       let authority = parse_authority ~forced (str_field kvs "authority") in
-       let from_status = Option.value (str_field kvs "from_status") ~default:"" in
-       let logged_assignee = str_field kvs "assignee" in
-       let ts = Option.value (str_field kvs "ts") ~default:"" in
-       process_done acc ~task_id ~actor ~authority ~from_status ~logged_assignee ~ts
+       (match actor with
+        | None ->
+          (* a completion with no [agent] is uninterpretable for ownership; skip
+             it rather than default to a sentinel that could mis-attribute a
+             foreign completion (an empty actor never equals the assignee). *)
+          acc
+        | Some actor ->
+          let forced = bool_or kvs "forced" ~default:false in
+          let authority = parse_authority ~forced (str_field kvs "authority") in
+          let from_status = str_or kvs "from_status" ~default:"" in
+          let logged_assignee = str_field kvs "assignee" in
+          let ts = str_or kvs "ts" ~default:"" in
+          process_done acc ~task_id ~actor ~authority ~from_status ~logged_assignee ~ts)
      | Some _, Some ("in_progress" | "awaiting_verification") ->
        (* start / verification keep the same claimant — no ownership change *)
        acc
@@ -273,7 +289,7 @@ let metric_to_summary m =
         "      VIOLATION task=%s actor=%s assignee=%s authority=%s ts=%s"
         r.task_id
         r.actor
-        (Option.value r.assignee ~default:"?")
+        (match r.assignee with Some a -> a | None -> "?")
         (authority_to_string r.authority)
         r.ts)
     m.foreign_assignee_completions;

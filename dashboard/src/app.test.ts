@@ -2,7 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { App, shouldUseCompactDashboardChrome } from './app'
+import { App, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
+import { route } from './router'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -12,12 +13,14 @@ describe('App v2 header chrome', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     window.location.hash = originalHash
+    route.value = { tab: 'overview', params: {}, postId: null }
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
     window.location.hash = originalHash
+    route.value = { tab: 'overview', params: {}, postId: null }
   })
 
   function renderApp() {
@@ -129,6 +132,7 @@ describe('App v2 header chrome', () => {
 
   it('hides mobile nav tabs on keeper detail routes', () => {
     window.location.hash = '#monitoring/agents?keeper=sangsu'
+    route.value = { tab: 'monitoring', params: { section: 'agents', keeper: 'sangsu' }, postId: null }
     window.innerWidth = 900
     renderApp()
 
@@ -193,9 +197,30 @@ describe('App v2 header chrome', () => {
     })
   })
 
-  it('focus mode does not permanently hide the rail', async () => {
+  it('hides floating status and focus chrome on prototype primary surfaces', () => {
     window.innerWidth = 1280
     window.location.hash = '#overview'
+    route.value = { tab: 'overview', params: {}, postId: null }
+    renderApp()
+
+    expect(container.querySelector('[data-testid="dashboard-status-tray"]')).toBeNull()
+    expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).toBeNull()
+  })
+
+  it('keeps floating status and focus chrome on operational surfaces', () => {
+    window.innerWidth = 1280
+    window.location.hash = '#monitoring/agents'
+    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
+    renderApp()
+
+    expect(container.querySelector('[data-testid="dashboard-status-tray"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="dashboard-focus-mode-toggle"]')).not.toBeNull()
+  })
+
+  it('focus mode does not permanently hide the rail', async () => {
+    window.innerWidth = 1280
+    window.location.hash = '#monitoring/agents'
+    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
     renderApp()
 
     // Rail should be visible initially.
@@ -216,6 +241,34 @@ describe('App v2 header chrome', () => {
     await waitFor(() => {
       expect(container.querySelector('#dashboard-side-rail')).not.toBeNull()
     })
+  })
+})
+
+describe('shouldSuppressFloatingChrome', () => {
+  it('suppresses floating chrome for prototype primary surfaces', () => {
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'overview',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
+    })).toBe(true)
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'connectors',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
+    })).toBe(true)
+  })
+
+  it('keeps floating chrome for operational surfaces unless a shell overlay is active', () => {
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'monitoring',
+      keeperDetailMode: false,
+      mobileDrawerOpen: false,
+    })).toBe(false)
+    expect(shouldSuppressFloatingChrome({
+      currentTab: 'monitoring',
+      keeperDetailMode: false,
+      mobileDrawerOpen: true,
+    })).toBe(true)
   })
 })
 

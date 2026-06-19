@@ -45,6 +45,7 @@ import {
   DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
 } from './config/navigation'
+import type { TabId } from './types'
 import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
@@ -75,6 +76,28 @@ const sidebarCollapsed = persistentSignal<boolean>({
   defaultValue: false,
 })
 const mobileMenuOpen = signal(false)
+const PROTOTYPE_PRIMARY_SURFACE_TABS = new Set<TabId>([
+  'overview',
+  'workspace',
+  'keepers',
+  'board',
+  'code',
+  'connectors',
+  'settings',
+])
+
+export function shouldSuppressFloatingChrome({
+  currentTab,
+  keeperDetailMode,
+  mobileDrawerOpen,
+}: {
+  currentTab: TabId
+  keeperDetailMode: boolean
+  mobileDrawerOpen: boolean
+}): boolean {
+  return keeperDetailMode || mobileDrawerOpen || PROTOTYPE_PRIMARY_SURFACE_TABS.has(currentTab)
+}
+
 const LazyAgentDetailOverlay = lazy(async () => ({
   default: (await import('./components/agent-detail')).AgentDetailOverlay,
 }))
@@ -257,7 +280,11 @@ export function App() {
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
   const focusMode = dashboardFocusMode.value
   const mobileDrawerOpen = isMobile && mobileMenuOpen.value
-  const suppressFloatingChrome = keeperDetailMode || mobileDrawerOpen || currentTab === 'connectors'
+  const suppressFloatingChrome = shouldSuppressFloatingChrome({
+    currentTab,
+    keeperDetailMode,
+    mobileDrawerOpen,
+  })
   const compactChromeMode = shouldUseCompactDashboardChrome({
     widgetSoloMode,
     focusMode,

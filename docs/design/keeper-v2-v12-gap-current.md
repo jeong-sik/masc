@@ -37,6 +37,7 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-conne
 - Unsaved connector drawer drafts now survive same-connector live refreshes, matching the prototype's local editing feel while the hard persistence contract remains unwired.
 - The Connectors page no longer renders the generic dashboard `Connectors > All` lead above the prototype `Gate / 커넥터` header; the primary surface now starts at the prototype-owned header.
 - Connectors suppresses the generic floating status tray/focus toggle and adds mobile bottom scroll padding, so fixed shell chrome does not sit on top of connector card content.
+- The generic floating status tray/focus toggle is now suppressed across prototype primary surfaces (Overview, Work, Keepers, Board, IDE, Connectors, Settings) while remaining available on operational/diagnostic lanes.
 
 ## Still Missing Vs Prototype
 
@@ -57,6 +58,6 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-conne
 - The old Overview slim-home cards should stay collapsed under `운영 롤업`, not return between the KPI/attention/telemetry/fleet prototype sections.
 - The old Connectors operator console should stay collapsed under `운영 상세`, not return above the connector gate grid and recent audit log.
 - The generic dashboard `Connectors > All` section lead should stay removed from the Connectors primary view; the prototype `Gate / 커넥터` header owns that page title.
-- The floating status tray/focus toggle should stay hidden on Connectors; the top shell already carries connection/status controls, and the prototype surface keeps the bottom edge free for connector cards.
+- The floating status tray/focus toggle should stay hidden on prototype primary surfaces; the top shell already carries connection/status controls, and those surfaces keep the bottom edge free for primary content.
 - The old read-only drawer binding summary should stay replaced by the inline editor shell; the lower-level config form can remain available under the drawer's `config` tab until persistence is fully wired.
 - Stale gap notes under `/Users/dancer/me/memory/keeper-v2-gap-*.md` are superseded by this repo-local snapshot.

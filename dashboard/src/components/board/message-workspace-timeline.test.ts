@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { h } from 'preact'
 import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { afterEach, describe, expect, it } from 'vitest'

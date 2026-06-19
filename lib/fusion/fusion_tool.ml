@@ -19,19 +19,24 @@ let append_chat_failure ~base_dir ~keeper ~run_id content =
      별도 "fusion/<run_id>" 스레드는 메인 오염을 막지 못하면서 한 run의 성공/실패만
      다른 lane으로 흩어지는 split-brain을 만든다. denied/sink_failed/aborted는 키퍼가
      다음 턴에 인지해야 할 운영 실패이므로 메인 lane이 옳다(run_id는 content에 포함). *)
-  try
-    Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
-    Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
-      ~content
-      ()
-  with
-  | Eio.Cancel.Cancelled _ as exn ->
-    (* 구조적 취소는 재전파. *)
-    raise exn
-  | exn ->
-    Log.Keeper.warn ~keeper_name:keeper
-      "fusion run %s failed to append failure message: %s" run_id
-      (Printexc.to_string exn)
+  (try
+     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
+     Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
+       ~content
+       ()
+   with
+   | Eio.Cancel.Cancelled _ as exn ->
+     (* 구조적 취소는 재전파. *)
+     raise exn
+   | exn ->
+     Log.Keeper.warn ~keeper_name:keeper
+       "fusion run %s failed to append failure message: %s" run_id
+       (Printexc.to_string exn));
+  (* RFC-0266: 실패도 호출 키퍼를 ok=false로 깨워 "결과 안 옴" 폴링 대신 능동 통지한다
+     (성공 경로의 fusion_sink.emit wake와 대칭). content가 실패 사유 라벨이 된다.
+     wake는 자체 예외 안전하므로 chat append 실패와 독립적으로 시도된다. *)
+  Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
+    ~resolved_answer:content ~board_post_id:""
 
 let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
   let prompt = Tool_args.get_string args "prompt" "" in

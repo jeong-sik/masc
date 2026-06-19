@@ -27,6 +27,19 @@ type stimulus_payload =
   | Board_signal of board_stimulus
   | Bootstrap
   | No_progress_recovery
+  | Fusion_completed of fusion_completion
+      (* RFC-0266: an async [masc_fusion] deliberation finished. Wakes the
+         calling keeper so the resolved answer arrives as actionable turn
+         input on its next cycle, instead of being discovered passively. *)
+
+and fusion_completion = {
+  run_id : string;
+  ok : bool;  (* judge synthesized vs denied/sink_failed/aborted. *)
+  resolved_answer : string;
+  (* judge resolved answer; a failure label when [ok = false]. *)
+  board_post_id : string;
+  (* correlates to the sink's board evidence post; "" if none was created. *)
+}
 
 type stimulus = {
   post_id : post_id;
@@ -93,10 +106,11 @@ let payload_kind_label = function
   | Board_signal _ -> "board_signal"
   | Bootstrap -> "bootstrap"
   | No_progress_recovery -> "no_progress_recovery"
+  | Fusion_completed _ -> "fusion_completed"
 
 let is_board_signal = function
   | Board_signal _ -> true
-  | Bootstrap | No_progress_recovery -> false
+  | Bootstrap | No_progress_recovery | Fusion_completed _ -> false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
   let now = Unix.gettimeofday () in

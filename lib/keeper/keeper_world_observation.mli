@@ -230,8 +230,21 @@ val board_signal_wake_reason :
   signal:Board_dispatch.board_signal ->
   Keeper_world_observation_board_signal.wake_reason option
 
+(** RFC-0266: build the actionable [pending_board_event] for a completed async
+    [masc_fusion] deliberation. Surfaces the sink's board result as a just-arrived
+    event so the woken turn acts on it; classified [Self_narrative] (own author +
+    System_post) so it renders inside the observational-data envelope (RFC-0247).
+    [board_post_id = ""] falls back to a synthetic [fusion-run:<id>] post id. *)
+val pending_board_event_of_fusion_completion :
+  meta:Keeper_meta_contract.keeper_meta ->
+  arrived_at:float ->
+  Keeper_event_queue.fusion_completion ->
+  pending_board_event
+
 (** Convert a queued Event Layer stimulus back into structured board activity
-    for the next keeper prompt. Returns [None] for non-board stimuli. *)
+    for the next keeper prompt. [Board_signal] and [Fusion_completed] (RFC-0266)
+    produce [Some]; [Bootstrap]/[No_progress_recovery] return [None] (no prompt
+    injection). *)
 val pending_board_event_of_stimulus :
   continuity_summary:string ->
   meta:Keeper_meta_contract.keeper_meta ->

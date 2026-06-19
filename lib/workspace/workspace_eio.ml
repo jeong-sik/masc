@@ -436,28 +436,31 @@ let get_agent config ~name =
 
 (** Remove agent *)
 let remove_agent config ~name =
-  let* () =
+  let* removed =
     match Backend.FileSystem.delete config.backend (agent_key name) with
-    | Ok () -> Ok ()
-    | Error (Backend.NotFound _) -> Ok ()  (* Already removed *)
+    | Ok () -> Ok true
+    | Error (Backend.NotFound _) -> Ok false  (* Already removed *)
     | Error (Backend.IOError msg) -> Error msg
     | Error (Backend.AlreadyExists _ | Backend.InvalidKey _
             | Backend.ConnectionFailed _ | Backend.BackendNotSupported _) ->
         Error "Failed to remove agent"
   in
-  (* Atomically update workspace state to remove this agent *)
-  (match atomic_update_state config ~f:(fun state ->
-     let active_agents = List.filter (fun n -> n <> name) state.active_agents in
-     { state with active_agents }
-   ) with
-  | Ok _ -> ()
-  | Error msg -> Log.Workspace.warn "remove_agent: state update failed for %s: %s" name msg);
+  if removed then begin
+    (* Atomically update workspace state to remove this agent *)
+    (match atomic_update_state config ~f:(fun state ->
+       let active_agents = List.filter (fun n -> n <> name) state.active_agents in
+       { state with active_agents }
+     ) with
+    | Ok _ -> ()
+    | Error msg -> Log.Workspace.warn "remove_agent: state update failed for %s: %s" name msg);
 
-  (* Log leave event *)
-  let _event = log_event config
-    ~event_type:AgentSessionEnded
-    ~agent:name
-    ~payload:`Null in
+    (* Log leave event *)
+    let _event = log_event config
+      ~event_type:AgentSessionEnded
+      ~agent:name
+      ~payload:`Null in
+    ()
+  end;
 
   Ok ()
 

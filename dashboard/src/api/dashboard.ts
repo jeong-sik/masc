@@ -2317,10 +2317,12 @@ export async function patchKeeperConfig(
 
 // Tool policy is set atomically (tool_access + denylist) via the dedicated
 // /tools endpoint with action=set_policy — a different mutation shape from the
-// /config PATCH above. The caller MUST echo the current tool_access so editing
-// only the denylist does not wipe the keeper's access. The endpoint returns the
-// updated tools block (not the full config), so we re-fetch the config to get a
-// consistent normalized snapshot.
+// /config PATCH above. The caller should echo the current tool_access so that
+// editing only the denylist preserves the operator's configured allowlist
+// record (which feeds tool visibility + assignment telemetry). Runtime
+// execution gating keys only off the denylist, not tool_access. The endpoint
+// returns the updated tools block (not the full config), so we re-fetch the
+// config to get a consistent normalized snapshot.
 export async function setKeeperToolPolicy(
   name: string,
   policy: { tool_access: string[]; deny: string[] },

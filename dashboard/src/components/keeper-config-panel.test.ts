@@ -601,6 +601,23 @@ describe('KeeperConfigPanel', () => {
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
   })
 
+  it('renders the compaction token gate as an editable number input (not a read-only row)', async () => {
+    // Regression guard for the ConfigRow → InlineNumberRow swap: a read-only
+    // ConfigRow renders no <input>, so asserting the input exists verifies the
+    // actual render change (buildRuntimePayload alone passed before the swap).
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    const tokenGateInput = container.querySelector(
+      'input[aria-label="토큰 게이트"]',
+    ) as HTMLInputElement | null
+    expect(tokenGateInput).not.toBeNull()
+    expect(tokenGateInput!.type).toBe('number')
+    // Value reflects the loaded config (makeKeeperConfig compaction.token_gate = 24000).
+    expect(tokenGateInput!.value).toBe('24000')
+  })
+
   it('patches runtime_id from the dashboard panel', async () => {
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({

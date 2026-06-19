@@ -16,7 +16,7 @@ the categorization roadmap. Newly-added typed getters in
 
 **Total**: 351 unique knobs across 9 modules.
 
-**Typed getter classification**: 21/205 tagged (`operator`: 21, `algorithm`: 0, `unclassified`: 184).
+**Typed getter classification**: 21/204 tagged (`operator`: 21, `algorithm`: 0, `unclassified`: 183).
 
 ## Env_config_core (29 knobs; typed classification 1/8)
 
@@ -52,26 +52,26 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_TEST_ALLOW_HOME_BASE_PATH` | string_literal | n/a | n/a | 343 | #9903: production base-path safeguard for test executables. Without this, a test whose [MASC_BASE_PATH] override fail... |
 | `MASC_URL` | string_literal | n/a | n/a | 244 | SSOT for the MASC_HTTP_BASE_URL env-var name (issue 8352). Defined here (above [masc_http_base_url]) so the constant ... |
 
-## Env_config_governance (32 knobs; typed classification 1/23)
+## Env_config_governance (31 knobs; typed classification 1/22)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_ANTI_RATIONALIZATION_FAIL_MODE` | typed:string | unclassified | unclassified | 192 |  |
-| `MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED` | typed:bool | unclassified | unclassified | 214 |  |
+| `MASC_ANTI_RATIONALIZATION_FAIL_MODE` | typed:string | unclassified | unclassified | 186 |  |
+| `MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED` | typed:bool | unclassified | unclassified | 208 |  |
 | `MASC_AUTONOMY_MAX_STARVATION_TICKS` | typed:int | unclassified | unclassified | 79 | {1 Thompson Sampling / Agent Selection Configuration} Primary env vars: MASC_AUTONOMY_*. |
 | `MASC_AUTONOMY_QUIET_END` | typed:int | unclassified | unclassified | 71 | Quiet hours end (0-23). |
 | `MASC_AUTONOMY_QUIET_START` | typed:int | unclassified | unclassified | 67 | Quiet hours start (0-23). Keeper suppresses actions in this window. |
 | `MASC_AUTONOMY_STARVATION_BONUS_COEF` | typed:float | unclassified | unclassified | 82 |  |
 | `MASC_AUTONOMY_THOMPSON_WEIGHT` | typed:float | unclassified | unclassified | 85 |  |
 | `MASC_AUTONOMY_VOTE_DECAY_FACTOR` | typed:float | unclassified | unclassified | 88 |  |
-| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 138 | Dashboard fixture name override. |
-| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 134 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | feature_flag | n/a | n/a | 145 | Whether governance judge is enabled. Default: true. |
-| `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 142 | Governance judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 161 | Default model id. |
-| `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 157 | Default provider name. |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 153 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
-| `MASC_GOAL_MODELS` | string_literal | n/a | n/a | 165 | Goal models (comma-separated). |
+| `MASC_DASHBOARD_FIXTURE` | string_literal | n/a | n/a | 132 | Dashboard fixture name override. |
+| `MASC_DASHBOARD_FIXTURES_ENABLED` | feature_flag | n/a | n/a | 128 | Whether dashboard fixtures are enabled. Default: false. Re-readable within the process; this does not imply shell-lev... |
+| `MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED` | feature_flag | n/a | n/a | 139 | Whether governance judge is enabled. Default: true. |
+| `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 136 | Governance judge interval, clamped to >= 15s. Default: 60. |
+| `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 155 | Default model id. |
+| `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 151 | Default provider name. |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 147 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
+| `MASC_GOAL_MODELS` | string_literal | n/a | n/a | 159 | Goal models (comma-separated). |
 | `MASC_INFERENCE_CACHE_ENABLED` | feature_flag | n/a | n/a | 20 | Enable inference response cache (L1+L2). |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | typed:int | unclassified | unclassified | 38 | L1 in-memory entry cap. BUG-015: Reduced from 2048 to 512 — unbounded growth with 2048 default caused excessive mem... |
 | `MASC_INFERENCE_CACHE_MAX_PROMPT_CHARS` | typed:int | unclassified | unclassified | 28 | Skip caching for oversized prompts (character count). |
@@ -79,15 +79,14 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_INFERENCE_CACHE_TTL_SEC` | typed:int | unclassified | unclassified | 24 | Default TTL for inference response cache (seconds). |
 | `MASC_INFERENCE_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 8 | Timeout for model API calls (seconds) |
 | `MASC_NEO4J_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 98 | Neo4j / zombie-cleanup interval (seconds). Controls the zero-zombie Pulse rhythm in the orchestrator. Clamped to >= 1... |
-| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 125 | Operator snapshot cache TTL (seconds). Default: 30. |
-| `MASC_OPERATOR_JUDGE_ENABLED` | feature_flag | n/a | n/a | 111 | Whether operator judge background loop is enabled. Default: true. |
-| `MASC_OPERATOR_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 114 | Operator judge interval, clamped to >= 15s. Default: 60. |
-| `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 122 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
-| `MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC` | typed:int | Timeouts | operator | 119 | Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60. @category Timeouts @ops_class operator |
+| `MASC_OPERATOR_CACHE_TTL` | typed:float | unclassified | unclassified | 119 | Operator snapshot cache TTL (seconds). Default: 30. |
+| `MASC_OPERATOR_JUDGE_ENABLED` | feature_flag | n/a | n/a | 105 | Whether operator judge background loop is enabled. Default: true. |
+| `MASC_OPERATOR_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 108 | Operator judge interval, clamped to >= 15s. Default: 60. |
+| `MASC_OPERATOR_JUDGE_SESSION_TTL_SEC` | typed:int | unclassified | unclassified | 116 | Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. |
+| `MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC` | typed:int | Timeouts | operator | 113 | Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60. @category Timeouts @ops_class operator |
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 54 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 58 | Max age for rate limit entries before cleanup (seconds) |
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 44 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
-| `MASC_SSE_KEEPALIVE_SEC` | typed:float | unclassified | unclassified | 104 | SSE keepalive interval (seconds). Frequency of `: keepalive` frames on command-plane SSE streams. Clamped to >= 1.0 t... |
 
 ## Env_config_keeper (65 knobs; typed classification 2/53)
 
@@ -332,7 +331,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 30 |  |
 | `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 190 |  |
 
-## Env_config_snapshot (77 knobs; typed classification 0/0)
+## Env_config_snapshot (78 knobs; typed classification 0/0)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -401,6 +400,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_SHUTDOWN_DRAIN_TIMEOUT` | string_literal | n/a | n/a | 688 |  |
 | `MASC_SHUTDOWN_FORCE_TIMEOUT` | string_literal | n/a | n/a | 690 |  |
 | `MASC_SHUTDOWN_NOTIFY_DELAY` | string_literal | n/a | n/a | 692 |  |
+| `MASC_SSE_KEEPALIVE_SEC` | string_literal | n/a | n/a | 762 |  |
 | `MASC_SSE_STREAM_CAPACITY` | string_literal | n/a | n/a | 716 |  |
 | `MASC_STRUCTURED_STATE` | string_literal | n/a | n/a | 148 |  |
 | `MASC_TELEMETRY_MAX_BYTES` | string_literal | n/a | n/a | 55 |  |

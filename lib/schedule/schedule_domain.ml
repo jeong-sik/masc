@@ -336,6 +336,9 @@ let validate_interval interval_sec =
   else Ok interval_sec
 ;;
 
+(* Daily recurrence intentionally uses fixed offsets only. This keeps dispatch
+   deterministic across host timezone changes and avoids pretending to support
+   DST-aware IANA zone rules. *)
 let timezone_offset_seconds timezone =
   let parse_fixed_offset raw =
     let len = String.length raw in
@@ -382,7 +385,7 @@ let validate_daily ~hour ~minute ~second ~timezone =
     | Some _ -> Ok (Daily { hour; minute; second; timezone })
     | None ->
       Error
-        "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00")
+        "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00; DST-aware IANA zones are not supported")
 ;;
 
 let validate_recurrence = function

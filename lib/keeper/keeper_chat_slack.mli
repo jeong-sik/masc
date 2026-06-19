@@ -55,6 +55,12 @@ val adapter_loop :
     The loop exits after one turn. *)
 
 module For_testing : sig
+  val escape_mrkdwn_text : string -> string
+
+  val truncate_to_limit : string -> int -> string
+
+  val limit_blocks_for_slack : Yojson.Safe.t list -> Yojson.Safe.t list
+
   val public_voice_audio_url : ?base_url:string -> string -> string
   (** [public_voice_audio_url ?base_url token] returns the public URL for
       an audio clip. *)

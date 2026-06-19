@@ -182,6 +182,8 @@ let runtime_id_for_keeper (keeper_name : string) : string option =
   List.assoc_opt keeper_name (Atomic.get keeper_assignments_ref)
 ;;
 
+let keeper_assignments () = Atomic.get keeper_assignments_ref
+
 (* [runtime].librarian routing for the memory-os librarian. [None] = the
    librarian inherits each keeper's runtime (legacy). Reads the Atomic ref set by
    [init_default]; the env override lives in keeper_librarian_runtime. *)

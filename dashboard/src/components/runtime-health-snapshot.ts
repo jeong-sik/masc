@@ -4,6 +4,7 @@ import {
   fetchDashboardRuntimeProbe,
   fetchRuntimeProviders,
   type DashboardRuntimeProbeResponse,
+  type DashboardRuntimeAssignmentGovernance,
   type DashboardRuntimeProviderProbe,
   type DashboardRuntimeProviderSnapshot,
   type DashboardRuntimeProvidersResponse,
@@ -90,14 +91,29 @@ function countProviderStatus(
   }
 }
 
-function snapshotStatus(counts: ReturnType<typeof countProviderStatus>, probeError: string | null): 'ok' | 'warn' | 'crit' {
+function governanceNeedsAttention(governance: DashboardRuntimeAssignmentGovernance | null | undefined): boolean {
+  return governance?.degraded === true || governance?.operator_action_required === true
+}
+
+function snapshotStatus(
+  counts: ReturnType<typeof countProviderStatus>,
+  probeError: string | null,
+  governance: DashboardRuntimeAssignmentGovernance | null | undefined,
+): 'ok' | 'warn' | 'crit' {
   if (probeError || counts.failed > 0 || counts.missingAuth > 0) return 'crit'
+  if (governanceNeedsAttention(governance)) return 'warn'
   if (counts.skipped > 0 || counts.reachable === 0) return 'warn'
   return 'ok'
 }
 
 function snapshotTone(status: 'ok' | 'warn' | 'crit'): 'ok' | 'warn' | 'bad' {
   return status === 'crit' ? 'bad' : status
+}
+
+function snapshotStatusText(status: 'ok' | 'warn' | 'crit', governanceAttention: boolean): string {
+  if (status === 'crit') return 'needs attention'
+  if (governanceAttention) return 'runtime assignment review'
+  return status === 'ok' ? 'runtime reachable' : 'probe incomplete'
 }
 
 function shortUrl(value: string | null | undefined): string {
@@ -146,6 +162,18 @@ function firstProblem(
   }
 }
 
+function assignmentGovernanceValue(governance: DashboardRuntimeAssignmentGovernance | null | undefined): string {
+  if (!governance) return MISSING_DATA_DASH
+  const count = governance.assignment_count
+  return count === 0 ? 'default only' : `${formatNumber(count)} explicit`
+}
+
+function assignmentGovernanceDetail(governance: DashboardRuntimeAssignmentGovernance | null | undefined): string {
+  if (!governance) return 'runtime.toml'
+  if (governance.warnings.length > 0) return governance.warnings.slice(0, 2).join(', ')
+  return governance.status ?? 'ok'
+}
+
 function endpointRows(probe: DashboardRuntimeProbeResponse | null): Array<{ label: string; value: string | null | undefined }> {
   return [
     { label: 'server', value: probe?.probe?.server_url },
@@ -173,8 +201,10 @@ export function RuntimeHealthSnapshot() {
   const providers = data?.providers ?? null
   const probe = data?.probe ?? null
   const probeError = data?.probeError ?? null
+  const governance = providers?.assignment_governance ?? null
   const counts = countProviderStatus(providers, probe)
-  const status = snapshotStatus(counts, probeError)
+  const status = snapshotStatus(counts, probeError, governance)
+  const governanceAttention = governanceNeedsAttention(governance)
   const problem = firstProblem(providers, probe)
   const providerProbes = providerProbeMap(probe)
   const defaultRuntime = configuredDefaultRuntime(providers) ?? probeDefaultRuntime(probe)
@@ -207,7 +237,7 @@ export function RuntimeHealthSnapshot() {
       ` : null}
       ${state.error ? html`<${ErrorState} message=${state.error} />` : null}
 
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-4" data-testid="runtime-health-snapshot">
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-5" data-testid="runtime-health-snapshot">
         <${StatTile}
           label="live probe"
           value=${counts.failed > 0 ? `${counts.failed} failing` : `${counts.reachable} reachable`}
@@ -238,6 +268,15 @@ export function RuntimeHealthSnapshot() {
           status=${probeError ? 'crit' : probe ? 'ok' : 'warn'}
           delta=${{ direction: probeError ? 'down' : 'flat', text: probe?.cache_hit ? 'cache hit' : 'fresh probe' }}
         />
+        <${StatTile}
+          label="assignments"
+          value=${assignmentGovernanceValue(governance)}
+          status=${governanceAttention ? 'warn' : governance ? 'ok' : 'warn'}
+          delta=${{
+            direction: governanceAttention ? 'down' : 'flat',
+            text: assignmentGovernanceDetail(governance),
+          }}
+        />
       </div>
 
       ${probeError ? html`
@@ -252,6 +291,22 @@ export function RuntimeHealthSnapshot() {
           <span class="mx-1">·</span>
           <span>${problem.message}</span>
           ${problem.detail ? html`<div class="mt-1 truncate text-2xs" title=${problem.detail}>${problem.detail}</div>` : null}
+        </div>
+      ` : null}
+
+      ${governanceAttention ? html`
+        <div class="mt-3 rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--status-warn)]/5 px-3 py-2 text-xs text-[var(--status-warn)]" role="alert">
+          runtime assignment governance · ${governance?.status ?? 'watch'} · ${formatNumber(governance?.assignment_count ?? 0)} explicit assignments
+          ${governance?.assigned_runtimes.length ? html`
+            <div class="mt-1 truncate text-2xs" title=${governance.assigned_runtimes.join(', ')}>
+              assigned runtimes: ${governance.assigned_runtimes.join(', ')}
+            </div>
+          ` : null}
+          ${governance?.warnings.length ? html`
+            <div class="mt-1 truncate text-2xs" title=${governance.warnings.join(', ')}>
+              warnings: ${governance.warnings.join(', ')}
+            </div>
+          ` : null}
         </div>
       ` : null}
 
@@ -270,7 +325,7 @@ export function RuntimeHealthSnapshot() {
 
       <div class="mt-3 flex flex-wrap items-center gap-2 text-2xs">
         <${StatusChip} tone=${snapshotTone(status)} uppercase=${false}>
-          ${status === 'crit' ? 'needs attention' : status === 'ok' ? 'runtime reachable' : 'probe incomplete'}
+          ${snapshotStatusText(status, governanceAttention)}
         <//>
         <${RouteLink}
           tab="monitoring"

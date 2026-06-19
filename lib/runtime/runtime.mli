@@ -51,6 +51,13 @@ val runtime_id_for_keeper : string -> string option
     it). persona⊥{model,runtime}: keeper→runtime assignment is NOT sourced from
     persona JSON or keeper TOML. *)
 
+val keeper_assignments : unit -> (string * string) list
+(** Snapshot of explicit [keeper_name -> runtime_id] assignments loaded from
+    [\[runtime.assignments\]]. The list is validated during {!init_default};
+    every runtime id in the returned snapshot resolves to a configured runtime.
+    Dashboard/operator surfaces use this to expose assignment blast radius
+    without parsing TOML independently. *)
+
 val librarian_runtime_id : unit -> string option
 (** [\[runtime\].librarian] runtime id for the memory-os librarian, or [None]
     when unset (the librarian inherits each keeper's runtime). Validated at load

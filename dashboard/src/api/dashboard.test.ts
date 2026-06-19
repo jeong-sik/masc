@@ -1825,6 +1825,26 @@ describe('fetchRuntimeProviders', () => {
             },
           },
         ],
+        assignment_governance: {
+          schema: 'masc.runtime_assignment_governance.v1',
+          source: 'runtime.toml',
+          status: 'degraded',
+          degraded: true,
+          operator_action_required: true,
+          blast_radius: 'single_runtime_assignment_pin',
+          assignment_count: 2,
+          assigned_keeper_count: 2,
+          assigned_runtime_count: 1,
+          default_assignment_count: 0,
+          default_runtime_id: 'runpod_mtp.qwen',
+          librarian_runtime_id: 'ollama_cloud.minimax-m3',
+          warnings: ['explicit_assignments_present', 'single_runtime_assignment_pin'],
+          assigned_runtimes: ['openai.gpt'],
+          assignments: [
+            { keeper: 'budgettest', runtime_id: 'openai.gpt', matches_default: false },
+            { keeper: 'routingtest', runtime_id: 'openai.gpt', matches_default: false },
+          ],
+        },
         config_path: '/Users/dancer/me/.masc/runtime.toml',
       }), {
         status: 200,
@@ -1844,6 +1864,10 @@ describe('fetchRuntimeProviders', () => {
     expect(result.providers[0]?.kind).toBe('cloud')
     expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
+    expect(result.assignment_governance?.status).toBe('degraded')
+    expect(result.assignment_governance?.assignment_count).toBe(2)
+    expect(result.assignment_governance?.assigned_runtimes).toEqual(['openai.gpt'])
+    expect(result.assignment_governance?.assignments[0]?.keeper).toBe('budgettest')
   })
 })
 

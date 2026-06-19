@@ -179,6 +179,45 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.textContent).toContain('500 Internal Server Error: Eio mutex poisoned')
   })
 
+  it('surfaces runtime assignment governance warnings on the first screen', async () => {
+    apiMocks.fetchRuntimeProviders.mockResolvedValueOnce({
+      ...providerPayload(),
+      assignment_governance: {
+        schema: 'masc.runtime_assignment_governance.v1',
+        source: 'runtime.toml',
+        status: 'degraded',
+        degraded: true,
+        operator_action_required: true,
+        blast_radius: 'single_runtime_assignment_pin',
+        assignment_count: 2,
+        assigned_keeper_count: 2,
+        assigned_runtime_count: 1,
+        default_assignment_count: 0,
+        default_runtime_id: 'runpod_mtp.qwen',
+        librarian_runtime_id: null,
+        warnings: ['explicit_assignments_present', 'single_runtime_assignment_pin'],
+        assigned_runtimes: ['openai.gpt'],
+        assignments: [
+          { keeper: 'budgettest', runtime_id: 'openai.gpt', matches_default: false },
+          { keeper: 'routingtest', runtime_id: 'openai.gpt', matches_default: false },
+        ],
+      },
+    })
+    const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
+
+    render(h(RuntimeHealthSnapshot, {}), container)
+    await waitFor(
+      () => container.textContent?.includes('runtime assignment governance') ?? false,
+      'assignment governance warning',
+    )
+
+    expect(container.textContent).toContain('runtime assignment review')
+    expect(container.textContent).toContain('2 explicit')
+    expect(container.textContent).toContain('assigned runtimes: openai.gpt')
+    expect(container.textContent).toContain('single_runtime_assignment_pin')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('runtime assignment governance')
+  })
+
   it('uses force=1 when the operator clicks Live probe', async () => {
     const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
 

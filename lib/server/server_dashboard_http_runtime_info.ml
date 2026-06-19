@@ -1238,6 +1238,81 @@ let runtime_unique_count values =
   values |> List.sort_uniq String.compare |> List.length
 ;;
 
+let runtime_assignment_governance_json ~default_id =
+  let assignments =
+    Runtime.keeper_assignments ()
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+  in
+  let assignment_count = List.length assignments in
+  let assigned_runtime_ids = List.map snd assignments in
+  let assigned_runtimes = List.sort_uniq String.compare assigned_runtime_ids in
+  let assigned_runtime_count = List.length assigned_runtimes in
+  let default_assignment_count =
+    match default_id with
+    | None -> 0
+    | Some default_id ->
+      assignments
+      |> List.filter (fun (_, runtime_id) -> String.equal runtime_id default_id)
+      |> List.length
+  in
+  let librarian_runtime_id = Runtime.librarian_runtime_id () in
+  let single_runtime_pin = assignment_count > 1 && assigned_runtime_count = 1 in
+  let assignments_match_default =
+    assignment_count > 0 && default_assignment_count = assignment_count
+  in
+  let add_if condition warning warnings =
+    if condition then warning :: warnings else warnings
+  in
+  let warnings =
+    []
+    |> add_if (assignment_count > 0) "explicit_assignments_present"
+    |> add_if single_runtime_pin "single_runtime_assignment_pin"
+    |> add_if assignments_match_default "assignments_match_default_runtime"
+    |> add_if (Option.is_some librarian_runtime_id) "librarian_runtime_override"
+    |> List.rev
+  in
+  let status =
+    if warnings = []
+    then "ok"
+    else if single_runtime_pin || assignments_match_default || Option.is_some librarian_runtime_id
+    then "degraded"
+    else "watch"
+  in
+  `Assoc
+    [ "schema", `String "masc.runtime_assignment_governance.v1"
+    ; "source", `String runtime_inventory_source
+    ; "status", `String status
+    ; "degraded", `Bool (String.equal status "degraded")
+    ; "operator_action_required", `Bool (warnings <> [])
+    ; "blast_radius",
+      `String
+        (if assignment_count = 0
+         then "default_runtime_only"
+         else if single_runtime_pin
+         then "single_runtime_assignment_pin"
+         else "mixed_runtime_assignments")
+    ; "assignment_count", `Int assignment_count
+    ; "assigned_keeper_count", `Int assignment_count
+    ; "assigned_runtime_count", `Int assigned_runtime_count
+    ; "default_assignment_count", `Int default_assignment_count
+    ; "default_runtime_id", Json_util.string_opt_to_json default_id
+    ; "librarian_runtime_id", Json_util.string_opt_to_json librarian_runtime_id
+    ; "warnings", Json_util.json_string_list warnings
+    ; "assigned_runtimes", Json_util.json_string_list assigned_runtimes
+    ; ( "assignments"
+      , `List
+          (List.map
+             (fun (keeper_name, runtime_id) ->
+                `Assoc
+                  [ "keeper", `String keeper_name
+                  ; "runtime_id", `String runtime_id
+                  ; ( "matches_default"
+                    , `Bool (Option.equal String.equal default_id (Some runtime_id)) )
+                  ])
+             assignments) )
+    ]
+;;
+
 let runtime_inventory_json () =
   let runtimes = Runtime.get_runtimes () in
   let default_id = runtime_default_runtime_id () in
@@ -1264,6 +1339,7 @@ let runtime_inventory_json () =
           ; "cli_models", `Int (count_models "cli")
           ; "default_runtime_id", Json_util.string_opt_to_json default_id
           ] )
+    ; "assignment_governance", runtime_assignment_governance_json ~default_id
     ; "providers", `List (List.map (runtime_inventory_entry_json ~default_id) runtimes)
     ]
 ;;

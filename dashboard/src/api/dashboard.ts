@@ -584,6 +584,30 @@ export interface DashboardRuntimeProviderSnapshot {
   discovery?: DashboardRuntimeProviderDiscovery | null
 }
 
+export interface DashboardRuntimeAssignment {
+  keeper: string
+  runtime_id: string
+  matches_default?: boolean
+}
+
+export interface DashboardRuntimeAssignmentGovernance {
+  schema?: string | null
+  source?: string | null
+  status?: string | null
+  degraded: boolean
+  operator_action_required: boolean
+  blast_radius?: string | null
+  assignment_count: number
+  assigned_keeper_count: number
+  assigned_runtime_count: number
+  default_assignment_count: number
+  default_runtime_id?: string | null
+  librarian_runtime_id?: string | null
+  warnings: string[]
+  assigned_runtimes: string[]
+  assignments: DashboardRuntimeAssignment[]
+}
+
 export interface DashboardRuntimeProvidersResponse {
   updated_at?: string
   summary?: {
@@ -595,6 +619,7 @@ export interface DashboardRuntimeProvidersResponse {
     default_runtime_id?: string | null
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
+  assignment_governance?: DashboardRuntimeAssignmentGovernance | null
   // Resolved filesystem path of the runtime.toml the server actually loaded
   // (Runtime.config_path); answers "which config is live" in the monitor.
   config_path?: string | null
@@ -750,6 +775,41 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
   }
 }
 
+function decodeRuntimeAssignment(raw: unknown): DashboardRuntimeAssignment | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const runtimeId = asString(raw.runtime_id)
+  if (!keeper || !runtimeId) return null
+  return {
+    keeper,
+    runtime_id: runtimeId,
+    matches_default: asBoolean(raw.matches_default),
+  }
+}
+
+function decodeRuntimeAssignmentGovernance(raw: unknown): DashboardRuntimeAssignmentGovernance | null {
+  if (!isRecord(raw)) return null
+  return {
+    schema: asNullableString(raw.schema),
+    source: asNullableString(raw.source),
+    status: asNullableString(raw.status),
+    degraded: asBoolean(raw.degraded) ?? false,
+    operator_action_required: asBoolean(raw.operator_action_required) ?? false,
+    blast_radius: asNullableString(raw.blast_radius),
+    assignment_count: asNumber(raw.assignment_count) ?? 0,
+    assigned_keeper_count: asNumber(raw.assigned_keeper_count) ?? 0,
+    assigned_runtime_count: asNumber(raw.assigned_runtime_count) ?? 0,
+    default_assignment_count: asNumber(raw.default_assignment_count) ?? 0,
+    default_runtime_id: asNullableString(raw.default_runtime_id),
+    librarian_runtime_id: asNullableString(raw.librarian_runtime_id),
+    warnings: asStringArray(raw.warnings),
+    assigned_runtimes: asStringArray(raw.assigned_runtimes),
+    assignments: asRecordArray(raw.assignments)
+      .map(decodeRuntimeAssignment)
+      .filter((item): item is DashboardRuntimeAssignment => item !== null),
+  }
+}
+
 function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProvidersResponse | null {
   if (!isRecord(raw)) return null
   const summary = isRecord(raw.summary) ? raw.summary : null
@@ -768,6 +828,7 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
     providers: asRecordArray(raw.providers)
       .map(decodeRuntimeProviderSnapshot)
       .filter((provider): provider is DashboardRuntimeProviderSnapshot => provider !== null),
+    assignment_governance: decodeRuntimeAssignmentGovernance(raw.assignment_governance),
     config_path: asNullableString(raw.config_path),
   }
 }

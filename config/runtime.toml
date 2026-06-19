@@ -85,10 +85,20 @@ supports-structured-output = true
 
 [models.deepseek-v4-flash]
 api-name = "deepseek-v4-flash"
-max-context = 262144
+max-context = 1048576
 tools-support = true
 thinking-support = true
 streaming = true
+
+[models.deepseek-v4-flash.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-image-input = false
+supports-multimodal-inputs = false
 
 [models.glm-4-7-coding]
 api-name = "glm-4.7"
@@ -171,20 +181,48 @@ supports-structured-output = false
 # json_object honored (clean JSON body), model "minimax-m3".
 [models.minimax-m3]
 api-name = "minimax-m3"
-max-context = 1000000
+max-context = 524288
 tools-support = true
 thinking-support = true
 streaming = true
 
 [models.minimax-m3.capabilities]
 max-output-tokens = 131072
-supports-tool-choice = true
+supports-tool-choice = false
 supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
 supports-native-streaming = true
 supports-response-format-json = true
 supports-structured-output = true
+supports-image-input = true
+supports-multimodal-inputs = true
 
 [ollama_cloud.minimax-m3]
+
+# Kimi K2.6 (Ollama Cloud) — vision-capable Cloud runtime. The model name is
+# kept separate from Kimi's direct API route; OAS owns provider/model wire
+# details and MASC declares only runtime-local concrete model capabilities.
+[models.kimi-k2-6]
+api-name = "kimi-k2.6"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.kimi-k2-6.capabilities]
+max-output-tokens = 32768
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.kimi-k2-6]
 
 [ollama.gemma4-26b-a4b-qat]
 max-concurrent = 1

@@ -7,7 +7,6 @@ module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 module Heartbeat_presence = Masc.Keeper_heartbeat_loop_presence
-module Meta_contract = Masc.Keeper_meta_contract
 (* [Runtime] (init_default) lives in the unwrapped [masc_runtime] library, so it
    is referenced directly (not via [Masc.]); [Keeper_runtime] (ensure_keeper_meta)
    lives in the main [masc] library. Same pattern as test_keeper_lifecycle_registry_dispatch. *)
@@ -373,55 +372,65 @@ active_goal_ids = ["goal-masc-improver"]
     | Ok meta -> meta
     | Error err -> Alcotest.failf "ensure_keeper_meta failed: %s" err
   in
-  let disk =
-    match Store.read_meta config name with
-    | Ok (Some meta) -> meta
-    | Ok None -> Alcotest.fail "expected re-synced keeper meta"
-    | Error err -> Alcotest.failf "read re-synced meta failed: %s" err
+  let disk_json = Yojson.Safe.from_file (Profile.keeper_meta_path config name) in
+  let leaked_config_keys =
+    match disk_json with
+    | `Assoc fields ->
+      fields
+      |> List.filter_map (fun (key, _) ->
+        if List.mem key Masc.Keeper_meta_json_scrub.config_field_names
+        then Some key
+        else None)
+    | _ -> Alcotest.fail "expected keeper meta JSON object"
   in
-  List.iter
-    (fun (label, (meta : Meta_contract.keeper_meta)) ->
-      Alcotest.(check (option string))
-        (label ^ " persona is TOML canonical")
-        (Some "masc-improver")
-        meta.persona;
-      Alcotest.(check string)
-        (label ^ " goal is TOML canonical")
-        "Improve MASC autonomously"
-        meta.goal;
-      Alcotest.(check string)
-        (label ^ " short_goal is TOML canonical")
-        "Restore aggressive keeper autonomy"
-        meta.short_goal;
-      Alcotest.(check bool)
-        (label ^ " proactive enabled is TOML canonical")
-        true
-        meta.proactive.enabled;
-      Alcotest.(check int)
-        (label ^ " proactive idle is TOML canonical")
-        77
-        meta.proactive.idle_sec;
-      Alcotest.(check int)
-        (label ^ " proactive cooldown is TOML canonical")
-        88
-        meta.proactive.cooldown_sec;
-      Alcotest.(check (list string))
-        (label ^ " tool_access is TOML canonical")
-        [ "tool_execute"; "tool_read_file" ]
-        meta.tool_access;
-      Alcotest.(check string)
-        (label ^ " sandbox_profile is TOML canonical")
-        "docker"
-        (Profile.sandbox_profile_to_string meta.sandbox_profile);
-      Alcotest.(check (list string))
-        (label ^ " allowed_paths is TOML canonical")
-        [ "workspace/yousleepwhen/masc" ]
-        meta.allowed_paths;
-      Alcotest.(check (list string))
-        (label ^ " active_goal_ids is TOML canonical")
-        [ "goal-masc-improver" ]
-        meta.active_goal_ids)
-    [ ("returned", returned); ("disk", disk) ]
+  Alcotest.(check (list string))
+    "disk meta excludes TOML-owned config keys"
+    []
+    leaked_config_keys;
+  Alcotest.(check (option string))
+    "disk meta keeps persona snapshot"
+    (Some "masc-improver")
+    (json_string_field "persona" disk_json);
+  Alcotest.(check (option string))
+    "returned persona is TOML canonical"
+    (Some "masc-improver")
+    returned.persona;
+  Alcotest.(check string)
+    "returned goal is TOML canonical"
+    "Improve MASC autonomously"
+    returned.goal;
+  Alcotest.(check string)
+    "returned short_goal is TOML canonical"
+    "Restore aggressive keeper autonomy"
+    returned.short_goal;
+  Alcotest.(check bool)
+    "returned proactive enabled is TOML canonical"
+    true
+    returned.proactive.enabled;
+  Alcotest.(check int)
+    "returned proactive idle is TOML canonical"
+    77
+    returned.proactive.idle_sec;
+  Alcotest.(check int)
+    "returned proactive cooldown is TOML canonical"
+    88
+    returned.proactive.cooldown_sec;
+  Alcotest.(check (list string))
+    "returned tool_access is TOML canonical"
+    [ "tool_execute"; "tool_read_file" ]
+    returned.tool_access;
+  Alcotest.(check string)
+    "returned sandbox_profile is TOML canonical"
+    "docker"
+    (Profile.sandbox_profile_to_string returned.sandbox_profile);
+  Alcotest.(check (list string))
+    "returned allowed_paths is TOML canonical"
+    [ "workspace/yousleepwhen/masc" ]
+    returned.allowed_paths;
+  Alcotest.(check (list string))
+    "returned active_goal_ids is TOML canonical"
+    [ "goal-masc-improver" ]
+    returned.active_goal_ids
 
 let test_turn_setup_uses_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->

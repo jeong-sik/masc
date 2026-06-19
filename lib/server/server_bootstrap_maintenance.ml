@@ -170,6 +170,77 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
+  (* RFC-0259 P2: memory-os grounding reconciler. Off the keeper hot path, every
+     [interval]s it re-checks each keeper's volatile (external_ref) facts past the
+     grounding horizon against GitHub and LOGS a provisional verdict. OBSERVE-ONLY:
+     no writes — no retraction, no last_verified_at advance — so the log is the
+     dry-run evidence P3 uses to design the real contradiction policy (RFC-0259
+     §3.3 dry-run-before-enable). Default OFF (mirrors the GC/consolidation gates).
+     With no MASC_GROUNDING_GITHUB_TOKEN every verdict is Indeterminate and it runs
+     harmlessly. Per-keeper failures are caught so one store cannot cancel siblings;
+     a 1s inter-keeper sleep spreads GitHub calls across the sweep. *)
+  if
+    Keeper_memory_bank_env.memory_env_bool_logged
+      "MASC_KEEPER_MEMORY_OS_GROUNDING"
+      ~default:false
+  then
+    fork_logged_fiber
+      ~sw
+      ~on_error:(log_server_fiber_crash "memory_os_grounding")
+      (fun () ->
+        (* Coarse cadence: grounding is advisory and off the hot path. *)
+        let interval = 600.0 in
+        let env_or name ~default =
+          match Keeper_memory_bank_env.memory_env_opt name with
+          | Some v when String.trim v <> "" -> v
+          | Some _ | None -> default
+        in
+        let owner = env_or "MASC_GROUNDING_GITHUB_OWNER" ~default:Keeper_memory_os_grounding.default_owner in
+        let repo = env_or "MASC_GROUNDING_GITHUB_REPO" ~default:Keeper_memory_os_grounding.default_repo in
+        let verify_external =
+          match Keeper_memory_bank_env.memory_env_opt "MASC_GROUNDING_GITHUB_TOKEN" with
+          | Some token when String.trim token <> "" ->
+            Keeper_memory_os_grounding.github_verify ~token ~clock ~timeout_sec:10.0 ~owner ~repo
+          | Some _ | None ->
+            Log.Server.warn
+              "memory_os_grounding: no MASC_GROUNDING_GITHUB_TOKEN; all verdicts Indeterminate";
+            Keeper_memory_os_grounding.no_token_verify
+        in
+        let rec loop () =
+          List.iter
+            (fun keeper_id ->
+              (try
+                 let facts = Keeper_memory_os_io.read_facts_all ~keeper_id in
+                 let observations =
+                   Keeper_memory_os_grounding.grounding_pass
+                     ~verify_external
+                     ~now:(Time_compat.now ())
+                     ~grounding_horizon:
+                       Keeper_memory_os_grounding.default_grounding_horizon_seconds
+                     ~keeper_id
+                     facts
+                 in
+                 List.iter
+                   (fun o ->
+                     Log.Server.info
+                       "memory_os_grounding: %s"
+                       (Keeper_memory_os_grounding.observation_log_line o))
+                   observations
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Log.Server.warn
+                   "memory_os_grounding: keeper=%s tick crashed: %s"
+                   keeper_id
+                   (Printexc.to_string exn));
+              Eio.Time.sleep clock 1.0)
+            (List.filter
+               (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
+               (Keeper_memory_os_io.list_fact_store_keeper_ids ()));
+          Eio.Time.sleep clock interval;
+          loop ()
+        in
+        loop ());
   (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
      write-only — strengthen/weaken populated synapses but decay +
      pruning never ran (zero production callers of [consolidate]).

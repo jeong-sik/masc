@@ -87,6 +87,7 @@
   test_keeper_memory_os
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
+  test_keeper_memory_os_grounding
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state
@@ -383,6 +384,7 @@
   test_keeper_memory_os
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
+  test_keeper_memory_os_grounding
   eval_memory_os_value
   test_keeper_reconcile_state
   test_attempt_state

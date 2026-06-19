@@ -15,6 +15,7 @@ import { route } from '../../router'
 import { votePost, voteComment } from '../../api/board'
 import { ModerationBadge } from './moderation-badge'
 import { ReactionBar } from './reaction-bar'
+import { FusionBoardEvidence } from './fusion-evidence'
 import {
   boardActorAvatarKey,
   boardActorDisplayName,
@@ -568,6 +569,8 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <div class="text-sm text-[var(--color-fg-primary)] leading-loose">
             <${RichContent} text=${stripStateBlocks(post.body)} previewLimit=${4} />
           </div>
+
+          <${FusionBoardEvidence} post=${post} />
 
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--color-border-divider)]">

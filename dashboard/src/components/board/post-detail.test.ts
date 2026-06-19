@@ -638,6 +638,89 @@ describe('PostDetail', () => {
     expect(audit).toHaveTextContent('목록 정렬/필터에 따라 위치가 바뀔 수 있습니다.')
   })
 
+  it('renders fusion panel and judge evidence from board meta', () => {
+    const post = {
+      id: 'post-fusion',
+      author: 'fusion-keeper',
+      title: 'Fusion deliberation (run fus-1): answer',
+      body: 'Fusion deliberation headline',
+      content: 'Fusion deliberation headline',
+      created_at: '2026-06-19T00:00:00Z',
+      updated_at: '2026-06-19T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'system',
+      comments: [],
+      meta: {
+        source: 'fusion',
+        run_id: 'fus-1234567890',
+        question: 'Should we ship the fusion board renderer?',
+        panel: [
+          {
+            model: 'ollama_cloud.kimi-k2-6',
+            status: 'answered',
+            answer: 'Panel one answer',
+            output_tokens: 1200,
+          },
+          {
+            model: 'ollama_cloud.minimax-m3',
+            status: 'failed',
+            reason: 'Timeout',
+          },
+        ],
+        judge: {
+          status: 'synthesized',
+          decision: 'answer — ship',
+          synthesis: 'Judge synthesis answer',
+          resolved_answer: 'Resolved answer fallback',
+        },
+        observed_usage: {
+          input_tokens: 300,
+          output_tokens: 3432,
+        },
+      },
+    } as any
+
+    const { container } = render(h(PostDetail, { post }))
+
+    const evidence = screen.getByTestId('fusion-board-evidence')
+    expect(evidence).toHaveTextContent('Fusion 심의 증거')
+    expect(evidence).toHaveTextContent('fus-1234567890')
+    expect(evidence).toHaveTextContent('1/2')
+    expect(evidence).toHaveTextContent('3,432 tok')
+    expect(evidence).toHaveTextContent('Should we ship the fusion board renderer?')
+    expect(evidence).toHaveTextContent('Panel one answer')
+    expect(evidence).toHaveTextContent('Timeout')
+    expect(evidence).toHaveTextContent('Judge synthesis answer')
+    expect(evidence).not.toHaveTextContent('Resolved answer fallback')
+    expect(container.querySelectorAll('[data-fusion-panel]')).toHaveLength(2)
+  })
+
+  it('does not render fusion evidence for ordinary board meta', () => {
+    const post = {
+      id: 'post-ordinary',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-06-19T00:00:00Z',
+      updated_at: '2026-06-19T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      comments: [],
+      meta: {
+        source: 'manual',
+        state_block: 'state only',
+      },
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.queryByTestId('fusion-board-evidence')).not.toBeInTheDocument()
+    expect(screen.getByText(/출처:/)).toBeInTheDocument()
+  })
+
   it('renders and clears the board comment route focus receipt', () => {
     const post = {
       id: 'post-1',

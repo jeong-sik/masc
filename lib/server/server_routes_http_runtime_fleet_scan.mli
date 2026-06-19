@@ -7,6 +7,7 @@ type paused_keeper_scan = {
 val empty_paused_keeper_scan : paused_keeper_scan
 val sorted_unique_strings : String.t list -> String.t list
 val effective_autoboot_enabled :
+  Workspace.config ->
   string ->
   Keeper_meta_contract.keeper_meta -> bool
 val pause_elapsed_sec :

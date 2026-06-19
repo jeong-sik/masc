@@ -15,6 +15,7 @@ val reject_placeholder_persona_profile :
   label:string -> path:string -> Yojson.Safe.t -> bool
 val operator_todo_placeholder_fields : (string * string option) list -> string list
 val personas_root_opt : unit -> string option
+val persona_profile_path_opt_in_dirs : string list -> string -> string option
 val persona_profile_path_opt : string -> string option
 val persona_description_max_chars : int
 val load_persona_extended : ?max_chars:int -> string -> string option

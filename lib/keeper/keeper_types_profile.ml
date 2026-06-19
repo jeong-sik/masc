@@ -150,9 +150,33 @@ let keeper_toml_path_opt name =
   Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
   Config_dir_resolver.keeper_toml_path_opt name
 
+let keeper_toml_path_opt_for_base_path ~base_path name =
+  Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path name
+
 let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
   Keeper_types_profile_persona_defaults.load ~name
 
+let load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name
+    : keeper_profile_defaults =
+  Keeper_types_profile_persona_defaults.load_from_dirs ~persona_dirs ~name
+
+let safe_persona_dirs ?base_path () =
+  try
+    match base_path with
+    | Some base_path -> Config_dir_resolver.personas_dirs_for_base_path ~base_path
+    | None -> Config_dir_resolver.personas_dirs ()
+  with
+  | Sys_error _ -> []
+  | exn ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ProfileLoadFailures)
+        ~labels:
+          [ "site", Keeper_profile_load_failure_site.(to_label Personas_dirs_resolve) ]
+        ();
+      Log.Keeper.warn
+        "profile defaults personas_dirs unexpected: %s"
+        (Printexc.to_string exn);
+      []
 
 let resolved_persona_name ~keeper_name
     (defaults : keeper_profile_defaults) : string =
@@ -160,20 +184,25 @@ let resolved_persona_name ~keeper_name
   | Some name when String.trim name <> "" -> name
   | _ -> keeper_name
 
-let load_keeper_profile_defaults_result_uncached name :
+let load_keeper_profile_defaults_result_uncached_with_paths
+    ~keeper_toml_path_opt
+    ~persona_dirs
+    name :
     (keeper_profile_defaults, string) result =
   (* Priority: TOML config/keepers/<name>.toml > persona profile.json.
      If TOML sets [persona_name], load that persona first and treat TOML as a
      thin overlay instead of duplicating the full keeper profile. *)
   let result =
-    match keeper_toml_path_opt name with
+    match keeper_toml_path_opt with
     | Some toml_path ->
       (match load_keeper_toml toml_path with
        | Ok (_name, defaults) -> (
            match defaults.persona_name with
            | Some persona_name ->
                let persona_defaults =
-                 load_keeper_profile_defaults_from_persona persona_name
+                 load_keeper_profile_defaults_from_persona_dirs
+                   ~persona_dirs
+                   persona_name
                in
                Ok
                  (merge_keeper_profile_defaults ~agent_name:name
@@ -181,9 +210,23 @@ let load_keeper_profile_defaults_result_uncached name :
            | None -> Ok defaults)
        | Error e -> Error e)
     | None ->
-      Ok (load_keeper_profile_defaults_from_persona name)
+      Ok (load_keeper_profile_defaults_from_persona_dirs ~persona_dirs name)
   in
   result
+
+let load_keeper_profile_defaults_result_uncached name :
+    (keeper_profile_defaults, string) result =
+  load_keeper_profile_defaults_result_uncached_with_paths
+    ~keeper_toml_path_opt:(keeper_toml_path_opt name)
+    ~persona_dirs:(safe_persona_dirs ())
+    name
+
+let load_keeper_profile_defaults_result_for_base_path ~base_path name :
+    (keeper_profile_defaults, string) result =
+  load_keeper_profile_defaults_result_uncached_with_paths
+    ~keeper_toml_path_opt:(keeper_toml_path_opt_for_base_path ~base_path name)
+    ~persona_dirs:(safe_persona_dirs ~base_path ())
+    name
 
 (* Classify a [load_keeper_toml] failure message into a low-cardinality
    label suitable for Otel_metric_store. The raw error string embeds user input
@@ -478,6 +521,22 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
          ()
      | None -> ());
     load_keeper_profile_defaults_from_persona name
+
+let load_keeper_profile_defaults_for_base_path ~base_path name
+    : keeper_profile_defaults =
+  match load_keeper_profile_defaults_result_for_base_path ~base_path name with
+  | Ok defaults -> defaults
+  | Error e ->
+    (match keeper_toml_path_opt_for_base_path ~base_path name with
+     | Some _ ->
+       Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
+       Otel_metric_store.inc_counter Keeper_metrics.(to_string TomlInvalid)
+         ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
+         ()
+     | None -> ());
+    load_keeper_profile_defaults_from_persona_dirs
+      ~persona_dirs:(safe_persona_dirs ~base_path ())
+      name
 
 (** Clamp a profile-provided max-turns override to [1, 100] — the same range
     enforced by [Keeper_runtime_resolved.reactive_max_turns_per_call].

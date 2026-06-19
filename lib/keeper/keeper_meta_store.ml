@@ -81,9 +81,10 @@ let persisted_keeper_names config =
     |> List.sort String.compare
 ;;
 
-let configured_keeper_names _config =
-  Config_dir_resolver.log_warnings ~context:"KeeperTypes" ();
-  Keeper_types_profile.discover_keepers_toml (Config_dir_resolver.keepers_dir ())
+let configured_keeper_names config =
+  Keeper_types_profile.discover_keepers_toml
+    (Config_dir_resolver.keepers_dir_for_base_path
+       ~base_path:config.Workspace.base_path)
   |> List.map fst
   |> dedupe_keep_order
 ;;
@@ -97,14 +98,24 @@ let keeper_names config =
   persisted_keeper_names config
 ;;
 
-let declarative_autoboot_enabled_by_default name =
-  match (load_keeper_profile_defaults name).autoboot_enabled with
+let declarative_autoboot_enabled_by_default config name =
+  match
+    (load_keeper_profile_defaults_for_base_path
+       ~base_path:config.Workspace.base_path
+       name)
+      .autoboot_enabled
+  with
   | Some false -> false
   | Some true | None -> true
 ;;
 
-let effective_autoboot_enabled name meta =
-  match (load_keeper_profile_defaults name).autoboot_enabled with
+let effective_autoboot_enabled config name meta =
+  match
+    (load_keeper_profile_defaults_for_base_path
+       ~base_path:config.Workspace.base_path
+       name)
+      .autoboot_enabled
+  with
   | Some value -> value
   | None -> meta.autoboot_enabled
 ;;
@@ -114,10 +125,12 @@ let keepalive_keeper_names config =
   |> List.filter_map (fun name ->
     match read_meta_file_path (keeper_meta_path config name) with
     | Ok (Some meta)
-      when (not meta.paused) && effective_autoboot_enabled name meta ->
+      when (not meta.paused) && effective_autoboot_enabled config name meta ->
         Some meta.name
     | Ok (Some _) -> None
-    | Ok None -> if declarative_autoboot_enabled_by_default name then Some name else None
+    | Ok None ->
+      if declarative_autoboot_enabled_by_default config name then Some name
+      else None
     | Error msg ->
       (* Issue #8377: was [_ -> None] which collapsed read/parse
          failures silently into "name disappeared". Discovery would
@@ -147,7 +160,7 @@ let persistent_agent_names config =
   |> List.filter_map (fun name ->
     match read_meta_file_path (keeper_meta_path config name) with
     | Ok (Some meta)
-      when (not meta.paused) && effective_autoboot_enabled name meta ->
+      when (not meta.paused) && effective_autoboot_enabled config name meta ->
         Some meta.name
     | Ok (Some _) -> None
     | Ok None -> None

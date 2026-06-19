@@ -349,6 +349,21 @@ let prompts_dir () =
 let keepers_dir () =
   (resolve ()).keepers.path
 
+let inputs_for_base_path ~base_path =
+  {
+    cwd = base_path;
+    executable_name = Sys.executable_name;
+    env_base_path = Some base_path;
+    env_config_dir = current_env_config_dir_opt ();
+    env_personas_dir = current_env_personas_dir_opt ();
+  }
+
+let resolve_for_base_path ~base_path =
+  resolve_with (inputs_for_base_path ~base_path)
+
+let keepers_dir_for_base_path ~base_path =
+  (resolve_for_base_path ~base_path).keepers.path
+
 let personas_dir_opt () =
   let resolution = resolve () in
   match resolution.config_root.source with
@@ -399,6 +414,11 @@ let personas_dirs_with inputs resolution =
     in
     dedupe_paths primary
 
+let personas_dirs_for_base_path ~base_path =
+  let inputs = inputs_for_base_path ~base_path in
+  let resolution = resolve_with inputs in
+  personas_dirs_with inputs resolution
+
 let personas_dirs () =
   let resolution = resolve () in
   let inputs = inputs_from_env () in
@@ -406,6 +426,12 @@ let personas_dirs () =
 
 let keeper_toml_path_opt name =
   let path = Filename.concat (keepers_dir ()) (name ^ ".toml") in
+  if existing_file path then Some path else None
+
+let keeper_toml_path_opt_for_base_path ~base_path name =
+  let path =
+    Filename.concat (keepers_dir_for_base_path ~base_path) (name ^ ".toml")
+  in
   if existing_file path then Some path else None
 
 let warnings () =

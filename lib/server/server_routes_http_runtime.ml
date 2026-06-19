@@ -459,6 +459,33 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
       Some (keeper_fleet_meta_scan (Mcp_server.workspace_config state))
     | None -> None
   in
+  let keeper_identity_drift_json =
+    compute_section ~name:"keeper_identity_drift" ?section_timings_ref
+      (fun () ->
+        match current_server_state_opt () with
+        | Some state ->
+          keeper_identity_drift_health_json (Mcp_server.workspace_config state)
+        | None ->
+          `Assoc
+            [
+              ("schema", `String "masc.keeper_identity_drift.v1");
+              ("status", `String "snapshot_not_ready");
+              ("blocking", `Bool false);
+              ("terminal_reason", `String "snapshot_not_ready");
+              ("operator_action_required", `Bool false);
+              ("configured_keeper_count", `Int 0);
+              ("configured_keeper_names", `List []);
+              ("materializable_configured_keeper_count", `Int 0);
+              ("materializable_configured_keeper_names", `List []);
+              ("persisted_meta_count", `Int 0);
+              ("persisted_meta_names", `List []);
+              ("configured_without_meta_count", `Int 0);
+              ("configured_without_meta_names", `List []);
+              ("meta_without_config_count", `Int 0);
+              ("meta_without_config_names", `List []);
+              ("next_action", `String "none");
+            ])
+  in
   let paused_keepers_json =
     compute_section ~name:"paused_keepers" ?section_timings_ref
       (fun () ->
@@ -531,6 +558,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
         ~starting_keepers:0 ~requested_keepers:24 () );
     ("fd_accountant", fd_accountant_json);
     ("keeper_fleet_safety", keeper_fleet_safety);
+    ("keeper_identity_drift", keeper_identity_drift_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns, and auto-paused keepers may no longer have a live registry
@@ -627,6 +655,7 @@ let full_health_cached_field_names =
     "keeper_fd_pressure";
     "fd_accountant";
     "keeper_fleet_safety";
+    "keeper_identity_drift";
     "keeper_reaction_ledger";
     "paused_keepers";
     "cdal";
@@ -660,6 +689,27 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "keeper_fleet_safety",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_fleet_safety" );
+    ( "keeper_identity_drift",
+      `Assoc
+        [
+          ("schema", `String "masc.keeper_identity_drift.v1");
+          ("status", `String status);
+          ("blocking", `Bool false);
+          ("terminal_reason", `String "snapshot_not_ready");
+          ("operator_action_required", `Bool false);
+          ("configured_keeper_count", `Int 0);
+          ("configured_keeper_names", `List []);
+          ("materializable_configured_keeper_count", `Int 0);
+          ("materializable_configured_keeper_names", `List []);
+          ("persisted_meta_count", `Int 0);
+          ("persisted_meta_names", `List []);
+          ("configured_without_meta_count", `Int 0);
+          ("configured_without_meta_names", `List []);
+          ("meta_without_config_count", `Int 0);
+          ("meta_without_config_names", `List []);
+          ("next_action", `String "none");
+          ("component_timed_out", `Bool component_timed_out);
+        ] );
     ( "keeper_reaction_ledger",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_reaction_ledger" );

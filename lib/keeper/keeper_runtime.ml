@@ -291,6 +291,62 @@ let resynced_tool_access
   | Some tools -> normalize_tool_names tools
   | None -> meta.tool_access
 
+let drift_if label changed =
+  if changed then Some label else None
+
+let goal_horizon_text_equal current target =
+  String.equal
+    (normalize_goal_horizon_text current)
+    (normalize_goal_horizon_text target)
+
+let keeper_meta_persistent_drift_categories
+    ~(defaults : Keeper_types_profile.keeper_profile_defaults)
+    ~(current : keeper_meta)
+    ~(target : keeper_meta) =
+  List.filter_map Fun.id
+    [
+      drift_if "persona" (current.persona <> target.persona);
+      drift_if "proactive" (current.proactive <> target.proactive);
+      drift_if "tool_access" (current.tool_access <> target.tool_access);
+      drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
+      drift_if "social_model" (current.social_model <> target.social_model);
+      drift_if "goal" (not (goal_horizon_text_equal current.goal target.goal));
+      drift_if "short_goal"
+        (not (goal_horizon_text_equal current.short_goal target.short_goal));
+      drift_if "mid_goal"
+        (not (goal_horizon_text_equal current.mid_goal target.mid_goal));
+      drift_if "long_goal"
+        (not (goal_horizon_text_equal current.long_goal target.long_goal));
+      drift_if "will" (not (personality_text_equal current.will target.will));
+      drift_if "needs" (not (personality_text_equal current.needs target.needs));
+      drift_if "desires"
+        (not (personality_text_equal current.desires target.desires));
+      drift_if "instructions"
+        (not (personality_text_equal current.instructions target.instructions));
+      drift_if "autoboot_enabled"
+        (current.autoboot_enabled <> target.autoboot_enabled);
+      drift_if "mention_targets"
+        (current.mention_targets <> target.mention_targets);
+      drift_if "active_goal_ids"
+        (Option.is_some defaults.active_goal_ids
+         && current.active_goal_ids <> target.active_goal_ids);
+      drift_if "sandbox_profile"
+        (current.sandbox_profile <> target.sandbox_profile);
+      drift_if "sandbox_image" (current.sandbox_image <> target.sandbox_image);
+      drift_if "network_mode" (current.network_mode <> target.network_mode);
+      drift_if "allowed_paths"
+        (Option.is_some defaults.allowed_paths
+         && current.allowed_paths <> target.allowed_paths);
+      drift_if "telemetry_feedback_enabled"
+        (current.telemetry_feedback_enabled <> target.telemetry_feedback_enabled);
+      drift_if "telemetry_feedback_window_hours"
+        (current.telemetry_feedback_window_hours
+         <> target.telemetry_feedback_window_hours);
+      drift_if "always_approve"
+        (current.always_approve <> target.always_approve);
+      drift_if "oas_env" (current.oas_env <> target.oas_env);
+    ]
+
 let ensure_keeper_meta_with_cause config name =
   match read_meta config name with
   | Ok (Some meta) ->
@@ -428,25 +484,20 @@ let ensure_keeper_meta_with_cause config name =
         oas_env = target_oas_env;
       }
     in
-    (* Runtime JSON intentionally omits TOML-owned config/personality
-       fields.  They must be overlaid into the returned meta for the
-       live registry, but comparing those omitted fields against TOML
-       would classify every reconcile tick as a write-worthy drift.
-       [active_goal_ids] can also be runtime-owned when set explicitly via
-       keeper_up, but when supplied by TOML it remains an overlay-only
-       declarative scope rather than being copied into runtime JSON. *)
-    let oas_env_changed = meta.oas_env <> target_oas_env in
-    let persistent_changed = oas_env_changed in
-    let overlay_without_persistent_changes =
-      { overlayed with
-        oas_env = meta.oas_env;
-      }
+    (* Keep the runtime snapshot honest as well as the live overlay.  The
+       previous overlay-only path made operators see stale JSON forever
+       (for example persona=analyst while TOML declared masc-improver),
+       which hid prompt/tool/autonomy drift from health and bootstrap
+       checks.  Runtime-owned list fields are only persisted when TOML
+       explicitly owns them, avoiding accidental allowed_paths or
+       active_goal_ids erasure. *)
+    let cats =
+      keeper_meta_persistent_drift_categories
+        ~defaults
+        ~current:meta
+        ~target:overlayed
     in
-
-    if persistent_changed then begin
-      let cats = List.filter_map Fun.id [
-        (if oas_env_changed then Some "oas_env" else None);
-      ] in
+    if cats <> [] then begin
       Log.Keeper.info
         "ensure_keeper_meta: re-syncing [%s] for %s"
         (String.concat "," cats)
@@ -460,7 +511,7 @@ let ensure_keeper_meta_with_cause config name =
           ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
           ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
-        Ok overlay_without_persistent_changes
+        Ok overlayed
     end
     else Ok overlayed))
   | Ok None ->

@@ -212,6 +212,14 @@ type keeper_fleet_meta_scan = {
   bootable_names : string list;
 }
 
+type keeper_identity_drift_scan = {
+  configured_names : string list;
+  persisted_meta_names : string list;
+  materializable_configured_names : string list;
+  configured_without_meta_names : string list;
+  meta_without_config_names : string list;
+}
+
 let sort_paused_keeper_details details =
   List.sort
     (fun left right ->
@@ -486,6 +494,97 @@ let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).co
 
 let string_set_of_list values =
   List.fold_left (fun acc value -> String_set.add value acc) String_set.empty values
+
+let json_string_list values = Json_util.json_string_list values
+
+let configured_keeper_is_materializable name =
+  try
+    let defaults = Keeper_types_profile.load_keeper_profile_defaults name in
+    (* Exclude loader-only TOMLs such as base.toml from identity drift. *)
+    Option.is_some defaults.persona_name
+    || Option.is_some defaults.goal
+    || defaults.mention_targets <> []
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> true
+
+let keeper_identity_drift_scan config =
+  let configured_names =
+    Keeper_meta_store.configured_keeper_names config |> sorted_unique_strings
+  in
+  let persisted_meta_names =
+    Keeper_meta_store.persisted_keeper_names config |> sorted_unique_strings
+  in
+  let materializable_configured_names =
+    configured_names
+    |> List.filter configured_keeper_is_materializable
+    |> sorted_unique_strings
+  in
+  let configured_set = string_set_of_list materializable_configured_names in
+  let persisted_set = string_set_of_list persisted_meta_names in
+  {
+    configured_names;
+    persisted_meta_names;
+    materializable_configured_names;
+    configured_without_meta_names =
+      materializable_configured_names
+      |> List.filter (fun name -> not (String_set.mem name persisted_set))
+      |> sorted_unique_strings;
+    meta_without_config_names =
+      persisted_meta_names
+      |> List.filter (fun name -> not (String_set.mem name configured_set))
+      |> sorted_unique_strings;
+  }
+
+let keeper_identity_drift_health_json_of_scan scan =
+  let configured_without_meta_count =
+    List.length scan.configured_without_meta_names
+  in
+  let meta_without_config_count = List.length scan.meta_without_config_names in
+  let blocking = meta_without_config_count > 0 in
+  let status =
+    if blocking then "blocked"
+    else if configured_without_meta_count > 0 then "degraded"
+    else "ok"
+  in
+  let terminal_reason =
+    if meta_without_config_count > 0 then "runtime_meta_without_keeper_toml"
+    else if configured_without_meta_count > 0 then "configured_keeper_without_runtime_meta"
+    else "none"
+  in
+  `Assoc
+    [
+      ("schema", `String "masc.keeper_identity_drift.v1");
+      ("status", `String status);
+      ("blocking", `Bool blocking);
+      ("terminal_reason", `String terminal_reason);
+      ("operator_action_required", `Bool (status <> "ok"));
+      ("configured_keeper_count", `Int (List.length scan.configured_names));
+      ( "configured_keeper_names",
+        json_string_list scan.configured_names );
+      ( "materializable_configured_keeper_count",
+        `Int (List.length scan.materializable_configured_names) );
+      ( "materializable_configured_keeper_names",
+        json_string_list scan.materializable_configured_names );
+      ("persisted_meta_count", `Int (List.length scan.persisted_meta_names));
+      ("persisted_meta_names", json_string_list scan.persisted_meta_names);
+      ("configured_without_meta_count", `Int configured_without_meta_count);
+      ( "configured_without_meta_names",
+        json_string_list scan.configured_without_meta_names );
+      ("meta_without_config_count", `Int meta_without_config_count);
+      ( "meta_without_config_names",
+        json_string_list scan.meta_without_config_names );
+      ( "next_action",
+        `String
+          (if meta_without_config_count > 0 then
+             "add_matching_keeper_toml_or_retire_stale_meta"
+           else if configured_without_meta_count > 0 then
+             "materialize_configured_keeper_or_disable_unused_toml"
+           else "none") );
+    ]
+
+let keeper_identity_drift_health_json config =
+  keeper_identity_drift_scan config |> keeper_identity_drift_health_json_of_scan
 
 let json_string_list_field field = function
   | `Assoc fields -> (

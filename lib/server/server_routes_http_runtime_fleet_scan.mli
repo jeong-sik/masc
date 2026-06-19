@@ -51,12 +51,24 @@ type keeper_fleet_meta_scan = {
   autoboot_scan : autoboot_keeper_scan;
   bootable_names : string list;
 }
+type keeper_identity_drift_scan = {
+  configured_names : string list;
+  persisted_meta_names : string list;
+  materializable_configured_names : string list;
+  configured_without_meta_names : string list;
+  meta_without_config_names : string list;
+}
 val sort_paused_keeper_details :
   ([> `Assoc of (string * [> `String of String.t ]) list ] as 'a) list ->
   'a list
 val keeper_fleet_meta_scan :
   ?include_paused_details:bool ->
   Workspace.config -> keeper_fleet_meta_scan
+val configured_keeper_is_materializable : string -> bool
+val keeper_identity_drift_scan : Workspace.config -> keeper_identity_drift_scan
+val keeper_identity_drift_health_json_of_scan :
+  keeper_identity_drift_scan -> Yojson.Safe.t
+val keeper_identity_drift_health_json : Workspace.config -> Yojson.Safe.t
 val autoboot_enabled_keeper_scan :
   Workspace.config -> autoboot_keeper_scan
 type keeper_phase_counts = {

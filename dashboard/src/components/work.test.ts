@@ -197,6 +197,42 @@ describe('Work', () => {
       expect(navigateMock).toHaveBeenCalledWith('monitoring', { section: 'agents', view: 'keepers', keeper: 'sangsu' })
     })
 
+    it('surfaces tasks without a goal_id in a dedicated unassigned section', () => {
+      goals.value = [
+        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        { id: 'J-1', title: 'Linked job', goal_id: 'G-1', status: 'todo' },
+        { id: 'U-1', title: 'Orphan job', goal_id: null, status: 'in_progress' },
+        { id: 'U-2', title: 'Another orphan', status: 'todo' },
+      ]
+
+      render(html`<${Work} />`)
+
+      // KPI counts every task regardless of goal linkage.
+      expect(screen.getByTestId('kpi-jobs').textContent).toBe('3')
+
+      const unassigned = screen.getByTestId('work-unassigned')
+      expect(unassigned).toBeTruthy()
+      expect(unassigned.textContent).toContain('미배정 작업')
+      expect(unassigned.textContent).toContain('(2)')
+      expect(screen.getByText('Orphan job')).toBeTruthy()
+      expect(screen.getByText('Another orphan')).toBeTruthy()
+    })
+
+    it('omits the unassigned section when every task has a goal', () => {
+      goals.value = [
+        { id: 'G-1', horizon: 'short', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+      ]
+      tasks.value = [
+        { id: 'J-1', title: 'Linked job', goal_id: 'G-1', status: 'todo' },
+      ]
+
+      render(html`<${Work} />`)
+
+      expect(screen.queryByTestId('work-unassigned')).toBeNull()
+    })
+
     it('auto-expands high-priority goals and goals with blocked jobs', () => {
       goals.value = [
         { id: 'G-1', horizon: 'short', title: 'Normal goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

@@ -123,6 +123,20 @@ describe('refreshPlanForRoute', () => {
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {
+    // The default Work board (section: 'work') reads the same flat goals + tasks
+    // signals as planning, so it must fetch both. Regression guard: a missing
+    // 'work' branch left the board empty (0 goals / 0 jobs) despite live data.
+    expect(refreshPlanForRoute({
+      tab: 'workspace',
+      params: { section: 'work' },
+    })).toEqual(['goals', 'execution'])
+
+    // Bare workspace route normalizes to the 'work' default section.
+    expect(refreshPlanForRoute({
+      tab: 'workspace',
+      params: {},
+    })).toEqual(['goals', 'execution'])
+
     expect(refreshPlanForRoute({
       tab: 'workspace',
       params: { section: 'planning' },

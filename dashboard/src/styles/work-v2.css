@@ -277,6 +277,35 @@
   margin-bottom: 7px;
 }
 
+/* Unassigned jobs: tasks with no goal_id, surfaced below the goal cards. */
+.wk-unassigned {
+  /* Background/border/radius/shadow come from the .ss-card utility. */
+  overflow: hidden;
+}
+
+.wk-unassigned-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 15px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-mid);
+}
+
+.wk-unassigned-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.wk-unassigned-n {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
 .wk-job {
   display: flex;
   align-items: center;

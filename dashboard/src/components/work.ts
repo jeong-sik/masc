@@ -259,23 +259,28 @@ function WorkSurfaceV2() {
     })
   }
 
+  // KPI counts span ALL tasks, not only goal-linked ones. goal↔task linkage is
+  // optional (tasks frequently carry no goal_id), so a goal-only sum would read
+  // 0 jobs even with a full backlog.
   const totals = useMemo(() => {
-    let totalJobs = 0
     let doneJobs = 0
     let blockedJobs = 0
-    for (const g of goalList) {
-      const p = goalProgressCounts(g)
-      totalJobs += p.total
-      doneJobs += p.done
-      blockedJobs += p.blocked
+    for (const t of allTasks) {
+      const state = jobStateForTask(t).cls
+      if (state === 'done') doneJobs++
+      else if (state === 'blocked') blockedJobs++
     }
     return {
       goals: goalList.length,
-      jobs: totalJobs,
+      jobs: allTasks.length,
       done: doneJobs,
       blocked: blockedJobs,
     }
   }, [goalList, allTasks])
+
+  // Tasks with no goal_id have no place in the goal→job tree. Surface them in a
+  // dedicated section instead of dropping them from the board.
+  const unassignedTasks = allTasks.filter(task => !task.goal_id)
 
   return html`
     <main class="wk-surface ss-surface bg-surface-page text-text-primary">
@@ -325,7 +330,20 @@ function WorkSurfaceV2() {
             `)}
           </div>
 
-          <div class="wk-foot mono">Goal → job → keeper · job 의 keeper 를 누르면 해당 keeper 대화로 이동</div>
+          ${unassignedTasks.length > 0 ? html`
+            <section class="wk-unassigned ss-card mx-6" data-testid="work-unassigned">
+              <div class="wk-unassigned-h">
+                <span class="wk-unassigned-dot" aria-hidden="true"></span>
+                미배정 작업
+                <span class="wk-unassigned-n mono">(${unassignedTasks.length})</span>
+              </div>
+              <div class="wk-jobs">
+                ${unassignedTasks.map(task => html`<${JobRow} key=${task.id} task=${task} />`)}
+              </div>
+            </section>
+          ` : null}
+
+          <div class="wk-foot mono">Goal → job → keeper · goal 없는 작업은 미배정 · job 의 keeper 를 누르면 해당 keeper 대화로 이동</div>
         </div>
       </div>
     </main>

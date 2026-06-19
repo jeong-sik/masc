@@ -273,7 +273,7 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
   return html`
     <button
       type="button"
-      class=${`fus-run-row ${active ? 'active' : ''} ${ringFocusClasses}`}
+      class=${`fus-run-row ${active ? 'active' : ''} ${ringFocusClasses()}`}
       aria-current=${active ? 'true' : undefined}
       onClick=${() => replaceRoute('fusion', { run_id: run.runId })}
     >
@@ -310,12 +310,12 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
         <div class="fus-actions">
           <button
             type="button"
-            class=${`fus-action ${ringFocusClasses}`}
+            class=${`fus-action ${ringFocusClasses()}`}
             onClick=${() => navigate('keepers', { keeper: run.keeperName })}
           >Open keeper</button>
           <button
             type="button"
-            class=${`fus-action primary ${ringFocusClasses}`}
+            class=${`fus-action primary ${ringFocusClasses()}`}
             onClick=${() => navigate('board', { post: run.boardPostId })}
           >Open board post</button>
         </div>
@@ -387,7 +387,7 @@ export function FusionSurface() {
           </div>
           <button
             type="button"
-            class=${`fus-refresh ${ringFocusClasses}`}
+            class=${`fus-refresh ${ringFocusClasses()}`}
             onClick=${() => void refreshBoard()}
             disabled=${boardLoading.value}
           >${boardLoading.value ? 'Refreshing...' : 'Refresh'}</button>

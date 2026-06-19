@@ -104,6 +104,37 @@ describe('FusionSurface', () => {
     expect(container.textContent).toContain('360')
   })
 
+  it('calls ringFocusClasses() for focus rings instead of stringifying the function', () => {
+    boardPosts.value = [
+      boardPost({
+        id: 'post-fus-1',
+        title: 'Fusion deliberation (run fus-1): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-1',
+          question: 'Which deploy path should we take?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'Use the canary path.' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary first.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    // Regression guard: a bare `${ringFocusClasses}` interpolation coerces the
+    // function to its source text (which contains the `opts` parameter) into the
+    // class attribute, so the resolved focus-ring utilities are never applied.
+    const refresh = container.querySelector<HTMLButtonElement>('.fus-refresh')
+    expect(refresh).not.toBeNull()
+    expect(refresh?.className).toContain('focus-visible:outline-none')
+    expect(refresh?.className).not.toContain('opts')
+
+    const row = container.querySelector<HTMLButtonElement>('.fus-run-row')
+    expect(row).not.toBeNull()
+    expect(row?.className).toContain('focus-visible:outline-none')
+    expect(row?.className).not.toContain('opts')
+  })
+
   it('supports older nested fusion_deliberation metadata and route selection', () => {
     boardPosts.value = [
       boardPost({

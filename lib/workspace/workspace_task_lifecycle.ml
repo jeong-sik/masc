@@ -72,6 +72,19 @@ let resolve_claim ~same_actor ~agent_name ~now (status : Masc_domain.task_status
   | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
 ;;
 
+(* RFC-0262: a transition that overrides the assignee guard is permitted when
+   the caller IS the assignee, or holds Operator/System authority (which
+   override ownership). Exhaustive match — adding an authority forces every
+   guarded arm to declare it (CLAUDE.md FSM sparse-match fix on the authority
+   dimension). Phase 1 is behavior-preserving: Operator/System bypass ownership
+   exactly as the old [force=true] did; per-authority evidence-gate divergence
+   is RFC-0262 Phase 3 (RFC-0199). *)
+let owner_authorized ~authority ~same_agent assignee =
+  match (authority : Masc_domain.completion_authority) with
+  | Assignee -> same_agent assignee
+  | Operator | System -> true
+;;
+
 let decide
       ~verification_enabled
       ~verification_timeout_seconds
@@ -82,7 +95,7 @@ let decide
       ~task_status
       ~action
       ~now
-      ~force
+      ~authority
       ~notes
       ~reason
   =
@@ -116,7 +129,7 @@ let decide
     Error Invalid_transition
   (* ── Start ────────────────────────────────────── *)
   | Masc_domain.Start, Masc_domain.Claimed { assignee; _ } ->
-    if same_agent assignee || force
+    if owner_authorized ~authority ~same_agent assignee
     then
       ok
         ~set_current:task_id
@@ -130,11 +143,11 @@ let decide
     -> Error Invalid_transition
   (* ── Done ─────────────────────────────────────── *)
   | Masc_domain.Done_action, Masc_domain.Claimed { assignee; _ } ->
-    if same_agent assignee || force
+    if owner_authorized ~authority ~same_agent assignee
     then ok ~drift:Claimed_to_done_skip (done_status ~agent_name ~now ~notes)
     else Error Invalid_transition
   | Masc_domain.Done_action, Masc_domain.InProgress { assignee; _ } ->
-    if same_agent assignee || force
+    if owner_authorized ~authority ~same_agent assignee
     then ok (done_status ~agent_name ~now ~notes)
     else Error Invalid_transition
   | Masc_domain.Done_action, Masc_domain.Done _ -> ok task_status
@@ -146,18 +159,22 @@ let decide
   | Masc_domain.Cancel, Masc_domain.Todo -> ok (cancelled_status ~agent_name ~now ~reason)
   | ( Masc_domain.Cancel
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }) ) ->
-    if same_agent assignee || force
+    if owner_authorized ~authority ~same_agent assignee
     then ok (cancelled_status ~agent_name ~now ~reason)
     else Error Invalid_transition
   | Masc_domain.Cancel, Masc_domain.AwaitingVerification _ ->
-    if force
-    then ok (cancelled_status ~agent_name ~now ~reason)
-    else Error Invalid_transition
+    (* No assignee self-cancel of an in-flight verification; only an override
+       authority may expire it (was bare [if force]). *)
+    (match (authority : Masc_domain.completion_authority) with
+     | Operator | System -> ok (cancelled_status ~agent_name ~now ~reason)
+     | Assignee -> Error Invalid_transition)
   | Masc_domain.Cancel, Masc_domain.Done _ -> Error Invalid_transition
   (* ── Release ──────────────────────────────────── *)
   | ( Masc_domain.Release
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }) ) ->
-    if same_agent assignee || force then ok Masc_domain.Todo else Error Invalid_transition
+    if owner_authorized ~authority ~same_agent assignee
+    then ok Masc_domain.Todo
+    else Error Invalid_transition
   | Masc_domain.Release, Masc_domain.Todo -> ok task_status
   | ( Masc_domain.Release
     , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _)
@@ -239,7 +256,7 @@ let decide
 let valid_next_actions
       ~verification_enabled
       ~same_agent
-      ~force
+      ~authority
       ~task_status
   =
   let same_agent_pred _ = same_agent in
@@ -255,7 +272,7 @@ let valid_next_actions
         ~task_status
         ~action
         ~now:""
-        ~force
+        ~authority
         ~notes:""
         ~reason:""
     with

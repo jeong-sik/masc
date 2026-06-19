@@ -84,7 +84,7 @@ let decide_claim ~same_agent ~agent_name ~task_id ~task_status =
     ~task_status
     ~action:D.Claim
     ~now
-    ~force:false
+    ~authority:D.Assignee
     ~notes:""
     ~reason:""
 ;;
@@ -95,7 +95,7 @@ let assert_consistent_with_decide
       ~ctx
       ~verification_enabled
       ~same_agent
-      ~force
+      ~authority
       ~task_status
   =
   let same_agent_pred _ = same_agent in
@@ -111,7 +111,7 @@ let assert_consistent_with_decide
         ~task_status
         ~action
         ~now:""
-        ~force
+        ~authority
         ~notes:""
         ~reason:""
     with
@@ -120,7 +120,7 @@ let assert_consistent_with_decide
   in
   let expected = List.filter decide_says_ok D.all_task_actions in
   let actual =
-    L.valid_next_actions ~verification_enabled ~same_agent ~force ~task_status
+    L.valid_next_actions ~verification_enabled ~same_agent ~authority ~task_status
   in
   assert_actions ~ctx ~expected ~actual
 ;;
@@ -135,20 +135,20 @@ let test_todo () =
   let task_status = D.Todo in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:true ~force:false ~task_status
+      ~verification_enabled:true ~same_agent:true ~authority:D.Assignee ~task_status
   in
   let expected = [ D.Claim; D.Cancel; D.Release ] in
   assert_actions ~ctx:"todo" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"todo/consistency" ~verification_enabled:true
-    ~same_agent:true ~force:false ~task_status
+    ~same_agent:true ~authority:D.Assignee ~task_status
 ;;
 
 let test_claimed_by_self () =
   let task_status = mk_claimed owner in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:true ~force:false ~task_status
+      ~verification_enabled:true ~same_agent:true ~authority:D.Assignee ~task_status
   in
   (* From Claimed by self: Claim (idempotent), Start, Done, Cancel,
      Release, Submit_for_verification. *)
@@ -164,27 +164,27 @@ let test_claimed_by_self () =
   assert_actions ~ctx:"claimed-self" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"claimed-self/consistency" ~verification_enabled:true
-    ~same_agent:true ~force:false ~task_status
+    ~same_agent:true ~authority:D.Assignee ~task_status
 ;;
 
 let test_claimed_by_other () =
   let task_status = mk_claimed other in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:false ~force:false ~task_status
+      ~verification_enabled:true ~same_agent:false ~authority:D.Assignee ~task_status
   in
   (* From Claimed by other (no force): all owner-gated actions reject. *)
   assert_actions ~ctx:"claimed-other" ~expected:[] ~actual;
   assert_consistent_with_decide
     ~ctx:"claimed-other/consistency" ~verification_enabled:true
-    ~same_agent:false ~force:false ~task_status
+    ~same_agent:false ~authority:D.Assignee ~task_status
 ;;
 
 let test_claimed_by_other_with_force () =
   let task_status = mk_claimed other in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:false ~force:true ~task_status
+      ~verification_enabled:true ~same_agent:false ~authority:D.Operator ~task_status
   in
   (* Force unlocks Start / Done / Cancel / Release for non-owners. Claim still
      requires same_agent (no force in decide for Claim). *)
@@ -192,14 +192,14 @@ let test_claimed_by_other_with_force () =
   assert_actions ~ctx:"claimed-other-force" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"claimed-other-force/consistency" ~verification_enabled:true
-    ~same_agent:false ~force:true ~task_status
+    ~same_agent:false ~authority:D.Operator ~task_status
 ;;
 
 let test_in_progress_self () =
   let task_status = mk_in_progress owner in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:true ~force:false ~task_status
+      ~verification_enabled:true ~same_agent:true ~authority:D.Assignee ~task_status
   in
   let expected =
     [ D.Claim
@@ -213,14 +213,14 @@ let test_in_progress_self () =
   assert_actions ~ctx:"in_progress-self" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"in_progress-self/consistency" ~verification_enabled:true
-    ~same_agent:true ~force:false ~task_status
+    ~same_agent:true ~authority:D.Assignee ~task_status
 ;;
 
 let test_awaiting_verification_by_other () =
   let task_status = mk_awaiting other in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:false ~force:false ~task_status
+      ~verification_enabled:true ~same_agent:false ~authority:D.Assignee ~task_status
   in
   (* same_agent=false (not the submitter): a verifier may Approve / Reject, and
      may also Claim the task to verify it (cross-agent verification dispatch,
@@ -230,27 +230,27 @@ let test_awaiting_verification_by_other () =
   assert_actions ~ctx:"awaiting-by-other" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"awaiting-by-other/consistency" ~verification_enabled:true
-    ~same_agent:false ~force:false ~task_status
+    ~same_agent:false ~authority:D.Assignee ~task_status
 ;;
 
 let test_awaiting_verification_by_submitter () =
   let task_status = mk_awaiting owner in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:true ~force:false ~task_status
+      ~verification_enabled:true ~same_agent:true ~authority:D.Assignee ~task_status
   in
   (* Same agent as submitter → Self_approval / Self_rejection blocks both. *)
   assert_actions ~ctx:"awaiting-by-submitter" ~expected:[] ~actual;
   assert_consistent_with_decide
     ~ctx:"awaiting-by-submitter/consistency" ~verification_enabled:true
-    ~same_agent:true ~force:false ~task_status
+    ~same_agent:true ~authority:D.Assignee ~task_status
 ;;
 
 let test_done () =
   let task_status = mk_done owner in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:true ~force:false ~task_status
+      ~verification_enabled:true ~same_agent:true ~authority:D.Assignee ~task_status
   in
   (* Done is terminal except for idempotent Claim / Start / Done_action which
      return the same status (decide returns Ok without state change). *)
@@ -258,21 +258,21 @@ let test_done () =
   assert_actions ~ctx:"done" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"done/consistency" ~verification_enabled:true
-    ~same_agent:true ~force:false ~task_status
+    ~same_agent:true ~authority:D.Assignee ~task_status
 ;;
 
 let test_cancelled () =
   let task_status = mk_cancelled owner in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:true ~same_agent:true ~force:false ~task_status
+      ~verification_enabled:true ~same_agent:true ~authority:D.Assignee ~task_status
   in
   (* Cancelled idempotent on Cancel only. *)
   let expected = [ D.Cancel ] in
   assert_actions ~ctx:"cancelled" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"cancelled/consistency" ~verification_enabled:true
-    ~same_agent:true ~force:false ~task_status
+    ~same_agent:true ~authority:D.Assignee ~task_status
 ;;
 
 let test_verification_disabled_todo () =
@@ -281,13 +281,13 @@ let test_verification_disabled_todo () =
   let task_status = D.Todo in
   let actual =
     L.valid_next_actions
-      ~verification_enabled:false ~same_agent:true ~force:false ~task_status
+      ~verification_enabled:false ~same_agent:true ~authority:D.Assignee ~task_status
   in
   let expected = [ D.Claim; D.Cancel; D.Release ] in
   assert_actions ~ctx:"todo-verification-disabled" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"todo-verification-disabled/consistency" ~verification_enabled:false
-    ~same_agent:true ~force:false ~task_status
+    ~same_agent:true ~authority:D.Assignee ~task_status
 ;;
 
 (* Exhaustive consistency sweep — every (task_status × same_agent × force ×
@@ -324,7 +324,9 @@ let test_exhaustive_consistency () =
                           (D.task_status_to_string task_status)
                       in
                       assert_consistent_with_decide
-                        ~ctx ~verification_enabled ~same_agent ~force ~task_status)
+                        ~ctx ~verification_enabled ~same_agent
+                        ~authority:(if force then D.Operator else D.Assignee)
+                        ~task_status)
                    bools)
               bools)
          bools)

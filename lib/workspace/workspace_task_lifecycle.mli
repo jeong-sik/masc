@@ -50,7 +50,7 @@ val decide
   -> task_status:Masc_domain.task_status
   -> action:Masc_domain.task_action
   -> now:string
-  -> force:bool
+  -> authority:Masc_domain.completion_authority
   -> notes:string
   -> reason:string
   -> (decision, invalid) result
@@ -63,6 +63,6 @@ val decide
 val valid_next_actions
   :  verification_enabled:bool
   -> same_agent:bool
-  -> force:bool
+  -> authority:Masc_domain.completion_authority
   -> task_status:Masc_domain.task_status
   -> Masc_domain.task_action list

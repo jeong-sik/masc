@@ -28,11 +28,20 @@ let transition_task_outcome_r
       ?(notes = "")
       ?(reason = "")
       ?handoff_context
-      ?(force = false)
+      ?(authority = Masc_domain.Assignee)
       ()
   : transition_outcome Masc_domain.masc_result
   =
   let open Result.Syntax in
+  (* RFC-0262: project the typed authority back to the legacy [forced] bool for
+     the drift / completion-path / audit-log / telemetry sinks, preserving their
+     existing shape. Operator/System override ownership (the old force=true);
+     Assignee does not. *)
+  let forced =
+    match (authority : Masc_domain.completion_authority) with
+    | Assignee -> false
+    | Operator | System -> true
+  in
   let* () =
     if not (is_initialized config)
     then Error (Masc_domain.System Masc_domain.System_error.NotInitialized)
@@ -127,7 +136,7 @@ let transition_task_outcome_r
               ~task_status:task.task_status
               ~action
               ~now
-              ~force
+              ~authority
               ~notes
               ~reason
           with
@@ -293,19 +302,19 @@ let transition_task_outcome_r
 (* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress. *)
            (Atomic.get Workspace_hooks.fsm_drift_observer_fn)
              ~variant:(drift_variant_label Workspace_task_lifecycle.Claimed_to_done_skip)
-             ~force
+             ~force:forced
              ~agent_name;
            Log.TaskState.warn
              "fsm_drift claimed_to_done_skip task=%s agent=%s force=%b"
              task_id
              agent_name
-             force
+             forced
          | None -> ());
 (* #10449: Observe task completion path + contract presence so operators can split bypass-rate by cause (no contract vs. *)
         (match new_status with
          | Masc_domain.Done _ ->
            let contract_state = classify_contract_state task.contract in
-           let path = classify_completion_path ~action ~drift:decision.drift ~force in
+           let path = classify_completion_path ~action ~drift:decision.drift ~force:forced in
            (Atomic.get Workspace_hooks.task_completion_path_observed_fn)
              ~path
              ~contract_state
@@ -504,7 +513,7 @@ let transition_task_outcome_r
                ~from_status:task.task_status
                ~to_status:new_status
                ~action:action_s
-               ~forced:force
+               ~forced:forced
                ?notes:(trim_opt (Some notes))
                ?reason:(trim_opt (Some reason))
                ?handoff_context:backlog_update.persisted_handoff_context
@@ -603,11 +612,11 @@ let transition_task_outcome_r
                  ?notes:(if notes = "" then None else Some notes)
                  ?reason:(if reason = "" then None else Some reason)
                  ?duration_ms
-                 ~forced:force
+                 ~forced:forced
                  ());
           (match action with
            | Masc_domain.Done_action ->
-             Workspace_task_cleanup.run_done_hooks config ~agent_name ~task_id ~force
+             Workspace_task_cleanup.run_done_hooks config ~agent_name ~task_id
            | Masc_domain.Cancel ->
              Workspace_task_cleanup.run_cancel_hooks config ~agent_name
            | Masc_domain.Release -> ()
@@ -644,7 +653,7 @@ let transition_task_r
       ?notes
       ?reason
       ?handoff_context
-      ?force
+      ?authority
       ()
   : string Masc_domain.masc_result
   =
@@ -660,7 +669,7 @@ let transition_task_r
     ?notes
     ?reason
     ?handoff_context
-    ?force
+    ?authority
     ()
   |> Result.map (fun outcome -> outcome.message)
 ;;

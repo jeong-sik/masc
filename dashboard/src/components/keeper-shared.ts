@@ -632,6 +632,7 @@ export function KeeperConversationPanel({
               variant="messenger"
               size="primary"
               showDayDividers=${true}
+              groupToolCalls=${true}
               showSourceBadge=${true}
               action=${onInspectTurn ? { label: '턴 상세', title: '이 메시지 턴 상세 열기', onClick: onInspectTurn } : undefined}
             />

@@ -155,6 +155,14 @@
   background: var(--color-status-err);
 }
 
+/* Live tool calls have a third state the v2 mock lacks: the result has not yet
+   been joined from the tool-call output store (or the call carried no provider
+   id, so it never will). Render a muted dot rather than leave it invisible or
+   miscolour it as a failure. */
+.chat-block-tstep-status.pending {
+  background: var(--color-fg-disabled);
+}
+
 .chat-block-tstep-dur {
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);

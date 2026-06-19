@@ -717,6 +717,23 @@ describe('ChatComposer queue & stall', () => {
 
     expect(container.querySelector('[data-chat-stall-hint]')).toBeNull()
   })
+
+  it('labels the idle send button 전송 (regression: corrupted 볂이기 literal)', () => {
+    render(
+      html`<${ChatComposer}
+        draft="보낼 메시지"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    const sendButton = [...container.querySelectorAll('button')].find((b) => b.classList.contains('send'))
+    expect(sendButton?.textContent?.trim()).toBe('전송')
+    expect(container.textContent).not.toContain('볂이기')
+  })
 })
 
 describe('ChatComposer IME composition guard', () => {
@@ -1373,6 +1390,119 @@ describe('ChatTranscript — workspace day dividers (C1)', () => {
       container,
     )
     expect(container.querySelectorAll('.kw-daydiv').length).toBe(0)
+  })
+
+  it('does not duplicate a day divider when a null-timestamp entry splits a day', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          // Both timestamps are midday UTC so they land on one calendar day in
+          // any plausible test TZ (the C1 baseline test uses the same window).
+          entry({ id: 'a', text: 'morning', timestamp: '2026-03-24T12:00:00.000Z' }),
+          // live placeholder with no timestamp, mid-day
+          entry({ id: 'live', text: '응답 연결 중', role: 'assistant', source: 'direct_assistant', timestamp: null, delivery: 'sending' }),
+          entry({ id: 'b', text: 'evening', timestamp: '2026-03-24T13:00:00.000Z' }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showDayDividers=${true}
+      />`,
+      container,
+    )
+    // One calendar day → exactly one divider. Adjacent-only comparison would
+    // let the null-ts entry reset the previous key and re-emit a second one.
+    expect(container.querySelectorAll('.kw-daydiv').length).toBe(1)
+  })
+})
+
+describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
+  let container: HTMLDivElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    resetToolCallOutputs()
+  })
+
+  it('folds consecutive tool calls into one 작업 과정 card when grouping is on', () => {
+    recordToolCallOutputs([
+      toolCallOutput({ tool_use_id: 't1', output: 'r1' }),
+      toolCallOutput({ tool_use_id: 't2', output: 'r2' }),
+    ])
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'keeper_board_list' }),
+          toolEntry({ id: 'tool-t2', label: 'keeper_tasks_list' }),
+          entry({ id: 'a', text: '답변', role: 'assistant', source: 'direct_assistant' }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+    const cards = container.querySelectorAll('[data-chat-tool-trace]')
+    expect(cards.length).toBe(1)
+    expect(cards[0]?.textContent).toContain('작업 과정')
+    expect(cards[0]?.textContent).toContain('2단계')
+    expect(cards[0]?.textContent).toContain('도구 2')
+    // Grouped surface keeps no standalone per-row tool bubbles.
+    expect(container.querySelectorAll('[data-chat-variant="tool-call"]').length).toBe(0)
+  })
+
+  it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'keeper_board_list' }),
+          toolEntry({ id: 'tool-t2', label: 'keeper_tasks_list' }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+    expect(container.querySelectorAll('[data-chat-tool-trace]').length).toBe(0)
+    expect(container.querySelectorAll('[data-chat-variant="tool-call"]').length).toBe(2)
+  })
+
+  it('surfaces real failure status and result inside the card when expanded', async () => {
+    recordToolCallOutputs([
+      toolCallOutput({ tool_use_id: 't1', success: false, semantic_success: false, output: 'BOOM' }),
+    ])
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-t1', label: 'keeper_board_post', text: '{"k":"v"}' })]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+    expect(container.querySelector('[data-chat-tool-trace]')?.textContent).toContain('실패 1')
+    ;(container.querySelector('.chat-block-trace-hd') as HTMLButtonElement).click()
+    await flushUi()
+    const step = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
+    expect(step.querySelector('.chat-block-tstep-status.bad')).not.toBeNull()
+    ;(step.querySelector('.chat-block-tstep-row') as HTMLElement).click()
+    await flushUi()
+    expect(step.textContent).toContain('BOOM')
+  })
+
+  it('marks a tool step pending until its output is joined', async () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[toolEntry({ id: 'tool-unjoined', label: 'keeper_context_status' })]}
+        emptyText="empty"
+        groupToolCalls=${true}
+      />`,
+      container,
+    )
+    ;(container.querySelector('.chat-block-trace-hd') as HTMLButtonElement).click()
+    await flushUi()
+    const step = container.querySelector('[data-chat-trace-step="tool"]')
+    expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
   })
 })
 

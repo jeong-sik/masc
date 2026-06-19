@@ -552,6 +552,15 @@ function isInFlightDelivery(delivery: KeeperConversationDelivery): boolean {
   return delivery === 'sending' || delivery === 'streaming' || delivery === 'queued'
 }
 
+// Entries with no parseable timestamp (live placeholders, still-streaming
+// turns) sort to the very bottom so the in-flight tail stays put; everything
+// else sorts by wall-clock so history renders oldest→newest.
+const TIMESTAMP_SORT_FALLBACK = Number.MAX_SAFE_INTEGER
+function entryTimeMs(entry: KeeperConversationEntry): number {
+  const ms = entry.timestamp ? Date.parse(entry.timestamp) : NaN
+  return Number.isFinite(ms) ? ms : TIMESTAMP_SORT_FALLBACK
+}
+
 function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // An empty history payload means the caller did not request history
   // (e.g. hydrateKeeperStatus fast path with tail_messages: 0), not
@@ -570,26 +579,21 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       && (isInFlightDelivery(entry.delivery)
         || !entries.some(historyEntry => sameConversationEntry(entry, historyEntry))),
   )
-  // When the merged list exceeds the cap, prefer to keep locally-created
-  // entries (optimistic/pending/live) at the end rather than trimming the
-  // newest messages. Server history beyond the cap is still available via
-  // the history endpoint.
-  const isLocalEntry = (entry: KeeperConversationEntry): boolean =>
-    entry.id.startsWith('local-')
-    || entry.id.startsWith('optimistic-')
-    || entry.delivery !== 'history'
+  // Render strictly oldest→newest by timestamp. Server /chat/history is
+  // chronological, but locally-appended entries (a live turn's transport error,
+  // optimistic rows) were concatenated AFTER it with no re-sort, which floated a
+  // days-old dns_failure to the very bottom of the transcript where it read as
+  // the newest message. Sorting by timestamp puts every entry in its real
+  // position; no-timestamp entries sort last (in-flight tail stays at the
+  // bottom) and the original array index breaks ties so same-second tool calls
+  // keep their issued order.
   const merged = [...entries, ...localEntries]
-  let kept = merged
-  if (merged.length > THREAD_ENTRY_CAP) {
-    const locals = merged.filter(isLocalEntry)
-    const history = merged.filter(entry => !isLocalEntry(entry))
-    const historyCap = Math.max(0, THREAD_ENTRY_CAP - locals.length)
-    // history.slice(-0) is equivalent to history.slice(0), so an explicit
-    // empty prefix is needed when the local tail already fills the cap.
-    kept = historyCap === 0
-      ? locals
-      : [...history.slice(-historyCap), ...locals]
-  }
+    .map((entry, index) => ({ entry, index }))
+    .sort((a, b) => entryTimeMs(a.entry) - entryTimeMs(b.entry) || a.index - b.index)
+    .map(({ entry }) => entry)
+  // Keep the newest THREAD_ENTRY_CAP entries. After the sort the in-flight tail
+  // is last, so the cap trims the oldest history rather than a live row.
+  const kept = merged.length > THREAD_ENTRY_CAP ? merged.slice(-THREAD_ENTRY_CAP) : merged
   keeperThreads.value = {
     ...keeperThreads.value,
     [name]: kept,

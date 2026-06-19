@@ -446,7 +446,7 @@ let handle_event ~received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_
       run_id;
     } in
     (match persist_complete ~base_path ~retention_days r with
-     | Ok () -> ()
+     | Ok () -> Cognitive_gravity_event_bus.run_gc ~base_path
      | Error (Io_failure m | Serialize_failure m) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CompactAuditFailures)

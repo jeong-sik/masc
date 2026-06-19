@@ -195,7 +195,14 @@ let runtime_id_for_librarian ~runtime_id =
     Keeper_memory_bank_env.memory_env_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
   with
   | Some value -> value
-  | None -> runtime_id
+  | None ->
+    (* [runtime].librarian (runtime.toml) routes the librarian independently of
+       keeper chat — the librarian runs JSON mode and needs a JSON-capable model,
+       which the cheap chat runtimes may not be. Env var above takes precedence;
+       [None] here falls back to inheriting the keeper's own runtime. *)
+    (match Runtime.librarian_runtime_id () with
+     | Some id -> id
+     | None -> runtime_id)
 ;;
 
 let select_recent_messages ~max_messages messages =

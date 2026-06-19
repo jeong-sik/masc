@@ -291,7 +291,47 @@ let with_temp_runtime_toml content f =
        )
     (fun () -> f path)
 
+let with_fake_runtime_model_catalog f =
+  let content =
+    "[[models]]\n\
+     id_prefix = \"chat\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n\
+     \n\
+     [[models]]\n\
+     id_prefix = \"libr\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n\
+     \n\
+     [[models]]\n\
+     id_prefix = \"no-cap\"\n\
+     base = \"openai_chat\"\n\
+     max_context_tokens = 1024\n\
+     \n\
+     [[models]]\n\
+     id_prefix = \"capped\"\n\
+     base = \"openai_chat\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let path = Filename.temp_file "oas-models" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+       Llm_provider.Model_catalog.clear_global ();
+       (try Sys.remove path with
+        | _ -> ())
+       )
+    (fun () ->
+       match Llm_provider.Model_catalog.load_file path with
+       | Error msg -> failf "fake OAS model catalog should load: %s" msg
+       | Ok catalog ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f ())
+
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
+  with_fake_runtime_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -346,6 +386,7 @@ let test_runtime_toml_max_concurrent_flows_to_candidate () =
    configured runtime and is returned by load_list; absent = None (inherit
    keeper runtime); an unknown id is rejected at load like [runtime].default. *)
 let test_librarian_runtime_routing () =
+  with_fake_runtime_model_catalog @@ fun () ->
   let base =
     "[providers.local]\n\
      display-name = \"Local\"\n\
@@ -408,6 +449,7 @@ let test_librarian_runtime_routing () =
     | Error _ -> ())
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
+  with_fake_runtime_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      display-name = \"Local\"\n\

@@ -68,7 +68,6 @@
   test_with_cleanups_on_release
   test_auth_login
   test_audit_log
-  test_system_log_category
   test_console_sink
   test_governance_anomaly
   test_http_negotiation
@@ -93,7 +92,6 @@
   test_attempt_state
   test_runtime_attempt_fsm
   test_keeper_turn_driver_accept
-  test_actor_mailbox
   test_domain_pool
   test_sse
   test_graphql_api
@@ -366,7 +364,6 @@
   test_with_cleanups_on_release
   test_auth_login
   test_audit_log
-  test_system_log_category
   test_console_sink
   test_governance_anomaly
   test_http_negotiation
@@ -391,7 +388,6 @@
   test_attempt_state
   test_runtime_attempt_fsm
   test_keeper_turn_driver_accept
-  test_actor_mailbox
   test_domain_pool
   test_sse
   test_graphql_api

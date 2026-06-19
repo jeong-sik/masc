@@ -45,7 +45,6 @@ let noop_observer = {
 let observer = Atomic.make noop_observer
 
 let set_observer hooks = Atomic.set observer hooks
-let reset_for_test () = Atomic.set observer noop_observer
 
 let observe_persist_lock_acquire_sec seconds =
   (Atomic.get observer).observe_persist_lock_acquire_sec seconds

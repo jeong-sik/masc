@@ -44,20 +44,6 @@ type capabilities =
   }
 [@@deriving show, eq]
 
-let capabilities_default =
-  { supports_inline_tools = false
-  ; supports_runtime_mcp_tools = false
-  ; supports_runtime_tool_events = false
-  ; supports_runtime_mcp_http_headers = false
-  ; requires_per_keeper_bridging_for_bound_actor_tools = false
-  ; identity_runtime_mcp_header_keys = []
-  ; argv_prompt_preflight = false
-  ; uses_anthropic_caching = false
-  ; max_turns_per_attempt = None
-  ; tolerates_bound_actor_fallback = false
-  }
-;;
-
 (** [providers.<id>] — connection + behavior. The deleted
     [runtime_provider]'s [log]/[healthcheck] sub-records are dropped from v1:
     no live Runtime consumer reads them, and the TOML parser parses-and-ignores

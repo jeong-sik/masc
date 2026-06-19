@@ -7,10 +7,6 @@ module Inference = struct
   let timeout_seconds =
     get_float ~default:30.0 "MASC_INFERENCE_TIMEOUT_SEC"
 
-  (** Integer fallback for call sites that use second granularity only. *)
-  let timeout_seconds_int =
-    max 1 (int_of_float timeout_seconds)
-
   (* #9629: [operator_judge_timeout_seconds] and
      [dashboard_governance_judge_timeout_seconds] used to live here as
      dedicated [int] configs.  The two judges
@@ -100,17 +96,6 @@ module Timeouts = struct
       Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
   let neo4j_timeout_sec =
     Float.max 1.0 (get_float ~default:60.0 "MASC_NEO4J_TIMEOUT_SEC")
-
-  (** SSE keepalive interval (seconds).
-      Frequency of `: keepalive` frames on command-plane SSE streams.
-      Clamped to >= 1.0 to prevent tight-loop when misconfigured. *)
-  let sse_keepalive_sec =
-    Float.max 1.0 (get_float ~default:30.0 "MASC_SSE_KEEPALIVE_SEC")
-
-  (** A2A event buffer size per subscription.
-      Caps the in-memory event list to prevent unbounded growth. *)
-  let event_buffer_size =
-    get_int ~default:100 "MASC_EVENT_BUFFER_SIZE"
 end
 
 (** {1 Operator Judge Configuration} *)
@@ -169,21 +154,9 @@ module Model_defaults = struct
   let default_model_opt () =
     Sys.getenv_opt "MASC_DEFAULT_MODEL" |> trim_opt
 
-  (** Routing runtime for team session routing. Defaults to the logical
-      [routes.routing] key; runtime callers normalize it through the runtime
-      route table. *)
-  let routing_runtime () =
-    match Sys.getenv_opt "MASC_ROUTING_RUNTIME" |> trim_opt with
-    | Some s -> s
-    | None -> "routing"
-
   (** Goal models (comma-separated). *)
   let goal_models_opt () =
     Sys.getenv_opt "MASC_GOAL_MODELS" |> trim_opt
-
-  (** Goal dispatch runtime. Default: "task". *)
-  let goal_dispatch_runtime () =
-    get_string ~default:"task" "MASC_GOAL_DISPATCH_RUNTIME"
 end
 
 (** {1 Anti-Rationalization Configuration}

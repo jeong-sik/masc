@@ -181,7 +181,6 @@ lib/workspace/event_kind.ml:56
 lib/workspace/event_kind.ml:79
 lib/workspace/event_kind.ml:105
 lib/workspace/nickname.ml:94
-lib/workspace/playground_repo_cache.ml:35
 lib/core/json_util.ml:19
 lib/core/json_util.ml:34
 lib/core/json_util.ml:40
@@ -514,7 +513,6 @@ lib/keeper/keeper_toml_loader.ml:498
 lib/keeper/keeper_tool_alias.ml:282
 lib/keeper/keeper_tool_alias.ml:361
 lib/keeper/keeper_tool_emission_hook.ml:29
-lib/keeper/keeper_tool_guidance.ml:149
 lib/keeper/keeper_tool_policy.ml:683
 lib/keeper/keeper_tool_policy.ml:699
 lib/keeper/keeper_tool_registry.ml:215

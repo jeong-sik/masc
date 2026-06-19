@@ -208,6 +208,8 @@ let review_completion_notes
         completion_notes = notes;
         agent_name = ctx.agent_name;
         task_id = task.id;
+        submitted_at = Some (Unix.time ());
+        submitter_name = Some ctx.agent_name;
       } in
       let on_verdict result =
         (Atomic.get record_verdict_fn)

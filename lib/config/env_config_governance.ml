@@ -206,6 +206,18 @@ module AntiRationalization = struct
      LLM-unavailable branch at gate 3. *)
   let gate2_fail_closed =
     get_bool ~default:false "MASC_ANTI_RATIONALIZATION_GATE2_FAIL_CLOSED"
+
+  (* #1425: minimum review time in seconds before a review can be approved.
+     Prevents rubber-stamping by enforcing a cooling-off period between
+     task submission and approval.  Default 60s; 0 disables. *)
+  let min_review_seconds =
+    get_int ~default:60 "MASC_ANTI_RATIONALIZATION_MIN_REVIEW_SECONDS"
+
+  (* #1425: require at least one cross-agent review (different keeper)
+     before a findings-0 (zero issues found) approval is accepted.
+     Prevents self-review and rubber-stamping by the same agent. *)
+  let cross_review_required =
+    get_bool ~default:true "MASC_ANTI_RATIONALIZATION_CROSS_REVIEW_REQUIRED"
 end
 
 (** {1 Endpoint Configuration} *)

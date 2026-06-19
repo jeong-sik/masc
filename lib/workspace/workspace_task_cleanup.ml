@@ -3,7 +3,7 @@ open Masc_domain
 open Workspace_utils
 open Workspace_state
 
-let run_done_hooks config ~agent_name ~task_id ~force =
+let run_done_hooks config ~agent_name ~task_id =
   (try
      (Atomic.get Workspace_hooks.agent_economy_earn_fn)
        ~base_path:config.base_path ~agent_name

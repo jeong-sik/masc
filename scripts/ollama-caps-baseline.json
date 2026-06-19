@@ -1,5 +1,5 @@
 {
-  "_comment": "Ollama model capability baseline (POST /api/show). Regenerate against the LIVE config (superset of the repo seed) so it covers both: scripts/masc-sync-ollama-caps.py --refresh --config ~/me/.masc/config/runtime.toml. CI drift gate (no network): --check.",
+  "_comment": "Ollama model capability baseline (POST /api/show). Regenerate against the LIVE config (superset of the repo seed) so it covers both: scripts/masc-sync-ollama-caps.py --refresh --config <masc_root>/config/runtime.toml. CI drift gate (no network): --check.",
   "schema_version": 1,
   "source": "{provider.endpoint - /v1}/api/show {\"model\": <api-name>}",
   "models": {

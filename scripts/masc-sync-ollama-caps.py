@@ -217,8 +217,7 @@ def probe_capabilities(model: OllamaModel) -> list[str]:
         token = os.environ.get(model.auth_env)
         if not token:
             raise RuntimeError(
-                f"auth env {model.auth_env} is unset for provider "
-                f"{model.provider_id}"
+                f"auth env {model.auth_env} is unset for provider {model.provider_id}"
             )
         req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=PROBE_TIMEOUT_S) as resp:
@@ -274,7 +273,7 @@ def mode_refresh(config_path: Path, baseline_path: Path) -> int:
             "Ollama model capability baseline (POST /api/show). Regenerate "
             "against the LIVE config (superset of the repo seed) so it covers "
             "both: scripts/masc-sync-ollama-caps.py --refresh --config "
-            "~/me/.masc/config/runtime.toml. CI drift gate (no network): --check."
+            "<masc_root>/config/runtime.toml. CI drift gate (no network): --check."
         ),
         "schema_version": BASELINE_SCHEMA_VERSION,
         "source": '{provider.endpoint - /v1}/api/show {"model": <api-name>}',
@@ -349,8 +348,7 @@ def mode_check(config_path: Path, baseline_path: Path, strict: bool) -> int:
         print(f"FAIL (strict): {soft} model(s) unverified", file=sys.stderr)
         return 1
     print(
-        f"OK: {len(models)} Ollama-family model(s) match baseline "
-        f"({soft} unverified)"
+        f"OK: {len(models)} Ollama-family model(s) match baseline ({soft} unverified)"
     )
     return 0
 
@@ -368,8 +366,10 @@ def mode_emit(config_path: Path, baseline_path: Path) -> int:
         lines = flags.declared_lines()
         if not lines:
             continue
-        print(f"# {model.model_id} (api: {model.api_name}) "
-              f"-- /api/show caps={entry['capabilities']}")
+        print(
+            f"# {model.model_id} (api: {model.api_name}) "
+            f"-- /api/show caps={entry['capabilities']}"
+        )
         print(f"[models.{model.model_id}.capabilities]")
         for line in lines:
             print(line)

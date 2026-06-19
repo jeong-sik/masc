@@ -389,9 +389,10 @@ let extract_and_append_with_provider
     ~provider_cfg
     inp
   =
-  let generation =
+  let next_generation =
     Keeper_memory_os_io.next_generation ~keeper_id ~trace_id:inp.Keeper_librarian.trace_id
   in
+  let generation = max inp.Keeper_librarian.generation next_generation in
   match extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp with
   | Error _ as e -> e
   | Ok episode ->

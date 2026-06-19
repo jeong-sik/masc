@@ -40,7 +40,7 @@ let retention_rank ~now:_ (f : fact) =
    The prior merge also blended a confidence float and bumped an access counter;
    both fed the deleted composite score and are gone. There is no numeric
    strength to move — re-observation is a binary "seen again now". *)
-let reobserve_fact ~now ~existing ~incoming =
+let reobserve_fact ~now ~existing ~(incoming : fact) =
   { existing with
     valid_until = incoming.valid_until
   ; last_verified_at = Some now

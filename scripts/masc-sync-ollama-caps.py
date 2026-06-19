@@ -57,11 +57,14 @@ from typing import Any
 try:
     import tomllib
 except ModuleNotFoundError:  # Python < 3.11
-    print(
-        "error: Python 3.11+ (tomllib) required; install tomli for older runtimes",
-        file=sys.stderr,
-    )
-    sys.exit(2)
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        print(
+            "error: Python 3.11+ (tomllib) or the tomli package required",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = REPO_ROOT / "config" / "runtime.toml"

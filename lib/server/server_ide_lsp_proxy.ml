@@ -225,14 +225,6 @@ let initialize_result_json () =
   `Assoc [ "capabilities", initialize_capabilities_json () ]
 ;;
 
-type route_admission =
-  | Upgrade_websocket
-  | Missing_process_manager
-
-let route_admission ~has_proc_mgr =
-  if has_proc_mgr then Upgrade_websocket else Missing_process_manager
-;;
-
 (** Extract client request ID from JSON-RPC message fields. *)
 let extract_id fields =
   match List.assoc_opt "id" fields with
@@ -880,13 +872,7 @@ let add_routes ~sw ~clock router =
 ;;
 
 module For_testing = struct
-  type nonrec route_admission =
-    route_admission =
-    | Upgrade_websocket
-    | Missing_process_manager
-
   let resolve_relative = resolve_relative
   let workspace_root_for_initialize = workspace_root_for_initialize
   let initialize_result_json = initialize_result_json
-  let route_admission = route_admission
 end

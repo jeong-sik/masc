@@ -77,23 +77,6 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (Lsp.resolve_relative ~base "file:///tmp/outside.ml")
 ;;
 
-let test_missing_proc_mgr_does_not_upgrade () =
-  check
-    bool
-    "missing process manager blocks websocket upgrade"
-    true
-    (match Lsp.route_admission ~has_proc_mgr:false with
-     | Lsp.Missing_process_manager -> true
-     | Lsp.Upgrade_websocket -> false);
-  check
-    bool
-    "process manager allows websocket upgrade"
-    true
-    (match Lsp.route_admission ~has_proc_mgr:true with
-     | Lsp.Upgrade_websocket -> true
-     | Lsp.Missing_process_manager -> false)
-;;
-
 let () =
   run
     "server_ide_lsp_proxy"
@@ -104,8 +87,6 @@ let () =
             test_workspace_root_initialize_stays_in_base
         ; test_case "file uri resolution is workspace scoped" `Quick
             test_file_uri_resolution_is_workspace_scoped
-        ; test_case "missing proc_mgr blocks websocket upgrade" `Quick
-            test_missing_proc_mgr_does_not_upgrade
         ] )
     ]
 ;;

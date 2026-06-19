@@ -66,12 +66,28 @@ const promptPreviewTab = signal<'blocks' | 'system' | 'world'>('blocks')
 export type HookSlotEntry = readonly [name: string, slot: KeeperHookSlot]
 
 /**
+ * All detail tags of a hook slot, across every category.
+ *
+ * A slot's gates / effects / features are distinct categories that can
+ * COEXIST (e.g. `pre_tool_use` carries both gates and a cost-telemetry
+ * feature), so they are concatenated, not coalesced. The earlier
+ * `slot.gates ?? slot.effects ?? slot.features` returned only the first
+ * category, and — because the normalizer fills absent categories with `[]`
+ * rather than `undefined` — that nullish chain always stopped at the empty
+ * `gates` array for every effects-/features-only slot, hiding their tags
+ * from both the filter and the rendered chips.
+ */
+export function hookSlotDetails(slot: KeeperHookSlot): readonly string[] {
+  return [...(slot.gates ?? []), ...(slot.effects ?? []), ...(slot.features ?? [])]
+}
+
+/**
  * Pure filter for hook slot entries.
  *
- * Case-insensitive substring match against, in order:
+ * Case-insensitive substring match against:
  * - slot name (the `Record<string, KeeperHookSlot>` key)
  * - `slot.source`
- * - any string in `slot.gates`, `slot.effects`, or `slot.features`
+ * - any detail tag from `hookSlotDetails` (gates ∪ effects ∪ features)
  *
  * Empty/whitespace query returns the input reference unchanged so
  * `useMemo` preserves referential equality when no filter is active.
@@ -86,7 +102,7 @@ export function filterHookSlots(
   return entries.filter(([name, slot]) => {
     if (name.toLowerCase().includes(needle)) return true
     if (slot.source && slot.source.toLowerCase().includes(needle)) return true
-    const tags = slot.gates ?? slot.effects ?? slot.features ?? []
+    const tags = hookSlotDetails(slot)
     for (const tag of tags) {
       if (tag && tag.toLowerCase().includes(needle)) return true
     }
@@ -1146,9 +1162,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                       <span class="text-xs font-semibold text-text-strong">${name}</span>
                       <span class="text-3xs text-text-muted">${slot.source}</span>
                     </div>
-                    ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
+                    ${hookSlotDetails(slot).length > 0 ? html`
                       <div class="flex flex-wrap gap-1 mt-1">
-                        ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
+                        ${hookSlotDetails(slot).map((d: string) => html`
                           <span class="text-3xs px-1.5 py-0.5 rounded-[var(--r-1)] ${d.endsWith('_off') ? 'bg-[var(--color-bg-hover)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
                         `)}
                       </div>

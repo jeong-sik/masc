@@ -8,6 +8,7 @@ import {
   coerceSandboxProfile,
   coerceSharedMemoryScope,
   filterHookSlots,
+  hookSlotDetails,
   initRuntimeDraftFromConfig,
   type HookSlotEntry,
   type RuntimeDraft,
@@ -207,6 +208,47 @@ describe('filterHookSlots', () => {
     ]
     expect(filterHookSlots(sparse, 'bare')).toHaveLength(1)
     expect(filterHookSlots(sparse, 'anything-else')).toHaveLength(0)
+  })
+
+  // Regression: the live normalizer (normalizeKeeperHookSlot) fills absent
+  // categories with `[]`, NOT `undefined`. The old
+  // `slot.gates ?? slot.effects ?? slot.features` chain stopped at the empty
+  // `gates` array, so an effects-/features-only slot was unfilterable. These
+  // fixtures use the production shape (empty arrays) to lock the fix in.
+  it('matches effects/features tags on production-shaped slots (empty [] categories)', () => {
+    const live: HookSlotEntry[] = [
+      ['after_turn', makeSlot({ gates: [], effects: ['cost_event'], features: [] })],
+      ['before_turn', makeSlot({ gates: [], effects: [], features: ['utf8_guard'] })],
+    ]
+    expect(filterHookSlots(live, 'cost_event')).toHaveLength(1)
+    expect(filterHookSlots(live, 'utf8_guard')).toHaveLength(1)
+  })
+
+  it('matches a feature on a slot that also carries gates (categories coexist)', () => {
+    const coexist: HookSlotEntry[] = [
+      ['pre_tool_use', makeSlot({ gates: ['keeper_deny_list'], features: ['cost_telemetry_threshold'] })],
+    ]
+    // The cost-telemetry feature must remain searchable even though gates is non-empty.
+    expect(filterHookSlots(coexist, 'cost_telemetry_threshold')).toHaveLength(1)
+    expect(filterHookSlots(coexist, 'keeper_deny_list')).toHaveLength(1)
+  })
+})
+
+describe('hookSlotDetails', () => {
+  it('concatenates gates, effects and features in that order', () => {
+    expect(
+      hookSlotDetails(makeSlot({ gates: ['g1'], effects: ['e1'], features: ['f1'] })),
+    ).toEqual(['g1', 'e1', 'f1'])
+  })
+
+  it('returns the lone populated category for single-category slots', () => {
+    expect(hookSlotDetails(makeSlot({ gates: [], effects: ['cost_event'], features: [] }))).toEqual([
+      'cost_event',
+    ])
+  })
+
+  it('returns [] when no category is present (undefined-safe)', () => {
+    expect(hookSlotDetails(makeSlot({ source: 'not_registered' }))).toEqual([])
   })
 })
 

@@ -2275,6 +2275,7 @@ export type SharedMemoryScope = 'disabled' | 'workspace'
 export type KeeperConfigUpdatePayload = {
   runtime_id?: string
   active_goal_ids?: string[]
+  mention_targets?: string[]
   allowed_paths?: string[]
   // Sandbox
   sandbox_profile?: SandboxProfile
@@ -2301,6 +2302,8 @@ export type KeeperConfigUpdatePayload = {
   auto_handoff?: boolean
   handoff_threshold?: number
   handoff_cooldown_sec?: number
+  // Tool policy
+  tool_denylist?: string[]
 }
 
 export async function patchKeeperConfig(

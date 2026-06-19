@@ -311,7 +311,14 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       active_goal_count: 0,
       missing_active_goal_ids: [],
     },
-    tools: {} as KeeperConfig['tools'],
+    tools: {
+      tool_access: [],
+      resolved_allowlist: [],
+      tool_denylist: [],
+      active_masc_tool_count: 0,
+      active_keeper_tool_count: 0,
+      total_active: 0,
+    },
     sources: {} as KeeperConfig['sources'],
     metrics: {} as KeeperConfig['metrics'],
   }
@@ -448,6 +455,68 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       active_goal_ids: ['goal-b', 'goal-c'],
     }), c)
     expect(payload.active_goal_ids).toEqual(['goal-b', 'goal-c'])
+  })
+
+  it('emits mention targets and tool denylist from line-based drafts', () => {
+    const c = makeKeeperConfigForSandbox({
+      workspace: {
+        mention_targets: ['sangsu'],
+        bound_workspace_ids: [],
+        active_goal_ids: [],
+        active_goals: [],
+        active_goal_count: 0,
+        missing_active_goal_ids: [],
+      },
+      tools: {
+        tool_access: [],
+        resolved_allowlist: [],
+        tool_denylist: ['Execute'],
+        active_masc_tool_count: 0,
+        active_keeper_tool_count: 0,
+        total_active: 0,
+      },
+    })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      mention_targets_text: 'alpha\n beta \nalpha\n',
+      tool_denylist_text: 'Execute\nRead\nRead\n',
+    }), c)
+
+    expect(payload.mention_targets).toEqual(['alpha', 'beta'])
+    expect(payload.tool_denylist).toEqual(['Execute', 'Read'])
+  })
+
+  it('emits explicit empty mention targets when the draft is cleared', () => {
+    const c = makeKeeperConfigForSandbox({
+      workspace: {
+        mention_targets: ['sangsu'],
+        bound_workspace_ids: [],
+        active_goal_ids: [],
+        active_goals: [],
+        active_goal_count: 0,
+        missing_active_goal_ids: [],
+      },
+    })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      mention_targets_text: '',
+    }), c)
+
+    expect(payload.mention_targets).toEqual([])
+  })
+
+  it('emits compaction_token_gate when the token gate changes', () => {
+    const c = makeKeeperConfigForSandbox({
+      compaction: {
+        profile: 'balanced',
+        ratio_gate: 0.8,
+        message_gate: 0,
+        token_gate: 24000,
+        cooldown_sec: 0,
+      },
+    })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      compaction_token_gate: 32000,
+    }), c)
+    expect(payload.compaction_token_gate).toBe(32000)
   })
 })
 
@@ -742,6 +811,61 @@ describe('KeeperConfigPanel', () => {
       expect.objectContaining({
         sandbox_profile: 'docker',
         network_mode: 'none',
+      }),
+    )
+  })
+
+  it('patches mention targets, tool denylist, and compaction token gate from the dashboard panel', async () => {
+    const base = makeKeeperConfig()
+    mocks.patchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({
+        workspace: {
+          ...base.workspace,
+          mention_targets: ['alpha', 'beta'],
+        },
+        tools: {
+          ...base.tools,
+          tool_denylist: ['Execute', 'Read'],
+        },
+        compaction: {
+          ...base.compaction,
+          token_gate: 32000,
+        },
+      }),
+    )
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    const mentionTargets = container.querySelector('textarea[aria-label="mention_targets"]') as HTMLTextAreaElement | null
+    const toolDenylist = container.querySelector('textarea[aria-label="tool_denylist"]') as HTMLTextAreaElement | null
+    const tokenGate = container.querySelector('input[aria-label="토큰 게이트"]') as HTMLInputElement | null
+    expect(mentionTargets).not.toBeNull()
+    expect(toolDenylist).not.toBeNull()
+    expect(tokenGate).not.toBeNull()
+
+    mentionTargets!.value = 'alpha\n beta \nalpha\n'
+    mentionTargets!.dispatchEvent(new Event('input', { bubbles: true }))
+    toolDenylist!.value = 'Execute\nRead\nRead\n'
+    toolDenylist!.dispatchEvent(new Event('input', { bubbles: true }))
+    tokenGate!.value = '32000'
+    tokenGate!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
+    )
+    saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      expect.objectContaining({
+        mention_targets: ['alpha', 'beta'],
+        tool_denylist: ['Execute', 'Read'],
+        compaction_token_gate: 32000,
       }),
     )
   })

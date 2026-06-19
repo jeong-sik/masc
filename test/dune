@@ -1545,6 +1545,8 @@
 
 (include stanzas/test_keeper_context_isolation.inc)
 
+(include stanzas/test_keeper_turn_up_args.inc)
+
 (include stanzas/test_keeper_cwd_response.inc)
 
 (include stanzas/test_keeper_disposition_budget.inc)

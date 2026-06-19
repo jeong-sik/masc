@@ -21,7 +21,7 @@ type parsed_args =
   ; runtime_id_opt : string option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option
-  ; mention_targets_in : string list
+  ; mention_targets_opt : string list option
   ; active_goal_ids_opt : string list option
   ; max_context_override_opt : int option
   ; proactive_enabled_opt : bool option
@@ -79,10 +79,10 @@ val parse_tool_access_input :
 val parse :
   _ context -> Yojson.Safe.t -> (parsed_args, tool_result) result
 
-(** Resolve mention targets with dedupe + blank filter, falling
-    through [mention_targets_in] → [fallback_targets] → [[name]]. *)
+(** Resolve mention targets with dedupe + blank filter. [None] falls through to
+    [fallback_targets] → [[name]]; [Some []] is an explicit clear. *)
 val resolve_mention_targets :
-  mention_targets_in:string list ->
+  mention_targets_opt:string list option ->
   fallback_targets:string list ->
   name:string ->
   string list

@@ -44,6 +44,30 @@ let test_systhread_offload_poisons_mutex () =
         check bool "use_rw inside a bare systhread raises" true raised;
         check bool "and leaves the mutex poisoned" true (poisons mu))))
 
+(* The diagnostic (defense-in-depth, Eio_guard.run_in_systhread): the bug still
+   poisons the mutex, but the exception surfaced out of [run_in_systhread] is now
+   an actionable [Failure] naming the misuse and the Executor_pool alternative,
+   instead of a bare [Effect.Unhandled]. This pins the conversion: on the
+   pre-hardening code the body raised [Effect.Unhandled] (caught here by [_ ->
+   false] -> test fails); after the hardening it is a [Failure] (-> test passes). *)
+let test_systhread_offload_raises_actionable_failure () =
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun _sw ->
+      Eio_guard.enable ();
+      Fun.protect ~finally:Eio_guard.disable (fun () ->
+        let mu = Eio.Mutex.create () in
+        let is_failure =
+          try
+            Eio_guard.run_in_systhread (fun () ->
+              Eio.Mutex.use_rw ~protect:true mu (fun () -> ()));
+            false
+          with
+          | Failure _ -> true
+          | _ -> false
+        in
+        check bool "run_in_systhread surfaces a Failure, not a bare Effect.Unhandled"
+          true is_failure)))
+
 (* The fix: [submit_or_inline] runs the closure with a live Eio context, so the
    same [use_rw] resolves and the mutex stays usable afterwards. *)
 let test_submit_or_inline_preserves_mutex () =
@@ -68,6 +92,8 @@ let () =
     [ ( "offload"
       , [ test_case "systhread offload poisons the mutex (bug)" `Quick
             test_systhread_offload_poisons_mutex
+        ; test_case "systhread offload raises an actionable Failure (diagnostic)" `Quick
+            test_systhread_offload_raises_actionable_failure
         ; test_case "submit_or_inline preserves the mutex (fix)" `Quick
             test_submit_or_inline_preserves_mutex
         ] )

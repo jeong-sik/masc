@@ -304,6 +304,8 @@ let test_approval_queue_submit_and_resolve () =
        | _ -> Alcotest.fail "no id field")
     | _ -> Alcotest.fail "bad entry"
   in
+  (* Override guardrail: set minimum review time to 0 for this test *)
+  AQ.For_testing.set_minimum_review_time_s 0.0;
   (* Operator resolves: approve *)
   (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
    | Ok () -> ()
@@ -909,6 +911,41 @@ let test_dashboard_resolve_and_delete_rules_use_workspace_base_path () =
       Alcotest.(check int) "env fallback still empty" 0
         (List.length (AQ.list_rules ~base_path:env_base ())))
 
+let test_approval_queue_rejects_rubber_stamp () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "rubber-stamp-test" in
+  let result = ref None in
+  AQ.For_testing.set_minimum_review_time_s 180.0;
+  Eio.Fiber.fork ~sw (fun () ->
+    let decision =
+      AQ.submit_and_await
+        ~keeper_name
+        ~tool_name:"masc_force_reset"
+        ~input:(`Assoc [])
+        ~risk_level:AQ.Critical
+        ()
+    in
+    result := Some decision
+  );
+  Eio.Fiber.yield ();
+  let id =
+    match pending_id_for_keeper ~keeper_name with
+    | Some id -> id
+    | None -> Alcotest.fail "rubber-stamp: no pending entry"
+  in
+  (* Immediate approve (< 180s) should be rejected *)
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Error (`Msg msg) when String.starts_with ~prefix:"Approval rejected:" msg -> ()
+   | Ok () -> Alcotest.fail "rubber-stamp: expected rejection, got Ok"
+   | Error (`Msg msg) -> Alcotest.fail ("rubber-stamp: unexpected error: " ^ msg));
+  (* Cleanup: restore 0s for other tests *)
+  AQ.For_testing.set_minimum_review_time_s 0.0;
+  (* Resolve with reject to clean up *)
+  (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "cleanup after rubber-stamp test") with
+   | Ok () | Error _ -> ());
+  AQ.For_testing.set_minimum_review_time_s 0.0
+
 let test_submit_pending_audit_uses_workspace_base_path () =
   let env_base = temp_dir () in
   let workspace_base = temp_dir () in
@@ -1401,6 +1438,8 @@ let () =
         test_dashboard_resolve_and_delete_rules_use_workspace_base_path;
       Alcotest.test_case "submit_pending audit uses workspace base_path" `Quick
         test_submit_pending_audit_uses_workspace_base_path;
+      Alcotest.test_case "rejects rubber-stamp approval" `Quick
+        test_approval_queue_rejects_rubber_stamp;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;
       Alcotest.test_case

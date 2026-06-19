@@ -277,6 +277,7 @@ module For_testing = struct
   ;;
 
   let first_cmd_token = first_cmd_token
+  let set_minimum_review_time_s t = minimum_review_time_s := t
 end
 
 let action_key_of_input ~tool_name ~(input : Yojson.Safe.t) =
@@ -474,21 +475,21 @@ let record_pending (entry : pending_approval) =
   broadcast_pending entry
 ;;
 
-let minimum_review_time_s = 180.0
+let minimum_review_time_s = ref 180.0
 
 let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
   let decision_str = approval_decision_to_string decision in
   let elapsed = Unix.gettimeofday () -. entry.requested_at in
-  if decision = Agent_sdk.Hooks.Approve && elapsed < minimum_review_time_s then begin
-    let remaining = int_of_float (minimum_review_time_s -. elapsed) in
+  if decision = Agent_sdk.Hooks.Approve && elapsed < !minimum_review_time_s then begin
+    let remaining = int_of_float (!minimum_review_time_s -. elapsed) in
     Log.Keeper.warn
       "HITL_RUBBER_STAMP_REJECTED: id=%s keeper=%s tool=%s elapsed=%.1fs min=%.1fs remaining=%ds"
-      entry.id entry.keeper_name entry.tool_name elapsed minimum_review_time_s remaining;
+      entry.id entry.keeper_name entry.tool_name elapsed !minimum_review_time_s remaining;
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels:[ "keeper", entry.keeper_name; "site", "rubber_stamp_rejected" ]
       ();
-    Error (`Msg (Printf.sprintf "Approval rejected: minimum review time is %.0fs (%.0fs elapsed)" minimum_review_time_s elapsed))
+    Error (`Msg (Printf.sprintf "Approval rejected: minimum review time is %.0fs (%.0fs elapsed)" !minimum_review_time_s elapsed))
   end else begin
   Log.Keeper.info
     "HITL_APPROVAL_RESOLVED: id=%s keeper=%s tool=%s decision=%s"

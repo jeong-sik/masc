@@ -39,14 +39,20 @@ import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
 import { isAgentOffline } from '../../lib/agent-status'
 import { keeperRowLooksRunning } from '../../runtime-counts'
-import { get } from '../../api/core'
-import { createAsyncResource, type AsyncResource } from '../../lib/async-state'
+import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
 import { navigate } from '../../router'
 import {
   normalizeSurfaceReadinessPayload,
   summarizeSurfaceReadiness,
   type SurfaceReadinessEntry,
 } from '../surface-readiness-panel'
+import {
+  fetchTelemetry,
+  fetchTelemetrySummary,
+  type TelemetryEntry,
+  type TelemetrySourceSummary,
+} from '../../api/dashboard'
+import { currentDashboardActor, get } from '../../api/core'
 
 // ─── Attention / Keeper v2 helpers ───────────────────────────────────────────
 
@@ -127,8 +133,13 @@ function keeperTraceCount(keeper: Keeper): number {
   return keeper.total_turns ?? keeper.turn_count ?? keeper.autonomous_turn_count ?? 0
 }
 
-function keeperModelLabel(keeper: Keeper): string {
-  const model = keeper.active_model ?? keeper.model ?? keeper.primary_model ?? keeper.last_model_used ?? ''
+export function keeperModelLabel(keeper: Keeper): string {
+  const model = keeper.active_model_label
+    ?? keeper.active_model
+    ?? keeper.model
+    ?? keeper.primary_model
+    ?? keeper.last_model_used
+    ?? ''
   return model.replace(/^claude-/, '')
 }
 
@@ -153,20 +164,90 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
 // ─── Telemetry bars ──────────────────────────────────────────────────────────
 
 export const OVERVIEW_TELEMETRY_BAR_COUNT = 28
+export const OVERVIEW_TELEMETRY_BUCKET_MINUTES = 5
+export const OVERVIEW_TELEMETRY_WINDOW_MINUTES =
+  OVERVIEW_TELEMETRY_BAR_COUNT * OVERVIEW_TELEMETRY_BUCKET_MINUTES
+const UNIX_MS_TIMESTAMP_THRESHOLD = 10_000_000_000
 
-/** Deterministic 28-bar telemetry histogram seeded from keeper trace counts.
- *  Each bar is a 0-1 saturation value; indices 9 and 22 are synthetic spikes. */
-export function telemetryBars(keeperList: readonly Keeper[]): number[] {
-  const seed = keeperList.reduce((sum, k) => sum + keeperTraceCount(k), 0)
-  const bars: number[] = []
-  let s = seed
-  for (let i = 0; i < OVERVIEW_TELEMETRY_BAR_COUNT; i++) {
-    s = (s * 1103515245 + 12345) & 0x7fffffff
-    const base = 0.25 + ((s >> 8) % 1000) / 1000 * 0.7
-    const spike = i === 9 || i === 22 ? 1 : base
-    bars.push(Math.min(1, spike))
+export interface OverviewTelemetrySnapshot {
+  bars: number[]
+  peakPerBucket: number
+  averagePerBucket: number
+  eventCount: number
+  latestAgeSeconds: number | null
+  sourceHealth: string
+  activeCoverageGaps: number
+  healthySourceCount: number
+  sourceCount: number
+  truncated: boolean
+}
+
+function telemetryEntryMs(entry: TelemetryEntry): number | null {
+  const raw = entry.ts_unix ?? entry.ts ?? entry.timestamp
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    // Unix seconds are ~1.7e9 today; unix milliseconds are ~1.7e12.
+    return raw > UNIX_MS_TIMESTAMP_THRESHOLD ? raw : raw * 1000
   }
-  return bars
+  if (entry.ts_iso) {
+    const parsed = Date.parse(entry.ts_iso)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function roundOne(value: number): number {
+  return Math.round(value * 10) / 10
+}
+
+export function buildOverviewTelemetrySnapshot({
+  entries,
+  sources,
+  nowMs = Date.now(),
+  totalMatchingEntries,
+  truncated = false,
+}: {
+  entries: readonly TelemetryEntry[]
+  sources: readonly TelemetrySourceSummary[]
+  nowMs?: number
+  totalMatchingEntries?: number
+  truncated?: boolean
+}): OverviewTelemetrySnapshot {
+  const bucketMs = OVERVIEW_TELEMETRY_BUCKET_MINUTES * 60 * 1000
+  const windowMs = OVERVIEW_TELEMETRY_WINDOW_MINUTES * 60 * 1000
+  const startMs = nowMs - windowMs
+  const buckets = Array.from({ length: OVERVIEW_TELEMETRY_BAR_COUNT }, () => 0)
+
+  for (const entry of entries) {
+    const ts = telemetryEntryMs(entry)
+    if (ts === null || ts < startMs || ts > nowMs) continue
+    const idx = Math.min(
+      OVERVIEW_TELEMETRY_BAR_COUNT - 1,
+      Math.max(0, Math.floor((ts - startMs) / bucketMs)),
+    )
+    buckets[idx] = (buckets[idx] ?? 0) + 1
+  }
+
+  const peakPerBucket = Math.max(0, ...buckets)
+  const averagePerBucket = roundOne(buckets.reduce((sum, count) => sum + count, 0) / buckets.length)
+  const oasEventSummary = sources.find(source => source.source === 'oas_event')
+  const healthySourceCount = sources.filter(source => source.health === 'ok').length
+  const activeCoverageGaps = sources.reduce(
+    (sum, source) => sum + (source.active_coverage_gap_count ?? 0),
+    0,
+  )
+
+  return {
+    bars: peakPerBucket > 0 ? buckets.map(count => count / peakPerBucket) : buckets,
+    peakPerBucket,
+    averagePerBucket,
+    eventCount: totalMatchingEntries ?? entries.length,
+    latestAgeSeconds: oasEventSummary?.latest_age_s ?? null,
+    sourceHealth: oasEventSummary?.health ?? 'unknown',
+    activeCoverageGaps,
+    healthySourceCount,
+    sourceCount: sources.length,
+    truncated,
+  }
 }
 
 // ─── Alert Panel ─────────────────────────────────────────────────────────────
@@ -720,12 +801,30 @@ export function pickActiveSession(snap: DashboardMissionResponse | null): Dashbo
 // ─── Surface Readiness Summary ───────────────────────────────────────────────
 
 const surfaceReadinessResource: AsyncResource<SurfaceReadinessEntry[]> = createAsyncResource()
+const overviewTelemetryResource: AsyncResource<OverviewTelemetrySnapshot> = createAsyncResource()
 
 function loadSurfaceReadiness(): Promise<void> {
   return surfaceReadinessResource.load(async () => {
     const raw = await get<unknown>('/api/v1/dashboard/surface-readiness')
     const data = normalizeSurfaceReadinessPayload(raw)
     return data.surfaces
+  })
+}
+
+function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
+  return overviewTelemetryResource.load(async () => {
+    const sinceMs = nowMs - OVERVIEW_TELEMETRY_WINDOW_MINUTES * 60 * 1000
+    const [telemetry, summary] = await Promise.all([
+      fetchTelemetry({ source: 'oas_event', since_ms: sinceMs, n: 1000 }),
+      fetchTelemetrySummary(),
+    ])
+    return buildOverviewTelemetrySnapshot({
+      entries: telemetry.entries,
+      sources: summary.sources,
+      nowMs,
+      totalMatchingEntries: telemetry.total_matching_entries,
+      truncated: telemetry.truncated ?? false,
+    })
   })
 }
 
@@ -767,16 +866,17 @@ function nowHMKst(): string {
 function OverviewHeader({ stats }: { stats: OverviewStats }) {
   useNowSecondsTicker()
   const clock = nowHMKst()
+  const actor = currentDashboardActor()
   return html`
     <header class="ov-head v2-overview-head" data-testid="overview-head">
       <div>
         <h1>운영 개요</h1>
         <p class="ov-sub">
-          <span title="최상위 조정 범위 — 모든 room/keeper를 담는 root namespace">namespace <span class="mono">masc-mcp</span></span>
+          <span title="데이터 출처 — 실제 dashboard execution projection">source <span class="mono">dashboard/execution</span></span>
           <span> · </span>
           <span title="등록된 keeper 총 수">Keeper ${stats.total}</span>
           <span> · </span>
-          <span title="현재 토큰으로 로그인한 운영자">operator <b class="text-text-secondary">@operator</b></span>
+          <span title="현재 dashboard actor">operator <b class="text-text-secondary">@${actor}</b></span>
         </p>
       </div>
       <div class="ov-clock v2-overview-clock mono" data-testid="overview-clock">
@@ -894,28 +994,58 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
   `
 }
 
-function OverviewTelemetry({ bars }: { bars: number[] }) {
+function formatTelemetryAge(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds)) return 'n/a'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
+  return `${roundOne(seconds / 3600)}h`
+}
+
+function telemetryHealthToneClass(snapshot: OverviewTelemetrySnapshot): string {
+  if (snapshot.activeCoverageGaps > 0) return 'text-warning'
+  if (snapshot.sourceHealth === 'ok') return 'text-success'
+  return 'text-text-tertiary'
+}
+
+function OverviewTelemetry({
+  telemetry,
+}: {
+  telemetry: AsyncState<OverviewTelemetrySnapshot>
+}) {
+  const snapshot = telemetry.status === 'loaded' ? telemetry.data : null
   return html`
     <section class="ov-card ov-telemetry v2-overview-telemetry" data-testid="overview-telemetry">
       <div class="ov-card-h">
         <h3>텔레메트리</h3>
-        <span class="ov-legend mono">trace / 5m · last 140m</span>
+        <span class="ov-legend mono">oas_event / 5m · last ${OVERVIEW_TELEMETRY_WINDOW_MINUTES}m</span>
       </div>
-      <div class="ov-bars v2-overview-bars" role="img" aria-label="Trace telemetry histogram">
-        ${bars.map((b, i) => html`
-          <span
-            key=${i}
-            class=${`ov-bar v2-overview-bar ${b >= 0.95 ? 'hot is-hot' : ''}`}
-            style=${{ height: `${10 + b * 90}%` }}
-          ></span>
-        `)}
-      </div>
-      <div class="ov-tel-foot">
-        <div class="ov-tel-stat"><span class="k">피크</span><span class="v mono">112/5m</span></div>
-        <div class="ov-tel-stat"><span class="k">평균</span><span class="v mono">47/5m</span></div>
-        <div class="ov-tel-stat"><span class="k">오류율</span><span class="v mono text-success">0.4%</span></div>
-        <div class="ov-tel-stat"><span class="k">p95 지연</span><span class="v mono">1.8s</span></div>
-      </div>
+      ${snapshot
+        ? html`
+          <div class="ov-bars v2-overview-bars" role="img" aria-label="Live OAS telemetry histogram">
+            ${snapshot.bars.map((b, i) => html`
+              <span
+                key=${i}
+                class=${`ov-bar v2-overview-bar ${b >= 0.95 ? 'hot is-hot' : ''}`}
+                style=${{ height: `${10 + b * 90}%` }}
+              ></span>
+            `)}
+          </div>
+          <div class="ov-tel-foot">
+            <div class="ov-tel-stat"><span class="k">피크</span><span class="v mono">${snapshot.peakPerBucket}/5m</span></div>
+            <div class="ov-tel-stat"><span class="k">평균</span><span class="v mono">${snapshot.averagePerBucket}/5m</span></div>
+            <div class="ov-tel-stat"><span class="k">이벤트</span><span class="v mono">${snapshot.eventCount.toLocaleString()}${snapshot.truncated ? '+' : ''}</span></div>
+            <div class="ov-tel-stat"><span class="k">최신</span><span class=${`v mono ${telemetryHealthToneClass(snapshot)}`}>${formatTelemetryAge(snapshot.latestAgeSeconds)}</span></div>
+            <div class="ov-tel-stat"><span class="k">소스</span><span class="v mono">${snapshot.healthySourceCount}/${snapshot.sourceCount}</span></div>
+            <div class="ov-tel-stat"><span class="k">갭</span><span class=${`v mono ${snapshot.activeCoverageGaps > 0 ? 'text-warning' : 'text-success'}`}>${snapshot.activeCoverageGaps}</span></div>
+          </div>
+        `
+        : html`
+          <div class="ov-empty">
+            ${telemetry.status === 'error'
+              ? `텔레메트리 로드 실패: ${telemetry.message}`
+              : '실제 telemetry 로드 중'}
+          </div>
+        `}
     </section>
   `
 }
@@ -925,7 +1055,7 @@ function keeperNamespaceLabel(keeper: Keeper): string {
     ?? keeper.selected_runtime_canonical
     ?? keeper.runtime_id
     ?? keeper.agent_name
-    ?? 'masc-mcp'
+    ?? 'runtime unavailable'
 }
 
 function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
@@ -989,7 +1119,7 @@ function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
               </div>
               <div class="ov-keeper-ns mono">${keeperNamespaceLabel(k)}</div>
               <div class="ov-keeper-foot">
-                <span class="mono">${keeperModelLabel(k) || 'model unknown'}</span>
+                <span class="mono">${keeperModelLabel(k) || keeperNamespaceLabel(k)}</span>
                 <div class="ov-mini-meter v2-overview-mini-meter">
                   <span class=${ctx >= 0.85 ? 'hot' : ''} style=${{ width: `${Math.min(100, ctxPct)}%` }}></span>
                 </div>
@@ -1007,6 +1137,13 @@ function OverviewFleetGrid({ keeperList }: { keeperList: readonly Keeper[] }) {
 
 export function Overview() {
   useNowSecondsTicker()
+  useEffect(() => {
+    void loadOverviewTelemetry()
+    const interval = window.setInterval(() => {
+      void loadOverviewTelemetry()
+    }, 60_000)
+    return () => window.clearInterval(interval)
+  }, [])
   const snap = missionSnapshot.value
   const taskList = tasks.value
   const keeperList = keepers.value
@@ -1023,7 +1160,7 @@ export function Overview() {
     [taskList, messageList, boardPostList, keeperList],
   )
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
-  const bars = useMemo(() => telemetryBars(keeperList), [keeperList])
+  const telemetry = overviewTelemetryResource.state.value
 
   return html`
     <main class="ov v2-overview-surface ss-surface text-text-primary" data-testid="overview-surface">
@@ -1032,7 +1169,7 @@ export function Overview() {
         <${OverviewKpiStrip} stats=${stats} />
         <div class="ov-grid v2-overview-primary-grid" data-testid="overview-primary-grid">
           <${OverviewAttentionPanel} keeperList=${keeperList} />
-          <${OverviewTelemetry} bars=${bars} />
+          <${OverviewTelemetry} telemetry=${telemetry} />
         </div>
         <${OverviewFleetGrid} keeperList=${keeperList} />
 

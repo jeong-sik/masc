@@ -44,7 +44,9 @@ import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus
 import {
   DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
+  isPrimaryDashboardSurface,
 } from './config/navigation'
+import type { TabId } from './types'
 import { Menu, X } from 'lucide-preact'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
@@ -75,6 +77,19 @@ const sidebarCollapsed = persistentSignal<boolean>({
   defaultValue: false,
 })
 const mobileMenuOpen = signal(false)
+
+export function shouldSuppressFloatingChrome({
+  currentTab,
+  keeperDetailMode,
+  mobileDrawerOpen,
+}: {
+  currentTab: TabId
+  keeperDetailMode: boolean
+  mobileDrawerOpen: boolean
+}): boolean {
+  return keeperDetailMode || mobileDrawerOpen || isPrimaryDashboardSurface(currentTab)
+}
+
 const LazyAgentDetailOverlay = lazy(async () => ({
   default: (await import('./components/agent-detail')).AgentDetailOverlay,
 }))
@@ -257,6 +272,11 @@ export function App() {
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
   const focusMode = dashboardFocusMode.value
   const mobileDrawerOpen = isMobile && mobileMenuOpen.value
+  const suppressFloatingChrome = shouldSuppressFloatingChrome({
+    currentTab,
+    keeperDetailMode,
+    mobileDrawerOpen,
+  })
   const compactChromeMode = shouldUseCompactDashboardChrome({
     widgetSoloMode,
     focusMode,
@@ -396,7 +416,7 @@ export function App() {
       ${selectedTask.value
         ? html`<${Suspense} fallback=${null}><${LazyTaskDetailOverlay} /><//>`
         : null}
-      ${keeperDetailMode || mobileDrawerOpen ? null : html`
+      ${suppressFloatingChrome ? null : html`
         <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
         <${DashboardFocusModeToggle} />
       `}

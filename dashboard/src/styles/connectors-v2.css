@@ -1009,6 +1009,13 @@
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
+  /* Keep the last connector cards scrollable above the mobile bottom bar
+   * (~56px) plus the floating status/focus chrome row (~48px) with a small
+   * breathing gap. 118px matches the prototype mobile scroll-padding heuristic. */
+  .v2-connectors-surface {
+    padding-bottom: 118px;
+  }
+
   .cn-surf-head {
     flex-direction: column;
     align-items: flex-start;

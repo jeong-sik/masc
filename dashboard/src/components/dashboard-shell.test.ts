@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, SideRail, summarizeAttentionPreview } from './dashboard-shell'
+import { DashboardHealthStrip, DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute, shouldRenderSurfaceLead, SideRail, summarizeAttentionPreview } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
@@ -69,6 +69,24 @@ describe('isKeeperDetailDashboardRoute', () => {
       params: { section: 'agents' },
       postId: null,
     })).toBe(false)
+  })
+})
+
+describe('shouldRenderSurfaceLead', () => {
+  it('lets the Connectors prototype surface own its primary header', () => {
+    expect(shouldRenderSurfaceLead({
+      tab: 'connectors',
+      params: { section: 'connector-status' },
+      postId: null,
+    })).toBe(false)
+  })
+
+  it('keeps the generic lead for ordinary sectioned surfaces', () => {
+    expect(shouldRenderSurfaceLead({
+      tab: 'workspace',
+      params: { section: 'work' },
+      postId: null,
+    })).toBe(true)
   })
 })
 

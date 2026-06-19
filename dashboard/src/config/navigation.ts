@@ -92,6 +92,10 @@ const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'logs',
 ]
 
+export function isPrimaryDashboardSurface(tabId: TabId): boolean {
+  return V2_PRIMARY_SURFACE_IDS.includes(tabId)
+}
+
 const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([
   'overview',
   'logs',

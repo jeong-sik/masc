@@ -41,6 +41,11 @@ let procedures_dir ~agent_name =
 let procedures_path ~agent_name =
   sprintf "%s/procedures.jsonl" (procedures_dir ~agent_name)
 
+let with_procedures_lock ~agent_name f =
+  let dir = procedures_dir ~agent_name in
+  Fs_compat.mkdir_p dir;
+  File_lock_eio.with_lock (procedures_path ~agent_name) f
+
 (* ================================================================ *)
 (* JSON Serialization                                               *)
 (* ================================================================ *)
@@ -87,29 +92,28 @@ let of_json (json : Yojson.Safe.t) : procedure option =
 (* ================================================================ *)
 
 let load_procedures ~agent_name : procedure list =
-  let path = procedures_path ~agent_name in
-  Fs_compat.load_jsonl path
-  |> List.filter_map of_json
+  with_procedures_lock ~agent_name (fun () ->
+    let path = procedures_path ~agent_name in
+    Fs_compat.load_jsonl path
+    |> List.filter_map of_json)
 
 let save_procedure ~agent_name (p : procedure) =
-  let dir = procedures_dir ~agent_name in
-  Fs_compat.mkdir_p dir;
-  let path = procedures_path ~agent_name in
-  Fs_compat.append_jsonl path (to_json p)
+  with_procedures_lock ~agent_name (fun () ->
+    let path = procedures_path ~agent_name in
+    Fs_compat.append_jsonl path (to_json p))
 
 let rewrite_procedures ~agent_name (procs : procedure list) =
-  let dir = procedures_dir ~agent_name in
-  Fs_compat.mkdir_p dir;
-  let path = procedures_path ~agent_name in
-  let content =
-    procs
-    |> List.map (fun p -> Yojson.Safe.to_string (to_json p))
-    |> String.concat "\n"
-    |> fun s -> if s = "" then "" else s ^ "\n"
-  in
-  match Fs_compat.save_file_atomic path content with
-  | Ok () -> ()
-  | Error msg -> Log.Config.warn "procedural_memory save: %s" msg
+  with_procedures_lock ~agent_name (fun () ->
+    let path = procedures_path ~agent_name in
+    let content =
+      procs
+      |> List.map (fun p -> Yojson.Safe.to_string (to_json p))
+      |> String.concat "\n"
+      |> fun s -> if s = "" then "" else s ^ "\n"
+    in
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> ()
+    | Error msg -> Log.Config.warn "procedural_memory save: %s" msg)
 
 (** Minimum evidence count required for crystallization.
     Configurable via MASC_PROC_MIN_EVIDENCE (default: 3).

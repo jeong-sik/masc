@@ -18,7 +18,17 @@ val episodes_dir : keeper_id:string -> string
 val tool_results_dir : keeper_id:string -> string
 val tool_result_path : keeper_id:string -> tool_call_id:string -> string
 val episode_path : keeper_id:string -> trace_id:string -> generation:int -> string
+
+(** Reserve the next episode generation for [(keeper_id, trace_id)].
+    The reservation is serialized with a per-trace file lock and a small counter
+    file, so concurrent callers cannot receive the same generation. Gaps are
+    possible if a caller reserves a generation and later fails before appending
+    the episode. *)
 val next_generation : keeper_id:string -> trace_id:string -> int
+
+(** Like {!next_generation}, but preserves a caller-provided generation lower
+    bound while still advancing the counter past it. *)
+val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:string -> int
 
 (** {1 Atomic writes} *)
 

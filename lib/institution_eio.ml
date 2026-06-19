@@ -385,6 +385,10 @@ let institution_file (config : config) =
   Filename.concat (Workspace_utils.masc_dir config) "institution.json"
 ;;
 
+let with_institution_lock config f =
+  File_lock_eio.with_lock (institution_file config) f
+;;
+
 let load_institution ~fs (config : config) : institution option =
   let file = institution_file config in
   let path = Eio.Path.(fs / file) in
@@ -396,7 +400,7 @@ let load_institution ~fs (config : config) : institution option =
   | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 ;;
 
-let save_institution ~fs (config : config) (inst : institution) =
+let save_institution_unlocked ~fs (config : config) (inst : institution) =
   let file = institution_file config in
   let path = Eio.Path.(fs / file) in
   let dir = Filename.dirname file in
@@ -406,6 +410,10 @@ let save_institution ~fs (config : config) (inst : institution) =
   let json = institution_to_json inst in
   let content = Yojson.Safe.pretty_to_string json in
   Eio.Path.save ~create:(`Or_truncate 0o644) path content
+;;
+
+let save_institution ~fs config inst =
+  with_institution_lock config (fun () -> save_institution_unlocked ~fs config inst)
 ;;
 
 (** {1 Pure Transformations} *)
@@ -523,12 +531,13 @@ end
 (** {1 Effectful Operations (Eio)} *)
 
 let get_or_create ~fs (config : config) ~name ~mission =
-  match load_institution ~fs config with
-  | Some inst -> inst
-  | None ->
-    let inst = create_institution ~name ~mission () in
-    save_institution ~fs config inst;
-    inst
+  with_institution_lock config (fun () ->
+    match load_institution ~fs config with
+    | Some inst -> inst
+    | None ->
+      let inst = create_institution ~name ~mission () in
+      save_institution_unlocked ~fs config inst;
+      inst)
 ;;
 
 let record_episode ~fs config inst ~event_type ~summary ~participants ~outcome ~learnings =
@@ -750,8 +759,7 @@ let format_for_welcome (inst : institution) : string =
 *)
 let load_and_format_for_welcome ~fs:_ (config : config) : string =
   let file = institution_file config in
-  if Fs_compat.file_exists file
-  then (
+  with_institution_lock config (fun () ->
     try
       let content = Fs_compat.load_file file in
       let json = Yojson.Safe.from_string content in
@@ -759,7 +767,14 @@ let load_and_format_for_welcome ~fs:_ (config : config) : string =
       format_for_welcome inst
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | (Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _) as exn ->
+    | Sys_error _ as exn ->
+      if Sys.file_exists file
+      then
+        Log.Institution.warn
+          "[load_and_format_for_welcome] institution read failed: %s"
+          (Printexc.to_string exn);
+      ""
+    | (Yojson.Json_error _ | Yojson.Safe.Util.Type_error _) as exn ->
       Log.Institution.warn
         "[load_and_format_for_welcome] institution read failed: %s"
         (Printexc.to_string exn);
@@ -767,7 +782,6 @@ let load_and_format_for_welcome ~fs:_ (config : config) : string =
     | exn ->
       Log.Misc.error "Unexpected institution load error: %s" (Printexc.to_string exn);
       "")
-  else ""
 ;;
 
 (** {1 Lightweight JSONL Episode Recording (No Eio Required)}
@@ -842,9 +856,10 @@ let episodes_jsonl_default_cap = 500
 
 let cap_episodes_jsonl ?(max_lines = episodes_jsonl_default_cap) () : int =
   let path = episodes_jsonl_path () in
-  if not (Sys.file_exists path)
-  then 0
-  else (
+  File_lock_eio.with_lock path (fun () ->
+    if not (Sys.file_exists path)
+    then 0
+    else (
     (* Bounded ring + total counter — O(max_lines) memory regardless
        of input size. The ring holds the trailing [max_lines] parsed
        JSON values that survive into the rewrite. *)
@@ -861,16 +876,18 @@ let cap_episodes_jsonl ?(max_lines = episodes_jsonl_default_cap) () : int =
     if total <= max_lines
     then 0
     else (
-      let tmp_path = path ^ ".tmp" in
-      let oc = open_out tmp_path in
-      Eio_guard.protect
-        ~finally:(fun () -> close_out_noerr oc)
-        (fun () ->
-           Queue.iter
-             (fun line ->
-                output_string oc (Yojson.Safe.to_string line);
-                output_char oc '\n')
-             buf);
-      Sys.rename tmp_path path;
-      total - max_lines))
+      let content =
+        let out = Buffer.create 4096 in
+        Queue.iter
+          (fun line ->
+             Buffer.add_string out (Yojson.Safe.to_string line);
+             Buffer.add_char out '\n')
+          buf;
+        Buffer.contents out
+      in
+      match Fs_compat.save_file_atomic path content with
+      | Ok () -> total - max_lines
+      | Error msg ->
+        Log.Institution.warn "JSONL episode cap failed: %s" msg;
+        0)))
 ;;

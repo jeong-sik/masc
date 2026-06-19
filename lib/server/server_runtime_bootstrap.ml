@@ -32,6 +32,105 @@ let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
+type model_catalog_env_resolution =
+  { path : string
+  ; source : string
+  }
+
+let nonempty_env env name =
+  match env name with
+  | Some value ->
+    let value = String.trim value in
+    if String.equal value "" then None else Some value
+  | None -> None
+
+let existing_file path =
+  let path = String.trim path in
+  if String.equal path "" then
+    None
+  else
+    try
+      if Sys.file_exists path && not (Sys.is_directory path) then Some path else None
+    with
+    | Sys_error _ -> None
+
+let rec find_in_parents filename dir depth =
+  if depth <= 0 then
+    None
+  else
+    let path = Filename.concat dir filename in
+    match existing_file path with
+    | Some _ as found -> found
+    | None ->
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else find_in_parents filename parent (depth - 1)
+
+let find_catalog_in_parents ~source dir =
+  match find_in_parents "models.toml" dir 10 with
+  | Some path -> Some { path; source = source ^ ":models.toml" }
+  | None ->
+    (match find_in_parents "oas-models.toml" dir 10 with
+     | Some path -> Some { path; source = source ^ ":oas-models.toml" }
+     | None -> None)
+
+let absolute_or_cwd ~cwd path =
+  let path = String.trim path in
+  if String.equal path "" then
+    None
+  else if String.length path > 0 && Char.equal path.[0] '/' then
+    Some path
+  else
+    Some (Filename.concat cwd path)
+
+let argv0_parent_dir ~cwd argv0 =
+  match absolute_or_cwd ~cwd argv0 with
+  | None -> None
+  | Some path -> Some (Filename.dirname path)
+
+let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
+  match nonempty_env env "OAS_MODEL_CATALOG" with
+  | Some path -> Some { path; source = "OAS_MODEL_CATALOG" }
+  | None ->
+    (match nonempty_env env "MASC_MODEL_CATALOG" with
+     | Some path -> Some { path; source = "MASC_MODEL_CATALOG" }
+     | None ->
+       let cwd =
+         match cwd with
+         | Some cwd when String.trim cwd <> "" -> cwd
+         | _ ->
+           (try Sys.getcwd () with
+            | Sys_error _ -> ".")
+       in
+       let argv0 =
+         match argv0 with
+         | Some argv0 -> argv0
+         | None ->
+           (match Array.to_list Sys.argv with
+            | head :: _ -> head
+            | [] -> "")
+       in
+       (match find_catalog_in_parents ~source:"cwd-parent" cwd with
+        | Some _ as found -> found
+        | None ->
+          (match argv0_parent_dir ~cwd argv0 with
+           | Some dir -> find_catalog_in_parents ~source:"argv0-parent" dir
+           | None -> None)))
+
+let configure_oas_model_catalog_env () =
+  match resolve_oas_model_catalog_path () with
+  | Some { source = "OAS_MODEL_CATALOG"; path } as resolution ->
+    Log.Misc.info "model_catalog: OAS_MODEL_CATALOG=%s already configured" path;
+    resolution
+  | Some { source; path } as resolution ->
+    Unix.putenv "OAS_MODEL_CATALOG" path;
+    Log.Misc.info "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s" path source;
+    resolution
+  | None ->
+    Log.Misc.warn
+      "model_catalog: no OAS model catalog resolved; capability lookups may fall \
+       back to provider_default";
+    None
+
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -86,19 +185,7 @@ let init_runtime_context env =
   let domain_mgr = Eio.Stdenv.domain_mgr env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let fs = Eio.Stdenv.fs env in
-  (* MASC_MODEL_CATALOG as convenience alias for OAS_MODEL_CATALOG.
-     OAS auto-discovers from ~/.masc/config/models.toml, cwd parents,
-     and $OAS_MODEL_CATALOG. Setting MASC_MODEL_CATALOG forwards it
-     so masc operators don't need to know OAS internals.
-     OAS lazily loads the catalog on first model capability query. *)
-  (match Sys.getenv_opt "MASC_MODEL_CATALOG" with
-   | Some path when Sys.getenv_opt "OAS_MODEL_CATALOG" = None ->
-     Unix.putenv "OAS_MODEL_CATALOG" path;
-     Log.Misc.info "model_catalog: MASC_MODEL_CATALOG=%s forwarded to OAS" path
-   | Some _ ->
-     Log.Misc.info "model_catalog: OAS_MODEL_CATALOG already set, MASC_MODEL_CATALOG ignored"
-   | None ->
-     ());
+  let (_ : model_catalog_env_resolution option) = configure_oas_model_catalog_env () in
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
 let metric_keeper_runtime_config_load_failures =

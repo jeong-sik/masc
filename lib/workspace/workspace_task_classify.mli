@@ -192,6 +192,8 @@ val transition_log_event
   -> ?duration_ms:int
   -> ?handoff_context:Masc_domain.task_handoff_context
   -> ?forced:bool
+  -> ?authority:Masc_domain.completion_authority
+  -> ?assignee:string
   -> ?now:string
   -> unit
   -> Yojson.Safe.t

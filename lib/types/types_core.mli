@@ -79,6 +79,11 @@ type completion_authority =
   | System
 [@@deriving show]
 
+val completion_authority_to_string : completion_authority -> string
+(** Stable lowercase wire label ([assignee] / [operator] / [system]) for
+    transition-log serialization. Distinct from {!show_completion_authority},
+    whose output is a [@@deriving] detail not safe to persist. *)
+
 (* RFC-0220: verification sub-state folded into [task_status] (was a separate
    request_status store) so the illegal Todo+Pending pair is unrepresentable. *)
 type verification_phase =

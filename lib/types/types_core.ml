@@ -249,6 +249,16 @@ type completion_authority =
           cleanup); never minted by an LLM/keeper turn *)
 [@@deriving show]
 
+(* Stable wire label for transition-log serialization. Deliberately not
+   [show_completion_authority] — [@@deriving show] emits the constructor name and
+   its formatting is an implementation detail; the log schema (and the §9 auditor
+   that reads it) must pin a fixed lowercase token. *)
+let completion_authority_to_string = function
+  | Assignee -> "assignee"
+  | Operator -> "operator"
+  | System -> "system"
+;;
+
 let task_action_of_string s =
   match String.lowercase_ascii s with
   | "claim" -> Ok Claim

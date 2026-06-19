@@ -1,4 +1,4 @@
-# RFC-0265 — Fusion async-completion wake + in-progress 가시성
+# RFC-0266 — Fusion async-completion wake + in-progress 가시성
 
 | | |
 |---|---|

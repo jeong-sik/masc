@@ -373,7 +373,7 @@ let () =
      clock and runs the panel/judge calls without timeout enforcement. *)
   Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
-  (match Runtime.init_default ~config_path with
+  (match Runtime.init_default_strict ~config_path with
    | Error msg ->
      Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;
      exit 1

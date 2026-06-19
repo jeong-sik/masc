@@ -20,12 +20,14 @@ val of_binding : config -> binding -> t option
 
 val decide_capability_gate :
   config_path:string -> (string * bool) list -> (unit, string) result
-(** Pure capability-gate decision used by [load_list]/[materialize_config],
-    exposed for testing. [entries] is [(label, known_to_oas_catalog)] per runtime
-    binding. Returns [Error] when any configured model is unknown to the OAS
-    capability catalog: an unknown model resolves to [provider_default] and
-    silently drops thinking/sampling control (corrupted the memory-os librarian for
-    minimax-m3, 2026-06-19). Empty entries are allowed for focused config probes. *)
+(** Pure capability-gate decision applied at startup by [init_default_strict]
+    (not by [load_list], which keeps only RFC-0206 routing validation so unit
+    tests stay catalog-independent), exposed for testing. [entries] is
+    [(label, known_to_oas_catalog)] per runtime binding. Returns [Error] when any
+    configured model is unknown to the OAS capability catalog: an unknown model
+    resolves to [provider_default] and silently drops thinking/sampling control
+    (corrupted the memory-os librarian for minimax-m3, 2026-06-19). Empty entries
+    are allowed for focused config probes. *)
 
 val load_list :
   config_path:string
@@ -51,6 +53,15 @@ val runtime_ids : t list -> string list
     {!get_default_runtime_id} instead. *)
 
 val init_default : config_path:string -> (unit, string) result
+(** Parse + RFC-0206 routing validation + populate the singletons. Does NOT apply
+    the OAS capability-catalog gate (use {!init_default_strict} at production
+    startup). Safe for tests with arbitrary-model runtime fixtures. *)
+
+val init_default_strict : config_path:string -> (unit, string) result
+(** Production startup entry point: {!init_default} PLUS the OAS capability-catalog
+    gate ({!decide_capability_gate}). Rejects ([Error]) a runtime whose model is
+    absent from the catalog before boot. Used by server boot and fusion run. *)
+
 val get_default_runtime : unit -> t option
 val get_runtimes : unit -> t list
 val get_runtime_ids : unit -> string list

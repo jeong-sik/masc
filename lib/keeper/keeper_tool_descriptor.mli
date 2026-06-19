@@ -117,6 +117,11 @@ val internal_descriptors : t list
     descriptor-backed tool, regardless of LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
+(** [model_visible_descriptors ()] is [public_descriptors] plus internal
+    descriptors whose policy visibility is [Default]. Hidden internal
+    descriptors remain executable only through non-model dispatcher paths. *)
+val model_visible_descriptors : unit -> t list
+
 val public_names_of_descriptor : t -> string list
 val public_names : unit -> string list
 val internal_names : t -> string list

@@ -449,6 +449,7 @@ let test_librarian_runtime_routing () =
     | Error _ -> ())
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
+  with_fake_runtime_model_catalog @@ fun () ->
   let content =
     "[providers.local]\n\
      display-name = \"Local\"\n\

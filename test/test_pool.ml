@@ -272,6 +272,30 @@ let test_total_timeout_reports_progress_snapshot () =
   | Ok (_, _) ->
     Alcotest.fail "expected total timeout, got Ok"
 
+let test_close_unreleased_client_closes_once () =
+  Eio_main.run @@ fun _env ->
+  let released = ref false in
+  let calls = ref [] in
+  Masc_http_client.Pool.For_testing.close_unreleased_client released (fun ~close_only ->
+    calls := close_only :: !calls;
+    released := true);
+  Masc_http_client.Pool.For_testing.close_unreleased_client released (fun ~close_only ->
+    calls := close_only :: !calls;
+    released := true);
+  Alcotest.(check (list bool)) "close_only called once" [ true ] (List.rev !calls)
+
+let test_close_unreleased_client_swallows_release_error () =
+  Eio_main.run @@ fun _env ->
+  let released = ref false in
+  let calls = ref 0 in
+  Masc_http_client.Pool.For_testing.close_unreleased_client released (fun ~close_only ->
+    Alcotest.(check bool) "finalizer forces close_only" true close_only;
+    incr calls;
+    released := true;
+    failwith "synthetic release failure");
+  Alcotest.(check int) "release attempted once" 1 !calls;
+  Alcotest.(check bool) "marked released before failing" true !released
+
 (* ── Runner ──────────────────────────────────────────────────── *)
 
 let () =
@@ -327,9 +351,16 @@ let () =
             test_idle_steady_stream_completes;
           Alcotest.test_case "silent-from-start cancels" `Quick
             test_idle_silent_from_start_cancels;
-	          Alcotest.test_case "mid-stream silence cancels" `Quick
-	            test_idle_mid_stream_silence_cancels;
-	          Alcotest.test_case "total timeout reports progress snapshot" `Quick
-	            test_total_timeout_reports_progress_snapshot;
-	        ] );
-	    ]
+          Alcotest.test_case "mid-stream silence cancels" `Quick
+            test_idle_mid_stream_silence_cancels;
+          Alcotest.test_case "total timeout reports progress snapshot" `Quick
+            test_total_timeout_reports_progress_snapshot;
+        ] );
+      ( "cancel-safe release finalizer",
+        [
+          Alcotest.test_case "closes unreleased client once" `Quick
+            test_close_unreleased_client_closes_once;
+          Alcotest.test_case "swallows release failure" `Quick
+            test_close_unreleased_client_swallows_release_error;
+        ] );
+    ]

@@ -312,6 +312,10 @@ let method_to_piaf : http_method -> Piaf.Method.t = function
   | `HEAD   -> `HEAD
   | `PATCH  -> `Other "PATCH"
 
+let close_unreleased_client released release_once =
+  Eio.Cancel.protect (fun () ->
+    if not !released then (try release_once ~close_only:true with _ -> ()))
+
 let path_and_query uri =
   let p = Uri.path uri in
   let p = if p = "" then "/" else p in
@@ -353,8 +357,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
     let body_piaf = Option.map Piaf.Body.of_string body in
     Fun.protect
       ~finally:(fun () ->
-        Eio.Cancel.protect (fun () ->
-          if not !released then (try release_once ~close_only:true with _ -> ())))
+        close_unreleased_client released release_once)
       (fun () ->
         t.counters.inflight <- t.counters.inflight + 1;
         let result =
@@ -517,8 +520,7 @@ let do_request_with_idle_timeout t
            without [Eio.Cancel.protect] the blocking Piaf shutdown would not
            complete (socket FD leak) and a [Cancelled] raised here would mask the
            original via [Fun.Finally_raised] (CLAUDE.md OCaml cleanup rule). *)
-        Eio.Cancel.protect (fun () ->
-          if not !released then (try release_once ~close_only:true with _ -> ())))
+        close_unreleased_client released release_once)
       (fun () ->
          t.counters.inflight <- t.counters.inflight + 1;
          let result =
@@ -618,5 +620,6 @@ let stats t : stats =
 
 module For_testing = struct
   module Host_key = Host_key
+  let close_unreleased_client = close_unreleased_client
   let read_body_with_idle = read_body_with_idle
 end

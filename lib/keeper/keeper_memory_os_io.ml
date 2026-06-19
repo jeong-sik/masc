@@ -361,12 +361,23 @@ let read_facts_tail ~keeper_id ~n =
   |> take_last n
 ;;
 
-(* RFC-0239 Q4: the per-keeper fact recall window / retention target. The store
-   is bounded to this many facts by the retention sweep, and recall reads up to
-   this many candidates (no longer just the last 64), so score ranking selects
-   the globally best facts within the bounded store rather than the most recent
-   few. *)
+(* RFC-0239 Q4: the per-keeper fact recall *retention target* — the size the
+   store is trimmed back to when the cap fires. NOT the recall scan window: the
+   store legitimately holds up to [fact_store_max] facts between caps (see the
+   hysteresis note on [fact_store_max]), so a reader that scans only this many
+   tail rows can miss the highest-ranked rows the last cap wrote at the file head.
+   Recall scans [fact_store_max] for that reason. *)
 let fact_recall_window = 256
+
+(* The largest a bounded store can grow before the retention cap rewrites it: the
+   cap triggers when the store exceeds this and trims back to [fact_recall_window]
+   (hysteresis = [fact_recall_window]/2 keeps rewrites off the per-turn hot path).
+   SSOT for two callers that MUST agree: the librarian write path passes it as the
+   cap [trigger], and recall scans this many tail rows so it sees the entire
+   bounded store — including the high-rank durable rows a fresh cap places at the
+   file head, which a [fact_recall_window]-sized tail scan would exclude in the
+   [fact_recall_window]..[fact_store_max] band. *)
+let fact_store_max = fact_recall_window + (fact_recall_window / 2)
 
 let take_first n xs =
   let rec aux k = function

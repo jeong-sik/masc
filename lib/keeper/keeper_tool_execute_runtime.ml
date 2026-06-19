@@ -137,7 +137,14 @@ let typed_validation_recovery_fields
              ; "stderr", `Assoc [ "discard", `Bool true ]
              ; "cwd", `String "repos/<repo>"
              ])
-  | _ -> []
+  | Keeper_tool_execute_typed_input.Empty_executable _
+  | Keeper_tool_execute_typed_input.Executable_repeated_in_argv0 _
+  | Keeper_tool_execute_typed_input.Argv_contains_shell_metachar _
+  | Keeper_tool_execute_typed_input.Redirect_path_not_absolute _
+  | Keeper_tool_execute_typed_input.Cwd_not_absolute _
+  | Keeper_tool_execute_typed_input.Pipeline_empty
+  | Keeper_tool_execute_typed_input.Pipeline_too_short
+  | Keeper_tool_execute_typed_input.Env_key_invalid _ -> []
 
 let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path

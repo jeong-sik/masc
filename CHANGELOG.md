@@ -10,6 +10,14 @@
   Pin metadata, lock metadata, generated docs, and the API surface fingerprint
   were refreshed for the new OAS release.
 
+### Fixed
+- `runtime`: corrected a stale `runtime_toml.mli` doc comment that claimed the
+  TOML parser still "accepts" the deprecated provider-letter protocol aliases
+  (`provider_d-http` / `provider-d-cli`). The parser has no such branch — these
+  labels are rejected with an "unknown protocol" error, so a checked-in config
+  still using them fails to load. Added `test_legacy_protocol_alias_rejected`
+  to lock the rejection and the canonical-label allow-list.
+
 
 ## [0.19.46] - 2026-06-18
 

@@ -48,6 +48,7 @@ import {
   stripInlineMarkdown,
 } from '../../lib/board-utils'
 import {
+  firstMentionNameFromMessage,
   keeperNameFromTarget,
   mentionQueryFromMessage,
   replaceTrailingMentionDraft,
@@ -681,7 +682,7 @@ function BdComposer() {
   const selectedMobileKeeper = keeperNameFromTarget(mobileKeeperTarget)
   const selectedMobileKeeperAvailable =
     !!selectedMobileKeeper && mobileMentionOptions.some(keeper => keeper.name === selectedMobileKeeper)
-  const typedMobileMention = mode === 'mention' ? firstMentionTarget(localBody) : null
+  const typedMobileMention = mode === 'mention' ? firstMentionNameFromMessage(localBody) : null
   const matchedTypedMobileMention = typedMobileMention
     ? mobileMentionOptions.find(keeper => keeper.name.toLowerCase() === typedMobileMention.toLowerCase())?.name ?? null
     : null
@@ -763,11 +764,6 @@ function BdComposer() {
     setMobileAttachments([])
     setMobileVoiceDraft(null)
     setMobileRecording(false)
-  }
-
-  function firstMentionTarget(body: string): string | null {
-    const match = body.match(/(^|\s)@([a-zA-Z0-9._-]+)/)
-    return match?.[2] ?? null
   }
 
   async function submitPost(event?: Event, options: { compactMobile?: boolean } = {}): Promise<void> {
@@ -1197,7 +1193,7 @@ function BdMobileQueues({
 }
 
 function countMentionMessages(): number {
-  return messages.value.filter(message => extractMentionTargets(message.content).length > 0 || message.type?.toLowerCase().includes('mention') === true).length
+  return messages.value.filter(message => extractMentionTargets(message.content).length > 0).length
 }
 
 function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => void }) {

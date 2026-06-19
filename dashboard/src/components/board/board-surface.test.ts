@@ -241,7 +241,7 @@ describe('BoardSurface Component', () => {
     const queues = screen.getByTestId('bd-mobile-queues')
     const mentionQueue = within(queues).getByTestId('bd-mobile-queue-mentions')
     expect(mentionQueue).toHaveTextContent('멘션 인박스')
-    expect(mentionQueue).toHaveTextContent('2')
+    expect(mentionQueue).toHaveTextContent('1')
 
     fireEvent.click(mentionQueue)
     expect(detail).toHaveClass('is-mobile-open')

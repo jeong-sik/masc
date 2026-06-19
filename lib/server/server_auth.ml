@@ -802,6 +802,8 @@ let authorize_permission_request ~base_path ~permission request :
                { reason = Generic; message = msg }))
   in
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
+  (* NDT-OK: pre-existing dashboard fallback for non-token dashboard reads.
+     Token-bound requests without a resolved agent fail closed in the guard below. *)
   let agent_name = Option.value ~default:"dashboard" agent_name_opt in
   if
     auth_cfg.enabled && auth_cfg.require_token && token <> None
@@ -838,6 +840,8 @@ let authorize_tool_request ~base_path ~tool_name request :
                { reason = Generic; message = msg }))
   in
   let* agent_name_opt = resolve_agent_name_for_auth ~base_path request ~token in
+  (* NDT-OK: pre-existing dashboard fallback for non-token dashboard tool requests.
+     Token-bound requests without a resolved agent fail closed in the guard below. *)
   let agent_name = Option.value ~default:"dashboard" agent_name_opt in
   if
     auth_cfg.enabled && auth_cfg.require_token && token <> None

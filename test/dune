@@ -1129,6 +1129,14 @@
  (modules test_completion_trust_audit)
  (libraries alcotest yojson masc.completion_trust_audit))
 
+; RFC-0262 §9 completion-trust dispatch oracle (E1: scripted backbone).
+; Deterministic reject gates on the full keeper_task_done dispatch path, no LLM.
+
+(test
+ (name test_completion_trust_harness)
+ (modules test_completion_trust_harness)
+ (libraries masc_test_deps))
+
 ; Scheduled internal automation domain guardrails.
 
 (test

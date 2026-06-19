@@ -40,6 +40,16 @@ type schedule_source =
   | Automated_request
   | System_request
 
+type recurrence =
+  | One_shot
+  | Interval of { interval_sec : int }
+  | Daily of
+      { hour : int
+      ; minute : int
+      ; second : int
+      ; timezone : string
+      }
+
 (** Opaque consumer payload.
 
     The schedule domain does not interpret payload kind or body fields, but it
@@ -60,6 +70,7 @@ type schedule_request =
   ; approval_required : bool
   ; status : schedule_status
   ; source : schedule_source
+  ; recurrence : recurrence
   }
 
 type execution_decision =
@@ -80,6 +91,23 @@ type execution_grant =
   ; approved_at : float
   ; decision : execution_decision
   ; evidence : execution_evidence
+  }
+
+type execution_status =
+  | Execution_running
+  | Execution_succeeded
+  | Execution_failed
+
+type execution_record =
+  { execution_id : string
+  ; schedule_id : string
+  ; started_at : float
+  ; finished_at : float option
+  ; due_at : float
+  ; payload_digest : string
+  ; status : execution_status
+  ; detail : Yojson.Safe.t option
+  ; error : string option
   }
 
 type grant_error =
@@ -105,12 +133,16 @@ val create_request :
   risk_class:risk_class ->
   approval_required:bool ->
   source:schedule_source ->
+  ?recurrence:recurrence ->
   unit ->
   (schedule_request, string) result
 
 val is_terminal : schedule_status -> bool
 val is_side_effecting : risk_class -> bool
 val requires_separate_human_grant : schedule_request -> bool
+val is_recurring : recurrence -> bool
+val next_due_after : now:float -> schedule_request -> float option
+val reschedule_after_due_signal : now:float -> schedule_request -> schedule_request option
 
 val payload_of_yojson : Yojson.Safe.t -> (payload, string) result
 val payload_to_yojson : payload -> Yojson.Safe.t
@@ -141,14 +173,22 @@ val schedule_status_to_string : schedule_status -> string
 val schedule_status_of_string : string -> (schedule_status, string) result
 val schedule_source_to_string : schedule_source -> string
 val schedule_source_of_string : string -> (schedule_source, string) result
+val recurrence_kind_to_string : recurrence -> string
+val execution_status_to_string : execution_status -> string
+val execution_status_of_string : string -> (execution_status, string) result
 val grant_error_to_string : grant_error -> string
 
 val actor_to_yojson : actor -> Yojson.Safe.t
 val actor_of_yojson : Yojson.Safe.t -> (actor, string) result
+val recurrence_to_yojson : recurrence -> Yojson.Safe.t
+val recurrence_of_yojson : Yojson.Safe.t -> (recurrence, string) result
 val execution_evidence_to_yojson : execution_evidence -> Yojson.Safe.t
 val execution_evidence_of_yojson :
   Yojson.Safe.t -> (execution_evidence, string) result
 val execution_grant_to_yojson : execution_grant -> Yojson.Safe.t
 val execution_grant_of_yojson : Yojson.Safe.t -> (execution_grant, string) result
+val execution_record_to_yojson : execution_record -> Yojson.Safe.t
+val execution_record_of_yojson :
+  Yojson.Safe.t -> (execution_record, string) result
 val schedule_request_to_yojson : schedule_request -> Yojson.Safe.t
 val schedule_request_of_yojson : Yojson.Safe.t -> (schedule_request, string) result

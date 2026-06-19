@@ -1,0 +1,182 @@
+open Alcotest
+open Masc
+
+let () = Mirage_crypto_rng_unix.use_default ()
+
+let temp_dir () =
+  let path = Filename.temp_file "schedule_consumer_dispatch_test" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let rm_rf dir =
+  let rec rm path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
+        Unix.rmdir path
+      end
+      else Sys.remove path
+  in
+  try rm dir with
+  | _ -> ()
+;;
+
+let with_workspace f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = temp_dir () in
+  Eio.Switch.run
+  @@ fun sw ->
+  Eio.Switch.on_release sw (fun () -> rm_rf dir);
+  Unix.putenv "MASC_BASE_PATH" dir;
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  let config = Workspace.default_config dir in
+  ignore (Workspace.init config ~agent_name:(Some "test"));
+  f config
+;;
+
+let human id : Schedule_domain.actor =
+  { id; kind = Schedule_domain.Human_operator; display_name = None }
+;;
+
+let automated id : Schedule_domain.actor =
+  { id; kind = Schedule_domain.Automated_actor; display_name = None }
+;;
+
+let board_post_payload =
+  `Assoc
+    [ "kind", `String "masc.board_post"
+    ; "schema_version", `Int 1
+    ; ( "body"
+      , `Assoc
+          [ "title", `String "Scheduled check-in"
+          ; "content", `String "Daily schedule fired"
+          ; "author", `String "schedule-bot"
+          ; "hearth", `String "ops"
+          ; "ttl_hours", `Int 0
+          ; "meta", `Assoc [ "purpose", `String "test" ]
+          ] )
+    ]
+;;
+
+let create_pending_board_schedule config =
+  match
+    Schedule_service.create config ~schedule_id:"board-sched-1"
+      ~requested_at:100.0 ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
+      ~payload:board_post_payload ~risk_class:Schedule_domain.Workspace_write
+      ~source:Schedule_domain.Operator_request ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let approve_schedule config (request : Schedule_domain.schedule_request) =
+  match
+    Schedule_service.approve config ~schedule_id:request.Schedule_domain.schedule_id
+      ~approved_by:(human "approver") ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("approve failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let tick_ok config ~now =
+  match
+    Schedule_runner.tick ~consumer:Server_schedule_consumers.consumer config ~now
+  with
+  | Ok result -> result
+  | Error err -> fail (Schedule_runner.runner_error_to_string err)
+;;
+
+let test_board_post_consumer_creates_post_and_succeeds_schedule () =
+  with_workspace
+  @@ fun config ->
+  let request = create_pending_board_schedule config in
+  check string "initial status" "pending_approval"
+    (Schedule_domain.schedule_status_to_string request.status);
+  ignore (approve_schedule config request : Schedule_domain.schedule_request);
+  let result = tick_ok config ~now:201.0 in
+  check int "one dispatch" 1 (List.length result.dispatches);
+  check string "dispatch status" "succeeded"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing"
+   | Some stored ->
+     check string "schedule succeeded" "succeeded"
+       (Schedule_domain.schedule_status_to_string stored.status));
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing execution record"
+   | Some execution ->
+     check string "execution status" "succeeded"
+       (Schedule_domain.execution_status_to_string execution.status);
+     (match execution.detail with
+      | Some detail ->
+        let open Yojson.Safe.Util in
+        check string "execution detail kind" "masc.board_post.created"
+          (detail |> member "kind" |> to_string)
+      | None -> fail "execution detail missing"));
+  match Board_dispatch.list_posts ~hearth:"ops" ~limit:10 () with
+  | [ post ] ->
+    check string "title" "Scheduled check-in" post.Board.title;
+    check string "content" "Daily schedule fired" post.content;
+    check string "author" "schedule-bot" (Board.Agent_id.to_string post.author);
+    (match post.meta_json with
+     | Some meta ->
+       let open Yojson.Safe.Util in
+       check string "meta source" "scheduled_automation"
+         (meta |> member "source" |> to_string);
+       check string "meta schedule" request.schedule_id
+         (meta |> member "schedule_id" |> to_string);
+       check string "payload meta" "test"
+         (meta |> member "payload_meta" |> member "purpose" |> to_string)
+     | None -> fail "expected schedule meta")
+  | posts -> failf "expected one board post, got %d" (List.length posts)
+;;
+
+let test_board_post_consumer_rejects_read_only_risk () =
+  with_workspace
+  @@ fun config ->
+  let request =
+    match
+      Schedule_service.create config ~schedule_id:"board-read-only"
+        ~requested_at:100.0 ~requested_by:(human "operator")
+        ~scheduled_by:(automated "scheduler-agent") ~due_at:200.0
+        ~payload:board_post_payload ~risk_class:Schedule_domain.Read_only
+        ~source:Schedule_domain.Operator_request ()
+    with
+    | Ok request -> request
+    | Error err ->
+      fail ("create failed: " ^ Schedule_service.service_error_to_string err)
+  in
+  let result = tick_ok config ~now:201.0 in
+  check int "one unsupported decision" 1 (List.length result.dispatches);
+  check string "dispatch status" "unsupported"
+    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing"
+   | Some stored ->
+     check string "schedule remains due" "due"
+       (Schedule_domain.schedule_status_to_string stored.status));
+  check int "no post" 0 (List.length (Board_dispatch.list_posts ~limit:10 ()))
+;;
+
+let () =
+  run "Schedule_consumer_dispatch"
+    [ ( "board_post"
+      , [ test_case "creates board post and succeeds schedule" `Quick
+            test_board_post_consumer_creates_post_and_succeeds_schedule
+        ; test_case "rejects read-only risk" `Quick
+            test_board_post_consumer_rejects_read_only_risk
+        ] )
+    ]
+;;

@@ -1792,7 +1792,21 @@ let schedule_payload_kind request =
   | _ -> None
 ;;
 
-let schedule_request_dashboard_json (request : Schedule_domain.schedule_request) =
+let execution_record_dashboard_json (execution : Schedule_domain.execution_record) =
+  match Schedule_domain.execution_record_to_yojson execution with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       @ [ "started_at_iso", unix_iso_json execution.started_at
+         ; "finished_at_iso", unix_iso_option_json execution.finished_at
+         ])
+  | other -> other
+;;
+
+let schedule_request_dashboard_json
+  ?last_execution
+  (request : Schedule_domain.schedule_request)
+  =
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
@@ -1807,11 +1821,17 @@ let schedule_request_dashboard_json (request : Schedule_domain.schedule_request)
     ; "due_at_iso", unix_iso_json request.due_at
     ; "expires_at", (match request.expires_at with None -> `Null | Some ts -> `Float ts)
     ; "expires_at_iso", unix_iso_option_json request.expires_at
+    ; "recurrence", Schedule_domain.recurrence_to_yojson request.recurrence
+    ; "recurrence_kind", `String (Schedule_domain.recurrence_kind_to_string request.recurrence)
     ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
     ; ( "payload_kind"
       , match schedule_payload_kind request with
         | None -> `Null
         | Some kind -> `String kind )
+    ; ( "last_execution"
+      , match last_execution with
+        | None -> `Null
+        | Some execution -> execution_record_dashboard_json execution )
     ]
 ;;
 
@@ -1819,7 +1839,8 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
   (* NDT-OK: dashboard read-model freshness clock; it derives display-only
      effective-due state and never mutates the schedule store or runs work. *)
   let now = Unix.gettimeofday () in
-  let schedules = Schedule_service.list config () in
+  let state = Schedule_store.read_state config in
+  let schedules = state.schedules in
   let active_count =
     List.fold_left
       (fun count request -> if schedule_request_active request then count + 1 else count)
@@ -1861,7 +1882,16 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
           ; "terminal_count", `Int terminal_count
           ; "next_due_at", unix_iso_option_json (schedule_next_due_at schedules)
           ] )
-    ; "requests", `List (List.map schedule_request_dashboard_json request_rows)
+    ; ( "requests"
+      , `List
+          (List.map
+             (fun (request : Schedule_domain.schedule_request) ->
+                let last_execution =
+                  Schedule_store.last_execution_for_schedule state
+                    ~schedule_id:request.Schedule_domain.schedule_id
+                in
+                schedule_request_dashboard_json ?last_execution request)
+             request_rows) )
     ]
 ;;
 

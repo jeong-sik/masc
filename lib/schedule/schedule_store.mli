@@ -8,6 +8,7 @@ type state =
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
   ; grants : Schedule_domain.execution_grant list
+  ; executions : Schedule_domain.execution_record list
   }
 
 type store_error =
@@ -16,6 +17,8 @@ type store_error =
   | Grant_already_recorded
   | Invalid_initial_status of string
   | Invalid_status_transition of string
+  | Schedule_not_due_candidate
+  | Schedule_not_running
   | Grant_validation_failed of Schedule_domain.grant_error
   | Corrupt_ledger of
       { primary_err : string
@@ -64,6 +67,10 @@ val state_of_yojson : Yojson.Safe.t -> (state, string) result
 val list_schedules : Workspace_utils.config -> Schedule_domain.schedule_request list
 val get_schedule :
   Workspace_utils.config -> schedule_id:string -> Schedule_domain.schedule_request option
+val executions_for_schedule :
+  state -> schedule_id:string -> Schedule_domain.execution_record list
+val last_execution_for_schedule :
+  state -> schedule_id:string -> Schedule_domain.execution_record option
 
 val insert_request :
   Workspace_utils.config ->
@@ -86,6 +93,42 @@ val refresh_due :
   (state * int, store_error) result
 (** Marks stored [Scheduled] requests as [Due] when [due_at <= now]. The
     integer is the number of requests changed. *)
+
+val reschedule_due_recurring :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_ids:string list ->
+  (state * int, store_error) result
+(** Advances matching recurring [Due] requests back to [Scheduled] after their
+    generic due signal has been durably recorded. One-shot requests are left
+    [Due] for a future consumer/terminal transition. *)
+
+val start_due_candidate :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Atomically transitions an approved due candidate to [Running] and records a
+    generic execution attempt. *)
+
+val complete_running :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  ?detail:Yojson.Safe.t ->
+  unit ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Completes a [Running] request. One-shot requests become [Succeeded];
+    recurring requests advance to the next [Scheduled] occurrence. The matching
+    execution attempt is marked [succeeded]. *)
+
+val fail_running :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  error:string ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Marks a [Running] request and its matching execution attempt [Failed]. *)
 
 val due_execution_candidates :
   state -> Schedule_domain.schedule_request list

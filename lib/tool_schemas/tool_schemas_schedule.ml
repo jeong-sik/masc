@@ -92,6 +92,7 @@ let statuses =
 let actor_kinds = [ "human_operator"; "automated_actor"; "system" ]
 
 let sources = [ "operator_request"; "automated_request"; "system_request" ]
+let recurrence_kinds = [ "one_shot"; "interval"; "daily" ]
 
 let create_schema =
   object_schema
@@ -113,6 +114,26 @@ let create_schema =
     ; string_prop ~description:"Optional stable schedule id." "schedule_id"
     ; number_prop ~description:"Optional request timestamp for replay/tests." "requested_at_unix"
     ; number_prop ~description:"Optional expiry timestamp." "expires_at_unix"
+    ; string_prop
+        ~description:"Recurrence kind. Defaults to one_shot."
+        ~enum:recurrence_kinds
+        "recurrence_kind"
+    ; integer_prop
+        ~description:"Required when recurrence_kind is interval; seconds between runs."
+        "recurrence_interval_sec"
+    ; integer_prop
+        ~description:"Required when recurrence_kind is daily; local hour in 0..23."
+        "recurrence_hour"
+    ; integer_prop
+        ~description:"Required when recurrence_kind is daily; local minute in 0..59."
+        "recurrence_minute"
+    ; integer_prop
+        ~description:"Optional when recurrence_kind is daily; local second in 0..59."
+        "recurrence_second"
+    ; string_prop
+        ~description:
+          "Required when recurrence_kind is daily. Supported values: UTC, Asia/Seoul, KST, or a fixed offset like +09:00."
+        "recurrence_timezone"
     ; string_prop ~description:"Requester actor id. Defaults to operator." "requested_by_id"
     ; string_prop ~enum:actor_kinds "requested_by_kind"
     ; string_prop ~description:"Requester display name." "requested_by_display_name"

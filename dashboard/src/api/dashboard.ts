@@ -1742,12 +1742,35 @@ export interface DashboardScheduledAutomationFsm {
   next_due_at?: string | null
 }
 
+export interface DashboardScheduledAutomationExecution {
+  execution_id: string
+  schedule_id: string
+  started_at?: number
+  started_at_iso?: string | null
+  finished_at?: number | null
+  finished_at_iso?: string | null
+  due_at?: number
+  payload_digest?: string
+  status: string
+  detail?: unknown | null
+  error?: string | null
+}
+
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: string
   risk_class: string
   approval_required: boolean
   source: string
+  recurrence?: {
+    kind: string
+    interval_sec?: number
+    hour?: number
+    minute?: number
+    second?: number
+    timezone?: string
+  }
+  recurrence_kind?: string
   requested_at?: number
   requested_at_iso?: string
   due_at?: number
@@ -1756,6 +1779,7 @@ export interface DashboardScheduledAutomationRequest {
   expires_at_iso?: string | null
   payload_digest?: string
   payload_kind?: string | null
+  last_execution?: DashboardScheduledAutomationExecution | null
 }
 
 export interface DashboardScheduledAutomation {

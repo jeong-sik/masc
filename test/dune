@@ -1137,6 +1137,11 @@
  (libraries masc_test_deps masc_schedule))
 
 (test
+ (name test_schedule_consumer_dispatch)
+ (modules test_schedule_consumer_dispatch)
+ (libraries masc_test_deps masc_schedule masc_server))
+
+(test
  (name test_schedule_tool_wiring)
  (modules test_schedule_tool_wiring)
  (libraries masc_test_deps masc_schedule))

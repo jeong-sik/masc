@@ -51,13 +51,23 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       let interval = 15.0 in
       let rec loop () =
         (try
-           match Schedule_runner.tick (Mcp_server.workspace_config state) ~now:(Time_compat.now ()) with
+           match
+             Schedule_runner.tick
+               ~consumer:Server_schedule_consumers.consumer
+               (Mcp_server.workspace_config state)
+               ~now:(Time_compat.now ())
+           with
            | Ok result ->
-             if result.Schedule_runner.emitted <> [] then
+             if result.Schedule_runner.emitted <> []
+                || result.rescheduled > 0
+                || result.dispatches <> []
+             then
                Log.Server.info
-                 "schedule_runner: due_changed=%d emitted=%d"
+                 "schedule_runner: due_changed=%d emitted=%d rescheduled=%d dispatched=%d"
                  result.due_changed
                  (List.length result.emitted)
+                 result.rescheduled
+                 (List.length result.dispatches)
            | Error err ->
              Log.Server.warn
                "schedule_runner: tick failed: %s"

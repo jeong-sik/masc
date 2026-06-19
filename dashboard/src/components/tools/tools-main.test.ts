@@ -129,8 +129,17 @@ describe('Tools', () => {
             risk_class: 'workspace_write',
             approval_required: true,
             source: 'operator_request',
+            recurrence: { kind: 'daily', hour: 9, minute: 30, second: 0, timezone: 'Asia/Seoul' },
+            recurrence_kind: 'daily',
             payload_kind: 'test.reminder',
             due_at_iso: '2026-06-13T01:00:00Z',
+            last_execution: {
+              execution_id: 'exec-1',
+              schedule_id: 'sched-1',
+              started_at_iso: '2026-06-13T00:30:00Z',
+              finished_at_iso: '2026-06-13T00:30:01Z',
+              status: 'succeeded',
+            },
           },
         ],
       },
@@ -142,6 +151,8 @@ describe('Tools', () => {
     expect(container.textContent).toContain('pending approval')
     expect(container.textContent).toContain('sched-1')
     expect(container.textContent).toContain('workspace write')
+    expect(container.textContent).toContain('09:30:00 Asia/Seoul')
+    expect(container.textContent).toContain('succeeded')
     expect(container.textContent).toContain('test.reminder')
     expect(container.querySelector('.v2-lab-table')).not.toBeNull()
     expect(container.querySelector('.v2-lab-row')).not.toBeNull()

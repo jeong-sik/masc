@@ -1,7 +1,8 @@
 (include_subdirs no)
 
-;; Scheduled internal automation domain + service/store/runner. The runner only
-;; emits generic schedule signals; consumer dispatch stays outside this layer.
+;; Scheduled internal automation domain + service/store/runner. The runner emits
+;; generic schedule signals and can call a consumer supplied by the server layer;
+;; consumer-specific behavior stays outside this library.
 
 (library
  (name masc_schedule)

@@ -79,12 +79,6 @@ val force_release_task_r :
   config -> agent_name:string -> task_id:string ->
   ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
 
-(** [force_release_task_r] with the typed no-op flag; see {!transition_outcome}. *)
-val force_release_task_outcome_r :
-  config -> agent_name:string -> task_id:string ->
-  ?handoff_context:Masc_domain.task_handoff_context ->
-  unit -> transition_outcome Masc_domain.masc_result
-
 val force_done_task_r :
   config -> agent_name:string -> task_id:string ->
   notes:string -> unit -> string Masc_domain.masc_result

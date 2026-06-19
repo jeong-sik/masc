@@ -1089,45 +1089,6 @@ let test_transition_release_todo_noop () =
     | Error _ -> Alcotest.fail "Expected Ok no-op")
 ;;
 
-let test_transition_release_todo_typed_noop () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    match
-      Workspace.force_release_task_outcome_r
-        config
-        ~agent_name:"claude"
-        ~task_id:"task-001"
-        ()
-    with
-    | Ok outcome ->
-      Alcotest.(check bool) "typed release todo no-op" true outcome.noop;
-      Alcotest.(check bool)
-        "message remains human-readable"
-        true
-        (str_contains outcome.message "already todo")
-    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
-;;
-
-let test_transition_force_release_claimed_typed_not_noop () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    match
-      Workspace.force_release_task_outcome_r
-        config
-        ~agent_name:"system"
-        ~task_id:"task-001"
-        ()
-    with
-    | Ok outcome ->
-      Alcotest.(check bool) "claimed force release mutates" false outcome.noop;
-      Alcotest.(check bool)
-        "release message"
-        true
-        (str_contains outcome.message "todo")
-    | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e))
-;;
-
 let test_transition_invalid () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Test" ~priority:1 ~description:"" in
@@ -1982,14 +1943,6 @@ let () =
             `Quick
             test_transition_release_generated_nickname_alias
         ; Alcotest.test_case "release todo no-op" `Quick test_transition_release_todo_noop
-        ; Alcotest.test_case
-            "release todo typed no-op"
-            `Quick
-            test_transition_release_todo_typed_noop
-        ; Alcotest.test_case
-            "force release claimed typed not no-op"
-            `Quick
-            test_transition_force_release_claimed_typed_not_noop
         ; Alcotest.test_case "invalid" `Quick test_transition_invalid
         ; Alcotest.test_case "version mismatch" `Quick test_transition_version_mismatch
         ; Alcotest.test_case "done idempotent" `Quick test_transition_done_idempotent

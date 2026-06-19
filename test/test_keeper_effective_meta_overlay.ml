@@ -7,6 +7,7 @@ module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
 module Keeper_tool_surface_ops = Masc.Keeper_tool_surface_ops
 module Heartbeat_presence = Masc.Keeper_heartbeat_loop_presence
+module Meta_contract = Masc.Keeper_meta_contract
 (* [Runtime] (init_default) lives in the unwrapped [masc_runtime] library, so it
    is referenced directly (not via [Masc.]); [Keeper_runtime] (ensure_keeper_meta)
    lives in the main [masc] library. Same pattern as test_keeper_lifecycle_registry_dispatch. *)
@@ -379,7 +380,7 @@ active_goal_ids = ["goal-masc-improver"]
     | Error err -> Alcotest.failf "read re-synced meta failed: %s" err
   in
   List.iter
-    (fun (label, meta) ->
+    (fun (label, (meta : Meta_contract.keeper_meta)) ->
       Alcotest.(check (option string))
         (label ^ " persona is TOML canonical")
         (Some "masc-improver")

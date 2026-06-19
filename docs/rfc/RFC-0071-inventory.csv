@@ -564,7 +564,6 @@ lib/keeper/social_model/keeper_social_model_protocol.ml,25,false,unclassified
 lib/keeper/social_model/keeper_social_model_types.ml,71,None,unclassified
 lib/keeper/social_model/keeper_social_model_types.ml,97,None,unclassified
 lib/keeper/social_model/keeper_social_model_types.ml,111,None,unclassified
-lib/level4_config.ml,105,None,unclassified
 lib/local/worker_container_types.ml,104,false,unclassified
 lib/local/worker_container_types.ml,153,None,unclassified
 lib/local/worker_container_types.ml,286,false,unclassified

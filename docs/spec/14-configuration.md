@@ -20,7 +20,7 @@ code_refs:
 
 ## 1. 목적
 
-설정 시스템은 MASC MCP 서버의 모든 조정 가능한 동작을 12-Factor App 원칙에 따라 환경변수로 외부화한다. 5개 계층(Core, Runtime, Governance, Keeper, Level2/Level4)으로 분류되며, 런타임 오버라이드 + 감사 경로를 제공한다.
+설정 시스템은 MASC MCP 서버의 모든 조정 가능한 동작을 12-Factor App 원칙에 따라 환경변수로 외부화한다. Core, Runtime, Governance, Keeper, numeric tuning, process RNG 계층으로 분류되며, 런타임 오버라이드 + 감사 경로를 제공한다.
 
 운영 reload 계약은 별도 문서로 분리한다:
 
@@ -37,7 +37,7 @@ code_refs:
 │ Layer 2: Env_config_runtime     (타이머, 캐시, 세션)    │
 │ Layer 3: Env_config_governance  (모델, 추론, Autonomy)   │
 │ Layer 4: Env_config_keeper      (Keeper 부트/알림/감독)  │
-│ Layer 5: Level2/Level4_config   (메트릭, 학습, RNG)     │
+│ Layer 5: Level2/Process_random  (메트릭, 학습, RNG)     │
 │ Layer 6: Runtime_params         (런타임 오버라이드)       │
 │ Layer 7: config/runtime.toml    (Runtime 모델 순서)     │
 └────────────────────────────────────────────────────┘
@@ -193,9 +193,9 @@ Keeper 부트스트랩, 메트릭 로테이션, 알림 팬아웃, Supervisor 설
 | `MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S` | float | 300.0 | 백오프 상한 |
 | `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | float | 30.0 | Supervisor sweep 주기 |
 
-### 3.5 Level2 / Level4 Config
+### 3.5 Level2 / Process Random
 
-L2는 메트릭/드리프트/학습 튜닝, L4는 공유 numeric wrapper와 RNG helper다.
+Level2는 메트릭/드리프트/학습 튜닝, Process_random은 프로세스 전역 `Stdlib.Random`의 env-seeded 초기화 경계다.
 
 **Level2** (`lib/level2_config.ml`):
 
@@ -209,15 +209,13 @@ L2는 메트릭/드리프트/학습 튜닝, L4는 공유 numeric wrapper와 RNG 
 | `MASC_HEBBIAN_DECAY` | float | 0.01 | Hebbian 감쇠율 |
 | `MASC_FITNESS_HALFLIFE` | float | 7.0 | Fitness 반감기 (일) |
 
-**Level4** (`lib/level4_config.ml`):
+**Process_random** (`lib/process_random.ml`):
 
 | 환경변수 | 타입 | 기본값 | 설명 |
 |----------|------|--------|------|
-| `MASC_RANDOM_SEED` | int | current time in ms | `Level4_config` RNG seed override for reproducible tests/runs |
+| `MASC_RANDOM_SEED` | int | current time in ms | `Process_random` RNG seed override for reproducible tests/runs |
 
 Removed `MASC_SWARM_*`, `MASC_FLOCK_*`, and `MASC_STIG_*` knobs are not runtime inputs. Do not add them to new configs.
-
-Level4는 `Normalized.t` (0.0-1.0 범위 보장) 추상 타입을 제공한다. `of_float`는 범위 밖 입력에 `None`을 반환하고, `of_float_clamped`는 clamping한다.
 
 ---
 
@@ -547,7 +545,6 @@ masc_set_param(key, value)
 - **INV-C3**: `Unknown` category에 매핑된 도구는 어떤 mode preset에서도 노출되지 않는다.
 - **INV-C4**: `tool_catalog.is_visible`이 false를 반환하는 도구는 `allow_direct_call_when_hidden=true`가 아닌 한 MCP 클라이언트에 노출되지 않는다.
 - **INV-C5**: Runtime JSON의 모델 목록은 순서대로 시도되며, 전부 실패 시 skip한다 (error propagation, fallback 없음).
-- **INV-C6**: `Normalized.t` 값은 항상 [0.0, 1.0] 범위이다. `of_float`는 NaN/Inf/범위 밖에 `None`을 반환한다.
 
 ---
 

@@ -23,6 +23,13 @@ type param_meta = {
 (** Opaque typed parameter handle.  Obtained from {!register}. *)
 type 'a param
 
+(** {1 Initialization} *)
+
+(** Set the workspace base path used for automatic persistence and audit.
+    Call once during server bootstrap before the first [set]/[clear].
+    Per-call [?base_path] overrides this value. *)
+val initialize : base_path:string -> unit
+
 (** {1 Registration} *)
 
 (** Register a named parameter with default thunk, validation, and serialization.
@@ -44,17 +51,22 @@ val register :
 (** Get current value.  Returns the override if set, otherwise the default. *)
 val get : 'a param -> 'a
 
-(** Set override.  Runs validation; persists on success. *)
-val set : 'a param -> 'a -> (unit, string) result
+(** Set override.  Runs validation; persists and audits on success when a
+    base path is available via [initialize] or [?base_path]. *)
+val set : ?base_path:string -> ?actor:string -> 'a param -> 'a -> (unit, string) result
 
-(** Set override by string key and JSON value (for MCP / governance). *)
-val set_by_key : string -> Yojson.Safe.t -> (unit, string) result
+(** Set override by string key and JSON value (for MCP / governance).
+    Persists and audits on success when a base path is available. *)
+val set_by_key :
+  ?base_path:string -> ?actor:string -> string -> Yojson.Safe.t -> (unit, string) result
 
-(** Clear override; reverts to env default. *)
-val clear : 'a param -> unit
+(** Clear override; reverts to env default.  Persists and audits the
+    reversion when a base path is available. *)
+val clear : ?base_path:string -> ?actor:string -> 'a param -> unit
 
-(** Clear override by string key. Returns [Error] if key is unknown. *)
-val clear_by_key : string -> (unit, string) result
+(** Clear override by string key. Returns [Error] if key is unknown.
+    Persists and audits the reversion when a base path is available. *)
+val clear_by_key : ?base_path:string -> ?actor:string -> string -> (unit, string) result
 
 (** {1 Introspection} *)
 

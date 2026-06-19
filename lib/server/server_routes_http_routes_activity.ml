@@ -785,7 +785,7 @@ let add_routes ~sw ~clock router =
                       | Some (_, current, _, _, _) -> current
                       | None -> `Null
                     in
-                    (match Runtime_params.set_by_key param_key value with
+                    (match Runtime_params.set_by_key param_key value ~actor with
                      | Error msg ->
                          respond_json_value_with_cors ~status:`Bad_request request reqd
                            (`Assoc
@@ -794,9 +794,6 @@ let add_routes ~sw ~clock router =
                                 ("error", `String msg);
                               ])
                      | Ok () ->
-                         Runtime_params.persist ~base_path;
-                         Runtime_params.record_audit ~base_path
-                           ~key:param_key ~old_value ~new_value:value ~actor ();
                          Sse.broadcast
                            (`Assoc
                               [
@@ -854,7 +851,7 @@ let add_routes ~sw ~clock router =
                      | Some (_, current, _, _, _) -> current
                      | None -> `Null
                    in
-                   match Runtime_params.clear_by_key param_key with
+                   match Runtime_params.clear_by_key param_key ~actor with
                    | Error msg ->
                        respond_json_value_with_cors ~status:`Bad_request request reqd
                          (`Assoc
@@ -869,9 +866,6 @@ let add_routes ~sw ~clock router =
                          | Some (_, _, default, _, _) -> default
                          | None -> `Null
                        in
-                       Runtime_params.persist ~base_path;
-                       Runtime_params.record_audit ~base_path
-                         ~key:param_key ~old_value ~new_value ~actor ();
                        Sse.broadcast
                          (`Assoc
                             [

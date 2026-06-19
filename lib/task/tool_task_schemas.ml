@@ -53,7 +53,7 @@ Example: %s({title: 'Fix login bug', priority: 1, description: 'Users cannot log
         ]);
         ("goal_id", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional structured goal link for rollups. If omitted, scoped agents may auto-link a single active goal; otherwise the task remains unscoped.");
+          ("description", `String "Optional structured goal link for rollups. If omitted, the task is created unscoped (goalless); pass goal_id explicitly to link it to a goal.");
         ]);
         ("contract", `Assoc [
           ("type", `String "object");
@@ -111,7 +111,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', priority: 2}, {title: '
               ]);
               ("goal_id", `Assoc [
                 ("type", `String "string");
-                ("description", `String "Optional structured goal link for rollups. If omitted, scoped agents may auto-link a single active goal; otherwise the task remains unscoped.");
+                ("description", `String "Optional structured goal link for rollups. If omitted, the task is created unscoped (goalless); pass goal_id explicitly to link it to a goal.");
               ]);
               ("contract", `Assoc [
                 ("type", `String "object");

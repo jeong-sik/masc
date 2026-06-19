@@ -151,10 +151,10 @@ let audit_orphan_tasks config : (Masc_domain.task * string) list =
     List.filter_map (fun (task : Masc_domain.task) ->
       match task.task_status with
       | Masc_domain.Claimed { assignee; _ }
-      | Masc_domain.InProgress { assignee; _ }
-      | Masc_domain.AwaitingVerification { assignee; _ } ->
+      | Masc_domain.InProgress { assignee; _ } ->
           if is_active_agent assignee then None
           else Some (task, assignee)
+      | Masc_domain.AwaitingVerification _ -> None
       | Masc_domain.Todo | Masc_domain.Done _ | Masc_domain.Cancelled _ -> None
     ) backlog.tasks
 

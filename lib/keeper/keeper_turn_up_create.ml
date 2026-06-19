@@ -73,7 +73,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   in
   let mention_targets =
     resolve_mention_targets
-      ~mention_targets_in:p.mention_targets_in
+      ~mention_targets_opt:p.mention_targets_opt
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in

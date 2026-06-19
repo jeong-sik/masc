@@ -19,7 +19,7 @@ type parsed_args = {
   runtime_id_opt : string option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
-  mention_targets_in : string list;
+  mention_targets_opt : string list option;
   active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
   proactive_enabled_opt : bool option;
@@ -148,27 +148,29 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let tool_access_input_res = parse_tool_access_input args in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
+    let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     match
       compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
-      active_goal_ids_opt_res, runtime_id_opt_res
+      active_goal_ids_opt_res, mention_targets_opt_res, runtime_id_opt_res
     with
-    | Error e, _, _, _, _
-    | _, Error e, _, _, _
-    | _, _, Error e, _, _
-    | _, _, _, Error e, _
-    | _, _, _, _, Error e -> Error (tool_result_error e)
+    | Error e, _, _, _, _, _
+    | _, Error e, _, _, _, _
+    | _, _, Error e, _, _, _
+    | _, _, _, Error e, _, _
+    | _, _, _, _, Error e, _
+    | _, _, _, _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
       Ok tool_access_opt,
       Ok allowed_paths_opt,
       Ok active_goal_ids_opt,
+      Ok mention_targets_opt,
       Ok runtime_id_opt ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
-    let mention_targets_in = get_string_list args "mention_targets" in
     let max_context_override_opt =
       let min_keeper_context = Keeper_config.min_keeper_context_tokens in
       let max_keeper_context = Keeper_config.max_keeper_context_tokens in
@@ -245,7 +247,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       allowed_paths_opt;
       active_goal_ids_opt;
       autoboot_enabled_opt;
-      mention_targets_in;
+      mention_targets_opt;
       max_context_override_opt;
       proactive_enabled_opt;
       proactive_idle_sec_opt;
@@ -270,11 +272,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     }
 
 (** Resolve mention targets with dedup and filtering. *)
-let resolve_mention_targets ~mention_targets_in ~fallback_targets ~name =
+let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
   let raw =
-    if mention_targets_in <> [] then mention_targets_in
-    else if fallback_targets <> [] then fallback_targets
-    else [ name ]
+    match mention_targets_opt with
+    | Some targets -> targets
+    | None -> if fallback_targets <> [] then fallback_targets else [ name ]
   in
   raw |> List.filter (fun s -> String.trim s <> "") |> dedupe_keep_order
 

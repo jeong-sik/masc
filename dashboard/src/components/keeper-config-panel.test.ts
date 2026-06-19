@@ -485,6 +485,24 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.tool_denylist).toEqual(['Execute', 'Read'])
   })
 
+  it('emits explicit empty mention targets when the draft is cleared', () => {
+    const c = makeKeeperConfigForSandbox({
+      workspace: {
+        mention_targets: ['sangsu'],
+        bound_workspace_ids: [],
+        active_goal_ids: [],
+        active_goals: [],
+        active_goal_count: 0,
+        missing_active_goal_ids: [],
+      },
+    })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      mention_targets_text: '',
+    }), c)
+
+    expect(payload.mention_targets).toEqual([])
+  })
+
   it('emits compaction_token_gate when the token gate changes', () => {
     const c = makeKeeperConfigForSandbox({
       compaction: {

@@ -123,7 +123,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
   in
   let mention_targets =
     resolve_mention_targets
-      ~mention_targets_in:p.mention_targets_in
+      ~mention_targets_opt:p.mention_targets_opt
       ~fallback_targets:
         (if old.mention_targets <> [] then old.mention_targets
          else p.profile_defaults.mention_targets)

@@ -5,6 +5,7 @@
     JSONL logs). Reads are bounded tail reads to keep startup cost low. *)
 
 open Keeper_memory_os_types
+open Result.Syntax
 
 let rec ensure_dir path =
   if path = "" || path = Filename.current_dir_name
@@ -349,9 +350,8 @@ let read_facts_all_strict ~keeper_id =
   let rec loop line_number acc = function
     | [] -> Ok (List.rev acc)
     | line :: rest ->
-      (match parse_fact_json_line_strict ~path ~line_number line with
-       | Ok fact -> loop (line_number + 1) (fact :: acc) rest
-       | Error _ as e -> e)
+      let* fact = parse_fact_json_line_strict ~path ~line_number line in
+      loop (line_number + 1) (fact :: acc) rest
   in
   loop 1 [] (read_lines_all path)
 ;;

@@ -47,7 +47,7 @@ describe('resolveKeeperToolPolicy', () => {
   it('defaults resolved allowlist to an empty array when missing', () => {
     const config = {
       tools: {
-        tool_access: {},
+        tool_access: [],
       },
     } as unknown as Pick<KeeperConfig, 'tools'>
     const result = resolveKeeperToolPolicy(config, 'loaded')
@@ -57,7 +57,7 @@ describe('resolveKeeperToolPolicy', () => {
   it('prefers tools over load status', () => {
     const config = {
       tools: {
-        tool_access: {},
+        tool_access: [],
       },
     } as unknown as Pick<KeeperConfig, 'tools'>
     // Even with error status, tools present means keeper_config

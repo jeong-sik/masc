@@ -530,6 +530,7 @@ const mocks = vi.hoisted(() => ({
   })),
   patchKeeperConfig: vi.fn(),
   updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
+  setKeeperToolPolicy: vi.fn(async () => makeKeeperConfig()),
 }))
 
 vi.mock('../api/dashboard', () => ({
@@ -538,6 +539,7 @@ vi.mock('../api/dashboard', () => ({
   fetchKeeperConfig: mocks.fetchKeeperConfig,
   patchKeeperConfig: mocks.patchKeeperConfig,
   updateKeeperRuntime: mocks.updateKeeperRuntime,
+  setKeeperToolPolicy: mocks.setKeeperToolPolicy,
 }))
 
 import { KeeperConfigPanel, loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
@@ -626,6 +628,39 @@ describe('KeeperConfigPanel', () => {
     expect(tokenGateInput!.type).toBe('number')
     // Value reflects the loaded config (makeKeeperConfig compaction.token_gate = 24000).
     expect(tokenGateInput!.value).toBe('24000')
+  })
+
+  it('saves the tool denylist via set_policy, echoing current tool_access and deduping entries', async () => {
+    mocks.setKeeperToolPolicy.mockClear()
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    const denylist = container.querySelector(
+      'textarea[aria-label="tool_denylist"]',
+    ) as HTMLTextAreaElement | null
+    expect(denylist).not.toBeNull()
+    expect(denylist!.value).toBe('Execute') // reflects loaded tool_denylist
+
+    // Operator edits: add a tool, with a blank line and a duplicate.
+    denylist!.value = 'Execute\nmcp__masc__masc_board_delete\nExecute\n'
+    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('정책 저장'),
+    )
+    expect(saveButton).toBeTruthy()
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    // Safety: set_policy sets tool_access AND deny atomically, so the current
+    // tool_access must be echoed unchanged; the deny list is trimmed + deduped.
+    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
+      tool_access: ['tool_read_file'],
+      deny: ['Execute', 'mcp__masc__masc_board_delete'],
+    })
   })
 
   it('patches runtime_id from the dashboard panel', async () => {

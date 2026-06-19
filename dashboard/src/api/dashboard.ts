@@ -2227,7 +2227,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       missing_active_goal_ids: normalizeStringList(workspace.missing_active_goal_ids),
     },
     tools: {
-      tool_access: tools.tool_access ?? {},
+      tool_access: normalizeStringList(tools.tool_access),
       resolved_allowlist: normalizeStringList(tools.resolved_allowlist),
       tool_denylist: normalizeStringList(tools.tool_denylist),
       active_masc_tool_count: asInt(tools.active_masc_tool_count) ?? 0,
@@ -2312,6 +2312,25 @@ export async function patchKeeperConfig(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
   ).then(raw => normalizeKeeperConfig(raw, name))
+}
+
+// Tool policy is set atomically (tool_access + denylist) via the dedicated
+// /tools endpoint with action=set_policy — a different mutation shape from the
+// /config PATCH above. The caller MUST echo the current tool_access so editing
+// only the denylist does not wipe the keeper's access. The endpoint returns the
+// updated tools block (not the full config), so we re-fetch the config to get a
+// consistent normalized snapshot.
+export async function setKeeperToolPolicy(
+  name: string,
+  policy: { tool_access: string[]; deny: string[] },
+): Promise<KeeperConfig> {
+  await ensureDevToken()
+  await post<unknown>(`/api/v1/keepers/${encodeURIComponent(name)}/tools`, {
+    action: 'set_policy',
+    tool_access: policy.tool_access,
+    deny: policy.deny,
+  })
+  return fetchKeeperConfig(name)
 }
 
 // --- Runtime config (raw runtime.toml editor) ---

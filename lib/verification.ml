@@ -11,6 +11,8 @@
     - Integration with existing task lifecycle
 *)
 
+open Result.Syntax
+
 (** Verification criteria *)
 type criterion =
   | Schema_match of Yojson.Safe.t   (** Output matches JSON schema *)
@@ -37,17 +39,26 @@ let criterion_of_yojson = function
             | Some schema -> Ok (Schema_match schema)
             | None -> Error "schema_match requires 'schema' field")
        | Some (`String "contains") ->
-           (match List.assoc_opt "value" fields with
-            | Some (`String s) -> Ok (Contains s)
-            | _ -> Error "contains requires 'value' string field")
+           let* value =
+             match List.assoc_opt "value" fields with
+             | Some (`String s) -> Ok s
+             | _ -> Error "contains requires 'value' string field"
+           in
+           Ok (Contains value)
        | Some (`String "not_contains") ->
-           (match List.assoc_opt "value" fields with
-            | Some (`String s) -> Ok (Not_contains s)
-            | _ -> Error "not_contains requires 'value' string field")
+           let* value =
+             match List.assoc_opt "value" fields with
+             | Some (`String s) -> Ok s
+             | _ -> Error "not_contains requires 'value' string field"
+           in
+           Ok (Not_contains value)
        | Some (`String "custom") ->
-           (match List.assoc_opt "description" fields with
-            | Some (`String s) -> Ok (Custom s)
-            | _ -> Error "custom requires 'description' string field")
+           let* description =
+             match List.assoc_opt "description" fields with
+             | Some (`String s) -> Ok s
+             | _ -> Error "custom requires 'description' string field"
+           in
+           Ok (Custom description)
        | Some (`String t) -> Error (Printf.sprintf "unknown criterion type: %s" t)
        | _ -> Error "criterion requires 'type' field")
   | _ -> Error "criterion must be a JSON object"
@@ -157,9 +168,8 @@ let request_status_of_yojson = function
                       (%s)"
                      got))
        | Some (`String "completed") ->
-           (match verdict_of_yojson (`Assoc fields) with
-            | Ok v -> Ok (Completed v)
-            | Error e -> Error e)
+           let* v = verdict_of_yojson (`Assoc fields) in
+           Ok (Completed v)
        | other ->
            let got =
              match other with
@@ -403,11 +413,9 @@ let save_request base_path req =
     Fs_compat.mkdir_p dir;
     let json = request_to_yojson req in
     let path = request_path base_path req.id in
-    match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
-    | Ok () ->
-        invalidate_list_requests_cache ();
-        Ok req.id
-    | Error e -> Error e
+    let* () = Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) in
+    invalidate_list_requests_cache ();
+    Ok req.id
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -531,39 +539,28 @@ let create_request ~base_path ~task_id ~output ~criteria ~worker ?verifier ?requ
     created_at = Time_compat.now ();
     status = Pending;
   } in
-  match save_request base_path req with
-  | Ok _ -> Ok req
-  | Error e -> Error e
+  let* _req_id = save_request base_path req in
+  Ok req
 
 let assign_verifier ~base_path ~req_id ~verifier =
-  match load_request base_path req_id with
-  | Error e -> Error e
-  | Ok req ->
-      match validate_cross_agent ~worker:req.worker ~verifier with
-      | Error e -> Error e
-      | Ok () ->
-          let updated = { req with status = Assigned verifier; verifier = Some verifier } in
-          match save_request base_path updated with
-          | Ok _ -> Ok updated
-          | Error e -> Error e
+  let* req = load_request base_path req_id in
+  let* () = validate_cross_agent ~worker:req.worker ~verifier in
+  let updated = { req with status = Assigned verifier; verifier = Some verifier } in
+  let* _req_id = save_request base_path updated in
+  Ok updated
 
 let submit_verdict ~base_path ~req_id ~verifier ~verdict =
-  match load_request base_path req_id with
-  | Error e -> Error e
-  | Ok req ->
-      match validate_cross_agent ~worker:req.worker ~verifier with
-      | Error e -> Error e
-      | Ok () ->
-          (* Persist the verifier into the record, not just validate it.
-             Before this fix callers that skipped [assign_verifier] left
-             [req.verifier = None] forever, which surfaced as "approved
-             without approver" in the dashboard projection. *)
-          let updated =
-            { req with status = Completed verdict; verifier = Some verifier }
-          in
-          match save_request base_path updated with
-          | Ok _ -> Ok updated
-          | Error e -> Error e
+  let* req = load_request base_path req_id in
+  let* () = validate_cross_agent ~worker:req.worker ~verifier in
+  (* Persist the verifier into the record, not just validate it.
+     Before this fix callers that skipped [assign_verifier] left
+     [req.verifier = None] forever, which surfaced as "approved
+     without approver" in the dashboard projection. *)
+  let updated =
+    { req with status = Completed verdict; verifier = Some verifier }
+  in
+  let* _req_id = save_request base_path updated in
+  Ok updated
 
 (* Marker verifier recorded when auto_verify transitions a request to
    Completed without a human/LLM judge. Keeps approved_by non-null in the
@@ -572,23 +569,20 @@ let submit_verdict ~base_path ~req_id ~verifier ~verdict =
 let auto_verifier_marker = "auto"
 
 let auto_verify ~base_path ~req_id =
-  match load_request base_path req_id with
-  | Error e -> Error e
-  | Ok req ->
-      let has_custom = List.exists (function Custom _ -> true | Schema_match _ | Contains _ | Not_contains _ -> false) req.criteria in
-      if has_custom then
-        Error "Cannot auto-verify: custom criteria require agent judgment"
-      else
-        let verdict = evaluate_all req.output req.criteria in
-        let verifier =
-          match req.verifier with
-          | Some _ as v -> v
-          | None -> Some auto_verifier_marker
-        in
-        let updated = { req with status = Completed verdict; verifier } in
-        match save_request base_path updated with
-        | Ok _ -> Ok updated
-        | Error e -> Error e
+  let* req = load_request base_path req_id in
+  let has_custom = List.exists (function Custom _ -> true | Schema_match _ | Contains _ | Not_contains _ -> false) req.criteria in
+  if has_custom then
+    Error "Cannot auto-verify: custom criteria require agent judgment"
+  else
+    let verdict = evaluate_all req.output req.criteria in
+    let verifier =
+      match req.verifier with
+      | Some _ as v -> v
+      | None -> Some auto_verifier_marker
+    in
+    let updated = { req with status = Completed verdict; verifier } in
+    let* _req_id = save_request base_path updated in
+    Ok updated
 
 let pending_for_agent ~base_path ~agent =
   list_requests base_path

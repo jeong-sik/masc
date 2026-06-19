@@ -134,7 +134,8 @@ val fallback_runtime_for_unavailable_profile :
     Status-code-aware rotation: raw API errors that are not wrapped in a MASC
     internal error are also classified when a different runtime may succeed:
     - [RateLimited] hard-quota messages → ["hard_quota"]
-    - [RateLimited] soft provider throttles → [None] (provider cooldown only)
+    - [RateLimited] soft provider throttles → ["rate_limit"] (rotation filters
+      candidates sharing the same credential pool)
     - [Overloaded] and Cloudflare 524 → ["capacity_backpressure"]
     - [ServerError] with status >= 500 → ["server_error"]
     - [AuthError] → ["auth_error"]
@@ -162,13 +163,18 @@ val degraded_retry_after_recoverable_error :
     any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
 
-    Non-contract transient infrastructure errors (provider timeout, server
-    error, capacity backpressure) allow cycling through candidates again when
-    all are exhausted, because the same runtime may succeed on a subsequent
-    attempt. Contract violations and quota/rate-limit classes cap rotation:
-    retrying the same credential pool amplifies account-scoped limits.
+    For ["rate_limit"], candidates sharing the effective runtime's credential
+    pool, as reported by [credential_pool_of_runtime_id], are excluded before
+    attempt filtering, preserving independent-provider failover while avoiding
+    same-account fan-out. If no pool function is supplied, no credential-pool
+    filtering is applied. Non-contract transient infrastructure errors
+    (provider timeout, server error, capacity backpressure) allow cycling
+    through candidates again when all are exhausted, because the same runtime may
+    succeed on a subsequent attempt. Contract violations and quota/rate-limit
+    classes cap rotation.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
+  ?credential_pool_of_runtime_id:(string -> string option) ->
   ?fallback_hint:string ->
   base_runtime:string ->
   effective_runtime:string ->

@@ -242,32 +242,25 @@ let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t
          })
   | _ -> err
 
-let cli_wrapped_hard_quota_indicators =
-  [ "hard_quota"
-  ; "terminalquotaerror"
-  ; "quota_exhausted"
-  ; "exhausted your capacity on this model"
-  ; "quota will reset after"
-  ; "\"api_error_status\":429"
-  ; "you've hit your limit"
-  ; "monthly usage limit"
-  ; "org's monthly usage limit"
-  ; "reached your specified api usage limits"
-  ; "you will regain access on"
-  ]
+(* Legacy accessors stay here for module compatibility.  The classifier SSOT is
+   the provider-attempt path used by the live turn driver. *)
+let message_looks_like_cli_wrapped_hard_quota =
+  Keeper_turn_driver_provider_attempt.message_looks_like_cli_wrapped_hard_quota
 
-let message_looks_like_cli_wrapped_hard_quota message =
-  List.exists
-    (fun needle -> String_util.contains_substring_ci message needle)
-    cli_wrapped_hard_quota_indicators
+let message_looks_like_capacity_backpressure =
+  Keeper_turn_driver_provider_attempt.message_looks_like_capacity_backpressure
 
-let capacity_backpressure_indicators =
-  [ "client capacity"; "capacity exhausted"; "local_resource_exhaustion"; "slot full" ]
+let sdk_error_is_hard_quota =
+  Keeper_turn_driver_provider_attempt.sdk_error_is_hard_quota
 
-let message_looks_like_capacity_backpressure message =
-  List.exists
-    (fun needle -> String_util.contains_substring_ci message needle)
-    capacity_backpressure_indicators
+let sdk_error_soft_rate_limited =
+  Keeper_turn_driver_provider_attempt.sdk_error_soft_rate_limited
+
+let sdk_error_is_max_turns_exceeded =
+  Keeper_turn_driver_provider_attempt.sdk_error_is_max_turns_exceeded
+
+let sdk_error_runtime_fallback_class =
+  Keeper_turn_driver_provider_attempt.sdk_error_runtime_fallback_class
 
 let exit_code_of_message message =
   let prefix = "exited with code " in
@@ -315,25 +308,6 @@ let sdk_error_is_terminal_provider_runtime_failure = function
     message_looks_like_terminal_provider_runtime_failure message
   | _ -> false
 
-let sdk_error_is_hard_quota = function
-  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _ as err)
-    when Llm_provider.Retry.is_hard_quota err -> true
-  | Agent_sdk.Error.Api
-      (Llm_provider.Retry.RateLimited { message; _ }
-      | InvalidRequest { message }
-      | NetworkError { message; _ }
-      | Overloaded { message }
-      | ServerError { message; _ }) ->
-    message_looks_like_cli_wrapped_hard_quota message
-  | _ -> false
-
-let sdk_error_soft_rate_limited = function
-  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as err) ->
-    if Llm_provider.Retry.is_hard_quota err then None else Some retry_after
-  | Agent_sdk.Error.Provider (Llm_provider.Error.RateLimit { retry_after; _ }) ->
-    Some retry_after
-  | _ -> None
-
 type capacity_backpressure_retry_hint =
   | Cbr_explicit of float
   | Cbr_synthetic_default of float
@@ -362,14 +336,3 @@ let sdk_error_capacity_backpressure_retry_after_s = function
   | Agent_sdk.Error.Provider (Llm_provider.Error.CapacityExhausted { retry_after; _ }) ->
     Some retry_after
   | _ -> None
-
-let sdk_error_is_max_turns_exceeded = function
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) -> true
-  | _ -> false
-
-let sdk_error_runtime_fallback_class err =
-  match Keeper_internal_error.classify_masc_internal_error err with
-  | Some internal -> Some (Keeper_internal_error.kind_of_masc_internal_error internal)
-  | None when sdk_error_is_hard_quota err -> Some "hard_quota"
-  | None when sdk_error_is_max_turns_exceeded err -> Some "max_turns"
-  | None -> None

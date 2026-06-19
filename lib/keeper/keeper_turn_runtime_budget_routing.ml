@@ -6,6 +6,24 @@ open Keeper_types_profile
 open Keeper_context_runtime
 module EC = Keeper_error_classify
 
+let credential_pool_of_runtime_id runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | None -> None
+  | Some (runtime : Runtime.t) ->
+    let transport =
+      match runtime.provider.transport with
+      | Runtime_schema.Http endpoint -> "http:" ^ endpoint
+      | Runtime_schema.Cli command -> "cli:" ^ command
+    in
+    let credential =
+      match runtime.provider.credentials with
+      | Some (Runtime_schema.Env key) -> "env:" ^ key
+      | Some (Runtime_schema.File path) -> "file:" ^ path
+      | Some (Runtime_schema.Inline _) -> "inline:" ^ runtime.provider.id
+      | None -> "none"
+    in
+    Some (transport ^ "|" ^ credential)
+
 let next_fail_open_runtime_for_turn
       ~(base_runtime : string)
       ~(effective_runtime : string)
@@ -14,6 +32,7 @@ let next_fail_open_runtime_for_turn
   : EC.degraded_retry option
   =
   EC.degraded_rotation_after_recoverable_error
+    ~credential_pool_of_runtime_id
     ~base_runtime
     ~effective_runtime
     ~attempted_runtimes

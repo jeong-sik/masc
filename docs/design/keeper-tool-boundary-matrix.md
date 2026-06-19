@@ -161,8 +161,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_diversity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_emission_hook.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_emission_hook.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_guidance.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_guidance.mli` - tool-surface-policy
 - `lib/keeper_outcome_taxonomy/keeper_tool_outcome.ml` - tool-surface-policy
 - `lib/keeper_outcome_taxonomy/keeper_tool_outcome.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_path_validation.ml` - tool-surface-policy

@@ -514,7 +514,6 @@ lib/keeper/keeper_toml_loader.ml:498
 lib/keeper/keeper_tool_alias.ml:282
 lib/keeper/keeper_tool_alias.ml:361
 lib/keeper/keeper_tool_emission_hook.ml:29
-lib/keeper/keeper_tool_guidance.ml:149
 lib/keeper/keeper_tool_policy.ml:683
 lib/keeper/keeper_tool_policy.ml:699
 lib/keeper/keeper_tool_registry.ml:215

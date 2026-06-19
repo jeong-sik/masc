@@ -1,19 +1,18 @@
 (** Contract lock for {!Keeper_hooks_oas_introspection.hook_introspection_json}.
 
-    This is a CONTRACT LOCK, not a live cross-check. The introspection is a
-    hand-maintained static description of the keeper hook slots, so it can
-    silently drift from the real wiring. This test pins the semantic contract
-    (which slots exist, which are active, their sources, and the cost-telemetry
-    "never enforced" invariant) so any edit to the introspection forces a
-    conscious update here and a re-check against the real hook wiring:
+    The introspection is a hand-maintained static description of the keeper
+    hook slots. This test pins the semantic contract and cross-checks the slots
+    owned by [Keeper_hooks_oas.make_hooks] against the actual final hook record,
+    so a runtime slot cannot be removed while the dashboard still reports it as
+    active:
 
     - lib/keeper/keeper_hooks_oas.ml ([make_hooks]) — the keeper_hooks_oas slots
     - lib/keeper/keeper_run_tools.ml — before_turn_params
     - lib/keeper/keeper_guards.ml — pre_tool_use
 
-    A full runtime cross-check that builds the real [make_hooks] record and
-    asserts each field's Some/None against these claims needs a
-    Workspace.config / keeper_meta / turn_ctx_cell fixture and is deferred. *)
+    [before_turn_params] is assembled by [Keeper_run_tools_hooks], not
+    [make_hooks], so its source/active claim remains a sibling-module contract
+    lock here. *)
 
 open Alcotest
 
@@ -37,6 +36,11 @@ let slot_bool slot_name field =
 
 let slot_string slot_name field =
   match slot_field slot_name field with Some (`String s) -> Some s | _ -> None
+
+let slot_active slot_name =
+  match slot_bool slot_name "active" with
+  | Some active -> active
+  | None -> failwith ("introspection slot missing active bool: " ^ slot_name)
 
 (* The 11 slots the introspection claims are wired, and the 3 it claims are
    not (compaction is handled by keeper_post_turn, not the SDK hooks). *)
@@ -83,6 +87,57 @@ let test_sources () =
       check (option string) (n ^ " source") (Some "not_registered") (slot_string n "source"))
     expected_inactive
 
+let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
+  let json : Yojson.Safe.t =
+    `Assoc
+      [
+        "name", `String name;
+        "agent_name", `String name;
+        "trace_id", `String "keeper-hooks-introspection-test";
+        "tool_access", Json_util.json_string_list [];
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> ref meta
+  | Error e -> failwith ("make_meta_ref: " ^ e)
+
+let make_runtime_hooks () : Agent_sdk.Hooks.hooks =
+  let base_path =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      ("masc-hook-introspection-" ^ string_of_int (Unix.getpid ()))
+  in
+  let config = Masc.Workspace.default_config base_path in
+  let meta_ref = make_meta_ref "hook-introspection-keeper" in
+  let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+  Masc.Keeper_hooks_oas.make_hooks ~config ~meta_ref ~turn_ctx_cell ~generation:0 ()
+
+let runtime_slots_of (hooks : Agent_sdk.Hooks.hooks) =
+  [
+    "before_turn", Option.is_some hooks.before_turn;
+    "after_turn", Option.is_some hooks.after_turn;
+    "pre_tool_use", Option.is_some hooks.pre_tool_use;
+    "post_tool_use", Option.is_some hooks.post_tool_use;
+    "post_tool_use_failure", Option.is_some hooks.post_tool_use_failure;
+    "on_stop", Option.is_some hooks.on_stop;
+    "on_idle", Option.is_some hooks.on_idle;
+    "on_idle_escalated", Option.is_some hooks.on_idle_escalated;
+    "on_error", Option.is_some hooks.on_error;
+    "on_tool_error", Option.is_some hooks.on_tool_error;
+    "pre_compact", Option.is_some hooks.pre_compact;
+    "post_compact", Option.is_some hooks.post_compact;
+    "on_context_compacted", Option.is_some hooks.on_context_compacted;
+  ]
+
+let test_runtime_active_claims_match_make_hooks () =
+  make_runtime_hooks ()
+  |> runtime_slots_of
+  |> List.iter (fun (slot_name, active) ->
+    check bool
+      (slot_name ^ " active claim matches make_hooks")
+      active
+      (slot_active slot_name))
+
 (* The cost budget is advisory-only: keeper_guards.cost_guard ignores
    max_cost_usd and always returns Continue. The introspection must therefore
    report enforced:false in BOTH the "no budget" and "budget set" branches —
@@ -112,6 +167,8 @@ let () =
       , [ test_case "exactly the 14 known slots" `Quick test_slot_set
         ; test_case "11 active / 3 inactive" `Quick test_active_split
         ; test_case "slot sources" `Quick test_sources
+        ; test_case "make_hooks active claims match runtime record" `Quick
+            test_runtime_active_claims_match_make_hooks
         ; test_case "cost telemetry is never enforced" `Quick test_cost_telemetry_never_enforced
         ] )
     ]

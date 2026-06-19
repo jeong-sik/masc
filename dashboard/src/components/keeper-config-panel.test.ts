@@ -375,6 +375,18 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.network_mode).toBeUndefined()
   })
 
+  it('omits compaction_token_gate when unchanged but emits it when edited', () => {
+    const c = makeKeeperConfigForSandbox({})
+    // Unchanged draft → not in payload.
+    expect(buildRuntimePayload(draftFrom(c), c).compaction_token_gate).toBeUndefined()
+    // Editing the token gate (now reachable via the InlineNumberRow) → emitted.
+    const edited = buildRuntimePayload(
+      draftFrom(c, { compaction_token_gate: c.compaction.token_gate + 4096 }),
+      c,
+    )
+    expect(edited.compaction_token_gate).toBe(c.compaction.token_gate + 4096)
+  })
+
   it('emits runtime_id when selected runtime changes', () => {
     const c = makeKeeperConfigForSandbox({
       execution: {
@@ -597,6 +609,23 @@ describe('KeeperConfigPanel', () => {
     const textareas = Array.from(container.querySelectorAll('textarea'))
     expect(textareas.length).toBeGreaterThan(0)
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
+  })
+
+  it('renders the compaction token gate as an editable number input (not a read-only row)', async () => {
+    // Regression guard for the ConfigRow → InlineNumberRow swap: a read-only
+    // ConfigRow renders no <input>, so asserting the input exists verifies the
+    // actual render change (buildRuntimePayload alone passed before the swap).
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    const tokenGateInput = container.querySelector(
+      'input[aria-label="토큰 게이트"]',
+    ) as HTMLInputElement | null
+    expect(tokenGateInput).not.toBeNull()
+    expect(tokenGateInput!.type).toBe('number')
+    // Value reflects the loaded config (makeKeeperConfig compaction.token_gate = 24000).
+    expect(tokenGateInput!.value).toBe('24000')
   })
 
   it('patches runtime_id from the dashboard panel', async () => {

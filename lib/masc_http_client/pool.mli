@@ -196,6 +196,12 @@ module For_testing : sig
     val compare : t -> t -> int
   end
 
+  (** Exposed for cleanup contract tests: close an unreleased client exactly
+      once in a cancel-protected finalizer and swallow release exceptions so
+      [Fun.protect] does not mask the original request/body exception. *)
+  val close_unreleased_client :
+    bool ref -> (close_only:bool -> unit) -> unit
+
   (** Exposed so unit tests can drive idle-timeout logic against a
       mock [Piaf.Body.t] built from [Piaf_stream.create], without
       standing up a real HTTP server. *)

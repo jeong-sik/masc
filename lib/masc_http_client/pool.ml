@@ -312,6 +312,10 @@ let method_to_piaf : http_method -> Piaf.Method.t = function
   | `HEAD   -> `HEAD
   | `PATCH  -> `Other "PATCH"
 
+let close_unreleased_client released release_once =
+  Eio.Cancel.protect (fun () ->
+    if not !released then (try release_once ~close_only:true with _ -> ()))
+
 let path_and_query uri =
   let p = Uri.path uri in
   let p = if p = "" then "/" else p in
@@ -333,34 +337,58 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
   match acquired with
   | Error e -> Error e
   | Ok client ->
+    (* Mirror [do_request_with_idle_timeout]: guarantee the client is released
+       on EVERY exit. [Pool.request] wraps this call in [with_optional_timeout]'s
+       [Eio.Fiber.first]; when the timeout wins it cancels this fiber, and the
+       cancel can land inside [Piaf.Body.to_string] — past the explicit releases
+       below. Without the finally the Piaf client/socket is neither parked nor
+       closed and the FD leaks (#21547). [Eio.Cancel.protect] lets the blocking
+       shutdown complete under cancellation; exceptions are swallowed so the
+       finalizer cannot mask the original via [Fun.Finally_raised] (CLAUDE.md
+       OCaml cleanup rule). *)
+    let released = ref false in
+    let release_once ~close_only =
+      if not !released then begin
+        released := true;
+        release t key client ~close_only
+      end
+    in
     let path = path_and_query uri in
     let body_piaf = Option.map Piaf.Body.of_string body in
-    t.counters.inflight <- t.counters.inflight + 1;
-    let result =
-      try
-        Piaf.Client.request client ?headers ?body:body_piaf
-          ~meth:(method_to_piaf method_) path
-      with exn -> Error (`Msg (Printexc.to_string exn))
-    in
-    t.counters.inflight <- t.counters.inflight - 1;
-    match result with
-    | Error err ->
-      (* Connection is suspect; close, do not park. *)
-      release t key client ~close_only:true;
-      Error (Piaf.Error.to_string (err :> Piaf.Error.t))
-    | Ok resp ->
-      let status = Piaf.Status.to_code (Piaf.Response.status resp) in
-      let headers_list =
-        Piaf.Response.headers resp |> Piaf.Headers.to_list
-      in
-      let body_result = Piaf.Body.to_string (Piaf.Response.body resp) in
-      (match body_result with
-       | Error err ->
-         release t key client ~close_only:true;
-         Error (Piaf.Error.to_string (err :> Piaf.Error.t))
-       | Ok body_str ->
-         release t key client ~close_only:false;
-         Ok { status; headers = headers_list; body = body_str })
+    Fun.protect
+      ~finally:(fun () ->
+        close_unreleased_client released release_once)
+      (fun () ->
+        t.counters.inflight <- t.counters.inflight + 1;
+        let result =
+          Fun.protect
+            ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
+            (fun () ->
+               try
+                 Piaf.Client.request client ?headers ?body:body_piaf
+                   ~meth:(method_to_piaf method_) path
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn -> Error (`Msg (Printexc.to_string exn)))
+        in
+        match result with
+        | Error err ->
+          (* Connection is suspect; close, do not park. *)
+          release_once ~close_only:true;
+          Error (Piaf.Error.to_string (err :> Piaf.Error.t))
+        | Ok resp ->
+          let status = Piaf.Status.to_code (Piaf.Response.status resp) in
+          let headers_list =
+            Piaf.Response.headers resp |> Piaf.Headers.to_list
+          in
+          let body_result = Piaf.Body.to_string (Piaf.Response.body resp) in
+          (match body_result with
+           | Error err ->
+             release_once ~close_only:true;
+             Error (Piaf.Error.to_string (err :> Piaf.Error.t))
+           | Ok body_str ->
+             release_once ~close_only:false;
+             Ok { status; headers = headers_list; body = body_str }))
 
 (* Optional wall-clock timeout race; mirrors masc_http_client pattern. *)
 let with_optional_timeout
@@ -487,8 +515,12 @@ let do_request_with_idle_timeout t
     let start_sec = Eio.Time.now clock in
     Fun.protect
       ~finally:(fun () ->
-        if not !released then
-          release_once ~close_only:true)
+        (* Cancel-safe close. [request_with_idle_timeout]'s outer
+           [total_timeout_sec] [Eio.Fiber.first] can cancel this fiber mid-body;
+           without [Eio.Cancel.protect] the blocking Piaf shutdown would not
+           complete (socket FD leak) and a [Cancelled] raised here would mask the
+           original via [Fun.Finally_raised] (CLAUDE.md OCaml cleanup rule). *)
+        close_unreleased_client released release_once)
       (fun () ->
          t.counters.inflight <- t.counters.inflight + 1;
          let result =
@@ -588,5 +620,6 @@ let stats t : stats =
 
 module For_testing = struct
   module Host_key = Host_key
+  let close_unreleased_client = close_unreleased_client
   let read_body_with_idle = read_body_with_idle
 end

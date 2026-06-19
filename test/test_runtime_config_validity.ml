@@ -365,6 +365,24 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_kwargs))
 
+let test_repo_runtime_bindings_resolve_through_oas_catalog () =
+  with_repo_oas_model_catalog @@ fun catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _librarian, _cross_verifier, _media_failover) ->
+    check bool "at least one runtime binding" true (List.length runtimes > 0);
+    List.iter
+      (fun (runtime : Runtime.t) ->
+         let model_id = runtime.model.api_name in
+         match Llm_provider.Model_catalog.lookup catalog model_id with
+         | None ->
+           failf
+             "runtime binding %s model %s must resolve through repo OAS catalog"
+             runtime.id model_id
+         | Some _ -> ())
+      runtimes
+
 let test_repo_runtime_toml_loads () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
@@ -880,6 +898,9 @@ let () =
             test_runtime_json_not_in_repo_config;
           test_case "repo OAS catalog covers live RunPod MTP runtime" `Quick
             test_repo_oas_model_catalog_covers_live_runpod_mtp;
+          test_case
+            "repo runtime bindings resolve through the OAS catalog"
+            `Quick test_repo_runtime_bindings_resolve_through_oas_catalog;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case

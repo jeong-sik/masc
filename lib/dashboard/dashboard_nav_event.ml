@@ -11,6 +11,8 @@ let valid_surfaces =
   [ "cockpit"
   ; "overview"
   ; "monitoring"
+  ; "keepers"
+  ; "board"
   ; "command"
   ; "connectors"
   ; "workspace"

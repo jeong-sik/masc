@@ -7,9 +7,9 @@ import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { SYSTEM_MESSAGE_FROM, boardMessageRowKey, previewBoardMessage } from '../../lib/board-utils'
 import { currentDashboardActorName } from '../../lib/dashboard-session-actor'
-import { navigate } from '../../router'
 import { messages, shellAuthSummary } from '../../store'
 import type { DashboardShellAuthSummary, Message } from '../../types'
+import { navigateBoard } from './board-route'
 
 interface MentionInboxRow {
   message: Message
@@ -199,7 +199,7 @@ export function MentionInbox() {
           variant="ghost"
           size="sm"
           class="inline-flex items-center gap-1.5"
-          onClick=${() => navigate('workspace', { section: 'board' })}
+          onClick=${() => navigateBoard()}
           ariaLabel="게시판으로 돌아가기"
         >
           <${ArrowLeft} size=${14} aria-hidden="true" />

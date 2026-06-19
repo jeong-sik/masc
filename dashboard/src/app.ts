@@ -27,13 +27,12 @@ import {
   DashboardMain,
   ErrorCounterBadge,
   isKeeperDetailDashboardRoute,
-  SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
 import { EmergencyStopControl } from './components/emergency-stop-control'
 import { TransportBeacon } from './components/transport-beacon'
 import { DashboardSurfaceTabs } from './components/dashboard-surface-tabs'
-import { MobileBottomBar } from './components/mobile-nav'
+import { DashboardNavRail } from './components/mobile-nav'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
@@ -45,7 +44,7 @@ import { DashboardStatusTray } from './components/status-tray'
 import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
 import {
   DASHBOARD_NAV_ITEMS,
-  VISIBLE_DASHBOARD_NAV_ITEMS,
+  PRIMARY_DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
 } from './config/navigation'
 import { Menu, X } from 'lucide-preact'
@@ -285,7 +284,7 @@ export function App() {
           <div class="flex min-w-0 flex-1 items-center gap-3 max-[860px]:flex-wrap">
             <div class="flex min-w-0 shrink-0 items-center gap-2.5 max-[520px]:w-full">
               <button type="button"
-                class=${`hidden max-[768px]:flex size-11 items-center justify-center rounded-md border border-[var(--ss-border)] bg-[var(--ss-card)] text-[var(--ss-text-primary)] cursor-pointer transition-colors hover:bg-[var(--ss-surface-subtle)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
+                class=${`${isMobile ? 'flex' : 'hidden'} size-11 items-center justify-center rounded-md border border-[var(--ss-border)] bg-[var(--ss-card)] text-[var(--ss-text-primary)] cursor-pointer transition-colors hover:bg-[var(--ss-surface-subtle)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? 'Close navigation' : 'Open navigation'}
                 aria-controls="dashboard-side-rail"
@@ -314,7 +313,7 @@ export function App() {
               </div>
             </div>
 
-            <${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
+            <${DashboardSurfaceTabs} items=${PRIMARY_DASHBOARD_NAV_ITEMS} currentTab=${currentTab} />
           </div>
 
           <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
@@ -334,10 +333,10 @@ export function App() {
             <//>
             <${ConnectionStatus} />
             <${ErrorCounterBadge} />
-            <div class="max-[768px]:hidden"><${TransportBeacon} /></div>
-            <div class="max-[768px]:hidden"><${ThemeSwitch} /></div>
-            <div class="max-[768px]:hidden"><${TweaksPanelToggle} /></div>
-            <div class="max-[768px]:hidden"><${BuildIdentityBadge} /></div>
+            <div class="v2-desktop-header-only"><${TransportBeacon} /></div>
+            <div class="v2-desktop-header-only"><${ThemeSwitch} /></div>
+            <div class="v2-desktop-header-only"><${TweaksPanelToggle} /></div>
+            <div class="v2-desktop-header-only"><${BuildIdentityBadge} /></div>
           </div>
         </div>
       </header>
@@ -368,17 +367,21 @@ export function App() {
         ${compactChromeMode
           ? null
           : html`
-            ${mobileMenuOpen.value ? html`
-              <button type="button" aria-label="Close navigation" tabindex=${-1} class="hidden max-[768px]:block fixed inset-0 z-40 cursor-pointer bg-black/50" onClick=${() => { mobileMenuOpen.value = false }}></button>
-            ` : null}
-            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="v2-shell-rail ${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:hidden max-[768px]:fixed max-[768px]:inset-y-0 max-[768px]:left-0 max-[768px]:z-50 max-[768px]:m-0 max-[768px]:w-72 max-[768px]:max-h-none max-[768px]:rounded-none max-[768px]:border-r ${mobileMenuOpen.value ? 'max-[768px]:block' : 'max-[768px]:hidden'}">
-              <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
-            </aside>
+            <${DashboardNavRail}
+              currentTab=${currentTab}
+              mobile=${isMobile}
+              drawerOpen=${mobileMenuOpen.value}
+              keeperDetailMode=${keeperDetailMode}
+              collapsed=${sidebarCollapsed.value}
+              onToggleCollapsed=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }}
+              onToggleDrawer=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }}
+              onCloseDrawer=${() => { mobileMenuOpen.value = false }}
+            />
           `}
 
         <div class="v2-stage min-h-0 flex-1">
           <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'v2-body min-w-0 flex-1 overflow-hidden' : 'v2-body min-w-0 flex-1 overflow-hidden rounded-[var(--ss-radius-card)] border border-[var(--ss-border)] bg-[var(--ss-card)] shadow-[var(--ss-shadow-card)]'}>
-            <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
+            <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : focusMode ? 'dashboard-main-scroll h-full overflow-y-auto p-3 max-[520px]:p-2 max-[900px]:pb-16' : 'dashboard-main-scroll h-full overflow-y-auto p-4 max-[900px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>
                 <${DashboardMain} />
               </div>
@@ -387,8 +390,7 @@ export function App() {
           ${dock.state.value.open ? html`<${CopilotDock} dock=${dock} />` : null}
         </div>
       </div>
-      ${!compactChromeMode && !mobileMenuOpen.value && !keeperDetailMode ? html`<${MobileBottomBar} currentTab=${currentTab} onMenuToggle=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }} />` : null}
-      ${!dock.state.value.open && !compactChromeMode ? html`<${CopilotDockFab} dock=${dock} />` : null}
+      ${!dock.state.value.open && !compactChromeMode && !isMobile ? html`<${CopilotDockFab} dock=${dock} />` : null}
 
       ${selectedAgentName.value
         ? html`<${Suspense} fallback=${null}><${LazyAgentDetailOverlay} /><//>`

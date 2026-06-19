@@ -1064,8 +1064,8 @@ export function routeLinksForContext(
     add({
       id: `board:${boardPostId}`,
       label: 'Board',
-      tab: 'workspace',
-      params: { section: 'board', post: boardPostId },
+      tab: 'board',
+      params: { post: boardPostId },
       evidence: `Board post ${boardPostId}`,
     })
   }
@@ -1074,9 +1074,8 @@ export function routeLinksForContext(
     add({
       id: `comment:${commentId}`,
       label: 'Comment',
-      tab: 'workspace',
+      tab: 'board',
       params: {
-        section: 'board',
         ...(boardPostId ? { post: boardPostId } : {}),
         comment: commentId,
       },

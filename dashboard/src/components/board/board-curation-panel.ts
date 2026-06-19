@@ -3,12 +3,12 @@ import { useCallback, useEffect, useState } from 'preact/hooks'
 import { ArrowLeft, RefreshCw, Sparkles } from 'lucide-preact'
 import { fetchBoardCuration } from '../../api/board'
 import type { BoardCurationSnapshot } from '../../types'
-import { navigate } from '../../router'
 import { ActionButton } from '../common/button'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { MISSING_DATA_DASH } from '../../lib/format-string'
+import { navigateBoard } from './board-route'
 
 function percent(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return MISSING_DATA_DASH
@@ -149,7 +149,7 @@ export function BoardCurationPanel() {
           <h2 id="board-curation-heading" class="mt-1 text-xl font-bold text-[var(--color-fg-primary)]">AI curation snapshot</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <${ActionButton} variant="ghost" size="sm" onClick=${() => navigate('workspace', { section: 'board' })} ariaLabel="Back to board">
+          <${ActionButton} variant="ghost" size="sm" onClick=${() => navigateBoard()} ariaLabel="Back to board">
             <span class="inline-flex items-center gap-1.5"><${ArrowLeft} size=${14} aria-hidden="true" />Board<//>
           <//>
           <${ActionButton} variant="ghost" size="sm" onClick=${() => { void load() }} disabled=${loading} ariaLabel="Refresh board curation">

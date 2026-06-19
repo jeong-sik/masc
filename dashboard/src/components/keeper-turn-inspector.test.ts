@@ -3,7 +3,11 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchKeeperTurnRecords, type TurnRecordsResponse } from '../api/dashboard'
-import { KeeperMemoryOsRecallPanel, KeeperTurnInspector } from './keeper-turn-inspector'
+import {
+  initialTurnRowForTimestamp,
+  KeeperMemoryOsRecallPanel,
+  KeeperTurnInspector,
+} from './keeper-turn-inspector'
 
 vi.mock('../api/dashboard', () => {
   return {
@@ -195,6 +199,93 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(drawerText).toContain('턴 상세')
     expect(drawerText).toContain('trace-active_0042')
     expect(drawerText).toContain('local')
+  })
+
+  it('matches an initial timestamp to the closest retained turn row', () => {
+    const response = turnRecordsWithMemoryOs()
+    const nearTurn42 = new Date((1_781_587_560 + 12) * 1000).toISOString()
+    const farFromRetainedTurns = new Date((1_781_587_560 + 3600) * 1000).toISOString()
+
+    expect(initialTurnRowForTimestamp(response.entries, nearTurn42)?.record.absolute_turn).toBe(42)
+    expect(initialTurnRowForTimestamp(response.entries, farFromRetainedTurns)).toBeNull()
+    expect(initialTurnRowForTimestamp(response.entries, 'not-a-date')).toBeNull()
+  })
+
+  it('opens the detail drawer when an initial timestamp matches a retained turn', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    const nearTurn42 = new Date((1_781_587_560 + 12) * 1000).toISOString()
+
+    const { container } = render(html`
+      <${KeeperTurnInspector}
+        keeperName="albini"
+        initialTurnTimestamp=${nearTurn42}
+      />
+    `)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    const drawerText = container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent ?? ''
+    expect(drawerText).toContain('trace-active_0042')
+    expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeFalsy()
+  })
+
+  it('keeps the list view when an initial timestamp is outside the retained turn window', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    const farFromRetainedTurns = new Date((1_781_587_560 + 3600) * 1000).toISOString()
+
+    const { container } = render(html`
+      <${KeeperTurnInspector}
+        keeperName="albini"
+        initialTurnTimestamp=${farFromRetainedTurns}
+      />
+    `)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-linked-empty"]')).toBeTruthy()
+    })
+    expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeFalsy()
+    expect(container.textContent).toContain('30분 이내의 turn record 없음')
+  })
+
+  it('renders repeated trace turn rows without duplicate-key warnings', async () => {
+    const response = turnRecordsWithMemoryOs()
+    response.entries = [
+      ...response.entries,
+      {
+        record: {
+          ...response.entries[1]!.record,
+          ts: 1_781_587_620,
+          output_tokens: 312,
+          execution_ids: ['exec-42b'],
+        },
+        diff_vs_prev: null,
+      },
+    ]
+    response.count = response.entries.length
+    fetchKeeperTurnRecordsMock.mockResolvedValue(response)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    try {
+      const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+      await waitFor(() => {
+        expect(container.querySelectorAll('.kti-turn-summary').length).toBe(3)
+      })
+
+      const duplicateKeyCalls = errorSpy.mock.calls
+        .flat()
+        .map(value => String(value))
+        .filter(value => value.includes('same key') || value.includes('same key attribute'))
+      expect(duplicateKeyCalls).toEqual([])
+    } finally {
+      errorSpy.mockRestore()
+    }
   })
 
   it('switches tabs inside the drawer', async () => {

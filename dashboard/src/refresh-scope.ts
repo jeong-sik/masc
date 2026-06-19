@@ -10,7 +10,7 @@ export function routeWantsRefreshTarget(
     case 'execution':
       return routeWantsExecution(routeState)
     case 'board':
-      return routeState.tab === 'workspace' && routeState.params.section === 'board'
+      return routeState.tab === 'board' || (routeState.tab === 'workspace' && routeState.params.section === 'board')
     case 'operator':
       return routeState.tab === 'command' && routeState.params.view !== 'inspector'
     case 'activity':
@@ -19,6 +19,8 @@ export function routeWantsRefreshTarget(
 }
 
 function routeWantsExecution(routeState: Pick<RouteState, 'tab' | 'params'>): boolean {
+  if (routeState.tab === 'keepers') return true
+
   if (routeState.tab === 'workspace') {
     return routeState.params.section === 'planning'
   }

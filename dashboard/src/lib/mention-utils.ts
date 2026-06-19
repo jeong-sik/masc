@@ -28,6 +28,11 @@ export function trailingMentionNameFromMessage(message: string): string | null {
   return match?.[1] ?? null
 }
 
+export function firstMentionNameFromMessage(message: string): string | null {
+  const match = message.match(/(?:^|\s)@([A-Za-z0-9_.-]+)/)
+  return match?.[1] ?? null
+}
+
 export function onlineKeeperNameForMention(onlineKeepers: OnlineKeeper[], mentionName: string | null): string | null {
   if (!mentionName) return null
   const normalized = mentionName.toLowerCase()

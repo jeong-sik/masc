@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   DASHBOARD_SURFACES,
+  PRIMARY_DASHBOARD_NAV_ITEMS,
+  PRIMARY_DASHBOARD_SURFACES,
   SECTION_REDIRECTS,
   VISIBLE_DASHBOARD_NAV_ITEMS,
   defaultParamsForTab,
+  isSectionlessSurface,
   normalizeRouteParams,
   sectionItemsForTab,
   visibleSectionItemsForTab,
@@ -18,12 +21,81 @@ describe('dashboard surface navigation', () => {
     expect(defaultParamsForTab('cockpit')).toEqual({})
     expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).not.toContain('cockpit')
   })
+
+  it('exposes Keepers as a top-level v2 workspace without nested sections', () => {
+    expect(defaultParamsForTab('keepers')).toEqual({})
+    expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('keepers')
+    expect(sectionItemsForTab('keepers')).toEqual([])
+    expect(visibleSectionItemsForTab('keepers')).toEqual([])
+
+    const result = normalizeRouteParams('keepers', { section: 'agents', keeper: 'sangsu', surface: 'old' })
+    expect(result).toEqual({ keeper: 'sangsu' })
+  })
+
+  it('exposes Board as a top-level v2 surface without workspace section baggage', () => {
+    expect(defaultParamsForTab('board')).toEqual({})
+    expect(VISIBLE_DASHBOARD_NAV_ITEMS.map(item => item.id)).toContain('board')
+    expect(sectionItemsForTab('board')).toEqual([])
+    expect(visibleSectionItemsForTab('board')).toEqual([])
+
+    const result = normalizeRouteParams('board', {
+      section: 'board',
+      post: 'post-1',
+      comment: 'comment-1',
+      focus: 'curation',
+      surface: 'old',
+    })
+    expect(result).toEqual({
+      post: 'post-1',
+      comment: 'comment-1',
+      focus: 'curation',
+    })
+  })
+
+  it('labels the workspace route as the v2 Work surface while preserving route compatibility', () => {
+    const workspace = DASHBOARD_SURFACES.find(surface => surface.id === 'workspace')
+
+    expect(workspace?.label).toBe('Work')
+    expect(defaultParamsForTab('workspace')).toEqual({ section: 'work' })
+    expect(workspace?.defaultTab).toBe('workspace')
+  })
+
+  it('keeps the v2 primary shell aligned to the prototype surface set', () => {
+    expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
+      'overview',
+      'workspace',
+      'keepers',
+      'board',
+      'code',
+      'connectors',
+      'settings',
+    ])
+    expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
+      'Overview',
+      'Work',
+      'Keepers',
+      'Board',
+      'IDE',
+      'Connectors',
+      'Settings',
+    ])
+  })
+
+  it('uses one sectionless-surface classifier for section stripping and section lookup', () => {
+    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board'] as const
+    expect(sectionless.filter(id => isSectionlessSurface(id))).toEqual([...sectionless])
+    expect(sectionItemsForTab('settings')).toEqual([])
+    expect(normalizeRouteParams('settings', { section: 'legacy', surface: 'old', panel: 'theme' })).toEqual({
+      panel: 'theme',
+    })
+  })
 })
 
 describe('code (IDE plane) navigation', () => {
   it('exposes the production IDE plane in the sidebar', () => {
     expect(defaultParamsForTab('code')).toEqual({ section: 'ide-shell' })
     expect(DASHBOARD_SURFACES.find(surface => surface.id === 'code')?.hidden).not.toBe(true)
+    expect(DASHBOARD_SURFACES.find(surface => surface.id === 'code')?.label).toBe('IDE')
 
     const visibleCodeSections = visibleSectionItemsForTab('code')
     const allCodeSections = sectionItemsForTab('code')
@@ -60,6 +132,9 @@ describe('lab navigation', () => {
       'Performance',
       'Memory Explore',
     ])
+    expect(labSections.find(item => item.id === 'performance')?.description).toBe(
+      'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',
+    )
   })
 })
 
@@ -218,11 +293,36 @@ describe('workspace navigation labels', () => {
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
     expect(labelFor('planning')).toBe('Plans & Goals')
-    expect(labelFor('moderation')).toBe('Moderation')
+    expect(labelFor('moderation')).toBeUndefined()
     // goals is no longer a standalone section
     const ids = sections.map(item => item.id)
     expect(ids).not.toContain('goals')
-    expect(ids).toContain('moderation')
+    expect(ids).not.toContain('moderation')
+  })
+
+  it('hides legacy board-family sections now that Board is top-level', () => {
+    const visibleIds = visibleSectionItemsForTab('workspace').map(item => item.id)
+    const allSections = sectionItemsForTab('workspace')
+    const hiddenIds = allSections.filter(item => item.hidden).map(item => item.id)
+
+    expect(visibleIds).toEqual([
+      'work',
+      'planning',
+      'repositories',
+      'verification',
+    ])
+    expect(hiddenIds).toEqual([
+      'board',
+      'sub-boards',
+      'moderation',
+    ])
+
+    expect(normalizeRouteParams('workspace', { section: 'board', post: 'post-1' })).toMatchObject({
+      section: 'board',
+      post: 'post-1',
+    })
+    expect(normalizeRouteParams('workspace', { section: 'sub-boards' }).section).toBe('sub-boards')
+    expect(normalizeRouteParams('workspace', { section: 'moderation' }).section).toBe('moderation')
   })
 })
 

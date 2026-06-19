@@ -23,8 +23,8 @@ describe('useIsMobile', () => {
     container.remove()
   })
 
-  it('returns true when viewport width is at the default 760px breakpoint', () => {
-    window.innerWidth = 760
+  it('returns true when viewport width is at the default 900px breakpoint', () => {
+    window.innerWidth = 900
     render(html`<${TestHarness} />`, container)
 
     const result = container.querySelector('[data-testid="result"]')
@@ -32,7 +32,7 @@ describe('useIsMobile', () => {
   })
 
   it('returns false when viewport width is above the default breakpoint', () => {
-    window.innerWidth = 1024
+    window.innerWidth = 901
     render(html`<${TestHarness} />`, container)
 
     const result = container.querySelector('[data-testid="result"]')

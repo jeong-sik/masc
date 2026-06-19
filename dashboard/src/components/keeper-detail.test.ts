@@ -40,7 +40,8 @@ vi.mock('./keeper-config-panel', async () => {
   const actual = await vi.importActual<typeof import('./keeper-config-panel')>('./keeper-config-panel')
   return {
     ...actual,
-    KeeperConfigPanel: () => null,
+    KeeperConfigPanel: ({ keeperName }: { keeperName: string }) =>
+      html`<div data-testid="keeper-config-panel" data-keeper=${keeperName}>Config ${keeperName}</div>`,
     loadKeeperConfig: mocks.loadKeeperConfig,
     resetKeeperConfig: mocks.resetKeeperConfig,
   }
@@ -357,6 +358,50 @@ describe('KeeperDetailPage', () => {
     fireEvent.click(statusTab)
     expect(statusTab.getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('운영 상태 개요')).toBeTruthy()
+  })
+
+  it('opens target keeper config as an overlay from the roster row menu after a keeper route change', () => {
+    keepers.value = [
+      {
+        name: 'analyst',
+        status: 'active',
+        phase: 'Running',
+        lifecycle_phase: 'Running',
+      },
+      {
+        name: 'executor',
+        status: 'active',
+        phase: 'Running',
+        lifecycle_phase: 'Running',
+      },
+    ] as unknown as Keeper[]
+    mocks.route.value = {
+      tab: 'keepers',
+      params: { keeper: 'analyst' },
+      postId: null,
+    }
+    mocks.navigate.mockImplementationOnce((tab, params = {}) => {
+      mocks.route.value = { tab, params, postId: null }
+    })
+
+    const { container, rerender } = render(html`<${KeeperDetailPage} />`)
+
+    expect(container.querySelector('.kw-grid')?.getAttribute('data-detail')).toBe('closed')
+    fireEvent.click(screen.getByTestId('kw-roster-menu-executor'))
+    fireEvent.click(screen.getByTestId('kw-roster-menu-config'))
+    rerender(html`<${KeeperDetailPage} />`)
+
+    const grid = container.querySelector('.kw-grid')
+    expect(mocks.navigate).toHaveBeenCalledWith('keepers', { keeper: 'executor' })
+    expect(grid?.getAttribute('data-route-focused-keeper')).toBe('executor')
+    expect(grid?.getAttribute('data-detail')).toBe('closed')
+    expect(activeKeeperDetailSection.value).toBe('keeper-config')
+    expect(screen.getByTestId('kw-config-overlay')).toBeTruthy()
+    expect(screen.getByTestId('keeper-config-panel').getAttribute('data-keeper')).toBe('executor')
+
+    fireEvent.click(screen.getByTestId('kw-config-close'))
+
+    expect(container.querySelector('[data-testid="kw-config-overlay"]')).toBeNull()
   })
 
   // Removed test 'surfaces and clears keeper route focus...' (2026-05-19):

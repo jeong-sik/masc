@@ -126,6 +126,11 @@ function surfaceLink(surface?: SurfaceRef | null): { url: string; label: string;
 
 type ChatTranscriptVariant = 'default' | 'messenger'
 type ChatTranscriptSize = 'default' | 'primary'
+type ChatTranscriptAction = {
+  label: string
+  title?: string
+  onClick: (entry: KeeperConversationEntry) => void
+}
 
 function timeLabel(timestamp?: string | null): string | null {
   if (!timestamp) return null
@@ -1297,11 +1302,13 @@ function ChatMessageBubble({
   showMetadata = true,
   variant = 'default',
   showSourceBadge = false,
+  action,
 }: {
   entry: KeeperConversationEntry
   showMetadata?: boolean
   variant?: ChatTranscriptVariant
   showSourceBadge?: boolean
+  action?: ChatTranscriptAction
 }) {
   const [expandedRaw, setExpandedRaw] = useState(false)
   const [rawExpandedRaw, setRawExpandedRaw] = useState(false)
@@ -1455,6 +1462,21 @@ function ChatMessageBubble({
                 `}
           </div>
         </div>
+        ${action
+          ? html`
+              <button
+                type="button"
+                class=${`border border-[var(--accent-20)] bg-[var(--accent-10)] text-xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING} ${
+                  isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
+                }`}
+                onClick=${() => action.onClick(entry)}
+                title=${action.title ?? action.label}
+                data-testid="chat-message-action"
+              >
+                ${action.label}
+              </button>
+            `
+          : null}
         ${canExpand
           ? html`
               <button
@@ -1742,6 +1764,7 @@ export function ChatTranscript({
   size = 'default',
   showDayDividers = false,
   showSourceBadge = false,
+  action,
 }: {
   entries: KeeperConversationEntry[]
   emptyText: string
@@ -1752,6 +1775,7 @@ export function ChatTranscript({
   // (copilot dock, detail page, etc.) renders unchanged.
   showDayDividers?: boolean
   showSourceBadge?: boolean
+  action?: ChatTranscriptAction
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(true)
@@ -1820,7 +1844,7 @@ export function ChatTranscript({
           : entries.flatMap((entry, i) => {
               const bubble = entry.role === 'tool'
                 ? html`<${ToolCallBubble} key=${entry.id} entry=${entry} />`
-                : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} showSourceBadge=${showSourceBadge} />`
+                : html`<${ChatMessageBubble} key=${entry.id} entry=${entry} showMetadata=${showMetadata !== false} variant=${variant} showSourceBadge=${showSourceBadge} action=${action} />`
               // C1: emit a day divider before the first message of each calendar
               // day. Skipped entirely when showDayDividers is off (every non-
               // workspace surface), so their flat render is byte-identical.

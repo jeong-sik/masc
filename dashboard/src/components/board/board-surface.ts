@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
-import { Sparkles, Trophy } from 'lucide-preact'
+import { AtSign, Braces, Mic, Paperclip, Sparkles, Square, Trophy, X } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { SectionCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
@@ -13,21 +13,31 @@ import { Checkbox } from '../common/checkbox'
 import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
-import { navigate, route } from '../../router'
+import { route } from '../../router'
+import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
 import { votePost } from '../../api/board'
-import { createPost } from '../../api'
+import { createPost, currentDashboardActor, sendBroadcast } from '../../api'
 import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
+import { dispatchOperatorAction, operatorActionBusy } from '../../operator-store'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
 import { MessageWorkspaceTimeline } from './message-workspace-timeline'
 import { BoardCurationPanel } from './board-curation-panel'
 import { BoardKarmaPanel } from './board-karma-panel'
-import { MentionInbox, MentionInboxPanel } from './mention-inbox'
+import { extractMentionTargets, MentionInbox, MentionInboxPanel } from './mention-inbox'
 import { PostDetail, CommentThread, CommentForm } from './post-detail'
 import { ReactionBar } from './reaction-bar'
 import { StateBlockMessages } from './state-block-messages'
-import { ComposerV2 } from './composer-v2'
-import type { ComposerV2Mode } from './composer-v2'
+import {
+  ComposerV2,
+  createComposerVoiceDraft,
+  formatClock,
+  formatFileSize,
+  serializeComposerBody,
+} from './composer-v2'
+import type { ComposerAttachmentDraft, ComposerV2Mode, ComposerVoiceDraft } from './composer-v2'
+import { ensureStateBlockDraft, stateBlockKeys } from '../ops/ops-state'
+import { navigateBoard } from './board-route'
 import {
   boardActorAvatarKey,
   boardActorDisplayName,
@@ -37,6 +47,13 @@ import {
   navigateToAuthor,
   stripInlineMarkdown,
 } from '../../lib/board-utils'
+import {
+  firstMentionNameFromMessage,
+  keeperNameFromTarget,
+  mentionQueryFromMessage,
+  replaceTrailingMentionDraft,
+} from '../../lib/mention-utils'
+import { useOperatorMentionContext } from '../common/use-operator-mention-context'
 import { ringFocusClasses } from '../common/ring'
 import {
   boardPosts,
@@ -260,7 +277,7 @@ function BoardSummary() {
         variant="ghost"
         size="sm"
         class="v2-workspace-action ${lastBoardRefreshAt.value ? '' : 'ml-auto'} !px-2"
-        onClick=${() => navigate('workspace', { section: 'board', focus: 'curation' })}
+        onClick=${() => navigateBoard({ focus: 'curation' })}
         ariaLabel="보드 큐레이션 열기"
       >
         <span class="inline-flex items-center gap-1">
@@ -272,7 +289,7 @@ function BoardSummary() {
         variant="ghost"
         size="sm"
         class="v2-workspace-action !px-2"
-        onClick=${() => navigate('workspace', { section: 'board', focus: 'karma' })}
+        onClick=${() => navigateBoard({ focus: 'karma' })}
         ariaLabel="보드 카르마 열기"
       >
         <span class="inline-flex items-center gap-1">
@@ -569,7 +586,7 @@ function BdThreadDetail({ post, onClose }: { post: BoardPost; onClose: () => voi
   const authorAvatarKey = boardActorAvatarKey(post.author, post.author_identity)
 
   return html`
-    <aside class="bd-detail" data-testid="bd-thread-detail">
+    <aside class="bd-detail has-post" data-testid="bd-thread-detail">
       <div class="bd-detail-h">
         <h3>스레드</h3>
         <button type="button" class="bd-detail-x" onClick=${onClose} aria-label="닫기">✕</button>
@@ -594,11 +611,24 @@ function BdThreadDetail({ post, onClose }: { post: BoardPost; onClose: () => voi
   `
 }
 
-function BdDetail({ post, onClose }: { post: BoardPost | null; onClose: () => void }) {
+function BdDetail({
+  post,
+  mentionMobileOpen,
+  onClose,
+  onCloseMentions,
+}: {
+  post: BoardPost | null
+  mentionMobileOpen: boolean
+  onClose: () => void
+  onCloseMentions: () => void
+}) {
   if (post) return html`<${BdThreadDetail} post=${post} onClose=${onClose} />`
   return html`
-    <aside class="bd-detail" data-testid="bd-mention-detail">
-      <div class="bd-detail-h"><h3>멘션 인박스</h3></div>
+    <aside class=${`bd-detail is-mentions ${mentionMobileOpen ? 'is-mobile-open' : ''}`} data-testid="bd-mention-detail">
+      <div class="bd-detail-h">
+        <h3>멘션 인박스</h3>
+        <button type="button" class="bd-detail-x bd-detail-mobile-close" onClick=${onCloseMentions} aria-label="멘션 인박스 닫기">✕</button>
+      </div>
       <div class="bd-detail-scroll">
         <${MentionInboxPanel} />
       </div>
@@ -612,7 +642,13 @@ function BdComposer() {
   const [localBody, setLocalBody] = useState('')
   const [localHearth, setLocalHearth] = useState(boardHearthFilter.value)
   const [localFlair, setLocalFlair] = useState('')
+  const [mobileKeeperTarget, setMobileKeeperTarget] = useState('')
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const [mobileAttachments, setMobileAttachments] = useState<ComposerAttachmentDraft[]>([])
+  const [mobileVoiceDraft, setMobileVoiceDraft] = useState<ComposerVoiceDraft | null>(null)
+  const [mobileRecording, setMobileRecording] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const mobileFileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (boardHearthFilter.value !== localHearth) {
@@ -625,6 +661,7 @@ function BdComposer() {
     { key: 'mention', label: '멘션' },
     { key: 'state', label: '상태 블록' },
   ]
+  const activeModeLabel = tabs.find(tab => tab.key === mode)?.label ?? '게시'
 
   const placeholder = mode === 'post'
     ? `${boardHearthFilter.value ? `#${boardHearthFilter.value}` : '보드'}에 게시…`
@@ -633,11 +670,106 @@ function BdComposer() {
       : '상태 블록 발행 — 상태 키:값 형식'
 
   const composerMode: ComposerV2Mode = mode === 'post' ? 'broadcast' : mode === 'mention' ? 'dm' : 'state-block'
+  const mobileMention = useOperatorMentionContext({
+    message: localBody,
+    target: mobileKeeperTarget,
+    dmActive: mode === 'mention',
+    listboxId: 'bd-mobile-mention-listbox',
+    fallbackKeepers: dashboardKeepers.value,
+  })
+  const mobileMentionOptions = mobileMention.onlineKeepers
+  const mobileMentionOptionNames = mobileMentionOptions.map(keeper => keeper.name).join('\0')
+  const selectedMobileKeeper = keeperNameFromTarget(mobileKeeperTarget)
+  const selectedMobileKeeperAvailable =
+    !!selectedMobileKeeper && mobileMentionOptions.some(keeper => keeper.name === selectedMobileKeeper)
+  const typedMobileMention = mode === 'mention' ? firstMentionNameFromMessage(localBody) : null
+  const matchedTypedMobileMention = typedMobileMention
+    ? mobileMentionOptions.find(keeper => keeper.name.toLowerCase() === typedMobileMention.toLowerCase())?.name ?? null
+    : null
+  const mobileMentionTarget = mode === 'mention'
+    ? mobileMention.trailingMentionTarget
+      ?? matchedTypedMobileMention
+      ?? (selectedMobileKeeperAvailable ? selectedMobileKeeper : null)
+      ?? (mobileMentionOptions.length === 0 ? typedMobileMention : null)
+    : null
+  const mobileMentionUnresolved =
+    mode === 'mention'
+    && !!typedMobileMention
+    && !mobileMentionTarget
+    && mobileMentionOptions.length > 0
+  const mobileStateKeys = mode === 'state' ? stateBlockKeys(localBody) : []
+  const mobileQuickBusy = submitting || operatorActionBusy.value
+  const mobileMentionHasDraft = mode === 'mention'
+    && (localBody.trim() !== '' || mobileAttachments.length > 0 || mobileVoiceDraft !== null)
+  const mobileQuickHasDraft = mode === 'mention' ? mobileMentionHasDraft : localBody.trim() !== ''
+  const mobileQuickDisabled = mobileQuickBusy
+    || !mobileQuickHasDraft
+    || (mode === 'mention' && (!mobileMentionTarget || mobileMentionUnresolved))
+    || (mode === 'state' && mobileStateKeys.length === 0)
 
-  async function submitPost(event?: Event): Promise<void> {
+  useEffect(() => {
+    if (mode !== 'mention') return
+    if (selectedMobileKeeperAvailable) return
+    const firstKeeper = mobileMentionOptions[0]?.name
+    setMobileKeeperTarget(firstKeeper ? `keeper:${firstKeeper}` : '')
+  }, [mode, mobileMentionOptionNames, selectedMobileKeeperAvailable])
+
+  useEffect(() => {
+    if (mode !== 'mention') return
+    if (mobileMentionOptions.length > 0) return
+    void refreshExecution()
+  }, [mode, mobileMentionOptions.length])
+
+  function mobilePostTitle(body: string): string {
+    const firstLine = body
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .find(Boolean)
+    if (!firstLine) return 'Board post'
+    return firstLine.replace(/\s+/g, ' ').slice(0, 72)
+  }
+
+  function chooseMobileMentionTarget(value: string): void {
+    const keeperName = keeperNameFromTarget(value)
+    setMobileKeeperTarget(value)
+    if (!keeperName) return
+    setLocalBody(current => mentionQueryFromMessage(current) !== null ? replaceTrailingMentionDraft(current, keeperName) : current)
+  }
+
+  function chooseMobileMentionCandidate(keeperName: string): void {
+    setMobileKeeperTarget(`keeper:${keeperName}`)
+    setLocalBody(current => replaceTrailingMentionDraft(current, keeperName))
+  }
+
+  function attachMobileMentionFiles(files: FileList | File[]): void {
+    const nextFiles = Array.from(files).slice(0, 6)
+    if (nextFiles.length === 0) return
+    setMobileAttachments(current => [
+      ...current,
+      ...nextFiles.map((file, index): ComposerAttachmentDraft => ({
+        id: `mobile-${Date.now()}-${index}-${file.name}`,
+        kind: file.type.startsWith('image/') ? 'image' : 'file',
+        name: file.name,
+        size: formatFileSize(file.size),
+      })),
+    ].slice(0, 6))
+  }
+
+  function stopMobileVoiceDraft(): void {
+    setMobileRecording(false)
+    setMobileVoiceDraft(createComposerVoiceDraft())
+  }
+
+  function resetMobileMentionDrafts(): void {
+    setMobileAttachments([])
+    setMobileVoiceDraft(null)
+    setMobileRecording(false)
+  }
+
+  async function submitPost(event?: Event, options: { compactMobile?: boolean } = {}): Promise<void> {
     event?.stopPropagation()
-    const title = localTitle.trim()
     const body = localBody.trim()
+    const title = options.compactMobile ? mobilePostTitle(body) : localTitle.trim()
     if (!title || !body) return
     setSubmitting(true)
     try {
@@ -648,6 +780,7 @@ function BdComposer() {
       setLocalTitle('')
       setLocalBody('')
       setLocalFlair('')
+      setMobileOpen(false)
       showToast('글을 등록했습니다', 'success')
       refreshBoard()
     } catch (err) {
@@ -658,76 +791,412 @@ function BdComposer() {
     }
   }
 
+  async function submitMobileQuick(event?: Event): Promise<void> {
+    if (mode === 'post') {
+      await submitPost(event, { compactMobile: true })
+      return
+    }
+
+    event?.stopPropagation()
+    const body = localBody.trim()
+    const message = mode === 'mention'
+      ? serializeComposerBody({ text: localBody, attachments: mobileAttachments, voice: mobileVoiceDraft })
+      : body
+    if (!message || mobileQuickDisabled) return
+    setSubmitting(true)
+    try {
+      if (mode === 'mention') {
+        const keeperId = mobileMentionTarget
+        if (!keeperId) return
+        await dispatchOperatorAction({
+          actor: currentDashboardActor(),
+          action_type: 'keeper_message',
+          target_type: 'keeper',
+          target_id: keeperId,
+          payload: { message },
+        })
+      } else {
+        await sendBroadcast(currentDashboardActor(), message)
+      }
+      setLocalBody('')
+      resetMobileMentionDrafts()
+      setMobileOpen(false)
+      showToast('Message sent.', 'success')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Message send failed.'
+      console.warn('[board] mobile quick compose failed', message)
+      showToast(message, 'error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return html`
-    <div class="bd-composer" data-testid="bd-composer">
-      <div class="bd-comp-tabs" role="tablist" aria-label="Composer mode">
-        ${tabs.map(tab => html`
-          <button
-            key=${tab.key}
-            type="button"
-            role="tab"
-            aria-selected=${mode === tab.key ? 'true' : 'false'}
-            class=${`bd-comp-tab ${mode === tab.key ? 'on' : ''}`}
-            onClick=${() => { boardComposerMode.value = tab.key }}
-            data-testid=${`bd-comp-tab-${tab.key}`}
-          >${tab.label}</button>
-        `)}
+    <div class="bd-composer" data-testid="bd-composer" data-mobile-open=${mobileOpen ? 'true' : 'false'}>
+      <div class="bd-composer-mobile-summary" data-testid="bd-composer-mobile-summary">
+        <div class="bd-composer-mobile-copy">
+          <span class="bd-composer-mobile-kicker">${localHearth ? `#${localHearth}` : 'Board'}</span>
+          <span class="bd-composer-mobile-title">${activeModeLabel} 작성</span>
+        </div>
+        <button
+          type="button"
+          class="bd-composer-mobile-toggle"
+          aria-expanded=${mobileOpen ? 'true' : 'false'}
+          aria-controls="bd-composer-fields"
+          onClick=${() => setMobileOpen(open => !open)}
+          data-testid="bd-composer-mobile-toggle"
+        >${mobileOpen ? '접기' : '새 글'}</button>
       </div>
-      ${mode === 'post' ? html`
-        <div class="bd-comp-box grid gap-2">
-          <input
-            type="text"
-            class="bg-transparent border-0 outline-0 text-[var(--text-bright)] text-sm placeholder:text-[var(--text-dim)]"
-            placeholder="제목"
-            value=${localTitle}
-            onInput=${(e: Event) => setLocalTitle((e.target as HTMLInputElement).value)}
-            data-testid="bd-composer-title"
-          />
+      <div class="bd-composer-fields" id="bd-composer-fields">
+        <div class="bd-comp-tabs" role="tablist" aria-label="Composer mode">
+          ${tabs.map(tab => html`
+            <button
+              key=${tab.key}
+              type="button"
+              role="tab"
+              aria-selected=${mode === tab.key ? 'true' : 'false'}
+              class=${`bd-comp-tab ${mode === tab.key ? 'on' : ''}`}
+              onClick=${() => { boardComposerMode.value = tab.key }}
+              data-testid=${`bd-comp-tab-${tab.key}`}
+            >${tab.label}</button>
+          `)}
+        </div>
+        ${mode === 'mention' ? html`
+          <div class="bd-mobile-mention-targets" aria-label="Mobile mention target picker">
+            <span class="bd-mobile-mention-icon" aria-hidden="true">
+              <${AtSign} size=${13} strokeWidth=${2.2} />
+            </span>
+            <select
+              class="bd-mobile-mention-select"
+              aria-label="Mobile mention target"
+              value=${selectedMobileKeeperAvailable ? mobileKeeperTarget : ''}
+              onInput=${(event: Event) => chooseMobileMentionTarget((event.target as HTMLSelectElement).value)}
+              disabled=${mobileQuickBusy || mobileMentionOptions.length === 0}
+              data-testid="bd-composer-mobile-mention-target"
+            >
+              ${mobileMentionOptions.length === 0
+                ? html`<option value="">No keeper targets</option>`
+                : mobileMentionOptions.map(keeper => html`
+                  <option key=${keeper.name} value=${`keeper:${keeper.name}`}>${keeper.name}</option>
+                `)}
+            </select>
+            <span class="bd-mobile-mention-current" aria-live="polite">
+              ${mobileMentionUnresolved
+                ? `No @${typedMobileMention} match`
+                : mobileMentionTarget
+                  ? `@${mobileMentionTarget}`
+                  : 'No target'}
+            </span>
+          </div>
+          ${mobileMention.mentionListOpen
+            ? html`
+              <div
+                id="bd-mobile-mention-listbox"
+                class="bd-mobile-mention-listbox"
+                role="listbox"
+                aria-label=${`Mobile mention autocomplete (${mobileMention.mentionMatches.length} matches)`}
+                data-testid="bd-composer-mobile-mention-listbox"
+              >
+                ${mobileMention.mentionMatches.length > 0
+                  ? mobileMention.mentionMatches.map((candidate, index) => html`
+                    <button
+                      id=${`bd-mobile-mention-listbox-option-${index}`}
+                      key=${candidate.name}
+                      type="button"
+                      class=${`bd-mobile-mention-option ${candidate.selected || index === mobileMention.activeMentionIndex ? 'on' : ''}`}
+                      role="option"
+                      aria-selected=${candidate.selected || index === mobileMention.activeMentionIndex ? 'true' : 'false'}
+                      disabled=${mobileQuickBusy}
+                      onClick=${() => chooseMobileMentionCandidate(candidate.name)}
+                    >
+                      <${AtSign} size=${12} strokeWidth=${2.2} aria-hidden="true" />
+                      <span class="bd-mobile-mention-option-name">${candidate.name}</span>
+                      <span class="bd-mobile-mention-option-status">${candidate.status ?? 'online'}</span>
+                    </button>
+                  `)
+                  : html`<div class="bd-mobile-mention-empty">No keeper target matches @${mobileMention.mentionQuery}</div>`}
+              </div>
+            `
+            : null}
+          ${mobileAttachments.length > 0 || mobileVoiceDraft
+            ? html`
+              <div class="bd-mobile-draft-tray composer-tray" data-testid="bd-composer-mobile-draft-tray">
+                ${mobileAttachments.map(attachment => html`
+                  <div class="cdraft att" key=${attachment.id}>
+                    <div class="cdraft-thumb">
+                      <span class="cdraft-glyph">${attachment.kind === 'image' ? '▧' : '◫'}</span>
+                    </div>
+                    <div class="cdraft-meta">
+                      <span class="cdraft-name mono">${attachment.name}</span>
+                      <span class="cdraft-sub mono">${[attachment.size, attachment.kind, attachment.dims].filter(Boolean).join(' · ')}</span>
+                    </div>
+                    <button
+                      type="button"
+                      class="cdraft-x"
+                      title="첨부 제거"
+                      aria-label=${`Remove mobile attachment ${attachment.name}`}
+                      onClick=${() => { setMobileAttachments(current => current.filter(item => item.id !== attachment.id)) }}
+                      disabled=${mobileQuickBusy}
+                    >
+                      <${X} size=${10} aria-hidden="true" />
+                    </button>
+                  </div>
+                `)}
+                ${mobileVoiceDraft
+                  ? html`
+                    <div class="cdraft voice">
+                      <span class="cdraft-glyph mic">◌</span>
+                      <div class="cdraft-wave" aria-hidden="true">
+                        ${mobileVoiceDraft.wave.map((height, index) => html`<span class="vbar" key=${index} style=${{ height: `${Math.round(4 + height * 18)}px` }} />`)}
+                      </div>
+                      <span class="cdraft-dur mono">${formatClock(mobileVoiceDraft.secs)}</span>
+                      <div class="cdraft-tx">
+                        <span class="cdraft-tx-k">받아쓰기</span>
+                        <span class="cdraft-tx-v">${mobileVoiceDraft.transcript}</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="cdraft-x"
+                        title="음성 제거"
+                        aria-label="Remove mobile voice draft"
+                        onClick=${() => { setMobileVoiceDraft(null) }}
+                        disabled=${mobileQuickBusy}
+                      >
+                        <${X} size=${10} aria-hidden="true" />
+                      </button>
+                    </div>
+                  `
+                  : null}
+              </div>
+            `
+            : null}
+          ${mobileRecording
+            ? html`
+              <div class="bd-mobile-rec-bar rec-bar" data-testid="bd-composer-mobile-recorder">
+                <span class="rec-dot" aria-hidden="true"></span>
+                <span class="rec-lbl">녹음 중</span>
+                <span class="rec-clock mono">0:12</span>
+                <div class="rec-wave" aria-hidden="true">
+                  ${[0.4, 0.8, 0.5, 0.9, 0.45, 0.75, 0.52, 0.84, 0.48, 0.7].map((height, index) => html`<span class="rbar" key=${index} style=${{ height: `${Math.round(3 + height * 20)}px` }} />`)}
+                </div>
+                <button
+                  type="button"
+                  class="rec-btn cancel"
+                  onClick=${() => { setMobileRecording(false) }}
+                  disabled=${mobileQuickBusy}
+                  data-testid="bd-composer-mobile-voice-cancel"
+                >취소</button>
+                <button
+                  type="button"
+                  class="rec-btn stop"
+                  onClick=${stopMobileVoiceDraft}
+                  disabled=${mobileQuickBusy}
+                  data-testid="bd-composer-mobile-voice-stop"
+                >
+                  <${Square} size=${11} aria-hidden="true" />
+                  완료
+                </button>
+              </div>
+            `
+            : null}
+        ` : null}
+        <div class="bd-mobile-quick-compose bd-comp-box" data-mode=${mode}>
           <textarea
-            rows=${2}
+            rows=${1}
             class="bg-transparent border-0 outline-0 text-[var(--text-bright)] text-sm placeholder:text-[var(--text-dim)] resize-none"
             placeholder=${placeholder}
             value=${localBody}
-            onInput=${(e: Event) => setLocalBody((e.target as HTMLTextAreaElement).value)}
-            data-testid="bd-composer-body"
+            role=${mode === 'mention' ? 'combobox' : undefined}
+            aria-autocomplete=${mode === 'mention' ? 'list' : undefined}
+            aria-controls=${mode === 'mention' && mobileMention.mentionListOpen ? 'bd-mobile-mention-listbox' : undefined}
+            aria-expanded=${mode === 'mention' ? String(mobileMention.mentionListOpen) : undefined}
+            aria-activedescendant=${mobileMention.activeMentionOptionId}
+            onInput=${(e: Event) => {
+              if (mobileMention.dismissedMentionQuery !== null) mobileMention.setDismissedMentionQuery(null)
+              setLocalBody((e.target as HTMLTextAreaElement).value)
+            }}
+            onKeyDown=${(event: KeyboardEvent) => {
+              if (mode === 'mention' && mobileMention.mentionListOpen && mobileMention.mentionMatches.length > 0) {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  mobileMention.setActiveMentionIndex(index => (index + 1) % mobileMention.mentionMatches.length)
+                  return
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  mobileMention.setActiveMentionIndex(index => (index - 1 + mobileMention.mentionMatches.length) % mobileMention.mentionMatches.length)
+                  return
+                }
+                if (event.key === 'Enter' && !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)) {
+                  event.preventDefault()
+                  chooseMobileMentionCandidate(mobileMention.mentionMatches[mobileMention.activeMentionIndex]?.name ?? mobileMention.mentionMatches[0]!.name)
+                  return
+                }
+              }
+              if (mode === 'mention' && mobileMention.mentionListOpen && event.key === 'Escape') {
+                event.preventDefault()
+                mobileMention.setDismissedMentionQuery(mobileMention.mentionQuery ?? '')
+              }
+            }}
+            data-testid="bd-composer-mobile-body"
           />
-          <div class="flex gap-2">
-            <${Select}
-              value=${localHearth}
-              options=${[{ value: '', label: 'No category' }, ...boardHearths.value.map(h => ({ value: h.name, label: h.name }))]}
-              ariaLabel="게시 category"
-              onInput=${(value: string) => setLocalHearth(value)}
-            />
-            <${Select}
-              value=${localFlair}
-              options=${[{ value: '', label: 'No flair' }, ...boardFlairs.value.map(f => ({ value: f.name, label: `${f.emoji ? `${f.emoji} ` : ''}${f.label}` }))]}
-              ariaLabel="게시 flair"
-              onInput=${(value: string) => setLocalFlair(value)}
+          ${mode === 'state' ? html`
+            <button
+              type="button"
+              class="bd-mobile-state-template"
+              title="Insert state block"
+              aria-label="Insert state block"
+              disabled=${mobileQuickBusy}
+              onClick=${() => setLocalBody(current => ensureStateBlockDraft(current))}
+              data-testid="bd-composer-mobile-state-template"
+            >
+              <${Braces} size=${15} strokeWidth=${2.2} aria-hidden="true" />
+            </button>
+          ` : null}
+          ${mode === 'mention' ? html`
+            <input
+              ref=${mobileFileInputRef}
+              type="file"
+              accept="image/*,.pdf,.txt,.log,.json,.csv,.md"
+              multiple
+              hidden
+              data-testid="bd-composer-mobile-file-input"
+              onChange=${(event: Event) => {
+                const input = event.target as HTMLInputElement
+                if (input.files) attachMobileMentionFiles(input.files)
+                input.value = ''
+              }}
             />
             <button
               type="button"
-              class="send ml-auto"
-              disabled=${!localTitle.trim() || !localBody.trim() || submitting}
-              onClick=${(e: Event) => { void submitPost(e) }}
-              data-testid="bd-composer-send"
-            >${submitting ? '등록 중...' : '게시 ↑'}</button>
+              class="bd-mobile-compose-tool"
+              title="이미지·파일 첨부"
+              aria-label="Attach mobile mention file"
+              disabled=${mobileQuickBusy || mobileAttachments.length >= 6}
+              onClick=${() => { mobileFileInputRef.current?.click() }}
+              data-testid="bd-composer-mobile-attach"
+            >
+              <${Paperclip} size=${15} strokeWidth=${2.2} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="bd-mobile-compose-tool"
+              title="음성 입력"
+              aria-label="Start mobile mention voice draft"
+              disabled=${mobileQuickBusy || mobileRecording}
+              onClick=${() => { setMobileRecording(true) }}
+              data-testid="bd-composer-mobile-voice"
+            >
+              <${Mic} size=${15} strokeWidth=${2.2} aria-hidden="true" />
+            </button>
+          ` : null}
+          <button
+            type="button"
+            class="send"
+            disabled=${mobileQuickDisabled}
+            onClick=${(e: Event) => { void submitMobileQuick(e) }}
+            data-testid="bd-composer-mobile-send"
+          >${submitting ? '등록 중...' : '게시 ↑'}</button>
+        </div>
+        ${mode === 'post' ? html`
+          <div class="bd-desktop-post-form bd-comp-box grid gap-2">
+            <input
+              type="text"
+              class="bg-transparent border-0 outline-0 text-[var(--text-bright)] text-sm placeholder:text-[var(--text-dim)]"
+              placeholder="제목"
+              value=${localTitle}
+              onInput=${(e: Event) => setLocalTitle((e.target as HTMLInputElement).value)}
+              data-testid="bd-composer-title"
+            />
+            <textarea
+              rows=${2}
+              class="bg-transparent border-0 outline-0 text-[var(--text-bright)] text-sm placeholder:text-[var(--text-dim)] resize-none"
+              placeholder=${placeholder}
+              value=${localBody}
+              onInput=${(e: Event) => setLocalBody((e.target as HTMLTextAreaElement).value)}
+              data-testid="bd-composer-body"
+            />
+            <div class="bd-comp-meta flex gap-2">
+              <${Select}
+                value=${localHearth}
+                options=${[{ value: '', label: 'No category' }, ...boardHearths.value.map(h => ({ value: h.name, label: h.name }))]}
+                ariaLabel="게시 category"
+                onInput=${(value: string) => setLocalHearth(value)}
+              />
+              <${Select}
+                value=${localFlair}
+                options=${[{ value: '', label: 'No flair' }, ...boardFlairs.value.map(f => ({ value: f.name, label: `${f.emoji ? `${f.emoji} ` : ''}${f.label}` }))]}
+                ariaLabel="게시 flair"
+                onInput=${(value: string) => setLocalFlair(value)}
+              />
+              <button
+                type="button"
+                class="send ml-auto"
+                disabled=${!localTitle.trim() || !localBody.trim() || submitting}
+                onClick=${(e: Event) => { void submitPost(e) }}
+                data-testid="bd-composer-send"
+              >${submitting ? '등록 중...' : '게시 ↑'}</button>
+            </div>
           </div>
-        </div>
-      ` : html`
-        <div class="bd-comp-box">
-          <${ComposerV2}
-            workspaceId=${localHearth || 'default'}
-            mode=${composerMode}
-            showModeSelector=${false}
-            modeLabels=${{ broadcast: '게시', dm: '멘션', 'state-block': '상태 블록' }}
-          />
-        </div>
-      `}
+        ` : html`
+          <div class="bd-desktop-composer-v2 bd-comp-box">
+            <${ComposerV2}
+              workspaceId=${localHearth || 'default'}
+              mode=${composerMode}
+              showModeSelector=${false}
+              modeLabels=${{ broadcast: '게시', dm: '멘션', 'state-block': '상태 블록' }}
+            />
+          </div>
+        `}
+      </div>
     </div>
   `
 }
 
-function BdFeed({ posts }: { posts: BoardPost[] }) {
+function BdMobileQueues({
+  activeFilter,
+  mentionCount,
+  modCount,
+  onFilter,
+  onMentions,
+}: {
+  activeFilter: 'all' | 'state' | 'mod'
+  mentionCount: number
+  modCount: number
+  onFilter: (filter: 'all' | 'state' | 'mod') => void
+  onMentions: () => void
+}) {
+  return html`
+    <div class="bd-mobile-queues" aria-label="Board mobile queues" data-testid="bd-mobile-queues">
+      <button
+        type="button"
+        class=${`bd-mobile-queue ${activeFilter === 'mod' ? 'on' : ''}`}
+        onClick=${() => onFilter('mod')}
+        data-testid="bd-mobile-queue-mod"
+      >
+        <span class="glyph">⚑</span>
+        모더레이션
+        <span class="n">${modCount}</span>
+      </button>
+      <button
+        type="button"
+        class="bd-mobile-queue"
+        onClick=${onMentions}
+        data-testid="bd-mobile-queue-mentions"
+      >
+        <span class="glyph">＠</span>
+        멘션 인박스
+        <span class="n">${mentionCount}</span>
+      </button>
+    </div>
+  `
+}
+
+function countMentionMessages(): number {
+  return messages.value.filter(message => extractMentionTargets(message.content).length > 0).length
+}
+
+function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => void }) {
   const [contentQuery, setContentQuery] = useState('')
   const filteredPosts = useMemo(
     () => filterBoardPosts(posts, contentQuery),
@@ -735,6 +1204,11 @@ function BdFeed({ posts }: { posts: BoardPost[] }) {
   )
   const isFiltering = contentQuery.trim() !== ''
   const visibleGroups = useMemo(() => splitVisiblePosts(filteredPosts), [filteredPosts])
+  const mentionCount = useMemo(() => countMentionMessages(), [messages.value])
+  const modCount = useMemo(
+    () => posts.filter(post => post.moderation_status && post.moderation_status !== 'none' && post.moderation_status !== 'approved').length,
+    [posts],
+  )
 
   const modeFilteredGroups = useMemo(() => visibleGroups.groups.map(g => ({
     ...g,
@@ -752,6 +1226,13 @@ function BdFeed({ posts }: { posts: BoardPost[] }) {
         activeFilter=${boardFilterMode.value}
         onFilter=${(filter: 'all' | 'state' | 'mod') => { boardFilterMode.value = filter }}
         count=${filteredByMode.length}
+      />
+      <${BdMobileQueues}
+        activeFilter=${boardFilterMode.value}
+        mentionCount=${mentionCount}
+        modCount=${modCount}
+        onFilter=${(filter: 'all' | 'state' | 'mod') => { boardFilterMode.value = filter }}
+        onMentions=${onMentions}
       />
       <div class="bd-list">
         <div class="mb-3 flex items-center gap-2">
@@ -783,6 +1264,7 @@ function BdFeed({ posts }: { posts: BoardPost[] }) {
 
 // ── Main Board component (public API) ──────────────────────────────
 export function BoardSurface() {
+  const [mobileMentionInboxOpen, setMobileMentionInboxOpen] = useState(false)
   useEffect(() => () => { selectedPostIds.value = new Set() }, [])
   useEffect(() => registerBoardHearthsRefresh(() => {
     void refreshBoardHearths()
@@ -818,7 +1300,7 @@ export function BoardSurface() {
             <${BoardSummary} />
             <button type="button"
               class="v2-workspace-action mb-4 px-3 py-1.5 rounded-[var(--r-1)] text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)] transition-colors cursor-pointer"
-              onClick=${() => navigate('workspace', { section: 'board' })}
+              onClick=${() => navigateBoard()}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
               ? html`<${LoadingState} title="글 불러오는 중…" />`
@@ -877,9 +1359,14 @@ export function BoardSurface() {
     ? posts.find(p => p.id === selectedBoardPostId.value) ?? null
     : null
 
+  function openMentionInbox(): void {
+    selectedBoardPostId.value = null
+    setMobileMentionInboxOpen(true)
+  }
+
   return html`
     <div class="v2-board-surface ss-surface bg-surface-page text-text-primary">
-      <div class=${`bd-body ${selectedPost ? '' : 'no-detail'}`}>
+      <div class="bd-body">
         <${BdRail}
           activeSub=${activeSub}
           onSub=${(sub: string) => {
@@ -887,10 +1374,15 @@ export function BoardSurface() {
             selectedBoardPostId.value = null
             refreshBoard()
           }}
-          onMentions=${() => { selectedBoardPostId.value = null }}
+          onMentions=${openMentionInbox}
         />
-        <${BdFeed} posts=${boardPosts.value} />
-        ${selectedPost ? html`<${BdDetail} post=${selectedPost} onClose=${() => { selectedBoardPostId.value = null }} />` : null}
+        <${BdFeed} posts=${boardPosts.value} onMentions=${openMentionInbox} />
+        <${BdDetail}
+          post=${selectedPost}
+          mentionMobileOpen=${mobileMentionInboxOpen}
+          onClose=${() => { selectedBoardPostId.value = null }}
+          onCloseMentions=${() => setMobileMentionInboxOpen(false)}
+        />
       </div>
     </div>
   `

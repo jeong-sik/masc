@@ -9,7 +9,7 @@
 // copyable context blocks styled after keeper-v2 turn-inspector.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { fetchKeeperTurnRecords } from '../api/dashboard'
 import type {
   MemoryOsEpisodeSummary,
@@ -25,6 +25,29 @@ import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
+
+const INITIAL_TURN_MATCH_WINDOW_SEC = 30 * 60
+const EMPTY_TURN_RECORD_ROWS: TurnRecordRow[] = []
+
+export function initialTurnRowForTimestamp(
+  rows: TurnRecordRow[],
+  timestampIso?: string | null,
+): TurnRecordRow | null {
+  if (!timestampIso || rows.length === 0) return null
+  const targetMs = Date.parse(timestampIso)
+  if (!Number.isFinite(targetMs)) return null
+  const targetSec = targetMs / 1000
+  let best: { row: TurnRecordRow; delta: number } | null = null
+
+  for (const row of rows) {
+    const delta = Math.abs(row.record.ts - targetSec)
+    if (!best || delta < best.delta) {
+      best = { row, delta }
+    }
+  }
+
+  return best && best.delta <= INITIAL_TURN_MATCH_WINDOW_SEC ? best.row : null
+}
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   const gap = coverageGapDisplay(data)
@@ -743,9 +766,17 @@ function TurnRow({
   `
 }
 
-export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
+export function KeeperTurnInspector({
+  keeperName,
+  initialTurnTimestamp,
+}: {
+  keeperName: string
+  initialTurnTimestamp?: string | null
+}) {
   const resource = useManagedAsyncResource<TurnRecordsResponse | null>(null)
   const [selectedRow, setSelectedRow] = useState<TurnRecordRow | null>(null)
+  const [initialMatchState, setInitialMatchState] = useState<'idle' | 'matched' | 'missed'>('idle')
+  const appliedInitialTurnTimestamp = useRef<string | null>(null)
 
   useEffect(() => {
     void resource.load(async (signal) => {
@@ -757,6 +788,33 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
   }, [keeperName, resource])
 
   const response = resource.state.value.data
+  const rows = response?.entries ?? EMPTY_TURN_RECORD_ROWS
+  // Server returns oldest-first; show newest first.
+  const sorted = useMemo(() => [...rows].reverse(), [rows])
+  const initialMatchedRow = useMemo(
+    () => initialTurnRowForTimestamp(rows, initialTurnTimestamp),
+    [rows, initialTurnTimestamp],
+  )
+
+  useEffect(() => {
+    appliedInitialTurnTimestamp.current = null
+    setInitialMatchState('idle')
+    setSelectedRow(null)
+  }, [keeperName, initialTurnTimestamp])
+
+  useEffect(() => {
+    if (
+      !initialTurnTimestamp
+      || rows.length === 0
+      || appliedInitialTurnTimestamp.current === initialTurnTimestamp
+    ) {
+      return
+    }
+
+    setSelectedRow(initialMatchedRow)
+    setInitialMatchState(initialMatchedRow ? 'matched' : 'missed')
+    appliedInitialTurnTimestamp.current = initialTurnTimestamp
+  }, [initialTurnTimestamp, initialMatchedRow, rows.length])
 
   if (resource.state.value.loading) {
     return html`<${LoadingState}>턴 레코드 불러오는 중...<//>`
@@ -766,7 +824,6 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
     return html`<div class="text-xs text-[var(--color-status-err)] p-4 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
-  const rows = response?.entries ?? []
   const memoryOsPanel = response?.memory_os
     ? html`<${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${rows} />`
     : null
@@ -781,9 +838,6 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
     `
   }
 
-  // Server returns oldest-first; show newest first.
-  const sorted = [...rows].reverse()
-
   return html`
     <div class="p-2 space-y-1 v2-monitoring-surface">
       <div class="flex items-center justify-between px-1 v2-monitoring-toolbar">
@@ -795,8 +849,18 @@ export function KeeperTurnInspector({ keeperName }: { keeperName: string }) {
           : null}
       </div>
       ${memoryOsPanel}
-      ${sorted.map(row => html`<${TurnRow}
-        key=${`${row.record.trace_id}-${row.record.absolute_turn}`}
+      ${initialMatchState === 'missed'
+        ? html`
+          <div
+            class="rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row"
+            data-testid="turn-linked-empty"
+          >
+            메시지 시각과 30분 이내의 turn record 없음. 리스트에서 직접 선택하세요.
+          </div>
+        `
+        : null}
+      ${sorted.map((row, index) => html`<${TurnRow}
+        key=${`${row.record.trace_id}-${row.record.absolute_turn}-${row.record.ts}-${index}`}
         row=${row}
         onOpen=${setSelectedRow}
       />`)}

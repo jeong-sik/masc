@@ -90,7 +90,7 @@ export const COCKPIT_MODE_TARGETS: Record<CockpitMode, CockpitRouteTarget> = {
   dashboard: COGNITIVE_MODE_TARGETS.cockpit,
   cockpit: COGNITIVE_MODE_TARGETS.cockpit,
   work: { tab: 'workspace', params: { section: 'planning' } },
-  comms: { tab: 'workspace', params: { section: 'board' } },
+  comms: { tab: 'board' },
   observe: { tab: 'monitoring', params: { section: 'runtime' } },
   cognition: { tab: 'monitoring', params: { section: 'cognition' } },
   ide: COGNITIVE_MODE_TARGETS.code,
@@ -116,7 +116,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   {
     mode: 'comms',
     aliases: ['board-feed'],
-    target: { tab: 'workspace', params: { section: 'board' } },
+    target: { tab: 'board' },
     coverage: 'covered',
   },
   {
@@ -174,12 +174,12 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'work', aliases: ['acc-mtx', 'accountability-matrix'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-matrix' } }, coverage: 'covered' },
 
   // Comms Plane legacy design subtabs.
-  { mode: 'comms', aliases: ['bd-feed'], target: { tab: 'workspace', params: { section: 'board' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['bd-thr', 'board-thread'], target: { tab: 'workspace', params: { section: 'board', focus: 'thread' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['bd-tog', 'board-direct-automation'], target: { tab: 'workspace', params: { section: 'board', focus: 'automation' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['ms-rm', 'messages-workspace'], target: { tab: 'workspace', params: { section: 'board', focus: 'messages-workspace' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['ms-inb', 'messages-mention-inbox'], target: { tab: 'workspace', params: { section: 'board', focus: 'mention-inbox' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['ms-st', 'messages-state-block'], target: { tab: 'workspace', params: { section: 'board', focus: 'state-block' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['bd-feed'], target: { tab: 'board' }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['bd-thr', 'board-thread'], target: { tab: 'board', params: { focus: 'thread' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['bd-tog', 'board-direct-automation'], target: { tab: 'board', params: { focus: 'automation' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['ms-rm', 'messages-workspace'], target: { tab: 'board', params: { focus: 'messages-workspace' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['ms-inb', 'messages-mention-inbox'], target: { tab: 'board', params: { focus: 'mention-inbox' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['ms-st', 'messages-state-block'], target: { tab: 'board', params: { focus: 'state-block' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['cm-bc', 'composer-broadcast'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'broadcast' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['cm-mn', 'composer-mention'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['cm-st', 'composer-state'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' } }, coverage: 'covered' },

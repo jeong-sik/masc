@@ -564,7 +564,8 @@ describe('IdeContextLens', () => {
     ])
     expect(model.surfaces.find(surface => surface.id === 'comment')?.routeLink).toMatchObject({
       label: 'Comment',
-      params: { section: 'board', post: 'post-1', comment: 'comment-1' },
+      tab: 'board',
+      params: { post: 'post-1', comment: 'comment-1' },
     })
     expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
       label: 'PR',
@@ -701,8 +702,8 @@ describe('IdeContextLens', () => {
       'Keeper',
     ])
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Comment')).toMatchObject({
-      tab: 'workspace',
-      params: { section: 'board', post: 'post-1', comment: 'comment-1' },
+      tab: 'board',
+      params: { post: 'post-1', comment: 'comment-1' },
     })
     expect(model.anchors[0]?.route_links?.find(link => link.label === 'Code')).toMatchObject({
       tab: 'code',

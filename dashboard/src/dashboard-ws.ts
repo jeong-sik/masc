@@ -241,6 +241,13 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
   if (routeState.tab === 'overview') {
     slices.add('execution')
   }
+  if (routeState.tab === 'keepers') {
+    slices.add('execution')
+    slices.add('composite')
+  }
+  if (routeState.tab === 'board') {
+    return Array.from(slices).sort()
+  }
   if (routeState.tab === 'workspace' && routeState.params.section === 'planning') {
     slices.add('execution')
     slices.add('goals')

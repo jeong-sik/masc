@@ -55,6 +55,14 @@ describe('isKeeperDetailDashboardRoute', () => {
     })).toBe(true)
   })
 
+  it('treats the top-level keepers surface as an immersive keeper workspace', () => {
+    expect(isKeeperDetailDashboardRoute({
+      tab: 'keepers',
+      params: {},
+      postId: null,
+    })).toBe(true)
+  })
+
   it('does not treat the fleet list as keeper detail', () => {
     expect(isKeeperDetailDashboardRoute({
       tab: 'monitoring',
@@ -857,8 +865,8 @@ describe('SideRail v2 chrome', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     route.value = {
-      tab: 'monitoring',
-      params: { section: 'agents' },
+      tab: 'workspace',
+      params: { section: 'work' },
       postId: null,
     }
   })
@@ -874,13 +882,13 @@ describe('SideRail v2 chrome', () => {
     expect(container.querySelector('.nav-brand')).not.toBeNull()
     expect(container.querySelector('.nav-sec')).not.toBeNull()
     expect(container.querySelector('.nav-link.active')).not.toBeNull()
-    expect(container.querySelector('.nav-link.active')?.textContent).toContain('Monitor')
+    expect(container.querySelector('.nav-link.active')?.textContent).toContain('Work')
 
     const sublist = container.querySelector('.nav-sublist')
     expect(sublist).not.toBeNull()
     const activeSublink = sublist?.querySelector('.nav-sublink.active')
     expect(activeSublink).not.toBeNull()
-    expect(activeSublink?.textContent).toContain('Keeper Fleet')
+    expect(activeSublink?.textContent).toContain('Work')
   })
 
   it('renders collapsed icon-only links with v2 classes', () => {

@@ -84,14 +84,21 @@ describe('App v2 header chrome', () => {
   })
 
   it('sets data-mobile based on the viewport width', () => {
-    window.innerWidth = 760
+    window.innerWidth = 900
     renderApp()
     const app = container.querySelector('.v2-app')
     expect(app?.getAttribute('data-mobile')).toBe('true')
   })
 
+  it('does not set data-mobile above the v2 shell breakpoint', () => {
+    window.innerWidth = 901
+    renderApp()
+    const app = container.querySelector('.v2-app')
+    expect(app?.getAttribute('data-mobile')).toBe('false')
+  })
+
   it('uses a 44x44 mobile menu button touch target', () => {
-    window.innerWidth = 760
+    window.innerWidth = 900
     renderApp()
 
     const menuButton = container.querySelector('button[aria-controls="dashboard-side-rail"]') as HTMLElement | null
@@ -99,8 +106,8 @@ describe('App v2 header chrome', () => {
     expect(menuButton?.classList.contains('size-11')).toBe(true)
   })
 
-  it('hides MobileBottomBar when the mobile side-rail drawer is open', async () => {
-    window.innerWidth = 760
+  it('hides mobile nav tabs when the mobile side-rail drawer is open', async () => {
+    window.innerWidth = 900
     renderApp()
 
     const menuButton = container.querySelector('button[aria-controls="dashboard-side-rail"]') as HTMLElement | null
@@ -112,9 +119,17 @@ describe('App v2 header chrome', () => {
     })
   })
 
-  it('hides MobileBottomBar on keeper detail routes', () => {
+  it('uses the header Copilot control instead of a floating FAB on mobile', () => {
+    window.innerWidth = 900
+    renderApp()
+
+    expect(container.querySelector('[data-testid="copilot-dock-topbar-button"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="copilot-dock-fab"]')).toBeNull()
+  })
+
+  it('hides mobile nav tabs on keeper detail routes', () => {
     window.location.hash = '#monitoring/agents?keeper=sangsu'
-    window.innerWidth = 760
+    window.innerWidth = 900
     renderApp()
 
     const bottomNav = container.querySelector('nav[aria-label="Primary mobile navigation"]')
@@ -158,7 +173,7 @@ describe('App v2 header chrome', () => {
   })
 
   it('toggles the mobile side-rail drawer', async () => {
-    window.innerWidth = 760
+    window.innerWidth = 900
     renderApp()
 
     const rail = container.querySelector('#dashboard-side-rail') as HTMLElement | null
@@ -168,15 +183,11 @@ describe('App v2 header chrome', () => {
     expect(menuButton).not.toBeNull()
     menuButton!.click()
 
-    // When open, the rail must both drop max-[768px]:hidden AND add
-    // max-[768px]:block. The rail also carries the static max-[1100px]:hidden,
-    // so removing :hidden alone leaves it display:none at <=768px — the
-    // pre-fix '' open-state class regressed exactly here. Assert both tokens in
-    // the same waitFor so they are checked at the open moment.
+    // DashboardNavRail owns the mobile drawer contract: opening swaps the rail
+    // from the hidden mobile state into an explicit block drawer.
     await waitFor(() => {
-      expect(rail?.classList.contains('max-[1100px]:hidden')).toBe(true)
-      expect(rail?.classList.contains('max-[768px]:hidden')).toBe(false)
-      expect(rail?.classList.contains('max-[768px]:block')).toBe(true)
+      expect(rail?.classList.contains('block')).toBe(true)
+      expect(rail?.classList.contains('hidden')).toBe(false)
     })
   })
 

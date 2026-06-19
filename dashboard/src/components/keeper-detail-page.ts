@@ -5,7 +5,7 @@ import type { Keeper } from '../types'
 import { route } from '../router'
 import { keepers } from '../store'
 import { selectKeeper } from '../keeper-runtime'
-import { loadKeeperConfig } from './keeper-config-panel'
+import { KeeperConfigPanel, loadKeeperConfig } from './keeper-config-panel'
 import { findKeeper } from '../lib/keeper-utils'
 import { resolveKeeperForDetail } from '../lib/keeper-detail-resolution'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
@@ -33,6 +33,7 @@ import { KeeperLifecycleButtons, KeeperClearContextDialog } from './keeper-detai
 import {
   KeeperDetailHeaderInfo,
   KeeperDetailMissingState,
+  activeKeeperDetailSection,
 } from './keeper-detail-shell'
 import { KeeperDetailBody } from './keeper-detail-body'
 import { KeeperWorkspaceRoster } from './keeper-workspace/keeper-workspace-roster'
@@ -56,12 +57,28 @@ const CLOSE_BUTTON_FOCUS_CLASS = ringFocusClasses({
 // Phase 5 (layout retune).
 
 export function KeeperDetailPage() {
-  const keeperName =
-    route.value.tab === 'monitoring' && route.value.params.section === 'agents'
+  const routeSurface = route.value.tab === 'keepers' ? 'keepers' : 'monitoring'
+  const keeperName = route.value.tab === 'keepers'
+    ? route.value.params.keeper?.trim() || selectedKeeper.peek()?.name || keepers.value[0]?.name || ''
+    : route.value.tab === 'monitoring' && route.value.params.section === 'agents'
       ? route.value.params.keeper?.trim()
       : ''
-  if (!keeperName) return null
-  return html`<${KeeperDetailResolver} keeperName=${keeperName} />`
+
+  if (!keeperName) {
+    return html`
+      <div class="kw-grid" data-detail="open">
+        <${KeeperWorkspaceRoster} activeName="" routeSurface=${routeSurface} />
+        <div class="kw-detail">
+          <div class="kw-detail-scroll">
+            <div class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-6 text-sm text-[var(--color-fg-muted)]">
+              표시할 keeper가 없습니다.
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+  }
+  return html`<${KeeperDetailResolver} keeperName=${keeperName} routeSurface=${routeSurface} />`
 }
 
 // P0 render-perf: isolate the `keepers` signal subscription here. A heartbeat,
@@ -71,7 +88,13 @@ export function KeeperDetailPage() {
 // memoizing KeeperDetailContent below skips the heavy subtree whenever the
 // resolved keeper object did not change — which is every heartbeat that is
 // not this keeper's phase transition.
-function KeeperDetailResolver({ keeperName }: { keeperName: string }) {
+function KeeperDetailResolver({
+  keeperName,
+  routeSurface,
+}: {
+  keeperName: string
+  routeSurface: 'monitoring' | 'keepers'
+}) {
   const keeper = resolveKeeperForDetail(
     keeperName,
     findKeeper(keeperName),
@@ -85,7 +108,7 @@ function KeeperDetailResolver({ keeperName }: { keeperName: string }) {
     // gives the missing-state card the full conversation span.
     return html`
       <div class="kw-grid" data-detail="open">
-        <${KeeperWorkspaceRoster} activeName=${keeperName} />
+        <${KeeperWorkspaceRoster} activeName=${keeperName} routeSurface=${routeSurface} />
         <div class="kw-detail">
           <div class="kw-detail-scroll">
             <${KeeperDetailMissingState} keeperName=${keeperName} onClose=${closeKeeperDetail} />
@@ -94,10 +117,35 @@ function KeeperDetailResolver({ keeperName }: { keeperName: string }) {
       </div>
     `
   }
-  return html`<${KeeperDetailContent} keeper=${keeper} />`
+  return html`<${KeeperDetailContent} keeper=${keeper} routeSurface=${routeSurface} />`
 }
 
-const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keeper: Keeper }) {
+function useIsKeeperWorkspaceMobile(): boolean {
+  const getInitial = () =>
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(max-width: 860px)').matches
+  const [isMobile, setIsMobile] = useState(getInitial)
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+    const media = window.matchMedia('(max-width: 860px)')
+    const update = () => setIsMobile(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+
+  return isMobile
+}
+
+const KeeperDetailContent = memo(function KeeperDetailContent({
+  keeper,
+  routeSurface,
+}: {
+  keeper: Keeper
+  routeSurface: 'monitoring' | 'keepers'
+}) {
   const titleId = `keeper-detail-title-${keeper.name}`
   const effectiveStatus = keeperDisplayStatus(keeper)
   const shouldOpenDiagnostics = keeperNeedsDiagnosticAttention(keeper)
@@ -111,10 +159,21 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
   // 3-pane workspace is the default conversation view; "상세 보기" flips to
   // the full tabbed KeeperDetailBody (FSM / 진단 / 정체성 / 설정 / 디버그).
   const [detailOpen, setDetailOpen] = useState(false)
+  const [configOverlayKeeper, setConfigOverlayKeeper] = useState<string | null>(null)
+  const [rosterOpen, setRosterOpen] = useState(true)
+  const [railOpen, setRailOpen] = useState(true)
+  const isMobile = useIsKeeperWorkspaceMobile()
+  const routeKeeperParam = route.value.tab === 'keepers'
+    ? route.value.params.keeper?.trim()
+    : route.value.tab === 'monitoring' && route.value.params.section === 'agents'
+      ? route.value.params.keeper?.trim()
+      : ''
+  const [mobileRailOpen, setMobileRailOpen] = useState(false)
   // Latest transition's wall_clock_at_decision, in unix seconds.  Used by
   // the header KeeperPhaseAndStage to render "현재 phase에 머문 시간" without
   // requiring a new backend field — derivation is plan-approved trade-off.
   const [phaseEnteredAtSec, setPhaseEnteredAtSec] = useState<number | null>(null)
+  const pendingConfigKeeperRef = useRef<string | null>(null)
   // RFC-0046 §7 #1: single composite snapshot shared with the two
   // derived panels (state-diagram + memory-tier).
   const compositeEvidence = useKeeperCompositeEvidence(keeper.name)
@@ -128,11 +187,22 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
   const runtimeTrace = evidenceFreshData(runtimeTraceEvidence)
   const prevKeeperRef = useRef(keeper.name)
   if (prevKeeperRef.current !== keeper.name) {
+    const shouldOpenPendingConfig = pendingConfigKeeperRef.current === keeper.name
     prevKeeperRef.current = keeper.name
+    if (shouldOpenPendingConfig) {
+      pendingConfigKeeperRef.current = null
+    }
     setDiagOpen(shouldOpenDiagnostics)
     setPhaseEnteredAtSec(null)
     setDetailOpen(false)
+    setConfigOverlayKeeper(shouldOpenPendingConfig ? keeper.name : null)
   }
+  useEffect(() => {
+    setMobileRailOpen(false)
+    if (routeKeeperParam) {
+      keeperMobilePane.value = 'chat'
+    }
+  }, [keeper.name, routeKeeperParam])
   useEffect(() => {
     selectedKeeper.value = keeper
     selectKeeper(keeper.name)
@@ -294,10 +364,34 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
       />
     </div>
   `
+  const openKeeperConfig = (name = keeper.name) => {
+    activeKeeperDetailSection.value = 'keeper-config'
+    setMobileRailOpen(false)
+    if (name !== keeper.name) {
+      pendingConfigKeeperRef.current = name
+    }
+    setDetailOpen(false)
+    setConfigOverlayKeeper(name)
+  }
 
   return html`
-    <div class="kw-grid v2-monitoring-surface" data-detail=${detailOpen ? 'open' : 'closed'} data-mobile-pane=${keeperMobilePane.value} data-route-focused-keeper=${keeper.name}>
-      <${KeeperWorkspaceRoster} activeName=${keeper.name} />
+    <div
+      class="kw-grid v2-monitoring-surface"
+      data-detail=${detailOpen ? 'open' : 'closed'}
+      data-roster=${rosterOpen ? 'open' : 'mini'}
+      data-rail=${railOpen ? 'open' : 'closed'}
+      data-mobile-pane=${keeperMobilePane.value}
+      data-route-focused-keeper=${keeper.name}
+    >
+      <${KeeperWorkspaceRoster}
+        activeName=${keeper.name}
+        routeSurface=${routeSurface}
+        mini=${!rosterOpen && !detailOpen}
+        onOpenConfig=${openKeeperConfig}
+        onSelect=${() => {
+          keeperMobilePane.value = 'chat'
+        }}
+      />
       ${detailOpen
         ? html`
             <div class="kw-detail v2-monitoring-panel">
@@ -315,13 +409,64 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
             </div>
           `
         : html`
+            <button
+              type="button"
+              class="kw-rail-toggle left v2-monitoring-action"
+              aria-label=${rosterOpen ? '로스터 접기' : '로스터 펼치기'}
+              aria-pressed=${rosterOpen ? 'true' : 'false'}
+              title=${rosterOpen ? '로스터 접기' : '로스터 펼치기'}
+              onClick=${() => setRosterOpen(open => !open)}
+            >${rosterOpen ? '◂' : '▸'}</button>
             <${KeeperWorkspaceChat}
               keeper=${keeper}
               detailOpen=${false}
               onToggleDetail=${() => setDetailOpen(true)}
               onClear=${() => setClearDialogOpen(true)}
+              mobile=${isMobile}
+              onBack=${() => {
+                keeperMobilePane.value = 'roster'
+              }}
+              onOpenRail=${() => setMobileRailOpen(true)}
+              onOpenConfig=${() => {
+                openKeeperConfig()
+              }}
             />
-            <${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => setDetailOpen(true)} />
+            <button
+              type="button"
+              class="kw-rail-toggle right v2-monitoring-action"
+              aria-label=${railOpen ? '컨텍스트 레일 접기' : '컨텍스트 레일 펼치기'}
+              aria-pressed=${railOpen ? 'true' : 'false'}
+              title=${railOpen ? '컨텍스트 레일 접기' : '컨텍스트 레일 펼치기'}
+              onClick=${() => setRailOpen(open => !open)}
+            >${railOpen ? '▸' : '◂'}</button>
+            ${!isMobile && railOpen ? html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => setDetailOpen(true)} />` : null}
+            ${isMobile && mobileRailOpen
+              ? html`
+                  <div
+                    class="kw-mobile-rail-overlay"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="키퍼 컨텍스트"
+                    data-testid="kw-mobile-rail-overlay"
+                    onClick=${() => setMobileRailOpen(false)}
+                  >
+                    <div class="kw-mobile-rail-drawer v2-monitoring-surface" onClick=${(e: Event) => e.stopPropagation()}>
+                      <div class="kw-mobile-rail-head v2-monitoring-toolbar">
+                        <strong>${keeper.name} 컨텍스트</strong>
+                        <button
+                          type="button"
+                          class="kw-act v2-monitoring-action"
+                          onClick=${() => setMobileRailOpen(false)}
+                        >닫기</button>
+                      </div>
+                      <${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {
+                        setMobileRailOpen(false)
+                        setDetailOpen(true)
+                      }} />
+                    </div>
+                  </div>
+                `
+              : null}
           `}
     </div>
     ${!detailOpen
@@ -340,5 +485,59 @@ const KeeperDetailContent = memo(function KeeperDetailContent({ keeper }: { keep
           onSubmit=${submitClearContext}
         />`
       : null}
+    ${configOverlayKeeper
+      ? html`<${KeeperConfigOverlay}
+          keeperName=${configOverlayKeeper}
+          onClose=${() => setConfigOverlayKeeper(null)}
+        />`
+      : null}
   `
 })
+
+function KeeperConfigOverlay({
+  keeperName,
+  onClose,
+}: {
+  keeperName: string
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return html`
+    <div
+      class="kw-config-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label=${`${keeperName} keeper 설정`}
+      data-testid="kw-config-overlay"
+      onClick=${onClose}
+    >
+      <div class="kw-config-drawer v2-monitoring-surface" onClick=${(event: Event) => event.stopPropagation()}>
+        <div class="kw-config-head v2-monitoring-toolbar">
+          <div class="min-w-0">
+            <h3>keeper 설정</h3>
+            <p>${keeperName}</p>
+          </div>
+          <button
+            type="button"
+            class=${`kw-act ${CLOSE_BUTTON_FOCUS_CLASS} v2-monitoring-action`}
+            onClick=${onClose}
+            data-testid="kw-config-close"
+          >닫기</button>
+        </div>
+        <div class="kw-config-scroll v2-monitoring-panel">
+          <${KeeperConfigPanel} keeperName=${keeperName} />
+        </div>
+      </div>
+    </div>
+  `
+}

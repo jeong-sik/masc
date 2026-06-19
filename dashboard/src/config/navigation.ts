@@ -4,6 +4,8 @@ type SurfaceId = TabId
 export type DashboardSurfaceIcon =
   | 'overview'
   | 'monitoring'
+  | 'keepers'
+  | 'board'
   | 'command'
   | 'connectors'
   | 'workspace'
@@ -76,6 +78,28 @@ export interface DashboardSectionNavItem {
   hidden?: boolean
 }
 
+const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
+  'overview',
+  'workspace',
+  'keepers',
+  'board',
+  'code',
+  'connectors',
+  'settings',
+]
+
+const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([
+  'overview',
+  'logs',
+  'settings',
+  'keepers',
+  'board',
+])
+
+export function isSectionlessSurface(tabId: TabId): boolean {
+  return SECTIONLESS_SURFACE_IDS.has(tabId)
+}
+
 export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   {
     id: 'cockpit',
@@ -105,6 +129,22 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     tabs: ['monitoring'],
   },
   {
+    id: 'keepers',
+    label: 'Keepers',
+    icon: 'keepers',
+    description: 'Dedicated keeper roster, conversation, and context workspace',
+    defaultTab: 'keepers',
+    tabs: ['keepers'],
+  },
+  {
+    id: 'board',
+    label: 'Board',
+    icon: 'board',
+    description: 'Human, agent, automation, and system posts',
+    defaultTab: 'board',
+    tabs: ['board'],
+  },
+  {
     id: 'command',
     label: 'Command',
     icon: 'command',
@@ -124,9 +164,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'workspace',
-    label: 'Workspace',
+    label: 'Work',
     icon: 'workspace',
-    description: 'Work goals, board feed, planning, repositories, and verification',
+    description: 'Work goals, planning, repositories, and verification',
     defaultTab: 'workspace',
     defaultParams: { section: 'work' },
     tabs: ['workspace'],
@@ -142,7 +182,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'code',
-    label: 'Code',
+    label: 'IDE',
     icon: 'code',
     description: 'Keeper collaboration IDE shell',
     defaultTab: 'code',
@@ -178,6 +218,18 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 
 export const VISIBLE_DASHBOARD_NAV_ITEMS: DashboardNavItem[] =
   DASHBOARD_NAV_ITEMS.filter(item => item.hidden !== true)
+
+export const PRIMARY_DASHBOARD_SURFACES: DashboardNavGroup[] =
+  V2_PRIMARY_SURFACE_IDS.flatMap(id => {
+    const surface = DASHBOARD_SURFACES.find(item => item.id === id && item.hidden !== true)
+    return surface ? [surface] : []
+  })
+
+export const PRIMARY_DASHBOARD_NAV_ITEMS: DashboardNavItem[] =
+  V2_PRIMARY_SURFACE_IDS.flatMap(id => {
+    const item = DASHBOARD_NAV_ITEMS.find(navItem => navItem.id === id && navItem.hidden !== true)
+    return item ? [item] : []
+  })
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   cockpit: [],
@@ -244,6 +296,8 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       // promotion was reverted by #16977 (Improve dashboard monitor IA).
     },
   ],
+  keepers: [],
+  board: [],
   command: [
     {
       id: 'operations',
@@ -272,18 +326,21 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Board',
       description: 'Human, agent, automation, and system posts.',
       params: { section: 'board' },
+      hidden: true,
     },
     {
       id: 'sub-boards',
       label: 'Sub-Boards',
       description: 'Named spaces within the board with distinct access policies.',
       params: { section: 'sub-boards' },
+      hidden: true,
     },
     {
       id: 'moderation',
       label: 'Moderation',
       description: 'Flagged board posts and moderation actions.',
       params: { section: 'moderation' },
+      hidden: true,
     },
     {
       id: 'planning',
@@ -326,7 +383,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'performance',
       label: 'Performance',
-      description: 'FPS meter and VirtualList windowing demo.',
+      description: 'FPS meter, VirtualList, content-visibility, native dialog, and observer probes.',
       params: { section: 'performance' },
     },
     {
@@ -356,7 +413,7 @@ export function defaultParamsForTab(tabId: TabId): Record<string, string> {
 }
 
 export function sectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
-  if (tabId === 'overview' || tabId === 'logs' || tabId === 'settings') return []
+  if (isSectionlessSurface(tabId)) return []
   return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId]
 }
 
@@ -422,7 +479,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   const next = { ...params }
   const legacyObservatoryRanges = new Set(['1h', '6h', '24h', '7d'])
 
-  if (tabId === 'overview' || tabId === 'logs' || tabId === 'settings') {
+  if (isSectionlessSurface(tabId)) {
     delete next.section
     delete next.surface
     return next
@@ -484,7 +541,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 }
 
 export function currentSectionForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): DashboardSectionNavItem | null {
-  if (routeState.tab === 'overview' || routeState.tab === 'logs') return null
+  if (isSectionlessSurface(routeState.tab)) return null
   const normalized = normalizeRouteParams(routeState.tab, routeState.params)
   return sectionItemsForTab(routeState.tab).find(item => item.params.section === normalized.section) ?? null
 }

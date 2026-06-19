@@ -302,6 +302,47 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('input[name="keeper_chat_search"]')).not.toBeNull()
   })
 
+  it('forwards the message-level turn inspector action to the transcript', async () => {
+    const onInspectTurn = vi.fn()
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'direct-assistant',
+          role: 'assistant',
+          source: 'direct_assistant',
+          label: 'sangsu',
+          text: '이번 턴을 검사합니다.',
+          rawText: '이번 턴을 검사합니다.',
+          timestamp: '2026-03-24T00:02:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+
+    render(
+      html`<${KeeperConversationPanel}
+        keeperName="sangsu"
+        placeholder="메시지 입력..."
+        layout="workspace"
+        onInspectTurn=${onInspectTurn}
+      />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const action = container.querySelector('[data-testid="chat-message-action"]') as HTMLButtonElement
+    expect(action).not.toBeNull()
+    expect(action.textContent).toBe('턴 상세')
+
+    action.click()
+
+    expect(onInspectTurn).toHaveBeenCalledTimes(1)
+    expect(onInspectTurn.mock.calls[0]?.[0].id).toBe('direct-assistant')
+  })
+
   it('renders probe and recover buttons in RuntimeActions', async () => {
     const keeper = { name: 'sangsu', status: 'running' } as any
 

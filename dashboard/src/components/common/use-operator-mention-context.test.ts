@@ -23,14 +23,16 @@ function Probe({
   message,
   target,
   dmActive,
+  fallbackKeepers,
   onContext,
 }: {
   message: string
   target: string
   dmActive: boolean
+  fallbackKeepers?: OperatorKeeperSnapshot[]
   onContext: (ctx: OperatorMentionContext) => void
 }) {
-  const ctx = useOperatorMentionContext({ message, target, dmActive, listboxId: LISTBOX_ID })
+  const ctx = useOperatorMentionContext({ message, target, dmActive, listboxId: LISTBOX_ID, fallbackKeepers })
   // Capture synchronously during render — vitest jsdom does not flush
   // useEffect within the await-microtask window the test uses.
   onContext(ctx)
@@ -67,6 +69,47 @@ describe('useOperatorMentionContext', () => {
 
     expect(captured?.onlineKeepers.map(k => k.name).sort()).toEqual(['alpha', 'gamma'])
     expect(captured?.onlineKeeperNames).toBe('alpha\0gamma')
+  })
+
+  it('uses fallback keepers when the operator snapshot has no targetable keepers', async () => {
+    operatorSnapshot.value = null
+
+    render(
+      html`<${Probe}
+        message="@fa"
+        target=""
+        dmActive=${true}
+        fallbackKeepers=${[
+          { name: 'fallback-a', status: 'active' } as OperatorKeeperSnapshot,
+          { name: 'fallback-paused', status: 'offline', phase: 'paused', paused: true } as OperatorKeeperSnapshot,
+          { name: 'fallback-offline', status: 'offline', phase: 'offline' } as OperatorKeeperSnapshot,
+        ]}
+        onContext=${(c: OperatorMentionContext) => { captured = c }}
+      />`,
+      container,
+    )
+
+    expect(captured?.onlineKeepers.map(k => k.name).sort()).toEqual(['fallback-a', 'fallback-paused'])
+    expect(captured?.mentionMatches.map(m => m.name).sort()).toEqual(['fallback-a', 'fallback-paused'])
+  })
+
+  it('prefers operator snapshot keepers over fallback keepers when snapshot targets exist', async () => {
+    operatorSnapshot.value = snapshotWithKeepers([
+      { name: 'snapshot-a', status: 'active' } as OperatorKeeperSnapshot,
+    ])
+
+    render(
+      html`<${Probe}
+        message="@"
+        target=""
+        dmActive=${true}
+        fallbackKeepers=${[{ name: 'fallback-a', status: 'active' } as OperatorKeeperSnapshot]}
+        onContext=${(c: OperatorMentionContext) => { captured = c }}
+      />`,
+      container,
+    )
+
+    expect(captured?.onlineKeepers.map(k => k.name)).toEqual(['snapshot-a'])
   })
 
   it('skips mention parsing when dmActive is false', async () => {

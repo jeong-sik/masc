@@ -3,13 +3,13 @@ import { useCallback, useEffect, useState } from 'preact/hooks'
 import { ArrowLeft, RefreshCw, Trophy } from 'lucide-preact'
 import { fetchBoardKarmaLedger } from '../../api/board'
 import type { BoardKarmaLedger, BoardKarmaLedgerEvent } from '../../types'
-import { navigate } from '../../router'
 import { ActionButton } from '../common/button'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
+import { navigateBoard } from './board-route'
 
 const LIMIT_OPTIONS = [
   { value: '25', label: '25 events' },
@@ -72,7 +72,7 @@ export function BoardKarmaPanel() {
           <h2 id="board-karma-heading" class="mt-1 text-xl font-bold text-[var(--color-fg-primary)]">Karma ledger</h2>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-          <${ActionButton} variant="ghost" size="sm" onClick=${() => navigate('workspace', { section: 'board' })} ariaLabel="Back to board">
+          <${ActionButton} variant="ghost" size="sm" onClick=${() => navigateBoard()} ariaLabel="Back to board">
             <span class="inline-flex items-center gap-1.5"><${ArrowLeft} size=${14} aria-hidden="true" />Board<//>
           <//>
           <${ActionButton} variant="ghost" size="sm" onClick=${() => { void load() }} disabled=${loading} ariaLabel="Refresh board karma">

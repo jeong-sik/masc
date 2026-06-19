@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
-import { VISIBLE_DASHBOARD_NAV_ITEMS } from '../config/navigation'
+import { PRIMARY_DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { DashboardSurfaceTabs, dashboardSurfaceTabId } from './dashboard-surface-tabs'
 
 const navigate = vi.fn()
@@ -33,7 +33,7 @@ describe('DashboardSurfaceTabs', () => {
 
   it('renders top-level surfaces as an ARIA tablist', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="code" />`,
+      html`<${DashboardSurfaceTabs} items=${PRIMARY_DASHBOARD_NAV_ITEMS} currentTab="code" />`,
       container,
     )
 
@@ -41,14 +41,22 @@ describe('DashboardSurfaceTabs', () => {
     expect(tablist?.getAttribute('aria-label')).toBe('Dashboard surfaces')
 
     const tabs = Array.from(container.querySelectorAll('[role="tab"]'))
-    expect(tabs.map(tab => tab.textContent?.trim())).toContain('Code')
+    expect(tabs.map(tab => tab.textContent?.trim())).toEqual([
+      'Overview',
+      'Work',
+      'Keepers',
+      'Board',
+      'IDE',
+      'Connectors',
+      'Settings',
+    ])
     expect(tabs.map(tab => tab.textContent?.trim())).not.toContain('MASC Cockpit')
-    expect(tabs).toHaveLength(VISIBLE_DASHBOARD_NAV_ITEMS.length)
+    expect(tabs).toHaveLength(PRIMARY_DASHBOARD_NAV_ITEMS.length)
   })
 
   it('marks the current surface as the selected tab', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="code" />`,
+      html`<${DashboardSurfaceTabs} items=${PRIMARY_DASHBOARD_NAV_ITEMS} currentTab="code" />`,
       container,
     )
 
@@ -63,37 +71,37 @@ describe('DashboardSurfaceTabs', () => {
 
   it('moves focus and activates the next surface on ArrowRight', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
+      html`<${DashboardSurfaceTabs} items=${PRIMARY_DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
       container,
     )
 
     const overviewTab = container.querySelector(`#${dashboardSurfaceTabId('overview')}`) as HTMLElement
-    const monitorTab = container.querySelector(`#${dashboardSurfaceTabId('monitoring')}`) as HTMLElement
+    const workTab = container.querySelector(`#${dashboardSurfaceTabId('workspace')}`) as HTMLElement
     overviewTab.focus()
     overviewTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
 
-    expect(document.activeElement).toBe(monitorTab)
-    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents' })
+    expect(document.activeElement).toBe(workTab)
+    expect(navigate).toHaveBeenCalledWith('workspace', { section: 'work' })
   })
 
   it('jumps to the last surface on End', () => {
     render(
-      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
+      html`<${DashboardSurfaceTabs} items=${PRIMARY_DASHBOARD_NAV_ITEMS} currentTab="overview" />`,
       container,
     )
 
     const overviewTab = container.querySelector(`#${dashboardSurfaceTabId('overview')}`) as HTMLElement
-    const logsTab = container.querySelector(`#${dashboardSurfaceTabId('logs')}`) as HTMLElement
+    const settingsTab = container.querySelector(`#${dashboardSurfaceTabId('settings')}`) as HTMLElement
     overviewTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
 
-    expect(document.activeElement).toBe(logsTab)
-    expect(navigate).toHaveBeenCalledWith('logs', undefined)
+    expect(document.activeElement).toBe(settingsTab)
+    expect(navigate).toHaveBeenCalledWith('settings', undefined)
   })
 
   it('passes axe with route tabs and the controlled main panel target', async () => {
     render(
       html`
-        <${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="overview" />
+        <${DashboardSurfaceTabs} items=${PRIMARY_DASHBOARD_NAV_ITEMS} currentTab="overview" />
         <main id="main-content">Overview content</main>
       `,
       container,
@@ -103,7 +111,7 @@ describe('DashboardSurfaceTabs', () => {
   })
 
   it('keeps the tablist keyboard-reachable when current surface is hidden', () => {
-    // Regression for #15120: VISIBLE_DASHBOARD_NAV_ITEMS hides the cockpit
+    // Regression for #15120: primary dashboard navigation hides the cockpit
     // surface, so when currentTab="cockpit" no item matches and the
     // previous active-only tabIndex branch left every tab at tabIndex=-1.
     // The roving-tabindex contract requires exactly one tabIndex=0; fall
@@ -111,7 +119,7 @@ describe('DashboardSurfaceTabs', () => {
     // the tablist. aria-selected stays "false" — we must not lie about
     // selection when nothing in [items] is actually current.
     render(
-      html`<${DashboardSurfaceTabs} items=${VISIBLE_DASHBOARD_NAV_ITEMS} currentTab="cockpit" />`,
+      html`<${DashboardSurfaceTabs} items=${PRIMARY_DASHBOARD_NAV_ITEMS} currentTab="cockpit" />`,
       container,
     )
 

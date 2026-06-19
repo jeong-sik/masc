@@ -816,11 +816,10 @@ let add_routes ~sw ~clock router =
                 | Some o -> o
                 | None -> "localhost"
               in
-              (match route_admission ~has_proc_mgr:(Option.is_some state.Mcp_server.proc_mgr) with
-               | Missing_process_manager ->
+              (match state.Mcp_server.proc_mgr with
+               | None ->
                  Log.Server.warn "LSP WebSocket: no proc_mgr available"
-               | Upgrade_websocket ->
-               let proc_mgr = Option.get state.Mcp_server.proc_mgr in
+               | Some proc_mgr ->
                Ws.Handshake.respond_with_upgrade ~sha1 reqd (fun () ->
                  Eio.Switch.run (fun conn_sw ->
                    let done_promise, done_resolver = Eio.Promise.create () in

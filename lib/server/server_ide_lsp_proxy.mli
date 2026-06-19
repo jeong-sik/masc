@@ -12,10 +12,4 @@ module For_testing : sig
   val resolve_relative : base:string -> string -> string option
   val workspace_root_for_initialize : base_path:string -> string -> string
   val initialize_result_json : unit -> Yojson.Safe.t
-
-  type route_admission =
-    | Upgrade_websocket
-    | Missing_process_manager
-
-  val route_admission : has_proc_mgr:bool -> route_admission
 end

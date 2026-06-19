@@ -1,3 +1,5 @@
+open Result.Syntax
+
 type goal_principal = {
   id : string;
   display_name : string option;
@@ -17,7 +19,7 @@ let goal_principal_of_yojson = function
           Ok
             {
               id = String.trim id;
-              display_name = Json_util.get_string json "display_name" ;
+              display_name = Json_util.get_string json "display_name";
             }
       | Some (`String _) -> Error "goal_principal_of_yojson: id must be non-empty"
       | other ->
@@ -65,40 +67,40 @@ let goal_verifier_policy_to_yojson (policy : goal_verifier_policy) =
       ( "required_verdicts", Json_util.int_opt_to_json policy.required_verdicts );
     ]
 
+let result_map_list f values =
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc)
+    | raw :: rest ->
+        let* item = f raw in
+        collect (item :: acc) rest
+  in
+  collect [] values
+
 let goal_verifier_policy_of_yojson = function
   | `Assoc _ as json -> (
-      match inherit_mode_of_yojson (Json_util.assoc_member_opt "inherit_mode" json |> Option.value ~default:`Null) with
-      | Error msg -> Error msg
-      | Ok inherit_mode -> (
-          match Json_util.assoc_member_opt "principals" json with
-          | Some (`List values) -> (
-              let rec collect acc = function
-                | [] -> Ok (List.rev acc)
-                | raw :: rest -> (
-                    match goal_principal_of_yojson raw with
-                    | Ok principal -> collect (principal :: acc) rest
-                    | Error msg -> Error msg)
-              in
-              match collect [] values with
-              | Error msg -> Error msg
-              | Ok principals ->
-                  let required_verdicts =
-                    match Json_util.assoc_member_opt "required_verdicts" json with
-                    | Some `Null -> Ok None
-                    | Some (`Int n) -> Ok (Some n)
-                    | other ->
-                        Error
-                          ( "goal_verifier_policy_of_yojson: invalid required_verdicts "
-                          ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
-                  in
-                  Result.map
-                    (fun required_verdicts ->
-                      { inherit_mode; principals; required_verdicts })
-                    required_verdicts)
-          | other ->
-              Error
-                ( "goal_verifier_policy_of_yojson: invalid principals "
-                ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )))
+      let* inherit_mode =
+        inherit_mode_of_yojson
+          (Json_util.assoc_member_opt "inherit_mode" json
+          |> Option.value ~default:`Null)
+      in
+      let* principals =
+        match Json_util.assoc_member_opt "principals" json with
+        | Some (`List values) -> result_map_list goal_principal_of_yojson values
+        | other ->
+            Error
+              ( "goal_verifier_policy_of_yojson: invalid principals "
+              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+      in
+      let+ required_verdicts =
+        match Json_util.assoc_member_opt "required_verdicts" json with
+        | Some `Null -> Ok None
+        | Some (`Int n) -> Ok (Some n)
+        | other ->
+            Error
+              ( "goal_verifier_policy_of_yojson: invalid required_verdicts "
+              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+      in
+      { inherit_mode; principals; required_verdicts })
   | json ->
       Error ("goal_verifier_policy_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -171,32 +173,23 @@ let policy_snapshot_of_yojson = function
   | `Assoc _ as json -> (
       let parse_principal_list field =
         match Json_util.assoc_member_opt field json with
-        | Some (`List values) ->
-            let rec collect acc = function
-              | [] -> Ok (List.rev acc)
-              | raw :: rest -> (
-                  match goal_principal_of_yojson raw with
-                  | Ok principal -> collect (principal :: acc) rest
-                  | Error msg -> Error msg)
-            in
-            collect [] values
+        | Some (`List values) -> result_map_list goal_principal_of_yojson values
         | other ->
             Error
               (Printf.sprintf "policy_snapshot_of_yojson: invalid %s %s" field
                  (Yojson.Safe.to_string (Option.value ~default:`Null other)))
       in
-      match parse_principal_list "principals", parse_principal_list "eligible_principals" with
-      | Ok principals, Ok eligible_principals -> (
-          match Json_util.assoc_member_opt "required_verdicts" json with
-          | Some (`Int required_verdicts) ->
-              Ok { principals; eligible_principals; required_verdicts }
-          | other ->
-              Error
-                ( "policy_snapshot_of_yojson: invalid required_verdicts "
-                ^ Yojson.Safe.to_string (Option.value ~default:`Null other) ))
-      | Error msg, _
-      | _, Error msg ->
-          Error msg)
+      let* principals = parse_principal_list "principals" in
+      let* eligible_principals = parse_principal_list "eligible_principals" in
+      let+ required_verdicts =
+        match Json_util.assoc_member_opt "required_verdicts" json with
+        | Some (`Int required_verdicts) -> Ok required_verdicts
+        | other ->
+            Error
+              ( "policy_snapshot_of_yojson: invalid required_verdicts "
+              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+      in
+      { principals; eligible_principals; required_verdicts })
   | json ->
       Error ("policy_snapshot_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -220,44 +213,49 @@ let goal_verification_vote_to_yojson (vote : goal_verification_vote) =
 
 let goal_verification_vote_of_yojson = function
   | `Assoc _ as json -> (
-      match
-        goal_principal_of_yojson (Json_util.assoc_member_opt "principal" json |> Option.value ~default:`Null),
-        vote_decision_of_yojson (Json_util.assoc_member_opt "decision" json |> Option.value ~default:`Null)
-      with
-      | Ok principal, Ok decision -> (
-          match Json_util.assoc_member_opt "submitted_at" json with
-          | Some (`String submitted_at) ->
-              let evidence_refs =
-                match Json_util.assoc_member_opt "evidence_refs" json with
-                | Some `Null -> Ok []
-                | Some (`List values) -> (
-                    try Ok (List.map (function `String s -> s | _ -> "") values)
-                    with
-                    | Eio.Cancel.Cancelled _ as e -> raise e
-                    | _ ->
-                      Error "goal_verification_vote_of_yojson: invalid evidence_refs")
-                | other ->
-                    Error
-                      ( "goal_verification_vote_of_yojson: invalid evidence_refs "
-                      ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
-              in
-              Result.map
-                (fun evidence_refs ->
-                  {
-                    principal;
-                    decision;
-                    note = (match Json_util.assoc_member_opt "note" json with Some (`String s) -> Some s | _ -> None) ;
-                    evidence_refs;
-                    submitted_at;
-                  })
-                evidence_refs
-          | other ->
-              Error
-                ( "goal_verification_vote_of_yojson: invalid submitted_at "
-                ^ Yojson.Safe.to_string (Option.value ~default:`Null other) ))
-      | Error msg, _
-      | _, Error msg ->
-          Error msg)
+      let* principal =
+        goal_principal_of_yojson
+          (Json_util.assoc_member_opt "principal" json
+          |> Option.value ~default:`Null)
+      in
+      let* decision =
+        vote_decision_of_yojson
+          (Json_util.assoc_member_opt "decision" json
+          |> Option.value ~default:`Null)
+      in
+      let* submitted_at =
+        match Json_util.assoc_member_opt "submitted_at" json with
+        | Some (`String submitted_at) -> Ok submitted_at
+        | other ->
+            Error
+              ( "goal_verification_vote_of_yojson: invalid submitted_at "
+              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+      in
+      let* evidence_refs =
+        match Json_util.assoc_member_opt "evidence_refs" json with
+        | Some `Null -> Ok []
+        | Some (`List values) -> (
+            try Ok (List.map (function `String s -> s | _ -> "") values)
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | _ ->
+              Error "goal_verification_vote_of_yojson: invalid evidence_refs")
+        | other ->
+            Error
+              ( "goal_verification_vote_of_yojson: invalid evidence_refs "
+              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+      in
+      Ok
+        {
+          principal;
+          decision;
+          note =
+            (match Json_util.assoc_member_opt "note" json with
+             | Some (`String s) -> Some s
+             | _ -> None);
+          evidence_refs;
+          submitted_at;
+        })
   | json ->
       Error ("goal_verification_vote_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -289,53 +287,61 @@ let goal_verification_request_to_yojson (request : goal_verification_request) =
 
 let goal_verification_request_of_yojson = function
   | `Assoc _ as json -> (
-      match
-        Goal_phase.of_yojson (Json_util.assoc_member_opt "target_phase" json |> Option.value ~default:`Null),
-        goal_principal_of_yojson (Json_util.assoc_member_opt "requested_by" json |> Option.value ~default:`Null),
-        policy_snapshot_of_yojson (Json_util.assoc_member_opt "policy_snapshot" json |> Option.value ~default:`Null),
-        request_status_of_yojson (Json_util.assoc_member_opt "status" json |> Option.value ~default:`Null)
-      with
-      | Ok target_phase, Ok requested_by, Ok policy_snapshot, Ok status -> (
-          match Json_util.assoc_member_opt "id" json, Json_util.assoc_member_opt "goal_id" json, Json_util.assoc_member_opt "created_at" json with
-          | Some (`String id), Some (`String goal_id), Some (`String created_at) ->
-              let votes =
-                match Json_util.assoc_member_opt "votes" json with
-                | Some `Null -> Ok []
-                | Some (`List rows) ->
-                    let rec collect acc = function
-                      | [] -> Ok (List.rev acc)
-                      | row :: rest -> (
-                          match goal_verification_vote_of_yojson row with
-                          | Ok vote -> collect (vote :: acc) rest
-                          | Error msg -> Error msg)
-                    in
-                    collect [] rows
-                | other ->
-                    Error
-                      ( "goal_verification_request_of_yojson: invalid votes "
-                      ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
-              in
-              Result.map
-                (fun votes ->
-                  {
-                    id;
-                    goal_id;
-                    target_phase;
-                    requested_by;
-                    policy_snapshot;
-                    votes;
-                    status;
-                    created_at;
-                    resolved_at = (match Json_util.assoc_member_opt "resolved_at" json with Some (`String s) -> Some s | _ -> None) ;
-                  })
-                votes
-          | _ ->
-              Error "goal_verification_request_of_yojson: invalid id/goal_id/created_at")
-      | Error msg, _, _, _
-      | _, Error msg, _, _
-      | _, _, Error msg, _
-      | _, _, _, Error msg ->
-          Error msg)
+      let* target_phase =
+        Goal_phase.of_yojson
+          (Json_util.assoc_member_opt "target_phase" json
+          |> Option.value ~default:`Null)
+      in
+      let* requested_by =
+        goal_principal_of_yojson
+          (Json_util.assoc_member_opt "requested_by" json
+          |> Option.value ~default:`Null)
+      in
+      let* policy_snapshot =
+        policy_snapshot_of_yojson
+          (Json_util.assoc_member_opt "policy_snapshot" json
+          |> Option.value ~default:`Null)
+      in
+      let* status =
+        request_status_of_yojson
+          (Json_util.assoc_member_opt "status" json
+          |> Option.value ~default:`Null)
+      in
+      let* id, goal_id, created_at =
+        match
+          ( Json_util.assoc_member_opt "id" json,
+            Json_util.assoc_member_opt "goal_id" json,
+            Json_util.assoc_member_opt "created_at" json )
+        with
+        | Some (`String id), Some (`String goal_id), Some (`String created_at) ->
+            Ok (id, goal_id, created_at)
+        | _ ->
+            Error "goal_verification_request_of_yojson: invalid id/goal_id/created_at"
+      in
+      let* votes =
+        match Json_util.assoc_member_opt "votes" json with
+        | Some `Null -> Ok []
+        | Some (`List rows) -> result_map_list goal_verification_vote_of_yojson rows
+        | other ->
+            Error
+              ( "goal_verification_request_of_yojson: invalid votes "
+              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+      in
+      Ok
+        {
+          id;
+          goal_id;
+          target_phase;
+          requested_by;
+          policy_snapshot;
+          votes;
+          status;
+          created_at;
+          resolved_at =
+            (match Json_util.assoc_member_opt "resolved_at" json with
+             | Some (`String s) -> Some s
+             | _ -> None);
+        })
   | json ->
       Error ("goal_verification_request_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -361,19 +367,20 @@ let state_to_yojson (state : state) =
 
 let state_of_yojson = function
   | `Assoc _ as json -> (
-      match Json_util.assoc_member_opt "version" json, Json_util.assoc_member_opt "updated_at" json, Json_util.assoc_member_opt "requests" json with
-      | Some (`Int version), Some (`String updated_at), Some (`List requests_json) ->
-          let rec collect acc = function
-            | [] -> Ok (List.rev acc)
-            | row :: rest -> (
-                match goal_verification_request_of_yojson row with
-                | Ok request -> collect (request :: acc) rest
-                | Error msg -> Error msg)
-          in
-          Result.map
-            (fun requests -> { version; updated_at; requests })
-            (collect [] requests_json)
-      | _ -> Error "goal_verification_state_of_yojson: invalid state")
+      let* version, updated_at, requests_json =
+        match
+          ( Json_util.assoc_member_opt "version" json,
+            Json_util.assoc_member_opt "updated_at" json,
+            Json_util.assoc_member_opt "requests" json )
+        with
+        | Some (`Int version), Some (`String updated_at), Some (`List requests_json) ->
+            Ok (version, updated_at, requests_json)
+        | _ -> Error "goal_verification_state_of_yojson: invalid state"
+      in
+      let* requests =
+        result_map_list goal_verification_request_of_yojson requests_json
+      in
+      Ok { version; updated_at; requests })
   | json ->
       Error ("goal_verification_state_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -398,51 +405,51 @@ let read_state config =
   let path = requests_path config in
   if Workspace_utils.path_exists config path then
     match Workspace_utils.read_json_result config path with
-    | Ok json ->
-        (match state_of_yojson json with
-         | Ok state -> state
-         | Error primary_msg ->
-             let recovery = requests_recovery_path config in
-             if Workspace_utils.path_exists config recovery then
-               match Workspace_utils.read_json_result config recovery with
-               | Ok recovery_json ->
-                   (match state_of_yojson recovery_json with
-                    | Ok state ->
-                        Log.Misc.warn
-                          "goal_verification: primary goal_verifications.json corrupt (%s), recovered from %s"
-                          primary_msg recovery;
-                        state
-                    | Error recovery_msg ->
-                        Log.Misc.error
-                          "goal_verification: both primary and recovery corrupt (primary: %s, recovery: %s)"
-                          primary_msg recovery_msg;
-                        default_state ())
-               | Error recovery_read_msg ->
-                   Log.Misc.warn
-                     "goal_verification: primary corrupt (%s), recovery read failed: %s"
-                     primary_msg recovery_read_msg;
-                   default_state ()
-             else
-               (Log.Misc.warn
-                  "goal_verification: goal_verifications.json corrupt (%s), no .last-good available"
-                  primary_msg;
-                default_state ()))
+    | Ok json -> (
+        match state_of_yojson json with
+        | Ok state -> state
+        | Error primary_msg ->
+            let recovery = requests_recovery_path config in
+            if Workspace_utils.path_exists config recovery then
+              match Workspace_utils.read_json_result config recovery with
+              | Ok recovery_json -> (
+                  match state_of_yojson recovery_json with
+                  | Ok state ->
+                      Log.Misc.warn
+                        "goal_verification: primary goal_verifications.json corrupt (%s), recovered from %s"
+                        primary_msg recovery;
+                      state
+                  | Error recovery_msg ->
+                      Log.Misc.error
+                        "goal_verification: both primary and recovery corrupt (primary: %s, recovery: %s)"
+                        primary_msg recovery_msg;
+                      default_state ())
+              | Error recovery_read_msg ->
+                  Log.Misc.warn
+                    "goal_verification: primary corrupt (%s), recovery read failed: %s"
+                    primary_msg recovery_read_msg;
+                  default_state ()
+            else
+              (Log.Misc.warn
+                 "goal_verification: goal_verifications.json corrupt (%s), no .last-good available"
+                 primary_msg;
+               default_state ()))
     | Error primary_msg ->
         let recovery = requests_recovery_path config in
         if Workspace_utils.path_exists config recovery then
           match Workspace_utils.read_json_result config recovery with
-          | Ok recovery_json ->
-              (match state_of_yojson recovery_json with
-               | Ok state ->
-                   Log.Misc.warn
-                     "goal_verification: primary unreadable (%s), recovered from %s"
-                     primary_msg recovery;
-                   state
-               | Error recovery_msg ->
-                   Log.Misc.error
-                     "goal_verification: primary unreadable (%s), recovery corrupt (%s)"
-                     primary_msg recovery_msg;
-                   default_state ())
+          | Ok recovery_json -> (
+              match state_of_yojson recovery_json with
+              | Ok state ->
+                  Log.Misc.warn
+                    "goal_verification: primary unreadable (%s), recovered from %s"
+                    primary_msg recovery;
+                  state
+              | Error recovery_msg ->
+                  Log.Misc.error
+                    "goal_verification: primary unreadable (%s), recovery corrupt (%s)"
+                    primary_msg recovery_msg;
+                  default_state ())
           | Error recovery_msg ->
               Log.Misc.error
                 "goal_verification: primary unreadable (%s), recovery unreadable (%s)"

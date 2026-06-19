@@ -309,7 +309,10 @@ let hash_namespace_truth_snapshot (snapshot : Yojson.Safe.t) : Digestif.SHA256.t
         let ctx = List.fold_left walk ctx values in
         Digestif.SHA256.feed_string ctx "]"
     | `String s ->
-        let ctx = Digestif.SHA256.feed_string ctx "S" in
+        (* Length-prefix variable-length string fields so distinct JSON
+           payloads cannot collide in the hash stream (e.g. ["aS","b"] vs
+           ["a","Sb"]). The exact separator format is internal to this hash. *)
+        let ctx = Digestif.SHA256.feed_string ctx (Printf.sprintf "S%d:" (String.length s)) in
         Digestif.SHA256.feed_string ctx s
     | `Int n ->
         let ctx = Digestif.SHA256.feed_string ctx "I" in

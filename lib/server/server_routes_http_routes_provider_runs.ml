@@ -44,9 +44,29 @@ let json_with_cache_metadata json metadata =
   | `Assoc fields -> `Assoc (fields @ [ "cache", metadata ])
   | other -> `Assoc [ "payload", other; "cache", metadata ]
 
-let cached_dashboard_json ~sw ~cache ~key ~placeholder ~compute =
+let cached_dashboard_json ~sync_first ~sw ~cache ~key ~placeholder ~compute =
   let now = Unix.gettimeofday () in
-  let entry, response, should_refresh =
+  let run_compute_and_store entry =
+    let result =
+      try Ok (Eio_guard.run_in_systhread compute) with
+      | exn -> Error (Printexc.to_string exn)
+    in
+    (* NDT-OK: moved cache freshness timestamp; wall-clock metadata is boundary output. *)
+    let refreshed_at = Unix.gettimeofday () in
+    Stdlib.Mutex.lock dashboard_metrics_cache_mu;
+    (match result with
+     | Ok json ->
+         entry.value <- Some json;
+         entry.updated_at <- refreshed_at;
+         entry.last_error <- None
+     | Error message ->
+         Log.Misc.warn "dashboard metrics cache refresh failed: %s" message;
+         entry.last_error <- Some message);
+    entry.in_flight <- false;
+    Stdlib.Mutex.unlock dashboard_metrics_cache_mu;
+    result, refreshed_at
+  in
+  let entry, response, should_refresh, was_cold =
     Stdlib.Mutex.lock dashboard_metrics_cache_mu;
     let entry =
       match Hashtbl.find_opt cache key with
@@ -57,11 +77,12 @@ let cached_dashboard_json ~sw ~cache ~key ~placeholder ~compute =
           entry
     in
     let age_s = now -. entry.updated_at in
-    let response, should_refresh =
+    let response, should_refresh, was_cold =
       match entry.value with
       | Some json when age_s <= dashboard_metrics_cache_ttl_s ->
           ( json_with_cache_metadata json
               (cache_metadata ~state:"fresh" ~generated_at:now ~age_s ()),
+            false,
             false )
       | Some json ->
           let start_refresh = not entry.in_flight in
@@ -69,37 +90,36 @@ let cached_dashboard_json ~sw ~cache ~key ~placeholder ~compute =
           ( json_with_cache_metadata json
               (cache_metadata ~state:"stale_refreshing" ~generated_at:now
                  ~age_s ?error:entry.last_error ()),
-            start_refresh )
+            start_refresh,
+            false )
       | None ->
           let start_refresh = not entry.in_flight in
           if start_refresh then entry.in_flight <- true;
           ( json_with_cache_metadata placeholder
               (cache_metadata ~state:"warming" ~generated_at:now
                  ?error:entry.last_error ()),
-            start_refresh )
+            start_refresh,
+            true )
     in
     Stdlib.Mutex.unlock dashboard_metrics_cache_mu;
-    entry, response, should_refresh
+    entry, response, should_refresh, was_cold
   in
-  if should_refresh then
-    Eio.Fiber.fork ~sw (fun () ->
-      let result =
-        try Ok (Eio_guard.run_in_systhread compute) with
-        | exn ->
-            Error (Printexc.to_string exn)
-      in
-      let refreshed_at = Unix.gettimeofday () in
-      Stdlib.Mutex.lock dashboard_metrics_cache_mu;
-      (match result with
-       | Ok json ->
-           entry.value <- Some json;
-           entry.updated_at <- refreshed_at;
-           entry.last_error <- None
-       | Error message ->
-           Log.Misc.warn "dashboard metrics cache refresh failed: %s" message;
-           entry.last_error <- Some message);
-      entry.in_flight <- false;
-      Stdlib.Mutex.unlock dashboard_metrics_cache_mu);
+  let response =
+    if should_refresh then
+      if sync_first && was_cold then
+        match run_compute_and_store entry with
+        | Ok json, refreshed_at ->
+            json_with_cache_metadata json
+              (cache_metadata ~state:"fresh" ~generated_at:refreshed_at ())
+        | Error _, _ -> response
+      else (
+        Eio.Fiber.fork ~sw (fun () ->
+          (* fire-and-forget: stale-while-revalidate background refresh. *)
+          ignore (run_compute_and_store entry : (Yojson.Safe.t, string) result * float));
+        response)
+    else
+      response
+  in
   response
 
 let empty_model_metrics_json ~window ~bucket_min =
@@ -147,7 +167,8 @@ let add_routes ~sw router =
              [ base_path; string_of_int window; string_of_int bucket_min ]
          in
          let json =
-           cached_dashboard_json ~sw ~cache:dashboard_model_metrics_cache ~key
+           cached_dashboard_json ~sw ~sync_first:false
+             ~cache:dashboard_model_metrics_cache ~key
              ~placeholder:(empty_model_metrics_json ~window ~bucket_min)
              ~compute:(fun () ->
                let agg =
@@ -168,7 +189,8 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int window ] in
          let json =
-           cached_dashboard_json ~sw ~cache:dashboard_keeper_costs_cache ~key
+           cached_dashboard_json ~sw ~sync_first:false
+             ~cache:dashboard_keeper_costs_cache ~key
              ~placeholder:
                (Dashboard_http_keeper.keeper_cost_aggregates_json ~config
                   ~keepers:[] ~window_minutes:window)
@@ -191,7 +213,8 @@ let add_routes ~sw router =
          let window = int_query_param req "window" ~default:1440 in
          let base_path = (Mcp_server.workspace_config state).base_path in
          let json =
-           cached_dashboard_json ~sw ~cache:dashboard_cost_latency_cache
+           cached_dashboard_json ~sw ~sync_first:false
+             ~cache:dashboard_cost_latency_cache
              ~key:(cache_key [ base_path; string_of_int window ])
              ~placeholder:(empty_cost_latency_json ~window)
              ~compute:(fun () ->
@@ -206,8 +229,8 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
          let json =
-           cached_dashboard_json ~sw ~cache:dashboard_keeper_decisions_cache
-             ~key
+           cached_dashboard_json ~sw ~sync_first:true
+             ~cache:dashboard_keeper_decisions_cache ~key
              ~placeholder:
                (Dashboard_http_keeper.keeper_decisions_json ~config
                   ~keepers:[] ~limit ())
@@ -231,7 +254,7 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
          let json =
-           cached_dashboard_json ~sw
+           cached_dashboard_json ~sw ~sync_first:false
              ~cache:dashboard_keeper_decisions_log_cache ~key
              ~placeholder:
                (Dashboard_http_keeper.keeper_decisions_log_json ~config
@@ -256,8 +279,8 @@ let add_routes ~sw router =
          let config = (Mcp_server.workspace_config state) in
          let key = cache_key [ config.base_path; string_of_int limit ] in
          let json =
-           cached_dashboard_json ~sw ~cache:dashboard_keeper_memory_log_cache
-             ~key
+           cached_dashboard_json ~sw ~sync_first:false
+             ~cache:dashboard_keeper_memory_log_cache ~key
              ~placeholder:
                (Dashboard_http_keeper.keeper_memory_log_json ~config
                   ~keepers:[] ~limit ())

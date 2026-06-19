@@ -44,26 +44,32 @@ const CHIPS: { id: AgentsView; label: string; description: string }[] = [
 
 export function AgentsUnified() {
   const keeperParam = route.value.params.keeper as string | undefined
-  if (keeperParam) {
-    return html`<${KeeperDetailPage} />`
-  }
-
-  // If an agent name is in the route params, show the profile page
   const agentParam = route.value.params.agent as string | undefined
-  if (agentParam) {
-    return html`<${AgentProfile} name=${agentParam} />`
-  }
-
   const currentView = activeView.value
 
   // countRuntimeKinds is an O(N) scan over agents+keepers. Memoized so an
   // execution_snapshot that only touches unrelated signals (or a re-render from
   // activeView/namespaceTruth/shellCounts) skips the rescan when agents/keepers
   // themselves are unchanged.
+  //
+  // Must run before any conditional return: when the route has a keeper/agent
+  // param this component renders a detail page, but navigating back to the
+  // fleet view re-enters this branch. Keeping the hook sequence stable prevents
+  // Preact hook-order failures during detail-to-list navigation.
   const liveRuntimeCounts = useMemo(
     () => countRuntimeKinds(agents.value, keepers.value),
     [agents.value, keepers.value],
   )
+
+  if (keeperParam) {
+    return html`<${KeeperDetailPage} />`
+  }
+
+  // If an agent name is in the route params, show the profile page
+  if (agentParam) {
+    return html`<${AgentProfile} name=${agentParam} />`
+  }
+
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,

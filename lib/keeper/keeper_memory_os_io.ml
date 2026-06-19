@@ -92,89 +92,11 @@ let episode_path ~keeper_id ~trace_id ~generation =
     (Printf.sprintf "%s-g%04d.json" trace_id generation)
 ;;
 
-(** Compute the next generation number for a trace's episode files.
-
-    Scans the episodes directory for files matching [trace_id-gNNNN.json]
-    and returns [max_gen + 1].  This is a **single-writer** operation:
-    concurrent callers for the same [trace_id] will race on the directory
-    scan and may produce duplicate generation numbers.  The caller must
-    ensure at most one fiber calls [next_generation] for a given
-    [trace_id] at a time (e.g. via a per-trace sequencer or by running
-    all extractions for one trace on a single fiber). *)
-let next_generation ~keeper_id ~trace_id =
-  let dir = episodes_dir ~keeper_id in
-  let prefix = Printf.sprintf "%s-g" trace_id in
-  let max_gen =
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter_map (fun name ->
-      if String.starts_with ~prefix name then
-        let plen = String.length prefix in
-        let rest = String.sub name plen (String.length name - plen) in
-        if String.length rest >= 4 then int_of_string_opt (String.sub rest 0 4) else None
-      else None)
-    |> List.fold_left max (-1)
-  in
-  max_gen + 1
-;;
-
-let unique_episode_path ~keeper_id episode =
-  let created_ms =
-    episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float
-  in
-  let base =
-    Filename.concat
-      (episodes_dir ~keeper_id)
-      (Printf.sprintf
-         "%s-g%04d-t%013Ld"
-         episode.trace_id
-         episode.generation
-         created_ms)
-  in
-  let rec loop suffix =
-    let path =
-      if suffix = 0
-      then base ^ ".json"
-      else Printf.sprintf "%s-%04d.json" base suffix
-    in
-    if Sys.file_exists path then loop (suffix + 1) else path
-  in
-  loop 0
-;;
-
-(* ---------- Append helpers ---------- *)
-
 let remove_noerr path =
   try
     if Sys.file_exists path then Sys.remove path
   with
   | Sys_error _ | Unix.Unix_error _ -> ()
-;;
-
-let append_line path line =
-  ensure_dir (Filename.dirname path);
-  let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
-  let close_attempted = ref false in
-  try
-    output_string oc (line ^ "\n");
-    close_attempted := true;
-    close_out oc
-  with
-  | exn ->
-    if not !close_attempted then close_out_noerr oc;
-    raise exn
-;;
-
-let append_json path json =
-  append_line path (Yojson.Safe.to_string json)
-;;
-
-let append_fact ~keeper_id fact =
-  append_json (facts_path ~keeper_id) (fact_to_json fact)
-;;
-
-let append_event ~keeper_id episode =
-  append_json (events_path ~keeper_id) (episode_to_json episode)
 ;;
 
 let write_file_atomically path content =
@@ -204,6 +126,113 @@ let write_file_atomically path content =
     if not !close_attempted then close_out_noerr oc;
     remove_noerr tmp;
     raise exn
+;;
+
+let generation_counter_path ~keeper_id ~trace_id =
+  Filename.concat (episodes_dir ~keeper_id) (Printf.sprintf "%s.generation" trace_id)
+;;
+
+let max_generation_from_files ~keeper_id ~trace_id =
+  let dir = episodes_dir ~keeper_id in
+  let prefix = Printf.sprintf "%s-g" trace_id in
+  Sys.readdir dir
+  |> Array.to_list
+  |> List.filter_map (fun name ->
+    if String.starts_with ~prefix name then
+      let plen = String.length prefix in
+      let rest = String.sub name plen (String.length name - plen) in
+      if String.length rest >= 4 then int_of_string_opt (String.sub rest 0 4) else None
+    else None)
+  |> List.fold_left max (-1)
+;;
+
+let read_generation_counter path =
+  if not (Sys.file_exists path)
+  then None
+  else (
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let len = in_channel_length ic in
+         really_input_string ic len |> String.trim |> int_of_string_opt))
+;;
+
+(** Compute the next generation number for a trace's episode files.
+
+    Scans the episodes directory for files matching [trace_id-gNNNN.json]
+    and reserves [max(floor, max_gen + 1, counter_next)] under a per-trace file
+    lock. The counter intentionally allows gaps when extraction later fails;
+    uniqueness is more important than contiguous numbering across fibers or
+    processes. *)
+let next_generation_with_floor ~floor ~keeper_id ~trace_id =
+  let counter_path = generation_counter_path ~keeper_id ~trace_id in
+  File_lock_eio.with_lock counter_path (fun () ->
+    let next_from_files = max_generation_from_files ~keeper_id ~trace_id + 1 in
+    let next_from_counter =
+      match read_generation_counter counter_path with
+      | Some next -> next
+      | None -> 0
+    in
+    let generation = max floor (max next_from_files next_from_counter) in
+    write_file_atomically counter_path (Printf.sprintf "%d\n" (generation + 1));
+    generation)
+;;
+
+let next_generation ~keeper_id ~trace_id =
+  next_generation_with_floor ~floor:0 ~keeper_id ~trace_id
+;;
+
+let unique_episode_path ~keeper_id episode =
+  let created_ms =
+    episode.created_at *. 1000.0 |> Float.max 0.0 |> Int64.of_float
+  in
+  let base =
+    Filename.concat
+      (episodes_dir ~keeper_id)
+      (Printf.sprintf
+         "%s-g%04d-t%013Ld"
+         episode.trace_id
+         episode.generation
+         created_ms)
+  in
+  let rec loop suffix =
+    let path =
+      if suffix = 0
+      then base ^ ".json"
+      else Printf.sprintf "%s-%04d.json" base suffix
+    in
+    if Sys.file_exists path then loop (suffix + 1) else path
+  in
+  loop 0
+;;
+
+(* ---------- Append helpers ---------- *)
+
+let append_line path line =
+  ensure_dir (Filename.dirname path);
+  let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
+  let close_attempted = ref false in
+  try
+    output_string oc (line ^ "\n");
+    close_attempted := true;
+    close_out oc
+  with
+  | exn ->
+    if not !close_attempted then close_out_noerr oc;
+    raise exn
+;;
+
+let append_json path json =
+  append_line path (Yojson.Safe.to_string json)
+;;
+
+let append_fact ~keeper_id fact =
+  append_json (facts_path ~keeper_id) (fact_to_json fact)
+;;
+
+let append_event ~keeper_id episode =
+  append_json (events_path ~keeper_id) (episode_to_json episode)
 ;;
 
 let append_episode ~keeper_id episode =

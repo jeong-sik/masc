@@ -235,6 +235,19 @@ type render_result =
   ; n_facts_in_store : int
   }
 
+let with_fact_store_locks keeper_ids f =
+  let paths =
+    keeper_ids
+    |> List.map (fun keeper_id -> Keeper_memory_os_io.facts_path ~keeper_id)
+    |> List.sort_uniq String.compare
+  in
+  let rec loop = function
+    | [] -> f ()
+    | path :: rest -> File_lock_eio.with_lock path (fun () -> loop rest)
+  in
+  loop paths
+;;
+
 let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
@@ -248,27 +261,39 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
      facts. RFC-0247: order by the structural truth anchor (most-recently-verified
      first); the composite score, lexical seed-rerank, and spreading-activation
      reranking were all removed in the purge. *)
-  let all_facts =
-    Keeper_memory_os_io.read_facts_tail ~keeper_id ~n:Keeper_memory_os_io.fact_store_max
-  in
-  let n_facts_in_store = List.length all_facts in
-  let facts = all_facts |> facts_recency_ranked ~now |> take max_facts in
-  (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own, with
-     private precedence — a claim already surfaced from this keeper's store is not
-     repeated from the shared store. The shared store is read under the reserved
-     [shared_store_id]; reading it for the shared store itself is a no-op guard.
-     Unlike per-keeper stores, the consolidator rewrites the shared tier directly
-     and does not apply [fact_store_max], so recall must scan every shared fact
-     before ranking and taking the small communal slice. *)
-  let private_keys = List.map (fun f -> normalize_claim f.claim) facts in
-  let shared_facts =
-    if String.equal keeper_id shared_store_id
-    then []
-    else
-      Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
-      |> facts_recency_ranked ~now
-      |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
-      |> take default_max_shared_facts
+  let facts, private_keys, shared_facts, n_facts_in_store =
+    let fact_store_ids =
+      if String.equal keeper_id shared_store_id
+      then [ keeper_id ]
+      else [ keeper_id; shared_store_id ]
+    in
+    with_fact_store_locks fact_store_ids (fun () ->
+      let all_facts =
+        Keeper_memory_os_io.read_facts_tail
+          ~keeper_id
+          ~n:Keeper_memory_os_io.fact_store_max
+      in
+      let n_facts_in_store = List.length all_facts in
+      let facts = all_facts |> facts_recency_ranked ~now |> take max_facts in
+      (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own,
+         with private precedence — a claim already surfaced from this keeper's
+         store is not repeated from the shared store. Both stores are read under
+         their facts locks in deterministic path order, so the private dedup keys
+         and shared slice come from one serialized snapshot boundary. Unlike
+         per-keeper stores, the consolidator rewrites the shared tier directly
+         and does not apply [fact_store_max], so recall must scan every shared
+         fact before ranking and taking the small communal slice. *)
+      let private_keys = List.map (fun f -> normalize_claim f.claim) facts in
+      let shared_facts =
+        if String.equal keeper_id shared_store_id
+        then []
+        else
+          Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
+          |> facts_recency_ranked ~now
+          |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
+          |> take default_max_shared_facts
+      in
+      facts, private_keys, shared_facts, n_facts_in_store)
   in
   let episodes =
     Keeper_memory_os_io.read_episodes_tail

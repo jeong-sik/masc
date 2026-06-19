@@ -184,6 +184,14 @@ let wait_for_ref ~clock label r =
   | Eio.Time.Timeout -> Alcotest.failf "timed out waiting for %s" label
 ;;
 
+let with_eio_guard f =
+  let restore_eio_guard = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect
+    ~finally:(fun () -> if not restore_eio_guard then Eio_guard.disable ())
+    f
+;;
+
 let episode_fixture ~now ~trace_id ~generation ~summary =
   let fact =
     { (fact_fixture ~now ()) with
@@ -1024,6 +1032,38 @@ let test_next_generation_scans_episode_files () =
       "missing trace remains zero"
       0
       (Memory_io.next_generation ~keeper_id ~trace_id:"trace-missing"))
+;;
+
+let test_next_generation_reserves_without_episode_file () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "episode-generation-reservation-keeper" in
+    Alcotest.(check int)
+      "first reservation starts at zero"
+      0
+      (Memory_io.next_generation ~keeper_id ~trace_id:"trace-reserve");
+    Alcotest.(check int)
+      "second reservation advances even before append"
+      1
+      (Memory_io.next_generation ~keeper_id ~trace_id:"trace-reserve");
+    Memory_io.append_episode
+      ~keeper_id
+      (episode_fixture
+         ~now:1_000_000.0
+         ~trace_id:"trace-reserve"
+         ~generation:5
+         ~summary:"manual higher generation");
+    Alcotest.(check int)
+      "existing files still advance the reservation floor"
+      6
+      (Memory_io.next_generation ~keeper_id ~trace_id:"trace-reserve");
+    Alcotest.(check int)
+      "caller floor can reserve a higher generation"
+      12
+      (Memory_io.next_generation_with_floor ~floor:12 ~keeper_id ~trace_id:"trace-floor");
+    Alcotest.(check int)
+      "counter advances past caller floor"
+      13
+      (Memory_io.next_generation ~keeper_id ~trace_id:"trace-floor"))
 ;;
 
 let test_episode_file_tail_uses_created_at_not_filename () =
@@ -2217,6 +2257,71 @@ let test_consolidator_rejects_corrupt_source_store () =
         (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
       Alcotest.(check bool) "error includes line number" true (contains ":2:" msg))
 ;;
+
+let test_consolidator_waits_for_shared_store_lock () =
+  with_eio (fun ~sw ~net:_ ~clock ->
+    with_eio_guard (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let now = 1_000_000.0 in
+        Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now "locked shared claim");
+        Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now "locked shared claim");
+        let result = ref None in
+        let started, resolve_started = Eio.Promise.create () in
+        File_lock_eio.with_lock
+          (Memory_io.facts_path ~keeper_id:Types.shared_store_id)
+          (fun () ->
+             Eio.Fiber.fork ~sw (fun () ->
+               Eio.Promise.resolve resolve_started ();
+               result := Some (Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ()));
+             Eio.Promise.await started;
+             Eio.Time.sleep clock 0.02;
+             Alcotest.(check bool)
+               "consolidator waits while shared store lock is held"
+               true
+               (Option.is_none !result));
+        wait_for_ref ~clock "consolidator after shared lock" result;
+        match !result with
+        | Some report ->
+          Alcotest.(check int) "claim promoted after lock release" 1 report.Consolidator.promoted
+        | None -> Alcotest.fail "expected consolidator report")))
+;;
+
+let test_recall_waits_for_shared_fact_lock () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_eio (fun ~sw ~net:_ ~clock ->
+        with_eio_guard (fun () ->
+          with_temp_keepers_dir (fun _keepers_dir ->
+            let now = 1_000_000.0 in
+            let shared_fact =
+              { (mk_shared_fixture ~now "locked recall shared fact") with
+                Types.observed_by = [ "alpha"; "beta" ]
+              }
+            in
+            Memory_io.append_fact ~keeper_id:Types.shared_store_id shared_fact;
+            let result = ref None in
+            let started, resolve_started = Eio.Promise.create () in
+            File_lock_eio.with_lock
+              (Memory_io.facts_path ~keeper_id:Types.shared_store_id)
+              (fun () ->
+                 Eio.Fiber.fork ~sw (fun () ->
+                   Eio.Promise.resolve resolve_started ();
+                   result := Some (Recall.render_context ~keeper_id:"observer" ~now ()));
+                 Eio.Promise.await started;
+                 Eio.Time.sleep clock 0.02;
+                 Alcotest.(check bool)
+                   "recall waits while shared fact lock is held"
+                   true
+                   (Option.is_none !result));
+            wait_for_ref ~clock "recall after shared lock" result;
+            match !result with
+            | Some block ->
+              Alcotest.(check bool)
+                "shared fact rendered after lock release"
+                true
+                (contains "locked recall shared fact" block)
+            | None -> Alcotest.fail "expected recall block")))))
+;;
 let test_librarian_provider_slot_gate_caps_at_capacity () =
   with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" "1" (fun () ->
     with_eio (fun ~sw ~net:_ ~clock ->
@@ -2487,6 +2592,10 @@ let () =
             `Quick
             test_next_generation_scans_episode_files
         ; Alcotest.test_case
+            "next generation reserves before episode append"
+            `Quick
+            test_next_generation_reserves_without_episode_file
+        ; Alcotest.test_case
             "episode file tail uses created_at"
             `Quick
             test_episode_file_tail_uses_created_at_not_filename
@@ -2629,9 +2738,17 @@ let () =
             `Quick
             test_recall_scans_whole_shared_store
         ; Alcotest.test_case
+            "recall waits for shared fact lock"
+            `Quick
+            test_recall_waits_for_shared_fact_lock
+        ; Alcotest.test_case
             "corrupt source store fails loud"
             `Quick
             test_consolidator_rejects_corrupt_source_store
+        ; Alcotest.test_case
+            "consolidator waits for shared store lock"
+            `Quick
+            test_consolidator_waits_for_shared_store_lock
         ] )
     ; ( "librarian runtime"
       , [ Alcotest.test_case

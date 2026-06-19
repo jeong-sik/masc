@@ -401,7 +401,10 @@ let extract_and_append_with_provider
     inp
   =
   let generation =
-    Keeper_memory_os_io.next_generation ~keeper_id ~trace_id:inp.Keeper_librarian.trace_id
+    Keeper_memory_os_io.next_generation_with_floor
+      ~floor:inp.Keeper_librarian.generation
+      ~keeper_id
+      ~trace_id:inp.Keeper_librarian.trace_id
   in
   match extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp with
   | Error _ as e -> e

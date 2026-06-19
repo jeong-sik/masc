@@ -160,9 +160,14 @@ let entry_of_record_json ~base_path json : (entry, string) result =
         Ok
           (Cancelled
              { reason =
+                 (* DET-OK: persisted cancelled records may predate reason;
+                    the explicit "cancelled" status tag already determined
+                    control flow, this fallback is display-only. *)
                  string_member "reason" json
                  |> Option.value ~default:"keeper_msg request was cancelled"
              ; cancelled_by =
+                 (* DET-OK: display-only audit attribution fallback for
+                    legacy/corrupt cancelled records. *)
                  string_member "cancelled_by" json |> Option.value ~default:"unknown"
              })
       | "done" | "error" ->
@@ -346,7 +351,10 @@ let set_status ?(preserve_terminal = false) request_id status =
     | Some entry ->
       let completed_at =
         match status with
-        | Done _ | Lost _ | Cancelled _ -> Some (Unix.gettimeofday ())
+        | Done _ | Lost _ | Cancelled _ ->
+          (* NDT-OK: completed_at is observational wall-clock metadata for
+             terminal request records; state transitions are status-derived. *)
+          Some (Unix.gettimeofday ())
         | _ -> None
       in
       let updated = { entry with status; completed_at } in
@@ -545,7 +553,10 @@ let cancel ?base_path request_id : bool =
           (* NDT-OK: gettimeofday is acceptable for timestamping operator cancelled state *)
           { entry with
             status = operator_cancelled_status ()
-          ; completed_at = Some (Unix.gettimeofday ())
+          ; completed_at =
+              (* NDT-OK: completed_at is audit metadata for a disk-only
+                 operator cancellation fallback. *)
+              Some (Unix.gettimeofday ())
           }
         in
         persist_entry cancelled_entry;

@@ -1702,6 +1702,11 @@ describe('fusion chat card', () => {
     // Collapsed: no detail rendered and no network call yet.
     expect(container.querySelector('[data-fusion-detail]')).toBeNull()
     expect(fetchBoardPost).not.toHaveBeenCalled()
+    // Focus ring must be the resolved CHAT_FOCUS_RING string, not the stringified
+    // ringFocusClasses function (a bare `${ringFocusClasses}` interpolation regression).
+    const expandButton = card?.querySelector('button')
+    expect(expandButton?.className).toContain('focus-visible:outline-none')
+    expect(expandButton?.className).not.toContain('opts')
   })
 
   it('lazy-fetches the board post and renders panel answers + judge on expand', async () => {
@@ -1731,6 +1736,9 @@ describe('fusion chat card', () => {
     expect(detail?.textContent).not.toContain('PANEL ONE ANSWER')
     const panelToggle = container.querySelector('[data-fusion-panel] button') as HTMLButtonElement | null
     expect(panelToggle).not.toBeNull()
+    // Panel toggle carries the resolved focus ring, not a stringified function.
+    expect(panelToggle?.className).toContain('focus-visible:outline-none')
+    expect(panelToggle?.className).not.toContain('opts')
     fireEvent.click(panelToggle as HTMLButtonElement)
     await flushUi()
     expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('PANEL ONE ANSWER')
@@ -1776,6 +1784,31 @@ describe('fusion chat card', () => {
     const panel = container.querySelector('[data-fusion-panel]')
     expect(panel?.querySelector('h2')?.textContent).toBe('Heading One')
     expect(panel?.querySelector('li')?.textContent).toContain('bullet item')
+  })
+
+  it('sanitizes untrusted model markup in judge synthesis and panel answers', async () => {
+    const xss = '**ok**\n\n<script>alert(1)</script>\n\n<img src=x onerror=alert(2)>\n\n[click](javascript:alert(3))'
+    vi.mocked(fetchBoardPost).mockResolvedValue({
+      meta: {
+        source: 'fusion',
+        panel: [{ model: 'm1', status: 'answered', answer: xss, output_tokens: 10 }],
+        judge: { status: 'synthesized', decision: 'answer', synthesis: xss },
+      },
+    } as unknown as Awaited<ReturnType<typeof fetchBoardPost>>)
+
+    render(html`<${ChatTranscript} entries=${[fusionEntry()]} emptyText="empty" />`, container)
+    fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
+    await flushUi()
+    fireEvent.click(container.querySelector('[data-fusion-panel] button') as HTMLButtonElement)
+    await flushUi()
+
+    // Benign markdown still renders, but every executable vector is stripped by purifyHtml.
+    const detail = container.querySelector('[data-fusion-detail]')
+    expect(detail?.querySelector('strong')?.textContent).toBe('ok')
+    expect(container.querySelector('[data-fusion-detail] script')).toBeNull()
+    const html_ = detail?.innerHTML ?? ''
+    expect(html_).not.toContain('onerror')
+    expect(html_.toLowerCase()).not.toContain('javascript:')
   })
 
   it('surfaces token usage and answered count in the header', async () => {

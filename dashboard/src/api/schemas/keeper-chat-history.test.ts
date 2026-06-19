@@ -187,6 +187,34 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     ])
   })
 
+  it('passes a fusion block through and keeps run_id optional', () => {
+    const withRunId = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        blocks: [{ t: 'fusion', board_post_id: 'post-123', run_id: 'fus-abc' }],
+      }),
+    )
+    expect(withRunId?.blocks).toEqual([{ t: 'fusion', board_post_id: 'post-123', run_id: 'fus-abc' }])
+
+    const withoutRunId = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        blocks: [{ t: 'fusion', board_post_id: 'post-456' }],
+      }),
+    )
+    expect(withoutRunId?.blocks).toEqual([{ t: 'fusion', board_post_id: 'post-456' }])
+  })
+
+  it('drops the whole row when a fusion block is missing board_post_id', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        blocks: [{ t: 'fusion', run_id: 'fus-orphan' }],
+      }),
+    )
+    expect(out).toBeNull()
+  })
+
   it('drops the whole row when blocks contain an unknown shape', () => {
     const out = safeParseKeeperChatHistoryMessage(
       validMessage({

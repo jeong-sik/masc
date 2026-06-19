@@ -939,6 +939,76 @@ let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
       check bool "single hard-cut rejection does not enrich circuit breaker" true
         Yojson.Safe.Util.(member "circuit_breaker" json = `Null))
 
+let test_tool_execute_pipe_argv_emits_pipeline_recovery_plan () =
+  with_exec_fixture "tool_execute_pipe_argv_emits_pipeline_recovery_plan"
+    (fun ~config ~meta ~ctx_work ->
+      let input =
+        `Assoc
+          [ "executable", `String "git"
+          ; ( "argv"
+            , `List
+                [ `String "log"
+                ; `String "--oneline"
+                ; `String "|"
+                ; `String "head"
+                ; `String "-20"
+                ] )
+          ]
+      in
+      let raw =
+        KET.execute_keeper_tool_call
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"tool_execute"
+          ~input
+          ()
+      in
+      let json = parse_json raw in
+      let open Yojson.Safe.Util in
+      check bool "typed marker" true (member "typed" json |> to_bool);
+      let error = member "error" json |> to_string in
+      check bool
+        "pipe argv error names executable"
+        true
+        (contains_substring error "executable \"git\" argv[2]=\"|\"");
+      check bool
+        "pipe argv error points at top-level pipeline"
+        true
+        (contains_substring error "top-level pipeline field");
+      check bool
+        "pipe argv error forbids sh/bash wrapper"
+        true
+        (contains_substring error "Do not wrap this in sh/bash");
+      check bool
+        "alternatives point at Execute.pipeline"
+        true
+        (member "alternatives" json |> json_list_contains "Execute.pipeline");
+      let diagnosis = member "diagnosis" json in
+      check string
+        "diagnosis suggests Execute"
+        "Execute"
+        (member "tool_suggestion" diagnosis |> to_string);
+      check string
+        "diagnosis pins pipe rule"
+        "execute_pipeline_operator_in_argv"
+        (member "rule_id" diagnosis |> to_string);
+      let plan = member "recovery_plan" json in
+      check string
+        "recovery plan keeps same public tool"
+        "Execute"
+        (member "next_tool" plan |> to_string);
+      check string
+        "recovery plan names pipeline shape"
+        "pipeline"
+        (member "input_shape" plan |> to_string);
+      check bool
+        "recovery plan forbids sh -c"
+        true
+        (member "instruction" plan |> to_string |> fun s ->
+          contains_substring s "Do not use sh -c"))
+
 let keeper_msg_input_schema () =
   match
     List.find_opt
@@ -1353,6 +1423,8 @@ let () =
         test_workflow_rejection_payload_skips_circuit_breaker;
       test_case "tool_execute raw cmd requires typed Shell IR" `Quick
         test_tool_execute_raw_cmd_requires_typed_shell_ir;
+      test_case "tool_execute pipe argv emits pipeline recovery plan" `Quick
+        test_tool_execute_pipe_argv_emits_pipeline_recovery_plan;
       test_case "OAS handler threads Eio context to keeper dispatch" `Quick
         test_oas_handler_threads_eio_context_to_keeper_dispatch;
       test_case "registered dispatch does not require masc_ prefix" `Quick

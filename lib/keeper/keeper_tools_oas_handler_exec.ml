@@ -20,6 +20,11 @@ let string_assoc key fields =
   | Some (`String value) when String.trim value <> "" -> Some value
   | _ -> None
 
+let same_public_tool ~current next =
+  match is_execute_tool_name current, String.lowercase_ascii next with
+  | true, "execute" -> true
+  | _ -> String.equal current next
+
 let result_cwd raw_result =
   try
     match Yojson.Safe.from_string raw_result with
@@ -170,9 +175,16 @@ let execute_with_observers
           let key_label =
             Keeper_tool_deterministic_error.to_telemetry_key reason
           in
-          [ ( "do_not_retry_tool"
-            , `String name )
-          ; ( "retry_skipped"
+          let recovery_plan_fields = deterministic_recovery_plan_fields raw_result in
+          let do_not_retry_tool_fields =
+            match string_assoc "required_next_tool" recovery_plan_fields with
+            | Some next_tool when same_public_tool ~current:name next_tool -> []
+            | _ -> [ "do_not_retry_tool", `String name ]
+          in
+          do_not_retry_tool_fields
+          @ [ ( "do_not_retry_same_args"
+              , `Bool true )
+            ; ( "retry_skipped"
             , `Bool true )
           ; ( "retry_skipped_reason"
             , `String key_label )
@@ -185,11 +197,11 @@ let execute_with_observers
            | Some classification ->
              [ ( "retry_skipped_source"
                , `String
-                   (Keeper_tool_deterministic_error.classification_source_to_string
-                      classification.source) )
+                      (Keeper_tool_deterministic_error.classification_source_to_string
+                         classification.source) )
              ]
            | None -> [])
-          @ deterministic_recovery_plan_fields raw_result
+          @ recovery_plan_fields
       in
       let recovery_fields =
         workflow_rejection_recovery_fields @ deterministic_recovery_fields

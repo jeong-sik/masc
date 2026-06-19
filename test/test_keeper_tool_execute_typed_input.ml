@@ -720,9 +720,13 @@ let test_standalone_pipe_operator_in_exec_argv_rejected () =
       Alcotest.(check string) (name ^ " token") token actual_token;
       let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
       Alcotest.(check bool)
-        (name ^ " message points to Pipeline.stages")
+        (name ^ " message points to Execute pipeline field")
         true
-        (String_util.contains_substring_ci msg "Pipeline.stages")
+        (String_util.contains_substring_ci msg "top-level pipeline field");
+      Alcotest.(check bool)
+        (name ^ " message forbids sh/bash wrapper")
+        true
+        (String_util.contains_substring_ci msg "do not wrap this in sh/bash")
     | Error other ->
       Alcotest.failf
         "%s: expected Argv_contains_shell_pipeline_operator, got %a"
@@ -926,9 +930,8 @@ let contains_substring haystack needle =
 
 let test_redirection_rejected_emits_typed_alternative () =
   (* The error message must steer the caller toward typed alternatives
-     (Phase B redirect fields or Pipeline mode), not toward the
-     deprecated "split into Pipeline stages" prose used for
-     control-character rejection. *)
+     (Phase B redirect fields or the public Execute.pipeline shape), not toward
+     stale internal constructor names. *)
   let input =
     Execute_input.Exec
       { executable = "find"
@@ -944,9 +947,9 @@ let test_redirection_rejected_emits_typed_alternative () =
   | Error (Execute_input.Argv_contains_shell_redirection _ as err) ->
     let msg = Format.asprintf "%a" Execute_input.pp_validation_error err in
     Alcotest.(check bool)
-      "error mentions discard_stderr typed field"
+      "error mentions stderr discard shape"
       true
-      (contains_substring msg "discard_stderr");
+      (contains_substring msg "stderr={discard:true}");
     Alcotest.(check bool)
       "error mentions Phase B RFC marker"
       true
@@ -963,7 +966,7 @@ let test_validation_error_alternatives () =
     ~name:"Argv_contains_shell_redirection alternatives"
     (Execute_input.Argv_contains_shell_redirection
        { executable = "find"; index = 3; token = "2>/dev/null" })
-    [ "discard_stderr"; "discard_stdout"; "Pipeline" ];
+    [ "stderr:{discard:true}"; "stdout:{discard:true}"; "Execute.pipeline" ];
   check_alts
     ~name:"Argv_contains_shell_metachar alternatives"
     (Execute_input.Argv_contains_shell_metachar
@@ -973,7 +976,7 @@ let test_validation_error_alternatives () =
     ~name:"Argv_contains_shell_pipeline_operator alternatives"
     (Execute_input.Argv_contains_shell_pipeline_operator
        { executable = "tail"; index = 3; token = "|" })
-    [ "Pipeline" ];
+    [ "Execute.pipeline" ];
   check_alts
     ~name:"Empty_executable has no alternatives"
     (Execute_input.Empty_executable { argv = [ "ls" ] })

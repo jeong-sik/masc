@@ -11,6 +11,8 @@
 
 import type { KeeperApprovalRiskLevel } from '../types/governance'
 
+export type KeeperApprovalRiskVisualBand = 'bad' | 'warn' | 'accent' | 'info'
+
 const RISK_LEVEL_VALUES: ReadonlySet<string> = new Set([
   'low',
   'medium',
@@ -31,4 +33,46 @@ export function asKeeperApprovalRiskLevel(
   const trimmed = value.trim().toLowerCase()
   if (trimmed === '') return null
   return isKeeperApprovalRiskLevel(trimmed) ? trimmed : null
+}
+
+export function keeperApprovalRiskVisualBand(value: unknown): KeeperApprovalRiskVisualBand {
+  switch (asKeeperApprovalRiskLevel(value)) {
+    case 'critical':
+      return 'bad'
+    case 'high':
+      return 'warn'
+    case 'medium':
+      return 'accent'
+    case 'low':
+    case null:
+      return 'info'
+  }
+}
+
+export function isHighOrCriticalKeeperApprovalRisk(value: unknown): boolean {
+  const level = asKeeperApprovalRiskLevel(value)
+  return level === 'critical' || level === 'high'
+}
+
+const RISK_RANK: Record<KeeperApprovalRiskLevel, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+}
+
+export function maxKeeperApprovalRiskLevel(
+  items: readonly { risk_level?: string | null }[],
+): KeeperApprovalRiskLevel | null {
+  let topRank = 0
+  let topLabel: KeeperApprovalRiskLevel | null = null
+  for (const item of items) {
+    const level = asKeeperApprovalRiskLevel(item.risk_level)
+    const rank = level ? RISK_RANK[level] : 0
+    if (rank > topRank) {
+      topRank = rank
+      topLabel = level
+    }
+  }
+  return topLabel
 }

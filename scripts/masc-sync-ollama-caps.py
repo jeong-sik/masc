@@ -29,14 +29,17 @@ Modes:
 
 Capability mapping (source: ollama/ollama types/model/capability.go enum,
 cross-checked against live POST /api/show on 2026-06-19):
-  "vision" or "image" -> supports-image-input        = true
-  "audio"             -> supports-audio-input         = true
-  any media above     -> supports-multimodal-inputs   = true
-Setting multimodal whenever a single media is present is safe: the RFC-0265
-gate (caps_admit_required_modalities) still checks each required modality
-individually, so multimodal only ever *adds* a requirement for >1-modality
-turns; it never bypasses a per-modality check. This mirrors the existing
-gemma4-26b-a4b-qat declaration (vision -> both flags true).
+  "vision" or "image" -> supports-image-input  = true
+  "audio"             -> supports-audio-input  = true
+
+supports-multimodal-inputs is intentionally NOT derived. MASC maps it to the
+"document" modality (runtime_agent.ml: supports_required_modality "document" ->
+supports_multimodal_inputs), and Ollama /api/show reports no document/multimodal
+capability string — only vision/image/audio. Deriving multimodal from "vision"
+would make the capability gate *admit* a document turn to an image-only model
+(a fail-open the gate exists to prevent). So document support stays an explicit
+operator declaration that this script neither emits nor checks; it manages only
+the image and audio input flags that /api/show actually evidences.
 """
 
 from __future__ import annotations
@@ -86,27 +89,29 @@ PROBE_TIMEOUT_S = 20.0
 
 @dataclass(frozen=True)
 class MediaFlags:
-    """The three media-input flags the RFC-0265 gate/reroute reads."""
+    """The /api/show-evidenced media-input flags: image and audio only.
+
+    supports-multimodal-inputs (the MASC "document" modality) is excluded by
+    design — see the module docstring. Ollama does not report it, so this script
+    neither derives nor compares it; document support is operator-declared.
+    """
 
     image: bool
     audio: bool
-    multimodal: bool
 
     @staticmethod
     def from_ollama_capabilities(caps: list[str]) -> "MediaFlags":
         lowered = {c.lower() for c in caps}
-        image = any(t in lowered for t in IMAGE_TOKENS)
-        audio = any(t in lowered for t in AUDIO_TOKENS)
-        return MediaFlags(image=image, audio=audio, multimodal=image or audio)
+        return MediaFlags(
+            image=any(t in lowered for t in IMAGE_TOKENS),
+            audio=any(t in lowered for t in AUDIO_TOKENS),
+        )
 
     @staticmethod
     def from_declared(capabilities_block: dict[str, Any]) -> "MediaFlags":
         return MediaFlags(
             image=bool(capabilities_block.get("supports-image-input", False)),
             audio=bool(capabilities_block.get("supports-audio-input", False)),
-            multimodal=bool(
-                capabilities_block.get("supports-multimodal-inputs", False)
-            ),
         )
 
     def declared_lines(self) -> list[str]:
@@ -115,8 +120,6 @@ class MediaFlags:
             lines.append("supports-image-input = true")
         if self.audio:
             lines.append("supports-audio-input = true")
-        if self.multimodal:
-            lines.append("supports-multimodal-inputs = true")
         return lines
 
 
@@ -315,15 +318,11 @@ def mode_check(config_path: Path, baseline_path: Path, strict: bool) -> int:
         expected = MediaFlags.from_ollama_capabilities(entry["capabilities"])
         declared = model.declared
         if declared != expected:
-            under = (
-                (expected.image and not declared.image)
-                or (expected.audio and not declared.audio)
-                or (expected.multimodal and not declared.multimodal)
+            under = (expected.image and not declared.image) or (
+                expected.audio and not declared.audio
             )
-            over = (
-                (declared.image and not expected.image)
-                or (declared.audio and not expected.audio)
-                or (declared.multimodal and not expected.multimodal)
+            over = (declared.image and not expected.image) or (
+                declared.audio and not expected.audio
             )
             if under and over:
                 kind = "MISMATCH (both under- and over-declared)"
@@ -334,10 +333,8 @@ def mode_check(config_path: Path, baseline_path: Path, strict: bool) -> int:
             print(
                 f"DRIFT {model.model_id} ({model.api_name}): {kind}\n"
                 f"  /api/show caps = {entry['capabilities']}\n"
-                f"  expected: image={expected.image} audio={expected.audio} "
-                f"multimodal={expected.multimodal}\n"
-                f"  declared: image={declared.image} audio={declared.audio} "
-                f"multimodal={declared.multimodal}",
+                f"  expected: image={expected.image} audio={expected.audio}\n"
+                f"  declared: image={declared.image} audio={declared.audio}",
                 file=sys.stderr,
             )
             hard += 1
@@ -379,21 +376,21 @@ def mode_emit(config_path: Path, baseline_path: Path) -> int:
 
 def mode_self_test() -> int:
     cases = [
-        (["completion", "tools", "thinking", "vision"], MediaFlags(True, False, True)),
-        (["vision", "thinking", "completion", "tools"], MediaFlags(True, False, True)),
-        (["completion", "tools", "thinking"], MediaFlags(False, False, False)),
-        (["completion", "vision", "audio"], MediaFlags(True, True, True)),
-        (["image"], MediaFlags(True, False, True)),
-        ([], MediaFlags(False, False, False)),
+        (["completion", "tools", "thinking", "vision"], MediaFlags(True, False)),
+        (["vision", "thinking", "completion", "tools"], MediaFlags(True, False)),
+        (["completion", "tools", "thinking"], MediaFlags(False, False)),
+        (["completion", "vision", "audio"], MediaFlags(True, True)),
+        (["image"], MediaFlags(True, False)),
+        ([], MediaFlags(False, False)),
     ]
     for caps, want in cases:
         got = MediaFlags.from_ollama_capabilities(caps)
         assert got == want, f"map({caps}) = {got}, want {want}"
-    # declared round-trips through the TOML key names.
+    # declared round-trips through the TOML key names; multimodal is ignored.
     declared = MediaFlags.from_declared(
         {"supports-image-input": True, "supports-multimodal-inputs": True}
     )
-    assert declared == MediaFlags(True, False, True), declared
+    assert declared == MediaFlags(True, False), declared
     print(f"self-test OK ({len(cases)} mapping cases)")
     return 0
 

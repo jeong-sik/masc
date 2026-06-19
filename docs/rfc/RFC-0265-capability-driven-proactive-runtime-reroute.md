@@ -220,10 +220,15 @@ path (the runtime stays static/deterministic per §3.4):
 
 Mapping (source: ollama `types/model/capability.go`, verified against live
 `/api/show` 2026-06-19): `vision`|`image` → `supports-image-input`; `audio` →
-`supports-audio-input`; any media → `supports-multimodal-inputs`. Setting
-`multimodal` for a single media is safe — the §3.1 gate still checks each
-required modality individually, so `multimodal` only ever *adds* a requirement
-for >1-modality turns; it never bypasses a per-modality check.
+`supports-audio-input`. `supports-multimodal-inputs` is intentionally **not**
+derived: MASC maps it to the `document` modality (§3.1
+`supports_required_modality "document" -> supports_multimodal_inputs`), and
+`/api/show` reports no document/multimodal capability string — only
+vision/image/audio. Deriving `multimodal` from `vision` would make the gate
+*admit* a document turn to an image-only model (a fail-open the gate exists to
+prevent). Document support therefore stays an explicit operator declaration that
+the script neither emits nor checks; it manages only the image/audio flags
+`/api/show` evidences.
 
 Two drift levels are both covered: *config vs baseline* by `--check`
 (deterministic, CI) and *baseline vs `/api/show`* by `--refresh` (surfaces as a

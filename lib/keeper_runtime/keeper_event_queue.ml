@@ -41,6 +41,10 @@ and fusion_completion = {
   (* correlates to the sink's board evidence post; "" if none was created. *)
 }
 
+let fusion_completion_post_id (fc : fusion_completion) =
+  if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
+  else fc.board_post_id
+
 type stimulus = {
   post_id : post_id;
   urgency : urgency;

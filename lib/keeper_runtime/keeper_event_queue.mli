@@ -75,6 +75,11 @@ and fusion_completion = {
     answer (or a failure label when [ok = false]); [board_post_id] correlates to
     the sink's board evidence post ("" when none was created). *)
 
+val fusion_completion_post_id : fusion_completion -> post_id
+(** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
+    sink created a board evidence post, otherwise falls back to
+    ["fusion-run:<run_id>"]. *)
+
 type stimulus = {
   post_id : post_id;
   urgency : urgency;

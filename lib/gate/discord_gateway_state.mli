@@ -183,6 +183,10 @@ type input =
   | Frame_received of frame    (** Parsed inbound frame. *)
   | Frame_parse_error of string (** Decoded JSON, failed schema. *)
   | Wss_closed of { code : int; reason : string }
+  | Connect_failed of { reason : string }
+      (** Socket never came up (DNS / connect / TLS handshake failure), as
+          opposed to [Wss_closed] where an established session ended. Drives
+          the same backoff reconnect path. *)
   | Heartbeat_tick             (** Clock fired heartbeat interval. *)
   | Heartbeat_ack_timeout      (** No ack within 2x interval. *)
   | Backoff_elapsed            (** Reconnect timer fired. *)

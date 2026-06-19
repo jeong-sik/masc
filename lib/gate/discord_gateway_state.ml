@@ -170,6 +170,10 @@ type input =
   | Frame_received of frame
   | Frame_parse_error of string
   | Wss_closed of { code : int; reason : string }
+  | Connect_failed of { reason : string }
+      (** The socket never came up (DNS / connect / TLS handshake failure),
+          as opposed to {!Wss_closed} where an established session ended.
+          Drives the same backoff reconnect path. *)
   | Heartbeat_tick
   | Heartbeat_ack_timeout
   | Backoff_elapsed
@@ -907,6 +911,35 @@ let handle_wss_closed t ~now_mono ~code ~reason =
               }
           ] )
 
+let handle_connect_failed t ~now_mono ~reason =
+  match t.state with
+  | Awaiting_hello | Identifying | Resuming ->
+      (* The socket never came up. Drive the same backoff reconnect as a
+         non-fatal Wss_closed, reusing [backoff_ms] / [make_reconnect_pending].
+         No Close_wss: there is no open connection to tear down (conn_ref was
+         never set by the I/O layer's Open_wss handler). *)
+      let resume_context = capture_resume_context t in
+      let resumable = Option.is_some resume_context in
+      let delay_ms = backoff_ms ~attempts:t.reconnect_attempts in
+      let t' =
+        make_reconnect_pending t ~now_mono ~delay_ms ~resumable ~resume_context
+      in
+      ( t'
+      , [ Schedule_backoff { delay_ms }
+        ; Log
+            { level = `Warn
+            ; message =
+                Printf.sprintf
+                  "WSS connect failed (%s); reconnect in %dms" reason delay_ms
+            }
+        ] )
+  | Disconnected | Reconnect_pending _ | Failed _ | Connected _ ->
+      (* No connection attempt is pending (already connected, idle, or
+         terminal): a late connect failure is stale; ignore it. *)
+      log_warn t
+        (Printf.sprintf
+           "Connect_failed (%s) outside a pending connection; ignoring" reason)
+
 let handle_heartbeat_ack_timeout t ~now_mono =
   match t.state with
   | Connected _ ->
@@ -1142,6 +1175,7 @@ let step t ~now_mono input =
       log_warn t (Printf.sprintf "frame parse error: %s" reason)
   | Wss_closed { code; reason } ->
       handle_wss_closed t ~now_mono ~code ~reason
+  | Connect_failed { reason } -> handle_connect_failed t ~now_mono ~reason
   | Heartbeat_tick -> handle_heartbeat_tick t ~now_mono
   | Heartbeat_ack_timeout -> handle_heartbeat_ack_timeout t ~now_mono
   | Backoff_elapsed -> handle_backoff_elapsed t ~now_mono

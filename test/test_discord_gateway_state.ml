@@ -301,6 +301,35 @@ let test_ready_transition () =
   check bool "Emit_event Ready sess-abc" true
     (has_emit_ready ~session_id:"sess-abc" effects)
 
+let test_connect_failed_schedules_backoff () =
+  let m = S.create ~config:(mk_config ()) in
+  let m, _ = S.step m ~now_mono:0.0 S.Connect_requested in
+  (* Awaiting_hello: a connection attempt is in flight. A DNS/connect failure
+     must reconnect with backoff, not unwind out of the drive loop. *)
+  let m', effects =
+    S.step m ~now_mono:1.0
+      (S.Connect_failed { reason = "getaddrinfo returned no result" })
+  in
+  (match S.state m' with
+   | S.Reconnect_pending _ -> ()
+   | _ -> fail "expected Reconnect_pending after Connect_failed");
+  check bool "Schedule_backoff effect emitted" true
+    (List.exists (function S.Schedule_backoff _ -> true | _ -> false) effects);
+  check bool "no Open_wss re-emitted synchronously" false (has_open_wss effects)
+
+let test_connect_failed_ignored_when_idle () =
+  let m = S.create ~config:(mk_config ()) in
+  (* Disconnected: no connection attempt pending, so a stale connect failure
+     is ignored (no state change, no backoff). *)
+  let m', effects =
+    S.step m ~now_mono:0.0 (S.Connect_failed { reason = "stale" })
+  in
+  (match S.state m' with
+   | S.Disconnected -> ()
+   | _ -> fail "expected Disconnected unchanged when idle");
+  check bool "no Schedule_backoff when idle" false
+    (List.exists (function S.Schedule_backoff _ -> true | _ -> false) effects)
+
 let test_heartbeat_tick_when_connected () =
   let m = S.create ~config:(mk_config ()) in
   let m, _ = S.step m ~now_mono:0.0 S.Connect_requested in
@@ -1958,6 +1987,11 @@ let () =
             test_ready_transition
         ; test_case "Heartbeat_tick (Connected) → Send_frame Op_heartbeat"
             `Quick test_heartbeat_tick_when_connected
+        ; test_case
+            "Connect_failed (Awaiting_hello) → Reconnect_pending + Schedule_backoff"
+            `Quick test_connect_failed_schedules_backoff
+        ; test_case "Connect_failed (idle) → ignored, no backoff" `Quick
+            test_connect_failed_ignored_when_idle
         ] )
     ; ( "presence"
       , [ test_case "Status_change (Connected) → opcode 3 STATUS_UPDATE"

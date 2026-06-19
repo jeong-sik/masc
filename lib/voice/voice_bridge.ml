@@ -2,6 +2,8 @@
 
 include Voice_bridge_core
 
+open Result.Syntax
+
 let safe_agent_id = Voice_bridge_transport.safe_agent_id
 let make_audio_file = Voice_bridge_transport.make_audio_file
 let read_file = Voice_bridge_transport.read_file
@@ -28,9 +30,9 @@ let audio_payload_fields ~audio_file ~audio_device =
 
 let available_stt_endpoints () =
   match load_voice_config () with
-  | Error _ -> []
   | Ok config ->
     config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
+  | Error _ -> []
 ;;
 
 let transcribe_audio ~audio_file ?language_code () =
@@ -46,9 +48,9 @@ let transcribe_audio ~audio_file ?language_code () =
       (match transcribe_via_http_stt endpoint ~audio_file ~model with
        | Ok json ->
          let text =
-           match Json_util.get_string json "text" with
-           | Some t -> t
-           | None -> Yojson.Safe.to_string json
+           Option.value
+             (Json_util.get_string json "text")
+             ~default:(Yojson.Safe.to_string json)
          in
          let lang =
            match language_code with
@@ -73,8 +75,8 @@ let transcribe_audio ~audio_file ?language_code () =
 
 let available_tts_endpoints ?provider () =
   match load_voice_config () with
-  | Error _ -> []
   | Ok config -> Voice_runtime_overlay.select_endpoints ?provider config.tts.endpoints
+  | Error _ -> []
 ;;
 
 (** Synthesize a dashboard-playable MP3 via any HTTP TTS endpoint.
@@ -175,25 +177,26 @@ let tts_preview_bytes_from_request_json json =
         try_endpoints (note :: attempted) rest)
       else (
         let output_file = Filename.temp_file "masc_voice_preview" ".mp3" in
-        let result =
-          speak_via_http_tts_to_file
-            endpoint
-            ~agent_id:"preview"
-            ~message:text
-            ~voice
-            ~model
-            ~output_file
-        in
         Eio_guard.protect
           ~finally:(fun () ->
             try Sys.remove output_file with
             | Sys_error _ -> ())
           (fun () ->
-             match result with
-             | Ok _ -> Ok (read_file output_file)
-             | Error error ->
-               let note = Printf.sprintf "%s: %s" endpoint.id error in
-               try_endpoints (note :: attempted) rest))
+             let* _file_size =
+               speak_via_http_tts_to_file
+                 endpoint
+                 ~agent_id:"preview"
+                 ~message:text
+                 ~voice
+                 ~model
+                 ~output_file
+             in
+             Ok (read_file output_file))
+        |> function
+        | Ok _ as ok -> ok
+        | Error error ->
+          let note = Printf.sprintf "%s: %s" endpoint.id error in
+          try_endpoints (note :: attempted) rest)
   in
   try_endpoints [] endpoints
 ;;
@@ -351,18 +354,20 @@ let rec retry_with_backoff ~clock ~attempt ~max_attempts ~backoff_sec operation 
     failure
 ;;
 
+let parse_json_response body =
+  try Ok (Yojson.Safe.from_string body) with
+  | Yojson.Json_error msg ->
+    Error (Printf.sprintf "Voice MCP: invalid JSON body: %s" msg)
+;;
+
 (** Make a single HTTP POST request to the Voice MCP server. *)
 let single_voice_mcp_call ~net:_ ~uri ~headers_list ~body_str =
   match
     Masc_http_client.post_sync ~url:(Uri.to_string uri)
       ~headers:headers_list ~body:body_str ()
   with
-  | Ok (code, body) when code >= 200 && code < 300 ->
-    (try Ok (Yojson.Safe.from_string body) with
-     | Yojson.Json_error msg ->
-       Error (Printf.sprintf "Voice MCP: invalid JSON body: %s" msg))
-  | Ok (code, body) ->
-    Error (Printf.sprintf "HTTP %d: %s" code body)
+  | Ok (code, body) when code >= 200 && code < 300 -> parse_json_response body
+  | Ok (code, body) -> Error (Printf.sprintf "HTTP %d: %s" code body)
   | Error e ->
     (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding fiber
        was cancelled. Masc_http_client.post_sync delegates to a piaf pool
@@ -380,14 +385,22 @@ let extract_mcp_result json =
     let result = json |> Json_util.assoc_member_opt "result" in
     if result = None
     then (
-      let error = (match Json_util.assoc_member_opt "error" json with
-        | Some err -> (match Json_util.assoc_member_opt "message" err with
-          | Some (`String s) -> Some s | _ -> None)
-        | None -> None) in
+      let error =
+        match Json_util.assoc_member_opt "error" json with
+        | Some err ->
+          (match Json_util.assoc_member_opt "message" err with
+           | Some (`String s) -> Some s
+           | _ -> None)
+        | None -> None
+      in
       Error (Option.value error ~default:"Unknown error"))
     else (
       (* Get content from result *)
-      let content = (match Option.bind result (fun r -> Json_util.assoc_member_opt "content" r) with Some (`List l) -> l | _ -> []) in
+      let content =
+        match Option.bind result (fun r -> Json_util.assoc_member_opt "content" r) with
+        | Some (`List l) -> l
+        | _ -> []
+      in
       match content with
       | [] -> Ok (`Assoc [])
       | first :: _ ->
@@ -547,45 +560,41 @@ let attempt_tts_endpoint
         ]
     in
     with_voice_output_turn ~agent_id (fun () ->
-      match
+      let* json =
         call_voice_mcp_endpoint
           ~clock
           ~net
           ~endpoint
           ~tool_name:"agent_speak"
           ~arguments:args
-      with
-      | Ok json ->
-        (match extract_mcp_result json with
-         | Ok data ->
-           (* Voice_mcp plays audio locally but does not expose a file for the
-              dashboard. Try to synthesize a parallel HTTP TTS clip so the
-              browser can also play it. *)
-           let data =
-             match
-               try_http_tts_for_dashboard
-                 ~agent_id
-                 ~message
-                 ~voice
-                 ~model
-                 ~audio_device
-                 ()
-             with
-             | Some (audio_file, file_size) ->
-               let audio_fields =
-                 [ "audio_file", `String audio_file
-                 ; "audio_size", `Int file_size
-                 ]
-                 @ audio_payload_fields ~audio_file ~audio_device
-               in
-               (match data with
-                | `Assoc fields -> `Assoc (fields @ audio_fields)
-                | other -> other)
-             | None -> data
-           in
-           Ok (append_provider_metadata data endpoint)
-         | Error error -> Error error)
-      | Error error -> Error error)
+      in
+      let* data = extract_mcp_result json in
+      (* Voice_mcp plays audio locally but does not expose a file for the
+         dashboard. Try to synthesize a parallel HTTP TTS clip so the
+         browser can also play it. *)
+      let data =
+        match
+          try_http_tts_for_dashboard
+            ~agent_id
+            ~message
+            ~voice
+            ~model
+            ~audio_device
+            ()
+        with
+        | Some (audio_file, file_size) ->
+          let audio_fields =
+            [ "audio_file", `String audio_file
+            ; "audio_size", `Int file_size
+            ]
+            @ audio_payload_fields ~audio_file ~audio_device
+          in
+          (match data with
+           | `Assoc fields -> `Assoc (fields @ audio_fields)
+           | other -> other)
+        | None -> data
+      in
+      Ok (append_provider_metadata data endpoint))
 ;;
 
 (** ============================================
@@ -602,6 +611,7 @@ type health_cache = {
 
 let health_cache : health_cache Atomic.t =
   Atomic.make { available = None; check_time = 0.0; health_target = None }
+;;
 
 (** Cache duration: 30s on success, 5s on failure (Circuit Breaker) *)
 let cache_duration cache =
@@ -612,9 +622,8 @@ let cache_duration cache =
 ;;
 
 let session_endpoint_result () =
-  match load_voice_config () with
-  | Error message -> Error message
-  | Ok config -> Voice_runtime_overlay.session_endpoint_result config
+  let* config = load_voice_config () in
+  Voice_runtime_overlay.session_endpoint_result config
 ;;
 
 let is_voice_server_available ~sw:_ ~clock ~net =
@@ -673,15 +682,10 @@ let is_voice_server_available ~sw:_ ~clock ~net =
 ;;
 
 let call_session_tool ~sw ~clock ~net ~tool_name ~arguments =
-  match session_endpoint_result () with
-  | Error message -> Error message
-  | Ok endpoint ->
-    (match call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments with
-     | Ok json ->
-       (match extract_mcp_result json with
-        | Ok data -> Ok (append_provider_metadata data endpoint)
-        | Error error -> Error error)
-     | Error error -> Error error)
+  let* endpoint = session_endpoint_result () in
+  let* json = call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments in
+  let* data = extract_mcp_result json in
+  Ok (append_provider_metadata data endpoint)
 ;;
 
 (** ============================================
@@ -698,10 +702,11 @@ let start_voice_session ~sw ~clock ~net ~agent_id ?session_name () =
       ; "session_name", Json_util.string_opt_to_json session_name
       ]
   in
-  match
+  let* data =
     call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_start" ~arguments:args
-  with
-  | Ok (`Assoc fields as data) ->
+  in
+  match data with
+  | `Assoc fields as data ->
     let session_id =
       Json_util.get_string data "session_id" |> Option.value ~default:"unknown"
     in
@@ -718,8 +723,7 @@ let start_voice_session ~sw ~clock ~net ~agent_id ?session_name () =
                (fun (key, _) ->
                   key = "provider_kind" || key = "endpoint_id" || key = "endpoint_url")
                fields))
-  | Ok data -> Ok data
-  | Error error -> Error error
+  | data -> Ok data
 ;;
 
 (** End a voice session *)
@@ -845,7 +849,7 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) ?au
              ?audio_device
              endpoint
          with
-         | Ok result -> Ok result
+         | Ok _ as ok -> ok
          | Error error ->
            let attempt = Printf.sprintf "%s: %s" endpoint.id error in
            try_endpoints (attempt :: attempted) rest)
@@ -942,10 +946,11 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
       ; "conference_name", Json_util.string_opt_to_json conference_name
       ]
   in
-  match
+  let* data =
     call_session_tool ~sw ~clock ~net ~tool_name:"conference_start" ~arguments:args
-  with
-  | Ok (`Assoc fields as data) ->
+  in
+  match data with
+  | `Assoc fields as data ->
     let conference_id =
       Json_util.get_string data "conference_id"
       |> Option.value ~default:"unknown"
@@ -963,8 +968,7 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
                (fun (key, _) ->
                   key = "provider_kind" || key = "endpoint_id" || key = "endpoint_url")
                fields))
-  | Ok data -> Ok data
-  | Error error -> Error error
+  | data -> Ok data
 ;;
 
 (** End a multi-agent voice conference *)
@@ -1005,11 +1009,7 @@ let get_transcript ~sw ~clock ~net () =
   then Error "Voice server unavailable"
   else (
     let args = `Assoc [] in
-    match
-      call_session_tool ~sw ~clock ~net ~tool_name:"get_transcript" ~arguments:args
-    with
-    | Ok data -> Ok data
-    | Error error -> Error error)
+    call_session_tool ~sw ~clock ~net ~tool_name:"get_transcript" ~arguments:args)
 ;;
 
 (** ============================================
@@ -1018,39 +1018,37 @@ let get_transcript ~sw ~clock ~net () =
 
 (** Health check for Voice MCP server *)
 let health_check ~sw:_ ~clock:_ ~net () =
-  match session_endpoint_result () with
-  | Error error -> Error error
-  | Ok endpoint ->
-    let uri =
-      match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
-      | Ok url -> Uri.of_string url
-      | Error _ -> voice_health_uri ()
-    in
-    match
-      Masc_http_client.get_response_sync ~url:(Uri.to_string uri) ~headers:[] ()
-    with
-    | Error msg ->
-      (* RFC-0106: re-raise Eio.Cancel.Cancelled when the health-check
-         fiber was cancelled. Pool.do_request captures Cancelled as an
-         Error string; without this check shutdown is reported as a
-         normal "Not reachable" failure. *)
-      Eio.Fiber.check ();
-      Error (Printf.sprintf "Not reachable: %s" msg)
-    | Ok { Masc_http_client.status; body = body_str; _ } ->
-      if status >= 200 && status < 300
-      then
-        Ok
-          (append_provider_metadata
-             (`Assoc
-                 [ "status", `String "healthy"
-                 ; "server", `String (Uri.to_string uri)
-                 ; ( "response"
-                   , try Yojson.Safe.from_string body_str with
-                     | Yojson.Json_error _ -> `String body_str )
-                 ])
-             endpoint)
-      else
-        Error (Printf.sprintf "Unhealthy: HTTP %d" status)
+  let* endpoint = session_endpoint_result () in
+  let uri =
+    match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
+    | Ok url -> Uri.of_string url
+    | Error _ -> voice_health_uri ()
+  in
+  match
+    Masc_http_client.get_response_sync ~url:(Uri.to_string uri) ~headers:[] ()
+  with
+  | Error msg ->
+    (* RFC-0106: re-raise Eio.Cancel.Cancelled when the health-check
+       fiber was cancelled. Pool.do_request captures Cancelled as an
+       Error string; without this check shutdown is reported as a
+       normal "Not reachable" failure. *)
+    Eio.Fiber.check ();
+    Error (Printf.sprintf "Not reachable: %s" msg)
+  | Ok { Masc_http_client.status; body = body_str; _ } ->
+    if status >= 200 && status < 300
+    then
+      Ok
+        (append_provider_metadata
+           (`Assoc
+               [ "status", `String "healthy"
+               ; "server", `String (Uri.to_string uri)
+               ; ( "response"
+                 , try Yojson.Safe.from_string body_str with
+                   | Yojson.Json_error _ -> `String body_str )
+               ])
+           endpoint)
+    else
+      Error (Printf.sprintf "Unhealthy: HTTP %d" status)
 ;;
 
 (** {1 Microphone record + transcribe} *)
@@ -1095,7 +1093,7 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code () =
   in
   Eio_guard.protect ~finally:cleanup (fun () ->
     play_tone 880.0;
-    let record_result =
+    let* () =
       try
         let status, _output =
           run_voice_status ~timeout_sec:(timeout_sec +. 5.0) rec_argv
@@ -1109,20 +1107,17 @@ let record_and_transcribe ~agent_id ?(timeout_sec = 15.0) ?language_code () =
       | exn -> Error (Printf.sprintf "rec exception: %s" (Printexc.to_string exn))
     in
     play_tone 440.0;
-    match record_result with
-    | Error err -> Error err
-    | Ok () ->
-      let file_exists =
-        try (Unix.stat audio_file).st_size > 100 with
-        | Unix.Unix_error _ -> false
-      in
-      if not file_exists
-      then
-        Ok
-          (`Assoc
-              [ "status", `String "no_audio"
-              ; "text", `String ""
-              ; "message", `String "no speech detected or recording too short"
-              ])
-      else transcribe_audio ~audio_file ?language_code ())
+    let file_exists =
+      try (Unix.stat audio_file).st_size > 100 with
+      | Unix.Unix_error _ -> false
+    in
+    if not file_exists
+    then
+      Ok
+        (`Assoc
+            [ "status", `String "no_audio"
+            ; "text", `String ""
+            ; "message", `String "no speech detected or recording too short"
+            ])
+    else transcribe_audio ~audio_file ?language_code ())
 ;;

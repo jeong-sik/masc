@@ -19,6 +19,309 @@ let rec repo_root_from dir =
 
 let repo_root () = repo_root_from (Sys.getcwd ())
 
+type ollama_cloud_case =
+  { runtime_id : string
+  ; api_name : string
+  ; context : int
+  ; tools : bool
+  ; thinking : bool
+  ; vision : bool
+  }
+
+let ollama_cloud_seed_cases =
+  [ { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v3-1-671b"
+    ; api_name = "deepseek-v3.1:671b"
+    ; context = 163840
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v3-2"
+    ; api_name = "deepseek-v3.2"
+    ; context = 163840
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-flash"
+    ; api_name = "deepseek-v4-flash"
+    ; context = 1048576
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+    ; api_name = "deepseek-v4-pro"
+    ; context = 524288
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-devstral-2-123b"
+    ; api_name = "devstral-2:123b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = false
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
+    ; api_name = "devstral-small-2:24b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = false
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-gemini-3-flash-preview"
+    ; api_name = "gemini-3-flash-preview"
+    ; context = 1048576
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-gemma3-4b"
+    ; api_name = "gemma3:4b"
+    ; context = 131072
+    ; tools = false
+    ; thinking = false
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-gemma3-12b"
+    ; api_name = "gemma3:12b"
+    ; context = 131072
+    ; tools = false
+    ; thinking = false
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-gemma3-27b"
+    ; api_name = "gemma3:27b"
+    ; context = 131072
+    ; tools = false
+    ; thinking = false
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-gemma4-31b"
+    ; api_name = "gemma4:31b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-4-7"
+    ; api_name = "glm-4.7"
+    ; context = 202752
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5"
+    ; api_name = "glm-5"
+    ; context = 202752
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-1"
+    ; api_name = "glm-5.1"
+    ; context = 202752
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-glm-5-2"
+    ; api_name = "glm-5.2"
+    ; context = 1000000
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-gpt-oss-20b"
+    ; api_name = "gpt-oss:20b"
+    ; context = 131072
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-gpt-oss-120b"
+    ; api_name = "gpt-oss:120b"
+    ; context = 131072
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k2-5"
+    ; api_name = "kimi-k2.5"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k2-6"
+    ; api_name = "kimi-k2.6"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-kimi-k2-7-code"
+    ; api_name = "kimi-k2.7-code"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m2-1"
+    ; api_name = "minimax-m2.1"
+    ; context = 204800
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m2-5"
+    ; api_name = "minimax-m2.5"
+    ; context = 196608
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m2-7"
+    ; api_name = "minimax-m2.7"
+    ; context = 196608
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-minimax-m3"
+    ; api_name = "minimax-m3"
+    ; context = 524288
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-ministral-3-3b"
+    ; api_name = "ministral-3:3b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = false
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-ministral-3-8b"
+    ; api_name = "ministral-3:8b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = false
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-ministral-3-14b"
+    ; api_name = "ministral-3:14b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = false
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-mistral-large-3-675b"
+    ; api_name = "mistral-large-3:675b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = false
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-nemotron-3-nano-30b"
+    ; api_name = "nemotron-3-nano:30b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-nemotron-3-super"
+    ; api_name = "nemotron-3-super"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-nemotron-3-ultra"
+    ; api_name = "nemotron-3-ultra"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-qwen3-coder-480b"
+    ; api_name = "qwen3-coder:480b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = false
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-qwen3-coder-next"
+    ; api_name = "qwen3-coder-next"
+    ; context = 262144
+    ; tools = true
+    ; thinking = false
+    ; vision = false
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-qwen3-5-397b"
+    ; api_name = "qwen3.5:397b"
+    ; context = 262144
+    ; tools = true
+    ; thinking = true
+    ; vision = true
+    }
+  ; { runtime_id = "ollama_cloud.ollama-cloud-rnj-1-8b"
+    ; api_name = "rnj-1:8b"
+    ; context = 32768
+    ; tools = true
+    ; thinking = false
+    ; vision = false
+    }
+  ]
+
+let has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len && String.sub value 0 prefix_len = prefix
+
+let find_runtime runtimes runtime_id =
+  List.find_opt
+    (fun (runtime : Runtime.t) -> String.equal runtime.id runtime_id)
+    runtimes
+
+let assert_ollama_cloud_seed_runtime runtimes case =
+  match find_runtime runtimes case.runtime_id with
+  | None -> failf "expected Ollama Cloud runtime in seed: %s" case.runtime_id
+  | Some runtime ->
+    check string (case.runtime_id ^ " api name") case.api_name
+      runtime.model.api_name;
+    check int (case.runtime_id ^ " context") case.context
+      runtime.model.max_context;
+    check bool (case.runtime_id ^ " tools") case.tools
+      runtime.model.tools_support;
+    check bool (case.runtime_id ^ " thinking") case.thinking
+      runtime.model.thinking_support;
+    check bool (case.api_name ^ " known to OAS catalog") true
+      (Option.is_some (Llm_provider.Capabilities.for_model_id case.api_name));
+    (match runtime.model.capabilities with
+     | None -> failf "expected capabilities for %s" case.runtime_id
+     | Some caps ->
+       let expected_thinking_format =
+         if case.thinking
+         then Runtime_schema.Reasoning_effort
+         else Runtime_schema.No_thinking_control
+       in
+       check bool (case.runtime_id ^ " forced tool_choice disabled") false
+         caps.supports_tool_choice;
+       check bool (case.runtime_id ^ " image input") case.vision
+         caps.supports_image_input;
+       check bool (case.runtime_id ^ " multimodal input") case.vision
+         caps.supports_multimodal_inputs;
+       check bool (case.runtime_id ^ " extended thinking") case.thinking
+         caps.supports_extended_thinking;
+       check bool (case.runtime_id ^ " reasoning budget") case.thinking
+         caps.supports_reasoning_budget;
+       check bool (case.runtime_id ^ " thinking control") true
+         (Runtime_schema.equal_thinking_control_format
+            caps.thinking_control_format
+            expected_thinking_format))
+
 let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
   check bool "retired runtime.json absent" false (Sys.file_exists path)
@@ -36,6 +339,16 @@ let test_repo_runtime_toml_loads () =
     check (option string) "nick0cave Gemma canary pin"
       (Some "ollama.gemma4-26b-a4b-qat")
       (List.assoc_opt "nick0cave" assignments);
+    check int "Ollama Cloud canonical seed count"
+      (List.length ollama_cloud_seed_cases)
+      (List.length
+         (List.filter
+            (fun (runtime : Runtime.t) ->
+               has_prefix ~prefix:"ollama_cloud.ollama-cloud-" runtime.id)
+            runtimes));
+    List.iter
+      (assert_ollama_cloud_seed_runtime runtimes)
+      ollama_cloud_seed_cases;
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->

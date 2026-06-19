@@ -76,12 +76,17 @@ let result_map_list f values =
   in
   collect [] values
 
+(* DET-OK: missing JSON members are rendered as Null only for strict parser
+   delegation/error text; this does not accept unknown input silently. *)
+let json_member_or_null = function
+  | Some json -> json
+  | None -> `Null
+
 let goal_verifier_policy_of_yojson = function
   | `Assoc _ as json -> (
       let* inherit_mode =
         inherit_mode_of_yojson
-          (Json_util.assoc_member_opt "inherit_mode" json
-          |> Option.value ~default:`Null)
+          (Json_util.assoc_member_opt "inherit_mode" json |> json_member_or_null)
       in
       let* principals =
         match Json_util.assoc_member_opt "principals" json with
@@ -89,7 +94,7 @@ let goal_verifier_policy_of_yojson = function
         | other ->
             Error
               ( "goal_verifier_policy_of_yojson: invalid principals "
-              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+              ^ Yojson.Safe.to_string (json_member_or_null other) )
       in
       let+ required_verdicts =
         match Json_util.assoc_member_opt "required_verdicts" json with
@@ -98,7 +103,7 @@ let goal_verifier_policy_of_yojson = function
         | other ->
             Error
               ( "goal_verifier_policy_of_yojson: invalid required_verdicts "
-              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+              ^ Yojson.Safe.to_string (json_member_or_null other) )
       in
       { inherit_mode; principals; required_verdicts })
   | json ->
@@ -177,7 +182,7 @@ let policy_snapshot_of_yojson = function
         | other ->
             Error
               (Printf.sprintf "policy_snapshot_of_yojson: invalid %s %s" field
-                 (Yojson.Safe.to_string (Option.value ~default:`Null other)))
+                 (Yojson.Safe.to_string (json_member_or_null other)))
       in
       let* principals = parse_principal_list "principals" in
       let* eligible_principals = parse_principal_list "eligible_principals" in
@@ -187,7 +192,7 @@ let policy_snapshot_of_yojson = function
         | other ->
             Error
               ( "policy_snapshot_of_yojson: invalid required_verdicts "
-              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+              ^ Yojson.Safe.to_string (json_member_or_null other) )
       in
       { principals; eligible_principals; required_verdicts })
   | json ->
@@ -215,13 +220,11 @@ let goal_verification_vote_of_yojson = function
   | `Assoc _ as json -> (
       let* principal =
         goal_principal_of_yojson
-          (Json_util.assoc_member_opt "principal" json
-          |> Option.value ~default:`Null)
+          (Json_util.assoc_member_opt "principal" json |> json_member_or_null)
       in
       let* decision =
         vote_decision_of_yojson
-          (Json_util.assoc_member_opt "decision" json
-          |> Option.value ~default:`Null)
+          (Json_util.assoc_member_opt "decision" json |> json_member_or_null)
       in
       let* submitted_at =
         match Json_util.assoc_member_opt "submitted_at" json with
@@ -229,7 +232,7 @@ let goal_verification_vote_of_yojson = function
         | other ->
             Error
               ( "goal_verification_vote_of_yojson: invalid submitted_at "
-              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+              ^ Yojson.Safe.to_string (json_member_or_null other) )
       in
       let* evidence_refs =
         match Json_util.assoc_member_opt "evidence_refs" json with
@@ -243,7 +246,7 @@ let goal_verification_vote_of_yojson = function
         | other ->
             Error
               ( "goal_verification_vote_of_yojson: invalid evidence_refs "
-              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+              ^ Yojson.Safe.to_string (json_member_or_null other) )
       in
       Ok
         {
@@ -289,23 +292,19 @@ let goal_verification_request_of_yojson = function
   | `Assoc _ as json -> (
       let* target_phase =
         Goal_phase.of_yojson
-          (Json_util.assoc_member_opt "target_phase" json
-          |> Option.value ~default:`Null)
+          (Json_util.assoc_member_opt "target_phase" json |> json_member_or_null)
       in
       let* requested_by =
         goal_principal_of_yojson
-          (Json_util.assoc_member_opt "requested_by" json
-          |> Option.value ~default:`Null)
+          (Json_util.assoc_member_opt "requested_by" json |> json_member_or_null)
       in
       let* policy_snapshot =
         policy_snapshot_of_yojson
-          (Json_util.assoc_member_opt "policy_snapshot" json
-          |> Option.value ~default:`Null)
+          (Json_util.assoc_member_opt "policy_snapshot" json |> json_member_or_null)
       in
       let* status =
         request_status_of_yojson
-          (Json_util.assoc_member_opt "status" json
-          |> Option.value ~default:`Null)
+          (Json_util.assoc_member_opt "status" json |> json_member_or_null)
       in
       let* id, goal_id, created_at =
         match
@@ -325,7 +324,7 @@ let goal_verification_request_of_yojson = function
         | other ->
             Error
               ( "goal_verification_request_of_yojson: invalid votes "
-              ^ Yojson.Safe.to_string (Option.value ~default:`Null other) )
+              ^ Yojson.Safe.to_string (json_member_or_null other) )
       in
       Ok
         {

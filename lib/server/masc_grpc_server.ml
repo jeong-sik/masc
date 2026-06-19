@@ -535,11 +535,18 @@ let start
                      Hashtbl.replace lsp_processes lang_id proc;
                      Ok proc
                    | Error msg ->
+                     (* Init failed: the proc + its 3 pipe FDs + reader fibers
+                        are bound to [lsp_sw] (server lifetime) and were NOT
+                        cached, so without teardown they leak until shutdown and
+                        the next LspCall re-spawns (RFC-0261 / #21546). *)
+                     Lsp_process_manager.shutdown proc;
                      Error (Printf.sprintf "LSP initialize failed for %s: %s" lang_id msg))
                 with
                 | Eio.Time.Timeout ->
+                  Lsp_process_manager.shutdown proc;
                   Error (Printf.sprintf "LSP initialize timeout for %s (10s)" lang_id)
                 | exn ->
+                  Lsp_process_manager.shutdown proc;
                   Error (Printf.sprintf "LSP initialize error for %s: %s" lang_id (Printexc.to_string exn)))))
       in
       match ensure_proc () with

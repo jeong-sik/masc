@@ -218,3 +218,29 @@ let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.R
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Process_error (Printexc.to_string exn)))
 ;;
+
+(** Tear down a spawned LSP process whose initialization failed or that is
+    being evicted. [spawn] binds the child, its pipes, the stderr-drain fiber,
+    and (via [Lsp_message_router.start_response_reader]) the response-reader
+    fiber to the caller's [~sw] — which the gRPC proxy scopes to the SERVER
+    lifetime. Without this teardown a failed [initialize] orphans the proc +
+    3 pipe FDs + 2 reader fibers on that switch until server shutdown, and the
+    next request re-spawns (RFC-0261 / issue #21546).
+
+    Mechanism: signalling the child closes its pipe write ends, so the
+    stderr-drain fiber (which reads the un-exposed [stderr_r]) reaches EOF and
+    exits; closing [stdin_w] and [stdout_r] releases the two FDs we hold and
+    makes [Lsp_message_router.read_message] raise, so the response-reader fiber
+    exits too. All three operations are non-blocking, so this is safe to call
+    while holding the spawn mutex. Each is best-effort; [Eio.Cancel.Cancelled]
+    is re-raised so cancellation still propagates. *)
+let shutdown (proc : lsp_process) =
+  let quietly f =
+    try f () with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> ()
+  in
+  quietly (fun () -> Eio.Process.signal proc.proc Sys.sigterm);
+  quietly (fun () -> Eio.Flow.close proc.stdin_w);
+  quietly (fun () -> Eio.Flow.close proc.stdout_r)
+;;

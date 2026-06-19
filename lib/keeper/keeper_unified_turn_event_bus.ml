@@ -199,9 +199,12 @@ let start_background_drain ~clock t =
           let rec loop () =
             try
               let _summary = drain ~site:"background_poll" t in
-              ()
+              Eio.Time.sleep clock (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
+              loop ()
             with
-            | Eio.Cancel.Cancelled _ as e -> raise e
+            | Eio.Cancel.Cancelled _ ->
+              (* [unsubscribe] cancels this background worker as normal teardown. *)
+              ()
             | exn ->
               Log.Keeper.warn
                 "%s: keeper_turn event-bus drain failed: %s"

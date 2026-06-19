@@ -31,6 +31,10 @@ type rate_tracker = {
 (** Session registry managing all connected agents. *)
 type registry
 
+(** Raised when a registry operation is still queued while its actor switch is
+    released. This is distinct from cooperative Eio cancellation. *)
+exception Registry_closed
+
 (** {1 Registry Lifecycle} *)
 
 (** Create a new session registry with optional rate-limit config. *)

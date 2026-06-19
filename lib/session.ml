@@ -56,6 +56,8 @@ type registry = {
   loop_started: bool Atomic.t;
 }
 
+exception Registry_closed
+
 (* Bound: 10x the per-session [max_notification_queue] (1000), sized to
    absorb a keeper-fleet boot burst (16 keepers × ~30 messages each =
    ~500) with 20x headroom. Unbounded ([max_int]) caused #10777-class
@@ -295,14 +297,22 @@ let dispatch registry msg =
   if Atomic.get registry.loop_started then Eio.Stream.add registry.mailbox msg
   else process_registry_msg registry msg
 
+(* Plain-promise variant for McpSessionStore, whose actor resolves bare values
+   (not [('a, exn) result]). The registry actor uses [await_exn_if_needed] so
+   its drain path can resolve_error on shutdown; McpSessionStore keeps the
+   non-result protocol, so it still needs this. *)
+let await_if_needed promise =
+  match Eio.Promise.peek promise with
+  | Some value -> value
+  | None -> Eio.Promise.await promise
+
 let await_exn_if_needed promise =
   match Eio.Promise.peek promise with
   | Some (Ok value) -> value
   | Some (Error exn) -> raise exn
   | None -> Eio.Promise.await_exn promise
 
-let registry_closed_error =
-  Eio.Cancel.Cancelled (Failure "Session registry loop terminated")
+let registry_closed_error = Registry_closed
 
 let resolve_msg_error msg =
   let cancel u = Eio.Promise.resolve_error u registry_closed_error in

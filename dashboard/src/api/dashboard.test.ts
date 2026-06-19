@@ -1833,7 +1833,6 @@ describe('fetchRuntimeProviders', () => {
           operator_action_required: true,
           blast_radius: 'single_runtime_assignment_pin',
           assignment_count: 2,
-          assigned_keeper_count: 2,
           assigned_runtime_count: 1,
           default_assignment_count: 0,
           default_runtime_id: 'runpod_mtp.qwen',
@@ -1845,7 +1844,7 @@ describe('fetchRuntimeProviders', () => {
             { keeper: 'routingtest', runtime_id: 'openai.gpt', matches_default: false },
           ],
         },
-        config_path: '/Users/dancer/me/.masc/runtime.toml',
+        config_path: '/tmp/masc-test/runtime.toml',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -1856,7 +1855,7 @@ describe('fetchRuntimeProviders', () => {
     const result = await fetchRuntimeProviders()
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/providers')
-    expect(result.config_path).toBe('/Users/dancer/me/.masc/runtime.toml')
+    expect(result.config_path).toBe('/tmp/masc-test/runtime.toml')
     expect(result.summary?.default_runtime_id).toBe('runpod_mtp.qwen')
     expect(result.providers[0]?.provider).toBe('runpod_mtp.qwen')
     expect(result.providers[0]?.provider_id).toBe('runpod_mtp')

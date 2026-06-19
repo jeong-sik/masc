@@ -190,7 +190,6 @@ describe('RuntimeHealthSnapshot', () => {
         operator_action_required: true,
         blast_radius: 'single_runtime_assignment_pin',
         assignment_count: 2,
-        assigned_keeper_count: 2,
         assigned_runtime_count: 1,
         default_assignment_count: 0,
         default_runtime_id: 'runpod_mtp.qwen',

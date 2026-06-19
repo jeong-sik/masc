@@ -598,7 +598,6 @@ export interface DashboardRuntimeAssignmentGovernance {
   operator_action_required: boolean
   blast_radius?: string | null
   assignment_count: number
-  assigned_keeper_count: number
   assigned_runtime_count: number
   default_assignment_count: number
   default_runtime_id?: string | null
@@ -797,7 +796,6 @@ function decodeRuntimeAssignmentGovernance(raw: unknown): DashboardRuntimeAssign
     operator_action_required: asBoolean(raw.operator_action_required) ?? false,
     blast_radius: asNullableString(raw.blast_radius),
     assignment_count: asNumber(raw.assignment_count) ?? 0,
-    assigned_keeper_count: asNumber(raw.assigned_keeper_count) ?? 0,
     assigned_runtime_count: asNumber(raw.assigned_runtime_count) ?? 0,
     default_assignment_count: asNumber(raw.default_assignment_count) ?? 0,
     default_runtime_id: asNullableString(raw.default_runtime_id),

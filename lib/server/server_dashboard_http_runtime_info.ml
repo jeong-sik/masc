@@ -1292,7 +1292,6 @@ let runtime_assignment_governance_json ~default_id =
          then "single_runtime_assignment_pin"
          else "mixed_runtime_assignments")
     ; "assignment_count", `Int assignment_count
-    ; "assigned_keeper_count", `Int assignment_count
     ; "assigned_runtime_count", `Int assigned_runtime_count
     ; "default_assignment_count", `Int default_assignment_count
     ; "default_runtime_id", Json_util.string_opt_to_json default_id

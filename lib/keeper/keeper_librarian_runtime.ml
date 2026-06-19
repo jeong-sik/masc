@@ -410,44 +410,44 @@ let extract_and_append_with_provider
   | Error _ as e -> e
   | Ok episode ->
     let now = episode.Keeper_memory_os_types.created_at in
-    (* RFC-0243: persist the episode log (unique episode file + event), then
-       UPSERT its claims into the fact store instead of blind-appending. A claim
+    (* RFC-0243: UPSERT claims into the fact store instead of blind-appending. A claim
        re-extracted across turns is folded into the existing row
        (Keeper_memory_os_policy.reobserve_fact: RFC-0247 refreshes
        [last_verified_at] only) rather than accumulating as a duplicate. The same
        call applies the RFC-0239 Q4 retention cap (ranked by the structural
-       [retention_rank]) in one atomic rewrite. The episode log already retains
-       the raw claims, but a fact-merge failure is still reported to the caller so
-       the turn is not counted as a clean librarian write. *)
-    Keeper_memory_os_io.append_episode ~keeper_id episode;
-    Keeper_memory_os_io.append_event ~keeper_id episode;
-    (match
-       try
-         let window = Keeper_memory_os_io.fact_recall_window in
-         let (_ : Keeper_memory_os_io.fact_merge_stats) =
-           File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-             Keeper_memory_os_io.merge_and_cap_facts
-               ~keeper_id
-               ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
-               ~incoming:episode.Keeper_memory_os_types.claims
-               ~keep:window
-               ~trigger:Keeper_memory_os_io.fact_store_max
-               ~rank:(Keeper_memory_os_policy.retention_rank ~now))
-         in
-         Ok ()
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         let message = Printexc.to_string exn in
-         Log.Keeper.warn "memory os fact upsert failed keeper=%s: %s" keeper_id message;
-         Error message
-     with
-     | Ok () ->
-       (* RFC-0251: the co-occurrence edge / spreading-activation organ was removed
-          (dark-by-default, no recall consumer), so the fact upsert above is the only
-          post-merge work. *)
-       Ok episode
-     | Error message -> Error ("memory os fact upsert failed: " ^ message))
+       [retention_rank]) in one atomic rewrite. Only after the facts are durable
+       do we publish the episode file and append the event row; the event row is
+       the reader-visible commit marker for [read_episodes_tail]. *)
+    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
+      match
+        try
+          let window = Keeper_memory_os_io.fact_recall_window in
+          let (_ : Keeper_memory_os_io.fact_merge_stats) =
+            File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
+              Keeper_memory_os_io.merge_and_cap_facts
+                ~keeper_id
+                ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
+                ~incoming:episode.Keeper_memory_os_types.claims
+                ~keep:window
+                ~trigger:Keeper_memory_os_io.fact_store_max
+                ~rank:(Keeper_memory_os_policy.retention_rank ~now))
+          in
+          Ok ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          let message = Printexc.to_string exn in
+          Log.Keeper.warn "memory os fact upsert failed keeper=%s: %s" keeper_id message;
+          Error message
+      with
+      | Ok () ->
+        Keeper_memory_os_io.append_episode ~keeper_id episode;
+        Keeper_memory_os_io.append_event ~keeper_id episode;
+        (* RFC-0251: the co-occurrence edge / spreading-activation organ was removed
+           (dark-by-default, no recall consumer), so the fact upsert above is the only
+           post-merge work. *)
+        Ok episode
+      | Error message -> Error ("memory os fact upsert failed: " ^ message))
 ;;
 
 let provider_for_runtime ~runtime_id =

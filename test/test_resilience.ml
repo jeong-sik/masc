@@ -186,10 +186,10 @@ let test_zombie_for_agent_regular_600s () =
   check bool "600s old regular agent is zombie" true
     (Workspace_resilience.Zombie.is_zombie_for_agent ~agent_name:"claude" ts)
 
-let test_zombie_for_agent_keeper_600s () =
-  (* 600s old keeper agent: should NOT be zombie (keeper threshold 3600s) *)
+let test_zombie_for_agent_keeper_shaped_non_keeper_600s () =
+  (* 600s old keeper-shaped non-keeper: should be zombie (default threshold 300s) *)
   let ts = make_iso_seconds_ago 600.0 in
-  check bool "600s old keeper agent is not zombie" false
+  check bool "600s old keeper-shaped non-keeper is zombie" true
     (Workspace_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
 
 let test_zombie_for_agent_keeper_type_600s () =
@@ -201,16 +201,16 @@ let test_zombie_for_agent_keeper_type_600s () =
        ~agent_name:"regular-bot"
        ts)
 
-let test_zombie_for_agent_keeper_4000s () =
-  (* 4000s old keeper agent: should be zombie (exceeds keeper threshold 3600s) *)
+let test_zombie_for_agent_keeper_shaped_4000s () =
+  (* 4000s old keeper-shaped non-keeper: should be zombie (exceeds default threshold) *)
   let ts = make_iso_seconds_ago 4000.0 in
-  check bool "4000s old keeper agent is zombie" true
+  check bool "4000s old keeper-shaped non-keeper is zombie" true
     (Workspace_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
 
-let test_zombie_for_agent_keeper_recent () =
-  (* Recent keeper agent: not zombie *)
+let test_zombie_for_agent_keeper_shaped_recent () =
+  (* Recent keeper-shaped agent: not zombie even without keeper grace. *)
   let ts = make_iso_seconds_ago 10.0 in
-  check bool "recent keeper agent not zombie" false
+  check bool "recent keeper-shaped agent not zombie" false
     (Workspace_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
 
 (* ================================================================
@@ -252,10 +252,10 @@ let () =
     ];
     "Zombie.is_zombie_for_agent", [
       test_case "regular 600s" `Quick test_zombie_for_agent_regular_600s;
-      test_case "keeper 600s" `Quick test_zombie_for_agent_keeper_600s;
+      test_case "keeper-shaped non-keeper 600s" `Quick test_zombie_for_agent_keeper_shaped_non_keeper_600s;
       test_case "keeper type 600s" `Quick test_zombie_for_agent_keeper_type_600s;
-      test_case "keeper 4000s" `Quick test_zombie_for_agent_keeper_4000s;
-      test_case "keeper recent" `Quick test_zombie_for_agent_keeper_recent;
+      test_case "keeper-shaped 4000s" `Quick test_zombie_for_agent_keeper_shaped_4000s;
+      test_case "keeper-shaped recent" `Quick test_zombie_for_agent_keeper_shaped_recent;
     ];
     "ZeroZombie.cleanup", [
       test_case "with results" `Quick test_zero_zombie_cleanup_with_results;

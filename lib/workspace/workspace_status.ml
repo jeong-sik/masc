@@ -49,6 +49,7 @@ let status config =
               let is_zombie =
                 is_zombie_agent
                   ~agent_type:agent.agent_type
+                  ?agent_meta:agent.meta
                   ~agent_name:agent.name
                   agent.last_seen
               in

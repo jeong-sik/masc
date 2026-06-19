@@ -205,8 +205,8 @@ let safe_read_backlog (ctx : context) =
     { Masc_domain.tasks = []; last_updated = Masc_domain.now_iso (); version = 1 }
 ;;
 
-let safe_is_zombie_agent ?agent_type ~agent_name last_seen =
-  try Workspace.is_zombie_agent ?agent_type ~agent_name last_seen with
+let safe_is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen =
+  try Workspace.is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Workspace.warn
@@ -369,10 +369,11 @@ let status_summary_string (ctx : context) =
       (fun (agent : Masc_domain.agent) ->
          Workspace_query.safe_yield ();
          let is_zombie =
-           safe_is_zombie_agent
-             ~agent_type:agent.agent_type
-             ~agent_name:agent.name
-             agent.last_seen
+             safe_is_zombie_agent
+               ~agent_type:agent.agent_type
+               ?agent_meta:agent.meta
+               ~agent_name:agent.name
+               agent.last_seen
          in
          agent, is_zombie)
       agents

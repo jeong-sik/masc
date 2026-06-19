@@ -963,7 +963,11 @@ let test_cleanup_zombies_detects_keeper () =
 let test_cleanup_zombies_spares_recent_keeper () =
   with_test_env (fun config ->
     (* Create a keeper agent idle for 10 minutes (< 3600s keeper threshold) *)
-    make_stale_agent config ~name:"keeper-active-agent" ~age_seconds:600.0;
+    make_stale_agent
+      ~agent_type:"keeper"
+      config
+      ~name:"keeper-active-agent"
+      ~age_seconds:600.0;
     let result = Workspace.cleanup_zombies config in
     let spared = match result with
       | Workspace.Cleaned { names; _ } -> not (List.mem "keeper-active-agent" names)
@@ -1357,7 +1361,8 @@ let test_audit_orphan_awaiting_verification_tasks () =
    have its own claimed task classified as an orphan. With the pre-fix
    [Time.is_stale] (300s flat) predicate this returned 1 orphan, which drove the
    keeper self-wake loop that #21418 papered over by filtering self from the
-   count. The root fix routes keepers through [Zombie.is_zombie_for_agent]. *)
+   count. The root fix routes typed/meta-confirmed keepers through
+   [Zombie.is_zombie_for_agent]. *)
 let test_audit_orphan_spares_live_keeper_within_grace () =
   with_test_env (fun config ->
     let _ = Workspace.add_task config ~title:"Keeper Task" ~priority:1 ~description:"" in
@@ -1691,15 +1696,15 @@ let test_zombie_cleanup_transitions_to_inactive () =
     Alcotest.(check string) "status transitioned to inactive" "inactive" status
   )
 
-(** BUG-5: Keeper detection uses agent_type, not just name *)
+(** BUG-5: Keeper detection uses agent_type/metadata evidence, not just name *)
 let test_keeper_detection_by_agent_type () =
   (* A non-keeper-named agent with agent_type="keeper" should get keeper threshold *)
   let is_keeper_by_type = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"keeper" in
   Alcotest.(check bool) "agent_type=keeper detected" true is_keeper_by_type;
 
-  (* A keeper-named agent should still be detected *)
+  (* A keeper-shaped name alone is not authoritative. *)
   let is_keeper_by_name = Workspace_resilience.Zombie.is_keeper ~name:"keeper-test-agent" ~agent_type:"test" in
-  Alcotest.(check bool) "keeper-*-agent name detected" true is_keeper_by_name;
+  Alcotest.(check bool) "keeper-*-agent name alone rejected" false is_keeper_by_name;
 
   (* Neither name nor type matches *)
   let not_keeper = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"claude" in

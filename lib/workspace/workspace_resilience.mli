@@ -63,31 +63,35 @@ module Zombie : sig
   (** [is_zombie ?threshold last_seen_iso] is a thin alias for
       {!Time.is_stale}. *)
 
+  val is_keeper_record :
+    agent_type:string -> agent_meta:Masc_domain.agent_meta option -> bool
+  (** [is_keeper_record ~agent_type ~agent_meta] returns [true] only for
+      file-backed evidence that the agent is a keeper: [agent_type =
+      "keeper"] or keeper-owned metadata. Keeper-shaped names are not
+      authority and do not receive keeper grace on their own. *)
+
   val is_keeper :
     name:string -> agent_type:string -> bool
-  (** [is_keeper ~name ~agent_type] returns [true] when EITHER:
-      - [name] matches the keeper-name convention, OR
-      - [agent_type] equals ["keeper"] (case-insensitive, trimmed)
-
-      Name-only matching is insufficient because non-pattern keeper
-      agents still need the keeper threshold, while legacy
-      [keeper-*-agent] names keep the same behavior. *)
+  (** [is_keeper ~name ~agent_type] is a compatibility wrapper for callers
+      that do not have metadata. The [name] argument is intentionally ignored
+      for keeper-grace decisions; only [agent_type = "keeper"] is accepted. *)
 
   val is_zombie_for_agent :
     ?keeper_threshold_sec:float ->
     ?agent_threshold_sec:float ->
     ?agent_type:string ->
+    ?agent_meta:Masc_domain.agent_meta ->
     agent_name:string ->
     string ->
     bool
   (** [is_zombie_for_agent ?keeper_threshold_sec ?agent_threshold_sec
-      ?agent_type ~agent_name last_seen_iso] uses
+      ?agent_type ?agent_meta ~agent_name last_seen_iso] uses
       {!Env_config_runtime.Zombie.keeper_threshold_seconds} when
-      {!is_keeper} matches the name or type, otherwise falls back to
-      {!default_zombie_threshold}.  Callers may override both
-      thresholds for deterministic tests or one-off cleanup windows.
-      This is the canonical "should I evict this agent" predicate for
-      the gc loop. *)
+      {!is_keeper_record} has typed/metadata evidence that the agent is a
+      keeper, otherwise falls back to {!default_zombie_threshold}. Callers may
+      override both thresholds for deterministic tests or one-off cleanup
+      windows. This is the canonical "should I evict this agent" predicate for
+      audit, status, and cleanup consumers. *)
 end
 
 (** {1 Zero-Zombie protocol}

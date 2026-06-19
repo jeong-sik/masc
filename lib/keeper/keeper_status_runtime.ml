@@ -114,6 +114,7 @@ let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojs
                  `Bool
                    (Workspace.is_zombie_agent
                       ~agent_type:agent.agent_type
+                      ?agent_meta:agent.meta
                       ~agent_name:agent.name
                       agent.last_seen));
               ]))

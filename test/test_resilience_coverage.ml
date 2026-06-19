@@ -138,7 +138,10 @@ let test_keeper_zombie_threshold_matches_env_config () =
       old_ts
   in
   check bool "keeper threshold uses env config" expected
-    (Workspace_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-demo-agent" old_ts)
+    (Workspace_resilience.Zombie.is_zombie_for_agent
+       ~agent_type:"keeper"
+       ~agent_name:"keeper-demo-agent"
+       old_ts)
 
 (* ============================================================
    ZeroZombie.global_stats Tests

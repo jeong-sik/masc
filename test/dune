@@ -42,6 +42,7 @@
   test_keeper_identity_id
   test_keeper_idle_threshold_contract
   test_keeper_context_layers
+  test_keeper_hooks_oas_introspection
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -339,6 +340,7 @@
   test_keeper_identity_id
   test_keeper_idle_threshold_contract
   test_keeper_context_layers
+  test_keeper_hooks_oas_introspection
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection

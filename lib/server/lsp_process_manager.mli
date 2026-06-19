@@ -9,6 +9,7 @@ type lsp_process = {
   proc : Eio_unix.Process.ty Eio.Std.r;
   stdin_w : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Std.r;
   stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r;
+  stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r;
   mutable next_id : int;
 }
 
@@ -44,3 +45,11 @@ val spawn :
   workspace_root:string ->
   Eio_unix.Process.mgr_ty Eio.Resource.t ->
   (lsp_process, spawn_error) result
+
+(** Tear down a spawned LSP process whose [initialize] failed or that is being
+    evicted: signals the child and closes all three held pipe FDs ([stdin_w],
+    [stdout_r], [stderr_r]). The stderr-drain and response-reader fibers exit on
+    the resulting close. Non-blocking — safe to call while holding the spawn
+    mutex. Without it, a proc bound to the server-lifetime switch leaks until
+    shutdown (RFC-0261 / #21546). *)
+val shutdown : lsp_process -> unit

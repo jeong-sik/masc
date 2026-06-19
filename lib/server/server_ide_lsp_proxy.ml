@@ -309,9 +309,11 @@ let ensure_lsp_process cs lang_id =
             Ok proc
           | Ok (Error msg) ->
             Log.Server.warn "LSP initialize failed for %s: %s" lang_id msg;
+            Lsp_process_manager.shutdown proc;
             Error msg
           | Error msg ->
             Log.Server.warn "LSP initialize timeout for %s" lang_id;
+            Lsp_process_manager.shutdown proc;
             Error msg)))
 ;;
 

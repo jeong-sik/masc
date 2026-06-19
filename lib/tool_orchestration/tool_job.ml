@@ -7,24 +7,27 @@ type policy_verdict =
 type t = {
   job_id : string;
   batch_id : string;
-  turn_id : string option;
-  goal_id : string option;
-  keeper_id : string option;
+  turn_id : string option [@default None];
+  goal_id : string option [@default None];
+  keeper_id : string option [@default None];
   tool_name : string;
-  tool_version : string option;
+  tool_version : string option [@default None];
   schema_hash : string;
   input_json : Yojson.Safe.t;
   read_only : bool;
   resource_keys : string list;
-  idempotency_key : string option;
-  deadline_ms : int option;
+  idempotency_key : string option [@default None];
+  deadline_ms : int option [@default None];
   approval : policy_verdict;
   attempt : int;
 }
 [@@deriving yojson, show]
 
+(* NDT-OK: UUID entropy is a replay handle only; tests pass explicit [job_id]. *)
+let uuid_rng = Random.State.make_self_init ()
+
 let fresh_id () =
-  Uuidm.v4_gen (Random.State.make_self_init ()) () |> Uuidm.to_string
+  Uuidm.v4_gen uuid_rng () |> Uuidm.to_string
 
 let rec normalize_input_for_hash = function
   | `Assoc kvs ->
@@ -43,26 +46,20 @@ let schema_hash_of_yojson schema =
   |> Digestif.SHA256.to_hex
 
 let read_only_of_tool_name name =
+  (* DET-OK: sound-partial allow — unknown tools default to writer semantics, which
+     makes the scheduler use the conservative [write:any] resource key below. *)
   (Tool_catalog.metadata name).readonly |> Option.value ~default:false
 
-let default_resource_keys_of_tool ~tool_name ~input_json =
-  let get = Tool_args.get_string_opt input_json in
-  let keys = ref [] in
-  let add prefix key_name =
-    match get key_name with
-    | Some value -> keys := (prefix ^ value) :: !keys
-    | None -> ()
-  in
-  (if String.starts_with ~prefix:"masc_goal_" tool_name then add "goal:" "goal_id");
-  (if String.starts_with ~prefix:"masc_task_" tool_name then add "task:" "task_id");
-  (if String.starts_with ~prefix:"masc_board_" tool_name then add "board:thread:" "thread_id");
-  (if String.starts_with ~prefix:"masc_workspace_" tool_name then add "workspace:" "workspace_path");
-  (if tool_name = "tool_read_file"
-      || tool_name = "tool_edit_file"
-      || tool_name = "tool_write_file"
-   then add "file:" "path");
-  (if tool_name = "tool_search_files" then add "repo:" "path");
-  List.rev !keys
+let default_resource_keys_of_tool ~read_only ~tool_name:_ ~input_json:_ =
+  if read_only then [] else [ "write:any" ]
+
+let fallback_schema_for_tool tool_name =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc []
+    ; "required", `List []
+    ; "x-masc-unregistered-tool", `String tool_name
+    ]
 
 let make
     ?(job_id = fresh_id ())
@@ -82,17 +79,13 @@ let make
   let schema =
     match Tool_dispatch.lookup_schema tool_name with
     | Some s -> s
-    | None ->
-      `Assoc
-        [ "type", `String "object"
-        ; "properties", `Assoc []
-        ; "required", `List []
-        ]
+    | None -> fallback_schema_for_tool tool_name
   in
+  let read_only = read_only_of_tool_name tool_name in
   let resource_keys =
     match resource_keys with
     | Some keys -> keys
-    | None -> default_resource_keys_of_tool ~tool_name ~input_json
+    | None -> default_resource_keys_of_tool ~read_only ~tool_name ~input_json
   in
   { job_id
   ; batch_id
@@ -103,7 +96,7 @@ let make
   ; tool_version
   ; schema_hash = schema_hash_of_yojson schema
   ; input_json
-  ; read_only = read_only_of_tool_name tool_name
+  ; read_only
   ; resource_keys
   ; idempotency_key
   ; deadline_ms

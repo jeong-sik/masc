@@ -21,8 +21,8 @@ type artifact_ref = Yojson.Safe.t [@@deriving yojson, show]
 (** Snapshot of a batch at creation time. *)
 type batch_created = {
   batch_id : string;
-  parent_turn_id : string option;
-  parent_goal_id : string option;
+  parent_turn_id : string option [@default None];
+  parent_goal_id : string option [@default None];
 }
 [@@deriving yojson, show, eq]
 

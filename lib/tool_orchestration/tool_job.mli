@@ -18,17 +18,17 @@ type policy_verdict =
 type t = {
   job_id : string;
   batch_id : string;
-  turn_id : string option;
-  goal_id : string option;
-  keeper_id : string option;
+  turn_id : string option [@default None];
+  goal_id : string option [@default None];
+  keeper_id : string option [@default None];
   tool_name : string;
-  tool_version : string option;
+  tool_version : string option [@default None];
   schema_hash : string;
   input_json : Yojson.Safe.t;
   read_only : bool;
   resource_keys : string list;
-  idempotency_key : string option;
-  deadline_ms : int option;
+  idempotency_key : string option [@default None];
+  deadline_ms : int option [@default None];
   approval : policy_verdict;
   attempt : int;
 }
@@ -58,8 +58,9 @@ val make :
       [tool_name], or from a minimal empty object schema when the tool has no
       registered schema.
     - [read_only] is derived from {!Tool_catalog} metadata when available.
-    - [resource_keys] uses the explicit list if provided; otherwise falls back
-      to {!default_resource_keys_of_tool}.
+    - [resource_keys] uses the explicit list if provided; otherwise read-only
+      tools get no lock key and writer/unknown tools get a coarse ["write:any"]
+      key so they serialize until a caller supplies typed resource keys.
     - [job_id] defaults to a fresh UUIDv4. Pass an explicit id in tests. *)
 
 (** {1 Schema hashing} *)
@@ -74,19 +75,13 @@ val schema_hash_of_yojson : Yojson.Safe.t -> string
 (** {1 Resource key inference} *)
 
 val default_resource_keys_of_tool :
-  tool_name:string -> input_json:Yojson.Safe.t -> string list
-(** Best-effort resource key inference from known tool naming patterns.
+  read_only:bool -> tool_name:string -> input_json:Yojson.Safe.t -> string list
+(** Conservative default resource key selection.
 
-    The returned keys are intentionally conservative: a tool that does not
-    match a known pattern yields an empty list, forcing the caller (planner or
-    executor) to supply explicit [resource_keys]. This avoids pretending a
-    write is read-only or locking the wrong resource.
-
-    Examples:
-    - [masc_goal_*] with [goal_id] -> ["goal:<id>"]
-    - [masc_task_*] with [task_id] -> ["task:<id>"]
-    - [tool_read_file]/[tool_edit_file]/[tool_write_file] with [path] -> ["file:<path>"]
-    - [tool_search_files] with [path] -> ["repo:<path>"] *)
+    This function deliberately does not infer resource keys from tool-name
+    strings. Read-only tools return [[]]. Writer or unknown tools return the
+    coarse ["write:any"] key, forcing serialization until the planner or
+    executor supplies typed resource keys from a real tool contract. *)
 
 (** {1 Field updates} *)
 

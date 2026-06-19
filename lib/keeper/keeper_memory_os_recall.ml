@@ -223,24 +223,36 @@ let facts_recency_ranked ~now facts =
   |> dedup_by_claim
 ;;
 
+(* RFC-0264 P2: render_context_exn returns the rendered block alongside the
+   normalize_claim keys it injected, so [render_if_enabled] can append a
+   deterministic recall-injection record (the join key for outcome eval). The
+   keys are a by-product already computed for shared-store dedup
+   ([private_keys]); surfacing them costs nothing extra on the hot path. *)
+type render_result =
+  { block : string
+  ; injected_fact_keys : string list
+  ; injected_episode_keys : string list
+  ; n_facts_in_store : int
+  }
+
 let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
-  let facts =
-    (* RFC-0239 Q4: scan the whole bounded store, not a [fact_recall_window]-sized
-       tail. The store holds up to [fact_store_max] facts between caps, and a fresh
-       cap rewrites it in rank order — so the highest-ranked durable rows sit at
-       the file head while new appends land at the tail. Scanning only
-       [fact_recall_window] tail rows would exclude exactly those head rows in the
-       [fact_recall_window]..[fact_store_max] band; scanning [fact_store_max]
-       covers the entire bounded store so recency ranking selects the globally best
-       facts. RFC-0247: order by the structural truth anchor (most-recently-verified
-       first); the composite score, lexical seed-rerank, and spreading-activation
-       reranking were all removed in the purge. *)
+  (* RFC-0239 Q4: scan the whole bounded store, not a [fact_recall_window]-sized
+     tail. The store holds up to [fact_store_max] facts between caps, and a fresh
+     cap rewrites it in rank order — so the highest-ranked durable rows sit at
+     the file head while new appends land at the tail. Scanning only
+     [fact_recall_window] tail rows would exclude exactly those head rows in the
+     [fact_recall_window]..[fact_store_max] band; scanning [fact_store_max]
+     covers the entire bounded store so recency ranking selects the globally best
+     facts. RFC-0247: order by the structural truth anchor (most-recently-verified
+     first); the composite score, lexical seed-rerank, and spreading-activation
+     reranking were all removed in the purge. *)
+  let all_facts =
     Keeper_memory_os_io.read_facts_tail ~keeper_id ~n:Keeper_memory_os_io.fact_store_max
-    |> facts_recency_ranked ~now
-    |> take max_facts
   in
+  let n_facts_in_store = List.length all_facts in
+  let facts = all_facts |> facts_recency_ranked ~now |> take max_facts in
   (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own, with
      private precedence — a claim already surfaced from this keeper's store is not
      repeated from the shared store. The shared store is read under the reserved
@@ -265,19 +277,30 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
     |> List.filter (episode_is_current ~now)
     |> take max_episodes
   in
-  match facts, shared_facts, episodes with
-  | [], [], [] -> ""
-  | _ ->
-    let fact_lines =
-      List.map (render_fact ~now) facts
-      @ List.map (render_shared_fact ~now) shared_facts
-    in
-    let episode_lines = List.map render_episode episodes in
-    (match render_recall_context ~fact_lines ~episode_lines with
-     | Ok context -> context
-     | Error msg ->
-       Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
-       "")
+  let injected_fact_keys =
+    private_keys @ List.map (fun f -> normalize_claim f.claim) shared_facts
+  in
+  let injected_episode_keys =
+    List.map
+      (fun (e : episode) -> Printf.sprintf "%s:g%d" e.trace_id e.generation)
+      episodes
+  in
+  let block =
+    match facts, shared_facts, episodes with
+    | [], [], [] -> ""
+    | _ ->
+      let fact_lines =
+        List.map (render_fact ~now) facts
+        @ List.map (render_shared_fact ~now) shared_facts
+      in
+      let episode_lines = List.map render_episode episodes in
+      (match render_recall_context ~fact_lines ~episode_lines with
+       | Ok context -> context
+       | Error msg ->
+         Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
+         "")
+  in
+  { block; injected_fact_keys; injected_episode_keys; n_facts_in_store }
 ;;
 
 let render_context
@@ -287,7 +310,7 @@ let render_context
       ?(max_episodes = default_max_episodes)
       ()
   =
-  try render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () with
+  try (render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ()).block with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
@@ -305,11 +328,46 @@ let enabled () =
     ~default:true
 ;;
 
-let render_if_enabled ~keeper_id ~now () =
+let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
   if not (enabled ())
   then None
   else (
-    match String.trim (render_context ~keeper_id ~now ()) with
+    (* RFC-0264 P2: render once, then append a recall-injection record keyed by
+       trace_id/turn so outcome eval can join "what recall showed this trace" to
+       the execution_receipt + forge outcome. The ledger write is best-effort
+       and never affects the returned block. *)
+    let result =
+      try
+        render_context_exn
+          ~keeper_id
+          ~now
+          ~max_facts:default_max_facts
+          ~max_episodes:default_max_episodes
+          ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Keeper.warn
+          "memory os recall unavailable keeper=%s: %s"
+          keeper_id
+          (Printexc.to_string exn);
+        { block = ""
+        ; injected_fact_keys = []
+        ; injected_episode_keys = []
+        ; n_facts_in_store = 0
+        }
+    in
+    match String.trim result.block with
     | "" -> None
-    | block -> Some block)
+    | block ->
+      Keeper_recall_injection_ledger.append
+        ~masc_root
+        ~keeper_id
+        ~trace_id
+        ~turn
+        ~injected_fact_keys:result.injected_fact_keys
+        ~injected_episode_keys:result.injected_episode_keys
+        ~n_facts_in_store:result.n_facts_in_store
+        ~now;
+      Some block)
 ;;

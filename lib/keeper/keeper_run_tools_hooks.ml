@@ -347,6 +347,9 @@ let assemble_hooks
                     Keeper_memory_os_recall.render_if_enabled
                       ~keeper_id:meta.name
                       ~now:(Time_compat.now ())
+                      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                      ~turn
+                      ~masc_root:(Workspace.masc_root_dir config)
                       ()
                   with
                   | None -> ctx

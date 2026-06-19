@@ -72,6 +72,16 @@ let with_temp_keepers_dir f =
   Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
 ;;
 
+let render_if_enabled_for_test ~keeper_id ~now ~masc_root () =
+  Recall.render_if_enabled
+    ~keeper_id
+    ~now
+    ~trace_id:"trace-recall-render-test"
+    ~turn:1
+    ~masc_root
+    ()
+;;
+
 let has_memory_os_prompt_root path =
   Sys.file_exists
     (Filename.concat path "config/prompts/keeper.memory_os_recall.context.md")
@@ -1280,9 +1290,13 @@ let test_render_if_enabled_default_is_on () =
 
 let test_render_if_enabled_explicit_off () =
   with_recall_env "false" (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
+    with_temp_keepers_dir (fun keepers_dir ->
       match
-        Recall.render_if_enabled ~keeper_id:"virtual-memory-keeper" ~now:1_000_000.0 ()
+        render_if_enabled_for_test
+          ~keeper_id:"virtual-memory-keeper"
+          ~now:1_000_000.0
+          ~masc_root:keepers_dir
+          ()
       with
       | None -> ()
       | Some block -> Alcotest.failf "expected None with kill switch set, got %S" block))
@@ -1290,9 +1304,13 @@ let test_render_if_enabled_explicit_off () =
 
 let test_render_if_enabled_empty_store_yields_none () =
   with_recall_env "true" (fun () ->
-    with_temp_keepers_dir (fun _keepers_dir ->
+    with_temp_keepers_dir (fun keepers_dir ->
       match
-        Recall.render_if_enabled ~keeper_id:"virtual-memory-keeper" ~now:1_000_000.0 ()
+        render_if_enabled_for_test
+          ~keeper_id:"virtual-memory-keeper"
+          ~now:1_000_000.0
+          ~masc_root:keepers_dir
+          ()
       with
       | None -> ()
       | Some block -> Alcotest.failf "expected None for empty store, got %S" block))
@@ -1301,7 +1319,7 @@ let test_render_if_enabled_empty_store_yields_none () =
 let test_render_if_enabled_renders_persisted_memory () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+      with_temp_keepers_dir (fun keepers_dir ->
         let keeper_id = "virtual-memory-keeper" in
         let now = 1_000_000.0 in
         let fact =
@@ -1325,7 +1343,7 @@ let test_render_if_enabled_renders_persisted_memory () =
           }
         in
         Memory_io.append_episode_bundle ~keeper_id episode;
-        match Recall.render_if_enabled ~keeper_id ~now () with
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
         | None -> Alcotest.fail "expected Some block with flag set and seeded store"
         | Some block ->
           Alcotest.(check bool)
@@ -1344,7 +1362,7 @@ let test_render_if_enabled_renders_persisted_memory () =
 let test_recall_scans_whole_bounded_store () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+      with_temp_keepers_dir (fun keepers_dir ->
         let keeper_id = "window-band-keeper" in
         let now = 1_000_000.0 in
         let head =
@@ -1389,7 +1407,7 @@ let test_recall_scans_whole_bounded_store () =
           "store sits in the (fact_recall_window, fact_store_max] band"
           true
           (total > Memory_io.fact_recall_window && total <= Memory_io.fact_store_max);
-        match Recall.render_if_enabled ~keeper_id ~now () with
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
         | None -> Alcotest.fail "expected Some recall block for a seeded store"
         | Some block ->
           Alcotest.(check bool)
@@ -1405,7 +1423,7 @@ let test_recall_scans_whole_bounded_store () =
 let test_recall_marks_stale_fact () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+      with_temp_keepers_dir (fun keepers_dir ->
         let keeper_id = "stale-fact-keeper" in
         let now = 1_000_000.0 in
         let fact =
@@ -1416,7 +1434,7 @@ let test_recall_marks_stale_fact () =
           }
         in
         Memory_io.append_fact ~keeper_id fact;
-        match Recall.render_if_enabled ~keeper_id ~now () with
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
         | None -> Alcotest.fail "expected Some block for a persisted stale fact"
         | Some block ->
           Alcotest.(check bool)
@@ -1434,7 +1452,7 @@ let test_recall_marks_stale_fact () =
 let test_recall_omits_marker_for_fresh_fact () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+      with_temp_keepers_dir (fun keepers_dir ->
         let keeper_id = "fresh-fact-keeper" in
         let now = 1_000_000.0 in
         let fact =
@@ -1445,7 +1463,7 @@ let test_recall_omits_marker_for_fresh_fact () =
           }
         in
         Memory_io.append_fact ~keeper_id fact;
-        match Recall.render_if_enabled ~keeper_id ~now () with
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
         | None -> Alcotest.fail "expected Some block for a persisted fresh fact"
         | Some block ->
           (* Match the rendered marker's tail ("...ago — verify]"), not the bare

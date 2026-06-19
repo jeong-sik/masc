@@ -141,26 +141,16 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
         "on_context_compacted";
     ]
   in
-  let active_count =
-    List.fold_left
-      (fun acc (_name, active, _json) -> if active then acc + 1 else acc)
-      0
-      slot_entries
-  in
-  let total_count = List.length slot_entries in
-  let inactive_count = total_count - active_count in
-  let slot_names = `List (List.map (fun (name, _, _) -> `String name) slot_entries) in
   let slot_assoc = List.map (fun (name, _active, json) -> name, json) slot_entries in
+  (* Derived counts (slot_count / active_slot_count / inactive_slot_count /
+     slot_names / deny_list_count) are intentionally NOT emitted: every
+     consumer computes them from [slots] / [deny_list] directly. Emitting them
+     was redundant derived state with no reader. *)
   `Assoc
     [
       (key_scope, `String "keeper_runtime_composite");
       (key_slots, `Assoc slot_assoc);
-      ("slot_names", slot_names);
-      (key_slot_count, `Int total_count);
-      (key_active_slot_count, `Int active_count);
-      (key_inactive_slot_count, `Int inactive_count);
       ("deny_list", denied_json);
-      (key_deny_list_count, `Int (List.length denied_tools));
       ("destructive_check_tools", destructive_json);
       ( "cost_telemetry",
         match max_cost_usd with

@@ -63,10 +63,6 @@ val key_tool_calls_made : string
 val key_total_turns : string
 val key_scope : string
 val key_slots : string
-val key_slot_count : string
-val key_active_slot_count : string
-val key_inactive_slot_count : string
-val key_deny_list_count : string
 val key_ts_unix : string
 val key_name : string
 val key_generation : string

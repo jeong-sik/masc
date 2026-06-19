@@ -84,7 +84,7 @@ An off-hot-path fiber (mirrors the GC/consolidation fibers in `server_bootstrap_
 for each keeper, for each fact with external_ref = Some r and (now - last_verified_at) > grounding_horizon:
   match verify_external r with        (* deterministic: gh pr/issue view, cached, rate-limited *)
   | Confirmed   -> advance last_verified_at = now
-  | Contradicted-> retract the fact    (* the new removal path, P? below *)
+  | Contradicted-> retract the fact    (* the new removal path, P3 below *)
   | Unknown     -> leave unchanged (network/transient) — never delete on uncertainty
 ```
 
@@ -92,10 +92,10 @@ for each keeper, for each fact with external_ref = Some r and (now - last_verifi
 
 ### 3.4 Retraction (P3)
 
-A single-claim removal under the facts lock (RFC-0259 must use the lock that PR #21529 added to GC), keyed on `normalize_claim`:
+A single-claim removal under the facts lock (P3 must use the lock that PR #21529 added to GC). Note the two removal callers key differently and both must be supported by the same removal primitive:
 
-- Reconciler retracts on `Contradicted`.
-- Librarian gains an episode-schema `supersedes: string list` (normalized claims the new extraction invalidates); the write path removes those rows in the same atomic rewrite as the upsert. This implements the long-promised "delete-on-contradiction" as real code (gap #3).
+- **Reconciler** retracts on `Contradicted`, keyed on the fact's `external_ref` identity (it already holds the specific fact it re-checked).
+- **Librarian** gains an episode-schema `supersedes: string list` (normalized claims the new extraction invalidates), keyed on `normalize_claim`; the write path removes those rows in the same atomic rewrite as the upsert. This implements the long-promised "delete-on-contradiction" as real code (gap #3).
 
 ### 3.5 Recall suppression (P4)
 

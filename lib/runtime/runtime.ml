@@ -200,7 +200,9 @@ let materialize_config ~(config_path : string) (cfg : config)
     validate_cross_verifier_runtime ~config_path runtimes
       cfg.cross_verifier_runtime_id
   in
-  let* () = validate_runtime_model_capabilities ~config_path runtimes in
+  (* The OAS catalog membership gate is intentionally not called here:
+     [load_list] stays a routing-validity parser for tests and config probes.
+     Production startup applies the stricter gate via [init_default_strict]. *)
   Ok
     ( runtimes
     , rt
@@ -252,16 +254,32 @@ let cross_verifier_runtime_id_ref : string option Atomic.t = Atomic.make None
 
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
-let init_default ~config_path =
-  let* runtimes, rt, assignments, librarian_id, cross_verifier_id =
-    load_list ~config_path
-  in
+let set_loaded (runtimes, rt, assignments, librarian_id, cross_verifier_id) =
   Atomic.set runtimes_ref runtimes;
   Atomic.set default_runtime_ref (Some rt);
   Atomic.set keeper_assignments_ref assignments;
   Atomic.set librarian_runtime_id_ref librarian_id;
-  Atomic.set cross_verifier_runtime_id_ref cross_verifier_id;
+  Atomic.set cross_verifier_runtime_id_ref cross_verifier_id
+
+let init_default ~config_path =
+  let* loaded = load_list ~config_path in
+  set_loaded loaded;
   Ok ()
+
+(* Startup entry point: [load_list] (RFC-0206 routing validation) PLUS the OAS
+   capability-catalog gate. Production callers (server boot, fusion run) use this
+   so an operator runtime.toml whose model is absent from the catalog is rejected
+   before boot — the gate that load_list intentionally no longer applies, kept out
+   of load_list so unit tests stay catalog-independent. *)
+let init_default_strict ~config_path =
+  match load_list ~config_path with
+  | Error _ as e -> e
+  | Ok ((runtimes, _, _, _, _) as loaded) ->
+    (match validate_runtime_model_capabilities ~config_path runtimes with
+     | Error _ as e -> e
+     | Ok () ->
+       set_loaded loaded;
+       Ok ())
 
 let get_default_runtime () = Atomic.get default_runtime_ref
 let get_runtimes () = Atomic.get runtimes_ref

@@ -407,6 +407,40 @@ let test_librarian_runtime_routing () =
          format support"
     | Error _ -> ())
 
+let test_save_config_text_refreshes_cross_verifier_runtime () =
+  let content =
+    "[providers.local]\n\
+     display-name = \"Local\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://localhost:11434\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.libr]\n\
+     api-name = \"libr\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.libr.capabilities]\n\
+     supports-response-format-json = true\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.libr]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n\
+     cross_verifier = \"local.libr\"\n"
+  in
+  with_temp_runtime_toml content (fun path ->
+    match Runtime.save_config_text ~runtime_config_path:path content with
+    | Error msg -> failf "save_config_text should validate and reload: %s" msg
+    | Ok () ->
+      check (option string) "saved cross_verifier runtime id"
+        (Some "local.libr")
+        (Runtime.cross_verifier_runtime_id ()))
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -418,6 +452,9 @@ let () =
             "[runtime].librarian and .cross_verifier resolve, default None, \
              reject unknown"
             `Quick test_librarian_runtime_routing;
+          test_case
+            "save_config_text validates and refreshes cross_verifier runtime"
+            `Quick test_save_config_text_refreshes_cross_verifier_runtime;
           test_case
             "lifecycle TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_lifecycle_keys;

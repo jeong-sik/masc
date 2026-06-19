@@ -9,6 +9,7 @@
     가 담당한다 — 셋 다 [Runtime_*] 코드 의존 0. *)
 
 open Runtime_schema
+open Result.Syntax
 
 type t =
   { id : string
@@ -172,47 +173,40 @@ let materialize_config ~(config_path : string) (cfg : config)
   =
   let runtimes = List.filter_map (of_binding cfg) cfg.bindings in
   let assignments = cfg.keeper_assignments in
-  match cfg.default_runtime_id with
-  | None ->
-    Error
-      (Printf.sprintf
-         "%s: [runtime].default is required (no default runtime configured; \
-          silent fallback removed)"
-         config_path)
-  | Some did ->
-    (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
-     | None ->
-       Error
-         (Printf.sprintf
-            "%s: [runtime].default = %S not found among %d runtimes"
-            config_path
-            did
-            (List.length runtimes))
-     | Some rt ->
-       (match validate_keeper_assignments ~config_path runtimes assignments with
-        | Error _ as e -> e
-        | Ok () ->
-          (match
-             validate_librarian_runtime ~config_path runtimes
-               cfg.librarian_runtime_id
-           with
-           | Error _ as e -> e
-           | Ok () ->
-             (match
-                validate_cross_verifier_runtime ~config_path runtimes
-                  cfg.cross_verifier_runtime_id
-              with
-              | Error _ as e -> e
-              | Ok () ->
-                (match validate_runtime_model_capabilities ~config_path runtimes with
-                 | Error _ as e -> e
-                 | Ok () ->
-                   Ok
-                     ( runtimes
-                     , rt
-                     , assignments
-                     , cfg.librarian_runtime_id
-                     , cfg.cross_verifier_runtime_id ))))))
+  let* rt =
+    match cfg.default_runtime_id with
+    | None ->
+      Error
+        (Printf.sprintf
+           "%s: [runtime].default is required (no default runtime configured; \
+            silent fallback removed)"
+           config_path)
+    | Some did ->
+      (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
+       | None ->
+         Error
+           (Printf.sprintf
+              "%s: [runtime].default = %S not found among %d runtimes"
+              config_path
+              did
+              (List.length runtimes))
+       | Some rt -> Ok rt)
+  in
+  let* () = validate_keeper_assignments ~config_path runtimes assignments in
+  let* () =
+    validate_librarian_runtime ~config_path runtimes cfg.librarian_runtime_id
+  in
+  let* () =
+    validate_cross_verifier_runtime ~config_path runtimes
+      cfg.cross_verifier_runtime_id
+  in
+  let* () = validate_runtime_model_capabilities ~config_path runtimes in
+  Ok
+    ( runtimes
+    , rt
+    , assignments
+    , cfg.librarian_runtime_id
+    , cfg.cross_verifier_runtime_id )
 ;;
 
 let load_list ~(config_path : string)
@@ -220,14 +214,15 @@ let load_list ~(config_path : string)
     , string )
     result
   =
-  match Runtime_toml.parse_file config_path with
-  | Error errs ->
-    Error
-      (Printf.sprintf
-         "runtime config parse failed (%s): %d error(s)"
-         config_path
-         (List.length errs))
-  | Ok cfg -> materialize_config ~config_path cfg
+  let* cfg =
+    Runtime_toml.parse_file config_path
+    |> Result.map_error (fun errs ->
+      Printf.sprintf
+        "runtime config parse failed (%s): %d error(s)"
+        config_path
+        (List.length errs))
+  in
+  materialize_config ~config_path cfg
 
 (* ---- Lazy default runtime singleton ---- *)
 
@@ -258,15 +253,15 @@ let cross_verifier_runtime_id_ref : string option Atomic.t = Atomic.make None
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let init_default ~config_path =
-  match load_list ~config_path with
-  | Ok (runtimes, rt, assignments, librarian_id, cross_verifier_id) ->
-    Atomic.set runtimes_ref runtimes;
-    Atomic.set default_runtime_ref (Some rt);
-    Atomic.set keeper_assignments_ref assignments;
-    Atomic.set librarian_runtime_id_ref librarian_id;
-    Atomic.set cross_verifier_runtime_id_ref cross_verifier_id;
-    Ok ()
-  | Error _ as e -> e
+  let* runtimes, rt, assignments, librarian_id, cross_verifier_id =
+    load_list ~config_path
+  in
+  Atomic.set runtimes_ref runtimes;
+  Atomic.set default_runtime_ref (Some rt);
+  Atomic.set keeper_assignments_ref assignments;
+  Atomic.set librarian_runtime_id_ref librarian_id;
+  Atomic.set cross_verifier_runtime_id_ref cross_verifier_id;
+  Ok ()
 
 let get_default_runtime () = Atomic.get default_runtime_ref
 let get_runtimes () = Atomic.get runtimes_ref
@@ -353,24 +348,24 @@ let config_path () : string option =
 let runtime_config_path_result ?runtime_config_path () =
   match runtime_config_path with
   | Some path -> Ok path
-  | None ->
-    (match config_path () with
-     | Some path -> Ok path
-     | None -> Error "runtime config path not found")
+  | None -> Option.to_result (config_path ()) ~none:"runtime config path not found"
+;;
+
+let load_file_result path =
+  try Ok (Fs_compat.load_file path) with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Error
+      (Printf.sprintf
+         "failed to read runtime config %s: %s"
+         path
+         (Printexc.to_string exn))
 ;;
 
 let load_config_text ?runtime_config_path () =
-  match runtime_config_path_result ?runtime_config_path () with
-  | Error _ as e -> e
-  | Ok path ->
-    (try Ok (path, Fs_compat.load_file path) with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "failed to read runtime config %s: %s"
-            path
-            (Printexc.to_string exn)))
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* content = load_file_result path in
+  Ok (path, content)
 ;;
 
 let contains_newline s =
@@ -573,32 +568,26 @@ let runtime_parse_errors_to_string errs =
 ;;
 
 let validate_runtime_config_text ~config_path content =
-  match Runtime_toml.parse_string content with
-  | Error errs ->
-    Error
-      (Printf.sprintf
-         "runtime config parse failed (%s): %s"
-         config_path
-         (runtime_parse_errors_to_string errs))
-  | Ok cfg ->
-    (match materialize_config ~config_path cfg with
-     | Ok _ -> Ok ()
-     | Error _ as e -> e)
+  let* cfg =
+    Runtime_toml.parse_string content
+    |> Result.map_error (fun errs ->
+      Printf.sprintf
+        "runtime config parse failed (%s): %s"
+        config_path
+        (runtime_parse_errors_to_string errs))
+  in
+  let* (_ : t list * t * (string * string) list * string option * string option) =
+    materialize_config ~config_path cfg
+  in
+  Ok ()
 ;;
 
 let save_config_text ?runtime_config_path content =
-  match runtime_config_path_result ?runtime_config_path () with
-  | Error _ as e -> e
-  | Ok path ->
-    (match validate_runtime_config_text ~config_path:path content with
-     | Error _ as e -> e
-     | Ok () ->
-       (match Fs_compat.save_file_atomic path content with
-        | Error _ as e -> e
-        | Ok () ->
-          (match init_default ~config_path:path with
-           | Ok () -> Ok ()
-           | Error msg -> Error ("runtime config saved but reload failed: " ^ msg))))
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  let* () = validate_runtime_config_text ~config_path:path content in
+  let* () = Fs_compat.save_file_atomic path content in
+  let* () = init_default ~config_path:path in
+  Ok ()
 ;;
 
 let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
@@ -613,33 +602,13 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
   else if contains_newline runtime_id
   then Error "runtime_id must not contain newlines"
   else
-    match runtime_config_path_result ?runtime_config_path () with
-    | Error _ as e -> e
-    | Ok path ->
-      let content_result =
-        try Ok (Fs_compat.load_file path) with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Error
-            (Printf.sprintf
-               "failed to read runtime config %s: %s"
-               path
-               (Printexc.to_string exn))
-      in
-      (match content_result with
-       | Error _ as e -> e
-       | Ok content ->
-         let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-         (match validate_runtime_config_text ~config_path:path next with
-          | Error _ as e -> e
-          | Ok () ->
-            (match Fs_compat.save_file_atomic path next with
-             | Error _ as e -> e
-             | Ok () ->
-               (match init_default ~config_path:path with
-                | Ok () -> Ok ()
-                | Error msg ->
-                  Error ("runtime config saved but reload failed: " ^ msg)))))
+    let* path = runtime_config_path_result ?runtime_config_path () in
+    let* content = load_file_result path in
+    let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
+    let* () = validate_runtime_config_text ~config_path:path next in
+    let* () = Fs_compat.save_file_atomic path next in
+    let* () = init_default ~config_path:path in
+    Ok ()
 ;;
 
 (* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]

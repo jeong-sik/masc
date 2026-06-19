@@ -326,6 +326,39 @@ let test_runtime_json_not_in_repo_config () =
   let path = Filename.concat (repo_root ()) "config/runtime.json" in
   check bool "retired runtime.json absent" false (Sys.file_exists path)
 
+let with_repo_oas_model_catalog f =
+  let path = Filename.concat (repo_root ()) "oas-models.toml" in
+  check bool "repo oas-models.toml present" true (Sys.file_exists path);
+  match Llm_provider.Model_catalog.load_file path with
+  | Error msg -> failf "repo oas-models.toml should load: %s" msg
+  | Ok catalog ->
+    Fun.protect
+      ~finally:Llm_provider.Model_catalog.clear_global
+      (fun () ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f catalog)
+
+let test_repo_oas_model_catalog_covers_runpod_gemma4_coder () =
+  with_repo_oas_model_catalog @@ fun catalog ->
+  let model_id = "gemma4-coder-smoke" in
+  (match Llm_provider.Model_catalog.lookup catalog model_id with
+   | None -> failf "expected repo OAS catalog row for %s" model_id
+   | Some entry ->
+     check (option string) "RunPod Gemma4 coder base" (Some "openai_chat")
+       entry.base_label);
+  match Llm_provider.Capabilities.for_model_id_catalog model_id with
+  | None -> fail "expected RunPod Gemma4 coder capability lookup"
+  | Some caps ->
+    check (option int) "RunPod Gemma4 coder context" (Some 262144)
+      caps.max_context_tokens;
+    check bool "RunPod Gemma4 coder tools" true caps.supports_tools;
+    check bool "RunPod Gemma4 coder tool choice" true caps.supports_tool_choice;
+    check bool "RunPod Gemma4 coder extended thinking" true
+      caps.supports_extended_thinking;
+    check bool "RunPod Gemma4 coder chat-template-token thinking" true
+      (Llm_provider.Capabilities.(
+         caps.thinking_control_format = Chat_template_token))
+
 let test_repo_runtime_toml_loads () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
@@ -839,6 +872,8 @@ let () =
     [ ( "runtime TOML gate",
         [ test_case "runtime.json is not a repo config source" `Quick
             test_runtime_json_not_in_repo_config;
+          test_case "repo OAS catalog covers RunPod Gemma4 coder" `Quick
+            test_repo_oas_model_catalog_covers_runpod_gemma4_coder;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case

@@ -196,8 +196,49 @@ Until those declarations match `/api/show`, no candidate qualifies and the floor
 governs the memory-os librarian routing — declared caps are the SSOT, and they
 must match the provider's actual `/api/show`. Adding
 `supports-image-input = true` (and `supports-multimodal-inputs = true` where the
-provider accepts documents) to those `.capabilities` blocks is a precondition,
-tracked separately from this code change.
+provider accepts media) to those `.capabilities` blocks is the precondition. To
+keep it accurate without hand-maintenance, §4.2 generates the declarations from
+`/api/show` and gates drift.
+
+### 4.2 Capability sync + drift gate (generated truth-source)
+
+`scripts/masc-sync-ollama-caps.py` keeps the declared media caps aligned with
+what Ollama actually reports, without putting a network probe on the runtime
+path (the runtime stays static/deterministic per §3.4):
+
+- `--refresh` (operator; needs network + `OLLAMA_CLOUD_API_KEY`) — `POST
+  {provider.endpoint − /v1}/api/show {"model": <api-name>}` for every
+  Ollama-family model in the config and (re)writes the baseline snapshot
+  `scripts/ollama-caps-baseline.json`.
+- `--check` (CI; no network) — compares each config-declared media flag against
+  the baseline. Hard-fails on `UNDER-DECLARED` (a vision model whose config
+  omits `supports-image-input` → reroute can't see it) or `OVER-DECLARED`
+  (config claims a modality the model lacks → provider 400 at dispatch). Wired
+  into `.github/workflows/ci.yml`.
+- `--emit` — prints the recommended `[models.<id>.capabilities]` media lines for
+  the operator to merge into the live `runtime.toml`.
+
+Mapping (source: ollama `types/model/capability.go`, verified against live
+`/api/show` 2026-06-19): `vision`|`image` → `supports-image-input`; `audio` →
+`supports-audio-input`; any media → `supports-multimodal-inputs`. Setting
+`multimodal` for a single media is safe — the §3.1 gate still checks each
+required modality individually, so `multimodal` only ever *adds* a requirement
+for >1-modality turns; it never bypasses a per-modality check.
+
+Two drift levels are both covered: *config vs baseline* by `--check`
+(deterministic, CI) and *baseline vs `/api/show`* by `--refresh` (surfaces as a
+reviewable baseline diff). This is the "generated truth-source + drift-gate"
+pattern; it deliberately does **not** derive caps at runtime.
+
+**Rejected alternative — derive in OAS discovery.** OAS already probes
+`/api/show` (`lib/llm_provider/discovery.ml`), but its derived `capabilities`
+reach no runtime path: the shared discovery atomic stores only
+context/endpoints, `provider_registry` reads `healthy`/`url` only, and
+`capabilities_to_json` has zero callers in `lib/`/`test/`/`examples/`. Extending
+that probe to parse the `capabilities` array would add code to a dead path, so
+the `/api/show` → flag mapping lives in the sync script (where it is consumed)
+and OAS is left untouched — preserving the MASC/OAS boundary with zero OAS
+change.
 
 ## 5. As-built surface
 

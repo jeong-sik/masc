@@ -128,4 +128,39 @@ let () =
           Alcotest.test_case "case insensitive" `Quick
             test_jaccard_case_insensitive;
         ] );
+      ( "gc_event_bus",
+        [
+          Alcotest.test_case "default_delta TurnElapsed" `Quick
+            (fun () ->
+              let open Masc.Cognitive_gravity_event_bus in
+              let d = default_delta (TurnElapsed { age = 5; min_age = 3 }) in
+              Alcotest.(check bool) "= 0.02" true
+                (Float.abs (d -. 0.02) <= 0.0001) );
+          Alcotest.test_case "default_delta NoNewMentions" `Quick
+            (fun () ->
+              let open Masc.Cognitive_gravity_event_bus in
+              let d =
+                default_delta (NoNewMentions { turns = 10; min_idle = 5 })
+              in
+              Alcotest.(check bool) "= 0.05" true
+                (Float.abs (d -. 0.05) <= 0.0001) );
+          Alcotest.test_case "default_delta Contradiction" `Quick
+            (fun () ->
+              let open Masc.Cognitive_gravity_event_bus in
+              let d =
+                default_delta
+                  (Contradiction { fact_id = "f1"; staleness = 2.0 })
+              in
+              Alcotest.(check bool) "= 0.10" true
+                (Float.abs (d -. 0.10) <= 0.0001) );
+          Alcotest.test_case "default_delta ManualDecay" `Quick
+            (fun () ->
+              let open Masc.Cognitive_gravity_event_bus in
+              let d =
+                default_delta
+                  (ManualDecay { fact_ids = [ "f1" ]; rate = 0.3 })
+              in
+              Alcotest.(check bool) "= rate 0.30" true
+                (Float.abs (d -. 0.30) <= 0.0001) );
+        ] );
     ]

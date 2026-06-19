@@ -19,16 +19,23 @@ type sse_conn_info = {
   mutex : Eio.Mutex.t;
   stop : bool ref;
   mutable closed : bool;
+  stop_promise : unit Eio.Promise.t;
+  resolve_stop : unit Eio.Promise.u;
 }
 (** Concrete record because callers
     ({!Server_mcp_transport_http}, AG-UI bridge) construct it
-    field-by-field for the SSE handler.  [client_id = -1]
+    via {!make_sse_conn} for the SSE handler.  [client_id = -1]
     indicates an inline response (see {!make_inline_sse_conn}).
 
     [stop] is a [bool ref] (not [Atomic.t]) because all callers
     update it from a single fiber under [mutex]; the
     cross-fiber visibility is established via
-    [Eio.Mutex.use_rw]. *)
+    [Eio.Mutex.use_rw].
+
+    [stop_promise]/[resolve_stop] is resolved exactly once by
+    {!close_sse_conn}; {!run_sse_pumps} awaits it to release the
+    per-connection pump switch.  Construct via {!make_sse_conn} so
+    the promise is always paired with the connection. *)
 
 (** {1 Connect-rate guard env knobs} *)
 
@@ -130,6 +137,32 @@ val send_raw : sse_conn_info -> string -> bool
     [Eio.Cancel.Cancelled] re-raises verbatim — fiber
     cancellation does not silently mark the connection as
     failed.  Returns [true] on successful flush. *)
+
+val make_sse_conn :
+  session_id:string ->
+  client_id:int ->
+  writer:Httpun.Body.Writer.t ->
+  mutex:Eio.Mutex.t ->
+  unit ->
+  sse_conn_info
+(** [make_sse_conn ~session_id ~client_id ~writer ~mutex ()] builds an
+    [sse_conn_info] with [stop = ref false], [closed = false], and a fresh
+    [stop_promise]/[resolve_stop] pair.  All SSE handlers construct connections
+    through this so the stop promise is never omitted. *)
+
+val run_sse_pumps :
+  sw:Eio.Switch.t ->
+  info:sse_conn_info ->
+  drain:(unit -> unit) ->
+  ping:(unit -> unit) ->
+  unit
+(** [run_sse_pumps ~sw ~info ~drain ~ping] forks the [drain] and [ping] pumps
+    under a switch scoped to the connection rather than directly on the
+    server-lifetime [sw].  A supervisor forked on [sw] opens a child switch,
+    runs both pumps as daemons, and blocks on [info.stop_promise];
+    {!close_sse_conn} resolving that promise releases the child switch and
+    cancels both pumps — including a drain fiber blocked in [Eio.Stream.take]
+    that the [info.stop] flag alone cannot interrupt (#21548). *)
 
 val make_inline_sse_conn :
   session_id:string -> Httpun.Body.Writer.t -> sse_conn_info

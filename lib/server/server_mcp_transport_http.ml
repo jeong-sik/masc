@@ -625,16 +625,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               stop_sse_session_evict evicted_sid
                 ~reason:Session_lifecycle_event.Cap_exceeded
           | None -> ());
-          let info =
-            {
-              session_id;
-              client_id;
-              writer;
-              mutex;
-              stop = ref false;
-              closed = false;
-            }
-          in
+          let info = make_sse_conn ~session_id ~client_id ~writer ~mutex () in
           info_ref := Some info;
           register_sse_conn ~session_id ~info;
           if not (send_raw info (sse_prime_event ())) then
@@ -652,7 +643,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           | Ok runtime ->
               let sw = runtime.sw in
               let clock = runtime.clock in
-              Eio.Fiber.fork ~sw (fun () ->
+              run_sse_pumps ~sw ~info
+                ~drain:(fun () ->
                   let rec drain () =
                     let event = Eio.Stream.take event_stream in
                     (try
@@ -670,8 +662,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
                   with Eio.Cancel.Cancelled _ as e -> raise e
                      | exn ->
                        Log.Server.error "drain loop error: %s"
-                         (Printexc.to_string exn));
-              Eio.Fiber.fork ~sw (fun () ->
+                         (Printexc.to_string exn))
+                ~ping:(fun () ->
                   let is_cancelled exn =
                     match exn with
                     | Eio.Cancel.Cancelled _ -> true

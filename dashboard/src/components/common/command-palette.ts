@@ -72,7 +72,7 @@ export function CommandPalette() {
       },
       {
         id: 'nav-workspace',
-        title: '작업 화면으로 이동 (Workspace)',
+        title: '작업 화면으로 이동 (Work)',
         section: 'Navigation',
         keywords: 'tasks work',
         handler: () => navigate('workspace')

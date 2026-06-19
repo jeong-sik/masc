@@ -131,6 +131,7 @@ describe('Work', () => {
       expect(screen.getByTestId('kpi-jobs').textContent).toBe('3')
       expect(screen.getByTestId('kpi-done').textContent).toBe('1')
       expect(screen.getByTestId('kpi-blocked').textContent).toBe('1')
+      expect(screen.getByText(/Goal → job → keeper/).textContent).toContain('누르면')
     })
 
     it('renders a collapsed goal card per goal and expands on click', () => {

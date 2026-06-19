@@ -25,11 +25,12 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-shell
 - Settings moved out of the main surface list and into the rail footer, matching the prototype's bottom-anchored Settings action.
 - The mobile More drawer still exposes operational routes (Monitor, Command, Lab, Logs) while Settings remains footer-anchored.
 - Opening the mobile More drawer suppresses floating status/focus chrome so the rail footer remains visible.
+- The Work route's user-facing command palette label and lazy-loading fallback now say Work while preserving the `workspace` route id, and the Work footer copy matches the prototype wording.
 
 ## Still Missing Vs Prototype
 
 - The desktop shell still has a dashboard header/status/tooling model around the prototype primary surfaces. The prototype top bar is visually quieter and has fewer operational chips.
-- The Work surface is route-compatible with `workspace`, but the app has not fully renamed internal copy, breadcrumbs, fallback labels, or source concepts that still correctly refer to a workspace.
+- The Work surface is route-compatible with `workspace`, but some internal breadcrumbs/source concepts still correctly refer to a workspace when they describe runtime scope or API contracts.
 - The Overview surface does not yet match the v12 prototype's exact composition for attention queue, telemetry histogram, keeper fleet cards, and context density.
 - The Connectors page remains an operator-heavy status console rather than the prototype's simpler connector gate grid plus recent audit/event framing.
 - The global mobile pane contract from the prototype (`data-mpane`, chat pane hiding rules, and drawer behavior) is not normalized across every surface.

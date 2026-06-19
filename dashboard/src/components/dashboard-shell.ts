@@ -1197,7 +1197,7 @@ function TabContent() {
       `
     case 'workspace':
       return html`
-        <${Suspense} fallback=${lazyTabFallback('Workspace')}>
+        <${Suspense} fallback=${lazyTabFallback('Work')}>
           <${LazyWork} />
         <//>
       `

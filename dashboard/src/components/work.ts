@@ -325,7 +325,7 @@ function WorkSurfaceV2() {
             `)}
           </div>
 
-          <div class="wk-foot mono">Goal → job → keeper · job 의 keeper 를 누른면 해당 keeper 대화로 이동</div>
+          <div class="wk-foot mono">Goal → job → keeper · job 의 keeper 를 누르면 해당 keeper 대화로 이동</div>
         </div>
       </div>
     </main>

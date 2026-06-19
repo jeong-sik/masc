@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { ComponentChildren } from 'preact'
 import { post } from '../api/core'
 import { DEFAULT_MASC_ORIGIN } from '../config/constants'
@@ -46,6 +46,7 @@ import { ConnectorPathsStrip } from './connector-paths-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 import { Tk } from './tk'
+import { KeeperBadge } from './keeper-badge'
 
 function MutedSpan({ children }: { children: unknown }) {
   return html`<span class="text-[var(--color-fg-disabled)]">${children}</span>`
@@ -115,6 +116,17 @@ export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
   imessage: 'iMessage',
   slack: 'Slack',
   telegram: 'Telegram',
+}
+
+const CONNECTOR_STATE_LABELS = ['offline', 'stale', 'connected', 'disconnected'] as const
+export type ConnectorStateLabel = (typeof CONNECTOR_STATE_LABELS)[number]
+
+function isConnectorStateLabel(value: string | undefined): value is ConnectorStateLabel {
+  return value === 'offline' || value === 'stale' || value === 'connected' || value === 'disconnected'
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled connector state label: ${String(value)}`)
 }
 
 // Sidecar directories — only for connectors that actually run as
@@ -376,7 +388,7 @@ function dotClass(state: LivenessState): string {
   }
 }
 
-function dotClassForLabel(label: string): string {
+function dotClassForLabel(label: ConnectorStateLabel): string {
   switch (label) {
     case 'connected':
       return 'bg-[var(--ok-10)]'
@@ -384,8 +396,10 @@ function dotClassForLabel(label: string): string {
       return 'bg-[var(--warn-10)]'
     case 'disconnected':
       return 'bg-[var(--bad-10)]'
-    default:
+    case 'offline':
       return 'bg-[var(--color-fg-disabled)]'
+    default:
+      return assertNever(label)
   }
 }
 
@@ -407,9 +421,9 @@ function runtimeLabelForKeeper(keeper: GateKeeperInfo | null | undefined): strin
   return runtime
 }
 
-export function connectorStateLabel(connector: GateConnectorInfo | null): string {
+export function connectorStateLabel(connector: GateConnectorInfo | null): ConnectorStateLabel {
   const advertised = connector?.status?.trim().toLowerCase()
-  if (advertised === 'offline' || advertised === 'stale' || advertised === 'connected' || advertised === 'disconnected') {
+  if (isConnectorStateLabel(advertised)) {
     return advertised
   }
   if (!connector?.available) return 'offline'
@@ -424,7 +438,7 @@ export function connectorStateLabel(connector: GateConnectorInfo | null): string
     status pill required. Mapping matches Portainer's container state
     palette: emerald for connected, amber for stale (intermittent),
     rose for disconnected (broken), muted for offline (not running). */
-export function connectorCardBorderClass(label: string): string {
+export function connectorCardBorderClass(label: ConnectorStateLabel): string {
   switch (label) {
     case 'connected':
       return 'border-l-4 border-l-emerald-500'
@@ -433,8 +447,9 @@ export function connectorCardBorderClass(label: string): string {
     case 'disconnected':
       return 'border-l-4 border-l-rose-500'
     case 'offline':
-    default:
       return 'border-l-4 border-l-[var(--color-border-default)]'
+    default:
+      return assertNever(label)
   }
 }
 
@@ -1748,13 +1763,370 @@ function GateStatusStrip({
   `
 }
 
+function connectorCardStateClass(label: ConnectorStateLabel): string {
+  switch (label) {
+    case 'connected':
+      return ''
+    case 'stale':
+      return 'stale'
+    case 'offline':
+    case 'disconnected':
+      return 'down'
+    default:
+      return assertNever(label)
+  }
+}
+
+function connectorStatusPillClass(label: ConnectorStateLabel): string {
+  switch (label) {
+    case 'connected':
+      return 'run'
+    case 'stale':
+      return 'pause'
+    case 'offline':
+    case 'disconnected':
+      return 'off'
+    default:
+      return assertNever(label)
+  }
+}
+
+function connectorStatusPillLabel(label: ConnectorStateLabel): string {
+  switch (label) {
+    case 'connected':
+      return 'Connected'
+    case 'stale':
+      return 'Stale'
+    case 'offline':
+    case 'disconnected':
+      return 'Down'
+    default:
+      return assertNever(label)
+  }
+}
+
+function connectorDisplayValue(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '-'
+  return String(value)
+}
+
+function ConnectorValueCell({
+  label,
+  value,
+  highlight,
+}: {
+  label: string
+  value: string | number | null | undefined
+  highlight?: boolean
+}) {
+  return html`
+    <div class="cell">
+      <div class="k">${label}</div>
+      <div class=${`v ${highlight ? 'hl' : ''}`}>${connectorDisplayValue(value)}</div>
+    </div>
+  `
+}
+
+function ConnectorGateCard({
+  connectorId,
+  connector,
+  onOpenConfig,
+}: {
+  connectorId: KnownConnectorId
+  connector: GateConnectorInfo | null
+  onOpenConfig: (connectorId: KnownConnectorId) => void
+}) {
+  const displayName = connector?.display_name || CONNECTOR_DISPLAY_NAMES[connectorId] || connectorId
+  const label = connectorStateLabel(connector)
+  const pillClass = connectorStatusPillClass(label)
+  const bindings = connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS
+  const caps = connector?.capabilities?.length ? connector.capabilities : ['bindings']
+  const baseOrGuilds = connector?.gate_base_url || (connector?.guild_count ? `${connector.guild_count} guilds` : '')
+
+  return html`
+    <article
+      class=${`cn-card ${connectorCardStateClass(label)}`}
+      data-testid="connector-gate-card"
+      data-connector-card=${connectorId}
+      data-connector-card-state=${label}
+    >
+      <div class="cn-h">
+        <span class="cn-glyph" aria-hidden="true">${channelIcon(connector?.channel ?? connectorId)}</span>
+        <div class="meta">
+          <div class="nm">${displayName}</div>
+          <div class="ch">${connectorId} · channel: ${connector?.channel ?? connectorId}</div>
+        </div>
+        <span class=${`cn-status-pill ${pillClass}`}>
+          <span class="dot"></span>
+          ${connectorStatusPillLabel(label)}
+        </span>
+        <button
+          type="button"
+          class="cn-config"
+          aria-label=${`${displayName} 설정 열기`}
+          title="이 게이트 상세 설정"
+          onClick=${() => { onOpenConfig(connectorId) }}
+        >⚙</button>
+      </div>
+
+      <div class="cn-kv">
+        <${ConnectorValueCell} label="Bot" value=${connector?.bot_user_name || connector?.bot_user_id} highlight />
+        <${ConnectorValueCell} label="Reply mode" value=${connector?.reply_mode || 'manual'} />
+        <${ConnectorValueCell} label=${connector?.channel === 'webhook' ? 'Base URL' : 'Base URL / Guilds'} value=${baseOrGuilds} />
+        <${ConnectorValueCell} label="PID" value=${connector?.pid || '-'} />
+        <${ConnectorValueCell} label="Last ready" value=${connector?.last_ready_at ? timeAgo(connector.last_ready_at) : '-'} />
+        <${ConnectorValueCell} label="Updated" value=${connector?.updated_at ? timeAgo(connector.updated_at) : '-'} />
+      </div>
+
+      <div class="cn-caps">
+        ${caps.slice(0, 6).map(cap => html`<span class="cn-cap">${cap}</span>`)}
+      </div>
+
+      <div class="cn-bind">
+        <h5>바인딩 — 채널 → keeper (${bindings.length})</h5>
+        ${bindings.length
+          ? bindings.map(binding => html`
+              <div class="cn-bind-row">
+                <span class="chn">${binding.channel_id}</span>
+                <span class="arr">→</span>
+                <span class="text-[var(--text-bright)]">${binding.keeper_name}</span>
+              </div>
+            `)
+          : html`<div class="cn-bind-none">바인딩 없음 — 이 게이트는 알림 전용입니다.</div>`}
+        ${connector?.error
+          ? html`<div class="callout mt-2"><span class="ico">⚠</span><span>${connector.error}</span></div>`
+          : null}
+      </div>
+    </article>
+  `
+}
+
+function ConnectorsGateGrid({
+  connectors,
+  filterQuery,
+  onOpenConfig,
+}: {
+  connectors: GateConnectorInfo[]
+  filterQuery: string
+  onOpenConfig: (connectorId: KnownConnectorId) => void
+}) {
+  const query = filterQuery.trim().toLowerCase()
+  const cards = KNOWN_CONNECTOR_IDS
+    .map(connectorId => ({
+      connectorId,
+      connector: findKnownConnector(connectors, connectorId) ?? placeholderConnector(connectorId),
+    }))
+    .filter(({ connectorId, connector }) => {
+      if (!query) return true
+      const haystack = [
+        connectorId,
+        CONNECTOR_DISPLAY_NAMES[connectorId],
+        connector.display_name,
+        connector.channel,
+        connectorStateLabel(connector),
+        connector.bot_user_name,
+      ].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+
+  return html`
+    <div class="cn-grid" data-testid="connector-gate-grid">
+      ${cards.map(({ connectorId, connector }) => html`
+        <${ConnectorGateCard}
+          connectorId=${connectorId}
+          connector=${connector}
+          onOpenConfig=${onOpenConfig}
+        />
+      `)}
+    </div>
+  `
+}
+
+function ConnectorsAuditLog({ connectors }: { connectors: GateConnectorInfo[] }) {
+  const rows = connectors
+    .flatMap(connector => (connector.recent_audit ?? []).map(audit => ({
+      connector,
+      audit,
+    })))
+    .sort((a, b) => Date.parse(b.audit.timestamp) - Date.parse(a.audit.timestamp))
+    .slice(0, 5)
+
+  return html`
+    <section class="cn-audit" data-testid="connector-audit-log">
+      <div class="cn-audit-h">
+        <h3>최근 감사 로그</h3>
+        <span class="cn-audit-legend">recent_audit · last 5</span>
+      </div>
+      ${rows.length
+        ? html`
+            <table>
+              <thead>
+                <tr>
+                  <th>시각</th>
+                  <th>액션</th>
+                  <th>대상</th>
+                  <th>Keeper</th>
+                  <th>Actor</th>
+                  <th>이전 keeper</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map(({ connector, audit }) => html`
+                  <tr>
+                    <td>${formatConnectorTimestamp(audit.timestamp)}</td>
+                    <td class="act">${audit.action}</td>
+                    <td>${audit.channel_id || connector.connector_id}</td>
+                    <td>${audit.keeper_name || '-'}</td>
+                    <td>${audit.actor_name || audit.actor_id || '-'}</td>
+                    <td>${audit.previous_keeper || '-'}</td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          `
+        : html`<div class="cn-bind-none">최근 감사 로그 없음</div>`}
+    </section>
+  `
+}
+
+type ConnectorBindingDirection = 'both' | 'inbound' | 'outbound' | 'post-back'
+
+interface ConnectorBindingDraft {
+  id: string
+  channel: string
+  keeper: string
+  direction: ConnectorBindingDirection
+  enabled: boolean
+}
+
+const DEFAULT_REPLY_MODE_OPTIONS = ['mention', 'all', 'manual'] as const
+
+function connectorScopeLabel(connector: GateConnectorInfo | null): string {
+  return connector?.channel === 'webhook' ? 'Base URL' : 'Guilds'
+}
+
+function connectorScopeValue(connector: GateConnectorInfo | null): string {
+  if (!connector) return '-'
+  if (connector.channel === 'webhook') return connector.gate_base_url || '-'
+  if (connector.guild_count > 0) return String(connector.guild_count)
+  return connector.gate_base_url || '-'
+}
+
+function connectorBotValue(connector: GateConnectorInfo | null): string {
+  return connector?.bot_user_name || connector?.bot_user_id || ''
+}
+
+function connectorBindingDirectionOptions(connector: GateConnectorInfo | null): ConnectorBindingDirection[] {
+  return connector?.channel === 'webhook' ? ['inbound', 'post-back'] : ['both', 'inbound', 'outbound']
+}
+
+function connectorBindingDrafts(connectorId: KnownConnectorId, connector: GateConnectorInfo | null): ConnectorBindingDraft[] {
+  return (connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS).map((binding, index) => ({
+    id: `${connectorId}:${binding.channel_id}:${index}`,
+    channel: binding.channel_id,
+    keeper: binding.keeper_name,
+    direction: connector?.channel === 'webhook' ? 'inbound' : 'both',
+    enabled: true,
+  }))
+}
+
+function keeperOptionsForBindingEditor(keepers: GateKeeperInfo[], drafts: ConnectorBindingDraft[]): string[] {
+  const names = new Set<string>()
+  for (const keeper of keepers) {
+    if (keeper.name) names.add(keeper.name)
+  }
+  for (const draft of drafts) {
+    if (draft.keeper) names.add(draft.keeper)
+  }
+  return Array.from(names).sort((a, b) => a.localeCompare(b))
+}
+
+function ConnectorBindingEditor({
+  connector,
+  drafts,
+  keeperOptions,
+  onPatch,
+  onDelete,
+  onAdd,
+}: {
+  connector: GateConnectorInfo | null
+  drafts: ConnectorBindingDraft[]
+  keeperOptions: string[]
+  onPatch: (id: string, patch: Partial<ConnectorBindingDraft>) => void
+  onDelete: (id: string) => void
+  onAdd: () => void
+}) {
+  const dirOptions = connectorBindingDirectionOptions(connector)
+
+  return html`
+    <div class="cn-drawer-section" data-testid="connector-binding-editor">
+      <h4>채널 → keeper 바인딩 (${drafts.length})</h4>
+      <div class="cn-set-hint">
+        어떤 채널이 어떤 keeper에 연결되는지. 한 keeper가 여러 채널을 받거나, 채널마다 다른 keeper로 라우팅할 수 있습니다.
+      </div>
+      ${drafts.length
+        ? drafts.map(draft => html`
+            <div class=${`cn-be ${draft.enabled ? '' : 'off'}`} data-testid="connector-binding-editor-row" data-drawer-binding=${draft.channel}>
+              <div class="cn-be-main">
+                <input
+                  class="cn-be-chn mono"
+                  aria-label="binding channel"
+                  value=${draft.channel}
+                  onInput=${(e: Event) => { onPatch(draft.id, { channel: (e.target as HTMLInputElement).value }) }}
+                />
+                <span class="cn-be-arr">→</span>
+                <span class="cn-be-kp">
+                  ${draft.keeper ? html`<${KeeperBadge} id=${draft.keeper} variant="sigil" size="sm" />` : null}
+                  <select
+                    class="cn-be-sel mono"
+                    aria-label="binding keeper"
+                    value=${draft.keeper}
+                    onInput=${(e: Event) => { onPatch(draft.id, { keeper: (e.target as HTMLSelectElement).value }) }}
+                  >
+                    ${keeperOptions.map(keeper => html`<option value=${keeper}>${keeper}</option>`)}
+                  </select>
+                </span>
+                <button
+                  type="button"
+                  class="cn-be-del"
+                  title="바인딩 삭제"
+                  onClick=${() => { onDelete(draft.id) }}
+                >✕</button>
+              </div>
+              <div class="cn-be-opts">
+                <div class="cn-be-dir" aria-label="binding direction">
+                  ${dirOptions.map(direction => html`
+                    <button
+                      type="button"
+                      class=${`cn-dir-b ${draft.direction === direction ? 'on' : ''}`}
+                      onClick=${() => { onPatch(draft.id, { direction }) }}
+                    >${direction}</button>
+                  `)}
+                </div>
+                <button
+                  type="button"
+                  class=${`set-toggle sm ${draft.enabled ? 'on' : ''}`}
+                  title=${draft.enabled ? '활성' : '일시중지'}
+                  onClick=${() => { onPatch(draft.id, { enabled: !draft.enabled }) }}
+                ><span class="knob"></span></button>
+              </div>
+            </div>
+          `)
+        : html`<div class="cn-bind-none">바인딩 없음 — 알림 전용 게이트</div>`}
+      <button type="button" class="cn-set-add" onClick=${onAdd}>＋ 바인딩 추가</button>
+    </div>
+  `
+}
+
 function ConnectorDetailDrawer({
   connectorId,
   connector,
+  keepers,
   onClose,
 }: {
   connectorId: KnownConnectorId
   connector: GateConnectorInfo | null
+  keepers: GateKeeperInfo[]
   onClose: () => void
 }) {
   useEffect(() => {
@@ -1772,9 +2144,58 @@ function ConnectorDetailDrawer({
     openConnectorConfig(connectorId)
   }, [connectorId])
 
+  return html`
+    <${ConnectorDetailDrawerBody}
+      key=${connectorId}
+      connectorId=${connectorId}
+      connector=${connector}
+      keepers=${keepers}
+      onClose=${onClose}
+    />
+  `
+}
+
+function ConnectorDetailDrawerBody({
+  connectorId,
+  connector,
+  keepers,
+  onClose,
+}: {
+  connectorId: KnownConnectorId
+  connector: GateConnectorInfo | null
+  keepers: GateKeeperInfo[]
+  onClose: () => void
+}) {
+  const [enabled, setEnabled] = useState(() => connectorStateLabel(connector) === 'connected')
+  const [botDraft, setBotDraft] = useState(() => connectorBotValue(connector))
+  const [replyMode, setReplyMode] = useState(() => connector?.reply_mode || 'manual')
+  const [bindingDrafts, setBindingDrafts] = useState(() => connectorBindingDrafts(connectorId, connector))
+
   const displayName = CONNECTOR_DISPLAY_NAMES[connectorId] ?? connectorId
   const tab = configDrawerTab.value
   const auditRows = connector?.recent_audit ?? []
+  const keeperOptions = useMemo(
+    () => keeperOptionsForBindingEditor(keepers, bindingDrafts),
+    [keepers, bindingDrafts],
+  )
+  const patchBindingDraft = (id: string, patch: Partial<ConnectorBindingDraft>) => {
+    setBindingDrafts(drafts => drafts.map(draft => draft.id === id ? { ...draft, ...patch } : draft))
+  }
+  const deleteBindingDraft = (id: string) => {
+    setBindingDrafts(drafts => drafts.filter(draft => draft.id !== id))
+  }
+  const addBindingDraft = () => {
+    setBindingDrafts(drafts => [
+      ...drafts,
+      {
+        id: `${connectorId}:new:${Date.now()}`,
+        channel: connector?.channel === 'webhook' ? '/hooks/new' : '#new-channel',
+        keeper: keeperOptions[0] ?? '',
+        direction: connector?.channel === 'webhook' ? 'inbound' : 'both',
+        enabled: true,
+      },
+    ])
+  }
 
   return html`
     <div class="cn-drawer-overlay" onClick=${onClose} data-testid="connector-detail-drawer">
@@ -1803,13 +2224,62 @@ function ConnectorDetailDrawer({
         <div class="cn-drawer-body">
           ${tab === 'connection' && html`
             <div class="cn-drawer-section">
-              <h4>연결 상태</h4>
-              <div class="text-2xs text-[var(--color-fg-secondary)]">
-                status <span class="font-mono text-[var(--color-fg-primary)]">${connectorStateLabel(connector)}</span>
-                ${connector?.gate_healthy !== null
-                  ? html` · gate <span class="font-mono text-[var(--color-fg-primary)]">${connector?.gate_healthy ? 'healthy' : 'unhealthy'}</span>`
-                  : null}
-                ${connector?.updated_at ? html` · heartbeat <span class="font-mono text-[var(--color-fg-primary)]">${timeAgo(connector.updated_at)}</span>` : null}
+              <h4>연결</h4>
+              <div class="cn-set-row">
+                <div class="cn-set-row-l">
+                  <div class="cn-set-label">게이트 활성화</div>
+                  <div class="cn-set-hint">
+                    ${enabled ? '연결됨' : '비활성'} · status ${connectorStateLabel(connector)}
+                    ${connector?.gate_healthy !== null
+                      ? html` · gate ${connector?.gate_healthy ? 'healthy' : 'unhealthy'}`
+                      : null}
+                    ${connector?.updated_at ? html` · heartbeat ${timeAgo(connector.updated_at)}` : null}
+                  </div>
+                </div>
+                <div class="cn-set-row-c">
+                  <button
+                    type="button"
+                    class=${`set-toggle ${enabled ? 'on' : ''}`}
+                    title=${enabled ? '연결됨' : '비활성'}
+                    onClick=${() => { setEnabled(value => !value) }}
+                  ><span class="knob"></span></button>
+                </div>
+              </div>
+              <div class="cn-set-row">
+                <div class="cn-set-row-l">
+                  <div class="cn-set-label">Bot</div>
+                </div>
+                <div class="cn-set-row-c">
+                  <input
+                    class="cn-set-input mono"
+                    aria-label="connector bot"
+                    value=${botDraft}
+                    onInput=${(e: Event) => { setBotDraft((e.target as HTMLInputElement).value) }}
+                  />
+                </div>
+              </div>
+              <div class="cn-set-row">
+                <div class="cn-set-row-l">
+                  <div class="cn-set-label">${connectorScopeLabel(connector)}</div>
+                </div>
+                <div class="cn-set-row-c">
+                  <span class="mono cn-set-static">${connectorScopeValue(connector)}</span>
+                </div>
+              </div>
+              <div class="cn-set-row">
+                <div class="cn-set-row-l">
+                  <div class="cn-set-label">토큰</div>
+                </div>
+                <div class="cn-set-row-c">
+                  <div class="cn-set-path">
+                    <input class="cn-set-input mono short" readonly value="••••••••••" />
+                    <button
+                      type="button"
+                      class="cn-test-btn"
+                      onClick=${() => { showToast(`${displayName} token rotation placeholder`, 'warning') }}
+                    >재발급</button>
+                  </div>
+                </div>
               </div>
               ${connector?.error
                 ? html`
@@ -1820,21 +2290,26 @@ function ConnectorDetailDrawer({
                 : null}
             </div>
             <div class="cn-drawer-section">
-              <h4>Bindings</h4>
-              ${connector?.configured_bindings?.length
-                ? html`
-                    <div class="space-y-1">
-                      ${connector.configured_bindings.map(b => html`
-                        <div class="flex items-center gap-2 text-2xs" data-drawer-binding=${b.channel_id}>
-                          <span class="font-mono text-[var(--color-fg-primary)]">${b.channel_id}</span>
-                          <span class="text-[var(--color-fg-disabled)]">→</span>
-                          <span class="font-mono text-[var(--color-fg-primary)]">${b.keeper_name}</span>
-                        </div>
-                      `)}
-                    </div>
-                  `
-                : html`<div class="text-2xs text-[var(--color-fg-disabled)]">바인딩 없음 — 알림 전용 게이트</div>`}
+              <h4>기본 응답 모드</h4>
+              <div class="cn-set-hint">바인딩별로 재정의하지 않으면 이 값을 따릅니다.</div>
+              <div class="cn-set-seg" data-testid="connector-reply-mode-editor">
+                ${DEFAULT_REPLY_MODE_OPTIONS.map(option => html`
+                  <button
+                    type="button"
+                    class=${`cn-set-seg-b ${replyMode === option ? 'on' : ''}`}
+                    onClick=${() => { setReplyMode(option) }}
+                  >${option}</button>
+                `)}
+              </div>
             </div>
+            <${ConnectorBindingEditor}
+              connector=${connector}
+              drafts=${bindingDrafts}
+              keeperOptions=${keeperOptions}
+              onPatch=${patchBindingDraft}
+              onDelete=${deleteBindingDraft}
+              onAdd=${addBindingDraft}
+            />
           `}
           ${tab === 'config' && html`
             <div class="cn-drawer-section">
@@ -1948,7 +2423,7 @@ export function ConnectorStatusPanel() {
     ? visibleConnectors[0] ?? placeholderConnector(focusedConnectorId)
     : findKnownConnector(allConnectors, focusedConnectorId) ?? placeholderConnector(focusedConnectorId)
 
-  const connectorCount = allConnectors.length
+  const connectorCount = filterId ? allConnectors.length : KNOWN_CONNECTOR_IDS.length
   const activeCount = allConnectors.filter(c => connectorStateLabel(c) === 'connected').length
 
   return html`
@@ -1962,51 +2437,72 @@ export function ConnectorStatusPanel() {
 
       ${!filterId
         ? html`
-            <${ConnectorsToolbar}
-              query=${connectorSearchQuery.value}
-              onQuery=${(value: string) => { connectorSearchQuery.value = value }}
-            />
             <${GateStatusStrip} gate=${d} connectors=${allConnectors} />
-          `
-        : null}
-
-      ${!filterId
-        ? html`
-            <${ConnectorOverviewStrip}
+            <${ConnectorsGateGrid}
               connectors=${allConnectors}
-              keeperCount=${snapshot.keepers.length}
-              discordTriggerPolicy=${snapshot.connectors?.discord_trigger_policy}
-              selectedConnectorId=${focusedConnectorId}
-              onSelectConnector=${(connectorId: KnownConnectorId) => { selectedConnectorId.value = connectorId }}
+              filterQuery=${connectorSearchQuery.value}
               onOpenConfig=${(connectorId: KnownConnectorId) => {
                 configDrawerConnectorId.value = connectorId
                 configDrawerTab.value = 'connection'
               }}
-              detailTargetId="connector-detail-panel"
-              filterQuery=${connectorSearchQuery.value}
             />
+            <${ConnectorsAuditLog} connectors=${allConnectors} />
           `
         : null}
 
       ${!filterId
         ? html`
-            <${SurfaceCard}
-              id="connector-detail-panel"
-              class="mb-4 !bg-[var(--color-bg-page)]/40 !p-3"
-              data-testid="connector-detail-panel"
-            >
-              <div class="mb-3 flex items-center justify-between gap-3 text-2xs">
-                <span class="font-semibold text-[var(--color-fg-primary)]">${CONNECTOR_DISPLAY_NAMES[focusedConnectorId]}</span>
+            <details class="v2-connectors-rollup" data-testid="connector-operations-rollup">
+              <summary>
+                <span>운영 상세</span>
+                <span class="mono">readiness · live panel · paths · analytics</span>
+              </summary>
+              <div class="v2-connectors-rollup-body">
+                <${ConnectorsToolbar}
+                  query=${connectorSearchQuery.value}
+                  onQuery=${(value: string) => { connectorSearchQuery.value = value }}
+                />
+                <${ConnectorOverviewStrip}
+                  connectors=${allConnectors}
+                  keeperCount=${snapshot.keepers.length}
+                  discordTriggerPolicy=${snapshot.connectors?.discord_trigger_policy}
+                  selectedConnectorId=${focusedConnectorId}
+                  onSelectConnector=${(connectorId: KnownConnectorId) => { selectedConnectorId.value = connectorId }}
+                  onOpenConfig=${(connectorId: KnownConnectorId) => {
+                    configDrawerConnectorId.value = connectorId
+                    configDrawerTab.value = 'connection'
+                  }}
+                  detailTargetId="connector-detail-panel"
+                  filterQuery=${connectorSearchQuery.value}
+                />
+                <${SurfaceCard}
+                  id="connector-detail-panel"
+                  class="mb-4 !bg-[var(--color-bg-page)]/40 !p-3"
+                  data-testid="connector-detail-panel"
+                >
+                  <div class="mb-3 flex items-center justify-between gap-3 text-2xs">
+                    <span class="font-semibold text-[var(--color-fg-primary)]">${CONNECTOR_DISPLAY_NAMES[focusedConnectorId]}</span>
+                  </div>
+                  <${ConnectorLivePanel}
+                    connector=${focusedConnector}
+                    gate=${d}
+                    keepers=${snapshot.keepers}
+                    connectorError=${snapshot.connectorError}
+                    keeperDirectoryError=${snapshot.keeperError}
+                    loading=${loading}
+                  />
+                </${SurfaceCard}>
+                <${DisclosurePanel}
+                  title="키퍼 매트릭스"
+                  badge=${html`<span>키퍼 ${snapshot.keepers.length}</span>`}
+                  testId="connector-matrix-disclosure"
+                >
+                  <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers)} />
+                <//>
+                <${ConnectorPathsStrip} connectors=${allConnectors} />
+                <${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />
               </div>
-              <${ConnectorLivePanel}
-                connector=${focusedConnector}
-                gate=${d}
-                keepers=${snapshot.keepers}
-                connectorError=${snapshot.connectorError}
-                keeperDirectoryError=${snapshot.keeperError}
-                loading=${loading}
-              />
-            </${SurfaceCard}>
+            </details>
           `
         : null}
 
@@ -2023,29 +2519,14 @@ export function ConnectorStatusPanel() {
           `
         : null}
 
-      ${!filterId
-        ? html`
-            <${DisclosurePanel}
-              title="키퍼 매트릭스"
-              badge=${html`<span>키퍼 ${snapshot.keepers.length}</span>`}
-              testId="connector-matrix-disclosure"
-            >
-              <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers)} />
-            <//>
-          `
-        : null}
-
-      ${!filterId
-        ? html`<${ConnectorPathsStrip} connectors=${allConnectors} />`
-        : null}
-
-      <${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />
+      ${filterId ? html`<${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />` : null}
 
       ${configDrawerConnectorId.value
         ? html`
             <${ConnectorDetailDrawer}
               connectorId=${configDrawerConnectorId.value}
               connector=${findKnownConnector(allConnectors, configDrawerConnectorId.value)}
+              keepers=${snapshot.keepers}
               onClose=${() => { configDrawerConnectorId.value = null }}
             />
           `

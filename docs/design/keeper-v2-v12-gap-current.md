@@ -2,7 +2,7 @@
 
 Source reviewed: `/Users/dancer/Downloads/v2 (12)`.
 
-Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-shell-parity`.
+Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-connectors`.
 
 ## Exists In Current Page
 
@@ -29,13 +29,17 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-shell
 - The Overview surface now uses the prototype's primary order and native `.ov-*` surface layer: header, six KPI tiles, attention queue, telemetry histogram, then Keeper 전체.
 - Legacy Overview rollups (alerts, surface readiness, fleet ticker, task funnel, active mission, active keepers) moved into a collapsed `운영 롤업` section below the primary prototype surface.
 - Mobile Overview gets extra internal scroll padding so the status tray and bottom navigation do not hide the final fleet/rollup content.
+- The Connectors surface now follows the prototype's primary order: Gate header, gate health strip, connector gate card grid, and recent audit log.
+- Existing operator-heavy Connectors diagnostics (search/readiness tiles, selected live panel, keeper matrix, paths, gate analytics) moved under a collapsed `운영 상세` section so the primary view is the simpler gate grid/audit surface.
+- The Connectors detail drawer now uses the prototype's connection-first layout: gate active toggle, bot field, guild/base URL row, token placeholder, default reply mode segmented control, and inline channel-to-keeper binding editor.
+- The drawer binding editor supports local UI edits for channel, keeper, direction, delete, enabled toggle, and add-binding actions so the visible flow matches the prototype shell before backend persistence is wired.
 
 ## Still Missing Vs Prototype
 
 - The desktop shell still has a dashboard header/status/tooling model around the prototype primary surfaces. The prototype top bar is visually quieter and has fewer operational chips.
 - The Work surface is route-compatible with `workspace`, but some internal breadcrumbs/source concepts still correctly refer to a workspace when they describe runtime scope or API contracts.
 - The Overview surface now matches the prototype's main section order, but the exact live-data density still differs when no live keeper rows are available and the shell health/status chrome is noisy.
-- The Connectors page remains an operator-heavy status console rather than the prototype's simpler connector gate grid plus recent audit/event framing.
+- The Connectors drawer still needs a hard persistence contract for save/delete/reorder binding edits, reply mode updates, token rotation, and backend-supported per-binding enabled/direction state. The current drawer editor is local draft UI only.
 - The global mobile pane contract from the prototype (`data-mpane`, chat pane hiding rules, and drawer behavior) is not normalized across every surface.
 - Composer parity is incomplete: binary attachments, microphone/STT behavior, and exact command affordance grouping are not implemented as prototype features.
 - Stable message-turn identity linking from board posts to keeper chat turns still needs a hard data contract rather than visual-only alignment.
@@ -47,4 +51,6 @@ Current implementation surface: `dashboard/src` on branch `codex/keeper-v2-shell
 - Duplicate keeper fleet entry points should eventually collapse: Keepers is the v2 primary destination, while Monitor > Keeper Fleet is now a routeable legacy/diagnostic lane.
 - The desktop top surface tab layer should stay removed; it is now covered by the single rail model.
 - The old Overview slim-home cards should stay collapsed under `운영 롤업`, not return between the KPI/attention/telemetry/fleet prototype sections.
+- The old Connectors operator console should stay collapsed under `운영 상세`, not return above the connector gate grid and recent audit log.
+- The old read-only drawer binding summary should stay replaced by the inline editor shell; the lower-level config form can remain available under the drawer's `config` tab until persistence is fully wired.
 - Stale gap notes under `/Users/dancer/me/memory/keeper-v2-gap-*.md` are superseded by this repo-local snapshot.

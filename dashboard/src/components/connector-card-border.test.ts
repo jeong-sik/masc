@@ -4,6 +4,7 @@ import {
   connectorCardBorderClass,
   connectorStateLabel,
 } from './connector-status'
+import type { ConnectorStateLabel } from './connector-status'
 
 describe('connectorCardBorderClass (pure)', () => {
   it('connected → emerald 4px left border (Portainer "running" tone)', () => {
@@ -31,17 +32,10 @@ describe('connectorCardBorderClass (pure)', () => {
     expect(connectorCardBorderClass('offline')).toContain('var(--color-border-default)')
   })
 
-  it('unknown label falls back to the offline (muted) tone', () => {
-    // Regression guard: a future status vocabulary extension (e.g.
-    // "reconnecting") must not accidentally render without a border —
-    // the default arm keeps every card visually framed.
-    expect(connectorCardBorderClass('reconnecting-someday')).toContain('border-l-4')
-  })
-
   it('every mapping returns exactly 2 Tailwind classes (width + color)', () => {
     // Keeps the output cheap for JIT purging — any 3rd class slipping
     // in would signal the helper growing responsibilities it shouldn't.
-    for (const label of ['connected', 'stale', 'disconnected', 'offline']) {
+    for (const label of ['connected', 'stale', 'disconnected', 'offline'] as const satisfies readonly ConnectorStateLabel[]) {
       const parts = connectorCardBorderClass(label).split(' ').filter(Boolean)
       expect(parts.length).toBe(2)
       expect(parts[0]).toBe('border-l-4')
@@ -64,6 +58,13 @@ describe('connectorStateLabel (pure, now exported)', () => {
       connector_id: 'discord', status: 'stale', available: true, connected: true, stale: false,
     } as unknown as Parameters<typeof connectorStateLabel>[0]
     expect(connectorStateLabel(c)).toBe('stale')
+  })
+
+  it('unknown advertised status falls back to the flag-derived closed label', () => {
+    const c = {
+      connector_id: 'discord', status: 'reconnecting-someday', available: false, connected: false, stale: false,
+    } as unknown as Parameters<typeof connectorStateLabel>[0]
+    expect(connectorStateLabel(c)).toBe('offline')
   })
 
   it('flag-derived: available=false → "offline"', () => {
@@ -100,7 +101,7 @@ describe('state → border class composition (contract)', () => {
   // map to a visible border via connectorCardBorderClass. Regression
   // guard against a future status vocabulary extension slipping through
   // without a border tone.
-  const labels = ['connected', 'stale', 'disconnected', 'offline']
+  const labels = ['connected', 'stale', 'disconnected', 'offline'] as const satisfies readonly ConnectorStateLabel[]
   for (const label of labels) {
     it(`${label} resolves to a concrete 4px border class`, () => {
       const cls = connectorCardBorderClass(label)

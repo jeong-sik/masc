@@ -660,6 +660,7 @@ describe('PostDetail', () => {
             model: 'ollama_cloud.kimi-k2-6',
             status: 'answered',
             answer: 'Panel one answer',
+            input_tokens: 700,
             output_tokens: 1200,
           },
           {
@@ -671,7 +672,7 @@ describe('PostDetail', () => {
         judge: {
           status: 'synthesized',
           decision: 'answer — ship',
-          synthesis: 'Judge synthesis answer',
+          synthesis: '**[judge]** synthesis\n\n**Consensus**\n- Judge synthesis answer (models: ollama_cloud.kimi-k2-6)\n\n**Resolved answer**\nShip it.\n\n**Decision**: answer — ship\n',
           resolved_answer: 'Resolved answer fallback',
         },
         observed_usage: {
@@ -691,6 +692,8 @@ describe('PostDetail', () => {
     expect(evidence).toHaveTextContent('Should we ship the fusion board renderer?')
     expect(evidence).toHaveTextContent('Panel one answer')
     expect(evidence).toHaveTextContent('Timeout')
+    expect(evidence).toHaveTextContent('**[judge]** synthesis')
+    expect(evidence).toHaveTextContent('Consensus')
     expect(evidence).toHaveTextContent('Judge synthesis answer')
     expect(evidence).not.toHaveTextContent('Resolved answer fallback')
     expect(container.querySelectorAll('[data-fusion-panel]')).toHaveLength(2)

@@ -13,6 +13,8 @@ type FusionPanelEntry = {
 type FusionJudgeView = {
   status: string
   decision?: string
+  // fusion_sink.ml writes render_judge markdown here; keep it ahead of
+  // resolvedAnswer so board detail and chat fusion cards share the same SSOT.
   synthesis?: string
   resolvedAnswer?: string
   error?: string

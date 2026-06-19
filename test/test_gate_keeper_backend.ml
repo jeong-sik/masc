@@ -248,7 +248,7 @@ let test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks () =
         name = "screen.png";
         size = 1024;
         mime_type = "image/png";
-        data = "abc123";
+        data = "data:image/png;base64,abc123";
       };
     ]
   in
@@ -278,6 +278,132 @@ let test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks () =
       check string "text" "describe this" text
   | Ok _ -> fail "expected image then text OAS blocks"
   | Error err -> fail ("expected OAS block conversion: " ^ err)
+
+let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
+  let attachments =
+    [
+      {
+        K.id = "att-img";
+        att_type = "image";
+        name = "screen.png";
+        size = 1024;
+        mime_type = "image/png";
+        data = "DATA:IMAGE/PNG;BASE64,abc123";
+      };
+    ]
+  in
+  let media =
+    {
+      Keeper_multimodal_input.attachment_id = "att-img";
+      name = "screen.png";
+      mime_type = "image/png";
+      size = Some 1024;
+    }
+  in
+  match
+    Keeper_multimodal_input.to_oas_blocks ~attachments
+      [ Keeper_multimodal_input.User_image media ]
+  with
+  | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
+      check string "media type" "image/png" media_type;
+      check string "data" "abc123" data;
+      check string "source type" "base64" source_type
+  | Ok _ -> fail "expected image OAS block"
+  | Error err -> fail ("expected mixed-case data URL conversion: " ^ err)
+
+let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
+  let attachments =
+    [
+      {
+        K.id = "att-img";
+        att_type = "image";
+        name = "screen.png";
+        size = 1024;
+        mime_type = "";
+        data = "DATA:IMAGE/PNG;BASE64,abc123";
+      };
+    ]
+  in
+  let media =
+    {
+      Keeper_multimodal_input.attachment_id = "att-img";
+      name = "screen.png";
+      mime_type = "";
+      size = Some 1024;
+    }
+  in
+  match
+    Keeper_multimodal_input.to_oas_blocks ~attachments
+      [ Keeper_multimodal_input.User_image media ]
+  with
+  | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
+      check string "media type" "image/png" media_type;
+      check string "data" "abc123" data;
+      check string "source type" "base64" source_type
+  | Ok _ -> fail "expected image OAS block"
+  | Error err -> fail ("expected inferred data URL MIME conversion: " ^ err)
+
+let test_keeper_multimodal_input_rejects_mismatched_data_url_mime () =
+  let attachments =
+    [
+      {
+        K.id = "att-img";
+        att_type = "image";
+        name = "screen.png";
+        size = 1024;
+        mime_type = "image/png";
+        data = "data:image/png;base64,abc123";
+      };
+    ]
+  in
+  let media =
+    {
+      Keeper_multimodal_input.attachment_id = "att-img";
+      name = "screen.png";
+      mime_type = "image/jpeg";
+      size = Some 1024;
+    }
+  in
+  match
+    Keeper_multimodal_input.to_oas_blocks ~attachments
+      [ Keeper_multimodal_input.User_image media ]
+  with
+  | Ok _ -> fail "expected mismatched data URL MIME to be rejected"
+  | Error err ->
+      check string "validation message"
+        {|attachment MIME mismatch for image user block "att-img": declared image/jpeg but data URL is image/png|}
+        err
+
+let test_keeper_multimodal_input_rejects_malformed_data_url () =
+  let attachments =
+    [
+      {
+        K.id = "att-img";
+        att_type = "image";
+        name = "screen.png";
+        size = 1024;
+        mime_type = "image/png";
+        data = "data:image/png,abc123";
+      };
+    ]
+  in
+  let media =
+    {
+      Keeper_multimodal_input.attachment_id = "att-img";
+      name = "screen.png";
+      mime_type = "image/png";
+      size = Some 1024;
+    }
+  in
+  match
+    Keeper_multimodal_input.to_oas_blocks ~attachments
+      [ Keeper_multimodal_input.User_image media ]
+  with
+  | Ok _ -> fail "expected malformed data URL to be rejected"
+  | Error err ->
+      check string "validation message"
+        {|malformed data URL for image user block "att-img": expected data:<mime>;base64,<payload>|}
+        err
 
 let test_keeper_stream_args_preserve_user_blocks () =
   let media =
@@ -844,6 +970,14 @@ let () =
             test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type;
           test_case "multimodal input converts user blocks to OAS blocks" `Quick
             test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks;
+          test_case "multimodal input accepts mixed-case data URL" `Quick
+            test_keeper_multimodal_input_accepts_mixed_case_data_url;
+          test_case "multimodal input normalizes inferred data URL MIME" `Quick
+            test_keeper_multimodal_input_normalizes_inferred_data_url_mime;
+          test_case "multimodal input rejects mismatched data URL MIME" `Quick
+            test_keeper_multimodal_input_rejects_mismatched_data_url_mime;
+          test_case "multimodal input rejects malformed data URL" `Quick
+            test_keeper_multimodal_input_rejects_malformed_data_url;
           test_case "stream args preserve user blocks" `Quick
             test_keeper_stream_args_preserve_user_blocks;
           test_case "chat history persists attachment refs not raw media" `Quick

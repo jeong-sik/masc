@@ -249,11 +249,69 @@ describe('thread history merge & persistence', () => {
     expect(entries[0]?.blocks).toEqual([{ t: 'p', html: 'hello' }])
   })
 
-  it('does not attach blocks to non-assistant rows', () => {
+  it('preserves server-provided media blocks on user rows', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'https://x.com/post', ts: 1_780_000_000, blocks: [{ t: 'image', src: 'https://x.com/a.png' }] },
     ])
+    expect(entries[0]?.blocks).toEqual([{ t: 'image', src: 'https://x.com/a.png' }])
+  })
+
+  it('drops html-bearing and forwarding payload blocks on user rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'user',
+        content: 'uploaded',
+        ts: 1_780_000_000,
+        blocks: [
+          { t: 'code', html: '<img src=x onerror=alert(1)>' },
+          { t: 'svg', svg: '<svg onload=alert(1) />' },
+          {
+            t: 'attach',
+            name: 'screen.png',
+            src: 'https://x.com/screen.png',
+            svg: '<svg onload=alert(1) />',
+            data: 'RAW',
+            mimeType: 'image/svg+xml',
+          },
+        ] as any,
+      },
+    ])
+    expect(entries[0]?.blocks).toEqual([
+      { t: 'attach', name: 'screen.png', src: 'https://x.com/screen.png' },
+    ])
+  })
+
+  it('does not locally parse user text into rich blocks', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'https://x.com/post', ts: 1_780_000_000 },
+    ])
     expect(entries[0]?.blocks).toBeUndefined()
+  })
+
+  it('normalizes extended rich block shapes from history rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'rich reply',
+        ts: 1_780_000_000,
+        blocks: [
+          { t: 'attach', name: 'screen.png', src: 'https://x.com/screen.png', sizeBytes: 42, kind: 'image' },
+          { t: 'voice', secs: 5, wave: [0.2, 0.6], transcript: 'memo' },
+          { t: 'table', head: ['name', { v: 'count', num: true }], rows: [['a', '1']] },
+        ],
+      },
+    ])
+    expect(entries[0]?.blocks).toEqual([
+      {
+        t: 'attach',
+        name: 'screen.png',
+        src: 'https://x.com/screen.png',
+        sizeBytes: 42,
+        kind: 'image',
+      },
+      { t: 'voice', secs: 5, wave: [0.2, 0.6], transcript: 'memo' },
+      { t: 'table', head: ['name', { v: 'count', num: true }], rows: [['a', '1']] },
+    ])
   })
 
   it('drops tool rows that lack id or name and keeps the rest of the turn', () => {

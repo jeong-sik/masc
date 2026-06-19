@@ -111,6 +111,11 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
       (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
       Keeper_types_profile.schemas
   in
+  let is_descriptor_backed_tool name =
+    match Keeper_tool_descriptor.descriptors_for_internal name with
+    | _ :: _ -> true
+    | [] -> false
+  in
   let supported_in_keeper name =
     if is_keeper_safe_inline_tool name then
       true
@@ -120,6 +125,15 @@ let keeper_supported_masc_schemas (schemas : Masc_domain.tool_schema list) =
          [is_registered]/not-initialized fallbacks so management tools are
          never over-exposed during boot. *)
       List.mem name keeper_supported_keeper_masc_tools
+    else if is_descriptor_backed_tool name then
+      (* Descriptor-backed in-process tools are dispatched by
+         Keeper_tool_runtime, not the legacy Tool_dispatch tag registry.
+         Requiring a Tool_dispatch tag here admits a name into
+         keeper_allowed_tool_names via descriptor_candidate_tool_names, while
+         dropping the schema from keeper_universe_model_tools. OAS then sees a
+         ghost tool: keeper_tools_list says it exists, but Agent.run has no
+         Tool.t for it. *)
+      true
     else if Tool_dispatch.is_registered name then
       true
     else if not (Tool_dispatch.is_tag_registry_initialized ()) then
@@ -353,15 +367,30 @@ let keeper_universe_tool_names (meta : keeper_meta) : string list =
     a named alias for call-site clarity at the search-index boundary. *)
 let keeper_tool_search_scope = keeper_universe_tool_names
 
+let descriptor_model_tool_schemas () =
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.concat_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+    Keeper_tool_descriptor.internal_names descriptor
+    |> List.map (fun name ->
+      { Masc_domain.name
+      ; description = descriptor.description
+      ; input_schema = descriptor.input_schema
+      }))
+  |> dedupe_tool_schemas
+
 (** Shared schema assembly: computes the full tool schema list once.
     [masc_schemas_fn] selects policy-filtered or universe-filtered MASC schemas
-    depending on the caller's access scope. *)
+    depending on the caller's access scope. Descriptor-backed internal tools
+    are appended as a keeper-local schema source so descriptor-only tools such
+    as [masc_fusion] cannot appear in candidate names without a matching
+    Agent.run [Tool.t]. *)
 let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schema list)
     (meta : keeper_meta) : Masc_domain.tool_schema list =
   keeper_model_tools
   @ keeper_voice_tool_schemas
   @ [ keeper_tool_search_schema ]
   @ (masc_schemas_fn meta)
+  @ descriptor_model_tool_schemas ()
 
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup
     instead of List.mem (O(n) per schema). *)

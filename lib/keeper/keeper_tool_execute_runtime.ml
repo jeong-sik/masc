@@ -338,9 +338,8 @@ let handle_tool_execute_typed
             ()
         else
         let path_missing = pre_dispatch_path_missing ~cwd ir in
-        if Option.is_some path_missing
-        then
-          let missing_path = Option.get path_missing in
+        match path_missing with
+        | Some missing_path ->
           let parent = Filename.dirname missing_path in
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Path_not_found
@@ -353,7 +352,7 @@ let handle_tool_execute_typed
             ~alternatives:
               [ Printf.sprintf "Use executable=\"ls\" argv=[%S]." parent ]
             ()
-        else
+        | None ->
           let env_snap =
             Cancel_safe.protect
               ~on_exn:(fun _ -> None)

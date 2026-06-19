@@ -110,6 +110,38 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
       ]
   | Error e -> `Assoc [ ("status", `String "failed"); ("error", `String e) ]
 
+(* RFC-0266: 심의 완료 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
+   board post + chat append(영속)와 별개로, 잠든(Running) 키퍼를 즉시 깨워
+   resolved_answer가 다음 턴의 actionable 입력으로 도착하게 하는 hint+payload 경로다.
+   예외 안전: registry 문제로 sink 결과/실패 알림이 오염되면 안 되므로 자체 흡수하되
+   Eio 구조적 취소(Cancelled)는 재전파한다(record_recovery_stimulus_turn_started 패턴).
+   Paused 키퍼는 강제 재개하지 않는다(board wake와 동일 보수적 기본값, wakeup_keeper가
+   Running 항목만 깨움) — 결과는 board/chat 영속으로 남는다. *)
+let wake_keeper_on_fusion_completion
+      ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id =
+  try
+    (* post_id 폴백 규칙은 keeper_world_observation.pending_board_event_of_fusion_completion
+       과 동일해야 한다(둘 다 board_post_id에서 유도) — dedup 일관성. *)
+    let post_id =
+      if String.equal board_post_id "" then "fusion-run:" ^ run_id else board_post_id
+    in
+    let stimulus : Keeper_event_queue.stimulus =
+      { Keeper_event_queue.post_id
+      ; urgency = Keeper_event_queue.Normal
+      ; arrived_at = Time_compat.now ()
+      ; payload =
+          Keeper_event_queue.Fusion_completed { run_id; ok; resolved_answer; board_post_id }
+      }
+    in
+    Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
+    Keeper_keepalive_signal.wakeup_keeper ~base_path:base_dir ~stimulus keeper
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn ~keeper_name:keeper "fusion completion wake failed run_id=%s: %s"
+      run_id
+      (Printexc.to_string exn)
+
 let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
     (unit, string) result =
   try
@@ -188,8 +220,20 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
          ~content
          ()
      | Error _ -> ());
+    (* RFC-0266: completion 성공 경로(board post 생성됨)에서만 깨운다. board 생성
+       실패(Error)는 orchestrator가 [Sink_failed]로 바꿔 fusion_tool의
+       append_chat_failure가 깨우므로, 여기서도 깨우면 중복 wake가 된다. judge가
+       Error여도 fusion은 끝났으니 ok=false로 통지한다(board엔 실패도 증거로 남음). *)
     (match board_result with
-     | Ok _post -> Ok ()
+     | Ok post ->
+       let ok, resolved_answer =
+         match judge with
+         | Ok j -> true, j.Fusion_types.resolved_answer
+         | Error e -> false, Printf.sprintf "judge failed: %s" e
+       in
+       wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok ~resolved_answer
+         ~board_post_id:(Board.Post_id.to_string post.id);
+       Ok ()
      | Error e -> Error (Board.show_board_error e))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

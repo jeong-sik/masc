@@ -14,6 +14,7 @@ type stimulus_kind =
   | Board_signal
   | Bootstrap
   | No_progress_recovery
+  | Fusion_completed  (** RFC-0266: async masc_fusion completion wake *)
 
 type reaction_kind =
   | Turn_started

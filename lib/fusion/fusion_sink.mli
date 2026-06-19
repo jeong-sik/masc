@@ -32,3 +32,23 @@ val emit
   -> judge:(Fusion_types.judge_synthesis, string) result
   -> judge_usage:Fusion_types.usage
   -> (unit, string) result
+
+(** RFC-0266: 심의 완료/실패 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
+
+    resolved_answer가 다음 키퍼 턴의 actionable 입력으로 도착하게 한다(board post +
+    chat append 영속과 별개의 hint+payload 경로). [ok = false]는 denied/sink_failed/
+    aborted 실패 라벨을 [resolved_answer]에 싣고, board post가 없으면 [board_post_id = ""].
+
+    [emit]은 성공 경로(board post 생성됨)에서 이를 호출하고, 실패 경로는 fusion_tool의
+    append_chat_failure가 호출한다(completion 타입당 단일 wake로 중복 방지).
+
+    예외 안전: [Eio.Cancel.Cancelled]는 재전파, 그 외 예외는 흡수(sink 결과 비오염).
+    Running이 아닌 키퍼는 silent no-op이며 결과는 board/chat 영속으로 남는다. *)
+val wake_keeper_on_fusion_completion :
+     base_dir:string
+  -> keeper:string
+  -> run_id:string
+  -> ok:bool
+  -> resolved_answer:string
+  -> board_post_id:string
+  -> unit

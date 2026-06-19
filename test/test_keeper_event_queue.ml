@@ -19,6 +19,14 @@ let () =
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
   assert (String.equal (payload_kind_label No_progress_recovery) "no_progress_recovery");
 
+  (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
+  let fusion_payload () =
+    Fusion_completed
+      { run_id = "fus-1"; ok = true; resolved_answer = "ok"; board_post_id = "post-1" }
+  in
+  assert (not (is_board_signal (fusion_payload ())));
+  assert (String.equal (payload_kind_label (fusion_payload ())) "fusion_completed");
+
   (* --- queue operations preserved --- *)
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }

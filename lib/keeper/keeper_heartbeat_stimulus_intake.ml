@@ -75,6 +75,17 @@ let consume_single_heartbeat_stimulus
   match stim.payload with
   | Keeper_event_queue.Board_signal _ ->
     pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
+  | Keeper_event_queue.Fusion_completed c ->
+    (* RFC-0266: an async fusion deliberation finished and woke this keeper.
+       Surface the resolved answer as a pending_board_event so this turn acts
+       on it (a non-empty list, unlike Bootstrap/No_progress_recovery which
+       inject nothing — returning [] here would silently drop the result). *)
+    Log.Keeper.info
+      "turn entry: fusion result delivered run_id=%s ok=%b (keeper=%s)"
+      c.run_id
+      c.ok
+      meta_after_triage.name;
+    pending_board_event_of_stimulus ~meta_after_triage stim |> Option.to_list
   | Keeper_event_queue.Bootstrap ->
     Log.Keeper.info
       "turn entry: bootstrap stimulus consumed (keeper=%s)"

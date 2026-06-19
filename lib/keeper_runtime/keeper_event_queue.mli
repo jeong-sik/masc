@@ -55,10 +55,25 @@ type stimulus_payload =
   | Board_signal of board_stimulus
   | Bootstrap
   | No_progress_recovery
+  | Fusion_completed of fusion_completion
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
-    unrepresentable rather than silently downgraded to [Unsupported]. *)
+    unrepresentable rather than silently downgraded to [Unsupported].
+    [Fusion_completed] (RFC-0266) wakes the calling keeper when an async
+    [masc_fusion] deliberation finishes so the result arrives as actionable
+    turn input rather than being discovered passively. *)
+
+and fusion_completion = {
+  run_id : string;
+  ok : bool;
+  resolved_answer : string;
+  board_post_id : string;
+}
+(** RFC-0266 payload for [Fusion_completed]: [ok] distinguishes a synthesized
+    judge result from denied/sink_failed/aborted; [resolved_answer] carries the
+    answer (or a failure label when [ok = false]); [board_post_id] correlates to
+    the sink's board evidence post ("" when none was created). *)
 
 type stimulus = {
   post_id : post_id;
@@ -98,7 +113,7 @@ val summary : t -> string
 
 val payload_kind_label : stimulus_payload -> string
 (** Stable short label for logs/metrics: ["board_signal"], ["bootstrap"],
-    or ["no_progress_recovery"]. *)
+    ["no_progress_recovery"], or ["fusion_completed"]. *)
 
 val is_board_signal : stimulus_payload -> bool
 (** [true] iff the payload is a [Board_signal]. *)

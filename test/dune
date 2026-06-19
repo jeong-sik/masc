@@ -633,6 +633,14 @@
  (modules test_runtime_config_validity)
  (libraries masc_test_deps))
 
+; RFC-0266: fusion async-completion wake — closed-sum classification +
+; actionable pending_board_event delivery.
+
+(test
+ (name test_fusion_wake)
+ (modules test_fusion_wake)
+ (libraries masc_test_deps))
+
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 
 (test

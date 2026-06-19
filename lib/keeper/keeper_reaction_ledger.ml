@@ -7,6 +7,7 @@ type stimulus_kind =
   | Board_signal
   | Bootstrap
   | No_progress_recovery
+  | Fusion_completed  (* RFC-0266: async masc_fusion completion wake *)
 
 type reaction_kind =
   | Turn_started
@@ -23,6 +24,7 @@ let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
   | No_progress_recovery -> "no_progress_recovery"
+  | Fusion_completed -> "fusion_completed"
 ;;
 
 let reaction_kind_to_string = function
@@ -50,6 +52,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_signal _ -> Board_signal
   | Keeper_event_queue.Bootstrap -> Bootstrap
   | Keeper_event_queue.No_progress_recovery -> No_progress_recovery
+  | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -117,6 +120,8 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       title
   | Keeper_event_queue.Bootstrap -> "bootstrap"
   | Keeper_event_queue.No_progress_recovery -> "no_progress_recovery"
+  | Keeper_event_queue.Fusion_completed fc ->
+    Printf.sprintf "fusion_completed run_id=%s ok=%b" fc.run_id fc.ok
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -126,7 +131,9 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let board_updated_at =
     match stimulus.payload with
     | Keeper_event_queue.Board_signal bs -> bs.updated_at
-    | Keeper_event_queue.Bootstrap | Keeper_event_queue.No_progress_recovery -> None
+    | Keeper_event_queue.Bootstrap
+    | Keeper_event_queue.No_progress_recovery
+    | Keeper_event_queue.Fusion_completed _ -> None
   in
   `Assoc
     (base_fields

@@ -624,6 +624,7 @@ let review
      | None -> ());
     result
   in
+
   let task_info fmt =
     Stdlib.Format.ksprintf
       (fun message -> Log.Task.info "task_id=%s %s" req.task_id message)

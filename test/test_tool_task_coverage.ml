@@ -1109,6 +1109,51 @@ let () = test "handle_transition_verifier_allows_verdict_actions" (fun () ->
     | Masc_domain.Done _ -> ()
     | _ -> failwith "expected verifier approval to complete task"))
 
+let () = test "handle_transition_blocks_submitter_verdict_actions" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let worker_ctx = make_test_ctx_with_agent "worker" in
+    let _ =
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 worker_ctx
+        (`Assoc [ ("title", `String "Submitter must not self-verify") ])
+    in
+    let _ =
+      Workspace.claim_task worker_ctx.config ~agent_name:"worker" ~task_id:"task-001"
+    in
+    let submit_result =
+      Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+        worker_ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "submit_for_verification");
+            ( "notes",
+              `String
+                "completion_notes: self-verification regression setup. \
+                 reviewable_evidence_ref: artifact:self-verification.json" );
+          ])
+    in
+    if not (Tool_result.is_success submit_result) then
+      failwith (Tool_result.message submit_result);
+    List.iter
+      (fun (action, expected) ->
+         let result =
+           Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0
+             worker_ctx
+             (`Assoc
+               [
+                 ("task_id", `String "task-001");
+                 ("action", `String action);
+                 ("notes", `String "rubber-stamp verdict");
+               ])
+         in
+         assert (not (Tool_result.is_success result));
+         assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+         assert (str_contains (Tool_result.message result) expected))
+      [ "approve", "Self-approval not allowed"
+      ; "reject", "Self-rejection not allowed"
+      ];
+    assert_task_awaiting_verification_by worker_ctx "worker"))
+
 let () = test "handle_claim_sets_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("title", `String "Claim direct")]) in

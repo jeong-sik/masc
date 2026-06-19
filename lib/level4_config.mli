@@ -30,3 +30,9 @@ val random_float : float -> float
 (** [random_int max] returns a value in [[0, max)]. Ensures RNG is
     seeded before first call. *)
 val random_int : int -> int
+
+module For_testing : sig
+  val reset_rng_state : unit -> unit
+  val rng_state : unit -> int
+  val initialized_state : int
+end

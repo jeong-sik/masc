@@ -80,6 +80,12 @@ let make_rng ?seed () =
   in
   Random.State.make [|s|]
 
+module For_testing = struct
+  let reset_rng_state () = Atomic.set rng_state rng_uninitialized
+  let rng_state () = Atomic.get rng_state
+  let initialized_state = rng_initialized
+end
+
 (** {1 Validation} *)
 
 (** Check if float is finite (not NaN or Inf) *)

@@ -6,6 +6,7 @@ type try_provider_ctx =
   ; keeper_name : string
   ; name : string
   ; goal : string
+  ; goal_blocks : Agent_sdk.Types.content_block list option
   ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string

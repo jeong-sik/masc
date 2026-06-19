@@ -19,7 +19,7 @@ let check name cond =
 ;;
 
 let msg ?(attachments = []) ~content ~ts source =
-  { Keeper_chat_queue.content; attachments; timestamp = ts; source }
+  { Keeper_chat_queue.content; user_blocks = []; attachments; timestamp = ts; source }
 ;;
 
 let attachment ~id =
@@ -30,6 +30,11 @@ let attachment ~id =
   ; mime_type = "text/plain"
   ; data = "d"
   }
+;;
+
+let image_block ~attachment_id =
+  Keeper_multimodal_input.User_image
+    { attachment_id; name = attachment_id ^ ".png"; mime_type = "image/png"; size = None }
 ;;
 
 let contents batch = List.map (fun m -> m.Keeper_chat_queue.content) batch
@@ -93,7 +98,8 @@ let test_merge_batch () =
   let batch =
     [ msg ~content:"first" ~ts:1.0 ~attachments:[ attachment ~id:"a" ]
         Keeper_chat_queue.Dashboard
-    ; msg ~content:"second" ~ts:2.0 Keeper_chat_queue.Dashboard
+    ; { (msg ~content:"second" ~ts:2.0 Keeper_chat_queue.Dashboard) with
+        Keeper_chat_queue.user_blocks = [ image_block ~attachment_id:"att-img" ] }
     ; msg ~content:"third" ~ts:3.0 ~attachments:[ attachment ~id:"b" ]
         Keeper_chat_queue.Dashboard
     ]
@@ -110,6 +116,10 @@ let test_merge_batch () =
          (fun (a : Keeper_chat_store.attachment) -> a.Keeper_chat_store.id)
          m.Keeper_chat_queue.attachments
        = [ "a"; "b" ]);
+    check
+      "semantic user blocks concatenate in order"
+      (Keeper_multimodal_input.modalities m.Keeper_chat_queue.user_blocks
+       = [ "image" ]);
     check "timestamp is the first message's" (m.Keeper_chat_queue.timestamp = 1.0);
     check
       "source is the shared route"

@@ -5,7 +5,7 @@ import {
   formatKeeperVisibleReply,
   normalizeKeeperConversationDetails,
 } from '../keeper-message'
-import type { KeeperConversationDetails } from '../types'
+import type { KeeperConversationDetails, KeeperUserInputBlock } from '../types'
 import type { DashboardAuthErrorCode } from '../types/dashboard-execution'
 import {
   currentDashboardActor,
@@ -456,10 +456,27 @@ export interface StreamKeeperMessageOptions {
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
   attachments?: StreamAttachment[]
+  userBlocks?: KeeperUserInputBlock[]
   channel?: string
   channelWorkspaceId?: string
   turnInstructions?: string
   surfaceContext?: KeeperStreamSurfaceContext
+}
+
+function streamUserBlockToWire(block: KeeperUserInputBlock): Record<string, unknown> {
+  if (block.type === 'text') {
+    return {
+      type: 'text',
+      text: block.text,
+    }
+  }
+  return {
+    type: block.type,
+    attachment_id: block.attachmentId,
+    name: block.name,
+    mime_type: block.mimeType,
+    size: block.size,
+  }
 }
 
 export async function streamKeeperMessage(
@@ -469,6 +486,7 @@ export async function streamKeeperMessage(
     signal,
     onEvent,
     attachments,
+    userBlocks,
     channel,
     channelWorkspaceId,
     turnInstructions,
@@ -501,6 +519,9 @@ export async function streamKeeperMessage(
       mime_type: att.mimeType,
       data: att.data,
     }))
+  }
+  if (userBlocks && userBlocks.length > 0) {
+    body.user_blocks = userBlocks.map(streamUserBlockToWire)
   }
   const requestBody = JSON.stringify(body)
   const postStream = () => fetch('/api/v1/keepers/chat/stream', {

@@ -209,6 +209,20 @@ module For_testing : sig
     ctx_clock:float Eio.Time.clock_ty Eio.Resource.t option ->
     float Eio.Time.clock_ty Eio.Resource.t option
 
+  val required_modalities_of_content_blocks :
+    Agent_sdk.Types.content_block list -> string list
+
+  val validate_content_blocks_against_capabilities :
+    provider_label:string ->
+    Llm_provider.Capabilities.capabilities ->
+    Agent_sdk.Types.content_block list ->
+    (unit, Agent_sdk.Error.sdk_error) result
+
+  val apply_runtime_model_input_capabilities :
+    Llm_provider.Capabilities.capabilities ->
+    Runtime_schema.model_capabilities ->
+    Llm_provider.Capabilities.capabilities
+
   val runtime_observation_for_completed_config :
     total_duration_ms:float -> config -> Runtime_observation.runtime_observation
 
@@ -272,6 +286,22 @@ val run :
     is used; otherwise {!build} produces a fresh agent.
     Returns the wrapped {!run_result}; errors propagate
     as [Agent_sdk.Error.sdk_error]. *)
+
+val run_blocks :
+  sw:Eio.Switch.t ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  config:config ->
+  ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  ?on_yield:(unit -> unit) ->
+  ?on_resume:(unit -> unit) ->
+  ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?goal_detail:string ->
+  Agent_sdk.Types.content_block list ->
+  (run_result, Agent_sdk.Error.sdk_error) result
+(** Runs an OAS agent against structured user-authored content blocks.  The
+    optional [goal_detail] is a display/log fallback only; media payloads stay
+    in typed OAS blocks and are not rendered into lifecycle strings. *)
 
 val run_with_masc_tools :
   sw:Eio.Switch.t ->

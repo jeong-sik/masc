@@ -30,6 +30,19 @@ describe('validateFile', () => {
     expect(validateFile(fileOfSize('a.json', 'application/json', 10))).toBeNull()
   })
 
+  it('accepts allowed audio files within the file size budget', () => {
+    expect(validateFile(fileOfSize('clip.webm', 'audio/webm', MAX_FILE_SIZE))).toBeNull()
+    expect(validateFile(fileOfSize('clip.wav', 'audio/wav', 10))).toBeNull()
+  })
+
+  it('rejects unsupported audio types', () => {
+    expect(validateFile(fileOfSize('clip.aiff', 'audio/aiff', 10))).toContain('지원하지 않는 오디오 형식')
+  })
+
+  it('rejects oversized audio files', () => {
+    expect(validateFile(fileOfSize('clip.webm', 'audio/webm', MAX_FILE_SIZE + 1))).toContain('오디오 크기 초과')
+  })
+
   it('rejects unsupported file types', () => {
     expect(validateFile(fileOfSize('a.bin', 'application/octet-stream', 10))).toContain('지원하지 않는 파일 형식')
   })

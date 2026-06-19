@@ -166,6 +166,7 @@ let test_discord_queue_projection_matches_gateway_context () =
   let queued : Chat_queue.queued_message =
     {
       content = "hello";
+      user_blocks = [];
       attachments = [];
       timestamp = 0.0;
       source =

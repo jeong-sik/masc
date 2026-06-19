@@ -15,6 +15,7 @@ type message_source =
 
 type queued_message = {
   content : string;
+  user_blocks : Keeper_multimodal_input.user_input_block list;
   attachments : Keeper_chat_store.attachment list;
   timestamp : float;
   source : message_source;
@@ -94,6 +95,7 @@ let merge_batch batch =
       Some
         {
           content = String.concat "\n\n" (List.map (fun m -> m.content) batch);
+          user_blocks = List.concat_map (fun m -> m.user_blocks) batch;
           attachments = List.concat_map (fun m -> m.attachments) batch;
           timestamp = first.timestamp;
           source = first.source;

@@ -931,6 +931,7 @@ let start_keeper_loops
                  channel_user_id = projection.payload_channel_user_id;
                  channel_user_name = projection.payload_channel_user_name;
                  channel_workspace_id = projection.payload_channel_workspace_id;
+                 user_blocks = queued_message.user_blocks;
                  attachments = queued_message.attachments;
                }
              in
@@ -1000,7 +1001,7 @@ let start_keeper_loops
                           skipping Slack delivery for keeper=%s"
                          keeper_name));
              process_single_turn ~state ~clock ~sw ~auth_token:None
-               ~thread_id ~closed ~payload ~run_id ~message_id
+               ~thread_id ~closed ~client_disconnects:None ~payload ~run_id ~message_id
                ~agent_name ~events)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

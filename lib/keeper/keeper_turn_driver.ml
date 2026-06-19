@@ -42,6 +42,7 @@ let run_named
     ~runtime_id
     ?(keeper_name = "")
     ~goal
+    ?goal_blocks
     ?priority
     ?session_id
     ?(system_prompt = "")
@@ -149,6 +150,7 @@ let run_named
     keeper_name;
     name;
     goal;
+    goal_blocks;
     priority;
     session_id;
     system_prompt;

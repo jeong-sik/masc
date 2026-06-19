@@ -212,6 +212,67 @@ describe('streamKeeperMessage', () => {
     expect(events).toEqual(['RUN_FINISHED'])
   })
 
+  it('forwards semantic user blocks separately from attachment payloads', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamKeeperMessage('sangsu', 'describe this', {
+      onEvent: () => {},
+      attachments: [
+        {
+          id: 'att-img',
+          type: 'image',
+          name: 'screen.png',
+          size: 1024,
+          mimeType: 'image/png',
+          data: 'data:image/png;base64,abc123',
+        },
+      ],
+      userBlocks: [
+        {
+          type: 'image',
+          attachmentId: 'att-img',
+          name: 'screen.png',
+          mimeType: 'image/png',
+          size: 1024,
+        },
+        { type: 'text', text: 'describe this' },
+      ],
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      name: 'sangsu',
+      message: 'describe this',
+      direct_reply: true,
+      attachments: [
+        {
+          id: 'att-img',
+          type: 'image',
+          name: 'screen.png',
+          size: 1024,
+          mime_type: 'image/png',
+          data: 'data:image/png;base64,abc123',
+        },
+      ],
+      user_blocks: [
+        {
+          type: 'image',
+          attachment_id: 'att-img',
+          name: 'screen.png',
+          mime_type: 'image/png',
+          size: 1024,
+        },
+        { type: 'text', text: 'describe this' },
+      ],
+    })
+  })
+
   const stubStaleToken = () => {
     window.sessionStorage.setItem('masc_bearer_token', 'stale-token')
     window.sessionStorage.setItem(

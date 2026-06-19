@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatBlock, KeeperConversationEntry } from '../../types'
+import type { ChatBlock, KeeperConversationEntry, KeeperUserInputBlock } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
 import { ChatComposer, ChatTranscript } from './primitives'
 import { collectAttachments } from './attachments'
@@ -1077,7 +1077,7 @@ describe('ChatComposer multimodal', () => {
 
   function renderComposer(props: {
     draft?: string
-    onSend?: (payload: { blocks: ChatBlock[] }) => void
+    onSend?: (payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => void
     disabled?: boolean
     streaming?: boolean
   } = {}) {
@@ -1207,6 +1207,55 @@ describe('ChatComposer multimodal', () => {
     expect(blocks).toHaveLength(2)
     expect(blocks[0]).toMatchObject({ t: 'attach', name: 'screen.png', kind: 'image' })
     expect(blocks[1]).toMatchObject({ t: 'p', html: 'check this &lt;tag&gt;' })
+    expect(onSend.mock.calls[0]?.[0].userBlocks).toEqual([
+      {
+        type: 'image',
+        attachmentId: 'att-img',
+        name: 'screen.png',
+        mimeType: 'image/png',
+        size: 1024,
+      },
+      { type: 'text', text: 'check this <tag>' },
+    ])
+  })
+
+  it('preserves audio attachments as audio user blocks', async () => {
+    vi.mocked(collectAttachments).mockResolvedValue({
+      attachments: [
+        {
+          id: 'att-audio',
+          type: 'file',
+          name: 'voice.webm',
+          size: 2048,
+          mimeType: 'audio/webm',
+          data: 'data:audio/webm;base64,AAAA',
+        },
+      ],
+      errors: [],
+    })
+
+    const onSend = vi.fn()
+    renderComposer({ onSend })
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['x'], 'voice.webm', { type: 'audio/webm' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledOnce()
+    expect(onSend.mock.calls[0]?.[0].userBlocks).toEqual([
+      {
+        type: 'audio',
+        attachmentId: 'att-audio',
+        name: 'voice.webm',
+        mimeType: 'audio/webm',
+        size: 2048,
+      },
+    ])
   })
 
   it('keeps send disabled until there is content', () => {

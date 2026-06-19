@@ -14,7 +14,7 @@ const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
-import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock } from '../../types'
+import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, ChatMermaidBlock, ChatShellBlock, ChatTableBlock, ChatTraceStep, ChatVoiceBlock, KeeperUserInputBlock } from '../../types'
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallOutputBlob } from '../../api/dashboard'
 import { lookupToolCallOutput } from '../../tool-call-output-store'
@@ -1230,6 +1230,14 @@ function AttachmentCard({ attachment }: { attachment: KeeperConversationAttachme
   `
 }
 
+function userInputMediaKindForAttachment(
+  attachment: KeeperConversationAttachment,
+): Exclude<KeeperUserInputBlock['type'], 'text'> {
+  if (attachment.type === 'image') return 'image'
+  if (attachment.mimeType.startsWith('audio/')) return 'audio'
+  return 'document'
+}
+
 function formatAudioDuration(seconds?: number | null): string {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return ''
   const totalSec = Math.round(seconds)
@@ -1946,7 +1954,7 @@ export function ChatComposer({
   queueEnabled?: boolean
   queueCount?: number
   onDraftChange: (value: string) => void
-  onSend: (payload: { blocks: ChatBlock[] }) => void | Promise<void>
+  onSend: (payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => void | Promise<void>
   onAbort?: () => void
   layout?: 'default' | 'primary'
 }) {
@@ -2026,6 +2034,7 @@ export function ChatComposer({
   const handleSend = () => {
     if (sendDisabled) return
     const blocks: ChatBlock[] = []
+    const userBlocks: KeeperUserInputBlock[] = []
     for (const att of attachments) {
       blocks.push({
         t: 'attach',
@@ -2041,12 +2050,20 @@ export function ChatComposer({
         mimeType: att.mimeType,
         sizeBytes: att.size,
       } as ChatBlock)
+      userBlocks.push({
+        type: userInputMediaKindForAttachment(att),
+        attachmentId: att.id,
+        name: att.name,
+        mimeType: att.mimeType,
+        size: att.size,
+      })
     }
     const text = draft.trim()
     if (text) {
       blocks.push({ t: 'p', html: escapeHtml(text) } as ChatBlock)
+      userBlocks.push({ type: 'text', text })
     }
-    void onSend({ blocks })
+    void onSend({ blocks, userBlocks })
     onDraftChange('')
     setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
@@ -2133,7 +2150,7 @@ export function ChatComposer({
             <input
               ref=${fileInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/gif,image/webp,text/plain,text/markdown,application/json,text/csv"
+              accept="image/png,image/jpeg,image/gif,image/webp,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,text/plain,text/markdown,application/json,text/csv"
               multiple
               class="hidden"
               aria-label="파일 첨부"

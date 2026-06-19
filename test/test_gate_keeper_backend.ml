@@ -17,6 +17,22 @@ let temp_base_path prefix =
   Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
 
+let string_contains haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then true
+  else if needle_len > haystack_len then false
+  else
+    let rec loop index =
+      if index + needle_len > haystack_len then false
+      else if String.sub haystack index needle_len = needle then true
+      else loop (index + 1)
+    in
+    loop 0
+
+let read_file path =
+  In_channel.with_open_bin path In_channel.input_all
+
 let test_agent_name_for_channel_actor () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
@@ -196,6 +212,368 @@ let test_parse_keeper_chat_stream_request_formats_surface_context () =
       check bool "surface context present" true (Option.is_some payload.surface_context)
   | Error err -> fail ("expected surface context to parse: " ^ err)
 
+let test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks () =
+  let body =
+    {|{"name":"luna","message":"","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,abc123"}],"user_blocks":[{"type":"image","attachment_id":"att-img","name":"screen.png","mime_type":"image/png","size":1024}]}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok payload -> (
+      check string "fallback message" "[image attached: screen.png]" payload.message;
+      check int "attachment preserved" 1 (List.length payload.attachments);
+      match payload.user_blocks with
+      | [ Server_routes_http_keeper_stream.User_image media ] ->
+          check string "attachment id" "att-img" media.attachment_id;
+          check string "mime type" "image/png" media.mime_type;
+          check (option int) "size" (Some 1024) media.size
+      | _ -> fail "expected one image user block")
+  | Error err -> fail ("expected attachment-only user_blocks to parse: " ^ err)
+
+let test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type () =
+  let body =
+    {|{"name":"luna","message":"hello","user_blocks":[{"type":"tool_result","text":"nope"}]}|}
+  in
+  match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
+  | Ok _ -> fail "expected unknown user block type to be rejected"
+  | Error err ->
+      check string "validation message"
+        {|unsupported user_blocks type "tool_result": expected text, image, document, or audio|}
+        err
+
+let test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks () =
+  let attachments =
+    [
+      {
+        K.id = "att-img";
+        att_type = "image";
+        name = "screen.png";
+        size = 1024;
+        mime_type = "image/png";
+        data = "abc123";
+      };
+    ]
+  in
+  let media =
+    {
+      Keeper_multimodal_input.attachment_id = "att-img";
+      name = "screen.png";
+      mime_type = "image/png";
+      size = Some 1024;
+    }
+  in
+  match
+    Keeper_multimodal_input.to_oas_blocks ~attachments
+      [
+        Keeper_multimodal_input.User_image media;
+        Keeper_multimodal_input.User_text "describe this";
+      ]
+  with
+  | Ok
+      [
+        Agent_sdk.Types.Image { media_type; data; source_type };
+        Agent_sdk.Types.Text text;
+      ] ->
+      check string "media type" "image/png" media_type;
+      check string "data" "abc123" data;
+      check string "source type" "base64" source_type;
+      check string "text" "describe this" text
+  | Ok _ -> fail "expected image then text OAS blocks"
+  | Error err -> fail ("expected OAS block conversion: " ^ err)
+
+let test_keeper_stream_args_preserve_user_blocks () =
+  let media =
+    {
+      Keeper_multimodal_input.attachment_id = "att-img";
+      name = "screen.png";
+      mime_type = "image/png";
+      size = Some 1024;
+    }
+  in
+  let payload =
+    { Server_routes_http_keeper_stream.name = "luna";
+      message = "describe this";
+      user_blocks =
+        [
+          Keeper_multimodal_input.User_text "describe this";
+          Keeper_multimodal_input.User_image media;
+        ];
+      timeout_sec = None;
+      turn_instructions = None;
+      surface_context = None;
+      channel = "";
+      channel_user_id = "";
+      channel_user_name = "";
+      channel_workspace_id = "";
+      attachments =
+        [
+          {
+            K.id = "att-img";
+            att_type = "image";
+            name = "screen.png";
+            size = 1024;
+            mime_type = "image/png";
+            data = "abc123";
+          };
+        ];
+    }
+  in
+  match Server_routes_http_keeper_stream.For_testing.args_of_request payload with
+  | `Assoc fields -> (
+      match List.assoc_opt "user_blocks" fields, List.assoc_opt "attachments" fields with
+      | Some (`List [ `Assoc text_fields; `Assoc image_fields ]),
+        Some (`List [ `Assoc attachment_fields ]) ->
+          check (option string) "text block type" (Some "text")
+            (match List.assoc_opt "type" text_fields with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "image block ref" (Some "att-img")
+            (match List.assoc_opt "attachment_id" image_fields with
+             | Some (`String value) -> Some value
+             | _ -> None);
+          check (option string) "attachment payload" (Some "abc123")
+            (match List.assoc_opt "data" attachment_fields with
+             | Some (`String value) -> Some value
+             | _ -> None)
+      | _ -> fail "expected user_blocks and attachment payload in keeper args")
+  | _ -> fail "expected keeper args object"
+
+let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
+  let base_dir = temp_base_path "gate-keeper-media-history" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "multimodal-history-keeper" in
+      let raw_media = "data:image/png;base64,SECRET_RAW_MEDIA" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"describe this"
+        ~user_attachments:
+          [
+            {
+              K.id = "att-img";
+              att_type = "image";
+              name = "screen.png";
+              size = 1024;
+              mime_type = "image/png";
+              data = raw_media;
+            };
+          ]
+        ~assistant_content:"looks like a dashboard"
+        ();
+      let path =
+        Filename.concat
+          (Filename.concat
+             (Common.masc_dir_from_base_path ~base_path:base_dir)
+             "keeper_chat")
+          (keeper_name ^ ".jsonl")
+      in
+      let persisted = read_file path in
+      check bool "raw media omitted from jsonl" false
+        (string_contains persisted raw_media);
+      check bool "attachment ref persisted" true
+        (string_contains persisted "masc://attachment/att-img/");
+      match K.load ~base_dir ~keeper_name with
+      | user :: _ -> (
+          match user.K.attachments with
+          | Some [ att ] ->
+              check bool "loaded attachment omits raw media" false
+                (String.equal raw_media att.K.data);
+              check bool "loaded attachment has ref" true
+                (string_contains att.K.data "masc://attachment/att-img/")
+          | _ -> fail "expected one persisted attachment")
+      | [] -> fail "expected persisted chat messages")
+
+let vision_provider_cfg () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Glm
+    ~model_id:"glm-5v-turbo"
+    ~base_url:"http://127.0.0.1.invalid"
+    ()
+
+let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let config =
+    Runtime_agent.default_config
+      ~name:"multimodal-runtime-proof"
+      ~provider_cfg:(vision_provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with
+      max_turns = 1;
+      session_id = Some "multimodal-runtime-proof-session";
+      exit_condition = Some (fun _turn -> true);
+      exit_condition_result =
+        Some (fun _turn -> Runtime_agent.Completed, Some "exit proof");
+    }
+  in
+  let agent_ref = ref None in
+  let blocks =
+    [
+      Agent_sdk.Types.Text "Inspect this";
+      Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"img" ();
+    ]
+  in
+  (match
+     Runtime_agent.run_blocks ~sw ~net:env#net ~config ~agent_ref blocks
+   with
+   | Ok result -> (
+       match result.Runtime_agent.stop_reason with
+       | Runtime_agent.Completed -> ()
+       | stop_reason ->
+           failf "unexpected stop reason after exit-condition proof: %s"
+             (Keeper_execution_receipt_types.stop_reason_to_string stop_reason))
+   | Error err ->
+       fail ("expected exit-condition checkpoint result: "
+             ^ Agent_sdk.Error.to_string err));
+  match !agent_ref with
+  | None -> fail "expected Runtime_agent.run_blocks to expose built OAS agent"
+  | Some agent -> (
+      match List.rev (Agent_sdk.Agent.state agent).messages with
+      | { Agent_sdk.Types.role = User; content; _ } :: _ -> (
+          check int "stored blocks" 2 (List.length content);
+          match content with
+          | [
+              Agent_sdk.Types.Text text;
+              Agent_sdk.Types.Image { media_type; data; source_type };
+            ] ->
+              check string "text preserved" "Inspect this" text;
+              check string "image media type" "image/png" media_type;
+              check string "image data" "img" data;
+              check string "source type" "base64" source_type
+          | _ -> fail "stored user input lost multimodal block shape")
+      | _ -> fail "missing appended OAS user message")
+
+let multimodal_caps ?(image = false) ?(audio = false) ?(multimodal = false) () =
+  { Llm_provider.Capabilities.default_capabilities with
+    supports_image_input = image;
+    supports_audio_input = audio;
+    supports_multimodal_inputs = multimodal;
+  }
+
+let test_runtime_multimodal_gate_model_caps_fail_closed () =
+  let provider_caps = multimodal_caps ~image:true ~multimodal:true () in
+  let model_caps =
+    { Runtime_schema.model_capabilities_default with
+      supports_image_input = false;
+      supports_multimodal_inputs = false;
+    }
+  in
+  let effective =
+    Runtime_agent.For_testing.apply_runtime_model_input_capabilities
+      provider_caps
+      model_caps
+  in
+  let blocks =
+    [ Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
+  in
+  match
+    Runtime_agent.For_testing.validate_content_blocks_against_capabilities
+      ~provider_label:"runtime:deepseek"
+      effective
+      blocks
+  with
+  | Ok () -> fail "expected runtime model capability to veto image input"
+  | Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig { detail; _ })) ->
+      check bool "mentions unsupported image" true
+        (String_util.string_contains_substring
+           ~needle:"unsupported image input"
+           detail)
+  | Error err -> fail ("unexpected error shape: " ^ Agent_sdk.Error.to_string err)
+
+let test_runtime_multimodal_gate_lists_required_modalities () =
+  let blocks =
+    [
+      Agent_sdk.Types.Text "describe these";
+      Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ();
+      Agent_sdk.Types.audio_block ~media_type:"audio/wav" ~data:"def" ();
+    ]
+  in
+  check (list string) "required modalities" [ "image"; "audio" ]
+    (Runtime_agent.For_testing.required_modalities_of_content_blocks blocks)
+
+let test_runtime_multimodal_gate_rejects_unsupported_image () =
+  let blocks =
+    [ Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" () ]
+  in
+  match
+    Runtime_agent.For_testing.validate_content_blocks_against_capabilities
+      ~provider_label:"test:text-only"
+      (multimodal_caps ())
+      blocks
+  with
+  | Ok () -> fail "expected image input to be rejected for text-only provider"
+  | Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+      check string "field" "multimodal_input" field;
+      check bool "mentions image" true
+        (String_util.string_contains_substring
+           ~needle:"unsupported image input"
+           detail);
+      check bool "mentions provider" true
+        (String_util.string_contains_substring
+           ~needle:"test:text-only"
+           detail)
+  | Error err -> fail ("unexpected error shape: " ^ Agent_sdk.Error.to_string err)
+
+let test_runtime_multimodal_gate_allows_supported_image () =
+  let blocks =
+    [
+      Agent_sdk.Types.Text "describe this";
+      Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ();
+    ]
+  in
+  match
+    Runtime_agent.For_testing.validate_content_blocks_against_capabilities
+      ~provider_label:"test:image"
+      (multimodal_caps ~image:true ())
+      blocks
+  with
+  | Ok () -> ()
+  | Error err -> fail ("expected image-capable provider to pass: "
+                       ^ Agent_sdk.Error.to_string err)
+
+let test_runtime_multimodal_gate_requires_multimodal_for_document () =
+  let blocks =
+    [
+      Agent_sdk.Types.document_block
+        ~media_type:"application/pdf"
+        ~data:"abc"
+        ();
+    ]
+  in
+  let rejected =
+    Runtime_agent.For_testing.validate_content_blocks_against_capabilities
+      ~provider_label:"test:image-only"
+      (multimodal_caps ~image:true ())
+      blocks
+  in
+  let accepted =
+    Runtime_agent.For_testing.validate_content_blocks_against_capabilities
+      ~provider_label:"test:multimodal"
+      (multimodal_caps ~multimodal:true ())
+      blocks
+  in
+  (match rejected with
+   | Error
+       (Agent_sdk.Error.Config
+          (Agent_sdk.Error.InvalidConfig { detail; _ })) ->
+       check bool "mentions document" true
+         (String_util.string_contains_substring
+            ~needle:"unsupported document input"
+            detail)
+   | Ok () -> fail "expected document to require multimodal capability"
+   | Error err -> fail ("unexpected error shape: " ^ Agent_sdk.Error.to_string err));
+  match accepted with
+  | Ok () -> ()
+  | Error err -> fail ("expected multimodal provider to accept document: "
+                       ^ Agent_sdk.Error.to_string err)
+
 let test_surface_context_to_instructions_formats_copilot_context () =
   let ctx =
     Yojson.Safe.from_string
@@ -248,6 +626,7 @@ let test_chat_surface_of_request_labels_copilot_gate () =
       timeout_sec = None;
       turn_instructions = None;
       surface_context = None;
+      user_blocks = [];
       channel = "copilot";
       channel_user_id = "";
       channel_user_name = "";
@@ -264,6 +643,7 @@ let test_chat_speaker_of_request_copilot_is_owner () =
       timeout_sec = None;
       turn_instructions = None;
       surface_context = None;
+      user_blocks = [];
       channel = "copilot";
       channel_user_id = "";
       channel_user_name = "";
@@ -283,6 +663,7 @@ let test_chat_speaker_of_request_connector_is_external () =
       timeout_sec = None;
       turn_instructions = None;
       surface_context = None;
+      user_blocks = [];
       channel = "discord";
       channel_user_id = "user-42";
       channel_user_name = "Alice";
@@ -457,6 +838,28 @@ let () =
             test_parse_keeper_chat_stream_request_accepts_copilot_context;
           test_case "stream request formats surface context" `Quick
             test_parse_keeper_chat_stream_request_formats_surface_context;
+          test_case "stream request accepts attachment-only user blocks" `Quick
+            test_parse_keeper_chat_stream_request_accepts_attachment_only_user_blocks;
+          test_case "stream request rejects unknown user block type" `Quick
+            test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type;
+          test_case "multimodal input converts user blocks to OAS blocks" `Quick
+            test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks;
+          test_case "stream args preserve user blocks" `Quick
+            test_keeper_stream_args_preserve_user_blocks;
+          test_case "chat history persists attachment refs not raw media" `Quick
+            test_keeper_chat_history_persists_attachment_refs_not_raw_media;
+          test_case "runtime run_blocks appends multimodal input to OAS agent" `Quick
+            test_runtime_run_blocks_appends_multimodal_input_to_oas_agent;
+          test_case "runtime multimodal gate lists required modalities" `Quick
+            test_runtime_multimodal_gate_lists_required_modalities;
+          test_case "runtime multimodal gate model caps fail closed" `Quick
+            test_runtime_multimodal_gate_model_caps_fail_closed;
+          test_case "runtime multimodal gate rejects unsupported image" `Quick
+            test_runtime_multimodal_gate_rejects_unsupported_image;
+          test_case "runtime multimodal gate allows supported image" `Quick
+            test_runtime_multimodal_gate_allows_supported_image;
+          test_case "runtime multimodal gate requires multimodal for document" `Quick
+            test_runtime_multimodal_gate_requires_multimodal_for_document;
           test_case "surface context formats into instructions" `Quick
             test_surface_context_to_instructions_formats_copilot_context;
           test_case "surface context ignores empty fields" `Quick

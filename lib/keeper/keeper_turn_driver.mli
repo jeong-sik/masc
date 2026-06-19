@@ -93,6 +93,7 @@ val run_named :
   runtime_id:string ->
   ?keeper_name:string ->
   goal:string ->
+  ?goal_blocks:Agent_sdk.Types.content_block list ->
   ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->

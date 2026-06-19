@@ -66,6 +66,7 @@ describe('dashboard surface navigation', () => {
       'workspace',
       'keepers',
       'board',
+      'approvals',
       'code',
       'connectors',
       'settings',
@@ -76,6 +77,7 @@ describe('dashboard surface navigation', () => {
       'Work',
       'Keepers',
       'Board',
+      'Approvals',
       'IDE',
       'Connectors',
       'Settings',
@@ -84,7 +86,7 @@ describe('dashboard surface navigation', () => {
   })
 
   it('uses one sectionless-surface classifier for section stripping and section lookup', () => {
-    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board'] as const
+    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board', 'approvals'] as const
     expect(sectionless.filter(id => isSectionlessSurface(id))).toEqual([...sectionless])
     expect(sectionItemsForTab('settings')).toEqual([])
     expect(normalizeRouteParams('settings', { section: 'legacy', surface: 'old', panel: 'theme' })).toEqual({

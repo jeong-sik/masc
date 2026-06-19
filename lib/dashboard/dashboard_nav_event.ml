@@ -20,6 +20,7 @@ let valid_surfaces =
   ; "code"
   ; "logs"
   ; "settings"
+  ; "approvals"
   ]
 ;;
 

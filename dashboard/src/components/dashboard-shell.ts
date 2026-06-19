@@ -42,6 +42,7 @@ import { ErrorPanel } from './common/error-panel'
 import { Bell } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
 import { SurfaceIcon } from './surface-icon'
+import { governanceData } from './governance-signals'
 import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
 import {
@@ -75,6 +76,7 @@ const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogV
 const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
 const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
 const LazySettingsSurface = lazy(async () => ({ default: (await import('./settings-surface')).SettingsSurface }))
+const LazyApprovals = lazy(async () => ({ default: (await import('./approvals/approvals-surface')).ApprovalsSurface }))
 
 function lazyTabFallback(label: string) {
   return html`<${LoadingState}>Loading ${label}...<//>`
@@ -1072,6 +1074,9 @@ export function SideRail({
 }) {
   const currentTab = route.value.tab
   const currentSection = currentSectionForRoute(route.value)
+  // Open keeper-approval count for the Approvals nav badge. Same signal the
+  // Approvals/Command surfaces read, so the badge tracks resolutions live.
+  const openApprovals = governanceData.value?.approval_queue?.length ?? 0
   const settingsSurface = DASHBOARD_SURFACES.find(surface => surface.id === 'settings')
   const visibleSurfaces = primaryOnly
     ? PRIMARY_DASHBOARD_SURFACES.filter(surface => surface.id !== 'settings')
@@ -1116,8 +1121,11 @@ export function SideRail({
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
                 >
-                  <span class="nav-icon" aria-hidden="true"><${SurfaceIcon} icon=${surface.icon} size=${15} /></span>
-                  <span class="sr-only">${surface.label}</span>
+                  <span class="nav-icon ${surface.id === 'approvals' && openApprovals > 0 ? 'relative' : ''}" aria-hidden="true">
+                    <${SurfaceIcon} icon=${surface.icon} size=${15} />
+                    ${surface.id === 'approvals' && openApprovals > 0 ? html`<span class="ap-nav-dot"></span>` : null}
+                  </span>
+                  <span class="sr-only">${surface.label}${surface.id === 'approvals' && openApprovals > 0 ? ` (${openApprovals} 대기)` : ''}</span>
                 <//>
               `
             }
@@ -1136,6 +1144,9 @@ export function SideRail({
                   <div class="nav-label flex-1 min-w-0">
                     <div class="truncate font-mono text-[var(--fs-11)] font-semibold uppercase leading-4 tracking-[var(--track-caps)] ${isSurfaceActive ? 'text-[var(--select)]' : ''}">${surface.label}</div>
                   </div>
+                  ${surface.id === 'approvals' && openApprovals > 0
+                    ? html`<span class="ap-nav-badge" data-testid="approvals-nav-badge" title=${`${openApprovals}건 승인 대기`}>${openApprovals}</span>`
+                    : null}
                 <//>
 
                 ${sections.length > 1 ? html`
@@ -1219,6 +1230,12 @@ function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('Board')}>
           <${LazyBoardSurface} />
+        <//>
+      `
+    case 'approvals':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('Approvals')}>
+          <${LazyApprovals} />
         <//>
       `
     case 'workspace':

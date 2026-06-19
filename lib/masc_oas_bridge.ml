@@ -15,11 +15,6 @@
     typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
 let min_timeout_s = 0.0
-let routine_cancel_inner_substring = "Eio__core__Fiber.Not_first"
-
-let is_routine_fast_cancel ~bucket ~inner_str =
-  String.equal bucket "fast"
-  && String_util.contains_substring inner_str routine_cancel_inner_substring
 
 let run_safe ~caller ~timeout_s fn =
   if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0 then
@@ -120,14 +115,13 @@ let run_safe ~caller ~timeout_s fn =
         ("caller", caller);
         ("bucket", bucket);
       ] ();
-    if is_routine_fast_cancel ~bucket ~inner_str then
-      Log.Misc.info
-        "masc_oas_bridge: OAS execution cancelled caller=%s wall=%.1fs bucket=%s inner=%s (re-raising)"
-        caller wall bucket inner_str
-    else
-      Log.Misc.warn
-        "masc_oas_bridge: OAS execution cancelled caller=%s wall=%.1fs bucket=%s inner=%s (re-raising)"
-        caller wall bucket inner_str;
+    (* Treat every [Eio.Cancel.Cancelled] as a routine cancellation and log it
+       at INFO level. We intentionally avoid matching on Eio internal exception
+       names (e.g. Fiber's Not_first race exception) because those strings are
+       not a stable API and will break if Eio renames the underlying exception. *)
+    Log.Misc.info
+      "masc_oas_bridge: OAS execution cancelled caller=%s wall=%.1fs bucket=%s inner=%s (re-raising)"
+      caller wall bucket inner_str;
     Printexc.raise_with_backtrace exn bt
   | exn ->
     let bt = Printexc.get_backtrace () in

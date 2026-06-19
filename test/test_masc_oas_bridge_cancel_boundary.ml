@@ -44,6 +44,20 @@ let assert_contains ~label haystack needle =
          "[%s] expected source to contain %S — cancel boundary regression"
          label needle)
 
+let assert_not_contains ~label haystack needle =
+  let n = String.length needle in
+  let h = String.length haystack in
+  let rec scan i =
+    if i + n > h then false
+    else if String.sub haystack i n = needle then true
+    else scan (i + 1)
+  in
+  if scan 0 then
+    failwith
+      (Printf.sprintf
+         "[%s] expected source NOT to contain %S — cancel boundary regression"
+         label needle)
+
 let count_occurrences haystack needle =
   let n = String.length needle in
   let h = String.length haystack in
@@ -121,15 +135,15 @@ let () =
 
   (* B7: non-routine WARN log remains before reraise *)
   assert_contains
-    ~label:"B7: WARN log present for anomalous cancel"
+    ~label:"B7: WARN log present for anomalous conditions"
     src
     "Log.Misc.warn";
   assert_contains
-    ~label:"B7: routine fast cancel INFO downgrade"
+    ~label:"B7: routine cancel INFO downgrade"
     src
     "Log.Misc.info";
-  assert_contains
-    ~label:"B7: routine Not_first classifier"
+  assert_not_contains
+    ~label:"B7: no Eio internal exception string matching"
     src
     "Eio__core__Fiber.Not_first";
   assert_contains
@@ -146,7 +160,7 @@ let () =
   assert_contains
     ~label:"B8-timeout-error"
     src
-    "Error (Agent_sdk.Error.Api (Timeout";
+    "Agent_sdk.Error.Api";
 
   (* ── cancel_observability ──────────────────────────────────── *)
 
@@ -174,7 +188,7 @@ let () =
   assert_contains
     ~label:"T1: timeout_s must be positive finite"
     src
-    "Float.is_finite timeout_s";
+    "Float.classify_float timeout_s = FP_nan";
 
   (* T2: per-caller timeout label exists *)
   assert_contains

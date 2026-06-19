@@ -244,15 +244,16 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
   (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own, with
      private precedence — a claim already surfaced from this keeper's store is not
      repeated from the shared store. The shared store is read under the reserved
-     [shared_store_id]; reading it for the shared store itself is a no-op guard. *)
+     [shared_store_id]; reading it for the shared store itself is a no-op guard.
+     Unlike per-keeper stores, the consolidator rewrites the shared tier directly
+     and does not apply [fact_store_max], so recall must scan every shared fact
+     before ranking and taking the small communal slice. *)
   let private_keys = List.map (fun f -> normalize_claim f.claim) facts in
   let shared_facts =
     if String.equal keeper_id shared_store_id
     then []
     else
-      Keeper_memory_os_io.read_facts_tail
-        ~keeper_id:shared_store_id
-        ~n:Keeper_memory_os_io.fact_recall_window
+      Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
       |> facts_recency_ranked ~now
       |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
       |> take default_max_shared_facts

@@ -1338,9 +1338,9 @@ let test_render_if_enabled_renders_persisted_memory () =
    (fact_recall_window, fact_store_max] band, a retention cap leaves the
    highest-ranked durable facts at the file head while newer appends land at the
    tail. Recall must scan fact_store_max (the whole bounded store), not a
-   fact_recall_window-sized tail, or it silently drops the best facts. Seed a head
-   fact verified now, then > fact_recall_window much-older fillers, and assert
-   recall still surfaces the head fact a tail-window scan would start past. *)
+   fact_recall_window-sized tail, or it silently drops the best facts. Drive the
+   real merge-and-cap rewrite first, append more tail rows, and assert recall
+   still surfaces the head fact a tail-window scan would start past. *)
 let test_recall_scans_whole_bounded_store () =
   with_recall_env "true" (fun () ->
     with_prompt_registry (fun () ->
@@ -1353,17 +1353,36 @@ let test_recall_scans_whole_bounded_store () =
           ; Types.last_verified_at = Some now
           }
         in
-        (* First append = file head (position 0). *)
-        Memory_io.append_fact ~keeper_id head;
-        let filler_count = Memory_io.fact_recall_window + 20 in
-        for i = 1 to filler_count do
-          let f =
+        let cap_fillers =
+          List.init Memory_io.fact_store_max (fun i ->
             { (fact_fixture ~now ()) with
-              Types.claim = Printf.sprintf "filler durable fact %d" i
+              Types.claim = Printf.sprintf "pre-cap filler durable fact %d" (i + 1)
             ; Types.last_verified_at = Some (now -. days 30 -. float_of_int i)
+            })
+        in
+        let cap_stats =
+          Memory_io.merge_and_cap_facts
+            ~keeper_id
+            ~merge:(Policy.reobserve_fact ~now)
+            ~incoming:(head :: cap_fillers)
+            ~keep:Memory_io.fact_recall_window
+            ~trigger:Memory_io.fact_store_max
+            ~rank:(Policy.retention_rank ~now)
+        in
+        Alcotest.(check bool) "cap rewrite dropped low-ranked rows" true (cap_stats.dropped > 0);
+        let capped = Memory_io.read_facts_all ~keeper_id in
+        Alcotest.(check int)
+          "cap rewrites to the recall window size"
+          Memory_io.fact_recall_window
+          (List.length capped);
+        for i = 1 to 20 do
+          let tail =
+            { (fact_fixture ~now ()) with
+              Types.claim = Printf.sprintf "post-cap tail durable fact %d" i
+            ; Types.last_verified_at = Some (now -. days 60 -. float_of_int i)
             }
           in
-          Memory_io.append_fact ~keeper_id f
+          Memory_io.append_fact ~keeper_id tail
         done;
         let total = List.length (Memory_io.read_facts_all ~keeper_id) in
         Alcotest.(check bool)
@@ -2111,6 +2130,40 @@ let test_recall_surfaces_shared_after_consolidation () =
            && not (contains "shared via" alpha_block)))))
 ;;
 
+let test_recall_scans_whole_shared_store () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun _keepers_dir ->
+        let now = 1_000_000.0 in
+        let shared_head =
+          { (mk_shared_fixture ~now "SHARED head fact verified most recently") with
+            Types.observed_by = [ "alpha"; "beta" ]
+          ; Types.last_verified_at = Some now
+          }
+        in
+        Memory_io.append_fact ~keeper_id:Types.shared_store_id shared_head;
+        for i = 1 to Memory_io.fact_recall_window + 10 do
+          let filler =
+            { (mk_shared_fixture ~now (Printf.sprintf "old shared filler fact %d" i)) with
+              Types.observed_by = [ "alpha"; "beta" ]
+            ; Types.last_verified_at = Some (now -. days 30 -. float_of_int i)
+            }
+          in
+          Memory_io.append_fact ~keeper_id:Types.shared_store_id filler
+        done;
+        let total = List.length (Memory_io.read_facts_all ~keeper_id:Types.shared_store_id) in
+        Alcotest.(check bool)
+          "shared store exceeds the private recall tail window"
+          true
+          (total > Memory_io.fact_recall_window);
+        let observer_block = Recall.render_context ~keeper_id:"observer" ~now () in
+        Alcotest.(check bool)
+          "shared recall surfaces a head fact beyond the tail window"
+          true
+          (contains "SHARED head fact verified most recently" observer_block
+           && contains "shared via alpha,beta" observer_block))))
+;;
+
 let with_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -2424,6 +2477,10 @@ let () =
             "recall surfaces shared facts with provenance (private precedence)"
             `Quick
             test_recall_surfaces_shared_after_consolidation
+        ; Alcotest.test_case
+            "recall scans the whole shared fact store"
+            `Quick
+            test_recall_scans_whole_shared_store
         ; Alcotest.test_case
             "corrupt source store fails loud"
             `Quick

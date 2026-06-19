@@ -72,7 +72,7 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
 let memory_os_dashboard_json ~keeper_id =
   let now = Time_compat.now () in
   let recent_episode_limit = 12 in
-  let fact_tail_limit = Keeper_memory_os_io.fact_recall_window in
+  let fact_tail_limit = Keeper_memory_os_io.fact_store_max in
   let episodes, episode_error =
     memory_os_read_episodes ~keeper_id ~n:recent_episode_limit
   in

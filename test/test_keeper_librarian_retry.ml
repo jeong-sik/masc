@@ -196,6 +196,107 @@ let test_cadence_due_scoped_by_trace () =
     check bool "trace a counter is independent" false
       (R.cadence_due ~keeper_id:kid ~trace_id:ta))
 
+(* Tolerant parsing for real-world librarian provider drift. *)
+
+let parse_ep raw =
+  let inp = { Lib.trace_id = "tolerant-t"; generation = 0; messages = [] } in
+  Lib.episode_of_output ~now:1_000_000.0 inp raw
+;;
+
+let test_parses_markdown_wrapped () =
+  let raw =
+    "```json\n\
+     {\"episode_summary\":\"s\",\"claims\":[],\"open_items\":[],\"constraints\":[],\"preserved_tool_refs\":[]}\n\
+     ```"
+  in
+  match parse_ep raw with
+  | Some ep ->
+    check string "episode_summary" "s" ep.episode_summary;
+    check int "claims count" 0 (List.length ep.claims)
+  | None -> Alcotest.fail "markdown-wrapped JSON should parse"
+;;
+
+let test_parses_prose_wrapped () =
+  let raw =
+    "Here is the episode you requested:\n\
+     ```json\n\
+     {\"episode_summary\":\"s\",\"claims\":[],\"open_items\":[],\"constraints\":[],\"preserved_tool_refs\":[]}\n\
+     ```\n\
+     Let me know if you need more."
+  in
+  match parse_ep raw with
+  | Some ep ->
+    check string "episode_summary" "s" ep.episode_summary;
+    check int "claims count" 0 (List.length ep.claims)
+  | None -> Alcotest.fail "prose-wrapped JSON should parse"
+;;
+
+let test_parses_json_string_wrapping () =
+  let raw =
+    "\"{\\\"episode_summary\\\":\\\"s\\\",\\\"claims\\\":[],\\\"open_items\\\":[],\\\"constraints\\\":[],\\\"preserved_tool_refs\\\":[]}\""
+  in
+  match parse_ep raw with
+  | Some ep ->
+    check string "episode_summary" "s" ep.episode_summary;
+    check int "claims count" 0 (List.length ep.claims)
+  | None -> Alcotest.fail "JSON-string-wrapped object should parse"
+;;
+
+let test_parses_string_source_turn () =
+  let raw =
+    {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":"3"}],"open_items":[],"constraints":[],"preserved_tool_refs":[]}|}
+  in
+  match parse_ep raw with
+  | Some ep ->
+    check int "claims count" 1 (List.length ep.claims);
+    (match ep.claims with
+     | [ claim ] -> check int "source_turn coerced" 3 claim.source.turn
+     | _ -> Alcotest.fail "expected exactly one claim")
+  | None -> Alcotest.fail "string source_turn should coerce to int"
+;;
+
+let test_missing_lists_default_to_empty () =
+  let raw =
+    {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":0}]}|}
+  in
+  match parse_ep raw with
+  | Some ep ->
+    check int "open_items empty" 0 (List.length ep.open_items);
+    check int "constraints empty" 0 (List.length ep.constraints);
+    check int "preserved_tool_refs empty" 0 (List.length ep.preserved_tool_refs)
+  | None -> Alcotest.fail "missing optional lists should default to empty"
+;;
+
+let test_invalid_source_turn_string_rejected () =
+  let raw =
+    {|{"episode_summary":"s","claims":[{"claim":"c","category":"fact","source_turn":"not-a-number"}],"open_items":[],"constraints":[],"preserved_tool_refs":[]}|}
+  in
+  check bool "invalid source_turn rejected" true (Option.is_none (parse_ep raw))
+;;
+
+let contains_sub sub s =
+  let sub_len = String.length sub in
+  let s_len = String.length s in
+  let rec aux i =
+    if i + sub_len > s_len
+    then false
+    else if String.equal (String.sub s i sub_len) sub
+    then true
+    else aux (i + 1)
+  in
+  aux 0
+;;
+
+let test_retry_nudge_matches_schema () =
+  (* The old nudge listed "confidence" as a claim field; the parser dropped
+     confidence in RFC-0247, so the nudge must no longer ask for it. *)
+  check bool "nudge does not list confidence as a field" false
+    (contains_sub "claim, confidence" R.parse_retry_nudge);
+  check bool "nudge mentions source_turn" true (contains_sub "source_turn" R.parse_retry_nudge);
+  check bool "nudge mentions source_tool_call_id" true
+    (contains_sub "source_tool_call_id" R.parse_retry_nudge)
+;;
+
 let () =
   run "keeper_librarian_retry"
     [
@@ -216,5 +317,15 @@ let () =
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
           test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
           test_case "cadence_due is scoped by trace" `Quick test_cadence_due_scoped_by_trace;
+        ] );
+      ( "tolerant_parsing",
+        [
+          test_case "parses markdown-wrapped JSON" `Quick test_parses_markdown_wrapped;
+          test_case "parses prose-wrapped JSON" `Quick test_parses_prose_wrapped;
+          test_case "parses JSON-string-wrapped object" `Quick test_parses_json_string_wrapping;
+          test_case "coerces string source_turn" `Quick test_parses_string_source_turn;
+          test_case "missing lists default to empty" `Quick test_missing_lists_default_to_empty;
+          test_case "rejects invalid source_turn string" `Quick test_invalid_source_turn_string_rejected;
+          test_case "retry nudge matches schema" `Quick test_retry_nudge_matches_schema;
         ] );
     ]

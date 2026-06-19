@@ -49,6 +49,10 @@ let truncate_text max_len s =
   if String.length s <= max_len then s else String.sub s 0 max_len ^ "\n...[truncated]"
 ;;
 
+let truncate_for_log max_len s =
+  if String.length s <= max_len then s else String.sub s 0 max_len ^ "..."
+;;
+
 let format_messages_for_prompt messages =
   match messages with
   | [] -> "[no messages]"
@@ -86,7 +90,11 @@ let optional_string_field key fields =
 let int_field key fields =
   match List.assoc_opt key fields with
   | Some (`Int i) -> Some i
-  | Some (`Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `Null | `String _)
+  | Some (`String s) ->
+    (match int_of_string_opt (String.trim s) with
+     | Some i when i >= 0 -> Some i
+     | Some _ | None -> None)
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Intlit _ | `List _ | `Null)
   | None -> None
 ;;
 
@@ -107,47 +115,83 @@ let string_list_field key fields =
 
 let string_list_field_or_empty key fields =
   match List.assoc_opt key fields with
-  | None -> Some []
+  | None | Some `Null -> Some []
   | Some _ -> string_list_field key fields
 ;;
 
 let json_of_output raw =
   let raw = String.trim raw in
-  let raw =
-    if String.starts_with ~prefix:"```" raw then (
-      match String.split_on_char '\n' raw with
-      | first :: rest when String.starts_with ~prefix:"```" first ->
-        rest
-        |> List.rev
-        |> (function
-            | last :: rest when String.starts_with ~prefix:"```" (String.trim last) ->
-              List.rev rest
-            | lines -> List.rev lines)
-        |> String.concat "\n"
-        |> String.trim
-      | _ -> raw)
-    else raw
+  let try_parse s =
+    try Some (Yojson.Safe.from_string (String.trim s)) with
+    | Yojson.Json_error _ -> None
   in
-  match Yojson.Safe.from_string raw with
-  | json -> Some json
-  | exception Yojson.Json_error _ ->
+  let unwrap_string json =
+    match json with
+    | `String inner -> try_parse inner
+    | _ -> None
+  in
+  let strip_markdown_fences s =
+    let lines = String.split_on_char '\n' s in
+    let is_fence line = String.starts_with ~prefix:"```" (String.trim line) in
+    let rec find_open i =
+      if i >= List.length lines
+      then None
+      else if is_fence (List.nth lines i)
+      then Some i
+      else find_open (i + 1)
+    in
+    let rec find_close start i =
+      if i >= List.length lines
+      then None
+      else if i > start && is_fence (List.nth lines i)
+      then Some i
+      else find_close start (i + 1)
+    in
+    match find_open 0 with
+    | None -> s
+    | Some open_idx ->
+      (match find_close open_idx (open_idx + 1) with
+       | None -> s
+       | Some close_idx ->
+         let between =
+           List.filteri (fun idx _ -> idx > open_idx && idx < close_idx) lines
+         in
+         String.concat "\n" between |> String.trim)
+  in
+  let from_parsing =
+    List.find_map
+      (fun candidate ->
+         if String.equal candidate ""
+         then None
+         else
+           Option.bind (try_parse candidate) (fun json ->
+             match unwrap_string json with
+             | Some inner -> Some inner
+             | None -> Some json))
+      [ raw; strip_markdown_fences raw ]
+  in
+  match from_parsing with
+  | Some _ as result -> result
+  | None ->
+    (* Fallback: extract the first {...} substring and try to parse it. This
+       recovers from leading/trailing prose that prevented the fenced-path from
+       isolating the JSON object. *)
     let len = String.length raw in
     let rec find_from i ch =
-      if i >= len then None
-      else if Char.equal raw.[i] ch then Some i
-      else find_from (i + 1) ch
+      if i >= len then None else if Char.equal raw.[i] ch then Some i else find_from (i + 1) ch
     in
     let rec find_from_right i ch =
-      if i < 0 then None
-      else if Char.equal raw.[i] ch then Some i
-      else find_from_right (i - 1) ch
+      if i < 0 then None else if Char.equal raw.[i] ch then Some i else find_from_right (i - 1) ch
     in
     (match find_from 0 '{', find_from_right (len - 1) '}' with
      | Some start, Some stop when start < stop ->
        let candidate = String.sub raw start (stop - start + 1) in
-       (match Yojson.Safe.from_string candidate with
-        | json -> Some json
-        | exception Yojson.Json_error _ -> None)
+       (match try_parse candidate with
+        | Some json ->
+          (match unwrap_string json with
+           | Some inner -> Some inner
+           | None -> Some json)
+        | None -> None)
      | _ -> None)
 ;;
 
@@ -210,7 +254,11 @@ let episode_of_output ?now ?generation (inp : input) (raw : string) : episode op
       Unix.gettimeofday ()
   in
   match json_of_output raw with
-  | None -> None
+  | None ->
+    Log.Keeper.debug
+      "librarian episode parse failed: not valid JSON (raw: %s)"
+      (truncate_for_log 800 raw);
+    None
   | Some json ->
     (match json with
     | `Assoc fields ->
@@ -243,7 +291,19 @@ let episode_of_output ?now ?generation (inp : input) (raw : string) : episode op
               ; terminal_marker = None
               ; schema_version
               }
-          | None -> None)
-       | _ -> None)
-    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None)
+          | None ->
+            Log.Keeper.debug
+              "librarian episode parse failed: claim objects did not match schema (raw: %s)"
+              (truncate_for_log 800 raw);
+            None)
+       | _ ->
+         Log.Keeper.debug
+           "librarian episode parse failed: JSON object missing required fields (raw: %s)"
+           (truncate_for_log 800 raw);
+         None)
+    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Log.Keeper.debug
+        "librarian episode parse failed: top-level JSON is not an object (raw: %s)"
+        (truncate_for_log 800 raw);
+      None)
 ;;

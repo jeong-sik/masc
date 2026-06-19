@@ -933,9 +933,55 @@ let test_clock_failfast_opt_out_when_no_idle_no_clock () =
   in
   check bool "no idle + no clock -> None" true (Option.is_none clock)
 
+(* ── Runtime.decide_capability_gate (OAS catalog binding gate) ── *)
+
+let mentions ~sub s =
+  let ls = String.length sub and lc = String.length s in
+  let rec go i = i + ls <= lc && (String.sub s i ls = sub || go (i + 1)) in
+  ls = 0 || go 0
+
+let test_capability_gate_empty () =
+  match Runtime.decide_capability_gate ~config_path:"cfg" [] with
+  | Ok () -> ()
+  | Error msg -> failf "expected Ok for empty bindings, got: %s" msg
+
+let test_capability_gate_all_known () =
+  match Runtime.decide_capability_gate ~config_path:"cfg" [ "a", true; "b", true ] with
+  | Ok () -> ()
+  | Error msg -> failf "expected Ok when all models known, got: %s" msg
+
+let test_capability_gate_partial_unknown_aborts () =
+  match
+    Runtime.decide_capability_gate
+      ~config_path:"cfg"
+      [ "known", true; "missing-model", false ]
+  with
+  | Ok () -> fail "expected Error when a model is missing from a populated catalog"
+  | Error msg ->
+    check bool "error names the missing model" true (mentions ~sub:"missing-model" msg)
+
+let test_capability_gate_all_unknown_passes () =
+  (* all-unknown => OAS catalog not loaded in this env => pass (do not abort the
+     whole process; the per-request OAS guard still fails loud). *)
+  match Runtime.decide_capability_gate ~config_path:"cfg" [ "a", false; "b", false ] with
+  | Ok () -> ()
+  | Error msg -> failf "expected Ok for all-unknown (catalog absent), got: %s" msg
+
 let () =
   run "runtime_provider_auth_headers"
-    [ ( "provider_config"
+    [ ( "capability_gate"
+      , [ test_case "empty -> ok" `Quick test_capability_gate_empty
+        ; test_case "all known -> ok" `Quick test_capability_gate_all_known
+        ; test_case
+            "partial unknown -> abort"
+            `Quick
+            test_capability_gate_partial_unknown_aborts
+        ; test_case
+            "all unknown -> pass (catalog absent)"
+            `Quick
+            test_capability_gate_all_unknown_passes
+        ] )
+    ; ( "provider_config"
       , [ test_case
             "runtime adapter carries auth in api_key only"
             `Quick

@@ -167,6 +167,7 @@ export const OVERVIEW_TELEMETRY_BAR_COUNT = 28
 export const OVERVIEW_TELEMETRY_BUCKET_MINUTES = 5
 export const OVERVIEW_TELEMETRY_WINDOW_MINUTES =
   OVERVIEW_TELEMETRY_BAR_COUNT * OVERVIEW_TELEMETRY_BUCKET_MINUTES
+const UNIX_MS_TIMESTAMP_THRESHOLD = 10_000_000_000
 
 export interface OverviewTelemetrySnapshot {
   bars: number[]
@@ -184,7 +185,8 @@ export interface OverviewTelemetrySnapshot {
 function telemetryEntryMs(entry: TelemetryEntry): number | null {
   const raw = entry.ts_unix ?? entry.ts ?? entry.timestamp
   if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return raw > 10_000_000_000 ? raw : raw * 1000
+    // Unix seconds are ~1.7e9 today; unix milliseconds are ~1.7e12.
+    return raw > UNIX_MS_TIMESTAMP_THRESHOLD ? raw : raw * 1000
   }
   if (entry.ts_iso) {
     const parsed = Date.parse(entry.ts_iso)

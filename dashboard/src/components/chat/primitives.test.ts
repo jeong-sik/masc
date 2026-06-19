@@ -1724,9 +1724,16 @@ describe('fusion chat card', () => {
 
     expect(fetchBoardPost).toHaveBeenCalledWith('p-1')
     const detail = container.querySelector('[data-fusion-detail]')
-    expect(detail?.textContent).toContain('PANEL ONE ANSWER')
-    expect(detail?.textContent).toContain('timeout')
+    // Judge conclusion + failed-panel reason are visible immediately.
     expect(detail?.textContent).toContain('JUDGE RESOLVED ANSWER')
+    expect(detail?.textContent).toContain('timeout')
+    // Answered panel answers are collapsed by default — open the panel to read.
+    expect(detail?.textContent).not.toContain('PANEL ONE ANSWER')
+    const panelToggle = container.querySelector('[data-fusion-panel] button') as HTMLButtonElement | null
+    expect(panelToggle).not.toBeNull()
+    fireEvent.click(panelToggle as HTMLButtonElement)
+    await flushUi()
+    expect(container.querySelector('[data-fusion-detail]')?.textContent).toContain('PANEL ONE ANSWER')
   })
 
   it('shows an error message when the board post fetch fails', async () => {
@@ -1756,15 +1763,19 @@ describe('fusion chat card', () => {
     fireEvent.click(container.querySelector('[data-fusion-card] button') as HTMLButtonElement)
     await flushUi()
 
-    const detail = container.querySelector('[data-fusion-detail]')
-    // Panel + judge markdown rendered to real elements, not raw ## / ** text.
-    expect(detail?.querySelector('h2')?.textContent).toBe('Heading One')
-    expect(detail?.querySelector('li')?.textContent).toContain('bullet item')
+    // Judge synthesis renders to real markdown elements immediately (not collapsed).
     const judge = container.querySelector('[data-fusion-judge]')
     expect(judge?.querySelector('strong')?.textContent).toBe('Consensus')
     // synthesis takes precedence over resolved_answer when both present.
     expect(judge?.textContent).toContain('agreed point')
     expect(judge?.textContent).not.toContain('PLAIN RESOLVED')
+    // Panel answer markdown renders to real elements once its row is opened.
+    // Scope to the panel — the judge synthesis above also contains an <li>.
+    fireEvent.click(container.querySelector('[data-fusion-panel] button') as HTMLButtonElement)
+    await flushUi()
+    const panel = container.querySelector('[data-fusion-panel]')
+    expect(panel?.querySelector('h2')?.textContent).toBe('Heading One')
+    expect(panel?.querySelector('li')?.textContent).toContain('bullet item')
   })
 
   it('surfaces token usage and answered count in the header', async () => {

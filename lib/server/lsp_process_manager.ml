@@ -11,6 +11,7 @@ type lsp_process =
   ; proc : Eio_unix.Process.ty Eio.Std.r
   ; stdin_w : [ Eio.Flow.sink_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; stdout_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
+  ; stderr_r : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r
   ; mutable next_id : int
   }
 
@@ -213,34 +214,44 @@ let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.R
               "LSP %s stderr reader ended: %s"
               lang_id
               (Printexc.to_string exn));
-        Ok { lang_id; proc; stdin_w; stdout_r; next_id = 1 }
+        Ok { lang_id; proc; stdin_w; stdout_r; stderr_r; next_id = 1 }
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> Error (Process_error (Printexc.to_string exn)))
 ;;
 
 (** Tear down a spawned LSP process whose initialization failed or that is
-    being evicted. [spawn] binds the child, its pipes, the stderr-drain fiber,
-    and (via [Lsp_message_router.start_response_reader]) the response-reader
-    fiber to the caller's [~sw] — which the gRPC proxy scopes to the SERVER
-    lifetime. Without this teardown a failed [initialize] orphans the proc +
-    3 pipe FDs + 2 reader fibers on that switch until server shutdown, and the
-    next request re-spawns (RFC-0261 / issue #21546).
+    being evicted. [spawn] binds the child, its 3 pipe FDs ([stdin_w],
+    [stdout_r], [stderr_r]), the stderr-drain fiber, and (via
+    [Lsp_message_router.start_response_reader]) the response-reader fiber to the
+    caller's [~sw] — which the gRPC proxy scopes to the SERVER lifetime. Without
+    this teardown a failed [initialize] orphans the proc + 3 pipe FDs + 2 reader
+    fibers on that switch until server shutdown, and the next request re-spawns
+    (RFC-0261 / issue #21546).
 
-    Mechanism: signalling the child closes its pipe write ends, so the
-    stderr-drain fiber (which reads the un-exposed [stderr_r]) reaches EOF and
-    exits; closing [stdin_w] and [stdout_r] releases the two FDs we hold and
-    makes [Lsp_message_router.read_message] raise, so the response-reader fiber
-    exits too. All three operations are non-blocking, so this is safe to call
-    while holding the spawn mutex. Each is best-effort; [Eio.Cancel.Cancelled]
-    is re-raised so cancellation still propagates. *)
+    Mechanism: closing [stdin_w], [stdout_r], and [stderr_r] releases all three
+    FDs the record holds — every pipe FD bound to the switch. (Fiber exit on EOF
+    is NOT FD release: signalling the child makes the drain fiber reach EOF and
+    exit, but its [stderr_r] FD stays bound to the switch until explicitly
+    closed.) Closing [stdout_r] also makes [Lsp_message_router.read_message]
+    raise so the response-reader fiber exits; closing [stderr_r] ends the
+    stderr-drain fiber's read. [Eio.Process.signal ... sigterm] stops the child.
+    All operations are non-blocking, so this is safe to call while holding the
+    spawn mutex. Each is best-effort and logs at debug on failure;
+    [Eio.Cancel.Cancelled] is re-raised so cancellation still propagates. *)
 let shutdown (proc : lsp_process) =
-  let quietly f =
+  let quietly what f =
     try f () with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _ -> ()
+    | exn ->
+      Log.Server.debug
+        "LSP shutdown for %s: %s failed: %s"
+        proc.lang_id
+        what
+        (Printexc.to_string exn)
   in
-  quietly (fun () -> Eio.Process.signal proc.proc Sys.sigterm);
-  quietly (fun () -> Eio.Flow.close proc.stdin_w);
-  quietly (fun () -> Eio.Flow.close proc.stdout_r)
+  quietly "signal" (fun () -> Eio.Process.signal proc.proc Sys.sigterm);
+  quietly "stdin_w close" (fun () -> Eio.Flow.close proc.stdin_w);
+  quietly "stdout_r close" (fun () -> Eio.Flow.close proc.stdout_r);
+  quietly "stderr_r close" (fun () -> Eio.Flow.close proc.stderr_r)
 ;;

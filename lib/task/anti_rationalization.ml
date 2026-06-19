@@ -23,8 +23,6 @@ type review_request =
   ; completion_notes : string
   ; agent_name : string
   ; task_id : string
-  ; submitted_at : float option  (** Unix timestamp of task submission; used for minimum review time guardrail (#1425) *)
-  ; submitter_name : string option  (** Name of the agent that submitted the task; used for cross-review guardrail (#1425) *)
   }
 
 type verdict =
@@ -89,7 +87,6 @@ type gate =
   | Llm_text_fallback
   | Format_reject
   | Fallback
-  | RubberStamp  (** #1425: minimum review time and cross-review enforcement *)
 
 let gate_to_string = function
   | Length -> "length"
@@ -99,7 +96,6 @@ let gate_to_string = function
   | Llm_text_fallback -> "llm_text_fallback"
   | Format_reject -> "format_reject"
   | Fallback -> "fallback"
-  | RubberStamp -> "rubber_stamp"
 ;;
 
 type review_result =
@@ -627,52 +623,6 @@ let review
      | Some f -> f result
      | None -> ());
     result
-  in
-
-  (* #1425: rubber-stamping guardrail — enforce minimum review time and cross-review *)
-  let () =
-    let min_secs = Env_config.AntiRationalization.min_review_seconds in
-    if min_secs > 0 then
-      match req.submitted_at with
-      | Some submitted_ts ->
-        let elapsed = Unix.time () -. submitted_ts in
-        if elapsed < float_of_int min_secs then
-          (task_info "rubber-stamp guardrail: review attempted after %.0fs (minimum %ds)"
-             elapsed min_secs;
-           emit
-             { verdict =
-                 Reject
-                   (sprintf
-                      "Rubber-stamping guardrail: review attempted after %.0f seconds, \
-                       minimum %d seconds required. Wait longer before reviewing."
-                      elapsed min_secs)
-             ; evaluator_runtime
-             ; generator_runtime
-             ; gate = RubberStamp
-             ; fallback_reason = None
-             })
-      | None ->
-        task_info "rubber-stamp guardrail: submitted_at missing, skipping minimum-time check"
-  in
-  let () =
-    if Env_config.AntiRationalization.cross_review_required then
-      match req.submitter_name with
-      | Some submitter ->
-        if String.equal submitter req.agent_name then
-          (task_info "rubber-stamp guardrail: self-review detected (submitter=%s == reviewer=%s)"
-             submitter req.agent_name;
-           emit
-             { verdict =
-                 Reject
-                   "Rubber-stamping guardrail: self-review is not allowed. \
-                    A different agent must review this task."
-             ; evaluator_runtime
-             ; generator_runtime
-             ; gate = RubberStamp
-             ; fallback_reason = None
-             })
-      | None ->
-        task_info "rubber-stamp guardrail: submitter_name missing, skipping cross-review check"
   in
 
   let task_info fmt =

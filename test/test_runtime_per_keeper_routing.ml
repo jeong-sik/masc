@@ -15,6 +15,7 @@
 
 open Alcotest
 open Masc
+module J = Yojson.Safe.Util
 module KMC = Keeper_meta_contract
 
 (* ---- temp config-dir + keeper TOML fixtures
@@ -222,6 +223,42 @@ let test_runtime_assignment_writer_updates_runtime_toml () =
       "meta runtime resolver sees updated assignment"
       "runpod_mtp.qwen"
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
+;;
+
+let test_runtime_inventory_surfaces_assignment_governance () =
+  with_runtime_initialized (fun () ->
+    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let governance = J.member "assignment_governance" json in
+    Alcotest.(check string)
+      "schema"
+      "masc.runtime_assignment_governance.v1"
+      (governance |> J.member "schema" |> J.to_string);
+    Alcotest.(check string)
+      "status"
+      "degraded"
+      (governance |> J.member "status" |> J.to_string);
+    Alcotest.(check int)
+      "assignment count"
+      2
+      (governance |> J.member "assignment_count" |> J.to_int);
+    Alcotest.(check int)
+      "assigned runtime count"
+      1
+      (governance |> J.member "assigned_runtime_count" |> J.to_int);
+    Alcotest.(check int)
+      "default assignment count"
+      0
+      (governance |> J.member "default_assignment_count" |> J.to_int);
+    Alcotest.(check bool)
+      "operator action required"
+      true
+      (governance |> J.member "operator_action_required" |> J.to_bool);
+    Alcotest.(check bool)
+      "single runtime warning"
+      true
+      (string_contains
+         (Yojson.Safe.to_string governance)
+         "single_runtime_assignment_pin"))
 ;;
 
 let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
@@ -565,6 +602,10 @@ let () =
             "dashboard runtime assignment writes runtime.toml and refreshes cache"
             `Quick
             test_runtime_assignment_writer_updates_runtime_toml
+        ; Alcotest.test_case
+            "dashboard runtime inventory exposes assignment governance"
+            `Quick
+            test_runtime_inventory_surfaces_assignment_governance
         ; Alcotest.test_case
             "unknown assignment is rejected before runtime.toml write"
             `Quick

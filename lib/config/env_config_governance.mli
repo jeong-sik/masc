@@ -14,10 +14,6 @@ module Inference : sig
   (** [MASC_INFERENCE_TIMEOUT_SEC] (default [30.0]).  Timeout
       for model API calls. *)
 
-  val timeout_seconds_int : int
-  (** [max 1 (int_of_float timeout_seconds)] — convenience for
-      callers that need second granularity only. *)
-
   val cache_enabled : bool
   (** [MASC_INFERENCE_CACHE_ENABLED] feature flag.  Enable L1+L2
       response cache. *)
@@ -94,10 +90,6 @@ module Timeouts : sig
 
   val sse_keepalive_sec : float
   (** [MASC_SSE_KEEPALIVE_SEC] (default [30.0]).  Floor [1.0]. *)
-
-  val event_buffer_size : int
-  (** [MASC_EVENT_BUFFER_SIZE] (default [100]).  A2A event
-      buffer cap per subscription. *)
 end
 
 (** {1 Operator judge} *)
@@ -149,12 +141,7 @@ module Model_defaults : sig
   val default_runtime_opt : unit -> string option
   val default_provider_opt : unit -> string option
   val default_model_opt : unit -> string option
-  val routing_runtime : unit -> string
-  (** [MASC_ROUTING_RUNTIME] override, otherwise logical key ["routing"]. *)
-
   val goal_models_opt : unit -> string option
-  val goal_dispatch_runtime : unit -> string
-  (** [MASC_GOAL_DISPATCH_RUNTIME] (default ["task"]). *)
 end
 
 (** {1 Anti-rationalization} *)

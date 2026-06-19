@@ -115,6 +115,36 @@ supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
 
+# RunPod Models
+
+[[models]]
+id_prefix = "runpod_mtp/qwen36-35b-a3b-mtp"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "chat_template_kwargs"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "qwen36-35b-a3b-mtp"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "chat_template_kwargs"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
 # Ollama Cloud Models (canonical 2026-06 seed)
 # Source: https://ollama.com/api/tags + /api/show, checked 2026-06-20 KST.
 # Provider-qualified entries preserve Ollama Cloud wire behavior when a model id overlaps another provider.

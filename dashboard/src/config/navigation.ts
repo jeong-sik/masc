@@ -6,6 +6,7 @@ export type DashboardSurfaceIcon =
   | 'monitoring'
   | 'keepers'
   | 'board'
+  | 'fusion'
   | 'command'
   | 'connectors'
   | 'workspace'
@@ -83,6 +84,7 @@ const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'keepers',
   'board',
   'approvals',
+  'fusion',
   'code',
   'connectors',
   'settings',
@@ -105,6 +107,7 @@ const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([
   'keepers',
   'board',
   'approvals',
+  'fusion',
 ])
 
 export function isSectionlessSurface(tabId: TabId): boolean {
@@ -162,6 +165,14 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     description: 'Keeper HITL approval queue — pending tool-call gates',
     defaultTab: 'approvals',
     tabs: ['approvals'],
+  },
+  {
+    id: 'fusion',
+    label: 'Fusion',
+    icon: 'fusion',
+    description: 'Panel and judge deliberations emitted by masc_fusion',
+    defaultTab: 'fusion',
+    tabs: ['fusion'],
   },
   {
     id: 'command',
@@ -255,6 +266,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   // Sectionless surface (single tab, no sub-sections) but still a NonHomeTabId
   // key — the Record is exhaustive over the union, so the empty entry is required.
   approvals: [],
+  fusion: [],
   monitoring: [
     {
       id: 'agents',

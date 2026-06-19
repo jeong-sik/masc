@@ -42,6 +42,13 @@ describe('navigate', () => {
     expect(window.location.hash).toBe('#board?post=post-1&comment=comment-1')
   })
 
+  it('navigates to top-level fusion without section baggage', () => {
+    navigate('fusion', { section: 'workspace', run_id: 'fus-1', surface: 'old' })
+    expect(route.value.tab).toBe('fusion')
+    expect(route.value.params).toEqual({ run_id: 'fus-1' })
+    expect(window.location.hash).toBe('#fusion?run_id=fus-1')
+  })
+
   it('keeps workspace board deep links routeable for compatibility', () => {
     navigate('workspace', { section: 'board', post: 'post-1' })
     expect(route.value.tab).toBe('workspace')

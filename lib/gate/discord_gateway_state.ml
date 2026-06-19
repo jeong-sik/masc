@@ -911,6 +911,8 @@ let handle_wss_closed t ~now_mono ~code ~reason =
               }
           ] )
 
+(* TEL-OK: emits a typed Discord gateway [Log] effect on both handled and stale
+   connect-failure paths; the I/O layer owns transporting that effect. *)
 let handle_connect_failed t ~now_mono ~reason =
   match t.state with
   | Awaiting_hello | Identifying | Resuming ->

@@ -52,12 +52,21 @@ type 'a param = 'a param_entry
     Protected by [mu]. *)
 let registry_tbl : (string, erased) Hashtbl.t = Hashtbl.create 64
 
+(** Workspace base path used for automatic persistence and audit.
+    Set via [initialize]; optional [?base_path] overrides it per call. *)
+let global_base_path : string option ref = ref None
+
 (** Eio.Mutex for all mutable state.
     Falls back to lock-free when Eio scheduler is absent (tests, init). *)
 let mu = Eio.Mutex.create ()
 
 let with_rw f = Eio_guard.with_mutex mu f
 let with_ro f = Eio_guard.with_mutex_ro mu f
+
+let initialize ~base_path = global_base_path := Some base_path
+
+let effective_base_path ?base_path () =
+  match base_path with Some p -> Some p | None -> !global_base_path
 
 (* ── registration ────────────────────────────────────────────── *)
 
@@ -94,44 +103,6 @@ let register ~key ~default ~validate ~serialize ~deserialize ?meta () =
       invalid_arg (sprintf "Runtime_params: duplicate key %S" key);
     Hashtbl.replace registry_tbl key erased);
   entry
-
-(* ── read / write ────────────────────────────────────────────── *)
-
-let get (entry : 'a param) =
-  with_ro (fun () ->
-    match entry.override with Some v -> v | None -> entry.default ())
-
-let set (entry : 'a param) value =
-  with_rw (fun () ->
-    match entry.validate value with
-    | Error msg -> Error (sprintf "validation failed for %s: %s" entry.key msg)
-    | Ok () ->
-        entry.override <- Some value;
-        Ok ())
-
-let set_by_key key json =
-  with_rw (fun () ->
-    match Hashtbl.find_opt registry_tbl key with
-    | None -> Error (sprintf "unknown parameter: %s" key)
-    | Some erased -> erased.set_from_json json)
-
-let clear (entry : 'a param) =
-  with_rw (fun () -> entry.override <- None)
-
-let clear_by_key key =
-  with_rw (fun () ->
-    match Hashtbl.find_opt registry_tbl key with
-    | None -> Error (sprintf "unknown parameter: %s" key)
-    | Some erased -> erased.clear_override (); Ok ())
-
-let registry () =
-  with_ro (fun () ->
-    Hashtbl.fold
-      (fun _key (erased : erased) acc ->
-        (erased.key, erased.current_json (), erased.default_json (),
-         erased.has_override (), erased.meta) :: acc)
-      registry_tbl [])
-  |> List.sort (fun (a, _, _, _, _) (b, _, _, _, _) -> String.compare a b)
 
 (* ── persistence ─────────────────────────────────────────────── *)
 
@@ -219,3 +190,96 @@ let recent_audit ~base_path n =
   if len <= n then List.rev all
   else
     all |> List.to_seq |> Seq.drop (len - n) |> List.of_seq |> List.rev
+
+(* ── read / write ────────────────────────────────────────────── *)
+
+let get (entry : 'a param) =
+  with_ro (fun () ->
+    match entry.override with Some v -> v | None -> entry.default ())
+
+let set ?base_path ?(actor = "system") (entry : 'a param) value =
+  let result =
+    with_rw (fun () ->
+      match entry.validate value with
+      | Error msg -> Error (sprintf "validation failed for %s: %s" entry.key msg)
+      | Ok () ->
+          let old_value =
+            entry.serialize (match entry.override with Some v -> v | None -> entry.default ())
+          in
+          entry.override <- Some value;
+          Ok (entry.key, old_value, entry.serialize value))
+  in
+  match result with
+  | Error _ as e -> e
+  | Ok (key, old_value, new_value) ->
+      (match effective_base_path ?base_path () with
+      | None -> ()
+      | Some base_path ->
+          persist ~base_path;
+          record_audit ~base_path ~key ~old_value ~new_value ~actor ());
+      Ok ()
+
+let set_by_key ?base_path ?(actor = "system") key json =
+  let result =
+    with_rw (fun () ->
+      match Hashtbl.find_opt registry_tbl key with
+      | None -> Error (sprintf "unknown parameter: %s" key)
+      | Some erased ->
+          let old_value = erased.current_json () in
+          match erased.set_from_json json with
+          | Error _ as e -> e
+          | Ok () -> Ok (erased.current_json (), old_value))
+  in
+  match result with
+  | Error _ as e -> e
+  | Ok (new_value, old_value) ->
+      (match effective_base_path ?base_path () with
+      | None -> ()
+      | Some base_path ->
+          persist ~base_path;
+          record_audit ~base_path ~key ~old_value ~new_value ~actor ());
+      Ok ()
+
+let clear ?base_path ?(actor = "system") (entry : 'a param) =
+  let key, old_value, new_value =
+    with_rw (fun () ->
+      let old_value =
+        entry.serialize (match entry.override with Some v -> v | None -> entry.default ())
+      in
+      entry.override <- None;
+      (entry.key, old_value, entry.serialize (entry.default ())))
+  in
+  match effective_base_path ?base_path () with
+  | None -> ()
+  | Some base_path ->
+      persist ~base_path;
+      record_audit ~base_path ~key ~old_value ~new_value ~actor ()
+
+let clear_by_key ?base_path ?(actor = "system") key =
+  let result =
+    with_rw (fun () ->
+      match Hashtbl.find_opt registry_tbl key with
+      | None -> Error (sprintf "unknown parameter: %s" key)
+      | Some erased ->
+          let old_value = erased.current_json () in
+          erased.clear_override ();
+          Ok (erased.default_json (), old_value))
+  in
+  match result with
+  | Error _ as e -> e
+  | Ok (new_value, old_value) ->
+      (match effective_base_path ?base_path () with
+      | None -> ()
+      | Some base_path ->
+          persist ~base_path;
+          record_audit ~base_path ~key ~old_value ~new_value ~actor ());
+      Ok ()
+
+let registry () =
+  with_ro (fun () ->
+    Hashtbl.fold
+      (fun _key (erased : erased) acc ->
+        (erased.key, erased.current_json (), erased.default_json (),
+         erased.has_override (), erased.meta) :: acc)
+      registry_tbl [])
+  |> List.sort (fun (a, _, _, _, _) (b, _, _, _, _) -> String.compare a b)

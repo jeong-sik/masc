@@ -138,6 +138,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     | raw -> Some raw
   in
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
+  Runtime_params.initialize ~base_path;
   Fs_compat.set_fs fs;
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;

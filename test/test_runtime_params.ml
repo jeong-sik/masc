@@ -189,6 +189,92 @@ let () =
      with Sys_error _ -> ())
   in
 
+  let test_set_persists_to_disk () =
+    let tmp_dir = Filename.temp_dir "masc_auto_persist_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let p =
+      Runtime_params.register
+        ~key:"test.auto_persist_param"
+        ~default:(fun () -> 1)
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `Int v)
+        ~deserialize:(fun json ->
+          match json with
+          | `Int i -> Ok i
+          | _ -> Error "expected int")
+        ()
+    in
+    (match Runtime_params.set p 42 ~base_path:tmp_dir with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    let path = Filename.concat masc_dir "runtime_params.json" in
+    Alcotest.(check bool) "runtime_params.json exists" true (Sys.file_exists path);
+    let content = Fs_compat.load_file path in
+    (match Yojson.Safe.from_string content with
+    | `Assoc pairs ->
+        (match List.assoc_opt "test.auto_persist_param" pairs with
+         | Some (`Int 42) -> ()
+         | Some other ->
+             Alcotest.fail
+               (Printf.sprintf "expected int 42, got %s" (Yojson.Safe.to_string other))
+         | None -> Alcotest.fail "param not found in persisted file")
+    | _ -> Alcotest.fail "expected JSON object");
+    (* Clear should remove the override from disk *)
+    Runtime_params.clear p ~base_path:tmp_dir;
+    let content_after_clear = Fs_compat.load_file path in
+    (match Yojson.Safe.from_string content_after_clear with
+    | `Assoc pairs ->
+        Alcotest.(check bool) "param removed from disk after clear"
+          true (List.assoc_opt "test.auto_persist_param" pairs = None)
+    | _ -> Alcotest.fail "expected JSON object after clear");
+    (try
+       Sys.remove path;
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
+  let test_set_by_key_logs_audit () =
+    let tmp_dir = Filename.temp_dir "masc_auto_audit_" "" in
+    let masc_dir = Filename.concat tmp_dir Common.masc_dirname in
+    (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
+    let _p =
+      Runtime_params.register
+        ~key:"test.auto_audit_param"
+        ~default:(fun () -> "hello")
+        ~validate:(fun _ -> Ok ())
+        ~serialize:(fun v -> `String v)
+        ~deserialize:(fun json ->
+          match json with
+          | `String s -> Ok s
+          | _ -> Error "expected string")
+        ()
+    in
+    (match
+       Runtime_params.set_by_key "test.auto_audit_param" (`String "world")
+         ~base_path:tmp_dir ~actor:"test-actor"
+     with
+     | Ok () -> ()
+     | Error msg -> Alcotest.fail msg);
+    let audit_path = Filename.concat masc_dir "param_audit.jsonl" in
+    Alcotest.(check bool) "audit file exists" true (Sys.file_exists audit_path);
+    let entries = Runtime_params.recent_audit ~base_path:tmp_dir 10 in
+    Alcotest.(check int) "audit entry count" 1 (List.length entries);
+    let entry = List.hd entries in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "audit key" "test.auto_audit_param"
+      (member "key" entry |> to_string);
+    Alcotest.(check string) "audit actor" "test-actor"
+      (member "actor" entry |> to_string);
+    (try
+       Sys.remove audit_path;
+       Sys.remove (Filename.concat masc_dir "runtime_params.json");
+       Sys.rmdir masc_dir;
+       Sys.rmdir tmp_dir
+     with Sys_error _ -> ())
+  in
+
   let test_governance_registry () =
     (* Verify that governance_registry registered params *)
     let entries = Runtime_params.registry () in
@@ -442,6 +528,9 @@ let () =
         [
           Alcotest.test_case "persist_restore" `Quick test_persist_restore;
           Alcotest.test_case "audit" `Quick test_audit;
+          Alcotest.test_case "set_persists_to_disk" `Quick test_set_persists_to_disk;
+          Alcotest.test_case "set_by_key_logs_audit" `Quick
+            test_set_by_key_logs_audit;
         ] );
       ( "governance_registry",
         [

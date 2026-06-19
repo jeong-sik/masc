@@ -1183,6 +1183,61 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
+let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
+  with_temp_dir "keeper-identity-drift" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_config_root_keeper_toml config_root "mad-improver";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"masc-improver" ~trace_id:"trace-masc-improver" ());
+        let json =
+          Server_routes_http_runtime_fleet_scan.keeper_identity_drift_health_json
+            config
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "drift schema" "masc.keeper_identity_drift.v1"
+          (json |> member "schema" |> to_string);
+        Alcotest.(check string) "drift status" "blocked"
+          (json |> member "status" |> to_string);
+        Alcotest.(check bool) "drift blocks on stale meta" true
+          (json |> member "blocking" |> to_bool);
+        Alcotest.(check string) "drift terminal reason"
+          "runtime_meta_without_keeper_toml"
+          (json |> member "terminal_reason" |> to_string);
+        Alcotest.(check bool) "drift asks operator action" true
+          (json |> member "operator_action_required" |> to_bool);
+        Alcotest.(check (list string)) "materializable configured names"
+          [ "mad-improver" ]
+          (json |> member "materializable_configured_keeper_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check (list string)) "configured without meta"
+          [ "mad-improver" ]
+          (json |> member "configured_without_meta_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check (list string)) "meta without config"
+          [ "masc-improver" ]
+          (json |> member "meta_without_config_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check string) "drift next action"
+          "add_matching_keeper_toml_or_retire_stale_meta"
+          (json |> member "next_action" |> to_string);
+        let request = Httpun.Request.create `GET "/health" in
+        let health = Server_routes_http_runtime.make_health_json request in
+        Alcotest.(check string) "health exposes drift status" "blocked"
+          (health |> member "keeper_identity_drift" |> member "status"
+           |> to_string)))
+
 let test_health_json_keeps_timeout_pause_without_policy_manual () =
   with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
     let config_root = make_config_root dir in
@@ -3048,6 +3103,10 @@ let () =
           Alcotest.test_case
             "health json surfaces durable paused keepers"
             `Quick test_health_json_surfaces_durable_paused_keepers;
+          Alcotest.test_case
+            "health json surfaces keeper identity config/meta drift"
+            `Quick
+            test_keeper_identity_drift_health_json_surfaces_config_meta_split;
           Alcotest.test_case
             "health json keeps timeout pause without policy manual"
             `Quick test_health_json_keeps_timeout_pause_without_policy_manual;

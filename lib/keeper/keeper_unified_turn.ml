@@ -600,7 +600,11 @@ let run_keeper_cycle
                   post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
                   Ok meta, turn_state
                 | Error err ->
-                  let final_execution = Option.get turn_state.last_execution in
+                  let final_execution =
+                    match turn_state.last_execution with
+                    | Some exec -> exec
+                    | None -> initial_execution
+                  in
                   finalize_trajectory_acc
                     ~config
                     ~keeper_name:meta.name
@@ -909,7 +913,11 @@ dominant source of the observed CAS race exhaustion after
                     ();
                   Error err, turn_state
                 | Ok result ->
-                  let final_execution = Option.get turn_state.last_execution in
+                  let final_execution =
+                    match turn_state.last_execution with
+                    | Some exec -> exec
+                    | None -> initial_execution
+                  in
                   finalize_trajectory_acc
                     ~config
                     ~keeper_name:meta.name

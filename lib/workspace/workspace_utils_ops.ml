@@ -1,25 +1,30 @@
 open Masc_domain
 open Workspace_utils_backend_setup
 open Workspace_utils_paths_backend
+open Result.Syntax
 
 
 let validate_agent_name name =
-  match Validation.Agent_id.validate name with
-  | Ok _ -> Ok name
-  | Error msg -> Error msg
+  let+ _ = Validation.Agent_id.validate name in
+  name
 
 let validate_task_id id =
-  match Validation.Task_id.validate id with
-  | Ok _ -> Ok id
-  | Error msg -> Error msg
+  let+ _ = Validation.Task_id.validate id in
+  id
 
 let validate_file_path path =
   (* Delegate to Validation module for consistent security checks *)
   (* Additional length check for file paths *)
-  if String.length path > 500 then Error "File path too long (max 500 chars)"
-  else if String_util.contains_substring path "<" || String_util.contains_substring path ">" then
-    Error "Invalid characters in path (security)"
-  else Validation.Safe_path.validate_relative path
+  let* () =
+    if String.length path > 500 then Error "File path too long (max 500 chars)"
+    else Ok ()
+  in
+  let* () =
+    if String_util.contains_substring path "<" || String_util.contains_substring path ">" then
+      Error "Invalid characters in path (security)"
+    else Ok ()
+  in
+  Validation.Safe_path.validate_relative path
 
 (* ============================================ *)
 (* Sanitization helpers                         *)
@@ -63,24 +68,29 @@ let safe_filename name =
 
 let validate_agent_name_r name : (string, masc_error) result =
   (* Delegate to Validation module, convert error type *)
-  match Validation.Agent_id.validate name with
-  | Ok _ -> Ok name
-  | Error msg -> Error (Agent (Agent_error.InvalidName msg))
+  Validation.Agent_id.validate name
+  |> Result.map (fun _ -> name)
+  |> Result.map_error (fun msg -> Agent (Agent_error.InvalidName msg))
 
 let validate_task_id_r id : (string, masc_error) result =
   (* Delegate to Validation module, convert error type *)
-  match Validation.Task_id.validate id with
-  | Ok _ -> Ok id
-  | Error msg -> Error (Task (Task_error.InvalidId msg))
+  Validation.Task_id.validate id
+  |> Result.map (fun _ -> id)
+  |> Result.map_error (fun msg -> Task (Task_error.InvalidId msg))
 
 let validate_file_path_r path : (string, masc_error) result =
   (* Delegate to Validation module, convert error type *)
-  if String.length path > 500 then Error (System (System_error.InvalidFilePath "too long (max 500 chars)"))
-  else if String_util.contains_substring path "<" || String_util.contains_substring path ">" then
-    Error (System (System_error.InvalidFilePath "invalid characters (security)"))
-  else match Validation.Safe_path.validate_relative path with
-  | Ok _ -> Ok path
-  | Error msg -> Error (System (System_error.InvalidFilePath msg))
+  let* () =
+    if String.length path > 500 then Error (System (System_error.InvalidFilePath "too long (max 500 chars)"))
+    else Ok ()
+  in
+  let* () =
+    if String_util.contains_substring path "<" || String_util.contains_substring path ">" then
+      Error (System (System_error.InvalidFilePath "invalid characters (security)"))
+    else Ok ()
+  in
+  Validation.Safe_path.validate_relative path
+  |> Result.map_error (fun msg -> System (System_error.InvalidFilePath msg))
 
 (* ============================================ *)
 (* Ensure initialized                           *)
@@ -151,12 +161,12 @@ let parse_json_content_result ~context content =
 
 let read_json_local_result_exn path =
   try
-    if not (Sys.file_exists path) then
-      Error (Json_read_error (Printf.sprintf "File not found: %s" path))
-    else
-      Fs_compat.load_file path
-      |> parse_json_content_result ~context:path
-      |> Result.map_error (fun msg -> Json_read_error msg)
+    let* () =
+      if Sys.file_exists path then Ok ()
+      else Error (Json_read_error (Printf.sprintf "File not found: %s" path))
+    in
+    parse_json_content_result ~context:path (Fs_compat.load_file path)
+    |> Result.map_error (fun msg -> Json_read_error msg)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Json_read_exn exn)
@@ -196,29 +206,27 @@ let write_json_root config path json =
   match root_key_of_path config path with
   | Some key ->
       let content = json_to_pretty_utf8 json in
-      (match backend_set config ~key ~value:content with
-       | Ok () -> ()
-       | Error e -> Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
+      backend_set config ~key ~value:content
+      |> Result.iter_error (fun e ->
+           Log.Misc.warn "write_json_root backend_set failed for %s: %s" key (Backend_types.show_error e));
       (* Dual-write: mirror to local filesystem so PG-timeout fallback reads fresh data *)
-      (match write_json_local path json with
-       | Ok () -> ()
-       | Error msg ->
-         Log.Misc.warn "write_json_root: local mirror write failed for %s: %s"
-           path msg)
+      write_json_local path json
+      |> Result.iter_error (fun msg ->
+           Log.Misc.warn "write_json_root: local mirror write failed for %s: %s" path msg)
   | None ->
-      (match write_json_local path json with
-       | Ok () -> ()
-       | Error msg ->
-         Log.Misc.warn "write_json_root: local write failed for %s: %s"
-           path msg)
+      write_json_local path json
+      |> Result.iter_error (fun msg ->
+           Log.Misc.warn "write_json_root: local write failed for %s: %s" path msg)
 
 let delete_path_root config path =
   match root_key_of_path config path with
   | Some key ->
-    (match backend_delete config ~key with
-     | Ok _ ->
-       (try Sys.remove path with Sys_error _ -> ())
-     | Error e -> Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key (Backend_types.show_error e))
+      backend_delete config ~key
+      |> Result.fold
+           ~ok:(fun _ -> try Sys.remove path with Sys_error _ -> ())
+           ~error:(fun e ->
+             Log.Misc.error "delete_path_root: backend_delete failed for %s: %s" key
+               (Backend_types.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists_root config path =
@@ -257,30 +265,32 @@ let read_json_result config path =
       match config.backend with
       | FileSystem _ when Sys.file_exists path -> read_json_local_result path
       | Memory _ | FileSystem _ ->
-      match backend_get config ~key with
-      | Ok (Some content) ->
-          parse_json_content_result ~context:"read_json_result" content
-      | Ok None -> Ok (`Assoc [])
-      | Error e ->
-          Error
-            (Printf.sprintf
-               "[read_json_result] backend_get failed for %s: %s"
-               key
-               (Backend_types.show_error e))
+          let* content_opt =
+            backend_get config ~key
+            |> Result.map_error (fun e ->
+                 Printf.sprintf
+                   "[read_json_result] backend_get failed for %s: %s"
+                   key
+                   (Backend_types.show_error e))
+          in
+          (match content_opt with
+           | Some content -> parse_json_content_result ~context:"read_json_result" content
+           | None -> Ok (`Assoc []))
     end
   | None -> read_json_local_result path
 
 let read_text config path =
   match key_of_path config path with
-  | Some key -> begin
-      match backend_get config ~key with
-      | Ok (Some content) ->
-        Safe_ops.repair_utf8_text ~surface:"workspace_text" ~path content
-      | Ok None -> ""
-      | Error e ->
-        Log.Misc.warn "[read_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
-        ""
-    end
+  | Some key ->
+      backend_get config ~key
+      |> Result.fold
+           ~ok:(function
+             | Some content ->
+               Safe_ops.repair_utf8_text ~surface:"workspace_text" ~path content
+             | None -> "")
+           ~error:(fun e ->
+             Log.Misc.warn "[read_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
+             "")
   | None ->
       if Fs_compat.file_exists path then
         Fs_compat.load_file path
@@ -296,21 +306,18 @@ let write_json config path json =
   match key_of_path config path with
   | Some key ->
       let content = json_to_pretty_utf8 json in
-      (match backend_set config ~key ~value:content with
-       | Ok () -> ()
-       | Error e -> Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));
+      backend_set config ~key ~value:content
+      |> Result.iter_error (fun e ->
+           Log.Misc.warn "write_json backend_set failed for %s: %s" key (Backend_types.show_error e));
       if should_dual_write_local config then
         (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
-        (match write_json_local path json with
-         | Ok () -> ()
-         | Error msg ->
-           Log.Misc.warn "write_json: local mirror write failed for %s: %s"
-             path msg)
-  | None -> (
-      match write_json_local path json with
-      | Ok () -> ()
-      | Error msg ->
-        Log.Misc.warn "write_json: local write failed for %s: %s" path msg)
+        write_json_local path json
+        |> Result.iter_error (fun msg ->
+             Log.Misc.warn "write_json: local mirror write failed for %s: %s" path msg)
+  | None ->
+      write_json_local path json
+      |> Result.iter_error (fun msg ->
+           Log.Misc.warn "write_json: local write failed for %s: %s" path msg)
 
 let write_text_local path content =
   mkdir_p (Filename.dirname path);
@@ -326,32 +333,30 @@ let write_text_local path content =
 let write_text config path content =
   match key_of_path config path with
   | Some key ->
-      (match backend_set config ~key ~value:content with
-       | Ok () -> ()
-       | Error e ->
+      backend_set config ~key ~value:content
+      |> Result.iter_error (fun e ->
            Log.Misc.warn "write_text backend_set failed for %s: %s" key
              (Backend_types.show_error e));
       if should_dual_write_local config then
         (* Keep a plaintext mirror for non-filesystem backends so local fallback reads stay fresh. *)
-        (match write_text_local path content with
-         | Ok () -> ()
-         | Error msg ->
-           Log.Misc.warn "write_text: local mirror write failed for %s: %s"
-             path msg)
-  | None -> (
-      match write_text_local path content with
-      | Ok () -> ()
-      | Error msg ->
-        Log.Misc.warn "write_text: local write failed for %s: %s" path msg)
+        write_text_local path content
+        |> Result.iter_error (fun msg ->
+             Log.Misc.warn "write_text: local mirror write failed for %s: %s" path msg)
+  | None ->
+      write_text_local path content
+      |> Result.iter_error (fun msg ->
+           Log.Misc.warn "write_text: local write failed for %s: %s" path msg)
 
 let delete_path config path =
   match key_of_path config path with
   | Some key ->
-    (match backend_delete config ~key with
-     | Ok _ ->
-       if should_dual_write_local config then
-         (try Sys.remove path with Sys_error _ -> ())
-     | Error e -> Log.Misc.error "delete_path: backend_delete failed for %s: %s" key (Backend_types.show_error e))
+      backend_delete config ~key
+      |> Result.fold
+           ~ok:(fun _ ->
+             if should_dual_write_local config then try Sys.remove path with Sys_error _ -> ())
+           ~error:(fun e ->
+             Log.Misc.error "delete_path: backend_delete failed for %s: %s" key
+               (Backend_types.show_error e))
   | None -> if Sys.file_exists path then Sys.remove path
 
 let path_exists config path =
@@ -366,16 +371,15 @@ let append_text config path content =
   match key_of_path config path with
   | Some key ->
       let existing =
-        match backend_get config ~key with
-        | Ok (Some value) -> value
-        | Ok None -> ""
-        | Error e ->
-          Log.Misc.warn "[append_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
-          ""
+        backend_get config ~key
+        |> Result.fold
+             ~ok:(function Some value -> value | None -> "")
+             ~error:(fun e ->
+               Log.Misc.warn "[append_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
+               "")
       in
-      (match backend_set config ~key ~value:(existing ^ content) with
-       | Ok () -> ()
-       | Error e ->
+      backend_set config ~key ~value:(existing ^ content)
+      |> Result.iter_error (fun e ->
            Log.Misc.warn "append_text backend_set failed for %s: %s" key
              (Backend_types.show_error e))
   | None ->
@@ -385,20 +389,23 @@ let append_text config path content =
 let read_json_opt config path =
   match key_of_path config path with
   | Some key -> (
-      match backend_get config ~key with
-      | Ok (Some content) ->
-          let trimmed = String.trim content in
-          if trimmed = "" then None
-          else (
-            match Safe_ops.parse_json_safe ~context:"read_json_opt" trimmed with
-            | Ok json -> Some json
-            | Error msg ->
-              Log.Misc.warn "[read_json_opt] %s" msg;
-              None)
-      | Ok None -> None
-      | Error e ->
-        Log.Misc.warn "[read_json_opt] backend_get failed for %s: %s" key (Backend_types.show_error e);
-        None)
+      backend_get config ~key
+      |> Result.fold
+           ~ok:(function
+             | Some content ->
+                 let trimmed = String.trim content in
+                 if trimmed = "" then None
+                 else
+                   Safe_ops.parse_json_safe ~context:"read_json_opt" trimmed
+                   |> Result.fold
+                        ~ok:(fun json -> Some json)
+                        ~error:(fun msg ->
+                          Log.Misc.warn "[read_json_opt] %s" msg;
+                          None)
+             | None -> None)
+           ~error:(fun e ->
+             Log.Misc.warn "[read_json_opt] backend_get failed for %s: %s" key (Backend_types.show_error e);
+             None))
   | None ->
       if Sys.file_exists path then Some (read_json_local path)
       else None
@@ -426,59 +433,62 @@ type read_agent_error =
   | Agent_read_error of string
 
 let read_agent_json_from_backend config key =
-  match backend_get config ~key with
-  | Ok (Some content) ->
-    parse_json_content_result ~context:"read_agent_with_repair" content
-    |> Result.map_error (fun msg -> Json_read_error msg)
-  | Ok None -> Ok (`Assoc [])
-  | Error e ->
-    Error
-      (Json_read_error
-         (Printf.sprintf
-            "[read_agent_with_repair] backend_get failed for %s: %s"
-            key
-            (Backend_types.show_error e)))
+  let* content_opt =
+    backend_get config ~key
+    |> Result.map_error (fun e ->
+         Json_read_error
+           (Printf.sprintf
+              "[read_agent_with_repair] backend_get failed for %s: %s"
+              key
+              (Backend_types.show_error e)))
+  in
+  match content_opt with
+  | Some content ->
+      parse_json_content_result ~context:"read_agent_with_repair" content
+      |> Result.map_error (fun msg -> Json_read_error msg)
+  | None -> Ok (`Assoc [])
 
 let read_agent_json_result config path =
   match key_of_path config path with
   | Some key ->
-    (match config.backend with
-     | FileSystem _ ->
-       (match
-          (try Ok (Sys.file_exists path) with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn -> Error (Json_read_exn exn))
-        with
-        | Ok true -> read_json_local_result_exn path
-        | Ok false -> read_agent_json_from_backend config key
-        | Error _ as err -> err)
-     | Memory _ -> read_agent_json_from_backend config key)
+      (match config.backend with
+       | FileSystem _ ->
+           let* exists =
+             try Ok (Sys.file_exists path) with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn -> Error (Json_read_exn exn)
+           in
+           if exists then read_json_local_result_exn path
+           else read_agent_json_from_backend config key
+       | Memory _ -> read_agent_json_from_backend config key)
   | None -> read_json_local_result_exn path
 
 let read_agent_with_repair_result config path =
-  match read_agent_json_result config path with
-  | Error (Json_read_exn exn) when is_fd_pressure_exn exn ->
-    Error (Agent_fd_pressure exn)
-  | Error (Json_read_exn exn) -> Error (Agent_read_error (Printexc.to_string exn))
-  | Error (Json_read_error msg) -> Error (Agent_read_error msg)
-  | Ok json ->
-    (match Masc_domain.agent_of_yojson json with
-     | Ok agent ->
-      if agent_json_needs_repair json then (
-        Log.Workspace.warn
-          "agent state repair: repaired agent JSON and rewrote canonical state for %s"
-          path;
-        write_json config path (Masc_domain.agent_to_yojson agent));
-      Ok agent
-     | Error msg -> Error (Agent_read_error msg))
+  let* json =
+    read_agent_json_result config path
+    |> Result.map_error (function
+         | Json_read_exn exn when is_fd_pressure_exn exn -> Agent_fd_pressure exn
+         | Json_read_exn exn -> Agent_read_error (Printexc.to_string exn)
+         | Json_read_error msg -> Agent_read_error msg)
+  in
+  let* agent =
+    Masc_domain.agent_of_yojson json
+    |> Result.map_error (fun msg -> Agent_read_error msg)
+  in
+  if agent_json_needs_repair json then (
+    Log.Workspace.warn
+      "agent state repair: repaired agent JSON and rewrote canonical state for %s"
+      path;
+    write_json config path (Masc_domain.agent_to_yojson agent));
+  Ok agent
 
 let read_agent_with_repair config path =
-  match read_agent_with_repair_result config path with
-  | Ok agent -> Ok agent
-  | Error (Agent_fd_pressure exn) ->
-    let detail = Printexc.to_string exn in
-    Error ("fd_pressure_io: " ^ detail)
-  | Error (Agent_read_error msg) -> Error msg
+  read_agent_with_repair_result config path
+  |> Result.map_error (function
+       | Agent_fd_pressure exn ->
+           let detail = Printexc.to_string exn in
+           "fd_pressure_io: " ^ detail
+       | Agent_read_error msg -> msg)
 
 (* ============================================ *)
 (* File locking                                 *)
@@ -531,16 +541,15 @@ let with_distributed_lock ?clock config _path key f =
   if acquire 50 0.05 then
     Common.protect ~module_name:"workspace_utils" ~finally_label:"finalizer"
       ~finally:(fun () ->
-        match backend_release_lock config ~key ~owner with
-        | Ok _ -> ()
-        | Error e ->
-            let msg =
-              match e with
-              | Backend_types.ConnectionFailed s | NotFound s
-              | IOError s | BackendNotSupported s | InvalidKey s
-              | AlreadyExists s -> s
-            in
-            Log.Workspace.warn "lock release failed for %s: %s" key msg)
+        backend_release_lock config ~key ~owner
+        |> Result.iter_error (fun e ->
+             let msg =
+               match e with
+               | Backend_types.ConnectionFailed s | NotFound s
+               | IOError s | BackendNotSupported s | InvalidKey s
+               | AlreadyExists s -> s
+             in
+             Log.Workspace.warn "lock release failed for %s: %s" key msg))
       f
   else begin
     (* #9645: surface lock acquire exhaustion as a fleet-wide
@@ -568,16 +577,15 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
   if acquire 50 0.05 then
     Common.protect ~module_name:"workspace_utils" ~finally_label:"finalizer"
       ~finally:(fun () ->
-        match backend_release_lock config ~key ~owner with
-        | Ok _ -> ()
-        | Error e ->
-            let msg =
-              match e with
-              | Backend_types.ConnectionFailed s | NotFound s
-              | IOError s | BackendNotSupported s | InvalidKey s
-              | AlreadyExists s -> s
-            in
-            Log.Workspace.warn "lock release failed for %s: %s" key msg)
+        backend_release_lock config ~key ~owner
+        |> Result.iter_error (fun e ->
+             let msg =
+               match e with
+               | Backend_types.ConnectionFailed s | NotFound s
+               | IOError s | BackendNotSupported s | InvalidKey s
+               | AlreadyExists s -> s
+             in
+             Log.Workspace.warn "lock release failed for %s: %s" key msg))
       (fun () -> Ok (f ()))
   else begin
     (* #9645: see [with_distributed_lock] above.

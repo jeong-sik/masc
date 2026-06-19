@@ -71,6 +71,12 @@ without an explicit per-fiber cancel.
 `Lsp_process_manager.shutdown proc` is invoked before returning `Error` on each of:
 the `Error msg` initialize result, the `Eio.Time.Timeout` branch, and the catch-all `exn` branch.
 
+The WebSocket IDE LSP proxy (`server_ide_lsp_proxy.ml`) uses the same
+`Lsp_process_manager.spawn` + initialize-on-cache-miss pattern. Its switch is connection-scoped
+rather than server-scoped, but repeated failed init attempts on a long-lived IDE connection have
+the same per-attempt child/pipe leak shape. It uses the same shutdown helper on its failed
+initialize result and timeout branches.
+
 ## Alternatives considered
 
 1. **Per-proc child switch.** Spawn each LSP proc under its own `Switch.run` held open by a fiber
@@ -84,11 +90,13 @@ the `Error msg` initialize result, the `Eio.Time.Timeout` branch, and the catch-
 ## Verification
 
 - `dune build --root . @lib/server/check` passes (type + `.mli` conformance).
+- `test_lsp_process_manager` spawns a real child process with held pipes, calls `shutdown`
+  twice, and asserts the child exits while the held `stdin_w` and `stdout_r` resources are closed.
 - Manual reasoning: the three failure branches now tear the proc down at the failure point;
   the success path is unchanged.
-- Not covered: a deterministic integration test requires a fake LSP server that fails
-  `initialize` on demand. Flagged as a follow-up; the FD-count assertion (`/dev/fd` before/after
-  N failed inits) is the right shape once that fixture exists.
+- Not covered: an end-to-end fake LSP server that fails `initialize` on demand. The lower-level
+  shutdown test covers the teardown primitive; the FD-count assertion (`/dev/fd` before/after N
+  failed inits) is still the right shape once an LSP fixture exists.
 
 ## Rollout
 

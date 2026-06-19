@@ -14,6 +14,8 @@ type gc_report =
   ; dry_run : bool
   }
 
+exception Fact_store_corrupt of string
+
 type indexed_fact =
   { index : int
   ; fact : fact
@@ -101,7 +103,7 @@ let run_gc ?(dry_run = false) ~keeper_id ~now () =
        let the raised error surface so an operator can repair it. *)
     match Io.read_facts_all_strict ~keeper_id with
     | Error message ->
-      invalid_arg ("memory os gc fact store read failed: " ^ message)
+      raise (Fact_store_corrupt ("memory os gc fact store read failed: " ^ message))
     | Ok facts ->
       let indexed = List.mapi (fun index fact -> { index; fact }) facts in
       let live, expired =

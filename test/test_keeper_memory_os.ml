@@ -1107,7 +1107,7 @@ let test_gc_preserves_corrupt_store () =
     let before = read_raw () in
     (match GC.run_gc ~keeper_id ~now () with
      | _report -> Alcotest.fail "expected run_gc to raise on a corrupt store"
-     | exception Invalid_argument _ -> ());
+     | exception GC.Fact_store_corrupt _ -> ());
     Alcotest.(check string)
       "corrupt store left untouched (no silent drop + overwrite)"
       before
@@ -1118,6 +1118,78 @@ let test_gc_preserves_corrupt_store () =
       "valid fact still on disk"
       1
       (List.length (Memory_io.read_facts_all ~keeper_id))))
+;;
+
+let test_gc_waits_for_fact_writer_lock () =
+  with_eio (fun ~sw ~net:_ ~clock ->
+  let restore_eio_guard = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  Fun.protect
+    ~finally:(fun () -> if not restore_eio_guard then Eio_guard.disable ())
+    (fun () ->
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "gc-lock-waits-keeper" in
+    let now = 1_000_000.0 in
+    let expired =
+      { (fact_fixture ~now ()) with
+        Types.claim = "expired fact already on disk"
+      ; Types.valid_until = Some (now -. 1.0)
+      }
+    in
+    let fresh =
+      let base = fact_fixture ~now () in
+      { base with
+        Types.claim = "fresh writer fact committed under lock"
+      ; Types.last_verified_at = Some now
+      ; Types.source = { base.source with turn = 2 }
+      }
+    in
+    Memory_io.append_fact ~keeper_id expired;
+    let writer_entered, resolve_writer_entered = Eio.Promise.create () in
+    let allow_writer, resolve_allow_writer = Eio.Promise.create () in
+    let writer_done, resolve_writer_done = Eio.Promise.create () in
+    let gc_result = ref None in
+    let fact_store_trigger = Memory_io.fact_recall_window + (Memory_io.fact_recall_window / 2) in
+    Eio.Fiber.fork ~sw (fun () ->
+      File_lock_eio.with_lock (Memory_io.facts_path ~keeper_id) (fun () ->
+        Eio.Promise.resolve resolve_writer_entered ();
+        Eio.Promise.await allow_writer;
+        let (_ : Memory_io.fact_merge_stats) =
+          Memory_io.merge_and_cap_facts
+            ~keeper_id
+            ~merge:(Policy.reobserve_fact ~now)
+            ~incoming:[ fresh ]
+            ~keep:Memory_io.fact_recall_window
+            ~trigger:fact_store_trigger
+            ~rank:(Policy.retention_rank ~now)
+        in
+        Eio.Promise.resolve resolve_writer_done ()));
+    Eio.Promise.await writer_entered;
+    Eio.Fiber.fork ~sw (fun () ->
+      gc_result := Some (GC.run_gc ~keeper_id ~now ()));
+    Eio.Time.sleep clock 0.02;
+    Alcotest.(check bool)
+      "gc waits for the same facts lock held by a writer"
+      true
+      (Option.is_none !gc_result);
+    Eio.Promise.resolve resolve_allow_writer ();
+    Eio.Promise.await writer_done;
+    wait_for_ref ~clock "gc after writer lock" gc_result;
+    let report =
+      match !gc_result with
+      | Some report -> report
+      | None -> Alcotest.fail "expected GC to finish after writer releases lock"
+    in
+    Alcotest.(check int) "gc sees writer's committed fact" 2 report.GC.total_input;
+    Alcotest.(check int) "gc drops only the expired fact" 1 report.ttl_expired;
+    let survivors = Memory_io.read_facts_all ~keeper_id in
+    Alcotest.(check int) "fresh fact survives GC" 1 (List.length survivors);
+    Alcotest.(check bool)
+      "survivor is the writer fact"
+      true
+      (List.exists
+         (fun f -> String.equal f.Types.claim "fresh writer fact committed under lock")
+         survivors))))
 ;;
 
 let test_recall_context_empty_without_memory () =
@@ -2327,6 +2399,10 @@ let () =
             "gc preserves a corrupt store instead of erasing it"
             `Quick
             test_gc_preserves_corrupt_store
+        ; Alcotest.test_case
+            "gc waits for fact writer lock"
+            `Quick
+            test_gc_waits_for_fact_writer_lock
         ] )
     ; ( "recall"
       , [ Alcotest.test_case

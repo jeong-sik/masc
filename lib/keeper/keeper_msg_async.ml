@@ -16,6 +16,10 @@ type request_status =
   | Queued
   | Running
   | Lost of { reason : string }
+  | Cancelled of
+      { reason : string
+      ; cancelled_by : string
+      }
   | Done of
       { ok : bool
       ; body : string
@@ -82,6 +86,7 @@ let status_to_string = function
   | Queued -> "queued"
   | Running -> "running"
   | Lost _ -> "lost"
+  | Cancelled _ -> "cancelled"
   | Done { ok = true; _ } -> "done"
   | Done { ok = false; _ } -> "error"
 ;;
@@ -104,6 +109,8 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
     match e.status with
     | Done { ok; body } -> fields @ [ "ok", `Bool ok; "body", `String body ]
     | Lost { reason } -> fields @ [ "reason", `String reason ]
+    | Cancelled { reason; cancelled_by } ->
+      fields @ [ "reason", `String reason; "cancelled_by", `String cancelled_by ]
     | Queued | Running -> fields
   in
   `Assoc fields
@@ -148,6 +155,15 @@ let entry_of_record_json ~base_path json : (entry, string) result =
                  string_member "reason" json
                  |> Option.value
                       ~default:"keeper_msg request was lost before terminal result"
+             })
+      | "cancelled" ->
+        Ok
+          (Cancelled
+             { reason =
+                 string_member "reason" json
+                 |> Option.value ~default:"keeper_msg request was cancelled"
+             ; cancelled_by =
+                 string_member "cancelled_by" json |> Option.value ~default:"unknown"
              })
       | "done" | "error" ->
         let ok =
@@ -226,7 +242,7 @@ let request_id_of_record_filename name =
 
 let should_gc_disk_record ~now (entry : entry) =
   match entry.status with
-  | Done _ | Lost _ -> now -. entry.submitted_at > max_age_sec
+  | Done _ | Lost _ | Cancelled _ -> now -. entry.submitted_at > max_age_sec
   | Queued | Running -> false
 ;;
 
@@ -311,15 +327,15 @@ let gc_stale () =
     Hashtbl.fold
       (fun id entry acc ->
          match entry.status with
-         | (Done _ | Lost _) when now -. entry.submitted_at > max_age_sec -> id :: acc
-         | Queued | Running | Done _ | Lost _ -> acc)
+         | (Done _ | Lost _ | Cancelled _) when now -. entry.submitted_at > max_age_sec -> id :: acc
+         | Queued | Running | Done _ | Lost _ | Cancelled _ -> acc)
       pending
       []
     |> List.iter (fun id -> Hashtbl.remove pending id))
 ;;
 
 let is_terminal_status = function
-  | Done _ | Lost _ -> true
+  | Done _ | Lost _ | Cancelled _ -> true
   | Queued | Running -> false
 ;;
 
@@ -330,7 +346,7 @@ let set_status ?(preserve_terminal = false) request_id status =
     | Some entry ->
       let completed_at =
         match status with
-        | Done _ | Lost _ -> Some (Unix.gettimeofday ())
+        | Done _ | Lost _ | Cancelled _ -> Some (Unix.gettimeofday ())
         | _ -> None
       in
       let updated = { entry with status; completed_at } in
@@ -343,13 +359,20 @@ let set_status_protected ?preserve_terminal request_id status =
   Eio.Cancel.protect (fun () -> set_status ?preserve_terminal request_id status)
 ;;
 
-let cancelled_lost_status exn =
-  Lost
-    { reason =
-        Printf.sprintf
-          "keeper_msg worker cancelled before terminal result: %s"
-          (Printexc.to_string exn)
-    }
+let cancelled_status ~cancelled_by reason =
+  Cancelled { reason; cancelled_by }
+;;
+
+let operator_cancelled_status () =
+  cancelled_status
+    ~cancelled_by:"operator"
+    "keeper_msg request was cancelled by operator"
+;;
+
+let runtime_cancelled_status () =
+  cancelled_status
+    ~cancelled_by:"runtime"
+    "keeper_msg worker was cancelled by runtime before terminal result"
 ;;
 
 let timeout_done_status ~request_id ~keeper_name ~timeout_sec =
@@ -413,8 +436,8 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
                | Worker_timeout { timeout_sec } ->
                  timeout_done_status ~request_id ~keeper_name ~timeout_sec))
       with
-      | CancelledByOperator as e -> cancelled_lost_status e
-      | Eio.Cancel.Cancelled _ as e -> cancelled_lost_status e
+      | CancelledByOperator -> operator_cancelled_status ()
+      | Eio.Cancel.Cancelled _ -> runtime_cancelled_status ()
       | exn ->
         Done
           { ok = false
@@ -484,15 +507,31 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
       @ [ "ok", `Bool false
         ; "result", `Assoc [ "error", `String "request_lost"; "reason", `String reason ]
         ]
+    | Cancelled { reason; cancelled_by } ->
+      fields
+      @ [ "ok", `Bool false
+        ; ( "result"
+          , `Assoc
+              [ "cancelled", `Bool true
+              ; "reason", `String reason
+              ; "cancelled_by", `String cancelled_by
+              ] )
+        ]
     | _ -> fields
   in
   `Assoc fields
 ;;
 
 let cancel ?base_path request_id : bool =
-  let sw_opt = with_lock (fun () -> Hashtbl.find_opt active_switches request_id) in
+  let sw_opt =
+    with_lock (fun () ->
+      match Hashtbl.find_opt pending request_id, Hashtbl.find_opt active_switches request_id with
+      | Some entry, Some sw when not (is_terminal_status entry.status) -> Some sw
+      | _ -> None)
+  in
   match sw_opt with
   | Some sw ->
+    set_status_protected ~preserve_terminal:true request_id (operator_cancelled_status ());
     Eio.Switch.fail sw CancelledByOperator;
     with_lock (fun () -> Hashtbl.remove active_switches request_id);
     true
@@ -502,10 +541,12 @@ let cancel ?base_path request_id : bool =
     | Some base_path ->
       match load_record ~base_path ~request_id with
       | Found ({ status = Queued | Running; _ } as entry) ->
-        let reason = "keeper_msg request was cancelled by operator" in
         let cancelled_entry =
-          (* NDT-OK: gettimeofday is acceptable for timestamping operator cancelled lost state *)
-          { entry with status = Lost { reason }; completed_at = Some (Unix.gettimeofday ()) }
+          (* NDT-OK: gettimeofday is acceptable for timestamping operator cancelled state *)
+          { entry with
+            status = operator_cancelled_status ()
+          ; completed_at = Some (Unix.gettimeofday ())
+          }
         in
         persist_entry cancelled_entry;
         true

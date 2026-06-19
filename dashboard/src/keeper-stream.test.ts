@@ -94,6 +94,26 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.text).toBe('Keeper request failed: Timeout after 630.0s')
   })
 
+  it('renders cancelled request terminal events without an error bubble', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_sangsu_1',
+        status: 'cancelled',
+        ok: false,
+        message: 'keeper chat stream cancelled by client',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('cancelled')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.error).toBeNull()
+    expect(entry?.text).toBe('요청이 취소되었습니다.')
+  })
+
   // RFC-0232 P2: the checkpoint distinction rides the producer-typed
   // `turn_outcome` field, not the reply text.
   it('does not render a declared continuation checkpoint as a chat reply', () => {

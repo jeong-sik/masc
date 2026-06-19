@@ -639,7 +639,11 @@ let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
 
 type keeper_stream_worker_event =
   | Stream_event of Agent_sdk.Types.sse_event
-  | Stream_terminal of bool * string
+  | Stream_terminal of
+      { ok : bool
+      ; status : string
+      ; body : string
+      }
 
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     ~client_disconnects
@@ -800,15 +804,15 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~keeper_name:payload.name ~source:chat_source
                 ~content:visible_reply
                 ());
-            push_worker_event (Stream_terminal (true, body));
+            push_worker_event (Stream_terminal { ok = true; status = "done"; body });
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->
             persist_failure_reply err;
-            push_worker_event (Stream_terminal (false, err));
+            push_worker_event (Stream_terminal { ok = false; status = "error"; body = err });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | Error err ->
             persist_failure_reply err;
-            push_worker_event (Stream_terminal (false, err));
+            push_worker_event (Stream_terminal { ok = false; status = "error"; body = err });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
       ()
   in
@@ -822,7 +826,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
            ignore (Keeper_msg_async.cancel ~base_path request_id);
            push_worker_event
              (Stream_terminal
-                (false, "keeper chat stream closed by client"))
+                { ok = false
+                ; status = "cancelled"
+                ; body = "keeper chat stream cancelled by client"
+                })
          end));
   Log.Keeper.info
     "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
@@ -856,7 +863,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       keeper_request_terminal_payload ~request_id ~keeper_name:payload.name
         ~status ~ok ~message ()
     in
-    if ok then
+    if ok || String.equal status "cancelled" then
       Log.Keeper.info
         "keeper_stream: request terminal keeper=%s request_id=%s status=%s"
         payload.name request_id status
@@ -899,11 +906,16 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
              Keeper_chat_events.publish events (Tool_call_end { tool_call_id = tid })
          | _ -> ());
         consume_worker_events ()
-    | Stream_terminal (false, err) ->
+    | Stream_terminal { ok = false; status = "cancelled"; body = message } ->
+        let message = redact_text message in
+        publish_terminal ~status:"cancelled" ~ok:false ~message ();
+        Keeper_chat_events.publish events Text_message_end;
+        Keeper_chat_events.publish events (Run_finished { run_id })
+    | Stream_terminal { ok = false; status; body = err } ->
         let err = redact_text err in
-        publish_terminal ~status:"error" ~ok:false ~message:err ();
+        publish_terminal ~status ~ok:false ~message:err ();
         Keeper_chat_events.publish events (Event_error { message = err })
-    | Stream_terminal (true, body) -> (
+    | Stream_terminal { ok = true; body; _ } -> (
         try
           let payload_json_opt, visible_reply = extract_visible_reply body in
           let visible_reply =

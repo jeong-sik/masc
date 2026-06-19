@@ -16,6 +16,8 @@ import {
 } from './keeper-state'
 import { isRecord, asString } from './components/common/normalize'
 
+const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
+
 // Most recent TOOL_CALL_START id per keeper — fallback target for
 // TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
 const lastToolCallIds = new Map<string, string>()
@@ -33,9 +35,11 @@ export function abortKeeperThreadMessage(name: string): void {
   if (controller) controller.abort()
   if (entryId) {
     finalizeAssistantEntry(keeperName, entryId, {
-      delivery: 'timeout',
+      text: KEEPER_MESSAGE_CANCELLED_TEXT,
+      rawText: KEEPER_MESSAGE_CANCELLED_TEXT,
+      delivery: 'cancelled',
       streamState: null,
-      error: '요청 취소됨',
+      error: null,
       timestamp: new Date().toISOString(),
     })
   }
@@ -138,8 +142,21 @@ export function applyKeeperStreamEvent(
         const terminal = isRecord(event.value) ? event.value : null
         const status = asString(terminal?.status, '').trim()
         const ok = terminal?.ok === true
+        if (status === 'cancelled') {
+          const message =
+            asString(terminal?.message, '').trim() || KEEPER_MESSAGE_CANCELLED_TEXT
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({
+            ...entry,
+            text: KEEPER_MESSAGE_CANCELLED_TEXT,
+            rawText: message,
+            delivery: 'cancelled',
+            streamState: null,
+            error: null,
+          }))
+          return null
+        }
         const failed =
-          !ok && ['error', 'lost', 'cancelled'].includes(status)
+          !ok && ['error', 'lost'].includes(status)
         if (failed) {
           const message =
             asString(terminal?.message, '').trim() || 'Keeper request failed'
@@ -147,7 +164,7 @@ export function applyKeeperStreamEvent(
             ...entry,
             text: entry.text || `Keeper request failed: ${message}`,
             rawText: entry.rawText || message,
-            delivery: status === 'cancelled' ? 'timeout' : 'error',
+            delivery: 'error',
             streamState: null,
             error: message,
           }))

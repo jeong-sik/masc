@@ -449,6 +449,43 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     ])
   })
 
+  it('resumes a cancelled pending request without restoring an error bubble', async () => {
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: '뭘 해야하나',
+      submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+    })
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      status: 'cancelled',
+      ok: false,
+      result: {
+        cancelled: true,
+        reason: 'keeper_msg request was cancelled by operator',
+        cancelled_by: 'operator',
+      },
+    })
+    queuedKeeperMessageError.mockImplementation(() => '요청이 취소되었습니다.')
+    queuedKeeperMessageToReply.mockImplementation(() => ({
+      text: '요청이 취소되었습니다.',
+      details: null,
+    }))
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledWith('kmsg_echo_1')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    expect(keeperActionErrors.value.echo).toBeNull()
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery, entry.error])).toEqual([
+      ['user', '뭘 해야하나', 'cancelled', null],
+      ['assistant', '요청이 취소되었습니다.', 'cancelled', null],
+    ])
+  })
+
   it('keeps the user message visible when the server no longer knows request_id', async () => {
     upsertPendingKeeperChatRequest({
       requestId: 'kmsg_echo_1',

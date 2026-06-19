@@ -60,10 +60,10 @@ let () =
    | Keeper_msg_async.Found entry ->
      let status_str = Keeper_msg_async.status_to_string entry.status in
      Printf.printf "  ✓ Cancelled status: %s\n%!" status_str;
-     if String.equal status_str "lost" then
-       Printf.printf "  ✓ Verification: Lost state correctly recorded\n%!"
+     if String.equal status_str "cancelled" then
+       Printf.printf "  ✓ Verification: Cancelled state correctly recorded\n%!"
      else
-       Printf.printf "  ✗ Verification failed: expected lost but got %s\n%!" status_str
+       Printf.printf "  ✗ Verification failed: expected cancelled but got %s\n%!" status_str
    | Keeper_msg_async.Absent ->
      Printf.printf "  ✗ Status after cancel: Not found\n%!"
    | Keeper_msg_async.Unreadable reason ->

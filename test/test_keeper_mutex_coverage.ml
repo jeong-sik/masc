@@ -55,6 +55,19 @@ let wait_for_lost request_id =
   loop 200
 ;;
 
+let wait_for_cancelled request_id =
+  let rec loop remaining =
+    match Keeper_msg_async.poll request_id with
+    | Keeper_msg_async.Found ({ status = Cancelled _; _ } as entry) -> entry
+    | _ when remaining <= 0 ->
+      failwith (Printf.sprintf "request %s did not become cancelled" request_id)
+    | _ ->
+      Eio.Fiber.yield ();
+      loop (remaining - 1)
+  in
+  loop 200
+;;
+
 let contains_substring ~needle value =
   let needle_len = String.length needle in
   let value_len = String.length value in
@@ -205,7 +218,7 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
     Alcotest.fail "expected persisted request"
 ;;
 
-let test_keeper_msg_async_marks_cancelled_worker_lost () =
+let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
   with_eio_env
   @@ fun _env ->
   let request_id =
@@ -225,16 +238,66 @@ let test_keeper_msg_async_marks_cancelled_worker_lost () =
     ignore (wait_for_running request_id : Keeper_msg_async.entry);
     request_id
   in
-  match wait_for_lost request_id with
-  | { Keeper_msg_async.status = Lost { reason }; completed_at = Some _; _ } ->
-    Alcotest.(check bool) "lost reason mentions cancellation" true
+  match wait_for_cancelled request_id with
+  | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
+    Alcotest.(check string) "cancelled_by runtime" "runtime" cancelled_by;
+    Alcotest.(check bool) "cancelled reason mentions cancellation" true
       (contains_substring ~needle:"cancelled" (String.lowercase_ascii reason))
-  | { Keeper_msg_async.status = Lost _; completed_at = None; _ } ->
+  | { Keeper_msg_async.status = Cancelled _; completed_at = None; _ } ->
     Alcotest.fail "expected cancelled request to have completed_at"
   | entry ->
     Alcotest.failf
-      "expected cancelled request to be lost, got %s"
+      "expected cancelled request to be cancelled, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
+;;
+
+let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
+  with_eio_env
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = temp_dir "keeper-msg-async-operator-cancel-" in
+  let never, _resolver = Eio.Promise.create () in
+  let request_id =
+    Keeper_msg_async.submit
+      ~sw
+      ~base_path
+      ~keeper_name:"operator-cancelled"
+      ~f:(fun () ->
+        Eio.Promise.await never;
+        tr_ok "{}")
+      ()
+  in
+  ignore (wait_for_running request_id : Keeper_msg_async.entry);
+  Alcotest.(check bool)
+    "cancel returns true"
+    true
+    (Keeper_msg_async.cancel ~base_path request_id);
+  (match wait_for_cancelled request_id with
+   | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
+     Alcotest.(check string) "cancelled_by operator" "operator" cancelled_by;
+     Alcotest.(check bool) "reason mentions operator" true
+       (contains_substring ~needle:"operator" (String.lowercase_ascii reason))
+   | { Keeper_msg_async.status = Cancelled _; completed_at = None; _ } ->
+     Alcotest.fail "expected operator-cancelled request to have completed_at"
+   | entry ->
+     Alcotest.failf
+       "expected operator cancel to be cancelled, got %s"
+       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status));
+  Keeper_msg_async.For_testing.forget request_id;
+  (match Keeper_msg_async.poll ~base_path request_id with
+   | Keeper_msg_async.Found { Keeper_msg_async.status = Cancelled { cancelled_by; _ }; _ } ->
+     Alcotest.(check string) "persisted cancelled_by operator" "operator" cancelled_by
+   | Keeper_msg_async.Found entry ->
+     Alcotest.failf
+       "expected persisted cancelled, got %s"
+       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
+   | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+     Alcotest.fail "expected persisted cancelled request");
+  Alcotest.(check bool)
+    "second cancel returns false"
+    false
+    (Keeper_msg_async.cancel ~base_path request_id)
 ;;
 
 let test_keeper_msg_async_timeout_is_terminal_error () =
@@ -549,9 +612,13 @@ let () =
             `Quick
             test_keeper_msg_async_marks_recovered_inflight_lost
         ; test_case
-            "cancelled worker is terminal lost"
+            "cancelled worker is terminal cancelled"
             `Quick
-            test_keeper_msg_async_marks_cancelled_worker_lost
+            test_keeper_msg_async_marks_cancelled_worker_cancelled
+        ; test_case
+            "operator cancel is terminal cancelled"
+            `Quick
+            test_keeper_msg_async_operator_cancel_is_terminal_cancelled
         ; test_case
             "timeout is terminal error"
             `Quick

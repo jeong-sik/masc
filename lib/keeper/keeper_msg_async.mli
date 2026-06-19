@@ -13,6 +13,10 @@ type request_status =
   | Queued
   | Running
   | Lost of { reason : string }
+  | Cancelled of
+      { reason : string
+      ; cancelled_by : string
+      }
   | Done of
       { ok : bool
       ; body : string
@@ -47,8 +51,9 @@ type load_result =
     [request_id] synchronously. When both [clock] and [timeout_sec] are
     provided, the worker records a terminal timeout error if [f] does not
     return before the deadline. Cancellation of [sw] interrupts the worker
-    and records a terminal [Lost] state before stopping, so pollers do not
-    observe an indefinite [Running] request. *)
+    and records a terminal [Cancelled] state before stopping, so pollers do
+    not observe an indefinite [Running] request. [Lost] is reserved for
+    persisted non-terminal requests recovered without a live worker. *)
 val submit
   :  ?clock:_ Eio.Time.clock
   -> ?timeout_sec:float

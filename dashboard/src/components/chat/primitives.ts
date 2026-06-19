@@ -152,6 +152,8 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
       return entry.streamState === 'finalizing' ? 'finalizing' : 'live'
     case 'timeout':
       return 'timeout'
+    case 'cancelled':
+      return 'cancelled'
     case 'error':
       return 'error'
     case 'interrupted':

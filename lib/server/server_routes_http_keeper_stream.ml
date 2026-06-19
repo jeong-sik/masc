@@ -639,7 +639,12 @@ let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
 
 type keeper_stream_worker_event =
   | Stream_event of Agent_sdk.Types.sse_event
-  | Stream_terminal of bool * string
+  | Stream_client_disconnected
+  | Stream_terminal of
+      { ok : bool
+      ; status : string
+      ; body : string
+      }
 
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     ~client_disconnects
@@ -665,6 +670,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
   let text_accum = Keeper_stream_text_accum.create () in
   let worker_events = Eio.Stream.create 512 in
   let terminal_pushed = Atomic.make false in
+  let client_disconnected = Atomic.make false in
   let push_worker_event event =
     match event with
     | Stream_terminal _ ->
@@ -676,6 +682,14 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                Log.Keeper.warn
                  "keeper_stream: worker terminal push failed: %s"
                  (Printexc.to_string exn))
+    | Stream_client_disconnected ->
+        (try Eio.Stream.add worker_events event
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Log.Keeper.warn
+               "keeper_stream: client-disconnect push failed: %s"
+               (Printexc.to_string exn))
     | Stream_event _ ->
         if not !closed then
           try Eio.Stream.add worker_events event
@@ -800,29 +814,29 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~keeper_name:payload.name ~source:chat_source
                 ~content:visible_reply
                 ());
-            push_worker_event (Stream_terminal (true, body));
+            push_worker_event (Stream_terminal { ok = true; status = "done"; body });
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->
             persist_failure_reply err;
-            push_worker_event (Stream_terminal (false, err));
+            push_worker_event (Stream_terminal { ok = false; status = "error"; body = err });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
         | Error err ->
             persist_failure_reply err;
-            push_worker_event (Stream_terminal (false, err));
+            push_worker_event (Stream_terminal { ok = false; status = "error"; body = err });
             Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
       ()
   in
   (match client_disconnects with
    | None -> ()
-   | Some disconnects ->
-       Eio.Fiber.fork ~sw (fun () ->
+   | Some (disconnect_sw, disconnects) ->
+       Eio.Fiber.fork ~sw:disconnect_sw (fun () ->
          let _ = Eio.Stream.take disconnects in
          if not (Atomic.get terminal_pushed) then begin
-           (* fire-and-forget: disconnect cleanup must not block terminal event emission. *)
-           ignore (Keeper_msg_async.cancel ~base_path request_id);
-           push_worker_event
-             (Stream_terminal
-                (false, "keeper chat stream closed by client"))
+           Atomic.set client_disconnected true;
+           Log.Keeper.info
+             "keeper_stream: client disconnected keeper=%s request_id=%s; request continues for polling"
+             payload.name request_id;
+           push_worker_event Stream_client_disconnected
          end));
   Log.Keeper.info
     "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
@@ -856,7 +870,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       keeper_request_terminal_payload ~request_id ~keeper_name:payload.name
         ~status ~ok ~message ()
     in
-    if ok then
+    if ok || String.equal status "cancelled" then
       Log.Keeper.info
         "keeper_stream: request terminal keeper=%s request_id=%s status=%s"
         payload.name request_id status
@@ -869,7 +883,9 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
   in
   let index_to_tool_id = Hashtbl.create 4 in
   let rec consume_worker_events () =
-    match Eio.Stream.take worker_events with
+    if Atomic.get client_disconnected then ()
+    else match Eio.Stream.take worker_events with
+    | Stream_client_disconnected -> ()
     | Stream_event evt ->
         (match evt with
          | Agent_sdk.Types.Connected ->
@@ -899,11 +915,16 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
              Keeper_chat_events.publish events (Tool_call_end { tool_call_id = tid })
          | _ -> ());
         consume_worker_events ()
-    | Stream_terminal (false, err) ->
+    | Stream_terminal { ok = false; status = "cancelled"; body = message } ->
+        let message = redact_text message in
+        publish_terminal ~status:"cancelled" ~ok:false ~message ();
+        Keeper_chat_events.publish events Text_message_end;
+        Keeper_chat_events.publish events (Run_finished { run_id })
+    | Stream_terminal { ok = false; status; body = err } ->
         let err = redact_text err in
-        publish_terminal ~status:"error" ~ok:false ~message:err ();
+        publish_terminal ~status ~ok:false ~message:err ();
         Keeper_chat_events.publish events (Event_error { message = err })
-    | Stream_terminal (true, body) -> (
+    | Stream_terminal { ok = true; body; _ } -> (
         try
           let payload_json_opt, visible_reply = extract_visible_reply body in
           let visible_reply =
@@ -1148,10 +1169,10 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            Eio.Fiber.fork ~sw:stream_sw (fun () ->
              sse_adapter_loop ~events ~writer ~mutex ~closed
                ~on_closed:notify_disconnect);
-           process_single_turn ~state ~clock ~sw:stream_sw
+           process_single_turn ~state ~clock ~sw
              ~auth_token:(auth_token_from_request request)
              ~thread_id ~closed
-             ~client_disconnects:(Some client_disconnects)
+             ~client_disconnects:(Some (stream_sw, client_disconnects))
              ~payload ~run_id ~message_id ~agent_name ~events;
            (* Queue drain is now handled by Keeper_chat_consumer
               (started in server_bootstrap_loops). *)

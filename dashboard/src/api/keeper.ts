@@ -308,6 +308,7 @@ export async function cancelQueuedKeeperMessage(
 }
 
 export function queuedKeeperMessageError(result: QueuedKeeperMessageResult): string {
+  if (result.status === 'cancelled') return '요청이 취소되었습니다.'
   const payload = isRecord(result.result) ? result.result : null
   const message = asString(payload?.message) ?? asString(payload?.reason)
   const error = asString(payload?.error)
@@ -315,6 +316,12 @@ export function queuedKeeperMessageError(result: QueuedKeeperMessageResult): str
 }
 
 export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): KeeperToolReply {
+  if (result.status === 'cancelled') {
+    return {
+      text: '요청이 취소되었습니다.',
+      details: null,
+    }
+  }
   const payload = isRecord(result.result) ? result.result : null
   const rawReply = asString(payload?.reply, '').trim()
   const details = normalizeKeeperConversationDetails(payload ?? result.result)

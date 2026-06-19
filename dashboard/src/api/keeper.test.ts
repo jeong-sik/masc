@@ -23,6 +23,8 @@ import {
   fetchKeeperRuntimeTrace,
   pauseKeeper,
   parseKeeperRuntimeTrace,
+  queuedKeeperMessageError,
+  queuedKeeperMessageToReply,
   resumeKeeper,
   sendKeeperMessageDetailed,
   shutdownKeeper,
@@ -132,6 +134,32 @@ describe('fetchQueuedKeeperMessageResult', () => {
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
     expect(result.status).toBe('done')
     expect(result.result).toEqual({ reply: 'pong' })
+  })
+
+  it('normalizes cancelled queued results as cancellation text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        request_id: 'kmsg_sangsu_2',
+        keeper_name: 'sangsu',
+        status: 'cancelled',
+        ok: false,
+        result: {
+          cancelled: true,
+          reason: 'keeper_msg request was cancelled by operator',
+          cancelled_by: 'operator',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_2')
+
+    expect(result.status).toBe('cancelled')
+    expect(queuedKeeperMessageError(result)).toBe('요청이 취소되었습니다.')
+    expect(queuedKeeperMessageToReply(result).text).toBe('요청이 취소되었습니다.')
   })
 })
 

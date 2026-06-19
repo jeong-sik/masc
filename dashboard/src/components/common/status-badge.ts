@@ -46,6 +46,7 @@ export function statusBadgeTone(status: string): StatusBadgeTone {
     case 'inactive':
     case 'offline':
     case 'stopped':
+    case 'cancelled':
     case 'todo':
       return 'neutral'
     case 'active':

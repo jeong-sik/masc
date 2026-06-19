@@ -693,6 +693,7 @@ export type KeeperConversationDelivery =
   | 'streaming'
   | 'delivered'
   | 'timeout'
+  | 'cancelled'
   | 'error'
   // Stream ended without a terminal RUN_FINISHED / RUN_ERROR event —
   // the transport was cut mid-response, so the text may be incomplete.

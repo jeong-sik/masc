@@ -145,7 +145,7 @@ val process_single_turn :
   auth_token:string option ->
   thread_id:string ->
   closed:bool ref ->
-  client_disconnects:unit Eio.Stream.t option ->
+  client_disconnects:(Eio.Switch.t * unit Eio.Stream.t) option ->
   payload:keeper_chat_stream_request ->
   run_id:string ->
   message_id:string ->
@@ -153,9 +153,13 @@ val process_single_turn :
   events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
   unit
 (** Execute a single keeper turn, publishing events to the provided
-    event stream.  [closed] is a mutable flag that suppresses worker
-    event pushes when set to [true] (used by the SSE adapter when the
-    HTTP stream is closed).  [auth_token] is [None] for queue-consumer
+    event stream. [sw] owns the async keeper_msg worker and must outlive
+    a single HTTP stream when resumable dashboard requests are used.
+    [closed] is a mutable flag that suppresses worker event pushes when
+    set to [true] (used by the SSE adapter when the HTTP stream is
+    closed). [client_disconnects] carries the HTTP stream switch and
+    disconnect signal; it stops only the stream projection and does not
+    cancel the accepted request. [auth_token] is [None] for queue-consumer
     turns where no HTTP request is available. *)
 
 (** {1 Testing helpers} *)

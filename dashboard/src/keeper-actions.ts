@@ -331,6 +331,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
 let localIdCounter = 0
 
 const resumingKeeperChatRequests = new Set<string>()
+const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 
 async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
   const key = `${request.keeperName}:${request.requestId}`
@@ -352,16 +353,19 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
 
       const reply = queuedKeeperMessageToReply(result)
       const isCheckpoint = reply.details?.turnOutcome === 'continuation_checkpoint'
-      const isError = result.status !== 'done' || result.ok === false
+      const isCancelled = result.status === 'cancelled'
+      const isError = !isCancelled && (result.status !== 'done' || result.ok === false)
       const errorMessage = isError ? queuedKeeperMessageError(result) : null
       let assistantDelivery: KeeperConversationDelivery = 'delivered'
-      if (isCheckpoint) {
+      if (isCancelled) {
+        assistantDelivery = 'cancelled'
+      } else if (isCheckpoint) {
         assistantDelivery = 'queued'
       } else if (isError) {
         assistantDelivery = 'error'
       }
       finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
-        delivery: isError ? 'error' : 'delivered',
+        delivery: isCancelled ? 'cancelled' : isError ? 'error' : 'delivered',
         error: errorMessage,
       })
       finalizeAssistantEntry(request.keeperName, assistantId, {
@@ -676,13 +680,19 @@ export async function sendKeeperThreadMessage(
         }
         removePendingKeeperChatRequest(requestId)
       }
+      finalizeAssistantEntry(keeperName, localId, {
+        delivery: 'cancelled',
+        error: null,
+      })
       finalizeAssistantEntry(keeperName, assistantId, {
-        delivery: 'timeout',
+        text: KEEPER_MESSAGE_CANCELLED_TEXT,
+        rawText: KEEPER_MESSAGE_CANCELLED_TEXT,
+        delivery: 'cancelled',
         streamState: null,
-        error: '요청 취소됨',
+        error: null,
         timestamp: new Date().toISOString(),
       })
-      setRecordValue(keeperActionErrors, keeperName, '요청 취소됨')
+      setRecordValue(keeperActionErrors, keeperName, null)
       throw err
     }
 

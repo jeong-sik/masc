@@ -69,6 +69,7 @@
     "globals": "^17.6.0",
     "happy-dom": "^20.9.0",
     "jest-axe": "^9.0.0",
+    "jsdom": "^29.1.1",
     "postcss": "^8.5.14",
     "rollup-plugin-visualizer": "^6.0.5",
     "tailwindcss": "^4.2.4",

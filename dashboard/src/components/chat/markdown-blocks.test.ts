@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from 'vitest'
 import { parseMarkdownToBlocks } from './markdown-blocks'
 import type { ChatBlock } from '../../types'

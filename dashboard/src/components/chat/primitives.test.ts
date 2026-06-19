@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
@@ -13,6 +15,26 @@ vi.mock('./attachments', () => ({
 }))
 
 const flushUi = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
+
+function makeFileList(files: File[]): FileList {
+  const list = [...files] as unknown as FileList
+  Object.defineProperties(list, {
+    length: { value: files.length },
+    item: { value: (index: number) => files[index] ?? null },
+  })
+  return list
+}
+
+function setInputFiles(input: HTMLInputElement, files: File[]): void {
+  Object.defineProperty(input, 'files', {
+    configurable: true,
+    value: makeFileList(files),
+  })
+}
+
+function dataTransferWith(files: File[]): DataTransfer {
+  return { files: makeFileList(files) } as DataTransfer
+}
 
 function toolEntry(
   overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id'>,
@@ -1106,9 +1128,7 @@ describe('ChatComposer multimodal', () => {
 
     renderComposer()
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
-    const dt = new DataTransfer()
-    dt.items.add(new File(['x'], 'screen.png', { type: 'image/png' }))
-    fileInput.files = dt.files
+    setInputFiles(fileInput, [new File(['x'], 'screen.png', { type: 'image/png' })])
     fileInput.dispatchEvent(new Event('change'))
     await new Promise((r) => setTimeout(r, 10))
 
@@ -1145,9 +1165,9 @@ describe('ChatComposer multimodal', () => {
     fireEvent.dragOver(composer)
     expect(composer.querySelector('.composer-box')?.classList.contains('drag')).toBe(true)
 
-    const dt = new DataTransfer()
-    dt.items.add(new File(['{}'], 'drop.json', { type: 'application/json' }))
-    fireEvent.drop(composer, { dataTransfer: dt })
+    fireEvent.drop(composer, {
+      dataTransfer: dataTransferWith([new File(['{}'], 'drop.json', { type: 'application/json' })]),
+    })
     await new Promise((r) => setTimeout(r, 10))
 
     expect(composer.querySelector('.composer-box')?.classList.contains('drag')).toBe(false)
@@ -1174,9 +1194,7 @@ describe('ChatComposer multimodal', () => {
     renderComposer({ draft: 'check this <tag>', onSend })
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
-    const dt = new DataTransfer()
-    dt.items.add(new File(['x'], 'screen.png', { type: 'image/png' }))
-    fileInput.files = dt.files
+    setInputFiles(fileInput, [new File(['x'], 'screen.png', { type: 'image/png' })])
     fileInput.dispatchEvent(new Event('change'))
     await new Promise((r) => setTimeout(r, 10))
 

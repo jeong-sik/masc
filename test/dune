@@ -640,6 +640,13 @@
  (modules test_runtime_per_keeper_routing)
  (libraries masc_test_deps unix))
 
+; RFC-0265: capability-driven proactive runtime reroute (modality-gated decision).
+
+(test
+ (name test_runtime_modality_reroute)
+ (modules test_runtime_modality_reroute)
+ (libraries masc_test_deps))
+
 ; Group 2: Property-based tests (QCheck)
 
 (tests

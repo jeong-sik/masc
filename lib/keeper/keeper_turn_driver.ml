@@ -99,7 +99,6 @@ let run_named
      candidate, and run a single provider attempt.  A failed runtime surfaces
      its [sdk_error] directly — there is nothing left to "exhaust". *)
   let runtime_id = String.trim runtime_id in
-  let error_runtime_id = runtime_id in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
   let enable_thinking =
@@ -125,7 +124,38 @@ let run_named
             "requested runtime %S not found among configured runtimes \
              (no silent fallback to default — RFC-0207/RFC-0206 §2.1)"
             runtime_id))
-  | Some runtime ->
+  | Some assigned_runtime ->
+  (* RFC-0265: proactively reroute a turn whose input modality (image/audio/
+     document) the assigned runtime cannot accept to a capable configured runtime
+     ([\[runtime\].media_failover] order, else declaration order). Text turns
+     ([goal_blocks = None]) and modality-satisfied turns are untouched; when no
+     runtime qualifies the assigned runtime stands and the loud capability gate in
+     [Runtime_agent.run_blocks] rejects (the floor). The reroute is visible via a
+     WARN log (non-silent — RFC-0126/0145). *)
+  let runtime_id, runtime =
+    match goal_blocks with
+    | None | Some [] -> runtime_id, assigned_runtime
+    | Some blocks ->
+      (match
+         Runtime_agent.decide_modality_reroute_for_runtime
+           ~assigned:assigned_runtime
+           blocks
+       with
+       | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
+         runtime_id, assigned_runtime
+       | Runtime_agent.Reroute { to_runtime_id; reason } ->
+         (match Runtime.get_runtime_by_id to_runtime_id with
+          | None -> runtime_id, assigned_runtime
+          | Some rerouted ->
+            Log.Keeper.warn
+              "%s: RFC-0265 modality reroute %s -> %s (%s)"
+              keeper_name
+              runtime_id
+              to_runtime_id
+              reason;
+            to_runtime_id, rerouted))
+  in
+  let error_runtime_id = runtime_id in
   let candidate =
     Runtime_candidate.of_provider_config
       ~max_concurrent:runtime.Runtime.binding.max_concurrent

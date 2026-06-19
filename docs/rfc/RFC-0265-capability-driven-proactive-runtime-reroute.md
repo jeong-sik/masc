@@ -141,14 +141,17 @@ RFC-0260 (provider health gate); §7.
 
 ### 3.3 Visibility (non-silent — RFC-0126/0145)
 
-A reroute is recorded, never silent:
+A reroute is recorded, never silent. v1 (this PR) emits a structured `WARN` log
+at the dispatch site (`keeper_turn_driver.run_named`):
 
-- emit a `Runtime_observation.runtime_fallback_event`
-  (`lib/runtime/runtime_observation.ml`, `record_fallback_event`) tagged
-  `reason = "modality_reroute"` with `from`/`to` runtime ids;
-- surface an operator-visible note on the turn ("turn rerouted
-  `<assigned>` → `<chosen>`: assigned model lacks `<modality>` input"), so the
-  keeper chat shows which model actually answered.
+```
+<keeper>: RFC-0265 modality reroute <assigned> -> <chosen> (<reason>)
+```
+
+Deferred follow-up: a typed `Runtime_observation.runtime_fallback_event`
+(`record_fallback_event`, tagged `modality_reroute`) and a keeper-chat-surfaced
+note so the dashboard shows which model actually answered. The WARN log satisfies
+the non-silent floor now; the richer surfaces improve operator ergonomics later.
 
 This satisfies the silent-fallback-elimination discipline: the assignment SSOT
 still says X, but the operator can see that this specific media turn ran on Y and
@@ -196,34 +199,52 @@ must match the provider's actual `/api/show`. Adding
 provider accepts documents) to those `.capabilities` blocks is a precondition,
 tracked separately from this code change.
 
-## 5. As-built surface (planned)
+## 5. As-built surface
 
-- `Runtime_agent.decide_modality_reroute` (pure) + `reroute_decision` type;
-  exposed in `runtime_agent.mli` for testing.
-- `Runtime.media_failover : unit -> string list` + load-time validation in
-  `Runtime.load_list` / `init_default` (mirrors `librarian_runtime_id`),
-  surfaced through `runtime.mli`; parsed in `lib/runtime/runtime_toml.ml`.
-- Keeper pre-dispatch (`keeper_unified_turn_pre_dispatch.ml` /
-  `keeper_turn.ml`): consult `decide_modality_reroute`; on `Reroute`, build the
-  runtime execution against the chosen id and record the visible event; on
-  `No_capable_runtime`, return the existing loud error.
+- `Runtime_agent.reroute_decision` type + `decide_modality_reroute` (pure) +
+  `decide_modality_reroute_for_runtime` (gathers candidates from the runtime
+  cache, then decides) + `input_capabilities_of_runtime` /
+  `media_reroute_candidates` helpers; all surfaced in `runtime_agent.mli`.
+- The accept predicate `caps_admit_required_modalities` is extracted and shared by
+  both `validate_content_blocks_against_capabilities` (the gate) and the reroute
+  decision, so a runtime the reroute picks is exactly one the gate would admit.
+- `Runtime.media_failover : unit -> string list` + `validate_media_failover`
+  load-time validation in `materialize_config` / `load_list` / `init_default`
+  (mirrors `librarian_runtime_id`); `media_failover : string list` added to
+  `Runtime_schema.config`; parsed in `lib/runtime/runtime_toml.ml`. `load_list`
+  becomes a 6-tuple.
+- Keeper dispatch (`keeper_turn_driver.run_named`, the single-runtime seam): for a
+  turn with content blocks, consult `decide_modality_reroute_for_runtime`; on
+  `Reroute`, rebind `runtime_id`/`runtime` to the chosen runtime (the existing
+  downstream candidate/config construction follows) and emit the WARN log; on
+  `No_reroute_needed`/`No_capable_runtime`, keep the assigned runtime (the loud
+  gate in `run_blocks` rejects when no runtime qualifies). Text turns
+  (`goal_blocks = None`) are untouched.
 - No OAS change. No `keeper_error_classify.ml` change.
 
 ## 6. Tests
 
-`test/test_runtime_modality_reroute.ml` (planned, self-initialising):
+`test/test_runtime_modality_reroute.ml` (7 cases, pure — no `Runtime.init_*`
+since the decision takes the candidate list as data):
 
-1. text-only turn on a text-only runtime → `No_reroute_needed`;
-2. image turn on a vision runtime → `No_reroute_needed`;
-3. image turn on a text-only runtime with a capable candidate → `Reroute` to the
-   first capable id in order;
-4. explicit `media_failover` order is honoured over declaration order;
+1. text-only turn (required = []) → `No_reroute_needed`;
+2. image turn on a vision-capable runtime → `No_reroute_needed`;
+3. image turn on a text-only runtime with capable candidates → `Reroute` to the
+   first capable id, skipping the text-only candidate;
+4. candidate ordering honoured (first listed capable wins — pins
+   `media_failover` precedence);
 5. image turn with **no** capable candidate → `No_capable_runtime` (floor);
-6. `media_failover` with an unresolved id → load error (no silent drop);
-7. determinism: identical inputs → identical decision across repeated calls.
+6. determinism: identical inputs → identical decision;
+7. `caps_admit_required_modalities`: all-supported multi-modality admits, a
+   missing modality rejects, empty required always admits.
 
-`dune build @check` and `dune build .` green; existing capability-gate tests
-(`test_gate_keeper_backend.ml`) unchanged.
+`load_list` 6-tuple consumers (`test_runtime_config_validity`,
+`test_runtime_provider_auth_headers`) updated and green; the capability-gate suite
+(`test_gate_keeper_backend.ml`, 52 cases) is unchanged by the
+`caps_admit_required_modalities` extraction. Load-time `media_failover`
+id-resolution validation (`validate_media_failover`) follows the existing
+`librarian`/`cross_verifier` pattern (covered by the runtime-config validity
+suite's pattern); `dune build lib` green.
 
 ## 7. Non-goals / deferred
 

@@ -148,6 +148,13 @@ type config =
         keeper absent from this table routes to the default runtime; an
         assignment to an unknown id is rejected at load. The id is an opaque
         binding key (only the OAS adapter parses it into provider/model/spec). *)
+  ; media_failover : string list
+    (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted
+        when a turn's input modality (image/audio/document) exceeds the assigned
+        runtime's declared capabilities; the turn reroutes to the first that
+        admits it. [[]] = derive capable runtimes from declared
+        [\[models.*.capabilities\]] in declaration order. Each id must resolve to
+        a configured runtime (rejected at load like [\[runtime\].default]). *)
   }
 [@@deriving show, eq]
 

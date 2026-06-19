@@ -31,18 +31,24 @@ val decide_capability_gate :
 
 val load_list :
   config_path:string
-  -> ( t list * t * (string * string) list * string option * string option
+  -> ( t list
+       * t
+       * (string * string) list
+       * string option
+       * string option
+       * string list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
-    keeper_assignments, librarian_runtime_id, cross_verifier_runtime_id)]. Fails
-    ([Error]) if [\[runtime\].default] is missing / unresolved, if any
-    [\[runtime.assignments\]] target does not resolve to a configured runtime, or
-    if [\[runtime\].librarian] / [\[runtime\].cross_verifier] is set to an
-    unresolved id (mirrors default validation — no silent fallback for a typo'd
-    id). [keeper_assignments] is the keeper→runtime-id list; the two trailing
-    options are the memory-os librarian and the anti-rationalization evaluator
-    runtimes. *)
+    keeper_assignments, librarian_runtime_id, cross_verifier_runtime_id,
+    media_failover)]. Fails ([Error]) if [\[runtime\].default] is missing /
+    unresolved, if any [\[runtime.assignments\]] target does not resolve to a
+    configured runtime, if [\[runtime\].librarian] / [\[runtime\].cross_verifier]
+    is set to an unresolved id, or if any [\[runtime\].media_failover] entry does
+    not resolve (mirrors default validation — no silent fallback for a typo'd id).
+    [keeper_assignments] is the keeper→runtime-id list; the two trailing options
+    are the memory-os librarian and the anti-rationalization evaluator runtimes;
+    [media_failover] is the RFC-0265 ordered reroute list. *)
 
 val runtime_ids : t list -> string list
 
@@ -92,6 +98,13 @@ val librarian_runtime_id : unit -> string option
     so a [Some] always resolves to a configured runtime.
     [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] overrides this at the librarian
     call site. *)
+
+val media_failover : unit -> string list
+(** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
+    turn's input modality exceeds the assigned runtime's declared capabilities;
+    the turn reroutes to the first that admits it. [[]] = derive capable runtimes
+    from declared [\[models.*.capabilities\]] in declaration order. Every entry is
+    validated at load so each resolves to a configured runtime. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id

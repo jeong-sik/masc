@@ -419,28 +419,38 @@ let multimodal_capability_error ~provider_label ~required ~supported ~reason =
              (render supported)
        })
 
+(* Pure accept predicate shared by the dispatch capability gate
+   ([validate_content_blocks_against_capabilities]) and the RFC-0265 modality
+   reroute decision ([decide_modality_reroute]). A single predicate guarantees
+   the invariant: a runtime the reroute picks as "capable" is exactly a runtime
+   the gate would admit, so a reroute never lands on a runtime the gate then
+   rejects. *)
+let caps_admit_required_modalities
+    (caps : Llm_provider.Capabilities.capabilities) (required : string list) =
+  List.for_all (supports_required_modality caps) required
+  && (List.length required <= 1 || supports_multimodal_bundle caps)
+
 let validate_content_blocks_against_capabilities
     ~(provider_label : string)
     (caps : Llm_provider.Capabilities.capabilities)
     (blocks : Agent_sdk.Types.content_block list) =
   let required = required_modalities_of_content_blocks blocks in
   let supported = supported_modalities_of_capabilities caps in
-  match
-    List.filter
-      (fun modality -> not (supports_required_modality caps modality))
-      required
-  with
-  | unsupported :: _ ->
-      Error
-        (multimodal_capability_error
-           ~provider_label
-           ~required
-           ~supported
-           ~reason:(Printf.sprintf "unsupported %s input" unsupported))
-  | [] ->
-      if List.length required <= 1 || supports_multimodal_bundle caps then
-        Ok ()
-      else
+  if caps_admit_required_modalities caps required then Ok ()
+  else
+    match
+      List.filter
+        (fun modality -> not (supports_required_modality caps modality))
+        required
+    with
+    | unsupported :: _ ->
+        Error
+          (multimodal_capability_error
+             ~provider_label
+             ~required
+             ~supported
+             ~reason:(Printf.sprintf "unsupported %s input" unsupported))
+    | [] ->
         Error
           (multimodal_capability_error
              ~provider_label
@@ -474,6 +484,36 @@ let input_capabilities_for_config (config : config) =
       in
       apply_runtime_model_input_capabilities caps model_caps
 
+(* Effective input capabilities of a materialized runtime (RFC-0265 reroute
+   candidate scoring). Same composition as [input_capabilities_for_config]:
+   provider caps overlaid with the model's declared media capabilities (the MASC
+   SSOT, [apply_runtime_model_input_capabilities]). *)
+let input_capabilities_of_runtime (rt : Runtime.t) =
+  apply_runtime_model_input_capabilities
+    (provider_caps_of_config rt.Runtime.provider_config)
+    (Option.value rt.Runtime.model.capabilities
+       ~default:Runtime_schema.model_capabilities_default)
+
+(* Ordered (runtime_id, input_caps) reroute candidates: [\[runtime\].media_failover]
+   order first (validated at load to resolve), then the remaining configured
+   runtimes in declaration order, excluding [exclude] (the assigned runtime).
+   Deterministic — no provider liveness (RFC-0260 deferred). *)
+let media_reroute_candidates ~(exclude : string) :
+    (string * Llm_provider.Capabilities.capabilities) list =
+  let all = Runtime.get_runtimes () in
+  let failover = Runtime.media_failover () in
+  let by_id id =
+    List.find_opt (fun (r : Runtime.t) -> String.equal r.Runtime.id id) all
+  in
+  let from_failover = List.filter_map by_id failover in
+  let rest =
+    List.filter (fun (r : Runtime.t) -> not (List.mem r.Runtime.id failover)) all
+  in
+  from_failover @ rest
+  |> List.filter (fun (r : Runtime.t) -> not (String.equal r.Runtime.id exclude))
+  |> List.map (fun (r : Runtime.t) ->
+       (r.Runtime.id, input_capabilities_of_runtime r))
+
 let validate_content_blocks_for_config
     ~(config : config)
     (blocks : Agent_sdk.Types.content_block list) =
@@ -481,6 +521,52 @@ let validate_content_blocks_for_config
     ~provider_label:(provider_label config.provider_cfg)
     (input_capabilities_for_config config)
     blocks
+
+(* RFC-0265: capability-driven proactive runtime reroute. A pure decision from
+   the turn's required input modalities and the candidate runtimes' declared
+   capabilities — no I/O, no provider liveness (liveness-aware skipping is
+   deferred to RFC-0260), so two identical turns reroute identically. The caller
+   gathers [candidates] from the configured runtimes (media_failover order, then
+   declaration order) and resolves [assigned_caps]/[candidate caps] via
+   [input_capabilities_for_config]. *)
+type reroute_decision =
+  | No_reroute_needed
+  | Reroute of { to_runtime_id : string; reason : string }
+  | No_capable_runtime of { required : string list }
+
+let decide_modality_reroute
+    ~(assigned_caps : Llm_provider.Capabilities.capabilities)
+    ~(required_modalities : string list)
+    ~(candidates : (string * Llm_provider.Capabilities.capabilities) list) :
+    reroute_decision =
+  if caps_admit_required_modalities assigned_caps required_modalities then
+    No_reroute_needed
+  else
+    match
+      List.find_opt
+        (fun (_id, caps) ->
+          caps_admit_required_modalities caps required_modalities)
+        candidates
+    with
+    | Some (to_runtime_id, _caps) ->
+        Reroute
+          { to_runtime_id
+          ; reason =
+              Printf.sprintf
+                "assigned runtime lacks %s input"
+                (String.concat "," required_modalities)
+          }
+    | None -> No_capable_runtime { required = required_modalities }
+
+(* Keeper-dispatch convenience (RFC-0265): gather candidates from the runtime
+   cache and decide a reroute for [assigned] given the turn's [blocks]. Pure
+   [decide_modality_reroute] over impure candidate gathering. *)
+let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
+    (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
+  decide_modality_reroute
+    ~assigned_caps:(input_capabilities_of_runtime assigned)
+    ~required_modalities:(required_modalities_of_content_blocks blocks)
+    ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
 
 module For_testing = struct
   let request_runtime_fields_on_base_config =
@@ -494,6 +580,7 @@ module For_testing = struct
     runtime_observation_for_terminal_config
   let decide_clock_for_idle = decide_clock_for_idle
   let required_modalities_of_content_blocks = required_modalities_of_content_blocks
+  let caps_admit_required_modalities = caps_admit_required_modalities
   let validate_content_blocks_against_capabilities =
     validate_content_blocks_against_capabilities
   let apply_runtime_model_input_capabilities =

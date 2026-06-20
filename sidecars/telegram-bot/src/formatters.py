@@ -10,7 +10,7 @@ import html
 import re
 from typing import Any
 
-TELEGRAM_MESSAGE_LIMIT = 4096
+from .config import TELEGRAM_MESSAGE_LIMIT
 
 _RE_STATE_BLOCK = re.compile(
     r"\[STATE\].*?(?:\[/STATE\]|$)", re.DOTALL

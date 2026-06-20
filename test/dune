@@ -667,6 +667,13 @@
  (modules test_runtime_modality_reroute)
  (libraries masc_test_deps))
 
+; RFC-0267 Phase 1: registry goal_id projection onto the /execution task wire.
+
+(test
+ (name test_dashboard_goal_id_projection)
+ (modules test_dashboard_goal_id_projection)
+ (libraries masc_test_deps))
+
 ; Group 2: Property-based tests (QCheck)
 
 (tests

@@ -4,7 +4,7 @@ import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
 import type {
-  BoardActorIdentity, BoardPost, BoardComment, BoardReactionSummary,
+  BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
@@ -426,6 +426,23 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
   }
 }
 
+// RFC-0233 §7: parse the typed origin object (post_to_yojson_with_karma emits
+// turn_ref / source / fusion_run_id). Parse, don't repair: a non-object or an
+// all-absent origin -> null (no empty record); each sub-field degrades
+// independently. Never throws, never drops the post.
+function normalizeBoardPostOrigin(raw: unknown): BoardPostOrigin | null {
+  if (!isRecord(raw)) return null
+  const turnRef = asNullableString(raw.turn_ref)
+  const source = asNullableString(raw.source)
+  const fusionRunId = asNullableString(raw.fusion_run_id)
+  if (turnRef === null && source === null && fusionRunId === null) return null
+  return {
+    ...(turnRef !== null ? { turn_ref: turnRef } : {}),
+    ...(source !== null ? { source } : {}),
+    ...(fusionRunId !== null ? { fusion_run_id: fusionRunId } : {}),
+  }
+}
+
 function normalizeBoardPost(raw: unknown): BoardPost | null {
   if (!isRecord(raw)) return null
   const id = asString(raw.id, '').trim()
@@ -507,6 +524,7 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     moderation_status: normalizeBoardModerationStatus(raw.moderation_status),
     contributor_quality: normalizeBoardContributorQuality(raw.contributor_quality),
     ...(reactions !== undefined ? { reactions } : {}),
+    origin: normalizeBoardPostOrigin(raw.origin),
   }
 }
 

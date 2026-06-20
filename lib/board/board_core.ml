@@ -16,6 +16,26 @@ let get_post store ~post_id : (post, board_error) Result.t =
       | None -> Error (Post_not_found post_id))
 ;;
 
+(* RFC-0233 §7 guard #2: exact O(1) index lookups, mirroring [get_post] by
+   primary key. The index is keyed on the full join string (turn_ref =
+   "trace#turn", or the fusion run_id) — never a meta_json substring or a
+   time-window heuristic. A miss returns [None] (no scan, no false positive). *)
+let find_post_by_turn_ref store ~turn_ref : post option =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    match Hashtbl.find_opt store.posts_by_turn_ref turn_ref with
+    | None -> None
+    | Some pid -> Hashtbl.find_opt store.posts pid)
+;;
+
+let find_post_by_run_id store ~run_id : post option =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    match Hashtbl.find_opt store.posts_by_run_id run_id with
+    | None -> None
+    | Some pid -> Hashtbl.find_opt store.posts pid)
+;;
+
 (* Reads post + comments under a single critical section. The previous
    two-call sequence (get_post then get_comments) acquired
    [store.mutex] twice with [maybe_sweep] dispatching to the flusher

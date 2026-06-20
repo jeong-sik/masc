@@ -205,10 +205,21 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
     in
     (* board post를 *먼저* 만들어 post id를 확보한다 — 이 id가 키퍼 chat의 fusion block
        lazy-fetch 키이기 때문이다(대시보드가 board meta_json에서 패널/심판을 펼친다). *)
+    (* RFC-0233 §7: typed origin. [fusion_run_id] is in scope here ([run_id]),
+       so a real index ([posts_by_run_id]) can key on it instead of the legacy
+       meta_json substring. [turn_ref = None]: fusion is an out-of-band
+       server-root-switch fork, so the triggering keeper's turn_ref is not in
+       this scope; threading it through [fusion_request] is a separate change.
+       The legacy meta_json [run_id] (above) is kept ADDITIVELY this release —
+       existing dashboard / on-disk readers depend on it; its removal is a
+       later migration, not this PR. *)
+    let origin : Board.post_origin =
+      { turn_ref = None; source = Some "fusion"; fusion_run_id = Some run_id }
+    in
     let board_result =
       Board_dispatch.create_post ~author:keeper ~content:board_headline
         ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
-        ~ttl_hours:board_post_ttl_hours ()
+        ~ttl_hours:board_post_ttl_hours ~origin ()
     in
     (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
        상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat

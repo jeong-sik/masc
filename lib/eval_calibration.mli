@@ -71,8 +71,38 @@ val get_store : unit -> Dated_jsonl.t
 val reset_store_for_testing : unit -> unit
 (** Reset the store reference.  For testing only. *)
 
+val set_store : base_dir:string -> unit
+(** Set the process-local verdict store to an explicit isolated directory.
+    Used by offline eval tooling after verdict-store isolation checks and by
+    tests through [set_store_for_testing]. *)
+
 val set_store_for_testing : base_dir:string -> unit
-(** Set store to a custom directory.  For testing only. *)
+(** Compatibility alias for [set_store] used by tests. *)
+
+val resolve_record_verdicts_store :
+  ?cwd:string ->
+  record_verdicts:bool ->
+  verdict_store_dir:string option ->
+  live_store_dir:string option ->
+  unit ->
+  (string option, string) result
+(** Decide where an offline eval's [--record-verdicts] verdicts go, refusing to
+    write the live store or any child path under it after best-effort
+    lexical/realpath normalization. [Ok None] = not recording; [Ok (Some dir)] =
+    isolated store; [Error] = missing/colliding-with-live store dir. Pass [~cwd]
+    in tests to make relative-path normalization deterministic. *)
+
+val resolve_record_verdicts_evaluator :
+  record_verdicts:bool ->
+  generator_runtime:string ->
+  evaluator_runtime:string option ->
+  cross_verifier_runtime:string option ->
+  (string option, string) result
+(** Decide which runtime label is passed to the verdict judge. When recording
+    verdicts, an explicit [evaluator_runtime] is trimmed and accepted, including
+    intentional same-model overrides. When omitted, [cross_verifier_runtime] must
+    be configured and distinct from [generator_runtime], so the default path does
+    not silently collapse cross-model evaluation to the generator. *)
 
 (** {1 Hashing} *)
 

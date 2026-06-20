@@ -113,9 +113,141 @@ let get_store () =
 (** Reset the store reference.  For testing only. *)
 let reset_store_for_testing () = store_ref := None
 
-(** Create a store with a custom base directory.  For testing only. *)
-let set_store_for_testing ~base_dir =
+(** Set the process-local verdict store to an explicit isolated directory.
+    Offline eval tooling uses this after verdict-store isolation checks; tests
+    use [set_store_for_testing] as a compatibility alias. *)
+let set_store ~base_dir =
   store_ref := Some (Dated_jsonl.create ~base_dir ())
+
+let set_store_for_testing = set_store
+
+(** Resolve where an offline eval tool's [--record-verdicts] verdicts are
+    written. Such a tool drives a real judge and persists verdicts; if those
+    land in the live ledger ([base_path ()] = $MASC_BASE_PATH/data/verdicts)
+    they contaminate production {!calibration_stats} and the dashboard (see
+    docs/design/completion-trust-calibration-wiring.md D3). We therefore refuse
+    a silent default to the live store (an "unknown -> permissive default" is the
+    exact failure mode this guards against) and require an explicit isolated
+    scratch path that is not the live store. [live_store_dir] is the caller's
+    live verdict store ([None] when no live store exists), passed in so tests can
+    supply a deterministic base path.
+
+    - [record_verdicts = false] -> [Ok None] (nothing to record).
+    - no [verdict_store_dir] -> [Error] (no silent fallback to the live store).
+    - [verdict_store_dir] equal to or below [live_store_dir] -> [Error] (would
+      pollute).
+    - otherwise -> [Ok (Some dir)]. *)
+(* Local by design: this guard needs absolute lexical cleanup that composes with
+   existing-prefix realpath for paths that may not exist yet. Env/basepath
+   normalizers deliberately carry broader policy such as HOME expansion. *)
+let lexical_normalize_abs abs =
+  let parts = String.split_on_char '/' abs in
+  let stack = ref [] in
+  List.iter
+    (function
+      | "" | "." -> ()
+      | ".." ->
+        (match !stack with
+         | _ :: rest -> stack := rest
+         | [] -> ())
+      | part -> stack := part :: !stack)
+    parts;
+  "/" ^ String.concat "/" (List.rev !stack)
+;;
+
+let lexical_abs ?cwd raw =
+  let abs =
+    if Filename.is_relative raw then
+      Filename.concat (match cwd with Some d -> d | None -> Sys.getcwd ()) raw
+    else
+      raw
+  in
+  lexical_normalize_abs abs
+;;
+
+let rec realpath_existing_prefix abs =
+  try Unix.realpath abs with
+  | Unix.Unix_error _ | Invalid_argument _ | Sys_error _ ->
+    let parent = Filename.dirname abs in
+    if String.equal parent abs then abs
+    else
+      let parent_real = realpath_existing_prefix parent in
+      lexical_normalize_abs (Filename.concat parent_real (Filename.basename abs))
+;;
+
+let normalize_for_store_collision ?cwd raw =
+  raw |> lexical_abs ?cwd |> realpath_existing_prefix |> lexical_normalize_abs
+;;
+
+let same_or_child_path ~parent child =
+  String.equal child parent
+  || (not (String.equal parent "/")
+      && String.length child > String.length parent
+      && child.[String.length parent] = '/'
+      && String.sub child 0 (String.length parent) = parent)
+;;
+
+let resolve_record_verdicts_store ?cwd ~record_verdicts ~verdict_store_dir
+    ~(live_store_dir : string option) () : (string option, string) result =
+  if not record_verdicts then Ok None
+  else
+    let is_live d =
+      match live_store_dir with
+      | Some l ->
+        let candidate = normalize_for_store_collision ?cwd d in
+        let live = normalize_for_store_collision ?cwd l in
+        same_or_child_path ~parent:live candidate
+      | None -> false
+    in
+    match verdict_store_dir with
+    | None ->
+      Error
+        "--record-verdicts requires --verdict-store-dir DIR (an isolated scratch \
+         path); refusing to write the live verdict store."
+    | Some d when String.trim d = "" ->
+      Error "--verdict-store-dir must not be empty."
+    | Some d when is_live d ->
+      Error
+        (Printf.sprintf
+           "--verdict-store-dir %s is inside the live verdict store; pick an \
+            isolated scratch path so the eval does not contaminate production \
+            calibration."
+           d)
+    | Some d -> Ok (Some d)
+;;
+
+let missing_cross_verifier_error =
+  "--record-verdicts without --evaluator-runtime requires [runtime].cross_verifier \
+   (routes.cross_verifier); configure it in runtime.toml or pass \
+   --evaluator-runtime ID"
+;;
+
+let resolve_record_verdicts_evaluator ~record_verdicts ~generator_runtime
+    ~evaluator_runtime ~cross_verifier_runtime : (string option, string) result =
+  if not record_verdicts then Ok evaluator_runtime
+  else
+    match evaluator_runtime with
+    | Some id ->
+      let id = String.trim id in
+      if id = "" then Error "--evaluator-runtime must not be empty"
+      else Ok (Some id)
+    | None -> (
+      let generator_runtime = String.trim generator_runtime in
+      match cross_verifier_runtime with
+      | Some id ->
+        let id = String.trim id in
+        if id = "" then Error missing_cross_verifier_error
+        else if String.equal id generator_runtime then
+          Error
+            (Printf.sprintf
+               "--record-verdicts without --evaluator-runtime requires \
+                [runtime].cross_verifier to be distinct from --runtime (%s); \
+                pass --evaluator-runtime ID to make same-model evaluation \
+                explicit."
+               generator_runtime)
+        else Ok None
+      | None -> Error missing_cross_verifier_error)
+;;
 
 (* ================================================================ *)
 (* Hashing                                                           *)

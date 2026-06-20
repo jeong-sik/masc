@@ -19,7 +19,7 @@ let sample_episode () =
     {|{"episode_summary":"s","claims":[{"claim":"c","confidence":0.9,"category":"fact","source_turn":0}],"open_items":[],"constraints":[],"preserved_tool_refs":[]}|}
   in
   let inp = { Lib.trace_id = "t"; generation = 0; messages = [] } in
-  match Lib.episode_of_output ~now:1_000_000.0 inp raw with
+  match Lib.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
   | Some ep -> ep
   | None -> Alcotest.fail "fixture episode failed to parse"
 
@@ -237,7 +237,7 @@ let test_cadence_step_keyed () =
 
 let parse_ep raw =
   let inp = { Lib.trace_id = "tolerant-t"; generation = 0; messages = [] } in
-  Lib.episode_of_output ~now:1_000_000.0 inp raw
+  Lib.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw
 ;;
 
 let test_parses_markdown_wrapped () =

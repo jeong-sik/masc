@@ -422,7 +422,7 @@ let test_librarian_accepts_integer_confidence () =
     }
   in
   let raw = valid_librarian_output () |> Yojson.Safe.to_string in
-  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
   | Some episode ->
     (match episode.Types.claims with
      | [ fact ] ->
@@ -449,11 +449,11 @@ let test_librarian_generation_override () =
   in
   let raw = valid_librarian_output () |> Yojson.Safe.to_string in
   match
-    ( Librarian.episode_of_output ~now:1_000_000.0 inp raw
+    ( Librarian.episode_of_output ~now:1_000_000.0 ~generation:4 inp raw
     , Librarian.episode_of_output ~now:1_000_000.0 ~generation:11 inp raw )
   with
-  | Some fallback, Some fresh ->
-    Alcotest.(check int) "default keeps input generation" 4 fallback.Types.generation;
+  | Some explicit_input, Some fresh ->
+    Alcotest.(check int) "explicit input generation" 4 explicit_input.Types.generation;
     Alcotest.(check int) "override uses fresh generation" 11 fresh.Types.generation
   | _ -> Alcotest.fail "expected librarian output to parse"
 ;;
@@ -491,7 +491,7 @@ let test_librarian_ephemeral_fact_has_ttl () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-ttl"; generation = 0; messages = [ text_message "x" ] }
   in
-  match Librarian.episode_of_output ~now inp output with
+  match Librarian.episode_of_output ~now ~generation:inp.generation inp output with
   | Some episode ->
     let find cat =
       List.find (fun f -> f.Types.category = cat) episode.Types.claims
@@ -525,7 +525,7 @@ let test_librarian_accepts_wrapped_json_output () =
   in
   List.iter
     (fun (name, raw) ->
-       match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+       match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
        | Some episode ->
          Alcotest.(check int)
            (name ^ " claim count")
@@ -557,7 +557,7 @@ let test_librarian_defaults_missing_optional_lists () =
       ]
     |> Yojson.Safe.to_string
   in
-  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
   | Some episode ->
     Alcotest.(check (list string)) "open_items defaults" [] episode.Types.open_items;
     Alcotest.(check (list string)) "constraints defaults" [] episode.Types.constraints;
@@ -651,7 +651,7 @@ let test_librarian_preserves_admission_memory_text () =
       ]
     |> Yojson.Safe.to_string
   in
-  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
   | Some episode ->
     (match episode.Types.claims with
      | [ transient_fact; diagnostic_fact ] ->
@@ -711,7 +711,7 @@ let test_librarian_preserves_pure_admission_episode () =
       ]
     |> Yojson.Safe.to_string
   in
-  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
   | Some episode ->
     Alcotest.(check string)
       "summary preserved"
@@ -736,7 +736,7 @@ let test_librarian_rejects_invalid_claims () =
   let reject name json =
     let raw = Yojson.Safe.to_string json in
     let accepted =
-      match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+      match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
       | Some _ -> true
       | None -> false
     in

@@ -9,10 +9,11 @@ module Memory_io = Masc.Keeper_memory_os_io
 module Config_dirs = Masc.Config_dir_resolver
 
 let procedure ?(evidence = []) ?(success_count = 0) ?(failure_count = 0)
-    ?(confidence = 0.0) ?(id = "proc-test") ?(pattern = "When a pattern appears, reuse the learned action") () : P.procedure =
+    ?(confidence = 0.0) ?(id = "proc-test") ?(agent_name = "keeper")
+    ?(pattern = "When a pattern appears, reuse the learned action") () : P.procedure =
   {
     id;
-    agent_name = "keeper";
+    agent_name;
     pattern;
     evidence;
     success_count;
@@ -331,6 +332,46 @@ let test_skill_candidate_store_lists_newest_unique_draft_per_id () =
   check string "keeps same candidate id" c1.id summary.id
 ;;
 
+let test_skill_candidate_store_keeps_same_id_distinct_sources () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let candidate_for agent_name =
+    require_candidate
+      (procedure ~id:"Shared Procedure" ~agent_name
+         ~evidence:[ "proof-store://abc"; "proof-store://def"; "proof-store://ghi" ]
+         ~success_count:3 ~failure_count:0 ~confidence:1.0 ())
+  in
+  let alpha = candidate_for "alpha" in
+  let beta = candidate_for "beta" in
+  check string "display ids intentionally collide" alpha.id beta.id;
+  let write c =
+    match Store.write_candidate ~base_path c with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  let alpha_stored = write alpha in
+  let beta_stored = write beta in
+  check bool "source identity has distinct draft dirs" true
+    (not (String.equal alpha_stored.dir beta_stored.dir));
+  check bool "source identity has distinct json paths" true
+    (not (String.equal alpha_stored.json_path beta_stored.json_path));
+  check bool "alpha json remains readable" true (Sys.file_exists alpha_stored.json_path);
+  check bool "beta json remains readable" true (Sys.file_exists beta_stored.json_path);
+  let listing =
+    match Store.list_drafts ~base_path ~limit:10 with
+    | Ok listing -> listing
+    | Error msg -> fail msg
+  in
+  check int "distinct source total" 2 listing.total;
+  check int "distinct source shown" 2 listing.shown;
+  let agents =
+    listing.items
+    |> List.map (fun (item : Store.draft_summary) -> item.agent_name)
+    |> List.sort String.compare
+  in
+  check (list string) "both source agents listed" [ "alpha"; "beta" ] agents
+;;
+
 let test_skill_candidate_store_writes_post_turn_memory_fact_candidates () =
   with_temp_base_path
   @@ fun base_path ->
@@ -572,6 +613,8 @@ let () =
             test_skill_candidate_store_lists_latest_reviewable_drafts;
           test_case "lists newest unique draft per id" `Quick
             test_skill_candidate_store_lists_newest_unique_draft_per_id;
+          test_case "keeps same id candidates with distinct sources" `Quick
+            test_skill_candidate_store_keeps_same_id_distinct_sources;
           test_case "writes post-turn memory fact candidates" `Quick
             test_skill_candidate_store_writes_post_turn_memory_fact_candidates;
           test_case "recovers partial candidate artifacts" `Quick

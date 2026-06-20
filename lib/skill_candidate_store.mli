@@ -35,7 +35,12 @@ type draft_listing =
   }
 
 val drafts_dir : base_path:string -> string
+
+(** Durable artifact directory for one candidate. The directory key includes
+    source identity, not just display [id], so different keepers/sources with the
+    same candidate id do not overwrite each other. *)
 val draft_dir : base_path:string -> Skill_candidate_projection.skill_candidate -> string
+
 val index_path : base_path:string -> string
 
 (** Render a compact metadata TOML for operator review. This is intentionally

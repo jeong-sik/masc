@@ -55,12 +55,21 @@ let component_prefix raw =
   if String.length safe > 48 then String.sub safe 0 48 else safe
 ;;
 
-let safe_component raw =
-  component_prefix raw ^ "-" ^ component_hash raw
+let candidate_identity_key (candidate : Skill_candidate_projection.skill_candidate) =
+  String.concat "\n"
+    [ candidate.source_kind; candidate.agent_name; candidate.source_ref ]
+;;
+
+let summary_identity_key (summary : draft_summary) =
+  String.concat "\n" [ summary.source_kind; summary.agent_name; summary.source_ref ]
+;;
+
+let candidate_component (candidate : Skill_candidate_projection.skill_candidate) =
+  component_prefix candidate.id ^ "-" ^ component_hash (candidate_identity_key candidate)
 ;;
 
 let draft_dir ~base_path (candidate : Skill_candidate_projection.skill_candidate) =
-  Filename.concat (drafts_dir ~base_path) (safe_component candidate.id)
+  Filename.concat (drafts_dir ~base_path) (candidate_component candidate)
 ;;
 
 let candidate_json_path ~base_path candidate =
@@ -259,10 +268,11 @@ let dedup_candidates candidates =
   let seen = Hashtbl.create 16 in
   List.filter
     (fun (candidate : Skill_candidate_projection.skill_candidate) ->
-       if Hashtbl.mem seen candidate.id
+       let key = candidate_identity_key candidate in
+       if Hashtbl.mem seen key
        then false
        else (
-         Hashtbl.add seen candidate.id ();
+         Hashtbl.add seen key ();
          true))
     candidates
 ;;
@@ -356,10 +366,11 @@ let latest_unique summaries =
   let seen = Hashtbl.create 16 in
   List.filter
     (fun (summary : draft_summary) ->
-      if Hashtbl.mem seen summary.id
+      let key = summary_identity_key summary in
+      if Hashtbl.mem seen key
       then false
       else (
-        Hashtbl.add seen summary.id ();
+        Hashtbl.add seen key ();
         true))
     summaries
 ;;

@@ -24,6 +24,11 @@ type AssemblyLane =
 type WarningSeverity = 'critical' | 'warn' | 'info'
 type AssemblyStageRole = 'source_prep' | 'model_input' | 'evidence'
 
+interface AssemblyComputedRowSpec {
+  id: string
+  promptKey: string
+}
+
 interface AssemblyStageSpec {
   id: string
   order: number
@@ -33,6 +38,7 @@ interface AssemblyStageSpec {
   messageSlot: string
   summary: string
   promptKeys: string[]
+  computedRows?: AssemblyComputedRowSpec[]
 }
 
 export interface KeeperPromptAssemblyRow {
@@ -124,7 +130,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'user_message',
     role: 'model_input',
     messageSlot: 'user',
-    summary: 'Current task, workspace state, and turn intent.',
+    summary: 'Current task, workspace state, scheduler signals, and turn intent.',
     promptKeys: [
       'keeper.unified.system',
       'keeper.turn_intent',
@@ -135,6 +141,10 @@ const STAGES: AssemblyStageSpec[] = [
       'keeper.turn_intent.board_curation_guidance',
       'keeper.turn_intent.broadcast_guidance',
       'keeper.immediate_task_move',
+    ],
+    computedRows: [
+      { id: 'world-observation', promptKey: '(computed:world_observation)' },
+      { id: 'scheduled-automation', promptKey: '(computed:scheduled_automation)' },
     ],
   },
   {
@@ -270,7 +280,7 @@ function stageRows(rows: KeeperPromptAssemblyRow[], stage: AssemblyStageSpec): K
 function buildStages(rows: KeeperPromptAssemblyRow[]): KeeperPromptAssemblyStage[] {
   return STAGES.map(stage => {
     const rowsForStage = stageRows(rows, stage)
-    const promptCount = rowsForStage.filter(row => row.promptKey !== '(computed)').length
+    const promptCount = rowsForStage.filter(row => row.source !== 'computed').length
     return {
       id: stage.id,
       order: stage.order,
@@ -295,14 +305,19 @@ export function buildKeeperPromptAssemblyReport(
   const promptByKey = new Map(prompts.map(prompt => [prompt.key, prompt]))
   const rows: KeeperPromptAssemblyRow[] = []
 
-  for (const stage of STAGES) {
-    if (stage.promptKeys.length === 0) {
+  function pushComputedRows(stage: AssemblyStageSpec) {
+    const computedRows =
+      stage.computedRows ?? (stage.promptKeys.length === 0
+        ? [{ id: 'computed', promptKey: '(computed)' }]
+        : [])
+
+    for (const row of computedRows) {
       rows.push({
-        id: `${stage.id}:computed`,
+        id: `${stage.id}:${row.id}`,
         order: stage.order,
         title: stage.title,
         lane: stage.lane,
-        promptKey: '(computed)',
+        promptKey: row.promptKey,
         source: 'computed',
         hasOverride: false,
         filePath: null,
@@ -311,6 +326,12 @@ export function buildKeeperPromptAssemblyReport(
         fingerprint: '-',
         missing: false,
       })
+    }
+  }
+
+  for (const stage of STAGES) {
+    if (stage.promptKeys.length === 0) {
+      pushComputedRows(stage)
       continue
     }
 
@@ -332,6 +353,8 @@ export function buildKeeperPromptAssemblyReport(
         missing: !prompt || prompt.source === 'missing',
       })
     }
+
+    pushComputedRows(stage)
   }
 
   const keeperPrompts = prompts.filter(prompt =>

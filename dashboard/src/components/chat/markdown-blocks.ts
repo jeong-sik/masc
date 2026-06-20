@@ -142,12 +142,56 @@ function parseParagraph(token: Tokens.Paragraph): ChatBlock | ChatBlock[] | null
   return html ? { t: 'p', html } : null
 }
 
+// A fenced code block opens with ``` or ~~~ at the start of the token's raw
+// source. When the model never writes the matching closing fence, CommonMark
+// (and marked, verified against 18.0.3) absorbs every following line — including
+// plain prose — into the single code token. The resulting code block traps the
+// prose in a monospace box, which is the user-reported symptom.
+const FENCE_OPEN_RE = /^\s*(`{3,}|~{3,})/
+const FENCE_CLOSE_RE = /(`{3,}|~{3,})\s*$/
+
+/**
+ * True when a code token is a fenced block that was opened but never closed.
+ *
+ * Detection: the token's `raw` starts with a fence but does not end with one.
+ * - Closed fence: raw ends with ``` / ~~~  → real code, keep as {t:'code'}.
+ * - Unterminated: raw ends with absorbed prose, not a fence → demote to text.
+ * - Indented code block (4-space, no fence): raw does not start with a fence,
+ *   so it is left untouched.
+ *
+ * This does not inspect the *kind* of closing fence (``` vs ~~~); marked only
+ * closes a fence with the same character that opened it, so a token that ends
+ * with any fence-looking line is already a closed block here.
+ */
+export function isUnterminatedFence(token: Tokens.Code): boolean {
+  const raw = token.raw
+  if (!FENCE_OPEN_RE.test(raw)) return false
+  return !FENCE_CLOSE_RE.test(raw.trimEnd())
+}
+
 function parseCode(token: Tokens.Code): ChatBlock {
   const lang = token.lang?.trim().toLowerCase() || undefined
   if (lang?.startsWith('mermaid')) {
     return { t: 'mermaid', source: token.text }
   }
   return { t: 'code', cap: lang, html: escapeHtml(token.text) }
+}
+
+// WORKAROUND: render an unterminated fence's absorbed body as prose instead of a
+// code box. The root cause is upstream — the LLM keeper opened a fence and never
+// closed it — and the front-end cannot recover the author's intent, so it
+// renders ambiguous input in the most readable way. We do not inject a synthetic
+// closing fence: that would still trap the prose in a code box, which is the
+// exact complaint. Trade-off: genuinely truncated code (a real snippet cut off
+// mid-fence) also renders as prose rather than a code block.
+//
+// Content is HTML-escaped (no inline markdown parsing) because the absorbed body
+// may itself be code where `*`/`_`/backticks are literal, not markdown. Newlines
+// are converted to <br> so the multi-line body keeps its line breaks inside the
+// <p> element (which has white-space: normal and would otherwise collapse them).
+function parseUnterminatedFenceAsText(token: Tokens.Code): ChatBlock {
+  const html = escapeHtml(token.text).replace(/\n/g, '<br>')
+  return { t: 'p', html }
 }
 
 function parseHeading(token: Tokens.Heading): ChatBlock {
@@ -176,8 +220,14 @@ function tokenToBlock(token: Token): ChatBlock | ChatBlock[] | null {
   switch (token.type) {
     case 'paragraph':
       return parseParagraph(token as Tokens.Paragraph)
-    case 'code':
-      return parseCode(token as Tokens.Code)
+    case 'code': {
+      const codeToken = token as Tokens.Code
+      // Demote an unterminated fence so its absorbed prose is not trapped in a
+      // monospace code box (see parseUnterminatedFenceAsText).
+      return isUnterminatedFence(codeToken)
+        ? parseUnterminatedFenceAsText(codeToken)
+        : parseCode(codeToken)
+    }
     case 'heading':
       return parseHeading(token as Tokens.Heading)
     case 'list':

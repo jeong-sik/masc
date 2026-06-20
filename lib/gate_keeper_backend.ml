@@ -128,7 +128,7 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
     Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ()
   end
 
-let dispatch ~sw ~clock ~proc_mgr ~net ~config
+let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~metadata ~content =
   let keeper_name = String.trim keeper_name in
@@ -219,10 +219,25 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
     net;
   } in
   let start_time = Unix.gettimeofday () in
+  let on_text_delta =
+    match on_text_snapshot with
+    | None -> (fun _ -> ())
+    | Some publish_snapshot ->
+        let streamed_text = Buffer.create 1024 in
+        fun delta ->
+          Buffer.add_string streamed_text delta;
+          let snapshot = redact_text (Buffer.contents streamed_text) in
+          (try publish_snapshot snapshot with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+               Log.Server.warn
+                 "channel gate text snapshot callback failed (keeper=%s): %s"
+                 keeper_name (Printexc.to_string exn))
+  in
   (* Channel gate needs the final keeper reply, not the async request ACK that
      plain [Keeper_tool_surface.dispatch] returns for masc_keeper_msg. *)
   match
-    Keeper_tool_surface.dispatch_stream ~on_text_delta:(fun _ -> ()) keeper_ctx
+    Keeper_tool_surface.dispatch_stream ~on_text_delta keeper_ctx
       ~name:"masc_keeper_msg" ~args
   with
   | Some result when Tool_result.is_success result ->
@@ -252,3 +267,15 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
   | None ->
       Gate_protocol.Unavailable_result
+
+let dispatch ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content =
+  dispatch_core ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content
+
+let dispatch_with_text_snapshot ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
+    ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
+    ~keeper_name ~metadata ~content =
+  dispatch_core ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config ~channel
+    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+    ~metadata ~content

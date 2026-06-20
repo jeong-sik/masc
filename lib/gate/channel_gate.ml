@@ -55,6 +55,17 @@ type dispatch_fn =
   content:string ->
   Gate_protocol.dispatch_result
 
+type streaming_dispatch_fn =
+  on_text_snapshot:(string -> unit) ->
+  channel:string ->
+  channel_user_id:string ->
+  channel_user_name:string ->
+  channel_workspace_id:string ->
+  keeper_name:string ->
+  metadata:(string * string) list ->
+  content:string ->
+  Gate_protocol.dispatch_result
+
 (* ── Configuration ──────────────────────────────────────────── *)
 
 let max_content_length () = 4000
@@ -159,7 +170,7 @@ let validate (msg : inbound_message) =
 
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
-let handle_inbound ~dispatch (msg : inbound_message) =
+let handle_inbound_with ~dispatch (msg : inbound_message) =
   let channel = msg.channel in
   match validate msg with
   | Error e ->
@@ -219,3 +230,9 @@ let handle_inbound ~dispatch (msg : inbound_message) =
              ~duration_ms:0
              Channel_gate_metrics.Dispatch_unavailable;
            Error Dispatch_unavailable)
+
+let handle_inbound ~dispatch msg =
+  handle_inbound_with ~dispatch msg
+
+let handle_inbound_streaming ~dispatch ~on_text_snapshot msg =
+  handle_inbound_with ~dispatch:(dispatch ~on_text_snapshot) msg

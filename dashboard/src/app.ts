@@ -30,6 +30,7 @@ import {
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
 import { EmergencyStopControl } from './components/emergency-stop-control'
+import { AttentionIndicator } from './components/attention-indicator'
 import { TransportBeacon } from './components/transport-beacon'
 import { DashboardNavRail } from './components/mobile-nav'
 import { SkipLink } from './components/skip-link'
@@ -344,6 +345,7 @@ export function App() {
                 scheduler <b>${serverStatus.value ? 'healthy' : '—'}</b>
               </span>
             </div>
+            <${AttentionIndicator} />
             <span class="contents" data-mobile-detail-keep><${EmergencyStopControl} /></span>
             <${CopilotDockTopBarButton} dock=${dock} />
             <${Suspense} fallback=${authStatusFallback()}>

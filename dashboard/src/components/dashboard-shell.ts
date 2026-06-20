@@ -127,8 +127,6 @@ export function ConnectionStatus() {
   const isConnected = wsOnly
     ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
     : connected.value
-  const snap = missionSnapshot.value
-  const attentionCount = snap?.attention_queue?.length ?? 0
   const reconn = reconnectCount.value
 
   const statusLabel = isConnected
@@ -153,15 +151,11 @@ export function ConnectionStatus() {
     >
       <span class="inline-block size-[8px] rounded-[var(--r-0)] ${isConnected ? 'bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]' : 'bg-[var(--color-status-err)]'}"></span>
       <span class="status-text">${statusLabel}</span>
-      ${attentionCount > 0 ? html`
-        <${RouteLink}
-          tab="overview"
-          class="inline-flex items-center justify-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 tabular-nums attention-badge"
-        >Attention ${attentionCount}<//>
-      ` : null}
     </div>
   `
 }
+// The attention count moved out of ConnectionStatus into the categorized
+// top-bar AttentionIndicator (components/attention-indicator.ts).
 
 type DashboardHealthChipTone = 'ok' | 'warn' | 'bad' | 'muted'
 

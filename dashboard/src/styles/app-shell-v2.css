@@ -261,6 +261,19 @@
   background: color-mix(in oklab, var(--ss-warning) 8%, transparent);
 }
 
+/* bad tone — mirrors .warn with the destructive palette (AttentionIndicator). */
+.v2-app .v2-header-actions .v2-statchip.bad {
+  color: var(--ss-destructive);
+  border-color: color-mix(in oklab, var(--ss-destructive) 35%, transparent);
+  background: color-mix(in oklab, var(--ss-destructive) 8%, transparent);
+}
+
+/* The attention chip is an interactive button rather than a static span. */
+.v2-app .v2-header-actions .v2-statchip.attn {
+  cursor: pointer;
+  font-family: inherit;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    STAGE / BODY — StyleSeed card-based surface
    ═══════════════════════════════════════════════════════════════ */

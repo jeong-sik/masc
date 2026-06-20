@@ -75,7 +75,8 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
-  | Tool_masc_fusion_dispatch -> None
+  | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status -> None
 ;;
 
 (* Shell IR mechanics live under Execute lowerers. Keeper_tool_command_runtime is
@@ -130,7 +131,8 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
-  | Tool_masc_fusion_dispatch -> None
+  | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status -> None
 ;;
 
 let handle_in_process ctx descriptor args =
@@ -301,6 +303,9 @@ let handle_in_process ctx descriptor args =
          ~meta:ctx.meta
          ~args
          ())
+  | Tool_masc_fusion_status ->
+    (* read-only: reads the in-memory run registry, no server context needed. *)
+    Some (Keeper_tool_in_process_runtime.handle_masc_fusion_status ~args ())
   | Tool_execute
   | Tool_search_files
   | Tool_read_file

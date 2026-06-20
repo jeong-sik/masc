@@ -283,6 +283,19 @@ let reference_time (f : fact) =
   | None -> f.first_seen
 ;;
 
+let fact_is_user_model (fact : fact) =
+  match fact.category with
+  | Preference | Constraint -> true
+  | Blocker
+  | Code_change
+  | Ephemeral
+  | Fact
+  | Goal
+  | Lesson
+  | Validated_approach
+  | Unknown _ -> false
+;;
+
 type episode =
   { trace_id : string
   ; generation : int

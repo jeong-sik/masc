@@ -15,6 +15,10 @@ val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> strin
 val list_fact_store_keeper_ids : unit -> string list
 val list_fact_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
+(** Base-path-scoped variant of {!list_fact_store_keeper_ids}; avoids ambient
+    config-dir reads in multi-workspace dashboard routes. *)
+val list_fact_store_keeper_ids_for_base_path : base_path:string -> string list
+
 val events_path : keeper_id:string -> string
 val events_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 val episodes_dir : keeper_id:string -> string
@@ -94,6 +98,7 @@ val read_facts_all_strict : keeper_id:string -> (fact list, string) result
 val read_facts_all_strict_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> (fact list, string) result
 val read_facts_tail : keeper_id:string -> n:int -> fact list
+val read_facts_tail_for_base_path : base_path:string -> keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
 

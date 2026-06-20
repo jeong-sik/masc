@@ -18,10 +18,7 @@ let check_include target expected =
 ;;
 
 let temp_dir () =
-  let path = Filename.temp_file "memory_subsystems_dashboard_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
+  Filename.temp_dir "memory_subsystems_dashboard_test" ""
 ;;
 
 let rm_rf dir =
@@ -105,7 +102,10 @@ let test_http_json_surfaces_user_model_projection () =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let keepers_dir = Filename.concat dir "keepers" in
+      let config = Workspace_utils.default_config dir in
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
       Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
         Memory_io.append_fact
           ~keeper_id:"sangsu"
@@ -118,7 +118,6 @@ let test_http_json_surfaces_user_model_projection () =
         Memory_io.append_fact
           ~keeper_id:"sangsu"
           (fact ~category:Types.Fact "The repo uses OCaml");
-        let config = Workspace_utils.default_config dir in
         let json =
           Memory_subsystems.dashboard_memory_subsystems_http_json
             ~config
@@ -141,6 +140,38 @@ let test_http_json_surfaces_user_model_projection () =
           ; "User requires worktree-first changes"
           ]
           claims))
+;;
+
+let test_http_json_user_model_uses_config_base_path () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let base_keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
+      Memory_io.For_testing.with_keepers_dir base_keepers_dir (fun () ->
+        Memory_io.append_fact
+          ~keeper_id:"target"
+          (fact ~category:Types.Preference "Target workspace preference"));
+      let ambient_keepers_dir = Filename.concat dir "ambient-keepers" in
+      Memory_io.For_testing.with_keepers_dir ambient_keepers_dir (fun () ->
+        Memory_io.append_fact
+          ~keeper_id:"ambient"
+          (fact ~category:Types.Preference "Ambient workspace preference");
+        let json =
+          Memory_subsystems.dashboard_memory_subsystems_http_json
+            ~config
+            ~include_memory_entries:false
+            (request "/dashboard/memory-subsystems?limit=100")
+        in
+        let user_model = Json.(json |> member "user_model") in
+        let items = Json.(user_model |> member "items" |> to_list) in
+        let claims =
+          items |> List.map (fun item -> Json.(item |> member "claim" |> to_string))
+        in
+        check (list string) "scoped claims" [ "Target workspace preference" ] claims))
 ;;
 
 let () =
@@ -166,6 +197,10 @@ let () =
             "surfaces user model projection"
             `Quick
             test_http_json_surfaces_user_model_projection
+        ; test_case
+            "user model projection reads config base path"
+            `Quick
+            test_http_json_user_model_uses_config_base_path
         ] )
     ]
 ;;

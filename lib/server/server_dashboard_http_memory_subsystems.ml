@@ -89,37 +89,20 @@ let load_memory_subsystems_entries ~(config : Workspace_utils.config) =
        rows, errors)
 ;;
 
-let memory_os_fact_is_current ~now (fact : Keeper_memory_os_types.fact) =
-  match fact.valid_until with
-  | None -> true
-  | Some valid_until -> valid_until > now
-;;
-
-let is_user_model_fact (fact : Keeper_memory_os_types.fact) =
-  match fact.category with
-  | Keeper_memory_os_types.Preference | Keeper_memory_os_types.Constraint -> true
-  | Keeper_memory_os_types.Blocker
-  | Keeper_memory_os_types.Code_change
-  | Keeper_memory_os_types.Ephemeral
-  | Keeper_memory_os_types.Fact
-  | Keeper_memory_os_types.Goal
-  | Keeper_memory_os_types.Lesson
-  | Keeper_memory_os_types.Validated_approach
-  | Keeper_memory_os_types.Unknown _ -> false
-;;
-
-let load_user_model_facts () =
+let load_user_model_facts ~(config : Workspace_utils.config) =
   let now = Time_compat.now () in
-  Keeper_memory_os_io.list_fact_store_keeper_ids ()
+  let base_path = config.base_path in
+  Keeper_memory_os_io.list_fact_store_keeper_ids_for_base_path ~base_path
   |> List.fold_left
        (fun (items_acc, errors_acc) keeper ->
          try
            let items =
-             Keeper_memory_os_io.read_facts_tail
+             Keeper_memory_os_io.read_facts_tail_for_base_path
+               ~base_path
                ~keeper_id:keeper
                ~n:Keeper_memory_os_io.fact_store_max
-             |> List.filter is_user_model_fact
-             |> List.filter (memory_os_fact_is_current ~now)
+             |> List.filter Keeper_memory_os_types.fact_is_user_model
+             |> List.filter (Keeper_memory_os_types.fact_is_current ~now)
              |> List.map (fun fact -> keeper, fact)
            in
            List.rev_append items items_acc, errors_acc
@@ -216,7 +199,7 @@ let dashboard_memory_subsystems_http_json
     then load_memory_subsystems_entries ~config
     else [], []
   in
-  let all_user_model_items, user_model_errors = load_user_model_facts () in
+  let all_user_model_items, user_model_errors = load_user_model_facts ~config in
   let memory_total = List.length all_memory_entries in
   let memory_filtered =
     all_memory_entries

@@ -8,12 +8,15 @@ open Keeper_memory_os_types
 (** {1 Path helpers} *)
 
 val facts_path : keeper_id:string -> string
+val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 
 (** RFC-0244 Tier 2: keeper ids that currently have a [*.facts.jsonl] store, for
     the cross-keeper consolidation sweep. Excludes the reserved shared id; sorted. *)
 val list_fact_store_keeper_ids : unit -> string list
+val list_fact_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
 val events_path : keeper_id:string -> string
+val events_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> string
 val episodes_dir : keeper_id:string -> string
 val tool_results_dir : keeper_id:string -> string
 val tool_result_path : keeper_id:string -> tool_call_id:string -> string
@@ -51,6 +54,8 @@ val with_episode_bundle_lock :
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
+val rewrite_facts_atomically_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> fact list -> unit
 
 (** {1 Facts snapshot CAS} *)
 
@@ -81,10 +86,13 @@ val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t 
 (** {1 Bounded tail reads} *)
 
 val read_facts_all : keeper_id:string -> fact list
+val read_facts_all_for_keepers_dir : keepers_dir:string -> keeper_id:string -> fact list
 (** Read every fact in the store, failing if any JSONL row is malformed or does
     not match the fact schema. Use this before destructive rewrites so corrupt
     input cannot be partially dropped and overwritten. *)
 val read_facts_all_strict : keeper_id:string -> (fact list, string) result
+val read_facts_all_strict_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> (fact list, string) result
 val read_facts_tail : keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list

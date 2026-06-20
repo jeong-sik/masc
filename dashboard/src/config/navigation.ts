@@ -45,6 +45,7 @@ type SurfaceSectionId =
   | 'design-canvas'
   | 'performance'
   | 'memory-explore'
+  | 'keeper-memory-health'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
@@ -403,6 +404,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Memory Explore',
       description: 'Memory Lens, Lineage Rail, and Goal Dossier composition.',
       params: { section: 'memory-explore' },
+    },
+    {
+      id: 'keeper-memory-health',
+      label: '키퍼 메모리 상태',
+      description: 'Per-keeper fact-store size, GC statistics, and cadence counter.',
+      params: { section: 'keeper-memory-health' },
     },
   ],
   code: [

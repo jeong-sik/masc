@@ -3514,6 +3514,37 @@ export function fetchMemorySubsystems(
   )
 }
 
+// --- Keeper Memory Health ---
+
+export interface KeeperMemoryHealthKeeperEntry {
+  keeper_id: string
+  facts: number
+  facts_bytes: number
+  events: number
+  events_bytes: number
+  events_to_facts_ratio: number
+  ttl_expired_on_disk: number
+  near_duplicate: number
+  external_ref: number
+}
+
+export interface KeeperMemoryHealthResponse {
+  generated_at: number
+  cadence_counter_entries: number
+  keepers: KeeperMemoryHealthKeeperEntry[]
+  totals: {
+    facts: number
+    facts_bytes: number
+    events_bytes: number
+    ttl_expired_on_disk: number
+    near_duplicate: number
+  }
+}
+
+export function fetchKeeperMemoryHealth(): Promise<KeeperMemoryHealthResponse> {
+  return get<KeeperMemoryHealthResponse>('/api/v1/dashboard/keeper-memory-health')
+}
+
 // --- Verification requests (Mission detail table) ---
 // Backend: lib/dashboard/dashboard_verification.ml
 // Route:   GET /api/v1/verification/requests?task_id=&limit=

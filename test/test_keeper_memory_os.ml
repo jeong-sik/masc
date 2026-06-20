@@ -1398,6 +1398,8 @@ let test_run_reconcile_apply_advance_persists () =
       in
       Alcotest.(check int) "advanced the still-open fact" 1 report.Reconcile.advanced;
       Alcotest.(check int) "nothing demoted" 0 report.Reconcile.terminal_kept;
+      (* No concurrent writer, so the CAS matches and the rewrite is persisted. *)
+      Alcotest.(check bool) "advance committed to disk" true report.Reconcile.committed;
       (* MUTATION: dropping the [advanced > 0] write guard skips this write, so
          last_verified_at on disk would still read the old value and the ref would be
          re-verified every cycle. *)
@@ -1441,6 +1443,69 @@ let test_run_reconcile_preserves_corrupt_store () =
         "corrupt store left byte-for-byte untouched (no silent drop + overwrite)"
         before
         (read_raw ())))
+;;
+
+let test_run_reconcile_cas_abandons_on_concurrent_write () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "reconcile-cas-keeper" in
+      let now = 1_000_000.0 in
+      let horizon = 3600.0 in
+      (* One still-open ref: classify routes it to verify, and [Still_open] makes the
+         pass want to advance (advanced>0 -> it would rewrite). *)
+      Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
+      (* A verify that, on its first call, commits a concurrent write to the store (a
+         fresh fact) before returning. Because verify now runs with the facts lock
+         RELEASED, this append lands during the verify window. The reconciler must
+         then re-read under the lock, see the snapshot changed, and abandon its (now
+         stale) rewrite rather than clobbering the concurrent fact. *)
+      let injected = ref false in
+      let verify : Reconcile.verify_fn =
+        fun _r ->
+        if not !injected
+        then (
+          injected := true;
+          Memory_io.append_fact
+            ~keeper_id
+            (stale_ref_fact ~now ~id:"99" "PR #99 concurrent append"));
+        Reconcile.Still_open
+      in
+      let report =
+        Reconcile.run_reconcile ~dry_run:false ~keeper_id ~now ~horizon ~verify ()
+      in
+      Alcotest.(check int)
+        "the still-open ref was classified as an advance"
+        1
+        report.Reconcile.advanced;
+      (* The advance was NOT persisted: a concurrent writer changed the store during
+         verify, so the snapshot CAS abandoned the rewrite this cycle (re-runs next
+         tick). [committed] makes that observable to the caller. *)
+      Alcotest.(check bool)
+        "advance not committed when snapshot changed under it"
+        false
+        report.Reconcile.committed;
+      let claims =
+        List.map (fun f -> f.Types.claim) (Memory_io.read_facts_all ~keeper_id)
+      in
+      (* MUTATION: replacing the [same_fact_snapshot] CAS with an unconditional rewrite
+         persists the stale survivors (just "PR #2"), dropping the concurrently-appended
+         "PR #99" — this membership check then fails. That is the lost-update teeth, and
+         it also proves the lock was released during verify (the append could commit). *)
+      Alcotest.(check bool)
+        "concurrently-appended fact survived (not clobbered by a stale rewrite)"
+        true
+        (List.mem "PR #99 concurrent append" claims);
+      match
+        List.find_opt
+          (fun f -> String.equal f.Types.claim "PR #2 in review")
+          (Memory_io.read_facts_all ~keeper_id)
+      with
+      | Some f ->
+        Alcotest.(check (option (float 0.001)))
+          "original ref left un-advanced on disk (rewrite abandoned)"
+          (Some (now -. 100_000.0))
+          f.Types.last_verified_at
+      | None -> Alcotest.fail "the original ref must still be on disk"))
 ;;
 
 let test_gc_waits_for_fact_writer_lock () =
@@ -3132,6 +3197,10 @@ let () =
             "corrupt store aborts without overwrite (P3)"
             `Quick
             test_run_reconcile_preserves_corrupt_store
+        ; Alcotest.test_case
+            "concurrent write during verify abandons the rewrite (P3 lock offload)"
+            `Quick
+            test_run_reconcile_cas_abandons_on_concurrent_write
         ] )
     ]
 ;;

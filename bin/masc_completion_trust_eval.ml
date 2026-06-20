@@ -329,7 +329,10 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
   let on_verdict (result : AR.review_result) =
     Cal.record_verdict ~task_id ~req ~result ()
   in
-  ignore (AR.review ~sw ~evaluator_runtime ~generator_runtime ~on_verdict req)
+  let (_ : AR.review_result) =
+    AR.review ~sw ~evaluator_runtime ~generator_runtime ~on_verdict req
+  in
+  ()
 ;;
 
 let run_one (scenario : EH.scenario) ~runtime_id ~run_index ~sw ~record_verdicts

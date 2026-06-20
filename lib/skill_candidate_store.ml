@@ -236,7 +236,7 @@ let index_event_matches_candidate ~base_path
 
 let index_contains_candidate ~base_path candidate =
   let index_path = index_path ~base_path in
-  if not (Sys.file_exists index_path)
+  if not (Fs_compat.file_exists index_path)
   then Ok false
   else
     try
@@ -249,6 +249,10 @@ let index_contains_candidate ~base_path candidate =
 ;;
 
 let write_candidate_if_changed ~base_path candidate =
+  (* Artifact files and the index are intentionally checked together: a prior
+     write can leave complete artifacts but miss the final index append. The
+     next post-turn pass should repair that listing row instead of treating the
+     draft as fully persisted. *)
   let artifacts_unchanged =
     candidate_artifacts ~base_path candidate
     |> List.for_all (fun (path, expected) ->
@@ -380,7 +384,7 @@ let list_drafts ~base_path ~limit =
   let limit = max 0 limit in
   try
     let items =
-      if Sys.file_exists index_path
+      if Fs_compat.file_exists index_path
       then
         Fs_compat.load_jsonl index_path
         |> List.rev

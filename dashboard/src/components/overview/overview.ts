@@ -26,7 +26,7 @@ import { KpiStripIsland } from '../kpi-strip-island'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
 import { agents, tasks, keepers, messages, boardPosts } from '../../store'
-import type { Agent, Task, Keeper, Message, BoardPost } from '../../types/core'
+import type { Agent, Task, Keeper, Message, BoardPost, KeeperRuntimeBlockerClass } from '../../types/core'
 import { SYSTEM_ACTOR_NAME } from '../../types/core'
 import type {
   DashboardMissionResponse,
@@ -35,7 +35,7 @@ import type {
 import { openAgentDetail } from '../agent-detail-state'
 import { openTaskDetail } from '../goals/task-detail-state'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
-import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
+import { keeperDisplayStatus, keeperRuntimeBlockerLabel } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
 import { isAgentOffline } from '../../lib/agent-status'
 import { keeperRowLooksRunning } from '../../runtime-counts'
@@ -62,13 +62,32 @@ export interface KeeperAttentionReason {
   act: string
 }
 
-const DEFAULT_ATTENTION_REASON: KeeperAttentionReason = { sev: 'warn', text: '점검 필요', act: '대화 열기' }
+const DEFAULT_ATTENTION_REASON: KeeperAttentionReason = { sev: 'warn', text: '주의 사유 미보고', act: '상태 상세' }
+
+const OPERATOR_ATTENTION_BLOCKERS = new Set<KeeperRuntimeBlockerClass>([
+  'awaiting_operator',
+])
+
+const CRITICAL_ATTENTION_BLOCKERS = new Set<KeeperRuntimeBlockerClass>([
+  'exception',
+  'turn_failures',
+  'heartbeat_failures',
+])
+
+function hasOperatorAttentionBlocker(blockerClass: Keeper['runtime_blocker_class'] | null | undefined): boolean {
+  return blockerClass != null && OPERATOR_ATTENTION_BLOCKERS.has(blockerClass)
+}
+
+function hasCriticalAttentionBlocker(blockerClass: Keeper['runtime_blocker_class'] | null | undefined): boolean {
+  return blockerClass != null && CRITICAL_ATTENTION_BLOCKERS.has(blockerClass)
+}
 
 /** Map a keeper's runtime/trust state to a human attention reason.
  *  Mirrors the hard-coded ATTN_REASON table from keeper-v2/overview.jsx
  *  but derives the text from live dashboard fields. */
 export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReason {
-  const blockerLabel = keeper.runtime_blocker_class?.replace(/_/g, ' ')
+  const blockerClass = keeper.runtime_blocker_class ?? null
+  const blockerLabel = keeperRuntimeBlockerLabel(blockerClass) ?? blockerClass?.replace(/_/g, ' ')
   const attention = keeper.attention_reason?.trim() || keeper.trust?.attention_reason?.trim()
   const nextAction = keeper.next_human_action?.trim() || keeper.trust?.next_human_action?.trim()
 
@@ -80,13 +99,11 @@ export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReas
     }
   }
 
-  if (keeper.runtime_blocker_class === 'awaiting_operator') {
+  if (hasOperatorAttentionBlocker(blockerClass)) {
     return { sev: 'warn', text: attention ?? '운영자 조치 대기', act: nextAction ?? '승인 검토' }
   }
 
-  const isCritical = keeper.runtime_blocker_class === 'exception'
-    || keeper.runtime_blocker_class === 'turn_failures'
-    || keeper.runtime_blocker_class === 'heartbeat_failures'
+  const isCritical = hasCriticalAttentionBlocker(blockerClass)
     || keeper.lifecycle_phase === 'Dead'
     || keeper.lifecycle_phase === 'Crashed'
 
@@ -111,7 +128,7 @@ export function pickAttentionKeepers(keeperList: readonly Keeper[]): Keeper[] {
     k.needs_attention === true
     || k.trust?.needs_attention === true
     || k.runtime_blocker_continue_gate === true
-    || k.runtime_blocker_class === 'awaiting_operator'
+    || hasOperatorAttentionBlocker(k.runtime_blocker_class)
     || !!k.attention_reason?.trim()
     || !!k.trust?.attention_reason?.trim(),
   )

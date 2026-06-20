@@ -235,63 +235,14 @@ let payload_from_args args =
     else generic_payload_from_args args
 ;;
 
-let payload_assoc_fields payload =
-  match Schedule_domain.payload_to_yojson payload with
-  | `Assoc fields -> Some fields
-  | _ -> None
-;;
-
-let assoc_string key fields =
-  match List.assoc_opt key fields with
-  | Some (`String value) -> trim_nonempty value
-  | _ -> None
-;;
-
-let payload_kind request =
-  Option.bind (payload_assoc_fields request.Schedule_domain.payload) (assoc_string "kind")
-;;
-
-let payload_body_fields request =
-  match payload_assoc_fields request.Schedule_domain.payload with
-  | Some fields ->
-    (match List.assoc_opt "body" fields with
-     | Some (`Assoc body) -> Some body
-     | _ -> None)
-  | None -> None
-;;
-
-let payload_board_target body =
-  match assoc_string "thread_id" body, assoc_string "hearth" body with
-  | Some thread_id, _ -> Some ("thread:" ^ thread_id)
-  | None, Some hearth -> Some ("hearth:" ^ hearth)
-  | None, None -> Some "board:default"
-;;
-
-let truncate_summary text =
-  let text = String.trim text in
-  if String.length text <= 160 then text else String.sub text 0 157 ^ "..."
-;;
-
-let payload_board_summary body =
-  match assoc_string "title" body, assoc_string "content" body with
-  | Some title, _ -> Some (truncate_summary title)
-  | None, Some content -> Some (truncate_summary content)
-  | None, None -> None
-;;
-
-let payload_target_summary request =
-  match payload_kind request, payload_body_fields request with
-  | Some "masc.board_post", Some body ->
-    payload_board_target body, payload_board_summary body
-  | _ -> None, None
-;;
-
 let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
   let next_due_at =
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
   let requires_grant = Schedule_domain.requires_separate_human_grant request in
-  let payload_target, payload_summary = payload_target_summary request in
+  let payload_target, payload_summary =
+    Schedule_payload_projection.target_summary request
+  in
   match Schedule_domain.schedule_request_to_yojson request with
   | `Assoc fields ->
     `Assoc
@@ -321,7 +272,7 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
                else "no_separate_grant_required") )
          ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
          ; ( "payload_kind"
-           , match payload_kind request with
+           , match Schedule_payload_projection.kind request with
              | None -> `Null
              | Some kind -> `String kind )
          ; ( "payload_target"

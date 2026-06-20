@@ -21,13 +21,14 @@ let request
   ?(approval_required = false)
   ?(requested_by = human "requester")
   ?(scheduled_by = human "scheduler")
+  ?expires_at
   ?recurrence
   ()
   =
   match
     create_request ~schedule_id:"sched-1" ~requested_by ~scheduled_by
       ~requested_at:100.0 ~due_at:200.0
-      ~payload:(payload_json ()) ~risk_class ~approval_required
+      ?expires_at ~payload:(payload_json ()) ~risk_class ~approval_required
       ~source:Operator_request ?recurrence ()
   with
   | Ok request -> request
@@ -122,6 +123,13 @@ let test_due_grant_keeps_request_due () =
   match apply_execution_grant due grant with
   | Error err -> fail (grant_error_to_string err)
   | Ok updated -> check_status "due approval stays due" Due updated.status
+;;
+
+let test_expired_schedule_blocks_grant () =
+  let req = request ~expires_at:149.0 () in
+  let grant = grant req in
+  check_error "expired approval" Schedule_terminal
+    (validate_execution_grant req grant)
 ;;
 
 let test_requester_cannot_approve () =
@@ -327,6 +335,8 @@ let () =
           test_case "reject grant marks rejected" `Quick test_reject_grant_marks_rejected;
           test_case "due grant keeps request due" `Quick
             test_due_grant_keeps_request_due;
+          test_case "expired schedule blocks grant" `Quick
+            test_expired_schedule_blocks_grant;
           test_case "requester cannot approve" `Quick test_requester_cannot_approve;
           test_case "scheduler cannot approve" `Quick test_scheduler_cannot_approve;
           test_case "automated actor cannot approve side-effecting" `Quick

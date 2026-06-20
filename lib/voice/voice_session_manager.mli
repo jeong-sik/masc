@@ -47,6 +47,16 @@ val status_of_string_opt : string -> session_status option
 (** {1 JSON conversion} *)
 
 val session_to_json : session -> Yojson.Safe.t
+(** Includes the durable session fields plus the dashboard/keeper-visible
+    turn-based voice-loop contract:
+    [conversation_mode="turn_based"], [transport_mode="batch_stt_tts"],
+    [realtime_supported=false], and [voice_loop]. *)
+
+val turn_based_voice_loop_json : session_active:bool -> Yojson.Safe.t
+(** Structured capability contract for the current voice implementation.
+    MASC voice sessions are batch STT/TTS loops: operator audio is first
+    transcribed to text, then delivered through the normal keeper turn;
+    keeper output uses [keeper_voice_speak] and dashboard audio clips. *)
 
 val session_of_json : Yojson.Safe.t -> session
 (** Decode failures on individual fields raise [Yojson] exceptions.

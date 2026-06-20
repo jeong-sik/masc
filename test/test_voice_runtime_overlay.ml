@@ -458,6 +458,16 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
     let voice = Yojson.Safe.Util.(member "voice" json |> to_string) in
     check bool "session_name is not persisted as voice" true
       (not (String.equal session_name voice));
+    let voice_loop = Yojson.Safe.Util.member "voice_loop" json in
+    check string "session start loop mode" "turn_based_batch"
+      Yojson.Safe.Util.(member "mode" voice_loop |> to_string);
+    check bool "session start loop active" true
+      Yojson.Safe.Util.(member "session_active" voice_loop |> to_bool);
+    check bool "session start realtime unsupported" false
+      Yojson.Safe.Util.(member "realtime_supported" voice_loop |> to_bool);
+    check string "session start output tool" "keeper_voice_speak"
+      Yojson.Safe.Util.(
+        member "keeper_output" voice_loop |> member "tool" |> to_string);
     ignore
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
          ~config
@@ -535,8 +545,17 @@ let test_keeper_voice_agent_reports_turn_based_capability () =
     let before = read_agent () in
     check string "conversation mode" "turn_based"
       Yojson.Safe.Util.(member "conversation_mode" before |> to_string);
+    check string "transport mode" "batch_stt_tts"
+      Yojson.Safe.Util.(member "transport_mode" before |> to_string);
     check bool "realtime unsupported" false
       Yojson.Safe.Util.(member "realtime_supported" before |> to_bool);
+    let before_loop = Yojson.Safe.Util.member "voice_loop" before in
+    check string "loop input route" "POST /api/v1/voice/transcribe"
+      Yojson.Safe.Util.(
+        member "operator_input" before_loop |> member "server_route" |> to_string);
+    check string "loop output route" "GET /api/v1/voice/audio/<token>"
+      Yojson.Safe.Util.(
+        member "keeper_output" before_loop |> member "browser_route" |> to_string);
     check bool "no active session" false
       Yojson.Safe.Util.(member "session_active" before |> to_bool);
     check bool "active_session is null" true
@@ -553,6 +572,12 @@ let test_keeper_voice_agent_reports_turn_based_capability () =
       Yojson.Safe.Util.(member "session_active" after |> to_bool);
     check string "active session agent" meta.name
       Yojson.Safe.Util.(member "active_session" after |> member "agent_id" |> to_string);
+    check string "active session loop mode" "turn_based_batch"
+      Yojson.Safe.Util.(
+        member "active_session" after
+        |> member "voice_loop"
+        |> member "mode"
+        |> to_string);
     end_session ())
 ;;
 

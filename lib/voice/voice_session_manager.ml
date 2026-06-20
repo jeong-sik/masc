@@ -67,7 +67,42 @@ let status_of_string_opt = function
   | "suspended" -> Some Suspended
   | _ -> None
 
+let turn_based_voice_loop_json ~session_active =
+  `Assoc
+    [ "mode", `String "turn_based_batch"
+    ; "transport_mode", `String "batch_stt_tts"
+    ; "realtime_supported", `Bool false
+    ; "session_active", `Bool session_active
+    ; ( "operator_input"
+      , `Assoc
+          [ "capture", `String "dashboard_microphone_or_audio_upload"
+          ; "server_route", `String "POST /api/v1/voice/transcribe"
+          ; "handoff", `String "transcribed_text_enters_normal_keeper_turn"
+          ] )
+    ; ( "keeper_output"
+      , `Assoc
+          [ "tool", `String "keeper_voice_speak"
+          ; "delivery", `String "tts_audio_clip"
+          ; "browser_route", `String "GET /api/v1/voice/audio/<token>"
+          ] )
+    ; ( "keeper_next_actions"
+      , `List
+          [ `String "Use keeper_voice_speak for audible keeper output."
+          ; `String
+              "Treat transcribed operator speech as normal text input; do not wait \
+               for a live duplex audio stream."
+          ; `String
+              "Call keeper_voice_agent to inspect whether a turn-based voice session \
+               is active."
+          ] )
+    ]
+
 let session_to_json session =
+  let session_active =
+    match session.status with
+    | Active -> true
+    | Idle | Suspended -> false
+  in
   `Assoc [
     ("session_id", `String session.session_id);
     ("agent_id", `String session.agent_id);
@@ -76,6 +111,10 @@ let session_to_json session =
     ("last_activity", `Float session.last_activity);
     ("turn_count", `Int session.turn_count);
     ("status", `String (string_of_status session.status));
+    ("conversation_mode", `String "turn_based");
+    ("transport_mode", `String "batch_stt_tts");
+    ("realtime_supported", `Bool false);
+    ("voice_loop", turn_based_voice_loop_json ~session_active);
   ]
 
 let session_of_json json =

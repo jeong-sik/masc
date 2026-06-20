@@ -252,7 +252,11 @@ let voice_agent_capability_fields ~(meta : keeper_meta) =
   let mgr = Keeper_voice_local.get_session_manager () in
   let active_session = Voice_session_manager.get_session mgr ~agent_id:meta.name in
   [ "conversation_mode", `String "turn_based"
+  ; "transport_mode", `String "batch_stt_tts"
   ; "realtime_supported", `Bool false
+  ; ( "voice_loop"
+    , Voice_session_manager.turn_based_voice_loop_json
+        ~session_active:(Option.is_some active_session) )
   ; "session_active", `Bool (Option.is_some active_session)
   ; ( "active_session"
     , match active_session with

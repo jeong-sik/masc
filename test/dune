@@ -32,6 +32,7 @@
   test_rfc0259_reconcile
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_no_signal_silence
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -329,6 +330,7 @@
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_no_signal_silence
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions

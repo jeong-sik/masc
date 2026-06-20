@@ -90,7 +90,6 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Task_reactive_cooldown_elapsed
   | Never_started
   | Min_interval_elapsed
-  | Entropic_oscillation
 
 type skip_reason = Keeper_world_observation_turn_types.skip_reason =
   | Keeper_paused
@@ -729,15 +728,6 @@ let effective_scheduled_autonomous_cooldown
     max floor (int_of_float (Float.round (float_of_int health_base *. factor))))
 ;;
 
-let entropic_oscillation_interval_sec = 600
-let entropic_oscillation_probability_percent = 5
-
-let should_inject_entropic_oscillation ~since_last_scheduled_autonomous ~draw_percent =
-  since_last_scheduled_autonomous >= entropic_oscillation_interval_sec
-  && draw_percent >= 0
-  && draw_percent < entropic_oscillation_probability_percent
-;;
-
 let keeper_cycle_decision
       ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
       ?(reactive_wake = false)
@@ -871,12 +861,6 @@ let keeper_cycle_decision
            on top defeats its purpose. Without this bypass, keepers ignore
            unclaimed work for idle_gate seconds even when the backlog signal
            is ready to fire. Ref: #7226 claim-first + idle_gate observation. *)
-        let should_oscillate =
-          (not min_interval_elapsed)
-          && should_inject_entropic_oscillation
-               ~since_last_scheduled_autonomous
-               ~draw_percent:(Random.int 100)
-        in
         (* Reactive-wake gate (thundering-herd fix). When this evaluation runs
            because an external broadcast woke the keeper early ([reactive_wake]),
            the GLOBAL task backlog must not, on its own, drive a turn: otherwise
@@ -893,7 +877,6 @@ let keeper_cycle_decision
         in
         let should_run =
           is_bootstrap
-          || should_oscillate
           || min_interval_elapsed
           || (proactive_work_ready
               && (backlog_drives_turn || (idle_gate_elapsed && cooldown_elapsed)))
@@ -940,7 +923,6 @@ let keeper_cycle_decision
           then (
             let run_reasons =
               [ Some Scheduled_autonomous_turn
-              ; (if should_oscillate then Some Entropic_oscillation else None)
               ; (if is_bootstrap then Some Never_started else None)
               ; (if min_interval_elapsed then Some Min_interval_elapsed else None)
               ; (if idle_gate_elapsed

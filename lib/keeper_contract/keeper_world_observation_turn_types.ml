@@ -46,7 +46,6 @@ type turn_reason =
   | Task_reactive_cooldown_elapsed
   | Never_started
   | Min_interval_elapsed
-  | Entropic_oscillation
 
 type skip_reason =
   | Keeper_paused
@@ -72,7 +71,6 @@ let turn_reason_to_string = function
   | Task_reactive_cooldown_elapsed -> "task_reactive_cooldown_elapsed"
   | Never_started -> "never_started"
   | Min_interval_elapsed -> "min_interval_elapsed"
-  | Entropic_oscillation -> "entropic_oscillation"
 ;;
 
 let skip_reason_to_string = function

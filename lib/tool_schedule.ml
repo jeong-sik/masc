@@ -136,29 +136,154 @@ let approved_by_from_args args =
       }
 ;;
 
+let has_arg args key = Option.is_some (Json_util.assoc_member_opt key args)
+
+let has_board_convenience_args args =
+  List.exists
+    (has_arg args)
+    [ "board_content"
+    ; "board_title"
+    ; "board_hearth"
+    ; "board_author"
+    ; "board_thread_id"
+    ; "board_ttl_hours"
+    ; "board_meta"
+    ]
+;;
+
+let optional_body_string args ~arg ~field fields =
+  match string_opt args arg with
+  | None -> Ok fields
+  | Some value -> Ok ((field, `String value) :: fields)
+;;
+
+let optional_body_int args ~arg ~field fields =
+  match Json_util.assoc_member_opt arg args with
+  | None -> Ok fields
+  | Some (`Int value) -> Ok ((field, `Int value) :: fields)
+  | Some _ -> Error (arg ^ " must be an integer")
+;;
+
+let optional_body_object args ~arg ~field fields =
+  match Json_util.assoc_member_opt arg args with
+  | None -> Ok fields
+  | Some (`Assoc _ as value) -> Ok ((field, value) :: fields)
+  | Some _ -> Error (arg ^ " must be an object")
+;;
+
+let board_post_payload_from_args args =
+  let* content = required_string args "board_content" in
+  let schema_version =
+    (* DET-OK: board_* is a stable convenience projection for the existing
+       masc.board_post v1 consumer. *)
+    optional_int args "payload_schema_version" |> Option.value ~default:1
+  in
+  if schema_version <> 1
+  then Error "board_* convenience fields only support payload_schema_version=1"
+  else
+    let* fields =
+      optional_body_string args ~arg:"board_title" ~field:"title"
+        [ "content", `String content ]
+    in
+    let* fields = optional_body_string args ~arg:"board_author" ~field:"author" fields in
+    let* fields = optional_body_string args ~arg:"board_hearth" ~field:"hearth" fields in
+    let* fields = optional_body_string args ~arg:"board_thread_id" ~field:"thread_id" fields in
+    let* fields = optional_body_int args ~arg:"board_ttl_hours" ~field:"ttl_hours" fields in
+    let* fields = optional_body_object args ~arg:"board_meta" ~field:"meta" fields in
+    Ok
+      (`Assoc
+        [ "kind", `String "masc.board_post"
+        ; "schema_version", `Int schema_version
+        ; "body", `Assoc (List.rev fields)
+        ])
+;;
+
+let generic_payload_from_args args =
+  let* kind = required_string args "payload_kind" in
+  let schema_version =
+    (* DET-OK: absent schema_version means the stable schedule payload v1
+       contract, not provider-derived guessing. *)
+    optional_int args "payload_schema_version" |> Option.value ~default:1
+  in
+  let* body =
+    match Json_util.assoc_member_opt "payload_body" args with
+    | None -> Ok (`Assoc [])
+    | Some (`Assoc _ as body) -> Ok body
+    | Some _ -> Error "payload_body must be an object"
+  in
+  Ok
+    (`Assoc
+      [ "kind", `String kind; "schema_version", `Int schema_version; "body", body ])
+;;
+
 let payload_from_args args =
   match Json_util.assoc_member_opt "payload" args with
   | Some (`Assoc _ as payload) -> Ok payload
   | Some _ -> Error "payload must be an object envelope"
   | None ->
-    let* kind = required_string args "payload_kind" in
-    let schema_version =
-      (* DET-OK: absent schema_version means the stable schedule payload v1
-         contract, not provider-derived guessing. *)
-      optional_int args "payload_schema_version" |> Option.value ~default:1
-    in
-    let* body =
-      match Json_util.assoc_member_opt "payload_body" args with
-      | None -> Ok (`Assoc [])
-      | Some (`Assoc _ as body) -> Ok body
-      | Some _ -> Error "payload_body must be an object"
-    in
-    Ok
-      (`Assoc
-        [ "kind", `String kind
-        ; "schema_version", `Int schema_version
-        ; "body", body
-        ])
+    if has_board_convenience_args args
+    then
+      if has_arg args "payload_body"
+      then Error "use either payload_body or board_* convenience fields, not both"
+      else
+        (match string_opt args "payload_kind" with
+         | None | Some "masc.board_post" -> board_post_payload_from_args args
+         | Some kind ->
+           Error
+             ("board_* convenience fields require payload_kind omitted or masc.board_post, got "
+              ^ kind))
+    else generic_payload_from_args args
+;;
+
+let payload_assoc_fields payload =
+  match Schedule_domain.payload_to_yojson payload with
+  | `Assoc fields -> Some fields
+  | _ -> None
+;;
+
+let assoc_string key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> trim_nonempty value
+  | _ -> None
+;;
+
+let payload_kind request =
+  Option.bind (payload_assoc_fields request.Schedule_domain.payload) (assoc_string "kind")
+;;
+
+let payload_body_fields request =
+  match payload_assoc_fields request.Schedule_domain.payload with
+  | Some fields ->
+    (match List.assoc_opt "body" fields with
+     | Some (`Assoc body) -> Some body
+     | _ -> None)
+  | None -> None
+;;
+
+let payload_board_target body =
+  match assoc_string "thread_id" body, assoc_string "hearth" body with
+  | Some thread_id, _ -> Some ("thread:" ^ thread_id)
+  | None, Some hearth -> Some ("hearth:" ^ hearth)
+  | None, None -> Some "board:default"
+;;
+
+let truncate_summary text =
+  let text = String.trim text in
+  if String.length text <= 160 then text else String.sub text 0 157 ^ "..."
+;;
+
+let payload_board_summary body =
+  match assoc_string "title" body, assoc_string "content" body with
+  | Some title, _ -> Some (truncate_summary title)
+  | None, Some content -> Some (truncate_summary content)
+  | None, None -> None
+;;
+
+let payload_target_summary request =
+  match payload_kind request, payload_body_fields request with
+  | Some "masc.board_post", Some body ->
+    payload_board_target body, payload_board_summary body
+  | _ -> None, None
 ;;
 
 let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
@@ -166,6 +291,7 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
   let requires_grant = Schedule_domain.requires_separate_human_grant request in
+  let payload_target, payload_summary = payload_target_summary request in
   match Schedule_domain.schedule_request_to_yojson request with
   | `Assoc fields ->
     `Assoc
@@ -192,8 +318,20 @@ let schedule_request_json ?last_execution (request : Schedule_domain.schedule_re
            , `String
                (if requires_grant
                 then "separate_human_grant_required"
-                else "no_separate_grant_required") )
+               else "no_separate_grant_required") )
          ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
+         ; ( "payload_kind"
+           , match payload_kind request with
+             | None -> `Null
+             | Some kind -> `String kind )
+         ; ( "payload_target"
+           , match payload_target with
+             | None -> `Null
+             | Some target -> `String target )
+         ; ( "payload_summary"
+           , match payload_summary with
+             | None -> `Null
+             | Some summary -> `String summary )
          ; ( "last_execution"
            , match last_execution with
              | None -> `Null

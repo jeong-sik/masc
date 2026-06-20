@@ -1893,6 +1893,49 @@ let schedule_payload_kind request =
   | _ -> None
 ;;
 
+let assoc_nonempty_string key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) ->
+    let value = String.trim value in
+    if String.equal value "" then None else Some value
+  | _ -> None
+;;
+
+let schedule_payload_body_fields request =
+  match Schedule_domain.payload_to_yojson request.Schedule_domain.payload with
+  | `Assoc fields ->
+    (match List.assoc_opt "body" fields with
+     | Some (`Assoc body) -> Some body
+     | _ -> None)
+  | _ -> None
+;;
+
+let schedule_payload_board_target body =
+  match assoc_nonempty_string "thread_id" body, assoc_nonempty_string "hearth" body with
+  | Some thread_id, _ -> Some ("thread:" ^ thread_id)
+  | None, Some hearth -> Some ("hearth:" ^ hearth)
+  | None, None -> Some "board:default"
+;;
+
+let truncate_payload_summary text =
+  let text = String.trim text in
+  if String.length text <= 160 then text else String.sub text 0 157 ^ "..."
+;;
+
+let schedule_payload_board_summary body =
+  match assoc_nonempty_string "title" body, assoc_nonempty_string "content" body with
+  | Some title, _ -> Some (truncate_payload_summary title)
+  | None, Some content -> Some (truncate_payload_summary content)
+  | None, None -> None
+;;
+
+let schedule_payload_target_summary request =
+  match schedule_payload_kind request, schedule_payload_body_fields request with
+  | Some "masc.board_post", Some body ->
+    schedule_payload_board_target body, schedule_payload_board_summary body
+  | _ -> None, None
+;;
+
 let execution_record_dashboard_json (execution : Schedule_domain.execution_record) =
   match Schedule_domain.execution_record_to_yojson execution with
   | `Assoc fields ->
@@ -1914,6 +1957,7 @@ let schedule_request_dashboard_json
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
   let requires_grant = Schedule_domain.requires_separate_human_grant request in
+  let payload_target, payload_summary = schedule_payload_target_summary request in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
@@ -1950,6 +1994,14 @@ let schedule_request_dashboard_json
       , match schedule_payload_kind request with
         | None -> `Null
         | Some kind -> `String kind )
+    ; ( "payload_target"
+      , match payload_target with
+        | None -> `Null
+        | Some target -> `String target )
+    ; ( "payload_summary"
+      , match payload_summary with
+        | None -> `Null
+        | Some summary -> `String summary )
     ; ( "last_execution"
       , match last_execution with
         | None -> `Null

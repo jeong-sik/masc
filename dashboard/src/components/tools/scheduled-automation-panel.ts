@@ -80,6 +80,23 @@ function lastExecutionLabel(request: DashboardScheduledAutomationRequest): strin
   return finishedAt === '-' ? status : `${status} ${finishedAt}`
 }
 
+function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest }) {
+  const kind = request.payload_kind ?? '-'
+  const target = request.payload_target?.trim() || null
+  const summary = request.payload_summary?.trim() || null
+  return html`
+    <div class="max-w-[18rem]">
+      <div class="font-mono text-xs text-[var(--color-fg-secondary)]">${kind}</div>
+      ${target
+        ? html`<div class="mt-1 font-mono text-3xs text-[var(--color-fg-muted)]">${target}</div>`
+        : null}
+      ${summary
+        ? html`<div class="mt-1 truncate text-3xs text-[var(--color-fg-muted)]" title=${summary}>${summary}</div>`
+        : null}
+    </div>
+  `
+}
+
 function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest }) {
   const effectiveStatus = request.effective_status ?? request.status
   const readiness = request.execution_readiness ?? '-'
@@ -98,7 +115,7 @@ function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(readiness)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(action)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(request.risk_class)}</td>
-      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${request.payload_kind ?? '-'}</td>
+      <td class="py-2 pr-3"><${PayloadCell} request=${request} /></td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${recurrenceLabel(request)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${lastExecutionLabel(request)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${formatDateTimeKo(dueIso)}</td>

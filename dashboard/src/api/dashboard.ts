@@ -1843,6 +1843,8 @@ export interface DashboardScheduledAutomationRequest {
   expires_at_iso?: string | null
   payload_digest?: string
   payload_kind?: string | null
+  payload_target?: string | null
+  payload_summary?: string | null
   recurrence_summary?: string | null
   requires_separate_human_grant?: boolean
   approval_policy?: string | null

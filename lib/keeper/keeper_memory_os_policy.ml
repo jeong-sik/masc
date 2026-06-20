@@ -39,25 +39,34 @@ let retention_rank ~now (f : fact) =
 
 (* RFC-0247 (purge): fold a re-observation of an existing fact into that fact.
    [existing] is the persisted row; [incoming] is the newly extracted claim with
-   the same normalized identity. The librarian re-extracting the same claim is
-   fresh evidence that the claim still holds, so [last_verified_at] advances to
-   [now] and the staleness marker resets. Identity and first-seen provenance are
-   preserved.
+   the same normalized identity. Identity and first-seen provenance are always
+   preserved (the merge returns [{ existing with ... }]).
 
-   RFC-0259 §3.2(b): re-observing IS re-verification, so a volatile (external-ref)
-   claim's decay horizon is refreshed from [now] — the disk re-derive anchors to
-   [first_seen], this anchors to the fresh sighting, so an actively-re-seen status
-   claim survives while an abandoned one decays. A non-volatile fact keeps its
-   [valid_until] (durable [None] or the original Ephemeral expiry).
+   RFC-0259 §3.7 (P6/F) — producer re-observation is NOT re-verification for a
+   volatile (external-ref) claim. This REVERSES the prior §3.2(b) rule. The
+   librarian re-extracting "PR #42 is open" from its own session history is not
+   evidence the PR is still open; only the grounding reconciler
+   ([Keeper_memory_os_reconcile], which checks the external referent) is real
+   re-verification. So a volatile re-observe INHERITS the prior row's anchor
+   unchanged ([first_seen], [last_verified_at], [valid_until]); the volatile TTL
+   and the [UNVERIFIED] grounding horizon keep ticking from the last *real*
+   verification (or first extraction). Advancing the anchor on every producer
+   re-extraction — the old behavior — let an actively re-extracted false claim
+   never age out and never render [UNVERIFIED] (RFC-0259 defect C1 residual
+   loop): the same false fact was re-injected into the prompt every cycle. Only
+   the reconciler advances the anchor ([keeper_memory_os_reconcile.ml],
+   [Stale_open] verdict); the producer inherits it.
+
+   A non-volatile fact ([external_ref = None]) has no external ground truth to
+   reconcile against, so re-extraction by the librarian is its only verification
+   signal and [last_verified_at] still advances. [valid_until] (durable [None]
+   or the original Ephemeral expiry) is preserved by [with].
 
    The prior merge also blended a confidence float and bumped an access counter;
    both fed the deleted composite score and are gone. There is no numeric
    strength to move — re-observation is a binary "seen again now". *)
 let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
-  let valid_until =
-    match existing.external_ref with
-    | Some _ -> Some (now +. volatile_external_ttl_seconds)
-    | None -> existing.valid_until
-  in
-  { existing with last_verified_at = Some now; valid_until }
+  match existing.external_ref with
+  | Some _ -> existing
+  | None -> { existing with last_verified_at = Some now }
 ;;

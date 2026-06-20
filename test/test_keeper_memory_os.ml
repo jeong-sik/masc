@@ -3213,24 +3213,38 @@ let test_fact_to_json_omits_external_ref_when_none () =
     (contains "external_ref" json_str)
 ;;
 
-let test_reobserve_refreshes_volatile_horizon () =
+(* RFC-0259 §3.7 (P6/F): producer re-observation is NOT re-verification for a
+   volatile (external-ref) claim. Re-extracting "PR #42 is OPEN" from session
+   history is not evidence the PR is still open — only the grounding reconciler
+   checks the external referent. So a producer re-observe INHERITS the prior
+   row's anchor unchanged ([first_seen], [last_verified_at], [valid_until]) and
+   the volatile TTL / [UNVERIFIED] horizon keeps ticking from the last real
+   verification. This reverses the prior "re-observing IS re-verification" rule,
+   which let an actively re-extracted false claim never age out and never render
+   [UNVERIFIED] (RFC-0259 defect C1 residual loop). The reconciler-side advance
+   (Stale_open) is exercised separately in the reconcile-io suite. *)
+let test_reobserve_volatile_inherits_anchor () =
   let now = 5_000_000.0 in
   let older = now -. 100_000.0 in
   let volatile =
     { (fact_fixture ~now:older ()) with
       Types.claim = "PR #42 is OPEN"
     ; Types.external_ref = Some { Types.kind = Types.Pr; Types.id = "42" }
+    ; Types.first_seen = older
+    ; Types.last_verified_at = Some older
     ; Types.valid_until = Some (older +. Types.volatile_external_ttl_seconds)
     }
   in
-  let refreshed = Policy.reobserve_fact ~now ~existing:volatile ~incoming:volatile in
-  match refreshed.Types.valid_until with
-  | None -> Alcotest.fail "volatile fact lost its horizon on reobserve"
-  | Some vu ->
-    Alcotest.(check (float 0.001))
-      "horizon re-anchored to now on re-observation"
-      (now +. Types.volatile_external_ttl_seconds)
-      vu
+  let merged = Policy.reobserve_fact ~now ~existing:volatile ~incoming:volatile in
+  Alcotest.(check (option (float 0.001)))
+    "valid_until inherited, NOT re-anchored to now (producer is not re-verification)"
+    (Some (older +. Types.volatile_external_ttl_seconds))
+    merged.Types.valid_until;
+  Alcotest.(check (option (float 0.001)))
+    "last_verified_at inherited (producer re-extraction does not advance the anchor)"
+    (Some older)
+    merged.Types.last_verified_at;
+  Alcotest.(check (float 0.001)) "first_seen preserved" older merged.Types.first_seen
 ;;
 
 let test_retention_rank_demotes_volatile () =
@@ -3550,9 +3564,9 @@ let () =
             `Quick
             test_fact_to_json_omits_external_ref_when_none
         ; Alcotest.test_case
-            "reobserve refreshes a volatile claim's horizon"
+            "reobserve inherits a volatile claim's anchor (RFC-0259 P6/F)"
             `Quick
-            test_reobserve_refreshes_volatile_horizon
+            test_reobserve_volatile_inherits_anchor
         ; Alcotest.test_case
             "retention rank demotes a volatile fact below durable"
             `Quick

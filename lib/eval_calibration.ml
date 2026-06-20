@@ -102,6 +102,13 @@ let store_ref : Dated_jsonl.t option ref = ref None
 let base_path () =
   Filename.concat (Env_config_core.base_path ()) "data/verdicts"
 
+(* Live store directory, or [None] when MASC_BASE_PATH is unset (no live store
+   exists to read or collide with). Non-raising, unlike [base_path]. *)
+let base_path_opt () =
+  match Env_config_core.base_path_source_opt () with
+  | Some _ -> Some (base_path ())
+  | None -> None
+
 let get_store () =
   match !store_ref with
   | Some s -> s
@@ -116,6 +123,42 @@ let reset_store_for_testing () = store_ref := None
 (** Create a store with a custom base directory.  For testing only. *)
 let set_store_for_testing ~base_dir =
   store_ref := Some (Dated_jsonl.create ~base_dir ())
+
+(** Resolve where an offline eval tool's [--record-verdicts] verdicts are
+    written. Such a tool drives a real judge and persists verdicts; if those
+    land in the live ledger ([base_path ()] = $MASC_BASE_PATH/data/verdicts)
+    they contaminate production {!calibration_stats} and the dashboard (see
+    docs/design/completion-trust-calibration-wiring.md D3). We therefore refuse
+    a silent default to the live store (an "unknown -> permissive default" is the
+    exact failure mode this guards against) and require an explicit isolated
+    scratch path that is not the live store. [live_store_dir] is the caller's
+    {!base_path_opt} ([None] when no live store exists), passed in so the
+    decision stays pure and testable.
+
+    - [record_verdicts = false] -> [Ok None] (nothing to record).
+    - no [verdict_store_dir] -> [Error] (no silent fallback to the live store).
+    - [verdict_store_dir] equal to [live_store_dir] -> [Error] (would pollute).
+    - otherwise -> [Ok (Some dir)]. *)
+let resolve_record_verdicts_store ~record_verdicts ~verdict_store_dir
+    ~(live_store_dir : string option) : (string option, string) result =
+  if not record_verdicts then Ok None
+  else
+    let is_live d =
+      match live_store_dir with Some l -> String.equal d l | None -> false
+    in
+    match verdict_store_dir with
+    | None ->
+      Error
+        "--record-verdicts requires --verdict-store-dir DIR (an isolated scratch \
+         path); refusing to write the live verdict store."
+    | Some d when is_live d ->
+      Error
+        (Printf.sprintf
+           "--verdict-store-dir %s is the live verdict store; pick an isolated \
+            scratch path so the eval does not contaminate production calibration."
+           d)
+    | Some d -> Ok (Some d)
+;;
 
 (* ================================================================ *)
 (* Hashing                                                           *)

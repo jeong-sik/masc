@@ -541,6 +541,12 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (due_row |> member "execution_readiness" |> to_string);
   check string "due action" "wait_for_runner_tick"
     (due_row |> member "operator_action" |> to_string);
+  check string "due keeper next tool" "masc_schedule_get"
+    (due_row |> member "keeper_next_tool" |> to_string);
+  check bool "due keeper action mentions runner tick" true
+    (String_util.contains_substring
+       (due_row |> member "keeper_next_action" |> to_string)
+       "runner tick");
   let blocked_row = find_request "sched-blocked" in
   check bool "blocked separate grant" true
     (blocked_row |> member "requires_separate_human_grant" |> to_bool);
@@ -552,6 +558,12 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (blocked_row |> member "execution_readiness" |> to_string);
   check string "blocked action" "approve_or_reject"
     (blocked_row |> member "operator_action" |> to_string);
+  check string "blocked keeper next tool" "masc_schedule_get"
+    (blocked_row |> member "keeper_next_tool" |> to_string);
+  check bool "blocked keeper action mentions grant tools" true
+    (String_util.contains_substring
+       (blocked_row |> member "keeper_next_action" |> to_string)
+       "masc_schedule_approve or masc_schedule_reject");
   let expired_row = find_request "sched-expired-effective" in
   check string "expired effective status" "expired"
     (expired_row |> member "effective_status" |> to_string);
@@ -559,6 +571,12 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (expired_row |> member "execution_readiness" |> to_string);
   check string "expired action" "inspect_or_recreate"
     (expired_row |> member "operator_action" |> to_string);
+  check string "expired keeper next tool" "masc_schedule_get"
+    (expired_row |> member "keeper_next_tool" |> to_string);
+  check bool "expired keeper action mentions recreate" true
+    (String_util.contains_substring
+       (expired_row |> member "keeper_next_action" |> to_string)
+       "masc_schedule_create");
   let exec_row =
     List.find_opt
       (fun row -> String.equal (row |> member "schedule_id" |> to_string) "sched-exec")
@@ -615,8 +633,18 @@ let test_keeper_observation_surfaces_schedule_attention () =
    | blocked :: ready :: [] ->
      check string "blocked schedule first" "sched-blocked" blocked.schedule_id;
      check string "blocked action" "approve_or_reject" blocked.action;
+     check (option string) "blocked next tool" (Some "masc_schedule_get")
+       blocked.keeper_next_tool;
+     check bool "blocked next action mentions grant tools" true
+       (String_util.contains_substring blocked.keeper_next_action
+          "masc_schedule_approve or masc_schedule_reject");
      check string "ready schedule second" "sched-ready" ready.schedule_id;
-     check string "ready action" "dispatch_ready" ready.action
+     check string "ready action" "dispatch_ready" ready.action;
+     check (option string) "ready next tool" (Some "masc_schedule_get")
+       ready.keeper_next_tool;
+     check bool "ready next action avoids duplicates" true
+       (String_util.contains_substring ready.keeper_next_action
+          "do not create a duplicate schedule")
    | _ -> fail "expected blocked and ready attention rows")
 ;;
 

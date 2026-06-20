@@ -54,6 +54,9 @@ let scheduled_automation_observation : WO.scheduled_automation_observation =
         ; recurrence_summary = "daily 09:00:00 Asia/Seoul"
         ; risk_class = "read_only"
         ; due_at = 200.0
+        ; keeper_next_tool = Some "masc_schedule_get"
+        ; keeper_next_action =
+            "Inspect the schedule if needed and monitor dispatch; do not create a duplicate schedule."
         }
       ; { schedule_id = "sched-blocked"
         ; action = "approve_or_reject"
@@ -62,6 +65,9 @@ let scheduled_automation_observation : WO.scheduled_automation_observation =
         ; recurrence_summary = "one_shot"
         ; risk_class = "workspace_write"
         ; due_at = 180.0
+        ; keeper_next_tool = Some "masc_schedule_get"
+        ; keeper_next_action =
+            "Inspect details, then wait for an explicit human decision before calling masc_schedule_approve or masc_schedule_reject."
         }
       ]
   }
@@ -308,7 +314,11 @@ let test_scheduled_automation_prompt_section () =
   check bool "prompt includes blocked action" true
     (contains_sub "action=approve_or_reject" user_msg);
   check bool "prompt points to schedule detail tool" true
-    (contains_sub "masc_schedule_get" user_msg)
+    (contains_sub "masc_schedule_get" user_msg);
+  check bool "prompt includes ready next action" true
+    (contains_sub "do not create a duplicate schedule" user_msg);
+  check bool "prompt includes approval next action" true
+    (contains_sub "masc_schedule_approve or masc_schedule_reject" user_msg)
 
 let () =
   run "keeper_unified_verification_surface"

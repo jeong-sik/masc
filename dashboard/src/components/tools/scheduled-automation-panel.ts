@@ -97,6 +97,22 @@ function PayloadCell({ request }: { request: DashboardScheduledAutomationRequest
   `
 }
 
+function KeeperActionCell({ request }: { request: DashboardScheduledAutomationRequest }) {
+  const nextTool = request.keeper_next_tool?.trim() || null
+  const nextAction = request.keeper_next_action?.trim() || null
+  if (!nextTool && !nextAction) return html`<span class="text-xs text-[var(--color-fg-disabled)]">-</span>`
+  return html`
+    <div class="max-w-[16rem]">
+      ${nextTool
+        ? html`<div class="truncate font-mono text-3xs text-[var(--color-fg-secondary)]" title=${nextTool}>${nextTool}</div>`
+        : null}
+      ${nextAction
+        ? html`<div class="mt-1 truncate text-3xs text-[var(--color-fg-muted)]" title=${nextAction}>${nextAction}</div>`
+        : null}
+    </div>
+  `
+}
+
 function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest }) {
   const effectiveStatus = request.effective_status ?? request.status
   const readiness = request.execution_readiness ?? '-'
@@ -114,6 +130,7 @@ function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest
       </td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(readiness)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(action)}</td>
+      <td class="py-2 pr-3"><${KeeperActionCell} request=${request} /></td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(request.risk_class)}</td>
       <td class="py-2 pr-3"><${PayloadCell} request=${request} /></td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${recurrenceLabel(request)}</td>
@@ -194,6 +211,7 @@ export function ScheduledAutomationPanel({
                     <th class="pb-2 pr-3 font-medium">status</th>
                     <th class="pb-2 pr-3 font-medium">readiness</th>
                     <th class="pb-2 pr-3 font-medium">action</th>
+                    <th class="pb-2 pr-3 font-medium">keeper</th>
                     <th class="pb-2 pr-3 font-medium">risk</th>
                     <th class="pb-2 pr-3 font-medium">payload</th>
                     <th class="pb-2 pr-3 font-medium">recurrence</th>

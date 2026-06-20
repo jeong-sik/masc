@@ -192,8 +192,13 @@ let format_scheduled_automation_item
     | None -> "unknown"
     | Some kind -> kind
   in
+  let next_tool =
+    match item.keeper_next_tool with
+    | None -> "none"
+    | Some tool -> tool
+  in
   Printf.sprintf
-    "- schedule_id=%s action=%s status=%s payload=%s recurrence=%S risk=%s due_at=%s"
+    "- schedule_id=%s action=%s status=%s payload=%s recurrence=%S risk=%s due_at=%s next_tool=%s next=%S"
     item.schedule_id
     item.action
     item.status
@@ -201,6 +206,8 @@ let format_scheduled_automation_item
     item.recurrence_summary
     item.risk_class
     (Masc_domain.iso8601_of_unix_seconds item.due_at)
+    next_tool
+    item.keeper_next_action
 ;;
 
 let format_scheduled_automation_summary

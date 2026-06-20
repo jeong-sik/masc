@@ -1818,33 +1818,47 @@ let schedule_effective_status ~now state (request : Schedule_domain.schedule_req
 
 let schedule_execution_readiness ~now state (request : Schedule_domain.schedule_request) =
   if schedule_effectively_expired ~now request
-  then "expired"
+  then Schedule_projection.Expired
   else if Schedule_domain.is_terminal request.status
-  then "terminal"
+  then Schedule_projection.Terminal
   else if request.status = Schedule_domain.Running
-  then "running"
+  then Schedule_projection.Running
   else if schedule_blocked_approval ~now state request
-  then "blocked_approval"
+  then Schedule_projection.Blocked_approval
   else if Schedule_store.has_current_approved_grant state request
-  then "approved"
+  then Schedule_projection.Approved
   else
     match request.status with
-    | Schedule_domain.Pending_approval -> "awaiting_approval"
-    | Scheduled when request.due_at <= now -> "due_pending_refresh"
-    | Scheduled -> "scheduled"
-    | Due -> "ready"
-    | Running -> "running"
-    | Succeeded | Failed | Rejected | Cancelled | Expired -> "terminal"
+    | Schedule_domain.Pending_approval -> Schedule_projection.Awaiting_approval
+    | Schedule_domain.Scheduled when request.due_at <= now ->
+      Schedule_projection.Due_pending_refresh
+    | Schedule_domain.Scheduled -> Schedule_projection.Scheduled
+    | Schedule_domain.Due -> Schedule_projection.Ready
+    | Schedule_domain.Running -> Schedule_projection.Running
+    | Schedule_domain.Succeeded
+    | Schedule_domain.Failed
+    | Schedule_domain.Rejected
+    | Schedule_domain.Cancelled
+    | Schedule_domain.Expired ->
+      Schedule_projection.Terminal
 ;;
 
-let schedule_operator_action ~now state (request : Schedule_domain.schedule_request) =
-  match schedule_execution_readiness ~now state request with
-  | "blocked_approval" | "awaiting_approval" -> `String "approve_or_reject"
-  | "due_pending_refresh" -> `String "wait_for_runner_tick"
-  | "expired" -> `String "inspect_or_recreate"
-  | "ready" | "approved" -> `String "wait_for_dispatch"
-  | "scheduled" | "running" | "terminal" -> `Null
-  | _ -> `Null
+let schedule_operator_action readiness =
+  match Schedule_projection.operator_action_for_execution_readiness readiness with
+  | Some action -> `String action
+  | None -> `Null
+;;
+
+let schedule_keeper_next_tool readiness =
+  match Schedule_projection.keeper_next_tool_for_execution_readiness readiness with
+  | Some tool -> `String tool
+  | None -> `Null
+;;
+
+let schedule_keeper_next_action readiness =
+  match Schedule_projection.keeper_next_action_for_execution_readiness readiness with
+  | Some action -> `String action
+  | None -> `Null
 ;;
 
 let schedule_fsm_state ~now state schedules =
@@ -1908,12 +1922,16 @@ let schedule_request_dashboard_json
   let payload_target, payload_summary =
     Schedule_payload_projection.target_summary request
   in
+  let execution_readiness = schedule_execution_readiness ~now state request in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
     ; "effective_status", `String (schedule_effective_status ~now state request)
-    ; "execution_readiness", `String (schedule_execution_readiness ~now state request)
-    ; "operator_action", schedule_operator_action ~now state request
+    ; ( "execution_readiness"
+      , `String (Schedule_projection.execution_readiness_to_string execution_readiness) )
+    ; "operator_action", schedule_operator_action execution_readiness
+    ; "keeper_next_tool", schedule_keeper_next_tool execution_readiness
+    ; "keeper_next_action", schedule_keeper_next_action execution_readiness
     ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
     ; "approval_required", `Bool request.approval_required
     ; "source", `String (Schedule_domain.schedule_source_to_string request.source)

@@ -72,6 +72,8 @@ type scheduled_automation_item = {
   recurrence_summary : string;
   risk_class : string;
   due_at : float;
+  keeper_next_tool : string option;
+  keeper_next_action : string;
 }
 
 (** Durable scheduled-automation summary from the MASC schedule store. *)

@@ -243,9 +243,43 @@ let handle_listen ~(meta : keeper_meta) ~(args : Yojson.Safe.t) () =
       ; "agent_id", `String meta.name
       ]
 
+let append_assoc_fields json fields =
+  match json with
+  | `Assoc existing -> `Assoc (existing @ fields)
+  | other -> `Assoc (("voice_config", other) :: fields)
+
+let voice_agent_capability_fields ~(meta : keeper_meta) =
+  let mgr = Keeper_voice_local.get_session_manager () in
+  let active_session = Voice_session_manager.get_session mgr ~agent_id:meta.name in
+  [ "conversation_mode", `String "turn_based"
+  ; "realtime_supported", `Bool false
+  ; "session_active", `Bool (Option.is_some active_session)
+  ; ( "active_session"
+    , match active_session with
+      | Some session -> Voice_session_manager.session_to_json session
+      | None -> `Null )
+  ; ( "input_modes"
+    , `List [ `String "browser_record_transcribe"; `String "server_microphone_listen" ] )
+  ; ( "output_modes"
+    , `List [ `String "tts_audio_clip"; `String "local_playback_if_configured" ] )
+  ; ( "session_control_tools"
+    , `List
+        [ `String "keeper_voice_session_start"
+        ; `String "keeper_voice_speak"
+        ; `String "keeper_voice_listen"
+        ; `String "keeper_voice_session_end"
+        ] )
+  ; ( "realtime_gap"
+    , `String
+        "No full-duplex live audio stream is bound to keeper turns; speech input \
+         is transcribed into text before the normal keeper turn." )
+  ]
+
 let handle_agent ~(meta : keeper_meta) =
   match Voice_bridge.get_agent_voice ~agent_id:meta.name with
-  | Ok json -> Yojson.Safe.to_string json
+  | Ok json ->
+    Yojson.Safe.to_string
+      (append_assoc_fields json (voice_agent_capability_fields ~meta))
   | Error err ->
     Tool_args.error_response_with
       [ "agent_id", `String meta.name

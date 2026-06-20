@@ -502,6 +502,60 @@ let test_keeper_voice_session_end_reports_ended () =
       (Yojson.Safe.Util.member "discarded_voice_queue_jobs" end_json = `Null))
 ;;
 
+let test_keeper_voice_agent_reports_turn_based_capability () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
+    let meta = make_keeper_meta "voice-capability-keeper" in
+    let read_agent () =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~config
+        ~meta
+        ~name:"keeper_voice_agent"
+        ~args:(`Assoc [])
+        ()
+      |> Yojson.Safe.from_string
+    in
+    let end_session () =
+      ignore
+        (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+           ~config
+           ~meta
+           ~name:"keeper_voice_session_end"
+           ~args:(`Assoc [])
+           ())
+    in
+    end_session ();
+    let before = read_agent () in
+    check string "conversation mode" "turn_based"
+      Yojson.Safe.Util.(member "conversation_mode" before |> to_string);
+    check bool "realtime unsupported" false
+      Yojson.Safe.Util.(member "realtime_supported" before |> to_bool);
+    check bool "no active session" false
+      Yojson.Safe.Util.(member "session_active" before |> to_bool);
+    check bool "active_session is null" true
+      (Yojson.Safe.Util.member "active_session" before = `Null);
+    ignore
+      (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~config
+         ~meta
+         ~name:"keeper_voice_session_start"
+         ~args:(`Assoc [])
+         ());
+    let after = read_agent () in
+    check bool "session active" true
+      Yojson.Safe.Util.(member "session_active" after |> to_bool);
+    check string "active session agent" meta.name
+      Yojson.Safe.Util.(member "active_session" after |> member "agent_id" |> to_string);
+    end_session ())
+;;
+
 let test_playback_timeout_parsers_and_budget () =
   check (option (float 0.001)) "afinfo duration line parses"
     (Some 236.6)
@@ -663,6 +717,10 @@ let () =
             "session_end reports ended without queue field"
             `Quick
             test_keeper_voice_session_end_reports_ended
+        ; test_case
+            "voice_agent reports turn-based capability"
+            `Quick
+            test_keeper_voice_agent_reports_turn_based_capability
         ] )
     ; ( "playback_timeout"
       , [ test_case

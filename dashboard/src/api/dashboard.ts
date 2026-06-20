@@ -3569,6 +3569,14 @@ export interface MemorySubsystemsUserModelError {
   error: string
 }
 
+export interface MemorySubsystemsUserModelPrompt {
+  enabled: boolean
+  block_id: string
+  injection: string
+  runtime_hook: string
+  producer?: string
+}
+
 export interface MemorySubsystemsResponse {
   generated_at: string
   hebbian: {
@@ -3597,6 +3605,7 @@ export interface MemorySubsystemsResponse {
   user_model?: {
     schema: string
     source: string
+    prompt?: MemorySubsystemsUserModelPrompt
     total: number
     filtered: number
     shown: number

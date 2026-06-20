@@ -127,6 +127,13 @@ let test_http_json_surfaces_user_model_projection () =
         let user_model = Json.(json |> member "user_model") in
         check string "schema" "masc.user_model.memory_projection.v1"
           Json.(user_model |> member "schema" |> to_string);
+        let prompt = Json.(user_model |> member "prompt") in
+        check string "prompt block id" "user_model"
+          Json.(prompt |> member "block_id" |> to_string);
+        check string "prompt injection" "extra_system_context"
+          Json.(prompt |> member "injection" |> to_string);
+        check string "prompt hook" "keeper_run_tools_hooks.before_turn_params"
+          Json.(prompt |> member "runtime_hook" |> to_string);
         check int "total" 2 Json.(user_model |> member "total" |> to_int);
         check int "shown" 2 Json.(user_model |> member "shown" |> to_int);
         let items = Json.(user_model |> member "items" |> to_list) in

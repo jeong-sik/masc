@@ -56,18 +56,6 @@ let sanitize_atom text =
     | c -> c)
 ;;
 
-let eligible_category = function
-  | Preference | Constraint -> true
-  | Code_change | Fact | Blocker | Goal | Ephemeral | Validated_approach | Lesson
-  | Unknown _ -> false
-;;
-
-let fact_truth_anchor (memory_fact : Keeper_memory_os_types.fact) =
-  match memory_fact.last_verified_at with
-  | Some ts -> ts
-  | None -> memory_fact.first_seen
-;;
-
 let dedup_facts_by_claim (facts : Keeper_memory_os_types.fact list) =
   let seen = Hashtbl.create 16 in
   List.filter
@@ -84,9 +72,9 @@ let dedup_facts_by_claim (facts : Keeper_memory_os_types.fact list) =
 let rank_facts ~now facts =
   facts
   |> List.filter (fact_is_current ~now)
-  |> List.filter (fun (fact : fact) -> eligible_category fact.category)
+  |> List.filter fact_is_user_model
   |> List.sort (fun (a : fact) (b : fact) ->
-    compare (fact_truth_anchor b) (fact_truth_anchor a))
+    compare (reference_time b) (reference_time a))
   |> dedup_facts_by_claim
 ;;
 

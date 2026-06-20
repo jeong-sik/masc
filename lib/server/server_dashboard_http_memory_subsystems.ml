@@ -113,6 +113,16 @@ let load_user_model_facts ~(config : Workspace_utils.config) =
   |> fun (items, errors) -> List.rev items, List.rev errors
 ;;
 
+let user_model_prompt_json () =
+  `Assoc
+    [ "enabled", `Bool (Keeper_user_model.enabled ())
+    ; "block_id", `String (Prompt_block_id.to_string Prompt_block_id.User_model)
+    ; "injection", `String "extra_system_context"
+    ; "runtime_hook", `String "keeper_run_tools_hooks.before_turn_params"
+    ; "producer", `String "keeper_user_model"
+    ]
+;;
+
 let dashboard_memory_subsystems_http_json
       ~(config : Workspace_utils.config)
       ?include_memory_entries
@@ -344,6 +354,7 @@ let dashboard_memory_subsystems_http_json
       , `Assoc
           [ "schema", `String "masc.user_model.memory_projection.v1"
           ; "source", `String "memory_os_facts"
+          ; "prompt", user_model_prompt_json ()
           ; "total", `Int (List.length all_user_model_items)
           ; "filtered", `Int (List.length user_model_filtered)
           ; "shown", `Int (List.length user_model_items)

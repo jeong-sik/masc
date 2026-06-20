@@ -15,6 +15,7 @@ import {
   type MemorySubsystemsMemoryEntryError,
   type MemorySubsystemsUserModelItem,
   type MemorySubsystemsUserModelError,
+  type MemorySubsystemsUserModelPrompt,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -563,18 +564,35 @@ function UserModelPanel({
   total,
   filtered,
   errors,
+  prompt,
 }: {
   readonly items: readonly MemorySubsystemsUserModelItem[]
   readonly total: number
   readonly filtered: number
   readonly errors?: readonly MemorySubsystemsUserModelError[]
+  readonly prompt?: MemorySubsystemsUserModelPrompt
 }) {
+  const promptEnabled = prompt?.enabled ?? true
+  const promptBlockId = prompt?.block_id ?? 'user_model'
+  const promptInjection = prompt?.injection ?? 'extra_system_context'
+  const promptHook = prompt?.runtime_hook ?? 'keeper_run_tools_hooks.before_turn_params'
   return html`
     <section data-testid="user-model-projection" class="flex flex-col gap-2" aria-label=${`User model · ${items.length} rows`}>
       <div class="flex flex-wrap items-center gap-2">
         <h3 class="text-base font-semibold text-[var(--color-fg-muted)]">User model</h3>
         <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
           memory_os preferences / constraints
+        </span>
+        <span
+          data-testid="user-model-prompt-surface"
+          class=${`rounded-[var(--r-1)] border px-1.5 py-0.5 font-mono text-2xs uppercase tracking-[var(--track-caps)] ${
+            promptEnabled
+              ? 'border-[var(--color-status-ok)] bg-[var(--color-bg-elevated)] text-[var(--color-status-ok)]'
+              : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-disabled)]'
+          }`}
+          title=${`${promptHook} · ${promptInjection}`}
+        >
+          prompt ${promptEnabled ? 'on' : 'off'} · ${promptBlockId}
         </span>
         <span class="ml-auto text-xs text-[var(--color-fg-muted)]">
           total ${total} · filtered ${filtered} · shown ${items.length}
@@ -853,6 +871,7 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
         total=${userModel?.total ?? userModelItems.length}
         filtered=${userModel?.filtered ?? userModelItems.length}
         errors=${userModel?.errors ?? []}
+        prompt=${userModel?.prompt}
       />
 
       ${

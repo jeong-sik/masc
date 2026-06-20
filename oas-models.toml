@@ -61,6 +61,7 @@ thinking_control_format = "thinking_object"
 supports_response_format_json = true
 supports_structured_output = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 # GLM Models

@@ -33,6 +33,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  activeStreamEntryId,
   appendThreadEntry,
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
@@ -336,8 +337,12 @@ const resumingKeeperChatRequests = new Set<string>()
 const sendingKeeperThreadMessages = new Set<string>()
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 
-function keeperThreadMessageSendKey(keeperName: string, message: string): string {
-  return `${keeperName}\u0000${message}`
+function keeperThreadMessageSendKey(
+  keeperName: string,
+  clientActionId: string | undefined,
+): string | null {
+  const actionId = clientActionId?.trim() ?? ''
+  return actionId ? `${keeperName}\u0000${actionId}` : null
 }
 
 export function _resetKeeperThreadMessageSendGuardsForTests(): void {
@@ -569,6 +574,7 @@ export async function sendKeeperThreadMessage(
   prompt: string,
   options: {
     attachments?: KeeperConversationAttachment[]
+    clientActionId?: string
     userBlocks?: KeeperUserInputBlock[]
   } = {},
 ): Promise<void> {
@@ -581,9 +587,9 @@ export async function sendKeeperThreadMessage(
       : deriveUserBlocks(prompt, attachments)
   const message = prompt.trim() || fallbackMessageForUserBlocks(userBlocks ?? [])
   if (!keeperName || !message) return
-  const sendKey = keeperThreadMessageSendKey(keeperName, message)
-  if (sendingKeeperThreadMessages.has(sendKey)) return
-  sendingKeeperThreadMessages.add(sendKey)
+  const sendKey = keeperThreadMessageSendKey(keeperName, options.clientActionId)
+  if (sendKey && sendingKeeperThreadMessages.has(sendKey)) return
+  if (sendKey) sendingKeeperThreadMessages.add(sendKey)
   abortKeeperThreadMessage(keeperName)
   const localId = `local-${++localIdCounter}-${Date.now()}`
   const assistantId = `reply-${++localIdCounter}-${Date.now()}`
@@ -771,11 +777,13 @@ export async function sendKeeperThreadMessage(
     // the non-terminal handoff above already released, so this is a no-op
     // there; Map.delete of an absent key is harmless.
     if (requestId) releaseLiveSendRequest(requestId)
-    sendingKeeperThreadMessages.delete(sendKey)
-    clearActiveStream(keeperName)
-    setRecordValue(keeperSending, keeperName, false)
-    setRecordValue(keeperStreamStartedAt, keeperName, null)
-    setRecordValue(keeperStreamLastEventAt, keeperName, null)
+    if (sendKey) sendingKeeperThreadMessages.delete(sendKey)
+    if (activeStreamEntryId(keeperName) === assistantId) {
+      clearActiveStream(keeperName)
+      setRecordValue(keeperSending, keeperName, false)
+      setRecordValue(keeperStreamStartedAt, keeperName, null)
+      setRecordValue(keeperStreamLastEventAt, keeperName, null)
+    }
     // No refreshDashboardState() here: forcing a full dashboard
     // refetch after every chat message re-rendered every panel and was
     // the main "the screen keeps refreshing" complaint. Keeper status

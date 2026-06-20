@@ -4,9 +4,9 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatBlock, KeeperConversationEntry, KeeperUserInputBlock } from '../../types'
+import type { ChatBlock, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
-import { ChatComposer, ChatTranscript } from './primitives'
+import { ChatComposer, ChatTranscript, type ChatComposerSendPayload } from './primitives'
 import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
@@ -1182,7 +1182,7 @@ describe('ChatComposer multimodal', () => {
 
   function renderComposer(props: {
     draft?: string
-    onSend?: (payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => void
+    onSend?: (payload: ChatComposerSendPayload) => void
     disabled?: boolean
     streaming?: boolean
   } = {}) {
@@ -1322,6 +1322,25 @@ describe('ChatComposer multimodal', () => {
       },
       { type: 'text', text: 'check this <tag>' },
     ])
+    const clientActionId = onSend.mock.calls[0]?.[0].clientActionId
+    expect(clientActionId).toContain('check this <tag>')
+    expect(clientActionId).toContain('att-img')
+  })
+
+  it('mints the same client action id for repeated sends of the same draft', async () => {
+    const onSend = vi.fn()
+    renderComposer({ draft: 'same text', onSend })
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(2)
+    const firstId = onSend.mock.calls[0]?.[0].clientActionId
+    const secondId = onSend.mock.calls[1]?.[0].clientActionId
+    expect(firstId).toBe(secondId)
+    expect(firstId).toContain('same text')
   })
 
   it('preserves audio attachments as audio user blocks', async () => {
@@ -1361,6 +1380,7 @@ describe('ChatComposer multimodal', () => {
         size: 2048,
       },
     ])
+    expect(onSend.mock.calls[0]?.[0].clientActionId).toContain('att-audio')
   })
 
   it('keeps send disabled until there is content', () => {

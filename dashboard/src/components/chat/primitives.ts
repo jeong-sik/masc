@@ -32,6 +32,12 @@ export interface SigilBadgeKeeper {
   sigil?: string
 }
 
+export interface ChatComposerSendPayload {
+  blocks: ChatBlock[]
+  userBlocks: KeeperUserInputBlock[]
+  clientActionId: string
+}
+
 /** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
 export function ChatStatusDot({ status, pulse }: { status: string; pulse?: boolean }): VNode {
   const state = status === 'run' ? 'ok' : status === 'pause' ? 'warn' : status === 'off' ? 'idle' : status
@@ -300,6 +306,28 @@ function isRenderableImageAttachment(attachment: KeeperConversationAttachment): 
 
 function attachmentMeta(attachment: KeeperConversationAttachment): string {
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
+}
+
+function composerAttachmentActionFingerprint(attachment: KeeperConversationAttachment): Record<string, unknown> {
+  return {
+    id: attachment.id,
+    type: attachment.type,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    size: attachment.size,
+    dims: attachment.dims ?? null,
+    dataLength: attachment.data.length,
+  }
+}
+
+function composerClientActionId(
+  text: string,
+  attachments: readonly KeeperConversationAttachment[],
+): string {
+  return JSON.stringify({
+    text,
+    attachments: attachments.map(composerAttachmentActionFingerprint),
+  })
 }
 
 function dataUriToText(data: string): string | null {
@@ -2474,7 +2502,7 @@ export function ChatComposer({
   queueEnabled?: boolean
   queueCount?: number
   onDraftChange: (value: string) => void
-  onSend: (payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => void | Promise<void>
+  onSend: (payload: ChatComposerSendPayload) => void | Promise<void>
   onAbort?: () => void
   layout?: 'default' | 'primary'
 }) {
@@ -2583,7 +2611,11 @@ export function ChatComposer({
       blocks.push({ t: 'p', html: escapeHtml(text) } as ChatBlock)
       userBlocks.push({ type: 'text', text })
     }
-    void onSend({ blocks, userBlocks })
+    void onSend({
+      blocks,
+      userBlocks,
+      clientActionId: composerClientActionId(text, attachments),
+    })
     onDraftChange('')
     setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'

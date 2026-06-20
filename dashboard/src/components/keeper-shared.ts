@@ -12,7 +12,6 @@ import type {
   KeeperConversationAttachment,
   KeeperConversationEntry,
   KeeperDiagnostic,
-  KeeperUserInputBlock,
 } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -43,7 +42,7 @@ import {
   removeQueuedMessage,
   type QueuedMessage,
 } from '../keeper-chat-store'
-import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize } from './chat/primitives'
+import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
@@ -541,7 +540,7 @@ export function KeeperConversationPanel({
     }
   }
 
-  const submit = async ({ blocks, userBlocks }: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => {
+  const submit = async ({ blocks, userBlocks, clientActionId }: ChatComposerSendPayload) => {
     const prompt = draft.trim()
     if (chatAccess.blocked) {
       showToast(chatAccess.message, 'error')
@@ -556,7 +555,7 @@ export function KeeperConversationPanel({
       return
     }
     try {
-      await sendKeeperThreadMessage(keeperName, prompt, { attachments, userBlocks })
+      await sendKeeperThreadMessage(keeperName, prompt, { attachments, clientActionId, userBlocks })
     } catch (err) {
       if (isAbortError(err)) return
       const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
@@ -687,7 +686,7 @@ export function KeeperConversationPanel({
               queueEnabled=${true}
               queueCount=${queueCount}
               onDraftChange=${setDraft}
-              onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
+              onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
               onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
               layout="primary"
             />
@@ -802,7 +801,7 @@ export function KeeperConversationPanel({
             queueEnabled=${true}
             queueCount=${queueCount}
             onDraftChange=${setDraft}
-            onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
+            onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
             layout="primary"
           />
@@ -915,7 +914,7 @@ export function KeeperConversationPanel({
             queueEnabled=${true}
             queueCount=${queueCount}
             onDraftChange=${setDraft}
-            onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
+            onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
           />
         </div>

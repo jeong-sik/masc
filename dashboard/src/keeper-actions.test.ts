@@ -51,11 +51,13 @@ vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard }))
 
 import {
   _resetLiveSendRequestOwnersForTests,
+  activeStreamEntryId,
   activeKeeperName,
   keeperActionErrors,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
+  keeperSending,
   keeperStatusDetails,
   keeperThreads,
 } from './keeper-state'
@@ -230,7 +232,37 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     }
   }
 
-  it('ignores a direct duplicate send while the keeper stream is already active', async () => {
+  function abortError(): Error {
+    const err = new Error('Aborted')
+    err.name = 'AbortError'
+    return err
+  }
+
+  it('does not content-deduplicate repeated same-text sends', async () => {
+    streamKeeperMessage
+      .mockImplementationOnce(async (
+        _name: string,
+        _message: string,
+        opts: { signal?: AbortSignal },
+      ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      }))
+      .mockResolvedValueOnce({ terminal: true })
+
+    const firstSend = sendKeeperThreadMessage('echo', '진행 상황?').catch(err => err)
+    await Promise.resolve()
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect((keeperThreads.value.echo ?? []).filter(entry => entry.role === 'user')).toHaveLength(2)
+    expect((keeperThreads.value.echo ?? []).filter(entry => entry.role === 'assistant')).toHaveLength(2)
+    const firstError = await firstSend
+    expect(firstError).toBeInstanceOf(Error)
+    expect(firstError.name).toBe('AbortError')
+  })
+
+  it('dedupes repeated firing of the same client action id while in flight', async () => {
     let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
     streamKeeperMessage
       .mockImplementationOnce(async () => new Promise<{ terminal: boolean }>(resolve => {
@@ -238,10 +270,14 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       }))
       .mockResolvedValueOnce({ terminal: true })
 
-    const firstSend = sendKeeperThreadMessage('echo', '진행 상황?')
+    const firstSend = sendKeeperThreadMessage('echo', '진행 상황?', {
+      clientActionId: 'send-button-click-1',
+    })
     await Promise.resolve()
 
-    await sendKeeperThreadMessage('echo', '진행 상황?')
+    await sendKeeperThreadMessage('echo', '진행 상황?', {
+      clientActionId: 'send-button-click-1',
+    })
 
     expect(streamKeeperMessage).toHaveBeenCalledTimes(1)
     expect((keeperThreads.value.echo ?? []).filter(entry => entry.role === 'assistant')).toHaveLength(1)
@@ -249,8 +285,90 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     resolveStream({ terminal: true })
     await firstSend
 
-    await sendKeeperThreadMessage('echo', '다음 질문')
+    await sendKeeperThreadMessage('echo', '진행 상황?', {
+      clientActionId: 'send-button-click-2',
+    })
     expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not suppress the same text when the attachment payload differs', async () => {
+    const firstAttachment: KeeperConversationAttachment = {
+      id: 'att-first',
+      type: 'image',
+      name: 'first.png',
+      size: 128,
+      mimeType: 'image/png',
+      data: 'data:image/png;base64,first',
+    }
+    const secondAttachment: KeeperConversationAttachment = {
+      id: 'att-second',
+      type: 'image',
+      name: 'second.png',
+      size: 256,
+      mimeType: 'image/png',
+      data: 'data:image/png;base64,second',
+    }
+    streamKeeperMessage
+      .mockImplementationOnce(async (
+        _name: string,
+        _message: string,
+        opts: { signal?: AbortSignal },
+      ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      }))
+      .mockResolvedValueOnce({ terminal: true })
+
+    const firstSend = sendKeeperThreadMessage('echo', 'describe this', {
+      attachments: [firstAttachment],
+    }).catch(err => err)
+    await Promise.resolve()
+
+    await sendKeeperThreadMessage('echo', 'describe this', {
+      attachments: [secondAttachment],
+    })
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect(streamKeeperMessage.mock.calls[1]?.[2]).toEqual(expect.objectContaining({
+      attachments: [secondAttachment],
+    }))
+    const firstError = await firstSend
+    expect(firstError).toBeInstanceOf(Error)
+    expect(firstError.name).toBe('AbortError')
+  })
+
+  it('keeps a replacement stream active when the superseded send aborts later', async () => {
+    let resolveSecond: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage
+      .mockImplementationOnce(async (
+        _name: string,
+        _message: string,
+        opts: { signal?: AbortSignal },
+      ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      }))
+      .mockImplementationOnce(async () => new Promise<{ terminal: boolean }>(resolve => {
+        resolveSecond = resolve
+      }))
+
+    const firstSend = sendKeeperThreadMessage('echo', 'first').catch(err => err)
+    await Promise.resolve()
+
+    const secondSend = sendKeeperThreadMessage('echo', 'second')
+    await Promise.resolve()
+
+    const firstError = await firstSend
+    expect(firstError).toBeInstanceOf(Error)
+    expect(firstError.name).toBe('AbortError')
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect(keeperSending.value.echo).toBe(true)
+    const activeAssistant = (keeperThreads.value.echo ?? [])
+      .find(entry => entry.role === 'assistant' && entry.delivery === 'sending')
+    expect(activeStreamEntryId('echo')).toBe(activeAssistant?.id)
+
+    resolveSecond({ terminal: true })
+    await secondSend
+    expect(keeperSending.value.echo).toBe(false)
+    expect(activeStreamEntryId('echo')).toBeNull()
   })
 
   it('does not duplicate the pending assistant when a live send is still streaming and the panel remounts', async () => {

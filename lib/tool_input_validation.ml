@@ -99,7 +99,16 @@ let is_execute_typed_argv_schema schema =
   && schema_has_property_name schema "pipeline"
 ;;
 
-let is_execute_tool_name name = String.equal name "Execute" || String.equal name "tool_execute"
+let execute_public_tool_name = "Execute"
+
+let is_execute_tool_name name =
+  let name = Tool_name_alias_axis.strip_mcp_masc_prefix name in
+  String.equal name execute_public_tool_name
+  ||
+  match Tool_name_alias_axis.internal_name_of_public execute_public_tool_name with
+  | Some internal_name -> String.equal name internal_name
+  | None -> false
+;;
 
 let normalize_execute_args_envelope ?schema ~name args =
   match schema, args with

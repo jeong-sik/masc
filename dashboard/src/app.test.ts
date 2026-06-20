@@ -4,6 +4,7 @@ import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { App, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
 import { route } from './router'
+import { serverStatus, shellCounts } from './store'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -14,6 +15,8 @@ describe('App v2 header chrome', () => {
     document.body.appendChild(container)
     window.location.hash = originalHash
     route.value = { tab: 'overview', params: {}, postId: null }
+    shellCounts.value = null
+    serverStatus.value = null
   })
 
   afterEach(() => {
@@ -21,6 +24,8 @@ describe('App v2 header chrome', () => {
     container.remove()
     window.location.hash = originalHash
     route.value = { tab: 'overview', params: {}, postId: null }
+    shellCounts.value = null
+    serverStatus.value = null
   })
 
   function renderApp() {
@@ -65,6 +70,35 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('.v2-shell-tabs')).toBeNull()
     expect(container.querySelector('.v2-app-header-status')).not.toBeNull()
     expect(container.querySelector('.v2-statchip.live')).not.toBeNull()
+  })
+
+  it('renders keeper breadcrumb tail and visible Korean desktop status chips', () => {
+    window.innerWidth = 1280
+    route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }
+    shellCounts.value = {
+      agents: 0,
+      tasks: 0,
+      keepers: 7,
+      total_runtimes: 0,
+      configured_keepers: 7,
+    }
+    serverStatus.value = {} as NonNullable<typeof serverStatus.value>
+    renderApp()
+
+    const crumb = container.querySelector('.v2-header-crumb')
+    expect(crumb?.textContent).toContain('Keepers')
+    expect(crumb?.textContent).toContain('albini')
+
+    const status = container.querySelector('.v2-app-header-status') as HTMLElement | null
+    expect(status).not.toBeNull()
+    expect(status?.classList.contains('flex')).toBe(true)
+    expect(status?.classList.contains('hidden')).toBe(false)
+    expect(status?.textContent).toContain('7 실행 중')
+    expect(status?.textContent).toContain('스케줄러')
+    expect(status?.textContent).toContain('정상')
+    expect(
+      status?.querySelector('.v2-statchip.live span')?.classList.contains('motion-safe:animate-pulse'),
+    ).toBe(true)
   })
 
   it('renders the main stage as a StyleSeed card (white, rounded-2xl, soft shadow)', () => {

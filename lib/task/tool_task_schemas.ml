@@ -289,4 +289,23 @@ they do not route normal completion through the verifier agent."
       ("required", `List [`String "agent_name"; `String "task_id"; `String "action"]);
     ];
   };
+  (* RFC-0267 Phase 2: assign an existing goalless task to a goal. *)
+  {
+    name = "masc_task_set_goal";
+    description = "Assign an existing, currently goalless task to a goal. Both task_id and goal_id are required and validated against the backlog and the goal store; an unknown id is rejected (never silently ignored or auto-picked). A task that already has a goal is rejected — reassignment is out of scope.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("task_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "ID of the task to assign");
+        ]);
+        ("goal_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "ID of the goal to assign the task to");
+        ]);
+      ]);
+      ("required", `List [`String "task_id"; `String "goal_id"]);
+    ];
+  };
 ]

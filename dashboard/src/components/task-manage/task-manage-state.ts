@@ -36,3 +36,22 @@ export async function createTask(input: TaskCreateInput): Promise<boolean> {
     taskCreating.value = false
   }
 }
+
+// RFC-0267 Phase 2: assign an existing goalless task to a goal. Goes through the
+// masc_task_set_goal MCP tool (the same callMcpTool path createTask uses); the
+// backend rejects an unknown id or an already-assigned task, surfaced as a toast.
+export async function assignTaskToGoal(taskId: string, goalId: string): Promise<boolean> {
+  if (!taskId.trim() || !goalId.trim()) return false
+  try {
+    await callMcpTool('masc_task_set_goal', { task_id: taskId, goal_id: goalId })
+    showToast('목표에 배정 완료', 'success')
+    await Promise.all([
+      refreshExecution({ force: true }),
+      refreshGoals(),
+    ])
+    return true
+  } catch (err) {
+    showToast(`목표 배정 실패: ${errorToString(err)}`, 'error')
+    return false
+  }
+}

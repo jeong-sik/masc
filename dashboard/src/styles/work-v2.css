@@ -399,6 +399,26 @@
   cursor: default;
 }
 
+/* RFC-0267 Phase 2: per-row "assign to goal" control on unassigned tasks. */
+.wk-job-assign {
+  flex: none;
+  max-width: 11rem;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-highlight);
+  background: var(--bg-sunken);
+  color: var(--text-mid);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.wk-job-assign:hover {
+  border-color: var(--volt-strong);
+  color: var(--text-bright);
+}
+
 /* ── Footer / new goal button ─────────────────────────────────────────────── */
 .wk-newgoal {
   width: auto;

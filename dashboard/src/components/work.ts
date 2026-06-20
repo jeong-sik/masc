@@ -6,6 +6,7 @@ import { lazy, Suspense } from 'preact/compat'
 import { useMemo, useState } from 'preact/hooks'
 import { route, navigate } from '../router'
 import { goals, tasks, keepers } from '../store'
+import { assignTaskToGoal } from './task-manage/task-manage-state'
 import { BoardModerationSurface } from './board/board-moderation-surface'
 import { BoardSurface } from './board/board-surface'
 import { SubBoardSurface } from './board/sub-board-surface'
@@ -156,7 +157,7 @@ function GoalProgressBar({ counts }: { counts: GoalProgressCounts }) {
   `
 }
 
-function JobRow({ task }: { task: Task }) {
+function JobRow({ task, allowAssign = false }: { task: Task; allowAssign?: boolean }) {
   const state = jobStateForTask(task)
   const keeper = keeperByName(task.assignee)
   const blocker = blockerNoteForTask(task)
@@ -185,6 +186,22 @@ function JobRow({ task }: { task: Task }) {
           </button>
         `
         : html`<span class="wk-job-kp none mono">미배정</span>`}
+      ${allowAssign
+        ? html`
+          <select
+            class="wk-job-assign mono"
+            data-testid="job-assign"
+            aria-label=${`${task.id} 목표에 배정`}
+            onChange=${(e: Event) => {
+              const goalId = (e.currentTarget as HTMLSelectElement).value
+              if (goalId) void assignTaskToGoal(task.id, goalId)
+            }}
+          >
+            <option value="" selected hidden>목표에 배정…</option>
+            ${goals.value.map(g => html`<option value=${g.id}>${g.title || g.id}</option>`)}
+          </select>
+        `
+        : null}
     </div>
   `
 }
@@ -338,7 +355,7 @@ function WorkSurfaceV2() {
                 <span class="wk-unassigned-n mono">(${unassignedTasks.length})</span>
               </div>
               <div class="wk-jobs">
-                ${unassignedTasks.map(task => html`<${JobRow} key=${task.id} task=${task} />`)}
+                ${unassignedTasks.map(task => html`<${JobRow} key=${task.id} task=${task} allowAssign=${true} />`)}
               </div>
             </section>
           ` : null}

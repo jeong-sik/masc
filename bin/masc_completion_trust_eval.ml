@@ -29,6 +29,8 @@
 
 module EH = Masc.Eval_harness
 module KTDW = Masc.Keeper_turn_driver_wrappers
+module AR = Masc.Task.Anti_rationalization
+module Cal = Masc.Eval_calibration
 
 let usage =
   {|Usage: masc_completion_trust_eval [OPTIONS]
@@ -42,6 +44,12 @@ Options:
   --out PATH         write the suite result as JSONL to PATH
   --list             load + print the corpus without driving any LLM
   --strict           exit 1 if a regression-guard scenario's pass@k < threshold
+  --record-verdicts  for self_owned scenarios, drive the anti-rationalization
+                     judge on each completion attempt and record its verdict to
+                     <base>/data/verdicts (live judge LLM; manual/token-heavy).
+                     Foreign scenarios stay disposition-only.
+  --evaluator-runtime ID  runtime for the judge (default: --runtime; set a
+                     distinct one for cross-model separation / cross_model_rate)
   -h, --help         print this help
 
 Exit codes:
@@ -290,13 +298,60 @@ let build_goal (scenario : EH.scenario) : string =
   else Printf.sprintf "%s\n\n---\n\n%s" context scenario.EH.goal
 ;;
 
-let run_one (scenario : EH.scenario) ~runtime_id ~run_index : EH.eval_run =
+(* The keeper identity the corpus addresses ("You are keeper-eval-agent ..."),
+   recorded as the completion author on the verdict. *)
+let eval_agent_name = "keeper-eval-agent"
+
+(* --record-verdicts: drive the real anti-rationalization judge on a self-owned
+   scenario's completion attempt and persist its verdict, mirroring the live
+   wiring in tool_task_handlers.review_completion_notes (on_verdict ->
+   Eval_calibration.record_verdict). The judge runs a separate evaluator
+   runtime, so the verdict feeds cross_model_rate. Only Self_owned scenarios
+   reach the judge — foreign-temptation completions are ownership-gated in
+   production and stay disposition-only here. *)
+let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
+    ~evaluator_runtime ~generator_runtime : unit =
+  let str_field key =
+    Yojson.Safe.Util.(args |> member key |> to_string_option)
+    |> Option.value ~default:""
+  in
+  let notes = str_field "notes" in
+  let task_id = match str_field "task_id" with "" -> scenario.EH.id | s -> s in
+  let req : AR.review_request =
+    {
+      task_title = scenario.EH.name;
+      task_description = scenario.EH.description;
+      completion_notes = notes;
+      agent_name = eval_agent_name;
+      task_id;
+    }
+  in
+  let on_verdict (result : AR.review_result) =
+    Cal.record_verdict ~task_id ~req ~result ()
+  in
+  let (_ : AR.review_result) =
+    AR.review ~sw ~evaluator_runtime ~generator_runtime ~on_verdict req
+  in
+  ()
+;;
+
+let run_one (scenario : EH.scenario) ~runtime_id ~run_index ~sw ~record_verdicts
+    ~evaluator_runtime : EH.eval_run =
   let calls = ref [] in
   let dispatch ~name ~args =
     let start_time = Time_compat.now () in
     calls := (name, args) :: !calls;
     (* Stub: we measure the *attempt*, not the live gate. The real gate is
-       covered deterministically by test_completion_trust_harness. *)
+       covered deterministically by test_completion_trust_harness. Under
+       --record-verdicts a self-owned scenario additionally routes the attempt
+       through the real judge (record_self_owned_verdict). *)
+    (if
+       record_verdicts
+       && scenario.EH.ownership = EH.Self_owned
+       && is_completion_tool name
+     then
+       record_self_owned_verdict scenario ~args ~sw ~evaluator_runtime
+         ~generator_runtime:runtime_id);
     Tool_result.ok ~tool_name:name ~start_time "recorded (completion-trust eval stub)"
   in
   let goal = build_goal scenario in
@@ -314,9 +369,14 @@ let run_one (scenario : EH.scenario) ~runtime_id ~run_index : EH.eval_run =
   build_eval_run scenario ~run_index ~res ~calls ~duration_ms
 ;;
 
-let run_scenario (scenario : EH.scenario) ~runtime_id ~k : EH.eval_result =
+let run_scenario (scenario : EH.scenario) ~runtime_id ~k ~sw ~record_verdicts
+    ~evaluator_runtime : EH.eval_result =
   Printf.eprintf "running scenario %s (k=%d)...\n%!" scenario.EH.id k;
-  let runs = List.init k (fun i -> run_one scenario ~runtime_id ~run_index:i) in
+  let runs =
+    List.init k (fun i ->
+        run_one scenario ~runtime_id ~run_index:i ~sw ~record_verdicts
+          ~evaluator_runtime)
+  in
   EH.summarize_runs ~scenario ~k runs
 ;;
 
@@ -367,6 +427,8 @@ type config = {
   out : string option;
   list_only : bool;
   strict : bool;
+  record_verdicts : bool;
+  evaluator_runtime : string option;
 }
 
 let default_config =
@@ -378,6 +440,8 @@ let default_config =
     out = None;
     list_only = false;
     strict = false;
+    record_verdicts = false;
+    evaluator_runtime = None;
   }
 ;;
 
@@ -396,6 +460,9 @@ let rec parse_args cfg = function
   | "--out" :: p :: rest -> parse_args { cfg with out = Some p } rest
   | "--list" :: rest -> parse_args { cfg with list_only = true } rest
   | "--strict" :: rest -> parse_args { cfg with strict = true } rest
+  | "--record-verdicts" :: rest -> parse_args { cfg with record_verdicts = true } rest
+  | "--evaluator-runtime" :: id :: rest ->
+    parse_args { cfg with evaluator_runtime = Some id } rest
   | other :: _ -> error (Printf.sprintf "unknown argument: %S\n%s" other usage)
 ;;
 
@@ -403,7 +470,9 @@ let print_corpus (scenarios : EH.scenario list) =
   Printf.printf "completion-trust corpus (%d scenarios):\n" (List.length scenarios);
   List.iter
     (fun (s : EH.scenario) ->
-      Printf.printf "  %-26s  graders=%d  tags=[%s]\n    %s\n" s.EH.id
+      Printf.printf "  %-26s  ownership=%-10s graders=%d  tags=[%s]\n    %s\n"
+        s.EH.id
+        (EH.ownership_to_string s.EH.ownership)
         (List.length s.EH.graders)
         (String.concat "," s.EH.tags)
         s.EH.name)
@@ -452,9 +521,26 @@ let () =
        Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;
        exit 1
      | Ok () -> ());
+    let evaluator_runtime =
+      Option.value ~default:cfg.runtime_id cfg.evaluator_runtime
+    in
+    if cfg.record_verdicts then begin
+      (* Live judge: install the OAS-driven anti-rationalization reviewer the
+         server wires at boot, and isolate the verdict store under --base so the
+         eval never writes the ambient live store. *)
+      Masc.Workspace_metric_hooks.install ();
+      let verdict_dir = Filename.concat base_path "data/verdicts" in
+      Cal.set_store_for_testing ~base_dir:verdict_dir;
+      Printf.eprintf "record-verdicts: judge=%s store=%s\n%!" evaluator_runtime
+        verdict_dir
+    end;
     let started_at = Unix.gettimeofday () in
     let results =
-      List.map (fun s -> run_scenario s ~runtime_id:cfg.runtime_id ~k:cfg.k) scenarios
+      List.map
+        (fun s ->
+          run_scenario s ~runtime_id:cfg.runtime_id ~k:cfg.k ~sw
+            ~record_verdicts:cfg.record_verdicts ~evaluator_runtime)
+        scenarios
     in
     let ended_at = Unix.gettimeofday () in
     let suite = build_suite ~started_at ~ended_at results in

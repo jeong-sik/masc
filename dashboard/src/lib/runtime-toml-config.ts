@@ -41,6 +41,18 @@ export interface RuntimeTomlEnvironment {
   warnings: string[]
 }
 
+export interface RuntimeTomlImpactSummary {
+  defaultRuntimeBefore: string
+  defaultRuntimeAfter: string
+  defaultRuntimeChanged: boolean
+  runtimeAssignmentsChanged: boolean
+  providerCountDelta: number
+  modelCountDelta: number
+  bindingCountDelta: number
+  lineDelta: number
+  charDelta: number
+}
+
 interface TomlSection {
   readonly name: string
   readonly start: number
@@ -237,6 +249,40 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
     models,
     bindings,
     warnings,
+  }
+}
+
+function sourceLineCount(sourceText: string): number {
+  return sourceText.length === 0 ? 1 : sourceText.split('\n').length
+}
+
+function sectionSource(document: TomlDocument, sectionName: string): string {
+  const section = sectionOf(document, sectionName)
+  if (!section) return ''
+  return document.lines.slice(section.start, section.end).join('\n').trim()
+}
+
+export function runtimeTomlImpactSummary(
+  beforeSourceText: string,
+  afterSourceText: string,
+): RuntimeTomlImpactSummary {
+  const beforeDocument = parseDocument(beforeSourceText)
+  const afterDocument = parseDocument(afterSourceText)
+  const beforeEnvironment = parseRuntimeTomlEnvironment(beforeSourceText)
+  const afterEnvironment = parseRuntimeTomlEnvironment(afterSourceText)
+
+  return {
+    defaultRuntimeBefore: beforeEnvironment.defaultRuntimeId,
+    defaultRuntimeAfter: afterEnvironment.defaultRuntimeId,
+    defaultRuntimeChanged: beforeEnvironment.defaultRuntimeId !== afterEnvironment.defaultRuntimeId,
+    runtimeAssignmentsChanged:
+      sectionSource(beforeDocument, 'runtime.assignments') !==
+      sectionSource(afterDocument, 'runtime.assignments'),
+    providerCountDelta: afterEnvironment.providers.length - beforeEnvironment.providers.length,
+    modelCountDelta: afterEnvironment.models.length - beforeEnvironment.models.length,
+    bindingCountDelta: afterEnvironment.bindings.length - beforeEnvironment.bindings.length,
+    lineDelta: sourceLineCount(afterSourceText) - sourceLineCount(beforeSourceText),
+    charDelta: afterSourceText.length - beforeSourceText.length,
   }
 }
 

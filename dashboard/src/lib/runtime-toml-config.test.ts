@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   deleteRuntimeTomlKey,
   parseRuntimeTomlEnvironment,
+  runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
   setRuntimeTomlDefault,
   setRuntimeTomlModelField,
@@ -129,5 +130,28 @@ describe('runtime TOML dashboard editing helpers', () => {
 
     expect(next).not.toContain('keep-alive = "10m"')
     expect(next).toContain('max-concurrent = 4')
+  })
+
+  it('summarizes runtime.toml apply impact from before and after source', () => {
+    const next = `${setRuntimeTomlDefault(sourceText, 'openai.gpt')}
+
+[runtime.assignments]
+sangsu = "openai.gpt"
+
+[models.extra]
+api-name = "extra"
+`
+
+    const impact = runtimeTomlImpactSummary(sourceText, next)
+
+    expect(impact.defaultRuntimeChanged).toBe(true)
+    expect(impact.defaultRuntimeBefore).toBe('runpod_mtp.qwen')
+    expect(impact.defaultRuntimeAfter).toBe('openai.gpt')
+    expect(impact.runtimeAssignmentsChanged).toBe(true)
+    expect(impact.providerCountDelta).toBe(0)
+    expect(impact.modelCountDelta).toBe(1)
+    expect(impact.bindingCountDelta).toBe(0)
+    expect(impact.lineDelta).toBeGreaterThan(0)
+    expect(impact.charDelta).toBeGreaterThan(0)
   })
 })

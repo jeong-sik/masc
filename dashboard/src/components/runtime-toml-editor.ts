@@ -7,6 +7,10 @@ import {
   type RuntimeTomlConfig,
 } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
+import {
+  runtimeTomlImpactSummary,
+  type RuntimeTomlImpactSummary,
+} from '../lib/runtime-toml-config'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -42,6 +46,57 @@ function runtimeTomlDraftStats(sourceText: string): RuntimeTomlDraftStats {
 
 function runtimeTomlLineNumbers(lineCount: number): string {
   return Array.from({ length: lineCount }, (_, index) => String(index + 1)).join('\n')
+}
+
+function signedDelta(value: number): string {
+  if (value > 0) return `+${value}`
+  return String(value)
+}
+
+function runtimeLabel(value: string): string {
+  return value.trim() || 'unset'
+}
+
+function RuntimeTomlImpactPreview({ impact }: { impact: RuntimeTomlImpactSummary }) {
+  const catalogDelta =
+    impact.providerCountDelta !== 0 || impact.modelCountDelta !== 0 || impact.bindingCountDelta !== 0
+
+  return html`
+    <div
+      class="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--color-border-subtle)] pt-2 text-2xs text-[var(--color-fg-muted)]"
+      data-testid="runtime-toml-impact-preview"
+    >
+      <span class="uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">적용 미리보기</span>
+      <span
+        class="rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-2 py-0.5 font-mono"
+        data-testid="runtime-toml-default-impact"
+      >
+        default ${impact.defaultRuntimeChanged
+          ? `${runtimeLabel(impact.defaultRuntimeBefore)} -> ${runtimeLabel(impact.defaultRuntimeAfter)}`
+          : 'unchanged'}
+      </span>
+      <span
+        class="rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-2 py-0.5"
+        data-testid="runtime-toml-assignments-impact"
+      >
+        assignments ${impact.runtimeAssignmentsChanged ? 'changed' : 'unchanged'}
+      </span>
+      <span class="rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-2 py-0.5">
+        lines ${signedDelta(impact.lineDelta)}
+      </span>
+      <span class="rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-2 py-0.5">
+        chars ${signedDelta(impact.charDelta)}
+      </span>
+      <span
+        class="rounded-[var(--r-0)] border border-[var(--color-border-subtle)] px-2 py-0.5"
+        data-testid="runtime-toml-catalog-impact"
+      >
+        catalog ${catalogDelta
+          ? `p${signedDelta(impact.providerCountDelta)} m${signedDelta(impact.modelCountDelta)} b${signedDelta(impact.bindingCountDelta)}`
+          : 'unchanged'}
+      </span>
+    </div>
+  `
 }
 
 const editorFocusClasses = ringFocusClasses({
@@ -177,6 +232,10 @@ export function RuntimeTomlEditor() {
     () => runtimeTomlLineNumbers(stats.lineCount),
     [stats.lineCount],
   )
+  const impact = useMemo(
+    () => (config !== null && dirty ? runtimeTomlImpactSummary(config.source_text, draft) : null),
+    [config, dirty, draft],
+  )
 
   return html`
     <${SectionCard}
@@ -248,13 +307,13 @@ export function RuntimeTomlEditor() {
                 onClick=${handleSave}
                 disabled=${!dirty || saving || loadState === 'loading'}
                 ariaBusy=${saving}
-                ariaLabel="runtime.toml 저장"
-                title="저장"
+                ariaLabel="runtime.toml 라이브 적용"
+                title="라이브 적용"
                 testId="runtime-toml-save"
                 class="inline-flex items-center gap-1"
               >
                 <${Save} size=${13} strokeWidth=${2.25} aria-hidden="true" />
-                <span>${saving ? '저장 중' : '저장'}</span>
+                <span>${saving ? '적용 중' : '라이브 적용'}</span>
               <//>
             </div>
           </div>
@@ -266,6 +325,7 @@ export function RuntimeTomlEditor() {
             <span>${stats.charCount} chars</span>
             <span>${dirty ? 'unsaved' : 'synced'}</span>
           </div>
+          ${impact ? html`<${RuntimeTomlImpactPreview} impact=${impact} />` : null}
         </div>
 
         ${error ? html`<${ErrorState} message=${error} />` : null}

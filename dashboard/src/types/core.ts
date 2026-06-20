@@ -896,6 +896,10 @@ export interface KeeperConversationEntry {
   error?: string | null
   surface?: SurfaceRef | null
   audio?: KeeperConversationAudioClip | null
+  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" join key. Carries the
+  // chat message's originating turn so the turn inspector can anchor to the
+  // exact turn (initialTurnRowForTurnRef) instead of the 30-min timestamp window.
+  turnRef?: string | null
 }
 
 export interface KeeperStatusDetail {

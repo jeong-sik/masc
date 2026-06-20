@@ -732,6 +732,9 @@ function normalizeHistoryEntry(
     audio,
     attachments,
     blocks,
+    // RFC-0233 §7: thread the MASC-minted turn join key through so the inspector
+    // can anchor to the exact originating turn. asString rejects non-strings.
+    turnRef: asString(raw.turn_ref) ?? null,
   }
 }
 
@@ -1001,6 +1004,9 @@ interface RestChatHistoryMessage {
   // RFC-0235 P3: backend-parsed rich chat blocks. When present the dashboard
   // prefers them over its local parser.
   blocks?: ChatBlock[]
+  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
+  // Forwarded to KeeperConversationEntry.turnRef for exact turn-inspector anchoring.
+  turn_ref?: string | null
 }
 
 /** Convert a persisted tool-call row into the same entry shape the live
@@ -1024,6 +1030,9 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     streamState: null,
     details: null,
     surface: message.surface ?? null,
+    // RFC-0233 §7: tool rows also carry the turn join key. Forward it here too so
+    // turnRef is not silently dropped on the tool-entry construction path.
+    turnRef: message.turn_ref ?? null,
   }
 }
 
@@ -1053,6 +1062,7 @@ export function chatHistoryEntriesFromRest(
         attachments: message.attachments,
         kind: message.kind,
         blocks: message.blocks,
+        turn_ref: message.turn_ref,
       },
       keeperName,
       previousSource,

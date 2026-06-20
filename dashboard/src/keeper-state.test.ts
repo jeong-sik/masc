@@ -260,6 +260,28 @@ describe('thread history merge & persistence', () => {
     expect(tool?.delivery).toBe('history')
   })
 
+  it('threads turn_ref onto entries via every construction path; null when absent or non-string', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'hi', ts: 1_780_000_000, turn_ref: 'trace-a#7' },
+      { role: 'assistant', content: 'hello', ts: 1_780_000_000, turn_ref: 'trace-a#7' },
+      {
+        role: 'tool',
+        content: '{"path":"x"}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_9',
+        tool_call_name: 'Read',
+        turn_ref: 'trace-a#7',
+      },
+      // RFC-0233 §7: turn_ref forwarded on normalizeHistoryEntry AND toolHistoryEntry
+      // paths (N-of-M guard). A legacy row without turn_ref degrades to null so the
+      // inspector falls back to the timestamp window rather than mis-anchoring.
+      { role: 'assistant', content: 'no ref here', ts: 1_780_000_001 },
+      // Non-string turn_ref is rejected by asString → null (parse-don't-repair).
+      { role: 'user', content: 'bad ref', ts: 1_780_000_002, turn_ref: 42 as unknown as string },
+    ])
+    expect(entries.map(e => e.turnRef)).toEqual(['trace-a#7', 'trace-a#7', 'trace-a#7', null, null])
+  })
+
   it('decodes persisted attachments so uploads survive a reload', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {

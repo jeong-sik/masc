@@ -23,6 +23,10 @@ let sample_episode () =
   | Some ep -> ep
   | None -> Alcotest.fail "fixture episode failed to parse"
 
+let parse_retry_error_to_string = function
+  | R.Retry_exhausted_unparseable e -> "unparseable: " ^ e
+  | R.Retry_transport_failed e -> "transport: " ^ e
+
 let nudge_count messages =
   List.length
     (List.filter
@@ -43,7 +47,8 @@ let test_succeeds_first_attempt () =
   in
   (match R.run_with_parse_retries ~max_retries:2 ~attempt [] with
    | Ok _ -> ()
-   | Error e -> Alcotest.failf "expected Ok, got Error %s" e);
+   | Error e ->
+     Alcotest.failf "expected Ok, got Error %s" (parse_retry_error_to_string e));
   check int "no retry when first attempt parses" 1 !calls
 
 let test_retries_then_succeeds () =
@@ -55,7 +60,10 @@ let test_retries_then_succeeds () =
   in
   (match R.run_with_parse_retries ~max_retries:2 ~attempt [] with
    | Ok _ -> ()
-   | Error e -> Alcotest.failf "expected Ok after retry, got %s" e);
+   | Error e ->
+     Alcotest.failf
+       "expected Ok after retry, got %s"
+       (parse_retry_error_to_string e));
   check int "one retry to recover" 2 !calls
 
 let test_bounded_then_fails () =
@@ -66,7 +74,10 @@ let test_bounded_then_fails () =
   in
   (match R.run_with_parse_retries ~max_retries:2 ~attempt [] with
    | Ok _ -> Alcotest.fail "expected Error after exhausting retries"
-   | Error e -> check string "last error surfaced" "still bad" e);
+   | Error (R.Retry_exhausted_unparseable e) ->
+     check string "last error surfaced" "still bad" e
+   | Error (R.Retry_transport_failed e) ->
+     Alcotest.failf "expected unparseable exhaustion, got transport %s" e);
   check int "initial attempt + max_retries" 3 !calls
 
 let test_transport_not_retried () =
@@ -77,7 +88,10 @@ let test_transport_not_retried () =
   in
   (match R.run_with_parse_retries ~max_retries:2 ~attempt [] with
    | Ok _ -> Alcotest.fail "expected Error"
-   | Error e -> check string "transport error surfaced" "timeout" e);
+   | Error (R.Retry_transport_failed e) ->
+     check string "transport error surfaced" "timeout" e
+   | Error (R.Retry_exhausted_unparseable e) ->
+     Alcotest.failf "expected transport error, got unparseable %s" e);
   check int "transport failure is not retried" 1 !calls
 
 let test_nudge_appended_each_retry () =

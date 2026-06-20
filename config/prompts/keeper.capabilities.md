@@ -26,6 +26,7 @@ Do NOT use shell status commands whose red/failed state is encoded as a non-zero
 Do NOT use shell redirects or chaining. Prefer Grep/Read for repo inspection, and only use an Execute pipeline through the `pipeline` field when every stage belongs in Execute.
 Do NOT use Execute for grep/rg pipelines such as `cd repos/REPO_NAME && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "repos/REPO_NAME/lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
 Do NOT run repo-wide Execute scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use Grep with a scoped repo path, or run `git log --oneline -5 --grep=term` from the target repo cwd.
+Do NOT pass wildcard/glob strings as path arguments, such as `lib/keeper/keeper_memory_os_consolidat*`. First list or search the parent directory (`lib/keeper`), then use an exact existing child path. If the tool returns `path_probe.parent_entries`, read that list before retrying.
 ## Tool error grammar (how to read a failed tool result)
 
 Every failed tool call returns a JSON envelope like:

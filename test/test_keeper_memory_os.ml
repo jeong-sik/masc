@@ -897,6 +897,113 @@ let test_librarian_runtime_appends_episode_bundle () =
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 
+let test_librarian_runtime_preserves_unstructured_fallback () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let keeper_id = "runtime-librarian-fallback-keeper" in
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          incr calls;
+          Ok (fake_response "not json, but keep this observation")
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-runtime-fallback"
+          ; generation = 9
+          ; messages = [ text_message "Please remember the fallback path." ]
+          }
+        in
+        let fallback_started_at = Eio.Time.now clock in
+        let fallback_result =
+          Librarian_runtime.extract_and_append_with_provider
+            ~complete
+            ~clock
+            ~timeout_sec:1.0
+            ~sw
+            ~net
+            ~keeper_id
+            ~provider_cfg:(test_provider_cfg ())
+            inp
+        in
+        let fallback_finished_at = Eio.Time.now clock in
+        let fallback_created_at = ref None in
+        let check_in_clock_window label value =
+          Alcotest.(check bool)
+            label
+            true
+            (value >= fallback_started_at && value <= fallback_finished_at +. 0.001)
+        in
+        (match fallback_result with
+         | Error msg -> Alcotest.fail msg
+         | Ok episode ->
+           fallback_created_at := Some episode.Types.created_at;
+           check_in_clock_window
+             "fallback created_at derives from injected clock"
+             episode.Types.created_at;
+           Alcotest.(check int)
+             "initial attempt + parse retries"
+             (1 + Librarian_runtime.librarian_max_parse_retries)
+             !calls;
+           Alcotest.(check string)
+             "fallback summary"
+             "Unstructured librarian note preserved after parse failure"
+             episode.Types.episode_summary;
+           Alcotest.(check (option string))
+             "fallback marker"
+             (Some "librarian_unstructured_fallback")
+             episode.Types.terminal_marker;
+           (match episode.Types.claims with
+            | [ fact ] ->
+              Alcotest.(check bool)
+                "fallback claim keeps raw provider text"
+                true
+                (contains "not json, but keep this observation" fact.Types.claim);
+              Alcotest.(check bool)
+                "fallback is ephemeral"
+                true
+                (fact.Types.category = Types.Ephemeral);
+              Alcotest.(check (float 0.001))
+                "fallback fact first_seen uses episode timestamp"
+                episode.Types.created_at
+                fact.Types.first_seen;
+              Alcotest.(check (option (float 0.001)))
+                "fallback fact last_verified_at uses episode timestamp"
+                (Some episode.Types.created_at)
+                fact.Types.last_verified_at
+            | facts -> Alcotest.failf "expected one fallback fact, got %d" (List.length facts)));
+        let fallback_created_at =
+          match !fallback_created_at with
+          | Some ts -> ts
+          | None -> Alcotest.fail "fallback result timestamp was not captured"
+        in
+        Alcotest.(check int)
+          "episode file persisted"
+          1
+          (json_episode_file_count ~keeper_id);
+        (match Memory_io.read_events_tail ~keeper_id ~n:1 with
+         | [ episode ] ->
+           Alcotest.(check (option string))
+             "event persisted with fallback marker"
+             (Some "librarian_unstructured_fallback")
+             episode.Types.terminal_marker;
+           Alcotest.(check (float 0.001))
+             "event persisted with injected-clock timestamp"
+             fallback_created_at
+             episode.Types.created_at
+         | events -> Alcotest.failf "expected one event, got %d" (List.length events));
+        match Memory_io.read_facts_tail ~keeper_id ~n:1 with
+        | [ fact ] ->
+          Alcotest.(check bool)
+            "fact persisted as unstructured note"
+            true
+            (contains "unstructured_note" fact.Types.claim);
+          Alcotest.(check (float 0.001))
+            "persisted fact first_seen uses injected clock"
+            fallback_created_at
+            fact.Types.first_seen
+        | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
+;;
+
 let test_librarian_runtime_reports_fact_upsert_failure () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -3368,6 +3475,10 @@ let () =
         ] )
     ; ( "librarian runtime"
       , [ Alcotest.test_case
+            "unparseable output is preserved as unstructured fallback"
+            `Quick
+            test_librarian_runtime_preserves_unstructured_fallback
+        ; Alcotest.test_case
             "provider slot gate caps concurrency at capacity (#21376/#21230)"
             `Quick
             test_librarian_provider_slot_gate_caps_at_capacity

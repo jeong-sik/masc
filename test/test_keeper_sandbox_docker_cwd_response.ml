@@ -35,6 +35,34 @@ let cleanup_dir path =
   in
   rm path
 
+let json_assoc_member key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let json_string key json =
+  match json_assoc_member key json with
+  | Some (`String s) -> Some s
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+  | None -> None
+
+let json_bool key json =
+  match json_assoc_member key json with
+  | Some (`Bool b) -> Some b
+  | Some (`Assoc _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _)
+  | None -> None
+
+let json_string_list key json =
+  match json_assoc_member key json with
+  | Some (`List values) ->
+    Some
+      (List.filter_map
+         (function
+           | `String s -> Some s
+           | `Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null -> None)
+         values)
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _)
+  | None -> None
+
 let make_docker_meta ~name : Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
@@ -134,6 +162,64 @@ let test_typed_execute_response_cwd_uses_container_path () =
            (Astring.String.is_prefix ~affix:"/home/keeper/playground" cwd)
        | _ -> fail "typed Execute cwd response should serialize as a string")
 
+let test_path_probe_lists_parent_entries_for_glob_like_miss () =
+  let base = temp_dir "typed_exec_path_probe_" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let keeper_dir = Filename.concat base "lib/keeper" in
+       Unix.mkdir (Filename.concat base "lib") 0o755;
+       Unix.mkdir keeper_dir 0o755;
+       let oc =
+         open_out (Filename.concat keeper_dir "keeper_memory_os_consolidator.ml")
+       in
+       close_out oc;
+       let probe =
+         Keeper_tool_execute_runtime.For_testing.path_probe_json
+           ~cwd:base
+           "lib/keeper/keeper_memory_os_consolidat*"
+       in
+       check (option bool) "wildcard-like path" (Some true)
+         (json_bool "wildcard_like" probe);
+       check (option string) "parent argument" (Some "lib/keeper")
+         (json_string "parent_argument" probe);
+       check (option bool) "parent exists" (Some true)
+         (json_bool "parent_exists" probe);
+       check (option bool) "parent is directory" (Some true)
+         (json_bool "parent_is_directory" probe);
+       check (option bool) "parent stays inside cwd" (Some true)
+         (json_bool "parent_within_cwd" probe);
+       match json_string_list "parent_entries" probe with
+       | Some entries ->
+         check bool "parent listing includes candidate" true
+           (List.mem "keeper_memory_os_consolidator.ml" entries)
+       | None -> fail "path probe should include parent_entries")
+
+let test_path_probe_does_not_list_parent_outside_cwd () =
+  let base = temp_dir "typed_exec_path_probe_base_" in
+  let outside = temp_dir "typed_exec_path_probe_outside_" in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir base;
+      cleanup_dir outside)
+    (fun () ->
+       let oc = open_out (Filename.concat outside "outside_candidate.ml") in
+       close_out oc;
+       let probe =
+         Keeper_tool_execute_runtime.For_testing.path_probe_json
+           ~cwd:base
+           (Filename.concat outside "outside*")
+       in
+       check (option bool) "outside parent is not in cwd" (Some false)
+         (json_bool "parent_within_cwd" probe);
+       check (option bool) "outside parent existence is not probed" (Some false)
+         (json_bool "parent_exists" probe);
+       check (option bool) "outside parent directory is not probed" (Some false)
+         (json_bool "parent_is_directory" probe);
+       match json_string_list "parent_entries" probe with
+       | Some entries -> check (list string) "outside parent entries hidden" [] entries
+       | None -> fail "path probe should include parent_entries")
+
 (* Source-level pin: assert that no [("cwd", `String <ident>)]
    literal remains in keeper_sandbox_docker.ml. The four sites
    from #11080's sibling leak class must be wired through
@@ -191,5 +277,14 @@ let () =
           test_case
             "no raw (\"cwd\", `String cwd) literal remains in source"
             `Quick test_source_has_no_raw_cwd_string_literal
+        ] )
+    ; ( "path-probe"
+      , [
+          test_case
+            "glob-like missing path returns parent entries"
+            `Quick test_path_probe_lists_parent_entries_for_glob_like_miss
+        ; test_case
+            "absolute missing path outside cwd does not list parent"
+            `Quick test_path_probe_does_not_list_parent_outside_cwd
         ] )
     ]

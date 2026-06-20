@@ -54,8 +54,10 @@ Options:
                      contaminate production calibration.
   --evaluator-runtime ID  runtime for the judge. Omit for cross-model separation
                      (the judge runs on routes.cross_verifier, a JSON-capable
-                     model distinct from --runtime); cross_model_rate is only
-                     meaningful when the judge differs from the generator.
+                     model distinct from --runtime; --record-verdicts requires
+                     routes.cross_verifier when this flag is omitted);
+                     cross_model_rate is only meaningful when the judge differs
+                     from the generator.
   -h, --help         print this help
 
 Exit codes:
@@ -508,6 +510,25 @@ let runtime_toml_path ~base_path =
     Config_dir_resolver.runtime_toml_filename
 ;;
 
+let resolve_record_verdicts_evaluator ~(record_verdicts : bool)
+    ~(evaluator_runtime : string option) : string option =
+  if not record_verdicts then evaluator_runtime
+  else
+    match evaluator_runtime with
+    | Some id ->
+      let id = String.trim id in
+      if id = "" then error "--evaluator-runtime must not be empty"
+      else Some id
+    | None -> (
+      match Runtime.cross_verifier_runtime_id () with
+      | Some id when String.trim id <> "" -> None
+      | _ ->
+        error
+          "--record-verdicts without --evaluator-runtime requires \
+           [runtime].cross_verifier (routes.cross_verifier); configure it in \
+           runtime.toml or pass --evaluator-runtime ID")
+;;
+
 let () =
   let cfg = parse_args default_config (List.tl (Array.to_list Sys.argv)) in
   match EH.load_scenarios_from_file cfg.scenarios_path with
@@ -548,6 +569,10 @@ let () =
        Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;
        exit 1
      | Ok () -> ());
+    let evaluator_runtime =
+      resolve_record_verdicts_evaluator ~record_verdicts:cfg.record_verdicts
+        ~evaluator_runtime:cfg.evaluator_runtime
+    in
     (match verdict_store with
      | Some verdict_dir ->
        (* Live judge: install the OAS-driven anti-rationalization reviewer the
@@ -556,7 +581,7 @@ let () =
        Masc.Workspace_metric_hooks.install ();
        Cal.set_store_for_testing ~base_dir:verdict_dir;
        let judge_label =
-         match cfg.evaluator_runtime with
+         match evaluator_runtime with
          | Some id -> id
          | None -> "routes.cross_verifier (default)"
        in
@@ -569,7 +594,7 @@ let () =
         (fun s ->
           run_scenario s ~runtime_id:cfg.runtime_id ~k:cfg.k ~sw
             ~record_verdicts:cfg.record_verdicts
-            ~evaluator_runtime:cfg.evaluator_runtime)
+            ~evaluator_runtime)
         scenarios
     in
     let ended_at = Unix.gettimeofday () in

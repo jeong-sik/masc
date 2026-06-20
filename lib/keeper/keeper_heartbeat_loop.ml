@@ -148,6 +148,9 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
   (* Capture the backtrace before any other call can clobber it. *)
   let backtrace = Printexc.get_backtrace () in
   Keeper_registry.increment_turn_failures ~base_path keeper_name;
+  Health.record_failure
+    ~agent_name:keeper_name
+    ~reason:(Keeper_types_profile.short_preview (Printexc.to_string exn));
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string CycleExceptions)
     ~labels:[ "keeper", keeper_name ]
@@ -195,11 +198,9 @@ let run_keepalive_unified_turn
       let scheduling =
         decide_keepalive_scheduling
           ~reactive_wake
-          ~runtime_resilience_of_name:(fun name ->
-            if Health.is_healthy ~agent_name:name then None
+          ~keeper_resilience_of_name:(fun keeper_name ->
+            if Health.is_healthy ~agent_name:keeper_name then None
             else Some "unhealthy")
-          ~runtime_status_of_name:
-            (runtime_status_of_health_snapshot ~base_path:ctx.config.base_path)
           ~stop
           ~meta:meta_after_triage
           obs

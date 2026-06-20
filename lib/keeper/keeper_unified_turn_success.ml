@@ -411,28 +411,27 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
 ;;
 
 let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
+  let reset_failure_state () =
+    Keeper_registry.reset_turn_failures
+      ~base_path:config.Workspace.base_path
+      updated_meta.name;
+    Health.record_success ~agent_name:updated_meta.name
+  in
   match result.Keeper_agent_run.stop_reason with
   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "turn budget exhausted (%d/%d), checkpoint saved — will resume next cycle"
       turns_used
       limit;
-    Keeper_registry.reset_turn_failures
-      ~base_path:config.Workspace.base_path
-      updated_meta.name
+    reset_failure_state ()
   | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "mutation boundary reached after %s, checkpoint saved — will resume next cycle"
       (match tool_name with
        | Some tool -> tool
        | None -> "committed tool");
-    Keeper_registry.reset_turn_failures
-      ~base_path:config.base_path
-      updated_meta.name
-  | Runtime_agent.Completed ->
-    Keeper_registry.reset_turn_failures
-      ~base_path:config.base_path
-      updated_meta.name
+    reset_failure_state ()
+  | Runtime_agent.Completed -> reset_failure_state ()
 ;;
 
 let handle

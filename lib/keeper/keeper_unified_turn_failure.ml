@@ -46,7 +46,11 @@ let record_failure_and_maybe_escalate
     (not is_auto_recoverable) || EC.is_runtime_exhausted_error err
   in
   if counts_toward_crash
-  then Keeper_registry.increment_turn_failures ~base_path meta.name
+  then (
+    Keeper_registry.increment_turn_failures ~base_path meta.name;
+    Health.record_failure
+      ~agent_name:meta.name
+      ~reason:(Keeper_types_profile.short_preview error_text))
   else
     Log.Keeper.info
       "%s: auto-recoverable turn failure (not counted toward crash threshold): %s"

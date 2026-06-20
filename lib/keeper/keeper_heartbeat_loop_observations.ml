@@ -57,12 +57,15 @@ let runtime_backpressure_observation_reasons ~reason =
   let category =
     if String.starts_with ~prefix:"runtime_resilience_" reason
     then "runtime_resilience"
+    else if String.starts_with ~prefix:"keeper_health_" reason
+    then "keeper_health"
     else "runtime_unhealthy"
   in
   [ "runtime_backpressure"; category; "reason_" ^ skip_reason_component reason ]
 ;;
 
 let runtime_backpressure_decision
+      ?(reason_prefix = "runtime_resilience")
       ~runtime_resilience
       ~should_run_turn
       ~runtime_id
@@ -70,7 +73,7 @@ let runtime_backpressure_decision
   match should_run_turn, runtime_resilience with
   | true, Some blocker ->
     Runtime_backpressured
-      { runtime_id; reason = "runtime_resilience_" ^ blocker }
+      { runtime_id; reason = reason_prefix ^ "_" ^ blocker }
   | false, _ | true, None -> Runtime_admitted
 ;;
 

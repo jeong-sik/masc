@@ -23,6 +23,7 @@ module Cfg = Env_config
 module KHL = Masc.Keeper_heartbeat_loop
 module Obs = Masc.Keeper_heartbeat_loop_observations
 module WO = Masc.Keeper_world_observation
+module Health = Masc.Health
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -846,6 +847,47 @@ let test_runtime_backpressure_blocks_requested_turn () =
   check bool "verdict reasons include runtime backpressure" true
     (List.mem "runtime_backpressure" decision.verdict_reasons)
 
+let test_keeper_health_backpressure_uses_keeper_name () =
+  let meta = make_meta "keeper-health-gate" in
+  let obs = { base_observation with pending_mentions = [ "operator", "please run" ] } in
+  let consulted = ref [] in
+  let decision =
+    KHL.decide_keepalive_scheduling
+      ~runtime_id_of_meta:(fun _ -> "runtime-test")
+      ~runtime_resilience_of_name:(fun _ ->
+        fail "runtime resilience should not be consulted after keeper health blocks")
+      ~keeper_resilience_of_name:(fun keeper_name ->
+        consulted := keeper_name :: !consulted;
+        Some "unhealthy")
+      ~stop:(Atomic.make false)
+      ~meta
+      obs
+  in
+  check (list string) "keeper health consulted by keeper name" [ meta.name ] !consulted;
+  check bool "world observation requested a turn" true decision.requested_should_run_turn;
+  check bool "keeper health blocks admission" false decision.should_run_turn;
+  (match decision.runtime_backpressure with
+   | Obs.Runtime_backpressured { reason; _ } ->
+     check string "keeper health reason" "keeper_health_unhealthy" reason
+   | Obs.Runtime_admitted -> fail "keeper health should reject turn")
+
+let test_crashed_cycle_records_health_failure () =
+  let base_path = temp_dir "health-feed" in
+  let keeper_name = "health-feed-keeper" in
+  Health.record_success ~agent_name:keeper_name;
+  check bool "keeper starts healthy" true (Health.is_healthy ~agent_name:keeper_name);
+  for i = 1 to 3 do
+    KHL.record_crashed_cycle_failure
+      ~base_path
+      ~keeper_name
+      (Failure (Printf.sprintf "boom-%d" i))
+  done;
+  check
+    bool
+    "crashed cycles feed Health breaker"
+    false
+    (Health.is_healthy ~agent_name:keeper_name)
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -906,5 +948,9 @@ let () =
     "scheduling", [
       test_case "runtime backpressure blocks requested turn" `Quick
         test_runtime_backpressure_blocks_requested_turn;
+      test_case "keeper health blocks by keeper name" `Quick
+        test_keeper_health_backpressure_uses_keeper_name;
+      test_case "crashed cycles feed agent health breaker" `Quick
+        test_crashed_cycle_records_health_failure;
     ];
   ]

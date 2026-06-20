@@ -339,10 +339,9 @@ describe('KeeperConversationPanel', () => {
     expect(getQueueLength('sangsu')).toBe(0)
   })
 
-  it('does not enqueue a duplicate submit for an already queued client action', async () => {
+  it('enqueues repeated same-draft submits as separate queued actions', async () => {
     keeperSending.value = { sangsu: true }
-    const clientActionId = JSON.stringify({ text: 'same draft', attachments: [] })
-    enqueueInput('sangsu', 'same draft', undefined, clientActionId)
+    enqueueInput('sangsu', 'same draft', undefined, 'queued-action-1')
 
     render(
       html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
@@ -357,7 +356,7 @@ describe('KeeperConversationPanel', () => {
     const sendButton = container.querySelector('.send') as HTMLButtonElement
     fireEvent.click(sendButton)
 
-    expect(getQueueLength('sangsu')).toBe(1)
+    expect(getQueueLength('sangsu')).toBe(2)
   })
 
   it('keeps queued client action ids attached when draining the queue', async () => {

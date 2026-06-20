@@ -1,7 +1,7 @@
 # Dashboard AttentionIndicator (keeper-v2 top-bar attention center)
 
 Status: implemented (PR — Unit 3 of the keeper-v2 dashboard port)
-Date: 2026-06-21
+Date: 2026-06-20
 Scope: `dashboard/src/components/attention-indicator.ts` + top-bar wiring (`app.ts`, `dashboard-shell.ts`, `styles/app-shell-v2.css`)
 Design source: keeper-v2 `shell.jsx` → `AttentionIndicator` / `TopBar`
 Related: `docs/design/dashboard-pill-convergence.md` (Unit 0), keeper-v2 gap analysis (2026-06-20)
@@ -65,9 +65,8 @@ queued item is ever silently dropped:
 
 ## Verification
 
-- `pnpm test attention-indicator` — 13 tests: the pure `attentionItemBucket` / `summarizeAttention`
-  partition (bucket rules, total invariant, tone, order, empty), `BUCKET_META` nav targets, and the
-  component (zero-state, chip tone/total, dropdown open + per-row navigate).
-- `dashboard-shell` + `app` test suites pass unchanged after removing the flat badge (69 tests green
-  across the three files).
-- `pnpm typecheck` clean; `pnpm eslint` clean on the changed component.
+- `pnpm --dir dashboard exec vitest run --config vitest.config.ts src/components/attention-indicator.test.ts --no-file-parallelism --maxWorkers=1`
+  covers the pure `attentionItemBucket` / `summarizeAttention` partition (bucket rules, total
+  invariant, tone, order, empty), `BUCKET_META` nav targets, and the component (zero-state, chip
+  tone/total, dropdown open + per-row navigate, outside-click close, Escape close).
+- Broader dashboard type/lint/build validation is left to PR CI and the normal release gate.

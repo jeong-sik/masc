@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { waitFor } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 
 vi.mock('../router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../router')>()),
@@ -148,15 +148,42 @@ describe('AttentionIndicator component', () => {
     ])
     render(html`<${AttentionIndicator} />`, container)
     const chip = container.querySelector('button.v2-statchip.attn') as HTMLButtonElement
-    chip.click()
+    fireEvent.click(chip)
     await waitFor(() => {
       expect(container.querySelector('[role="menu"]')).not.toBeNull()
     })
     expect(container.querySelectorAll('[data-attention-bucket]').length).toBe(2)
     const approvalsRow = container.querySelector('[data-attention-bucket="approvals"]') as HTMLButtonElement
-    approvalsRow.click()
+    fireEvent.click(approvalsRow)
     await waitFor(() => {
       expect(vi.mocked(navigate)).toHaveBeenCalledWith('approvals')
+    })
+  })
+
+  it('closes the dropdown on outside click and Escape', async () => {
+    setQueue([
+      item({ kind: 'pending_confirm_waiting', severity: 'bad' }),
+      item({ target_type: 'keeper', kind: 'keeper_x', severity: 'warn' }),
+    ])
+    render(html`<${AttentionIndicator} />`, container)
+    const chip = container.querySelector('button.v2-statchip.attn') as HTMLButtonElement
+
+    fireEvent.click(chip)
+    await waitFor(() => {
+      expect(container.querySelector('[role="menu"]')).not.toBeNull()
+    })
+    fireEvent.click(document)
+    await waitFor(() => {
+      expect(container.querySelector('[role="menu"]')).toBeNull()
+    })
+
+    fireEvent.click(chip)
+    await waitFor(() => {
+      expect(container.querySelector('[role="menu"]')).not.toBeNull()
+    })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => {
+      expect(container.querySelector('[role="menu"]')).toBeNull()
     })
   })
 })

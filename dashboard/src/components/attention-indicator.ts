@@ -113,12 +113,20 @@ const MENU_TITLE = '지금 나를 필요로 하는 것'
 export function AttentionIndicator() {
   const [open, setOpen] = useState(false)
   // Close on any outside click while open (the chip's own clicks are stopped
-  // below so they don't immediately re-close the menu).
+  // below so they don't immediately re-close the menu), and match the
+  // dashboard's other popovers by accepting Escape.
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
-    window.addEventListener('click', close)
-    return () => window.removeEventListener('click', close)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('click', close)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('click', close)
+      document.removeEventListener('keydown', onKeyDown)
+    }
   }, [open])
 
   const snap = missionSnapshot.value

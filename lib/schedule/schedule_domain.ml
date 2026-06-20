@@ -772,9 +772,16 @@ let create_execution_grant
   }
 ;;
 
+let expired_at ~now (request : schedule_request) =
+  match request.expires_at with
+  | Some expires_at when expires_at <= now -> true
+  | None | Some _ -> false
+;;
+
 let validate_execution_grant (request : schedule_request) (grant : execution_grant) =
   if grant.schedule_id <> request.schedule_id then Error Grant_schedule_id_mismatch
   else if is_terminal request.status then Error Schedule_terminal
+  else if expired_at ~now:grant.approved_at request then Error Schedule_terminal
   else if request.status <> Pending_approval && request.status <> Due then
     Error Schedule_not_pending_approval
   else if requires_separate_human_grant request && grant.approved_by.kind <> Human_operator
@@ -817,12 +824,6 @@ let apply_execution_grant (request : schedule_request) (grant : execution_grant)
     in
     Ok { request with status }
   | Reject _ -> Ok { request with status = Rejected }
-;;
-
-let expired_at ~now (request : schedule_request) =
-  match request.expires_at with
-  | Some expires_at when expires_at <= now -> true
-  | None | Some _ -> false
 ;;
 
 let mark_due ~now (request : schedule_request) =

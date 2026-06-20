@@ -198,6 +198,10 @@ val schedule_status_of_string : string -> (schedule_status, string) result
 val schedule_source_to_string : schedule_source -> string
 val schedule_source_of_string : string -> (schedule_source, string) result
 val recurrence_kind_to_string : recurrence -> string
+val recurrence_summary : recurrence -> string
+(** Stable, human-readable recurrence summary for dashboard and keeper tool
+    outputs. This is presentation-only; schedule eligibility still uses the
+    typed [recurrence] value. *)
 val execution_status_to_string : execution_status -> string
 val execution_status_of_string : string -> (execution_status, string) result
 val grant_error_to_string : grant_error -> string

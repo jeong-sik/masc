@@ -305,6 +305,17 @@ let test_cron_schedule_roundtrip () =
      | _ -> fail "expected cron recurrence")
 ;;
 
+let test_recurrence_summary () =
+  check string "one-shot summary" "one_shot" (recurrence_summary One_shot);
+  check string "interval summary" "every 900s"
+    (recurrence_summary (Interval { interval_sec = 900 }));
+  check string "daily summary" "daily 09:05:07 Asia/Seoul"
+    (recurrence_summary
+       (Daily { hour = 9; minute = 5; second = 7; timezone = "Asia/Seoul" }));
+  check string "cron summary" "cron 0 9 * * 1-5 UTC"
+    (recurrence_summary (Cron { expression = "0 9 * * 1-5"; timezone = "UTC" }))
+;;
+
 let test_missing_recurrence_defaults_one_shot () =
   let req = request ~risk_class:Read_only () in
   let json =
@@ -410,6 +421,7 @@ let () =
         [
           test_case "schedule roundtrip" `Quick test_schedule_roundtrip;
           test_case "cron schedule roundtrip" `Quick test_cron_schedule_roundtrip;
+          test_case "recurrence summary" `Quick test_recurrence_summary;
           test_case "missing recurrence defaults one-shot" `Quick
             test_missing_recurrence_defaults_one_shot;
           test_case "grant roundtrip" `Quick test_grant_roundtrip;

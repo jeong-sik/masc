@@ -47,6 +47,7 @@ function CountChip({ name, count }: { name: string; count: number }) {
 }
 
 function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
+  if (request.recurrence_summary?.trim()) return request.recurrence_summary
   const recurrence = request.recurrence
   const kind = recurrence?.kind ?? request.recurrence_kind ?? 'one_shot'
   if (kind === 'interval' && typeof recurrence?.interval_sec === 'number') {
@@ -83,6 +84,8 @@ function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest
   const effectiveStatus = request.effective_status ?? request.status
   const readiness = request.execution_readiness ?? '-'
   const action = request.operator_action ?? '-'
+  const dueIso = request.next_due_at_iso ?? request.due_at_iso ?? null
+  const approval = request.approval_policy ?? (request.approval_required ? 'required' : 'not_required')
   return html`
     <tr class="v2-lab-row border-t border-[var(--color-border-default)]">
       <td class="py-2 pr-3 font-mono text-xs text-[var(--color-fg-secondary)]">${request.schedule_id}</td>
@@ -98,8 +101,8 @@ function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${request.payload_kind ?? '-'}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${recurrenceLabel(request)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${lastExecutionLabel(request)}</td>
-      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${formatDateTimeKo(request.due_at_iso ?? null)}</td>
-      <td class="py-2 text-xs text-[var(--color-fg-muted)]">${request.approval_required ? 'required' : 'not required'}</td>
+      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${formatDateTimeKo(dueIso)}</td>
+      <td class="py-2 text-xs text-[var(--color-fg-muted)]">${enumLabel(approval)}</td>
     </tr>
   `
 }

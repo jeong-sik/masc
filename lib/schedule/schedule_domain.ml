@@ -213,6 +213,14 @@ let recurrence_kind_to_string = function
   | Cron _ -> "cron"
 ;;
 
+let recurrence_summary = function
+  | One_shot -> "one_shot"
+  | Interval { interval_sec } -> Printf.sprintf "every %ds" interval_sec
+  | Daily { hour; minute; second; timezone } ->
+    Printf.sprintf "daily %02d:%02d:%02d %s" hour minute second timezone
+  | Cron { expression; timezone } -> Printf.sprintf "cron %s %s" expression timezone
+;;
+
 let execution_status_to_string = function
   | Execution_running -> "running"
   | Execution_succeeded -> "succeeded"

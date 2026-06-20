@@ -67,6 +67,65 @@ let substring_between source ~start_marker ~end_marker =
       | None -> Alcotest.failf "missing marker %S" end_marker
       | Some end_pos -> String.sub source body_start (end_pos - body_start))
 
+let find_substring_from source needle start =
+  let source_len = String.length source in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then Some start
+    else if i + needle_len > source_len then None
+    else if String.equal (String.sub source i needle_len) needle then Some i
+    else loop (i + 1)
+  in
+  loop start
+
+let skip_spaces source i =
+  let len = String.length source in
+  let rec loop pos =
+    if pos >= len then pos
+    else
+      match source.[pos] with
+      | ' ' | '\n' | '\r' | '\t' -> loop (pos + 1)
+      | _ -> pos
+  in
+  loop i
+
+let matching_paren source open_pos =
+  let len = String.length source in
+  if open_pos >= len || not (Char.equal source.[open_pos] '(') then None
+  else
+    let rec loop pos depth =
+      if pos >= len then None
+      else
+        match source.[pos] with
+        | '(' -> loop (pos + 1) (depth + 1)
+        | ')' ->
+            let next_depth = depth - 1 in
+            if next_depth = 0 then Some pos else loop (pos + 1) next_depth
+        | _ -> loop (pos + 1) depth
+    in
+    loop open_pos 0
+
+let function_call_spans source marker =
+  let marker_len = String.length marker in
+  let rec loop from acc =
+    match find_substring_from source marker from with
+    | None -> List.rev acc
+    | Some marker_pos -> (
+        let args_start = skip_spaces source (marker_pos + marker_len) in
+        if args_start >= String.length source
+           || not (Char.equal source.[args_start] '(')
+        then loop (marker_pos + marker_len) acc
+        else
+          match matching_paren source args_start with
+          | None -> loop (marker_pos + marker_len) acc
+          | Some args_end ->
+              let span =
+                String.sub source marker_pos (args_end - marker_pos + 1)
+              in
+              loop (args_end + 1) (span :: acc))
+  in
+  loop 0 []
+
 (* ====== Session Registry ====== *)
 
 let test_initial_session_count () =
@@ -107,7 +166,15 @@ let test_session_close_wire_calls_stay_outside_registry_lock () =
   Alcotest.(check bool)
     "wire close helper does not acquire sessions_mutex"
     false
-    (contains_substring close_helper "with_sessions_rw")
+    (contains_substring close_helper "with_sessions_rw");
+  List.iteri
+    (fun i span ->
+      Alcotest.(check bool)
+        (Printf.sprintf
+           "registry lock span %d does not invoke detached wire close" i)
+        false
+        (contains_substring span "close_detached_session_wsd"))
+    (function_call_spans source "with_sessions_rw")
 
 (* ====== SHA1 (httpun-ws handshake) ====== *)
 

@@ -60,6 +60,7 @@ import {
   keeperThreads,
 } from './keeper-state'
 import {
+  _resetKeeperThreadMessageSendGuardsForTests,
   _resetChatHydrationForTests,
   dispatchKeeperInterjectAction,
   hydrateKeeperChatHistory,
@@ -201,6 +202,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
     _clearPendingKeeperChatRequestsForTests()
+    _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()
     streamKeeperMessage.mockReset()
     fetchKeeperChatHistory.mockReset()
@@ -227,6 +229,29 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       return { terminal }
     }
   }
+
+  it('ignores a direct duplicate send while the keeper stream is already active', async () => {
+    let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage
+      .mockImplementationOnce(async () => new Promise<{ terminal: boolean }>(resolve => {
+        resolveStream = resolve
+      }))
+      .mockResolvedValueOnce({ terminal: true })
+
+    const firstSend = sendKeeperThreadMessage('echo', '진행 상황?')
+    await Promise.resolve()
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(1)
+    expect((keeperThreads.value.echo ?? []).filter(entry => entry.role === 'assistant')).toHaveLength(1)
+
+    resolveStream({ terminal: true })
+    await firstSend
+
+    await sendKeeperThreadMessage('echo', '다음 질문')
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+  })
 
   it('does not duplicate the pending assistant when a live send is still streaming and the panel remounts', async () => {
     // A send whose SSE stream stays open (reply pending). The mock fires the

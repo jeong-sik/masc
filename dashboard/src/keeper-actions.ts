@@ -333,7 +333,16 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
 let localIdCounter = 0
 
 const resumingKeeperChatRequests = new Set<string>()
+const sendingKeeperThreadMessages = new Set<string>()
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
+
+function keeperThreadMessageSendKey(keeperName: string, message: string): string {
+  return `${keeperName}\u0000${message}`
+}
+
+export function _resetKeeperThreadMessageSendGuardsForTests(): void {
+  sendingKeeperThreadMessages.clear()
+}
 
 async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
   // A live in-session send stream still owns this request (e.g. the panel
@@ -572,6 +581,9 @@ export async function sendKeeperThreadMessage(
       : deriveUserBlocks(prompt, attachments)
   const message = prompt.trim() || fallbackMessageForUserBlocks(userBlocks ?? [])
   if (!keeperName || !message) return
+  const sendKey = keeperThreadMessageSendKey(keeperName, message)
+  if (sendingKeeperThreadMessages.has(sendKey)) return
+  sendingKeeperThreadMessages.add(sendKey)
   abortKeeperThreadMessage(keeperName)
   const localId = `local-${++localIdCounter}-${Date.now()}`
   const assistantId = `reply-${++localIdCounter}-${Date.now()}`
@@ -759,6 +771,7 @@ export async function sendKeeperThreadMessage(
     // the non-terminal handoff above already released, so this is a no-op
     // there; Map.delete of an absent key is harmless.
     if (requestId) releaseLiveSendRequest(requestId)
+    sendingKeeperThreadMessages.delete(sendKey)
     clearActiveStream(keeperName)
     setRecordValue(keeperSending, keeperName, false)
     setRecordValue(keeperStreamStartedAt, keeperName, null)

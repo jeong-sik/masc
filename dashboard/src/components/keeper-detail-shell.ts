@@ -17,9 +17,9 @@ function KeeperModelChip({ keeper }: { keeper: Keeper }) {
   if (!display) return null
   return html`
     <span
-      class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
+      class="inline-flex max-w-full min-w-0 items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
       title=${`${display.label}: ${display.value}`}
-    >${display.value}</span>
+    ><span class="block min-w-0 truncate">${display.value}</span></span>
   `
 }
 
@@ -89,9 +89,9 @@ export function KeeperDetailHeaderInfo({
           ? html`<span aria-hidden="true">${keeper.emoji}</span>`
           : html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`}
       </div>
-      <div class="flex min-w-[12rem] flex-1 flex-col gap-0.5">
+      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <div class="flex flex-wrap items-center gap-2.5">
-          <h2 id=${titleId} class="m-0 text-xl font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>
+          <h2 id=${titleId} class="m-0 min-w-0 truncate text-xl font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>
           <${KeeperPhaseAndStage}
             phase=${keeper.lifecycle_phase ?? keeper.phase}
             pipelineStage=${keeper.pipeline_stage}

@@ -457,11 +457,20 @@ let test_persistence_load_skips_corrupt_and_nameless_rows () =
         ("selections", `Int 99);
       ]
   in
+  let schema_mismatch =
+    `Assoc
+      [
+        ("name", `String "persist-schema-mismatch");
+        ("score", `Float 99.0);
+        ("selections", `Int 99);
+      ]
+  in
   Fs_compat.save_file path
     (String.concat "\n"
        [
          "{not-json";
          Yojson.Safe.to_string nameless;
+         Yojson.Safe.to_string schema_mismatch;
          Yojson.Safe.to_string valid;
          "";
        ]);
@@ -474,7 +483,13 @@ let test_persistence_load_skips_corrupt_and_nameless_rows () =
     Thompson_sampling.get_all_stats ()
     |> List.exists (fun (s : Thompson_sampling.agent_stats) -> String.equal s.name "")
   in
-  check bool "nameless schema row skipped" false has_empty_name
+  check bool "nameless schema row skipped" false has_empty_name;
+  let loaded_names =
+    Thompson_sampling.get_all_stats ()
+    |> List.map (fun (s : Thompson_sampling.agent_stats) -> s.name)
+  in
+  check bool "schema mismatch row skipped" false
+    (List.mem "persist-schema-mismatch" loaded_names)
 
 (** {1 Test Runner} *)
 

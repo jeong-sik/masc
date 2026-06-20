@@ -278,9 +278,9 @@ let stats_of_json (json : Yojson.Safe.t) : agent_stats option =
   let name = Json_util.get_string_with_default json ~key:"name" ~default:"" in
   if String.equal (String.trim name) "" then
     None
-  else
-  let alpha = Json_util.get_float json "alpha" |> Option.value ~default:0.0 in
-  let beta = Json_util.get_float json "beta" |> Option.value ~default:0.0 in
+  else match Json_util.get_float json "alpha", Json_util.get_float json "beta" with
+  | None, _ | _, None -> None
+  | Some alpha, Some beta ->
   let selections = Json_util.get_int json "selections" |> Option.value ~default:0 in
   let last_selected_at = Json_util.get_float json "last_selected_at" |> Option.value ~default:0.0 in
   let total_votes_up = Json_util.get_int json "total_votes_up" |> Option.value ~default:0 in
@@ -324,7 +324,13 @@ let load_stats () =
   let path = stats_path () in
   if Fs_compat.file_exists path then begin
     try
-      let entries = Fs_compat.load_jsonl path in
+      (* Boot-safe: malformed JSONL rows are dropped with diagnostics by
+         Fs_compat; any remaining I/O/schema exception is logged below and does
+         not abort server startup. *)
+      let entries, malformed = Fs_compat.load_jsonl_diagnostics path in
+      if malformed > 0 then
+        Log.Thompson.warn "Dropped %d malformed stats line(s) from %s"
+          malformed path;
       (* Parse outside the lock — [stats_of_json] is pure and avoids
          holding [ts_mu] across per-line work — then install the whole
          batch under one critical section. *)

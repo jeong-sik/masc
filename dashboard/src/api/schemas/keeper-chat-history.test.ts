@@ -79,6 +79,25 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.external_message_id).toBe('1498985300729172039')
   })
 
+  it('passes the RFC-0233 turn_ref join key through when present', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({ turn_ref: 'trace-1780648779957-00000#4071' }),
+    )
+    expect(out?.turn_ref).toBe('trace-1780648779957-00000#4071')
+  })
+
+  it('leaves turn_ref undefined on legacy rows without dropping the message', () => {
+    const out = safeParseKeeperChatHistoryMessage(validMessage())
+    expect(out).not.toBeNull()
+    expect(out?.turn_ref).toBeUndefined()
+  })
+
+  it('returns null when turn_ref has the wrong type', () => {
+    expect(
+      safeParseKeeperChatHistoryMessage(validMessage({ turn_ref: 4071 })),
+    ).toBeNull()
+  })
+
   it('passes surface ref fields through when present', () => {
     const out = safeParseKeeperChatHistoryMessage(
       validMessage({

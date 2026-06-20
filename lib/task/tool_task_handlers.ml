@@ -320,7 +320,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
             ~priority ~description)
 
 (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
-   over [Goal_task_assignment.set_task_goal] — the single validated backend
+   over [Task_goal_assignment.set_task_goal] — the single validated backend
    shared with the dashboard HTTP route, so neither surface re-implements the
    precondition checks. All caller-input violations are [Workflow_rejection]. *)
 let handle_set_goal ~tool_name ~start_time ctx args =
@@ -347,7 +347,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
         ~tool_name ~start_time
         "goal_id is required and cannot be empty"
     else (
-      match Goal_task_assignment.set_task_goal ctx.config ~task_id ~goal_id with
+      match Task_goal_assignment.set_task_goal ctx.config ~task_id ~goal_id with
       | Ok () ->
         Tool_result.ok ~tool_name ~start_time
           (Yojson.Safe.to_string
@@ -360,7 +360,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
         Tool_result.error
           ~failure_class:(Some Tool_result.Workflow_rejection)
           ~tool_name ~start_time
-          (Goal_task_assignment.set_task_goal_error_to_string err))
+          (Task_goal_assignment.set_task_goal_error_to_string err))
 
 let handle_batch_add_tasks ~tool_name ~start_time ctx args =
   let valid_item_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in

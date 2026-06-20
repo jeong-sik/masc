@@ -9,6 +9,7 @@
   anti_rationalization
   planning_eio
   task_dispatch
+  task_goal_assignment
   task_transition_state
   tool_task
   tool_task_args

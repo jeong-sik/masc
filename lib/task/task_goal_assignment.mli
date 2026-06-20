@@ -4,7 +4,11 @@
     and the dashboard HTTP route (POST /api/v1/dashboard/tasks/assign-goal),
     so the precondition checks are written once instead of duplicated at each
     surface. The link is persisted in the [goal_task_links] registry
-    ([Workspace_goal_index]); the task record carries no goal_id field. *)
+    ([Workspace_goal_index]); the task record carries no goal_id field.
+
+    Lives in the task domain: a task->goal reference is the allowed direction,
+    whereas hosting it in the goal leaf domain would be a goal->task coupling
+    the domain-boundary ratchet rejects. *)
 
 type set_task_goal_error =
   | Unknown_task of string
@@ -29,8 +33,8 @@ val set_task_goal :
     - [Error (Already_assigned _)] — the task already carries one or more
       goal links; reassignment/unlink is out of scope (RFC-0267 §4, which
       keeps Phase 2 strictly additive for goalless tasks).
-    - [Ok ()] — the link was written (the registry write is idempotent and
-      file-locked).
+    - [Ok ()] — the link was written after confirming under the registry file
+      lock that the task still has no goal link.
 
     Neither an unknown task nor an unknown goal is silently tolerated: both
     are returned as typed errors rather than mapped to a permissive default. *)

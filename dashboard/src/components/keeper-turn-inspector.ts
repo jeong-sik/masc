@@ -445,6 +445,11 @@ type TurnToolDetail = {
 type TurnInspectorData = {
   turns: TurnRecordsResponse
   toolCalls: ToolCallsResponse | null
+  toolCallError: string | null
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function approxTokens(str: string): number {
@@ -896,12 +901,14 @@ function TurnDetailDrawer({
   row,
   source,
   toolEntries,
+  toolCallError,
   onClose,
 }: {
   keeperName: string
   row: TurnRecordRow
   source: string
   toolEntries: readonly ToolCallEntry[]
+  toolCallError: string | null
   onClose: () => void
 }) {
   const [tab, setTab] = useState('timeline')
@@ -957,6 +964,17 @@ function TurnDetailDrawer({
             <span class="sub-k">runtime</span>${row.record.runtime_profile}
           </span>
         </div>
+
+        ${toolCallError
+          ? html`
+            <div
+              class="mt-2 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-status-warn)]"
+              data-testid="turn-timing-source-warning"
+            >
+              tool-call timing source unavailable · ${toolCallError}
+            </div>
+          `
+          : null}
 
         <div class="kti-summary" data-testid="turn-summary-stats">
           <div class="kti-stat">
@@ -1134,9 +1152,12 @@ export function KeeperTurnInspector({
     void resource.load(async (signal) => {
       const [turns, toolCalls] = await Promise.all([
         fetchKeeperTurnRecords(keeperName, 50, { signal }),
-        fetchKeeperToolCalls(keeperName, 200, { signal }).catch(() => null),
+        fetchKeeperToolCalls(keeperName, 200, { signal }).then(
+          toolCalls => ({ toolCalls, toolCallError: null }),
+          error => ({ toolCalls: null, toolCallError: errorMessage(error) }),
+        ),
       ])
-      return { turns, toolCalls }
+      return { turns, toolCalls: toolCalls.toolCalls, toolCallError: toolCalls.toolCallError }
     })
     return () => {
       resource.cancel()
@@ -1145,6 +1166,7 @@ export function KeeperTurnInspector({
 
   const response = resource.state.value.data?.turns
   const toolEntries = resource.state.value.data?.toolCalls?.entries ?? []
+  const toolCallError = resource.state.value.data?.toolCallError ?? null
   const rows = response?.entries ?? EMPTY_TURN_RECORD_ROWS
   // Server returns oldest-first; show newest first.
   const sorted = useMemo(() => [...rows].reverse(), [rows])
@@ -1219,6 +1241,11 @@ export function KeeperTurnInspector({
               malformed ${response.skipped_rows}행 제외됨
             </span>`
           : null}
+        ${toolCallError
+          ? html`<span class="text-3xs text-[var(--color-status-warn)]" data-testid="turn-timing-source-warning">
+              tool-call timing source unavailable
+            </span>`
+          : null}
       </div>
       ${memoryOsPanel}
       ${userModelPanel}
@@ -1245,6 +1272,7 @@ export function KeeperTurnInspector({
             row=${selectedRow}
             source=${response?.source ?? 'turn_record'}
             toolEntries=${toolEntries}
+            toolCallError=${toolCallError}
             onClose=${() => setSelectedRow(null)}
           />`
         : null}

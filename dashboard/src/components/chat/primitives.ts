@@ -2060,7 +2060,7 @@ function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; outp
       : output.success === false || output.semantic_success === false
         ? 'bad'
         : 'ok'
-  const durLabel = output && output.duration_ms > 0 ? formatMsCompact(output.duration_ms) : ''
+  const durLabel = output?.duration_ms != null && output.duration_ms > 0 ? formatMsCompact(output.duration_ms) : ''
   const resultView = output ? toolOutputDisplay(output.output) : null
   const hasResult = resultView !== null && resultView.text.trim() !== ''
   // Expandable when there is anything to show: args, a result, or a still-pending

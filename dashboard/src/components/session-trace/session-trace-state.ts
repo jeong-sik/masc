@@ -451,7 +451,11 @@ function toolCallEntryMatchesTraceEvent(
   const entryTurn = entry.turn ?? entry.keeper_turn_id
   if (eventTurn != null && entryTurn != null && eventTurn !== entryTurn) return false
 
-  if (event.duration_ms != null && Math.abs(event.duration_ms - entry.duration_ms) > 1) return false
+  if (
+    event.duration_ms != null
+    && entry.duration_ms != null
+    && Math.abs(event.duration_ms - entry.duration_ms) > 1
+  ) return false
   if (toolEventSuccess(event) !== entry.success) return false
 
   return Math.abs(event.ts - (entry.ts * 1000)) <= TOOL_CALL_MATCH_WINDOW_MS
@@ -501,7 +505,7 @@ function enrichToolCallTrace(
     toolName: entry.tool,
     toolArgs: normalizeToolCallInput(entry.input) ?? event.toolArgs,
     toolResult: entry.success ? outputText : null,
-    duration_ms: entry.duration_ms,
+    duration_ms: entry.duration_ms ?? undefined,
     // Trajectory turn is trace-relative and pairs with `round`; the log's
     // session-absolute turn stays readable as detail.turn. Mixing the two
     // vocabularies in one T#R# badge would mislabel the row.
@@ -531,7 +535,7 @@ function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): Uni
     toolName: entry.tool,
     toolArgs: normalizeToolCallInput(entry.input),
     toolResult: entry.success ? outputText : null,
-    duration_ms: entry.duration_ms,
+    duration_ms: entry.duration_ms ?? undefined,
     turn: entry.turn ?? entry.keeper_turn_id,
     executionId: entry.execution_id,
     error: entry.success ? null : outputText || 'tool call failed',

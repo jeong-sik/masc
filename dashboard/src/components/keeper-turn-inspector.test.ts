@@ -198,6 +198,17 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
   }
 }
 
+function toolCallsForTurnWithoutDuration(): ToolCallsResponse {
+  const response = toolCallsForTurn()
+  return {
+    ...response,
+    entries: response.entries.map(entry => ({
+      ...entry,
+      duration_ms: null,
+    })),
+  }
+}
+
 beforeEach(() => {
   fetchKeeperToolCallsMock.mockResolvedValue(emptyToolCalls())
 })
@@ -521,6 +532,58 @@ describe('KeeperTurnInspector v2 drawer', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('agent subturn T9001')
     })
+  })
+
+  it('keeps joined tool calls with missing duration unmeasured, not 0ms', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    fetchKeeperToolCallsMock.mockResolvedValue(toolCallsForTurnWithoutDuration())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    const drawerText = container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent ?? ''
+    expect(drawerText).toContain('keeper_board_post_get')
+    expect(drawerText).toContain('측정 없음')
+    expect(drawerText).not.toContain('0ms')
+    expect(drawerText).not.toContain('0.50s')
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('duration 없음')
+    })
+  })
+
+  it('warns when the timing source fails while keeping turn records visible', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+    fetchKeeperToolCallsMock.mockRejectedValue(new Error('tool log unavailable'))
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    expect(container.textContent).toContain('tool-call timing source unavailable')
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    const drawerText = container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent ?? ''
+    expect(drawerText).toContain('tool-call timing source unavailable')
+    expect(drawerText).toContain('tool log unavailable')
   })
 
   it('displays the token-economics stacked bar', async () => {

@@ -396,6 +396,40 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.semantic_outcome).toBe('blocked')
     expect(entry?.goal_ids).toEqual(['g-1', 'g-2'])
   })
+
+  it('keeps missing or malformed tool-call duration unmeasured', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 2,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_context_status',
+            input: {},
+            output: 'ok',
+            success: true,
+          },
+          {
+            ts: 2,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_board_post_get',
+            input: {},
+            output: 'ok',
+            success: true,
+            duration_ms: 'not recorded',
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+
+    expect(result.entries.map(entry => entry.duration_ms)).toEqual([null, null])
+  })
 })
 
 describe('fetchMemorySubsystems', () => {

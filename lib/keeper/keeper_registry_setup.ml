@@ -115,6 +115,9 @@ let register_with_state
      Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;
      decr_running_count_clamped ()
    | _ -> ());
+  let initial_event_queue =
+    Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
+  in
   let entry =
     { base_path
     ; name
@@ -123,7 +126,7 @@ let register_with_state
     ; conditions
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
-    ; event_queue = Atomic.make Keeper_event_queue.empty
+    ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; done_p
@@ -196,8 +199,14 @@ let register_restarting ~base_path name meta
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
-(* Build fresh entry once — its per-fiber atomics (fiber_stop, event_queue, etc.) are independent of registry contents, so a CAS retry can re-use the same record without re-allocating. *)
+  (* Build fresh entry once — its per-fiber atomics are independent of the
+     registry contents, so a CAS retry can re-use the same record without
+     re-allocating. Pending Event Layer stimuli are restored from the durable
+     queue snapshot instead of being reset across restart. *)
   let done_p, done_r = Eio.Promise.create () in
+  let initial_event_queue =
+    Keeper_event_queue_persistence.load ~base_path ~keeper_name:name
+  in
   let new_entry =
     { base_path
     ; name
@@ -206,7 +215,7 @@ let register_restarting ~base_path name meta
     ; conditions
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
-    ; event_queue = Atomic.make Keeper_event_queue.empty
+    ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
     ; done_p

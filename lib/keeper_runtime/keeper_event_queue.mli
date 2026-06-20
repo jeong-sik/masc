@@ -129,3 +129,15 @@ val drain_board_window : ?window_sec:float -> t -> stimulus list * t
     the queue.  Board signals are urgency-sorted; non-board stimuli and
     board signals outside the window remain in the returned queue in
     their original order. *)
+
+val stimulus_to_yojson : stimulus -> Yojson.Safe.t
+(** Stable JSON representation used by MASC-owned durable queue snapshots. *)
+
+val stimulus_of_yojson : Yojson.Safe.t -> (stimulus, string) result
+(** Parse a stimulus written by [stimulus_to_yojson]. *)
+
+val queue_to_yojson : t -> Yojson.Safe.t
+(** Stable JSON representation of the queue in FIFO order. *)
+
+val queue_of_yojson : Yojson.Safe.t -> (t, string) result
+(** Parse a queue written by [queue_to_yojson]. *)

@@ -244,6 +244,8 @@ run_tlc "$REPO_ROOT/specs/state-product" "WorkspaceProduct.tla"
 run_tlc_buggy "$REPO_ROOT/specs/state-product" "WorkspaceProduct.tla"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
+run_tlc "$REPO_ROOT/specs/task-lifecycle" "CompletionAuthority.tla"
+run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "CompletionAuthority.tla"
 
 run_tlc "$REPO_ROOT/specs/goal-loop" "TierRouting.tla"
 run_tlc_buggy "$REPO_ROOT/specs/goal-loop" "TierRouting.tla"

@@ -305,7 +305,11 @@ let handle_in_process ctx descriptor args =
          ())
   | Tool_masc_fusion_status ->
     (* read-only: reads the in-memory run registry, no server context needed. *)
-    Some (Keeper_tool_in_process_runtime.handle_masc_fusion_status ~args ())
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_fusion_status
+         ~meta:ctx.meta
+         ~args
+         ())
   | Tool_execute
   | Tool_search_files
   | Tool_read_file

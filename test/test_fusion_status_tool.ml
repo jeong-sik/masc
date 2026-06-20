@@ -2,7 +2,8 @@
 
    Two failure modes a stub could introduce while still compiling:
 
-   1. the JSON projection [fusion_status_json] mislabels a run status (e.g.
+   1. the JSON projection [fusion_status_json] leaks another keeper's run or
+      mislabels a run status (e.g.
       reports a denied/sink-failed run as "completed"), or returns the wrong
       shape for list vs single-run vs unknown-run_id; and
    2. the tool is wired but NOT visible to the keeper LLM (Pass B requires
@@ -59,21 +60,28 @@ let find_run runs id =
 let seeded () =
   let t = R.create () in
   R.register_running t ~run_id:"r-run" ~keeper:"k1" ~preset:"balanced" ~started_at:300.0;
-  R.register_running t ~run_id:"r-done" ~keeper:"k2" ~preset:"deep" ~started_at:100.0;
+  R.register_running t ~run_id:"r-done" ~keeper:"k1" ~preset:"deep" ~started_at:100.0;
   R.mark_completed t ~run_id:"r-done" ~ok:true;
-  R.register_running t ~run_id:"r-fail" ~keeper:"k3" ~preset:"deep" ~started_at:200.0;
+  R.register_running t ~run_id:"r-fail" ~keeper:"k1" ~preset:"deep" ~started_at:200.0;
   R.mark_completed t ~run_id:"r-fail" ~ok:false;
+  R.register_running
+    t
+    ~run_id:"r-foreign"
+    ~keeper:"k2"
+    ~preset:"balanced"
+    ~started_at:400.0;
   t
 ;;
 
-(* (1a) list mode: every tracked run, newest-first, with the right status label.
-   The label mapping is the mutation-sensitive core — ok=false must read
-   "failed", not "completed". *)
-let test_list_all () =
-  let json = H.fusion_status_json ~registry:(seeded ()) ~run_id:"" |> parse in
+(* (1a) list mode: only the calling keeper's tracked runs, newest-first, with
+   the right status label. The label mapping is the mutation-sensitive core —
+   ok=false must read "failed", not "completed". *)
+let test_list_scoped_to_keeper () =
+  let json = H.fusion_status_json ~registry:(seeded ()) ~keeper:"k1" ~run_id:"" |> parse in
   check bool "ok" true (bool_ json "ok");
   check int "count" 3 (int_ json "count");
   let runs = runs_of json in
+  check int "only caller keeper runs" 3 (List.length runs);
   check string "newest started_at first" "r-run" (str (List.hd runs) "run_id");
   check string "running label" "running" (str (find_run runs "r-run") "status");
   check string "completed label" "completed" (str (find_run runs "r-done") "status");
@@ -86,7 +94,9 @@ let test_list_all () =
 
 (* (1b) single-run lookup: found -> {found=true; run}. *)
 let test_single_found () =
-  let json = H.fusion_status_json ~registry:(seeded ()) ~run_id:"r-fail" |> parse in
+  let json =
+    H.fusion_status_json ~registry:(seeded ()) ~keeper:"k1" ~run_id:"r-fail" |> parse
+  in
   check bool "ok" true (bool_ json "ok");
   check bool "found" true (bool_ json "found");
   let run =
@@ -98,10 +108,24 @@ let test_single_found () =
   check string "single run status" "failed" (str run "status")
 ;;
 
-(* (1c) unknown run_id -> a deterministic not_found envelope, not an empty/ok
+(* (1c) a keeper cannot fetch another keeper's run_id even when the run exists
+   in the process-wide registry. *)
+let test_single_foreign_run_not_found () =
+  let json =
+    H.fusion_status_json ~registry:(seeded ()) ~keeper:"k1" ~run_id:"r-foreign" |> parse
+  in
+  check bool "ok" true (bool_ json "ok");
+  check bool "found is false" false (bool_ json "found");
+  check string "echoes the queried run_id" "r-foreign" (str json "run_id");
+  check string "status not_found" "not_found" (str json "status")
+;;
+
+(* (1d) unknown run_id -> a deterministic not_found envelope, not an empty/ok
    silent drop. *)
 let test_single_not_found () =
-  let json = H.fusion_status_json ~registry:(seeded ()) ~run_id:"ghost" |> parse in
+  let json =
+    H.fusion_status_json ~registry:(seeded ()) ~keeper:"k1" ~run_id:"ghost" |> parse
+  in
   check bool "ok" true (bool_ json "ok");
   check bool "found is false" false (bool_ json "found");
   check string "echoes the queried run_id" "ghost" (str json "run_id");
@@ -110,7 +134,7 @@ let test_single_not_found () =
 
 (* empty registry lists nothing but still returns the ok/count/runs shape *)
 let test_empty_registry () =
-  let json = H.fusion_status_json ~registry:(R.create ()) ~run_id:"" |> parse in
+  let json = H.fusion_status_json ~registry:(R.create ()) ~keeper:"k1" ~run_id:"" |> parse in
   check int "empty count" 0 (int_ json "count");
   check int "empty runs list" 0 (List.length (runs_of json))
 ;;
@@ -137,8 +161,9 @@ let () =
   run
     "fusion_status_tool"
     [ ( "rfc-0266-phase3"
-      , [ test_case "list all runs (newest-first, status labels)" `Quick test_list_all
+      , [ test_case "list caller runs only (newest-first)" `Quick test_list_scoped_to_keeper
         ; test_case "single run found" `Quick test_single_found
+        ; test_case "foreign run_id -> not_found" `Quick test_single_foreign_run_not_found
         ; test_case "unknown run_id -> not_found" `Quick test_single_not_found
         ; test_case "empty registry shape" `Quick test_empty_registry
         ; test_case "tool is visible to the keeper LLM" `Quick test_tool_is_keeper_visible

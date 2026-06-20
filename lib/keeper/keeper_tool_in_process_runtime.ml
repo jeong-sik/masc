@@ -408,12 +408,13 @@ let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
          ])
 ;;
 
-(* RFC-0266 §7 Phase 3 — masc_fusion_status: read-only view of the fusion run
-   registry (in-progress + recently completed). [fusion_status_json] is the
+(* RFC-0266 §7 Phase 3 — masc_fusion_status: read-only view of the caller's
+   fusion runs (in-progress + recently completed). [fusion_status_json] is the
    pure projection over any registry instance, so tests exercise it on an
    isolated [Fusion_run_registry.create ()]; [handle_masc_fusion_status] binds
-   the process-wide [global] the fusion tool/sink write to. *)
-let fusion_status_json ~(registry : Fusion_run_registry.t) ~run_id : string =
+   the process-wide [global] the fusion tool/sink write to and scopes by the
+   calling keeper. *)
+let fusion_status_json ~(registry : Fusion_run_registry.t) ~keeper ~run_id : string =
   let status_label (status : Fusion_run_registry.run_status) =
     match status with
     | Fusion_run_registry.Running -> "running"
@@ -429,9 +430,23 @@ let fusion_status_json ~(registry : Fusion_run_registry.t) ~run_id : string =
       ; "status", `String (status_label r.status)
       ]
   in
+  let belongs_to_keeper (r : Fusion_run_registry.run) =
+    String.equal r.keeper keeper
+  in
+  let not_found () =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool true
+         ; "found", `Bool false
+         ; "run_id", `String run_id
+         ; "status", `String "not_found"
+         ])
+  in
   if String.equal run_id ""
   then begin
-    let runs = Fusion_run_registry.list_runs registry in
+    let runs =
+      Fusion_run_registry.list_runs registry |> List.filter belongs_to_keeper
+    in
     Yojson.Safe.to_string
       (`Assoc
          [ "ok", `Bool true
@@ -441,22 +456,15 @@ let fusion_status_json ~(registry : Fusion_run_registry.t) ~run_id : string =
   end
   else (
     match Fusion_run_registry.get registry ~run_id with
-    | Some run ->
+    | Some run when belongs_to_keeper run ->
       Yojson.Safe.to_string
         (`Assoc [ "ok", `Bool true; "found", `Bool true; "run", run_to_yojson run ])
-    | None ->
-      Yojson.Safe.to_string
-        (`Assoc
-           [ "ok", `Bool true
-           ; "found", `Bool false
-           ; "run_id", `String run_id
-           ; "status", `String "not_found"
-           ]))
+    | Some _ | None -> not_found ())
 ;;
 
-let handle_masc_fusion_status ~args () =
+let handle_masc_fusion_status ~(meta : keeper_meta) ~args () =
   let run_id = Safe_ops.json_string ~default:"" "run_id" args |> String.trim in
-  fusion_status_json ~registry:Fusion_run_registry.global ~run_id
+  fusion_status_json ~registry:Fusion_run_registry.global ~keeper:meta.name ~run_id
 ;;
 
 (* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]

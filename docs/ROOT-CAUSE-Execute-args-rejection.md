@@ -1,9 +1,9 @@
 # Root Cause: `Tool 'Execute' received unsupported field(s): args`
 
-> Scope: MASC (`~/me/workspace/yousleepwhen/masc`) `issue_king` keeper → `Execute` tool
+> Scope: repository-local MASC `Execute` tool validation path
 > Error observed:
-> `[2026-06-21 01:26:50] [WARN] [Keeper/issue_king] tool_policy_rejection: Execute — {"ok":false,"error":"Tool 'Execute' received unsupported field(s): args"}`
-> Date: 2026-06-21
+> `[WARN] [Keeper/issue_king] tool_policy_rejection: Execute — {"ok":false,"error":"Tool 'Execute' received unsupported field(s): args"}`
+> Date: 2026-06-20
 
 ---
 
@@ -186,7 +186,7 @@ Look at `config/keepers/issue_king.toml` and its runtime binding to see which pr
 
 ### 6.4 Check trajectory / telemetry
 
-Search `.masc/trajectories/`, `logs/`, or telemetry for the turn around `2026-06-21 01:26:50` for `issue_king`. The raw tool-call JSON should be present in the trajectory.
+Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king` turn. The raw tool-call JSON should be present in the trajectory.
 
 ---
 
@@ -244,7 +244,7 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the turn around `2026-06
 
 ## 9. Next step
 
-1. Identify which provider `issue_king` was using at `2026-06-21 01:26:50`.
+1. Identify which provider `issue_king` was using for the affected turn.
 2. Add a one-line diagnostic log in `lib/tool_input_validation.ml:411` to print the rejected `input` JSON.
 3. Reproduce or wait for the next occurrence; inspect the raw LLM response.
 4. Apply the fix corresponding to the actual leak path (most likely Gemini `args` unwrap or model hallucination via flattened schema).

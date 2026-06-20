@@ -702,6 +702,7 @@ function normalizeHistoryEntry(
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
+  // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
@@ -987,7 +988,8 @@ interface RestChatHistoryMessage {
   tool_call_name?: string
   source?: string
   surface?: SurfaceRef
-  turn_ref?: string
+  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
+  turn_ref?: string | null
   audio?: unknown
   // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
   // KeeperConversationAttachment at consume time so reload keeps the cards.
@@ -1027,7 +1029,9 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     streamState: null,
     details: null,
     surface: message.surface ?? null,
-    turnRef: message.turn_ref ?? null,
+    // Tool rows share the same untrusted REST boundary; reject malformed
+    // turn_ref values here too so this path matches normalizeHistoryEntry.
+    turnRef: asString(message.turn_ref) ?? null,
   }
 }
 

@@ -433,7 +433,7 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.label).toBe('echo')
   })
 
-  it('preserves turn_ref on persisted chat history entries', () => {
+  it('preserves valid turn_ref on every persisted chat-history path and rejects malformed values', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'query', ts: 1_780_000_000, turn_ref: 'trace-a#1' },
       {
@@ -445,9 +445,26 @@ describe('thread history merge & persistence', () => {
         turn_ref: 'trace-a#1',
       },
       { role: 'assistant', content: 'answer', ts: 1_780_000_000, turn_ref: 'trace-a#1' },
+      { role: 'assistant', content: 'legacy answer', ts: 1_780_000_001 },
+      { role: 'user', content: 'bad user ref', ts: 1_780_000_002, turn_ref: 42 as unknown as string },
+      {
+        role: 'tool',
+        content: '{"q":2}',
+        ts: 1_780_000_003,
+        tool_call_id: 'toolu_bad_ref',
+        tool_call_name: 'masc_status',
+        turn_ref: 42 as unknown as string,
+      },
     ])
 
-    expect(entries.map(e => e.turnRef)).toEqual(['trace-a#1', 'trace-a#1', 'trace-a#1'])
+    expect(entries.map(e => e.turnRef)).toEqual([
+      'trace-a#1',
+      'trace-a#1',
+      'trace-a#1',
+      null,
+      null,
+      null,
+    ])
   })
 
   it('dedups a rehydrated tool row against the live tool entry', () => {

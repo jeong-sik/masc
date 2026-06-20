@@ -2208,7 +2208,9 @@ function entryTurnRef(entry: KeeperConversationEntry): string | null {
 
 function canAppendToolToRun(run: KeeperConversationEntry[], entry: KeeperConversationEntry): boolean {
   if (run.length === 0) return true
-  const firstTurnRef = entryTurnRef(run[0]!)
+  const first = run[0]
+  if (!first) return true
+  const firstTurnRef = entryTurnRef(first)
   const nextTurnRef = entryTurnRef(entry)
   if (firstTurnRef || nextTurnRef) {
     return firstTurnRef !== null && nextTurnRef !== null && firstTurnRef === nextTurnRef
@@ -2218,7 +2220,9 @@ function canAppendToolToRun(run: KeeperConversationEntry[], entry: KeeperConvers
 
 function canBundleToolsWithAssistant(run: KeeperConversationEntry[], assistant: KeeperConversationEntry): boolean {
   if (run.length === 0) return true
-  const toolTurnRef = entryTurnRef(run[0]!)
+  const first = run[0]
+  if (!first) return true
+  const toolTurnRef = entryTurnRef(first)
   const assistantTurnRef = entryTurnRef(assistant)
   if (toolTurnRef || assistantTurnRef) {
     return toolTurnRef !== null && assistantTurnRef !== null && toolTurnRef === assistantTurnRef
@@ -2241,7 +2245,9 @@ function buildChatRenderUnits(
   let run: KeeperConversationEntry[] = []
   const flush = () => {
     if (run.length === 0) return
-    units.push({ kind: 'toolGroup', id: `tracegroup-${run[0]!.id}`, entries: run })
+    const first = run[0]
+    if (!first) return
+    units.push({ kind: 'toolGroup', id: `tracegroup-${first.id}`, entries: run })
     run = []
   }
   for (const entry of entries) {

@@ -1407,6 +1407,8 @@
 
 (include stanzas/test_board_persistence_load_contract.inc)
 
+(include stanzas/test_board_post_origin.inc)
+
 (include stanzas/test_board_sse_canonical_event_type.inc)
 
 (include stanzas/test_briefing_compactors.inc)

@@ -100,6 +100,7 @@ val create_post_with_outcome :
   ?ttl_hours:int ->
   ?hearth:string ->
   ?thread_id:string ->
+  ?origin:post_origin ->
   unit ->
   (create_post_outcome, board_error) result
 
@@ -115,5 +116,11 @@ val create_post :
   ?ttl_hours:int ->
   ?hearth:string ->
   ?thread_id:string ->
+  ?origin:post_origin ->
   unit ->
   (post, board_error) result
+
+(** RFC-0233 §7: maintain the [posts_by_turn_ref] / [posts_by_run_id]
+    secondary indexes from a post's [origin].  Idempotent; a [None] origin is
+    a no-op.  Called on create and on load so the two paths stay in lockstep. *)
+val index_post_origin : store -> post -> unit

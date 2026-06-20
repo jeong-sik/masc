@@ -8,6 +8,25 @@ include Board_core_classify
 
 (** {1 JSON Serialization} *)
 
+(* RFC-0233 §7: encode the typed origin as its own top-level [origin] key
+   (sibling of [meta], NOT nested under it) so the index key needs no
+   meta_json substring scan (RFC §7.6 guard #2). Each sub-field is emitted
+   only when present; turn_ref serializes via [Ids.Turn_ref.to_yojson] (a flat
+   "trace#turn" string), matching the chat-row wire form. *)
+let post_origin_to_yojson (o : post_origin) : Yojson.Safe.t =
+  `Assoc
+    ((match o.turn_ref with
+      | Some tr -> [ "turn_ref", Ids.Turn_ref.to_yojson tr ]
+      | None -> [])
+     @ (match o.source with
+        | Some s -> [ "source", `String s ]
+        | None -> [])
+     @
+     match o.fusion_run_id with
+     | Some r -> [ "fusion_run_id", `String r ]
+     | None -> [])
+;;
+
 let post_to_yojson (p : post) : Yojson.Safe.t =
   `Assoc
     ([ "id", `String (Post_id.to_string p.id)
@@ -32,6 +51,9 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
         | None -> [])
      @ (match p.thread_id with
         | Some t -> [ "thread_id", `String t ]
+        | None -> [])
+     @ (match p.origin with
+        | Some o -> [ "origin", post_origin_to_yojson o ]
         | None -> [])
      @
      match p.meta_json with

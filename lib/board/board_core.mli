@@ -149,6 +149,12 @@ val rotate_if_needed : string -> unit
 (** Appends one post snapshot to {!persist_path}. *)
 val append_post : post -> unit
 
+(** RFC-0233 §7: maintain the origin secondary indexes ([posts_by_turn_ref] /
+    [posts_by_run_id]) from a post's [origin].  Used by the load path to
+    rebuild the indexes that {!find_post_by_turn_ref} / {!find_post_by_run_id}
+    read.  A [None] origin is a no-op. *)
+val index_post_origin : store -> post -> unit
+
 (** Appends one comment snapshot to {!comments_path}. *)
 val append_comment : comment -> unit
 
@@ -231,6 +237,7 @@ val create_post_with_outcome
   -> ?ttl_hours:int
   -> ?hearth:string
   -> ?thread_id:string
+  -> ?origin:post_origin
   -> unit
   -> (create_post_outcome, board_error) Result.t
 
@@ -258,10 +265,22 @@ val create_post
   -> ?ttl_hours:int
   -> ?hearth:string
   -> ?thread_id:string
+  -> ?origin:post_origin
   -> unit
   -> (post, board_error) Result.t
 
 val get_post : store -> post_id:string -> (post, board_error) Result.t
+
+(** RFC-0233 §7: look up a post by the originating turn's join key
+    ([Ids.Turn_ref.to_string], i.e. ["<trace_id>#<absolute_turn>"]).  Exact
+    O(1) index lookup ([posts_by_turn_ref]); [None] on miss.  No meta_json scan
+    and no time-window heuristic (RFC §7.6 guard #2/#3). *)
+val find_post_by_turn_ref : store -> turn_ref:string -> post option
+
+(** RFC-0233 §7: look up a post by its fusion run correlation id
+    ([origin.fusion_run_id]).  Exact O(1) index lookup ([posts_by_run_id]);
+    [None] on miss.  [run_id] is distinct from [turn_ref] (RFC §7.6 guard #5). *)
+val find_post_by_run_id : store -> run_id:string -> post option
 
 (** Coalesces [get_post] + [get_comments] under a single
     {!with_lock} block to avoid the two-call lock churn

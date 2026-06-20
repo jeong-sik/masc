@@ -139,6 +139,7 @@ val create_post :
   ?ttl_hours:int ->
   ?hearth:string ->
   ?thread_id:string ->
+  ?origin:Board.post_origin ->
   unit ->
   (Board.post, Board.board_error) Result.t
 

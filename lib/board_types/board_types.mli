@@ -89,6 +89,18 @@ type automation_label =
 
 (** {1 Records — Mandatory TTL} *)
 
+(** RFC-0233 §7: typed provenance of a board post — which keeper turn produced
+    it and through which channel.  [source] is the channel's
+    [Surface_ref.lane_label] string (not the typed [Surface_ref.t], which lives
+    in the [masc] umbrella that depends on [masc_board]).  [turn_ref] and
+    [fusion_run_id] are distinct (RFC §7.6 guard #5).  All sub-fields optional;
+    an all-[None] origin is represented as [origin = None]. *)
+type post_origin = {
+  turn_ref : Ids.Turn_ref.t option;
+  source : string option;
+  fusion_run_id : string option;
+}
+
 type post = {
   id : Post_id.t;
   author : Agent_id.t;
@@ -107,6 +119,7 @@ type post = {
   pinned : bool;
   hearth : string option;
   thread_id : string option;
+  origin : post_origin option;
 }
 
 type comment = {
@@ -264,4 +277,10 @@ type store = {
   (** Sub-board id -> sub_board record. *)
   sub_boards_by_slug : (string, string) Hashtbl.t;
   (** slug -> sub_board id index for O(1) slug lookup. *)
+  posts_by_turn_ref : (string, string) Hashtbl.t;
+  (** RFC-0233 §7: [Ids.Turn_ref.to_string] -> post id. Maintained on
+      create, rebuilt on load. *)
+  posts_by_run_id : (string, string) Hashtbl.t;
+  (** RFC-0233 §7: fusion run_id -> post id. Maintained on create, rebuilt
+      on load. *)
 }

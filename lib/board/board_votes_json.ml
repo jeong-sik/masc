@@ -10,6 +10,28 @@ let record_post_meta_json_read_drop () =
 
 let visibility_of_string = Board_core_classify.visibility_of_string
 
+(* RFC-0233 §7: decode the typed post origin. Parse, don't repair — an absent
+   [origin], a non-object value, or a malformed sub-field all degrade to [None]
+   (per-field for the sub-fields), NEVER dropping the row: origin is provenance
+   metadata, not load-bearing identity (contrast the [meta] row-drop below).
+   [Ids.Turn_ref.of_string] is total and returns [None] on a malformed join
+   key. An all-[None] origin decodes to [None] (no empty record carried). *)
+let post_origin_of_yojson (json : Yojson.Safe.t) : post_origin option =
+  match json with
+  | `Assoc _ ->
+    let turn_ref =
+      match Safe_ops.json_string_opt "turn_ref" json with
+      | Some s -> Ids.Turn_ref.of_string s
+      | None -> None
+    in
+    let source = Safe_ops.json_string_opt "source" json in
+    let fusion_run_id = Safe_ops.json_string_opt "fusion_run_id" json in
+    (match turn_ref, source, fusion_run_id with
+     | None, None, None -> None
+     | _ -> Some { turn_ref; source; fusion_run_id })
+  | _ -> None
+;;
+
 let post_of_yojson (json : Yojson.Safe.t) : post option =
   match
     ( Safe_ops.json_string_opt "id" json
@@ -54,6 +76,11 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
               record_post_meta_json_read_drop ();
               None)
          | None -> None)
+    in
+    let origin =
+      match Safe_ops.json_member_opt "origin" json with
+      | Some o -> post_origin_of_yojson o
+      | None -> None
     in
     (match
        ( Post_id.of_string id_str
@@ -108,6 +135,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
             ; pinned
             ; hearth
             ; thread_id
+            ; origin
             })
      | _ -> None)
   | _ -> None
@@ -177,6 +205,11 @@ let load_persisted_posts store =
              when Float.compare p.expires_at 0.0 = 0
                   || Float.compare p.expires_at now > 0 ->
              Hashtbl.replace store.posts (Post_id.to_string p.id) p;
+             (* RFC-0233 §7: rebuild the origin indexes on load (derive-on-load,
+                mirroring comments_by_post below) so find_post_by_turn_ref /
+                find_post_by_run_id survive a restart without a second persisted
+                SSOT that could drift from the post rows. *)
+             index_post_origin store p;
              incr loaded
            | _ -> ())
         lines;

@@ -99,16 +99,18 @@ let is_execute_typed_argv_schema schema =
   && schema_has_property_name schema "pipeline"
 ;;
 
-let normalize_execute_args_envelope ?schema args =
+let is_execute_tool_name name = String.equal name "Execute" || String.equal name "tool_execute"
+
+let normalize_execute_args_envelope ?schema ~name args =
   match schema, args with
   | Some schema, `Assoc [ "args", (`Assoc _ as nested) ]
-    when is_execute_typed_argv_schema schema -> nested
+    when is_execute_tool_name name && is_execute_typed_argv_schema schema -> nested
   | _ -> args
 ;;
 
 let prepare_args ?schema ~name args =
   let args = strip_internal_marker_args args in
-  let args = normalize_execute_args_envelope ?schema args in
+  let args = normalize_execute_args_envelope ?schema ~name args in
   normalize_blank_optional_enum_args ?schema args
 ;;
 

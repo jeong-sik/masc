@@ -900,6 +900,54 @@ let test_validate_args_execute_unwraps_args_object_envelope () =
       "expected Execute args object envelope to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+let test_validate_args_tool_execute_unwraps_args_object_envelope () =
+  let inner = `Assoc [ "executable", `String "pwd" ] in
+  let args = `Assoc [ "args", inner ] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool)
+      "internal tool_execute args object envelope unwrapped"
+      true
+      (Yojson.Safe.equal inner forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected tool_execute args object envelope to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+let test_validate_args_execute_unwraps_pipeline_envelope () =
+  let inner =
+    `Assoc
+      [ ( "pipeline"
+        , `List
+            [ `Assoc [ "executable", `String "printf"; "argv", `List [ `String "x" ] ]
+            ; `Assoc [ "executable", `String "cat" ]
+            ] )
+      ]
+  in
+  let args = `Assoc [ "args", inner ] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:tool_execute_schema
+      ~name:"Execute"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool)
+      "pipeline args object envelope unwrapped"
+      true
+      (Yojson.Safe.equal inner forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected Execute pipeline args object envelope to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
 let test_validate_args_execute_rejects_args_array_envelope () =
   let args = `Assoc [ "args", `List [ `String "git"; `String "status" ] ] in
   match
@@ -946,6 +994,26 @@ let test_validate_args_execute_rejects_mixed_args_envelope () =
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool)
       "mixed envelope keeps args unsupported"
+      true
+      (string_contains msg "unsupported field(s): args")
+
+let test_validate_args_non_execute_rejects_args_object_envelope () =
+  let args = `Assoc [ "args", `Assoc [ "executable", `String "git" ] ] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:tool_execute_schema
+      ~name:"not_execute"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected non-Execute args envelope to be rejected, got %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "non-Execute name does not get Execute envelope normalization"
       true
       (string_contains msg "unsupported field(s): args")
 
@@ -2097,10 +2165,16 @@ let () =
         test_validate_args_tool_execute_accepts_typed_pipeline;
       Alcotest.test_case "Execute unwraps args object envelope" `Quick
         test_validate_args_execute_unwraps_args_object_envelope;
+      Alcotest.test_case "tool_execute unwraps args object envelope" `Quick
+        test_validate_args_tool_execute_unwraps_args_object_envelope;
+      Alcotest.test_case "Execute unwraps pipeline args envelope" `Quick
+        test_validate_args_execute_unwraps_pipeline_envelope;
       Alcotest.test_case "Execute rejects args array envelope" `Quick
         test_validate_args_execute_rejects_args_array_envelope;
       Alcotest.test_case "Execute rejects mixed args envelope" `Quick
         test_validate_args_execute_rejects_mixed_args_envelope;
+      Alcotest.test_case "non-Execute rejects args object envelope" `Quick
+        test_validate_args_non_execute_rejects_args_object_envelope;
       Alcotest.test_case "tool_execute write validation stays structural" `Quick
         test_tool_execute_write_validation_stays_structural;
       Alcotest.test_case "tool_execute find expression not rewritten" `Quick

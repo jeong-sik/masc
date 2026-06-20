@@ -37,7 +37,7 @@ Allowed top-level fields:
 | Field | Type | Required? |
 |---|---|---|
 | `executable` | string | required for single-process branch |
-| `argv` | array of strings | yes (single-process branch) |
+| `argv` | array of strings | optional; contains arguments after `executable` |
 | `pipeline` | array of `{executable, argv}` stages | alternative branch |
 | `env` | object | optional |
 | `cwd` | string | optional |
@@ -49,7 +49,7 @@ Allowed top-level fields:
 Schema properties:
 
 - `additionalProperties: false`
-- `oneOf`: either `executable`/`argv` **or** `pipeline`, never both.
+- `oneOf`: either `executable` with optional `argv` **or** `pipeline`, never both.
 
 Therefore **any of these inputs are rejected**:
 

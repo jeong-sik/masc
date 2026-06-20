@@ -188,12 +188,8 @@ let to_json request =
 let delegation_request_json ~requester ?goal = function
   | Some execution ->
       let requests = of_execution_result ~requester ?goal execution in
-      (match requests with
-      | [] -> `Null
-      | [ request ] -> to_json request
-      | _ -> `List (List.map to_json requests))
-  | None -> `Null
+      `List (List.map to_json requests)
+  | None -> `List []
 
 let delegation_request_field ~requester ?goal execution =
   ("delegation_request", delegation_request_json ~requester ?goal execution)
-

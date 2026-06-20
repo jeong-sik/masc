@@ -12,7 +12,7 @@
 
 키퍼가 thinking 토큰만 소비하고 deliverable(text·tool_use) 없이 `end_turn`으로 종료하면, accept 레이어가 그 턴을 `No_usable_progress`로 거부한다. 거부 판정 자체는 정확하다 — 진전이 0인 턴이다. 문제는 **그 정확한 거부에 대한 교정 행동이 없다**는 것이다. 거부 직후 즉시 `Error err`로 단일 runtime turn이 종결되고, 누적되면 키퍼는 `completion_contract_auto_paused`로 PAUSE된다.
 
-실측 (2026-06-20, `~/me/.masc` 라이브):
+실측 (2026-06-20, `<base-path>/.masc` 라이브; shell-home shorthand가 아님):
 
 ```
 scope=ollama_cloud.deepseek-v4-flash  reason_kind=no_usable_progress

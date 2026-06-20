@@ -167,6 +167,10 @@ server-side boundary.
 - **Preserve bot throughput where it is safe.** The guard permits a bot merge
   whenever the head SHA's `CI Gate` is `success`. It blocks only `failure` and
   `cancelled`, and waits on `pending`/`missing`.
+- **No check-query/merge TOCTOU.** The SHA whose `CI Gate` was observed must be
+  the SHA that GitHub merges. If the PR head changes after the guard reads
+  status, the merge command must fail and restart the guard on the new head
+  rather than merging against stale evidence.
 - **No telemetry-as-fix.** Counting bad merges is not the fix; the merge must be
   *prevented*, and red `main` must be *reverted or halted*, not merely surfaced.
 - **Boundary enforcement, not symptom suppression.** A red `main` is a
@@ -208,6 +212,19 @@ a tweak to an existing check. It has two insertion points, one per bot actor:
    guard keys on that classification. The query uses the head SHA's *latest*
    `CI Gate` run (`| last`), satisfying the §3 superseded-run constraint.
 
+   The guard must then pass that same SHA to the merge operation. With the
+   current GitHub CLI (`gh version 2.87.3`, checked 2026-06-20), the supported
+   flag is:
+
+   ```
+   gh pr merge <number> --squash --match-head-commit <head_sha>
+   ```
+
+   If `--match-head-commit` rejects because the PR head advanced between the
+   check query and the merge request, the guard must not retry the same merge
+   blindly. It restarts from PR metadata, reads the new head SHA, and waits for
+   that SHA's `CI Gate == success`.
+
 2. **Conveyor.** The auto-merge conveyor must apply the same precondition
    wherever it issues the merge. Its code is not in this repository (§1.1), so
    this RFC names the contract and §8 flags the ownership question.
@@ -221,14 +238,21 @@ GitHub is asked to merge.
 
 Even with A, a race (a merge that lands microseconds before its run reports, or
 a future bypass path such as a human admin merge) can still leave `main` red. A
-workflow on `push: main` runs `Build and Test`; on failure it:
+workflow on `push: main` first takes the conveyor halt/lock, then runs `Build
+and Test`; on failure it:
 
 - halts the conveyor (stops auto-merging onto a red tip), and
 - opens a revert PR for the merge that turned `main` red (the merge commit whose
   first parent built green and whose tree is red), or pages an operator.
 
 This bounds the "stayed red while more PRs merged" amplification — the cost that
-turned single bad PRs into a fleet-wide block.
+turned single bad PRs into a fleet-wide block. Detection latency is explicit:
+the halt/lock is emitted at workflow start, before the build verdict, so the
+maximum additional conveyor merges after the `push: main` event is zero once the
+workflow starts (excluding merges already in flight before the lock is acquired).
+If the `push: main` workflow does not start within 5 minutes, a watchdog page is
+the failure mode; if the build fails, the revert/page step must run immediately
+after the failed `Build and Test` conclusion.
 
 D is a bounded backstop, not a permanent valve. **Removal target:** once A covers
 every bot merge actor (keeper executor landed and conveyor contract confirmed)
@@ -236,12 +260,20 @@ and branch-protection drift monitoring remains green, D's auto-revert reduces to
 a halt-and-page alarm or is removed; the review is tied to the §8
 conveyor-ownership and break-glass decisions.
 
-### 4.3 Why not B alone, and where C now sits
+### 4.3 Why not B/E alone, and where C now sits
 
 - **B — promote `Build and Test` + `Lint` to required status checks.** Closes
   hole 1 at GitHub, but a required check that concludes `cancelled` is still not
   `failure`. B alone also does not stop a bot from attempting a merge before the
   aggregate decision is known.
+- **E — set required-status `strict=true`.** This is useful stale-base hygiene:
+  GitHub requires the PR branch to be up to date with `main` before required
+  checks count. It does not close this incident class by itself. The bad heads
+  were red on their own CI, and the bypass was a non-`success` aggregate
+  conclusion plus merge timing/authority; `strict=true` does not turn
+  `cancelled` into `failure`, does not enforce bot-side head-SHA matching, and
+  does not halt a red `main` after an already-landed push. Treat it as a
+  complementary branch-protection hardening, not a substitute for A+D.
 - **C — `enforce_admins=true`.** This is no longer an alternative. It is the
   current branch-protection invariant and is enforced by
   `scripts/ci/check-main-branch-protection.sh`. A and D should be described as
@@ -279,8 +311,11 @@ normal RFC implementation rollback.
    that consumes `Command_descriptor.Gh_pr_merge`, currently only mirrored for
    telemetry at `ide_bridge.ml:751`). Reject a non-`success` `CI Gate` with a
    typed error surfaced to the keeper; treat `pending`/`missing` as
-   retry-with-backoff. Tests: stub a check-runs response of
-   `success`/`failure`/`cancelled`/`pending` → execute / reject / reject / retry.
+   retry-with-backoff. Execute only with `--match-head-commit <head_sha>` and
+   restart the guard if GitHub reports a head mismatch. Tests: stub a
+   check-runs response of `success`/`failure`/`cancelled`/`pending` → execute /
+   reject / reject / retry; stub a head-advanced merge rejection → restart,
+   never merge the stale SHA.
 2. **A, conveyor:** locate the conveyor merge issuer (§8) and add the same
    precondition; if external, file the contract against its owner.
 3. **D, tripwire workflow:** `.github/workflows/main-redline.yml` on `push: main`
@@ -304,10 +339,15 @@ normal RFC implementation rollback.
 - **Negative not blocked (no deadlock):** a PR whose head SHA `CI Gate` is
   `success` merges, even when an *older* superseded run for a previous SHA was
   `cancelled`. The guard inspects the head SHA's latest `CI Gate`.
+- **TOCTOU blocked:** if the head SHA changes after `CI Gate == success` is
+  observed but before merge, `--match-head-commit` rejects and the guard restarts
+  against the new head. It must not merge using the stale success evidence.
 - **Pending does not reject:** a head SHA `CI Gate` of `pending` causes
   retry-with-backoff, not a merge refusal, up to the bounded timeout.
 - **Tripwire:** pushing a commit that fails `Build and Test` to `main` triggers
-  `main-redline.yml`, which halts the conveyor and opens a revert PR.
+  `main-redline.yml`, which halts the conveyor before running the build and
+  opens a revert PR after failure. If the push workflow does not start within 5
+  minutes, the watchdog pages.
 - **Regression guard:** replay the 2026-06-20 incidents (`#21714` head
   `e4211cc887` and `#21750` head `444bdf0261`, both `CI Gate=cancelled`) against
   the guard and assert the merge is refused.

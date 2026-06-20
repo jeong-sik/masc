@@ -264,6 +264,12 @@ type fact =
   ; schema_version : string
   }
 
+let fact_is_current ~now (fact : fact) =
+  match fact.valid_until with
+  | None -> true
+  | Some ts -> ts >= now
+;;
+
 type episode =
   { trace_id : string
   ; generation : int

@@ -50,12 +50,6 @@ let sanitize_atom text =
     | c -> c)
 ;;
 
-let fact_is_current ~now (fact : fact) =
-  match fact.valid_until with
-  | None -> true
-  | Some ts -> ts >= now
-;;
-
 let episode_is_current ~now (episode : episode) =
   match episode.valid_until with
   | None -> true

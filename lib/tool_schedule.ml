@@ -164,6 +164,14 @@ let optional_body_int args ~arg ~field fields =
   | Some _ -> Error (arg ^ " must be an integer")
 ;;
 
+let optional_nonnegative_body_int args ~arg ~field fields =
+  match Json_util.assoc_member_opt arg args with
+  | None -> Ok fields
+  | Some (`Int value) when value >= 0 -> Ok ((field, `Int value) :: fields)
+  | Some (`Int _) -> Error (arg ^ " must be non-negative")
+  | Some _ -> Error (arg ^ " must be an integer")
+;;
+
 let optional_body_object args ~arg ~field fields =
   match Json_util.assoc_member_opt arg args with
   | None -> Ok fields
@@ -188,7 +196,9 @@ let board_post_payload_from_args args =
     let* fields = optional_body_string args ~arg:"board_author" ~field:"author" fields in
     let* fields = optional_body_string args ~arg:"board_hearth" ~field:"hearth" fields in
     let* fields = optional_body_string args ~arg:"board_thread_id" ~field:"thread_id" fields in
-    let* fields = optional_body_int args ~arg:"board_ttl_hours" ~field:"ttl_hours" fields in
+    let* fields =
+      optional_nonnegative_body_int args ~arg:"board_ttl_hours" ~field:"ttl_hours" fields
+    in
     let* fields = optional_body_object args ~arg:"board_meta" ~field:"meta" fields in
     Ok
       (`Assoc

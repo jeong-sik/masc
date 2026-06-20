@@ -2,9 +2,7 @@ open Alcotest
 open Masc
 
 let with_config f =
-  let path = Filename.temp_file "schedule_tool_wiring_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o700;
+  let path = Filename.temp_dir "schedule_tool_wiring_test" "" in
   Fun.protect
     ~finally:(fun () ->
       let rec rm path =
@@ -258,6 +256,37 @@ let test_dispatch_create_board_post_convenience_payload () =
     (row |> member "payload_summary" |> to_string)
 ;;
 
+let test_dispatch_create_rejects_negative_board_ttl () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-negative-ttl"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "board_content", `String "Daily schedule fired"
+      ; "board_ttl_hours", `Int (-1)
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects negative ttl" false (Tool_result.is_success result);
+     check (option string) "failure class" (Some "workflow_rejection")
+       (Option.map Tool_result.tool_failure_class_to_string
+          (Tool_result.failure_class result));
+     check string "message" "board_ttl_hours must be non-negative"
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
+;;
+
 let test_dispatch_cancel_persists_status () =
   with_config
   @@ fun config ->
@@ -470,6 +499,8 @@ let () =
             test_dispatch_create_derives_due_at_for_cron_recurrence
         ; test_case "dispatch create accepts board-post convenience payload" `Quick
             test_dispatch_create_board_post_convenience_payload
+        ; test_case "dispatch create rejects negative board ttl" `Quick
+            test_dispatch_create_rejects_negative_board_ttl
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
         ; test_case "dashboard projection surfaces schedule FSM" `Quick

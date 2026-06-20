@@ -106,9 +106,9 @@ let keeper_health_to_json h : Yojson.Safe.t =
 ;;
 
 let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
-  (* NDT-OK: one wall-clock instant for the whole snapshot — used as the
-     generated_at timestamp and as the [now] each per-keeper dry-run GC scans
-     against; no retention or control logic depends on the exact value. *)
+  (* One wall-clock instant is shared by the snapshot timestamp and dry-run GC
+     scans; no retention or control logic depends on the exact value. *)
+  (* NDT-OK: diagnostic snapshot timestamp only. *)
   let now = Unix.gettimeofday () in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let cadence_counter_entries = Keeper_librarian_runtime.cadence_counter_entries () in

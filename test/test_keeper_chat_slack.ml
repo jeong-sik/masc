@@ -162,6 +162,42 @@ let test_content_blocks_mixed_content () =
   in
   check int "two blocks" 2 (List.length blocks)
 
+let test_content_blocks_redacts_text_derived_image_secrets () =
+  let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz" in
+  let blocks =
+    S.content_blocks_of_text
+      (Printf.sprintf "![%s](https://example.com/diagram.png?token=%s)"
+         secret secret)
+  in
+  check int "one image block" 1 (List.length blocks);
+  let s = json_string (List.hd blocks) in
+  check bool "raw secret removed" false (contains s secret);
+  check bool "redaction marker present" true (contains s "[REDACTED]")
+
+let test_content_blocks_suppresses_credential_url () =
+  let blocks =
+    S.content_blocks_of_text "https://user:pass@example.com/diagram.png"
+  in
+  check int "credential URL does not become block" 0 (List.length blocks)
+
+let test_final_message_blocks_merges_text_and_event_blocks () =
+  let event_block =
+    S.link_block_json ~url:"https://event.example.com"
+      ~title:"event" ~description:None
+  in
+  let blocks =
+    S.final_message_blocks
+      ~content:"https://example.com/photo.jpg"
+      ~event_blocks:[ event_block ]
+  in
+  check int "text block plus event block" 2 (List.length blocks);
+  let first = json_string (List.hd blocks) in
+  check bool "text-derived image first" true
+    (contains first "\"image_url\":\"https://example.com/photo.jpg\"");
+  let second = json_string (List.nth blocks 1) in
+  check bool "event block preserved" true
+    (contains second "https://event.example.com")
+
 let () =
   run "keeper_chat_slack"
     [
@@ -199,5 +235,11 @@ let () =
             test_content_blocks_detects_bare_image_url
         ; test_case "detects link" `Quick test_content_blocks_detects_link
         ; test_case "mixed content" `Quick test_content_blocks_mixed_content
+        ; test_case "redacts text-derived image secrets" `Quick
+            test_content_blocks_redacts_text_derived_image_secrets
+        ; test_case "suppresses credential URL blocks" `Quick
+            test_content_blocks_suppresses_credential_url
+        ; test_case "final delivery merges text and event blocks" `Quick
+            test_final_message_blocks_merges_text_and_event_blocks
         ] )
     ]

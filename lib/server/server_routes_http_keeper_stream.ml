@@ -1134,8 +1134,9 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                     Tool_call_end)
             then loop ()
         | Link_block _ | Image_block _ | Audio_block _ | Tool_context_block _ ->
-            (* Rich blocks are Discord-specific; the SSE stream already
-               receives the underlying text/audio through other events. *)
+            (* Connector rich blocks are delivered by non-dashboard adapters;
+               the SSE stream already receives the underlying text/audio
+               through other events. *)
             loop ()
         | Event_error { message } -> send_error message
         | Run_finished { run_id } ->

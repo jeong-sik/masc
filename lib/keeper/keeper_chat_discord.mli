@@ -36,6 +36,8 @@ val adapter_loop :
       once per {!min_edit_interval_s}.
     - [Text_message_end]: force PATCH if content changed since last edit.
     - [Run_finished]: force final PATCH with complete text.
+      Standalone links and images in the final text are also projected into
+      Discord embeds using the shared server chat-block parser.
     - [Event_error]: sends error text as a new message.
     - [Link_block], [Image_block], [Audio_block]: send rich block embeds
       or messages.
@@ -62,4 +64,9 @@ module For_testing : sig
   val public_voice_audio_url : ?base_url:string -> string -> string
   (** [public_voice_audio_url ?base_url token] returns the public URL for
       an audio clip. Exposed for testing. *)
+
+  val rich_embeds_of_text : string -> Discord_rest_client.embed list
+  (** Project text-derived server chat blocks into Discord embeds. Text and
+      fusion blocks are omitted because the text message already carries the
+      reply and fusion cards have no Discord-native projection yet. *)
 end

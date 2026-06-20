@@ -247,6 +247,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -261,6 +262,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -275,6 +277,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -289,6 +292,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -303,6 +307,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -317,6 +322,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -415,6 +421,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -429,6 +436,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -443,6 +451,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -499,6 +508,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
@@ -515,6 +525,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -529,6 +540,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -543,6 +555,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -557,6 +570,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -641,6 +655,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -714,6 +729,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -728,6 +744,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -742,6 +759,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -756,6 +774,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -770,6 +789,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -784,6 +804,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -868,6 +889,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -882,6 +904,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -896,6 +919,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -952,6 +976,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -966,6 +991,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -980,6 +1006,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -994,6 +1021,7 @@ supports_reasoning_budget = false
 thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
@@ -1078,6 +1106,7 @@ supports_reasoning_budget = true
 thinking_control_format = "reasoning_effort"
 supports_multimodal_inputs = true
 supports_image_input = true
+modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]

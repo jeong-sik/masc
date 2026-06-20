@@ -262,24 +262,16 @@ let schedule_blocked_approval ~now state (request : Schedule_domain.schedule_req
   | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled | Expired -> false
 ;;
 
-let keeper_next_tool_for_schedule_action =
-  Schedule_projection.keeper_next_tool_for_attention_action
-;;
-
-let keeper_next_action_for_schedule_action =
-  Schedule_projection.keeper_next_action_for_attention_action
-;;
-
 let schedule_attention_item action (request : Schedule_domain.schedule_request) =
   { schedule_id = request.schedule_id
-  ; action
+  ; action = Schedule_projection.attention_action_to_string action
   ; status = Schedule_domain.schedule_status_to_string request.status
   ; payload_kind = schedule_payload_kind request
   ; recurrence_summary = Schedule_domain.recurrence_summary request.recurrence
   ; risk_class = Schedule_domain.risk_class_to_string request.risk_class
   ; due_at = request.due_at
-  ; keeper_next_tool = keeper_next_tool_for_schedule_action action
-  ; keeper_next_action = keeper_next_action_for_schedule_action action
+  ; keeper_next_tool = Schedule_projection.keeper_next_tool_for_attention_action action
+  ; keeper_next_action = Schedule_projection.keeper_next_action_for_attention_action action
   }
 ;;
 
@@ -342,10 +334,12 @@ let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
            0
     in
     let due_items =
-      List.map (schedule_attention_item "dispatch_ready") due_ready
+      List.map (schedule_attention_item Schedule_projection.Dispatch_ready) due_ready
     in
     let blocked_items =
-      List.map (schedule_attention_item "approve_or_reject") blocked
+      List.map
+        (schedule_attention_item Schedule_projection.Approve_or_reject)
+        blocked
     in
     { active_count
     ; due_ready_count = List.length due_ready

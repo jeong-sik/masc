@@ -243,6 +243,14 @@ describe('parseMarkdownToBlocks', () => {
     expect(p.html).toContain('then prose runs on')
   })
 
+  it('does not treat a mismatched closing fence as closed', () => {
+    const blocks = parseMarkdownToBlocks('~~~\nsome code\n```')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('some code')
+  })
+
   it('leaves a 4-space indented code block untouched', () => {
     const blocks = parseMarkdownToBlocks('    line1\n    line2')
     expect(blocks).toHaveLength(1)

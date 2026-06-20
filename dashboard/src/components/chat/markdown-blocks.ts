@@ -148,25 +148,29 @@ function parseParagraph(token: Tokens.Paragraph): ChatBlock | ChatBlock[] | null
 // plain prose — into the single code token. The resulting code block traps the
 // prose in a monospace box, which is the user-reported symptom.
 const FENCE_OPEN_RE = /^\s*(`{3,}|~{3,})/
-const FENCE_CLOSE_RE = /(`{3,}|~{3,})\s*$/
+
+function hasMatchingClosingFence(raw: string, opener: string): boolean {
+  const fenceChar = opener[0]
+  const lines = raw.trimEnd().split(/\r?\n/)
+  const closingLine = lines[lines.length - 1]?.trim() ?? ''
+  return closingLine.length >= opener.length && [...closingLine].every((ch) => ch === fenceChar)
+}
 
 /**
  * True when a code token is a fenced block that was opened but never closed.
  *
- * Detection: the token's `raw` starts with a fence but does not end with one.
- * - Closed fence: raw ends with ``` / ~~~  → real code, keep as {t:'code'}.
+ * Detection: the token's `raw` starts with a fence but does not end with a
+ * matching fence line.
+ * - Closed fence: raw ends with same-char ``` / ~~~  → real code, keep as {t:'code'}.
  * - Unterminated: raw ends with absorbed prose, not a fence → demote to text.
  * - Indented code block (4-space, no fence): raw does not start with a fence,
  *   so it is left untouched.
- *
- * This does not inspect the *kind* of closing fence (``` vs ~~~); marked only
- * closes a fence with the same character that opened it, so a token that ends
- * with any fence-looking line is already a closed block here.
  */
 export function isUnterminatedFence(token: Tokens.Code): boolean {
   const raw = token.raw
-  if (!FENCE_OPEN_RE.test(raw)) return false
-  return !FENCE_CLOSE_RE.test(raw.trimEnd())
+  const opener = raw.match(FENCE_OPEN_RE)?.[1]
+  if (!opener) return false
+  return !hasMatchingClosingFence(raw, opener)
 }
 
 function parseCode(token: Tokens.Code): ChatBlock {

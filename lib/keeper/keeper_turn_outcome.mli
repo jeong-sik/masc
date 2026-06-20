@@ -24,6 +24,12 @@ val wire_key : string
 (** JSON field name carrying the label in the keeper reply payload:
     ["turn_outcome"]. *)
 
+val turn_ref_wire_key : string
+(** JSON field name carrying the turn's join key in the keeper reply
+    payload: ["turn_ref"] (RFC-0233 §7).  Shared by the producer
+    ({!Keeper_turn} reply_json) and the consumer
+    ({!turn_ref_of_reply_payload}) so the wire name cannot drift. *)
+
 val of_stop_reason : Runtime_agent.stop_reason -> t
 (** [Completed] is the only stop reason whose reply text is model
     output.  [TurnBudgetExhausted] replaces the reply with the synthetic
@@ -39,3 +45,11 @@ val of_reply_payload : Yojson.Safe.t option -> t
     silently {e not} persisted — the lane watermark stalled and the
     keeper re-answered the same message — so decode failure must fail
     toward persisting, never toward dropping. *)
+
+val turn_ref_of_reply_payload : Yojson.Safe.t option -> Ids.Turn_ref.t option
+(** Decode the turn's join key ([turn_ref_wire_key]) from a parsed keeper
+    reply payload (RFC-0233 §7).  Parse, don't repair: absent payload,
+    absent field, or a malformed value all decode to [None]
+    ([Ids.Turn_ref.of_string] never raises).  The server stamps the
+    result on the persisted chat row via {!Keeper_chat_store.append_turn}
+    [?turn_ref]. *)

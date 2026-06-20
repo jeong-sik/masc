@@ -441,6 +441,19 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in
       let keeper_turn_id = meta0.runtime.usage.total_turns + 1 in
+      (* RFC-0233 §7: mint the turn's join key ONCE from the pre-turn meta0 —
+         the same (trace_id, total_turns + 1) snapshot the Turn_record writer
+         stamps (keeper_agent_run.ml:250-251 receives this very meta via the
+         run_turn call below). Threaded into reply_json; never re-derived at
+         the reply seam from updated_meta, whose trace_id is post-lifecycle and
+         is rotated on handoff turns (keeper_rollover) — re-derivation would
+         yield a different join key than the Turn_record for the same turn
+         (RFC §7.2 mint-once, thread down). *)
+      let turn_ref =
+        Ids.Turn_ref.make
+          ~trace_id:(Keeper_id.Trace_id.to_string meta0.runtime.trace_id)
+          ~absolute_turn:keeper_turn_id
+      in
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
       let meta = meta0 in
@@ -960,6 +973,11 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                     ("cache_read_input_tokens", `Int u.cache_read_input_tokens);
                     ("cost_usd", cost_field);
                   ]);
+                  (* RFC-0233 §7: the turn's join key, minted once from the
+                     pre-turn snapshot above. The server persists it on the
+                     chat row via append_turn ?turn_ref. *)
+                  ( Keeper_turn_outcome.turn_ref_wire_key,
+                    Ids.Turn_ref.to_yojson turn_ref );
                 ]
               in
               tool_result_ok (Yojson.Safe.to_string reply_json)

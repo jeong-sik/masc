@@ -797,6 +797,13 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         match dispatch_result with
         | Ok (true, body) ->
             let payload_json_opt, visible_reply = extract_visible_reply body in
+            (* RFC-0233 §7: the keeper minted this turn's join key into the
+               reply payload (keeper_turn.ml). Decode it via the shared
+               reply-payload parser — never repair: a malformed or absent
+               value reads as None and the row simply carries no turn_ref. *)
+            let turn_ref =
+              Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
+            in
             (match Keeper_turn_outcome.of_reply_payload payload_json_opt with
             | Keeper_turn_outcome.Continuation_checkpoint -> ()
             | Keeper_turn_outcome.Visible_reply ->
@@ -809,6 +816,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~surface:chat_surface
                 ~speaker:chat_speaker
                 ~assistant_content:visible_reply
+                ?turn_ref
                 ();
               Keeper_chat_broadcast.chat_appended
                 ~keeper_name:payload.name ~source:chat_source

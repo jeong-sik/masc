@@ -115,14 +115,16 @@ let metadata_value key metadata =
   | None -> None
 
 let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
-    ?conversation_id ~reply () =
+    ?conversation_id ?turn_ref ~reply () =
   let content = String.trim reply in
   if content <> "" then begin
     (* RFC-0232 P5: the gate recorder knows the connector label only;
        coordinates ride [conversation_id] as before. *)
     let surface = Surface_ref.Gate { label = source; address = [] } in
+    (* RFC-0233 §7: [turn_ref] is the join key the keeper minted into the
+       reply payload, carried onto this connector turn's assistant row. *)
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
-      ~content ~surface ?conversation_id ();
+      ~content ~surface ?conversation_id ?turn_ref ();
     Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ()
   end
 
@@ -234,9 +236,17 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
         | Some s -> Some { s with duration_ms }
         | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
+      (* RFC-0233 §7: pull the turn's join key out of the same reply payload
+         (parse, don't repair) so the connector assistant row joins to its
+         Turn_record. *)
+      let turn_ref =
+        Keeper_turn_outcome.turn_ref_of_reply_payload
+          (try Some (Yojson.Safe.from_string body)
+           with Yojson.Json_error _ -> None)
+      in
       persist_connector_assistant_reply
         ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
-        ?conversation_id ~reply ();
+        ?conversation_id ?turn_ref ~reply ();
       Gate_protocol.Reply { content = reply; structured; stats }
   | Some result ->
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))

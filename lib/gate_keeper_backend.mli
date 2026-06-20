@@ -54,11 +54,14 @@ val persist_connector_assistant_reply :
   keeper_name:string ->
   source:string ->
   ?conversation_id:string ->
+  ?turn_ref:Ids.Turn_ref.t ->
   reply:string ->
   unit ->
   unit
 (** Persist a completed connector direct reply on the same chat lane that
-    received the inbound user line. Empty replies are ignored. *)
+    received the inbound user line. Empty replies are ignored.
+    [turn_ref] (RFC-0233 §7) is the join key the keeper minted into the
+    reply payload, stamped on the assistant row. *)
 
 val filesystem_safe_or_unknown : string -> string
 (** Sanitize a value for use as a filesystem path component.

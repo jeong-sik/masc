@@ -85,8 +85,30 @@ let normalize_blank_optional_enum_args ?schema args =
   | _ -> args
 ;;
 
+let schema_property_names schema =
+  match Json_util.assoc_member_opt "properties" schema with
+  | Some (`Assoc props) -> List.map fst props
+  | _ -> []
+;;
+
+let schema_has_property_name schema name = List.mem name (schema_property_names schema)
+
+let is_execute_typed_argv_schema schema =
+  schema_has_property_name schema "executable"
+  && schema_has_property_name schema "argv"
+  && schema_has_property_name schema "pipeline"
+;;
+
+let normalize_execute_args_envelope ?schema args =
+  match schema, args with
+  | Some schema, `Assoc [ "args", (`Assoc _ as nested) ]
+    when is_execute_typed_argv_schema schema -> nested
+  | _ -> args
+;;
+
 let prepare_args ?schema ~name args =
   let args = strip_internal_marker_args args in
+  let args = normalize_execute_args_envelope ?schema args in
   normalize_blank_optional_enum_args ?schema args
 ;;
 
@@ -102,9 +124,7 @@ let schema_has_properties = function
 ;;
 
 let property_names schema =
-  match Json_util.assoc_member_opt "properties" schema with
-  | Some (`Assoc props) -> List.map fst props
-  | _ -> []
+  schema_property_names schema
 ;;
 
 let forbids_additional_properties schema =
@@ -123,7 +143,7 @@ let unsupported_arg_names schema = function
   | _ -> []
 ;;
 
-let schema_has_property schema name = List.mem name (property_names schema)
+let schema_has_property schema name = schema_has_property_name schema name
 
 let typed_shell_unsupported_field_hint schema names =
   let has_shell_fields =

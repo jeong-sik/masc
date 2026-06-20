@@ -133,7 +133,8 @@ let with_response_wait_typing_indicator ~clock ~channel_id f =
 type stream_finish =
   | Stream_not_started
   | Stream_completed
-  | Stream_failed of State.send_error
+  | Stream_final_edit_failed of State.send_error
+  | Stream_overflow_send_failed of State.send_error
 
 type discord_stream_reply =
   { channel_id : string
@@ -216,7 +217,7 @@ let finish_discord_stream_reply state ~final_content =
       (match edit_result with
        | Error error ->
            log_stream_error "final edit" state error;
-           Stream_failed error
+           Stream_final_edit_failed error
        | Ok () ->
            state.last_edited_text <- head;
            if String.equal overflow "" then Stream_completed
@@ -228,7 +229,7 @@ let finish_discord_stream_reply state ~final_content =
              | Ok _ -> Stream_completed
              | Error error ->
                  log_stream_error "overflow send" state error;
-                 Stream_failed error)
+                 Stream_overflow_send_failed error)
 
 let metadata_opt key = function
   | None -> []
@@ -482,7 +483,7 @@ let handle_message_create ~dispatch
                 Discord_observability.Reply_sent;
               Discord_observability.record_reply
                 Discord_observability.Reply_send_ok
-          | Stream_not_started | Stream_failed _ ->
+          | Stream_not_started | Stream_final_edit_failed _ ->
               (match State.send_message ~channel_id ~content:out.content ~reply_to_message_id:message_id () with
                | Ok _ ->
                  (match attention_event_id with
@@ -501,7 +502,12 @@ let handle_message_create ~dispatch
                    Discord_observability.Reply_send_failed;
                  Log.Server.error "discord send_message failed (channel=%s): %s"
                    channel_id
-                   (Format.asprintf "%a" State.pp_send_error e))))
+                   (Format.asprintf "%a" State.pp_send_error e))
+          | Stream_overflow_send_failed _ ->
+              Discord_observability.record_inbound_dispatch
+                Discord_observability.Reply_send_error;
+              Discord_observability.record_reply
+                Discord_observability.Reply_send_failed)
 
 let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
   match ev with

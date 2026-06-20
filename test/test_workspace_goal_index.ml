@@ -14,15 +14,7 @@ let with_test_env f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let tmp_dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf
-         "masc_goal_index_%d_%d"
-         (Unix.getpid ())
-         (int_of_float (Unix.gettimeofday () *. 1000.)))
-  in
-  Unix.mkdir tmp_dir 0o755;
+  let tmp_dir = Filename.temp_dir "masc_goal_index_" "" in
   let config = Workspace.default_config tmp_dir in
   let _ = Workspace.init config ~agent_name:(Some "claude") in
   try

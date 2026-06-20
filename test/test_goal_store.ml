@@ -12,10 +12,7 @@ open Alcotest
 open Masc
 
 let temp_dir () =
-  let path = Filename.temp_file "goal_store_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
+  Filename.temp_dir "goal_store_test" ""
 
 let rm_rf dir =
   let rec rm path =

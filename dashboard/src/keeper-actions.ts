@@ -364,6 +364,12 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       const isCancelled = result.status === 'cancelled'
       const isError = !isCancelled && (result.status !== 'done' || result.ok === false)
       const errorMessage = isError ? queuedKeeperMessageError(result) : null
+      let userDelivery: KeeperConversationDelivery = 'delivered'
+      if (isCancelled) {
+        userDelivery = 'cancelled'
+      } else if (isError) {
+        userDelivery = 'error'
+      }
       let assistantDelivery: KeeperConversationDelivery = 'delivered'
       if (isCancelled) {
         assistantDelivery = 'cancelled'
@@ -373,7 +379,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         assistantDelivery = 'error'
       }
       finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
-        delivery: isCancelled ? 'cancelled' : isError ? 'error' : 'delivered',
+        delivery: userDelivery,
         error: errorMessage,
       })
       finalizeAssistantEntry(request.keeperName, assistantId, {

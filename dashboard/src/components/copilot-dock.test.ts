@@ -181,7 +181,8 @@ describe('CopilotDock', () => {
     const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
     fireEvent.input(textarea, { target: { value: '요약해줘' } })
 
-    const sendBtn = container.querySelector('.dock-send') as HTMLButtonElement
+    const sendBtn = container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement
+    expect(sendBtn?.classList.contains('dock-send')).toBe(true)
     sendBtn.click()
 
     await waitFor(() => expect(container.querySelectorAll('[data-dock-message="user"]').length).toBe(1))
@@ -205,7 +206,7 @@ describe('CopilotDock', () => {
     const textarea = container.querySelector('[data-testid="copilot-dock-textarea"]') as HTMLTextAreaElement
     fireEvent.input(textarea, { target: { value: '요약해줘' } })
 
-    const sendBtn = container.querySelector('.dock-send') as HTMLButtonElement
+    const sendBtn = container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement
     sendBtn.click()
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))

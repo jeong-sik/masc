@@ -515,8 +515,8 @@ describe('deriveKeeperAttentionReason', () => {
   it('returns default warn reason when keeper has no attention signal', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({ name: 'plain' }))
     expect(reason.sev).toBe('warn')
-    expect(reason.text).toBe('점검 필요')
-    expect(reason.act).toBe('대화 열기')
+    expect(reason.text).toBe('주의 사유 미보고')
+    expect(reason.act).toBe('상태 상세')
   })
 
   it('marks continue_gate keepers as warn with approval action', () => {

@@ -91,6 +91,20 @@ vi.mock('./board-state', () => ({
   refreshBoard: vi.fn(),
 }))
 
+// Stub the shared turn-inspector drawer so the board affordance can be tested
+// without the real KeeperTurnInspector self-fetching turn records. Renders the
+// anchor props as data attributes only when open, mirroring the real testId.
+vi.mock('../keeper-turn-inspector-drawer', () => ({
+  TurnInspectorDrawer: ({ keeperName, initialTurnRef, open, testId }: any) =>
+    open
+      ? h('div', {
+          'data-testid': `${testId}-drawer`,
+          'data-keeper': keeperName,
+          'data-initial-turn-ref': initialTurnRef ?? '',
+        })
+      : null,
+}))
+
 import {
   CommentThread,
   PostDetail,
@@ -766,5 +780,60 @@ describe('PostDetail', () => {
       post: 'post-1',
       focus: 'curation',
     })
+  })
+
+  it('shows a turn affordance and opens the inspector at the post origin turn_ref', () => {
+    const post = {
+      id: 'post-origin',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      moderation_status: 'none',
+      origin: { turn_ref: 'trace-x#5', source: 'dashboard', fusion_run_id: null },
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    // Drawer stays closed until the affordance is clicked.
+    expect(screen.queryByTestId('board-post-turn-inspector-drawer')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText('원본 턴 검사'))
+
+    const drawer = screen.getByTestId('board-post-turn-inspector-drawer')
+    // keeperName falls back to post.author when no keeper is resolved in-test;
+    // initialTurnRef is the exact origin turn_ref join key (RFC-0233 §7).
+    expect(drawer.getAttribute('data-keeper')).toBe('sleepers')
+    expect(drawer.getAttribute('data-initial-turn-ref')).toBe('trace-x#5')
+  })
+
+  it('omits the turn affordance when the post has no origin turn_ref (e.g. fusion-origin)', () => {
+    const post = {
+      id: 'post-no-origin',
+      author: 'sleepers',
+      title: 'Post',
+      body: 'Body',
+      content: 'Body',
+      created_at: '2026-04-02T00:00:00Z',
+      updated_at: '2026-04-02T00:00:00Z',
+      votes: 0,
+      comment_count: 0,
+      post_kind: 'direct',
+      moderation_status: 'none',
+      // A fusion-origin post carries fusion_run_id but no turn_ref → no affordance.
+      origin: { turn_ref: null, source: 'fusion', fusion_run_id: 'fus-1' },
+      comments: [],
+    } as any
+
+    render(h(PostDetail, { post }))
+
+    expect(screen.queryByLabelText('원본 턴 검사')).toBeNull()
+    expect(screen.queryByTestId('board-post-turn-inspector-drawer')).toBeNull()
   })
 })

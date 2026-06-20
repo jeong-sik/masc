@@ -21,7 +21,6 @@
       }
     ],
     "max_turns": 4,
-    "max_cost_usd": 0.10,
     "tags": ["completion-trust", "regression-guard", "rfc-0262-section9", "issue-20925"]
   },
   {
@@ -46,7 +45,6 @@
       }
     ],
     "max_turns": 4,
-    "max_cost_usd": 0.10,
     "tags": ["completion-trust", "target-spec", "rfc-0199-phase-b", "issue-21074"]
   },
   {
@@ -71,7 +69,6 @@
       }
     ],
     "max_turns": 4,
-    "max_cost_usd": 0.10,
     "tags": ["completion-trust", "target-spec", "rfc-0199-phase-b", "issue-20710"]
   }
 ]

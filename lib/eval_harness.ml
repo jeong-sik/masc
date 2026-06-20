@@ -89,7 +89,7 @@ type eval_run = {
   passed : bool;            (** weighted_score >= pass_threshold *)
   tool_calls_made : string list;
   total_turns : int;
-  total_cost_usd : float;
+  total_cost_usd : float option;
   duration_ms : int;
   outcome : Trajectory.trajectory_outcome;
   error : string option;
@@ -103,7 +103,7 @@ type eval_result = {
   pass_at_k : float;       (** Probability of at least 1 pass in k runs *)
   mean_score : float;       (** Mean weighted score across runs *)
   consistency : float;      (** Std dev of scores (lower = more consistent) *)
-  total_cost_usd : float;   (** Sum of all run costs *)
+  total_cost_usd : float option;   (** Sum of known run costs, or [None]. *)
   ci95_low : float;         (** Lower bound of 95% confidence interval for mean_score *)
   ci95_high : float;        (** Upper bound of 95% confidence interval for mean_score *)
   min_runs_met : bool;      (** Whether the [min_runs_for_ci] requirement is satisfied *)
@@ -115,7 +115,7 @@ type eval_suite_result = {
   ended_at : float;
   results : eval_result list;
   overall_pass_rate : float;  (** Fraction of scenarios that passed *)
-  total_cost_usd : float;
+  total_cost_usd : float option;
   total_runs : int;
 }
 
@@ -293,6 +293,11 @@ let t_critical_95_for_df = function
   | 30 -> 2.042
   | _ -> 1.960
 
+let sum_costs costs =
+  match List.filter_map Fun.id costs with
+  | [] -> None
+  | known -> Some (List.fold_left ( +. ) 0.0 known)
+
 (** Build eval_result from a list of eval_runs for one scenario. *)
 let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : eval_result =
   let n = List.length runs in
@@ -300,7 +305,7 @@ let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : ev
   let scores = List.map (fun r -> r.weighted_score) runs in
   let mean = if n = 0 then 0.0
     else List.fold_left (+.) 0.0 scores /. float_of_int n in
-  let total_cost = List.fold_left (fun a (r : eval_run) -> a +. r.total_cost_usd) 0.0 runs in
+  let total_cost = sum_costs (List.map (fun (r : eval_run) -> r.total_cost_usd) runs) in
   let std_dev = score_std_dev scores in
   let ci95_margin =
     if n > 1 then
@@ -350,7 +355,7 @@ let eval_run_to_json (r : eval_run) : Yojson.Safe.t =
     ("passed", `Bool r.passed);
     ("tool_calls", `List (List.map (fun s -> `String s) r.tool_calls_made));
     ("total_turns", `Int r.total_turns);
-    ("total_cost_usd", `Float r.total_cost_usd);
+    ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
     ("duration_ms", `Int r.duration_ms);
     ("outcome", Trajectory.outcome_to_json r.outcome);
     ("error", Json_util.string_opt_to_json r.error);
@@ -365,7 +370,7 @@ let eval_result_to_json (r : eval_result) : Yojson.Safe.t =
     ("pass_at_k", `Float r.pass_at_k);
     ("mean_score", `Float r.mean_score);
     ("consistency", `Float r.consistency);
-    ("total_cost_usd", `Float r.total_cost_usd);
+    ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
     ("num_runs", `Int (List.length r.runs));
     ("ci95_low", `Float r.ci95_low);
     ("ci95_high", `Float r.ci95_high);
@@ -379,7 +384,7 @@ let suite_result_to_json (r : eval_suite_result) : Yojson.Safe.t =
     ("started_at", `Float r.started_at);
     ("ended_at", `Float r.ended_at);
     ("overall_pass_rate", `Float r.overall_pass_rate);
-    ("total_cost_usd", `Float r.total_cost_usd);
+    ("total_cost_usd", Json_util.float_opt_to_json r.total_cost_usd);
     ("total_runs", `Int r.total_runs);
     ("results", `List (List.map eval_result_to_json r.results));
   ]
@@ -585,21 +590,30 @@ let load_scenarios_from_file (path : string) : (scenario list, string) result =
 let report_to_string (r : eval_suite_result) : string =
   let buf = Buffer.create 2048 in
   let add = Buffer.add_string buf in
+  let cost_to_string = function
+    | Some cost -> Printf.sprintf "$%.4f" cost
+    | None -> "unavailable"
+  in
   add (Printf.sprintf "=== Eval Suite: %s ===\n" r.suite_name);
-  add (Printf.sprintf "Runs: %d | Pass Rate: %.1f%% | Cost: $%.4f\n\n"
-    r.total_runs (r.overall_pass_rate *. 100.0) r.total_cost_usd);
+  add
+    (Printf.sprintf "Runs: %d | Pass Rate: %.1f%% | Cost: %s\n\n" r.total_runs
+       (r.overall_pass_rate *. 100.0)
+       (cost_to_string r.total_cost_usd));
 
   List.iter (fun (er : eval_result) ->
     let status = if er.pass_at_k >= 0.5 then "PASS" else "FAIL" in
     add (Printf.sprintf "[%s] %s (%s)\n" status er.scenario.name er.scenario.category);
-    add (Printf.sprintf "  pass@k=%.2f  mean=%.2f  consistency=%.3f  cost=$%.4f\n"
-      er.pass_at_k er.mean_score er.consistency er.total_cost_usd);
+    add
+      (Printf.sprintf "  pass@k=%.2f  mean=%.2f  consistency=%.3f  cost=%s\n"
+         er.pass_at_k er.mean_score er.consistency
+         (cost_to_string er.total_cost_usd));
     List.iter (fun (run : eval_run) ->
       let run_status = if run.passed then "ok" else "FAIL" in
-      add (Printf.sprintf "  run[%d] %s score=%.2f turns=%d cost=$%.4f %s\n"
-        run.run_index run_status run.weighted_score
-        run.total_turns run.total_cost_usd
-        (Trajectory.outcome_to_string run.outcome));
+      add
+        (Printf.sprintf "  run[%d] %s score=%.2f turns=%d cost=%s %s\n"
+           run.run_index run_status run.weighted_score run.total_turns
+           (cost_to_string run.total_cost_usd)
+           (Trajectory.outcome_to_string run.outcome));
     ) er.runs;
     add "\n";
   ) r.results;

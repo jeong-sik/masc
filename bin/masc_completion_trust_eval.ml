@@ -253,9 +253,10 @@ let build_eval_run (scenario : EH.scenario) ~run_index
       passed = ws >= pass_threshold;
       tool_calls_made = List.map fst calls;
       total_turns = run_result.Runtime_agent.turns;
-      (* USD cost is not computed in V1 (needs a price catalog); raw token usage
-         remains in run_result telemetry. *)
-      total_cost_usd = 0.0;
+      (* USD cost is unavailable in this V1 runner. Do not report a fabricated
+         $0.0000: raw token usage remains in run_result telemetry, but this
+         runner has no authoritative price/cost fold yet. *)
+      total_cost_usd = None;
       duration_ms;
       outcome = outcome_of_stop run_result.Runtime_agent.stop_reason;
       error = None;
@@ -271,7 +272,7 @@ let build_eval_run (scenario : EH.scenario) ~run_index
       passed = false;
       tool_calls_made = List.map fst calls;
       total_turns = 0;
-      total_cost_usd = 0.0;
+      total_cost_usd = None;
       duration_ms;
       outcome = Trajectory.Failed msg;
       error = Some msg;
@@ -330,7 +331,9 @@ let build_suite ~started_at ~ended_at (results : EH.eval_result list) :
     List.fold_left (fun a (r : EH.eval_result) -> a + List.length r.EH.runs) 0 results
   in
   let total_cost =
-    List.fold_left (fun a (r : EH.eval_result) -> a +. r.EH.total_cost_usd) 0.0 results
+    match List.filter_map (fun (r : EH.eval_result) -> r.EH.total_cost_usd) results with
+    | [] -> None
+    | costs -> Some (List.fold_left ( +. ) 0.0 costs)
   in
   let n = List.length results in
   let passing =

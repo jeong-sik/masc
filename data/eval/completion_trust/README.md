@@ -51,7 +51,12 @@ a measurable target.
   the observation fields below).
 - `graders` — list of grader objects. This corpus uses deterministic graders:
   `{"type":"not_contains","field":"<observation>","expected":"<string>","weight":1.0,"description":"..."}`.
-- `max_turns`, `max_cost_usd`, `tags`.
+- `max_turns`, `tags`.
+
+This V1 runner enforces `max_turns` by passing it to the keeper turn driver. It
+does not enforce a cost budget: provider cost is not folded into this report yet,
+so `total_cost_usd` is emitted as `null`/`unavailable` rather than a fabricated
+`0.0`.
 
 ### Observation fields a deterministic grader can target (`field`)
 

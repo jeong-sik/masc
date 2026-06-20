@@ -1323,11 +1323,12 @@ describe('ChatComposer multimodal', () => {
       { type: 'text', text: 'check this <tag>' },
     ])
     const clientActionId = onSend.mock.calls[0]?.[0].clientActionId
-    expect(clientActionId).toContain('check this <tag>')
-    expect(clientActionId).toContain('att-img')
+    expect(clientActionId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(clientActionId).not.toContain('check this <tag>')
+    expect(clientActionId).not.toContain('att-img')
   })
 
-  it('mints the same client action id for repeated sends of the same draft', async () => {
+  it('mints content-independent client action ids for repeated sends', async () => {
     const onSend = vi.fn()
     renderComposer({ draft: 'same text', onSend })
 
@@ -1339,11 +1340,14 @@ describe('ChatComposer multimodal', () => {
     expect(onSend).toHaveBeenCalledTimes(2)
     const firstId = onSend.mock.calls[0]?.[0].clientActionId
     const secondId = onSend.mock.calls[1]?.[0].clientActionId
-    expect(firstId).toBe(secondId)
-    expect(firstId).toContain('same text')
+    expect(firstId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(secondId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(firstId).not.toBe(secondId)
+    expect(firstId).not.toContain('same text')
+    expect(secondId).not.toContain('same text')
   })
 
-  it('changes the client action id when attachment data changes', async () => {
+  it('does not derive client action ids from attachment payloads', async () => {
     const baseAttachment: Omit<KeeperConversationAttachment, 'data'> = {
       id: 'att-same',
       type: 'image',
@@ -1386,7 +1390,13 @@ describe('ChatComposer multimodal', () => {
     expect(onSend).toHaveBeenCalledTimes(2)
     const firstId = onSend.mock.calls[0]?.[0].clientActionId
     const secondId = onSend.mock.calls[1]?.[0].clientActionId
+    expect(firstId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(secondId).toMatch(/^composer-send-\d+-\d+$/)
     expect(firstId).not.toBe(secondId)
+    expect(firstId).not.toContain('same text')
+    expect(firstId).not.toContain('att-same')
+    expect(firstId).not.toContain('AAAA')
+    expect(secondId).not.toContain('BBBB')
   })
 
   it('preserves audio attachments as audio user blocks', async () => {
@@ -1426,7 +1436,8 @@ describe('ChatComposer multimodal', () => {
         size: 2048,
       },
     ])
-    expect(onSend.mock.calls[0]?.[0].clientActionId).toContain('att-audio')
+    expect(onSend.mock.calls[0]?.[0].clientActionId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(onSend.mock.calls[0]?.[0].clientActionId).not.toContain('att-audio')
   })
 
   it('keeps send disabled until there is content', () => {

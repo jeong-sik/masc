@@ -308,36 +308,11 @@ function attachmentMeta(attachment: KeeperConversationAttachment): string {
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
 }
 
-function actionFingerprint(value: string): string {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(36)
-}
+let composerActionSeq = 0
 
-function composerAttachmentActionFingerprint(attachment: KeeperConversationAttachment): Record<string, unknown> {
-  return {
-    id: attachment.id,
-    type: attachment.type,
-    name: attachment.name,
-    mimeType: attachment.mimeType,
-    size: attachment.size,
-    dims: attachment.dims ?? null,
-    dataLength: attachment.data.length,
-    dataHash: actionFingerprint(attachment.data),
-  }
-}
-
-function composerClientActionId(
-  text: string,
-  attachments: readonly KeeperConversationAttachment[],
-): string {
-  return JSON.stringify({
-    text,
-    attachments: attachments.map(composerAttachmentActionFingerprint),
-  })
+function nextComposerClientActionId(): string {
+  composerActionSeq += 1
+  return `composer-send-${Date.now()}-${composerActionSeq}`
 }
 
 function dataUriToText(data: string): string | null {
@@ -2624,7 +2599,7 @@ export function ChatComposer({
     void onSend({
       blocks,
       userBlocks,
-      clientActionId: composerClientActionId(text, attachments),
+      clientActionId: nextComposerClientActionId(),
     })
     onDraftChange('')
     setAttachments([])

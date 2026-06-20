@@ -504,6 +504,11 @@ let handle_message_create ~dispatch
                    channel_id
                    (Format.asprintf "%a" State.pp_send_error e))
           | Stream_overflow_send_failed _ ->
+              (match attention_event_id with
+               | Some event_id ->
+                   mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                     ~reason:"discord_reply_partial_overflow"
+               | None -> ());
               Discord_observability.record_inbound_dispatch
                 Discord_observability.Reply_send_error;
               Discord_observability.record_reply

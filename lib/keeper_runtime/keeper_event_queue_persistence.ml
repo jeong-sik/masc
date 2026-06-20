@@ -11,6 +11,13 @@
 
 let write_mu = Stdlib.Mutex.create ()
 
+let valid_keeper_name name =
+  let valid_char = function
+    | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '.' | '_' | '-' -> true
+    | _ -> false
+  in
+  (not (String.equal name "")) && String.for_all valid_char name
+
 let save_json_atomic path json =
   Fs_compat.mkdir_p (Filename.dirname path);
   json
@@ -19,7 +26,7 @@ let save_json_atomic path json =
   |> Fs_compat.save_file_atomic path
 
 let snapshot_path ~base_path ~keeper_name =
-  if Keeper_config.validate_name keeper_name
+  if valid_keeper_name keeper_name
   then
     Ok
       (Filename.concat

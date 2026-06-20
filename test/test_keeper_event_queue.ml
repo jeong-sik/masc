@@ -1,3 +1,23 @@
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
+
+let snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "event-queue.json"
+
 let () =
   let open Keeper_event_queue in
   let board_payload () =
@@ -161,5 +181,70 @@ let () =
   (match queue_of_yojson (`Assoc [ "schema", `String "wrong"; "items", `List [] ]) with
    | Ok _ -> Alcotest.fail "wrong queue snapshot schema should be rejected"
    | Error _ -> ());
+
+  (* --- durable snapshot store: persist/load and empty dequeue state --- *)
+  let base_path = temp_dir "keeper-event-queue-persistence" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-test" in
+      let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
+      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
+      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
+      assert (length restored = 2);
+      let first, rest =
+        match dequeue restored with
+        | Some item -> item
+        | None -> Alcotest.fail "persisted queue should restore first stimulus"
+      in
+      assert (String.equal first.post_id "p1");
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
+      let second, rest =
+        match dequeue (Keeper_event_queue_persistence.load ~base_path ~keeper_name) with
+        | Some item -> item
+        | None -> Alcotest.fail "persisted queue should restore second stimulus"
+      in
+      assert (String.equal second.post_id "bootstrap");
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
+      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- registry integration: CAS-successful enqueue persists and register reloads --- *)
+  let base_path = temp_dir "keeper-event-queue-registry" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-registry-test" in
+      let meta =
+        match
+          Masc.Keeper_meta_json_parse.meta_of_json
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name", `String keeper_name
+              ; "trace_id", `String "trace-event-queue-registry-test"
+              ; "last_model_used", `String "llama:auto"
+              ; "tool_access", `List []
+              ])
+        with
+        | Ok meta -> meta
+        | Error msg -> Alcotest.fail ("meta parse failed: " ^ msg)
+      in
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
+      Masc.Keeper_registry.clear ();
+      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
+      assert (length restored = 1);
+      let replayed =
+        match Masc.Keeper_registry_event_queue.dequeue ~base_path keeper_name with
+        | Some stim -> stim
+        | None -> Alcotest.fail "registry reload should replay pending stimulus"
+      in
+      assert (String.equal replayed.post_id "p1");
+      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
   print_endline "test_keeper_event_queue: all passed"

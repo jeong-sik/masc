@@ -27,11 +27,13 @@ val send_message_with_blocks :
     [Log.Keeper.warn] and returns the outcome. *)
 
 val content_blocks_of_text : string -> Yojson.Safe.t list
-(** [content_blocks_of_text text] extracts rich Slack blocks from plain text:
+(** [content_blocks_of_text text] projects server chat blocks into Slack
+    Block Kit blocks:
     - Markdown images [![alt](url)] become image blocks.
     - Standalone image URLs (png/jpg/gif/webp/svg) become image blocks.
     - Other standalone URLs become link blocks with a hostname-derived title.
-    Non-URL text is omitted because it is delivered via the [content] field. *)
+    Text and fusion blocks are omitted because text is delivered via the
+    [content] field and fusion cards have no Slack-native projection yet. *)
 
 val adapter_loop :
   token:string ->
@@ -78,4 +80,9 @@ module For_testing : sig
 
   val content_blocks_of_text : string -> Yojson.Safe.t list
   (** Same as {!content_blocks_of_text}; exposed for unit testing. *)
+
+  val final_message_blocks :
+    content:string -> event_blocks:Yojson.Safe.t list -> Yojson.Safe.t list
+  (** Merge text-derived blocks with explicitly emitted rich event blocks in
+      final delivery order. *)
 end

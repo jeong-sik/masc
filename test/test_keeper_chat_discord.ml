@@ -65,6 +65,27 @@ let test_public_voice_audio_url_strips_trailing_slash () =
   check string "audio URL"
     "https://chat.example.com/api/v1/voice/audio/tok123" url
 
+let test_rich_embeds_of_text_projects_links_and_images () =
+  let embeds =
+    D.rich_embeds_of_text
+      "https://example.com/page\n![diagram](https://example.com/diagram.png)\nplain text"
+  in
+  check int "two embeds" 2 (List.length embeds);
+  let link_json =
+    Discord_rest_client.embed_to_json (List.hd embeds) |> Yojson.Safe.to_string
+  in
+  check bool "link title" true (contains link_json "\"title\":\"example.com\"");
+  check bool "link url" true
+    (contains link_json "\"url\":\"https://example.com/page\"");
+  let image_json =
+    Discord_rest_client.embed_to_json (List.nth embeds 1)
+    |> Yojson.Safe.to_string
+  in
+  check bool "image url" true
+    (contains image_json "\"url\":\"https://example.com/diagram.png\"");
+  check bool "image caption" true
+    (contains image_json "\"description\":\"diagram\"")
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -86,5 +107,7 @@ let () =
             test_public_voice_audio_url_uses_base_url
         ; test_case "audio URL strips trailing slash" `Quick
             test_public_voice_audio_url_strips_trailing_slash
+        ; test_case "projects text links and images to embeds" `Quick
+            test_rich_embeds_of_text_projects_links_and_images
         ] )
     ]

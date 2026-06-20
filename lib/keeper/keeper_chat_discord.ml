@@ -251,6 +251,36 @@ let send_audio_block ~token ~channel_id ~base_url ~audio_token ~message_text
   in
   send_message ~token ~channel_id ~content
 
+let rich_embed_of_chat_block = function
+  | Keeper_chat_blocks.Image { src; cap } ->
+      let caption = Option.map Observability_redact.redact_text cap in
+      Some (Discord_rest_client.image_embed ~url:src ~caption)
+  | Keeper_chat_blocks.Link { url; title; meta = _ } ->
+      let title = Observability_redact.redact_text title in
+      Some
+        (Discord_rest_client.link_embed ~url ~title ~description:None
+           ~image:None)
+  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Fusion _ -> None
+
+let rich_embeds_of_text text =
+  Keeper_chat_blocks.parse_text_to_blocks text
+  |> List.filter_map rich_embed_of_chat_block
+
+let send_text_rich_embeds ~token ~channel_id text =
+  rich_embeds_of_text text
+  |> List.iter (fun embed ->
+         match
+           Discord_rest_client.send_embed_message ~token ~channel_id
+             ~content:"" ~embeds:[ embed ] ()
+         with
+         | Ok _msg_id -> ()
+         | Error err ->
+             let err_str =
+               Format.asprintf "%a" Discord_rest_client.pp_error err
+             in
+             Log.Keeper.warn
+               "keeper_chat_discord: send_text_rich_embed failed: %s" err_str)
+
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
 (* NDT-OK: wall-clock used for Discord rate-limit backoff only,
@@ -348,6 +378,7 @@ let adapter_loop ~token ~channel_id ~events ?base_url () =
               | Some overflow ->
                send_message ~token ~channel_id ~content:overflow
              ));
+        send_text_rich_embeds ~token ~channel_id acc_text;
         (* Loop exits after one turn. *)
         ()
     | Event_error { message } ->
@@ -427,4 +458,5 @@ module For_testing = struct
   let streaming_patch_content = streaming_patch_content
   let final_head_and_overflow = final_head_and_overflow
   let public_voice_audio_url = public_voice_audio_url
+  let rich_embeds_of_text = rich_embeds_of_text
 end

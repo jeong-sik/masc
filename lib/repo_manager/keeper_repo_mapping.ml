@@ -263,7 +263,16 @@ let safe_realpath path =
   try Some (Unix.realpath path)
   with Unix.Unix_error _ -> None
 
-let read_file_opt = Fs_compat.load_file_opt
+let max_git_probe_file_bytes = 64 * 1024
+
+let read_git_probe_file_opt path =
+  match safe_lstat path with
+  | Some { Unix.st_kind = Unix.S_REG; st_size; _ }
+    when st_size <= max_git_probe_file_bytes -> Fs_compat.load_file_opt path
+  | Some { Unix.st_kind =
+             ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
+             | Unix.S_FIFO | Unix.S_SOCK ); _ } -> None
+  | None -> None
 
 let normalize_lexical_path path =
   let absolute = String.starts_with ~prefix:"/" path in
@@ -311,7 +320,7 @@ let git_config_path_of_repo_root repo_root =
   if safe_file_exists dot_git && safe_is_directory dot_git then
     Some (Filename.concat dot_git "config")
   else if safe_file_exists dot_git then
-    match read_file_opt dot_git with
+    match read_git_probe_file_opt dot_git with
     | None -> None
     | Some content ->
         content
@@ -332,7 +341,7 @@ let remote_origin_url_of_repo_root repo_root =
   match git_config_path_of_repo_root repo_root with
   | None -> None
   | Some config_path -> (
-      match read_file_opt config_path with
+      match read_git_probe_file_opt config_path with
       | None -> None
       | Some content ->
           let rec loop in_origin = function

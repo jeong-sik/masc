@@ -129,15 +129,20 @@ let cadence_turns () =
   |> max 1
 ;;
 
-(* Per-(keeper, active trace) "turns since last successful extraction"
-   counters. Stdlib.Mutex (not Eio.Mutex): the critical section is a Hashtbl
-   read/write that never yields, and the table is reachable from concurrent
-   keeper fibers. *)
+(* Per-keeper "turns since last successful extraction" counter, paired with the
+   trace it belongs to. Keyed by [keeper_id] (the long-lived owner), NOT by
+   (keeper_id, trace_id): trace_id rotates on every keeper run, so a pair-keyed
+   table mints a fresh row per rotation and never reclaims the previous one,
+   growing without bound over the process lifetime. Keying by keeper_id bounds
+   the table to one row per live keeper; a rotated trace is detected as a stored
+   mismatch and resets the schedule in place. Stdlib.Mutex (not Eio.Mutex): the
+   critical section is a Hashtbl read/write that never yields, and the table is
+   reachable from concurrent keeper fibers. *)
 let cadence_mu = Stdlib.Mutex.create ()
-let cadence_counters : (string * string, int) Hashtbl.t = Hashtbl.create 16
+let cadence_counters : (string, string * int) Hashtbl.t = Hashtbl.create 16
 
-(* A counter value below 0 means the (keeper, trace) has never had a successful
-   extraction: the next turn is due immediately. *)
+(* A counter value below 0 means the keeper has never had a successful
+   extraction on the current trace: the next turn is due immediately. *)
 let fresh_counter = -1
 
 (* Pure cadence decision. Given the keeper's current [counter] (turns since its
@@ -159,22 +164,46 @@ let cadence_step ~cadence ~counter =
     if next >= cadence then cadence, true else next, false)
 ;;
 
+(* Pure keyed cadence decision. Given a keeper's [prior] stored (trace, counter)
+   and the [current_trace], a stored entry from a different (rotated) trace is
+   treated as fresh — due immediately, not inheriting the old trace's schedule —
+   exactly like an unseen keeper ([prior = None]). Returns the value to store and
+   whether extraction is due now. Exposed for testing the rollover decision
+   without the global table. *)
+let cadence_step_keyed ~cadence ~current_trace ~prior =
+  let counter =
+    (* sound-partial: allow — an unseen keeper or a rotated trace is fresh
+       (due immediately via [fresh_counter]); fresh-state init, not a default
+       hiding a parse error. *)
+    match prior with
+    | Some (t, c) when String.equal t current_trace -> c
+    | _ -> fresh_counter
+  in
+  let updated, due = cadence_step ~cadence ~counter in
+  (current_trace, updated), due
+;;
+
 let cadence_due ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
-    let counter =
-      (* sound-partial: allow — an unseen (keeper, trace) is due immediately via
-         [fresh_counter]; fresh-state init, not a default hiding a parse error. *)
-      Option.value ~default:fresh_counter
-        (Hashtbl.find_opt cadence_counters (keeper_id, trace_id))
+    let prior = Hashtbl.find_opt cadence_counters keeper_id in
+    let value, due =
+      cadence_step_keyed ~cadence:(cadence_turns ()) ~current_trace:trace_id ~prior
     in
-    let updated, due = cadence_step ~cadence:(cadence_turns ()) ~counter in
-    Hashtbl.replace cadence_counters (keeper_id, trace_id) updated;
+    Hashtbl.replace cadence_counters keeper_id value;
     due)
 ;;
 
 let cadence_record_success ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters (keeper_id, trace_id) 0)
+    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
+;;
+
+(* Live per-keeper cadence rows. Bounded by the number of keepers that have run
+   (one row each), so it doubles as a leak-regression signal: it must not grow
+   with trace rotations. Read-only; consumed by the cadence test and the
+   dashboard memory-health panel. *)
+let cadence_counter_entries () =
+  Stdlib.Mutex.protect cadence_mu (fun () -> Hashtbl.length cadence_counters)
 ;;
 
 let max_messages () =

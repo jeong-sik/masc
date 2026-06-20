@@ -179,22 +179,59 @@ let test_cadence_due_independent_keepers () =
     check bool "kb advances on its own counter, not due on ka's schedule" false
       (R.cadence_due ~keeper_id:kb ~trace_id:tb))
 
-let test_cadence_due_scoped_by_trace () =
+(* A handoff rollover (a new trace_id for the same keeper) resets the cadence
+   schedule in place. The table is keyed by keeper_id, so the rotated trace
+   overwrites the keeper's single row rather than minting a new one — the
+   previous trace's counter is intentionally not preserved (production never has
+   two live traces for one keeper; meta.runtime.trace_id is the single active
+   trace and rolls over sequentially). *)
+let test_cadence_due_resets_on_trace_rollover () =
   let cadence = R.cadence_turns () in
   if cadence <= 1
-  then () (* cadence 1: every trace due every turn *)
+  then () (* cadence 1: every turn due, rollover semantics are trivial *)
   else (
-    let kid = "test-cadence-scope-trace" and ta = "trace-a" and tb = "trace-b" in
+    let kid = "test-cadence-rollover" and ta = "trace-a" and tb = "trace-b" in
     (* Advance trace a past its fresh-due turn to a non-due turn. *)
     if R.cadence_due ~keeper_id:kid ~trace_id:ta
     then R.cadence_record_success ~keeper_id:kid ~trace_id:ta;
-    ignore (R.cadence_due ~keeper_id:kid ~trace_id:ta);
-    (* Trace b is fresh and should be due immediately regardless of trace a. *)
-    check bool "fresh trace is due immediately" true
+    check bool "trace a is mid-cycle, not due" false
+      (R.cadence_due ~keeper_id:kid ~trace_id:ta);
+    (* A new trace (rollover) is fresh and due immediately, overwriting the row. *)
+    check bool "rolled-over trace is due immediately" true
       (R.cadence_due ~keeper_id:kid ~trace_id:tb);
-    (* Trace a remains not due on its own counter. *)
-    check bool "trace a counter is independent" false
+    (* Rolling back to trace a is itself a rollover off trace b: fresh, due
+       immediately — the old trace-a counter was not retained. *)
+    check bool "returning to the prior trace is a fresh rollover, due immediately"
+      true
       (R.cadence_due ~keeper_id:kid ~trace_id:ta))
+
+(* Leak regression: the cadence table is keyed by keeper_id, so an unbounded
+   number of trace rotations for one keeper must add exactly one row (the
+   pre-fix (keeper, trace) keying added one row per rotation and never reclaimed
+   it). Measured as a delta so concurrent rows from other tests do not matter. *)
+let test_cadence_table_bounded_under_trace_rotation () =
+  let kid = "test-cadence-rotation-bound" in
+  let before = R.cadence_counter_entries () in
+  for i = 1 to 64 do
+    ignore (R.cadence_due ~keeper_id:kid ~trace_id:(Printf.sprintf "rot-trace-%d" i))
+  done;
+  check int "64 trace rotations add exactly one keeper row" 1
+    (R.cadence_counter_entries () - before)
+
+(* Pure rollover decision: a stored entry from a different trace, or no entry,
+   is fresh (due immediately) and the returned value carries the current trace;
+   a matching trace advances the stored counter. *)
+let test_cadence_step_keyed () =
+  check (pair (pair string int) bool) "unseen keeper is fresh, due, carries trace"
+    (("t1", 3), true)
+    (R.cadence_step_keyed ~cadence:3 ~current_trace:"t1" ~prior:None);
+  check (pair (pair string int) bool) "matching trace advances mid-cycle, not due"
+    (("t1", 2), false)
+    (R.cadence_step_keyed ~cadence:3 ~current_trace:"t1" ~prior:(Some ("t1", 1)));
+  check (pair (pair string int) bool)
+    "rotated trace is fresh (due), discards prior counter, carries new trace"
+    (("t2", 3), true)
+    (R.cadence_step_keyed ~cadence:3 ~current_trace:"t2" ~prior:(Some ("t1", 2)))
 
 (* Tolerant parsing for real-world librarian provider drift. *)
 
@@ -316,7 +353,11 @@ let () =
           test_case "record success resets" `Quick test_cadence_record_success_resets;
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
           test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
-          test_case "cadence_due is scoped by trace" `Quick test_cadence_due_scoped_by_trace;
+          test_case "cadence_due resets on trace rollover" `Quick
+            test_cadence_due_resets_on_trace_rollover;
+          test_case "cadence table bounded under trace rotation" `Quick
+            test_cadence_table_bounded_under_trace_rotation;
+          test_case "cadence_step_keyed rollover decision" `Quick test_cadence_step_keyed;
         ] );
       ( "tolerant_parsing",
         [

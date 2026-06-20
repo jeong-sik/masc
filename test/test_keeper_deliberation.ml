@@ -44,6 +44,10 @@ let json_string_field key json =
   | Some (`String value) -> value
   | _ -> fail ("expected string field " ^ key)
 
+let json_list_items label = function
+  | `List items -> items
+  | _ -> fail ("expected JSON list for " ^ label)
+
 let test_triage_skip_on_empty_observation () =
   let result = D.triage base_obs in
   match result with
@@ -516,8 +520,11 @@ let test_delegation_request_from_propose_spawn_action () =
              reason = "needs channel-specific formatter work";
            })
     with
-    | Some request -> request
-    | None -> fail "expected delegation request"
+    | [ request ] -> request
+    | requests ->
+        fail
+          (Printf.sprintf "expected one delegation request, got %d"
+             (List.length requests))
   in
   check string "requester" "planner" request.requester;
   check string "source action" "propose_spawn" request.source_action;
@@ -549,8 +556,11 @@ let test_delegation_request_from_execution_result_uses_selected_action () =
   let result = D.execute_structured_result obs structured in
   let request =
     match R.of_execution_result ~requester:"rondo" ~goal:"connector parity" result with
-    | Some request -> request
-    | None -> fail "expected delegation request from selected action"
+    | [ request ] -> request
+    | requests ->
+        fail
+          (Printf.sprintf "expected one delegation request from selected action, got %d"
+             (List.length requests))
   in
   let json = R.to_json request in
   check string "schema" "masc.keeper_delegation_request.v1"
@@ -566,7 +576,7 @@ let test_delegation_request_from_execution_result_uses_selected_action () =
         (json_string_field "title" task_seed)
   | None -> fail "expected task_seed"
 
-let test_delegation_request_multistep_first_spawn_wins () =
+let test_delegation_request_multistep_projects_all_spawns () =
   let action =
     D.MultiStep
       [
@@ -574,14 +584,68 @@ let test_delegation_request_multistep_first_spawn_wins () =
         D.ProposeSpawn
           { topic = "First delegation"; reason = "primary projection" };
         D.ProposeSpawn
-          { topic = "Second delegation"; reason = "must not replace first" };
+          { topic = "Second delegation"; reason = "also projected" };
       ]
   in
   match R.of_action ~requester:"planner" action with
-  | Some request ->
-      check string "first spawn topic" "First delegation" request.topic;
-      check string "first spawn reason" "primary projection" request.reason
-  | None -> fail "expected first delegation request"
+  | [ first; second ] ->
+      check string "first spawn topic" "First delegation" first.topic;
+      check string "first spawn reason" "primary projection" first.reason;
+      check string "second spawn topic" "Second delegation" second.topic;
+      check string "second spawn reason" "also projected" second.reason
+  | requests ->
+      fail
+        (Printf.sprintf "expected two delegation requests, got %d"
+           (List.length requests))
+
+let test_delegation_request_json_uses_stable_array_shape () =
+  let empty =
+    R.delegation_request_json ~requester:"planner" None
+    |> json_list_items "empty delegation requests"
+  in
+  check int "empty request list" 0 (List.length empty);
+  let single_result =
+    D.execute_structured_result base_obs
+      D.
+        {
+          action =
+            ProposeSpawn
+              { topic = "Single delegation"; reason = "shape stability" };
+          reasoning = "delegate one task";
+          confidence = 0.7;
+        }
+  in
+  let single =
+    R.delegation_request_json ~requester:"planner" (Some single_result)
+    |> json_list_items "single delegation request"
+  in
+  check int "single request list" 1 (List.length single);
+  (match single with
+  | [ request_json ] ->
+      check string "single schema" "masc.keeper_delegation_request.v1"
+        (json_string_field "schema" request_json)
+  | _ -> fail "expected one request JSON");
+  let multi_result =
+    D.execute_structured_result base_obs
+      D.
+        {
+          action =
+            MultiStep
+              [
+                ProposeSpawn
+                  { topic = "First delegation"; reason = "first" };
+                ProposeSpawn
+                  { topic = "Second delegation"; reason = "second" };
+              ];
+          reasoning = "delegate both tasks";
+          confidence = 0.8;
+        }
+  in
+  let multiple =
+    R.delegation_request_json ~requester:"planner" (Some multi_result)
+    |> json_list_items "multiple delegation requests"
+  in
+  check int "multiple request list" 2 (List.length multiple)
 
 let test_delegation_request_id_includes_goal () =
   let a =
@@ -1205,8 +1269,10 @@ let () =
             test_delegation_request_from_propose_spawn_action;
           test_case "delegation request from selected execution" `Quick
             test_delegation_request_from_execution_result_uses_selected_action;
-          test_case "delegation request multi_step first spawn wins" `Quick
-            test_delegation_request_multistep_first_spawn_wins;
+          test_case "delegation request multi_step projects all spawns" `Quick
+            test_delegation_request_multistep_projects_all_spawns;
+          test_case "delegation request json uses stable array shape" `Quick
+            test_delegation_request_json_uses_stable_array_shape;
           test_case "delegation request id includes goal" `Quick
             test_delegation_request_id_includes_goal;
           test_case "delegation request truncates utf8 at boundary" `Quick

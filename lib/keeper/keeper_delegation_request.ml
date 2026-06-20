@@ -151,19 +151,13 @@ let make ~requester ?goal ~topic ~reason () =
 
 let rec of_action ~requester ?goal = function
   | ProposeSpawn { topic; reason } ->
-      Some (make ~requester ?goal ~topic ~reason ())
+      [ make ~requester ?goal ~topic ~reason () ]
   | MultiStep actions ->
-      let rec first = function
-        | [] -> None
-        | action :: rest -> (
-            match of_action ~requester ?goal action with
-            | Some _ as request -> request
-            | None -> first rest)
-      in
-      first actions
+      List.concat_map (of_action ~requester ?goal) actions
   | Noop _ | BoardPost _ | BoardComment _ | BoardVote _ | TaskClaim _
   | Broadcast _ ->
-      None
+      []
+
 
 let of_execution_result ~requester ?goal result =
   of_action ~requester ?goal result.selected_action
@@ -192,11 +186,10 @@ let to_json request =
     ]
 
 let delegation_request_json ~requester ?goal = function
-  | Some execution -> (
-      match of_execution_result ~requester ?goal execution with
-      | Some request -> to_json request
-      | None -> `Null)
-  | None -> `Null
+  | Some execution ->
+      let requests = of_execution_result ~requester ?goal execution in
+      `List (List.map to_json requests)
+  | None -> `List []
 
 let delegation_request_field ~requester ?goal execution =
   ("delegation_request", delegation_request_json ~requester ?goal execution)

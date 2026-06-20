@@ -36,16 +36,16 @@ val of_action :
   requester:string ->
   ?goal:string ->
   Keeper_deliberation.deliberation_action ->
-  t option
-(** [of_action] projects the first [propose_spawn] in a [multi_step] action.
-    Multiple spawn proposals are intentionally first-wins so the dashboard
-    surfaces keep a single deterministic delegation artifact. *)
+  t list
+(** [of_action] projects all [propose_spawn] actions in a [multi_step] action.
+    Returns an empty list when no [propose_spawn] is found. *)
 
 val of_execution_result :
   requester:string ->
   ?goal:string ->
   Keeper_deliberation.execution_result ->
-  t option
+  t list
+
 
 val task_seed_to_json : task_seed -> Yojson.Safe.t
 val to_json : t -> Yojson.Safe.t

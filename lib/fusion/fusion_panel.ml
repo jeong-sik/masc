@@ -19,7 +19,10 @@ let outcome_of_result (model : string)
   | Error e ->
     Fusion_types.Failed
       { failed_model = model
-      ; reason = Fusion_types.Provider_error (Agent_sdk.Error.to_string e)
+      ; reason =
+          Fusion_types.Provider_error
+            (Fusion_oas.provider_error_detail ~runtime_id:model
+               (Agent_sdk.Error.to_string e))
       }
 
 let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt
@@ -32,7 +35,7 @@ let run ~sw ~net ~max_fibers ~timeout_s ~models ~system_prompt ~prompt
       (fun (oks, fails) model ->
         match
           Fusion_oas.build_agent ~sw ~net ~system_prompt ~tools
-            ~max_tool_calls:max_tool_calls_per_panel model
+            ~max_tool_calls:max_tool_calls_per_panel ~timeout_s model
         with
         | Ok agent -> ((agent, model) :: oks, fails)
         | Error reason ->

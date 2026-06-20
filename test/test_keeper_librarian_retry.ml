@@ -196,6 +196,36 @@ let test_cadence_due_scoped_by_trace () =
     check bool "trace a counter is independent" false
       (R.cadence_due ~keeper_id:kid ~trace_id:ta))
 
+(* The cadence table is keyed by (keeper, active trace); a handoff rolls the
+   trace_id, leaving one dead entry per rotation. Drive far more rotations than
+   the cap at a fixed [now], then advance the clock past the staleness horizon:
+   the dead entries must be reclaimed so the table stops growing without bound.
+   This is the regression guard for the unbounded-growth leak. *)
+let test_cadence_table_bounds_dead_traces () =
+  let t0 = 2_000_000_000.0 in
+  let fill = R.cadence_max_entries + 100 in
+  for i = 1 to fill do
+    ignore
+      (R.cadence_due_at
+         ~now:t0
+         ~keeper_id:(Printf.sprintf "deadtrace-keeper-%d" i)
+         ~trace_id:"t")
+  done;
+  let peak = R.cadence_tracked_pairs () in
+  (* Same-instant entries are never stale, so the table is allowed past the cap
+     while they are fresh — that is what preserves per-trace independence. *)
+  check bool "fresh entries are kept even past the cap" true (peak > R.cadence_max_entries);
+  (* A later turn, past the staleness horizon, reclaims the now-dead entries. *)
+  ignore
+    (R.cadence_due_at
+       ~now:(t0 +. 10_000_000.0)
+       ~keeper_id:"deadtrace-trigger"
+       ~trace_id:"t");
+  let after = R.cadence_tracked_pairs () in
+  check bool "stale dead-trace entries are reclaimed" true (after < peak);
+  check bool "table is bounded after the prune" true (after <= R.cadence_max_entries)
+;;
+
 (* Tolerant parsing for real-world librarian provider drift. *)
 
 let parse_ep raw =
@@ -317,6 +347,8 @@ let () =
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
           test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
           test_case "cadence_due is scoped by trace" `Quick test_cadence_due_scoped_by_trace;
+          test_case "dead-trace entries are reclaimed (bounded table)" `Quick
+            test_cadence_table_bounds_dead_traces;
         ] );
       ( "tolerant_parsing",
         [

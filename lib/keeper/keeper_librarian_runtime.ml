@@ -134,7 +134,25 @@ let cadence_turns () =
    read/write that never yields, and the table is reachable from concurrent
    keeper fibers. *)
 let cadence_mu = Stdlib.Mutex.create ()
-let cadence_counters : (string * string, int) Hashtbl.t = Hashtbl.create 16
+
+(* Each entry carries [last_used] (wall clock of its last touch) alongside the
+   [counter] ("turns since last successful extraction") so that dead traces can
+   be reclaimed by age. *)
+type cadence_entry =
+  { counter : int
+  ; last_used : float
+  }
+
+let cadence_counters : (string * string, cadence_entry) Hashtbl.t = Hashtbl.create 16
+
+(* [cadence_counters] is keyed by (keeper, active trace). A handoff rolls the
+   trace_id, so a keeper accumulates one dead entry per rotation. The table is
+   bounded by reclaiming entries untouched beyond [cadence_stale_seconds] once it
+   exceeds [cadence_max_entries] — the same prune shape as Process file-lock
+   tables. Recently-used entries are always kept, so traces in active rotation
+   retain independent counters; only genuinely dead traces are dropped. *)
+let cadence_max_entries = 512
+let cadence_stale_seconds = 3600.0
 
 (* A counter value below 0 means the (keeper, trace) has never had a successful
    extraction: the next turn is due immediately. *)
@@ -159,22 +177,74 @@ let cadence_step ~cadence ~counter =
     if next >= cadence then cadence, true else next, false)
 ;;
 
-let cadence_due ~keeper_id ~trace_id =
+(* Pure eviction decision: given a [(key, last_used)] snapshot, the keys whose
+   entry is stale (untouched beyond [stale_seconds]) — but only once the snapshot
+   exceeds [max_entries]. Below the cap nothing is dropped, so traces in active
+   rotation keep independent counters. *)
+let stale_cadence_keys ~now ~max_entries ~stale_seconds entries =
+  if List.compare_length_with entries max_entries <= 0
+  then []
+  else
+    List.filter_map
+      (fun (key, last_used) ->
+        if Float.compare (now -. last_used) stale_seconds > 0 then Some key else None)
+      entries
+;;
+
+(* Reclaim dead-trace entries in place. Caller holds [cadence_mu]. *)
+let prune_cadence_table ~now =
+  if Hashtbl.length cadence_counters > cadence_max_entries
+  then (
+    let snapshot =
+      Hashtbl.fold
+        (fun key entry acc -> (key, entry.last_used) :: acc)
+        cadence_counters
+        []
+    in
+    List.iter
+      (Hashtbl.remove cadence_counters)
+      (stale_cadence_keys
+         ~now
+         ~max_entries:cadence_max_entries
+         ~stale_seconds:cadence_stale_seconds
+         snapshot))
+;;
+
+let cadence_due_at ~now ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
+    prune_cadence_table ~now;
     let counter =
       (* sound-partial: allow — an unseen (keeper, trace) is due immediately via
          [fresh_counter]; fresh-state init, not a default hiding a parse error. *)
-      Option.value ~default:fresh_counter
-        (Hashtbl.find_opt cadence_counters (keeper_id, trace_id))
+      match Hashtbl.find_opt cadence_counters (keeper_id, trace_id) with
+      | Some entry -> entry.counter
+      | None -> fresh_counter
     in
     let updated, due = cadence_step ~cadence:(cadence_turns ()) ~counter in
-    Hashtbl.replace cadence_counters (keeper_id, trace_id) updated;
+    Hashtbl.replace
+      cadence_counters
+      (keeper_id, trace_id)
+      { counter = updated; last_used = now };
     due)
+;;
+
+let cadence_due ~keeper_id ~trace_id =
+  cadence_due_at ~now:(Time_compat.now ()) ~keeper_id ~trace_id
 ;;
 
 let cadence_record_success ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
-    Hashtbl.replace cadence_counters (keeper_id, trace_id) 0)
+    Hashtbl.replace
+      cadence_counters
+      (keeper_id, trace_id)
+      { counter = 0; last_used = Time_compat.now () })
+;;
+
+(* Number of [(keeper, trace)] cadence entries currently tracked; bounded by
+   [prune_cadence_table]. Read-only; exposed for the bound's regression test and
+   for diagnostics. *)
+let cadence_tracked_pairs () =
+  Stdlib.Mutex.protect cadence_mu (fun () -> Hashtbl.length cadence_counters)
 ;;
 
 let max_messages () =

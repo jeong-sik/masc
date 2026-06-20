@@ -30,18 +30,37 @@ val cadence_step : cadence:int -> counter:int -> int * bool
     resets it. Exposed for testing the cadence logic without the per-keeper
     counter table. *)
 
+val cadence_max_entries : int
+(** Soft cap on the cadence counter table: once it exceeds this many entries,
+    [cadence_due] reclaims entries untouched past the staleness horizon. Exposed
+    so the bound's regression test does not hardcode the threshold. *)
+
 val cadence_due : keeper_id:string -> trace_id:string -> bool
 (** Advance the persistent cadence counter for ([keeper_id], [trace_id]) by one
     turn and report whether extraction is due now. This is what
     [run_best_effort] gates on. The counter is scoped to the active trace so a
     handoff rollover starts a fresh cadence cycle. First call for an unseen pair
-    is due immediately. *)
+    is due immediately. As a side effect it reclaims dead-trace entries (see
+    [cadence_due_at]) so the counter table stays bounded. *)
+
+val cadence_due_at : now:float -> keeper_id:string -> trace_id:string -> bool
+(** [cadence_due] with an explicit wall-clock [now]. Before reading the counter
+    it prunes entries untouched past the staleness horizon once the table exceeds
+    [cadence_max_entries], so dead traces from handoff rollovers do not
+    accumulate without bound; entries in active rotation are kept, preserving
+    per-trace independence. [cadence_due] is this with [now = Time_compat.now ()].
+    Exposed with an explicit clock so the prune is testable deterministically. *)
 
 val cadence_record_success : keeper_id:string -> trace_id:string -> unit
 (** Record a successful extraction for ([keeper_id], [trace_id]) so the cadence
     counter resets and the next cycle can begin. Must only be called after a
     due turn actually produced an episode; skipped or failed attempts must not
     call this. *)
+
+val cadence_tracked_pairs : unit -> int
+(** Number of [(keeper_id, trace_id)] cadence entries currently tracked. Bounded
+    by the dead-trace prune in [cadence_due_at]. Read-only; exposed for that
+    bound's regression test and for diagnostics. *)
 
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The

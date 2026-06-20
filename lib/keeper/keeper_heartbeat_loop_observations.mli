@@ -22,7 +22,7 @@ type runtime_backpressure_decision =
 val runtime_backpressure_observation_reasons : reason:string -> string list
 
 val runtime_backpressure_decision
-  :  ?reason_prefix:string
+  :  reason_prefix:string
   -> runtime_resilience:string option
   -> should_run_turn:bool
   -> runtime_id:string

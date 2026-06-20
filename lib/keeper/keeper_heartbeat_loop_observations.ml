@@ -65,7 +65,7 @@ let runtime_backpressure_observation_reasons ~reason =
 ;;
 
 let runtime_backpressure_decision
-      ?(reason_prefix = "runtime_resilience")
+      ~reason_prefix
       ~runtime_resilience
       ~should_run_turn
       ~runtime_id

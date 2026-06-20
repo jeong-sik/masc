@@ -50,6 +50,7 @@ let decide_keepalive_scheduling
         ~runtime_id
     | None ->
       Observations.runtime_backpressure_decision
+        ~reason_prefix:"runtime_resilience"
         ~runtime_resilience:(runtime_resilience_of_name runtime_id)
         ~should_run_turn:requested_should_run_turn
         ~runtime_id

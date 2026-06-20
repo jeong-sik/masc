@@ -33,11 +33,10 @@ let ttl_expired ~now (fact : fact) =
    diverge from them (RFC-0247 §2.3 fold). *)
 let normalized_claim_key fact = normalize_claim fact.claim
 
-let verified_at fact =
-  match fact.last_verified_at with
-  | Some ts -> ts
-  | None -> fact.first_seen
-;;
+(* The dedup winner's recency anchor: the type-level {!reference_time} SSOT, so
+   GC's "which duplicate to keep" reads the same timestamp as recall ordering and
+   retention ranking. *)
+let verified_at = reference_time
 
 (* RFC-0247 (purge): the dedup winner is structural — the most-recently-verified
    row for a claim (else first-seen), tie-broken by file order. The prior GC

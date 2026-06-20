@@ -112,12 +112,10 @@ let episode_path ~keeper_id ~trace_id ~generation =
     (Printf.sprintf "%s-g%04d.json" trace_id generation)
 ;;
 
-let remove_noerr path =
-  try
-    if Sys.file_exists path then Sys.remove path
-  with
-  | Sys_error _ | Unix.Unix_error _ -> ()
-;;
+(* Raised when a durable atomic write fails. Distinct from [Failure] so the
+   facts-lock wrapper's lock-timeout handler ([with_facts_lock]) does not
+   misclassify a write error (e.g. ENOSPC) as a lock-acquisition timeout. *)
+exception Atomic_write_failed of string
 
 (* Run [f] against [oc] then close it, guaranteeing the descriptor is released
    on every exit. [close_out] runs inside the body so a flush failure (e.g.
@@ -135,31 +133,22 @@ let with_out_channel oc ~f =
        close_out oc)
 ;;
 
+(* Durable atomic write delegated to the Fs_compat durability SSOT:
+   tmp -> fsync(tmp) -> rename -> best-effort fsync(parent dir) — the same
+   primitive board and event-queue persistence use. A local fsync pair here would
+   duplicate (and could drift from) that durability boundary, so route through it.
+   NB: the primitive's boot-time atomic-orphan sweep is depth-1 from base_path and
+   does not currently reach the keepers dir, so a SIGKILL between write and rename
+   still leaves an uncollected [.atomic_*.tmp] here — a pre-existing gap (the old
+   hand-rolled temp was not swept either), tracked separately, not worsened here.
+   The Memory OS write contract raises on failure (unit return), so map [Error] to
+   [Atomic_write_failed]; the temp is already cleaned up by [save_file_atomic], and
+   [Eio.Cancel.Cancelled] is re-raised by it (RFC-0143), never swallowed. *)
 let write_file_atomically path content =
   ensure_dir (Filename.dirname path);
-  let rec open_tmp attempt =
-    (* PID/counter affect only the collision-resistant temp path;
-       NDT-OK: persisted content and final path stay input-derived, and O_EXCL
-       prevents accidental reuse before the checked close + rename. *)
-    let tmp = Printf.sprintf "%s.tmp.%d.%d" path (Unix.getpid ()) attempt in
-    try
-      let fd =
-        Unix.openfile tmp [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o644
-      in
-      tmp, Unix.out_channel_of_descr fd
-    with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> open_tmp (attempt + 1)
-  in
-  let tmp, oc = open_tmp 0 in
-  (* The rename stays OUTSIDE [with_out_channel]: it runs only after the write
-     and close both succeed, and the exception path removes the temp file. *)
-  try
-    with_out_channel oc ~f:(fun oc -> output_string oc content);
-    Sys.rename tmp path
-  with
-  | exn ->
-    remove_noerr tmp;
-    raise exn
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error msg -> raise (Atomic_write_failed msg)
 ;;
 
 let generation_counter_path ~keeper_id ~trace_id =

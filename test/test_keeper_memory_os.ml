@@ -2012,6 +2012,43 @@ let test_recall_no_prefix_for_non_volatile_fact () =
             (contains "[UNVERIFIED — re-check before acting]" block))))
 ;;
 
+(* RFC-0259 §3.5 + SSOT anchor: a volatile fact whose [last_verified_at] is recent
+   is NOT unverified-volatile even when [first_seen] is long past the horizon — a
+   re-grounded ref is fresh. This discriminates the staleness anchor: recall
+   measures age from the shared [reference_time] SSOT (last_verified_at when set,
+   else first_seen) rather than inlining its own match. Were the anchor
+   [first_seen], this old-but-re-verified fact would wrongly carry the hard
+   prefix; the false assertion below is the mutation guard for that drift. *)
+let test_recall_no_prefix_for_recently_verified_volatile_fact () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun keepers_dir ->
+        let keeper_id = "volatile-fresh-keeper" in
+        let now = 1_000_000.0 in
+        let horizon = Reconcile.default_grounding_horizon_seconds in
+        let fact =
+          { (fact_fixture ~now ()) with
+            Types.claim = "PR #21515 is still open"
+          ; Types.external_ref = Some { Types.kind = Types.Pr; id = "21515" }
+          ; Types.first_seen = now -. (horizon *. 3.0)
+          ; Types.last_verified_at = Some (now -. (horizon /. 2.0))
+          ; Types.valid_until = Some (now +. horizon)
+          }
+        in
+        Memory_io.append_fact ~keeper_id fact;
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
+        | None -> Alcotest.fail "expected Some block for a persisted volatile fact"
+        | Some block ->
+          Alcotest.(check bool)
+            "recently re-verified volatile fact does not carry the hard prefix"
+            false
+            (contains "[UNVERIFIED — re-check before acting]" block);
+          Alcotest.(check bool)
+            "recently re-verified volatile fact is still recalled"
+            true
+            (contains "PR #21515 is still open" block))))
+;;
+
 (* RFC-0259 recall suppression validation harness ------------------------------
    The P4 unit tests above pin the mechanism on single crafted facts. This
    harness measures the end-to-end effect on a mixed, realistic population:
@@ -3372,6 +3409,10 @@ let () =
             "non-volatile fact never gets the hard prefix"
             `Quick
             test_recall_no_prefix_for_non_volatile_fact
+        ; Alcotest.test_case
+            "recently re-verified volatile fact gets no hard prefix (anchor = reference_time)"
+            `Quick
+            test_recall_no_prefix_for_recently_verified_volatile_fact
         ; Alcotest.test_case
             "RFC-0259 suppression harness: stale neutralized, durable preserved"
             `Quick

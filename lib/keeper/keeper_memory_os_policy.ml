@@ -33,7 +33,7 @@ let retention_rank ~now (f : fact) =
     then 0.0
     else durable_retention_tier
   in
-  let recency = match f.last_verified_at with Some t -> t | None -> f.first_seen in
+  let recency = reference_time f in
   tier +. recency
 ;;
 

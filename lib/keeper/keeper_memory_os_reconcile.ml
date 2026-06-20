@@ -37,13 +37,9 @@ let verdict_to_string = function
    have its last_verified_at advanced by P3) before the TTL would hard-expire it. *)
 let default_grounding_horizon_seconds = volatile_external_ttl_seconds /. 2.0
 
-(* The reference time a fact was last known good: last_verified_at if set, else
-   first_seen — a never-re-verified fact is as old as its extraction. *)
-let reference_time (f : fact) =
-  match f.last_verified_at with
-  | Some t -> t
-  | None -> f.first_seen
-;;
+(* [reference_time] (the last-known-good anchor) is the SSOT in
+   {!Keeper_memory_os_types}; classify measures the re-ground horizon from it and
+   recall measures staleness from the same definition. *)
 
 let classify ~now ~horizon ~(verify : verify_fn) (f : fact) : verdict =
   match f.external_ref with

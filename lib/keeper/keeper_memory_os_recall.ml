@@ -82,12 +82,7 @@ let humanize_age seconds =
    self-delimited bracket distinguishing never-verified facts (anchored on
    [first_seen]) from facts confirmed long ago (anchored on [last_verified_at]). *)
 let staleness_marker ~now (fact : fact) =
-  let anchor =
-    match fact.last_verified_at with
-    | Some ts -> ts
-    | None -> fact.first_seen
-  in
-  let age = now -. anchor in
+  let age = now -. reference_time fact in
   if age < staleness_note_seconds
   then ""
   else (
@@ -110,11 +105,11 @@ let is_unverified_volatile ~now (fact : fact) =
   match fact.external_ref with
   | None -> false
   | Some _ ->
-    let anchor =
-      match fact.last_verified_at with
-      | Some ts -> ts
-      | None -> fact.first_seen
-    in
+    (* A fact is unverified volatile exactly when the P2 reconciler would consider
+       it past due for re-grounding: same anchor ([reference_time], the type-level
+       SSOT) and same horizon as [classify], so suppression and re-grounding can
+       never disagree on staleness. *)
+    let anchor = reference_time fact in
     now -. anchor > Keeper_memory_os_reconcile.default_grounding_horizon_seconds
 ;;
 
@@ -241,15 +236,11 @@ let dedup_by_claim facts =
     facts
 ;;
 
-(* RFC-0247 (purge): the truth anchor — [last_verified_at] when present, else
-   [first_seen]. Used as the structural recall order (most-recently-verified
-   first) and matches the anchor [retention_rank] and [staleness_marker] use, so
-   "kept", "ranked", and "marked stale" all read the same timestamp. *)
-let truth_anchor (fact : fact) =
-  match fact.last_verified_at with
-  | Some ts -> ts
-  | None -> fact.first_seen
-;;
+(* RFC-0247 (purge): the truth anchor used as the structural recall order
+   (most-recently-verified first). It is the type-level {!reference_time} SSOT, so
+   "kept" ([retention_rank]), "ranked" (here), and "marked stale"
+   ([staleness_marker]) all read the same timestamp by construction. *)
+let truth_anchor (fact : fact) = reference_time fact
 
 (* Filter to current, order by structural recency (the truth anchor), and dedup.
    RFC-0247 replaced the composite [score_fact] order with this single typed

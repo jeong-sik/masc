@@ -171,12 +171,12 @@ let test_skill_candidate_json_and_draft_are_candidate_only () =
     (contains_substring ~needle:"requires human approval" draft)
 ;;
 
-let read_file path =
-  let ic = open_in path in
-  let len = in_channel_length ic in
-  let content = really_input_string ic len in
-  close_in ic;
-  content
+let read_file = Fs_compat.load_file
+
+let write_file_or_fail path content =
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error msg -> fail msg
 ;;
 
 let with_temp_base_path f =
@@ -372,11 +372,7 @@ let test_skill_candidate_store_recovers_partial_candidate_artifacts () =
     let toml_path = Filename.concat dir "candidate.toml" in
     let skill_md_path = Filename.concat dir "SKILL.md" in
     Fs_compat.mkdir_p dir;
-    (match
-       Fs_compat.save_file_atomic json_path (Yojson.Safe.pretty_to_string (S.to_json c) ^ "\n")
-     with
-     | Ok () -> ()
-     | Error msg -> fail msg);
+    write_file_or_fail json_path (Yojson.Safe.pretty_to_string (S.to_json c) ^ "\n");
     check bool "partial json preexists" true (Sys.file_exists json_path);
     check bool "partial toml absent" false (Sys.file_exists toml_path);
     Memory_io.append_fact ~keeper_id:"keeper" fact;
@@ -391,6 +387,52 @@ let test_skill_candidate_store_recovers_partial_candidate_artifacts () =
     check int "partial candidate rewritten" 1 (List.length stored);
     check bool "toml recovered" true (Sys.file_exists toml_path);
     check bool "skill draft recovered" true (Sys.file_exists skill_md_path))
+;;
+
+let test_skill_candidate_store_recovers_missing_index_for_complete_artifacts () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+    let fact =
+      memory_fact ~category:M.Lesson ~trace_id:"trace-index-skill" ~turn:13
+        ~tool_call_id:"tool-index-skill"
+        "When draft candidate artifacts already exist, missing index rows are repaired"
+    in
+    let c =
+      match S.candidates_of_memory_facts ~agent_name:"keeper" [ fact ] with
+      | [ candidate ] -> candidate
+      | _ -> fail "expected one projected candidate"
+    in
+    let dir = Store.draft_dir ~base_path c in
+    let json_path = Filename.concat dir "candidate.json" in
+    let toml_path = Filename.concat dir "candidate.toml" in
+    let skill_md_path = Filename.concat dir "SKILL.md" in
+    Fs_compat.mkdir_p dir;
+    write_file_or_fail json_path (Yojson.Safe.pretty_to_string (S.to_json c) ^ "\n");
+    write_file_or_fail toml_path (Store.render_candidate_toml c);
+    write_file_or_fail skill_md_path (S.render_skill_draft c);
+    check bool "index absent before recovery" false
+      (Sys.file_exists (Store.index_path ~base_path));
+    Memory_io.append_fact ~keeper_id:"keeper" fact;
+    let stored =
+      match
+        Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+          ~fact_tail_limit:16 ~procedure_limit:0
+      with
+      | Ok stored -> stored
+      | Error msg -> fail msg
+    in
+    check int "complete artifacts re-indexed" 1 (List.length stored);
+    let listing =
+      match Store.list_drafts ~base_path ~limit:10 with
+      | Ok listing -> listing
+      | Error msg -> fail msg
+    in
+    check int "missing index repaired" 1 listing.total;
+    match listing.items with
+    | [ item ] -> check string "indexed candidate id" c.id item.id
+    | _ -> fail "expected one indexed draft")
 ;;
 
 let test_skill_candidate_store_sanitizes_candidate_id_path () =
@@ -462,6 +504,8 @@ let () =
             test_skill_candidate_store_writes_post_turn_memory_fact_candidates;
           test_case "recovers partial candidate artifacts" `Quick
             test_skill_candidate_store_recovers_partial_candidate_artifacts;
+          test_case "recovers missing index for complete artifacts" `Quick
+            test_skill_candidate_store_recovers_missing_index_for_complete_artifacts;
           test_case "sanitizes candidate id path" `Quick
             test_skill_candidate_store_sanitizes_candidate_id_path;
         ] );

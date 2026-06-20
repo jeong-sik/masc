@@ -143,6 +143,12 @@ let candidate_json_content candidate =
   Yojson.Safe.pretty_to_string (Skill_candidate_projection.to_json candidate) ^ "\n"
 ;;
 
+let json_string_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `String s -> Some s
+  | _ -> None
+;;
+
 let candidate_artifacts ~base_path candidate =
   [ candidate_json_path ~base_path candidate, candidate_json_content candidate
   ; candidate_toml_path ~base_path candidate, render_candidate_toml candidate
@@ -179,15 +185,70 @@ let write_candidates ~base_path candidates =
 
 let read_file_opt = Fs_compat.load_file_opt
 
+let index_event_matches_candidate ~base_path
+    (candidate : Skill_candidate_projection.skill_candidate) json =
+  let dir = draft_dir ~base_path candidate in
+  let json_path = candidate_json_path ~base_path candidate in
+  let toml_path = candidate_toml_path ~base_path candidate in
+  let skill_md_path = candidate_skill_md_path ~base_path candidate in
+  match
+    ( json_string_opt "id" json
+    , json_string_opt "agent_name" json
+    , json_string_opt "source_kind" json
+    , json_string_opt "source_ref" json
+    , json_string_opt "promotion_state" json
+    , json_string_opt "dir" json
+    , json_string_opt "json_path" json
+    , json_string_opt "toml_path" json
+    , json_string_opt "skill_md_path" json )
+  with
+  | ( Some id
+    , Some agent_name
+    , Some source_kind
+    , Some source_ref
+    , Some promotion_state
+    , Some indexed_dir
+    , Some indexed_json_path
+    , Some indexed_toml_path
+    , Some indexed_skill_md_path ) ->
+    String.equal id candidate.id
+    && String.equal agent_name candidate.agent_name
+    && String.equal source_kind candidate.source_kind
+    && String.equal source_ref candidate.source_ref
+    && String.equal promotion_state
+         (Skill_candidate_projection.promotion_state_to_string
+            candidate.promotion_state)
+    && String.equal indexed_dir dir
+    && String.equal indexed_json_path json_path
+    && String.equal indexed_toml_path toml_path
+    && String.equal indexed_skill_md_path skill_md_path
+  | _ -> false
+;;
+
+let index_contains_candidate ~base_path candidate =
+  let index_path = index_path ~base_path in
+  if not (Sys.file_exists index_path)
+  then Ok false
+  else
+    try
+      Ok
+        (Fs_compat.load_jsonl index_path
+         |> List.exists (index_event_matches_candidate ~base_path candidate))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
+;;
+
 let write_candidate_if_changed ~base_path candidate =
-  let unchanged =
+  let artifacts_unchanged =
     candidate_artifacts ~base_path candidate
     |> List.for_all (fun (path, expected) ->
       match read_file_opt path with
       | Some content -> String.equal content expected
       | None -> false)
   in
-  if unchanged
+  let* indexed = index_contains_candidate ~base_path candidate in
+  if artifacts_unchanged && indexed
   then Ok None
   else (
     let* stored = write_candidate ~base_path candidate in
@@ -233,12 +294,6 @@ let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure
       loop acc rest
   in
   loop [] candidates
-;;
-
-let json_string_opt name json =
-  match Yojson.Safe.Util.member name json with
-  | `String s -> Some s
-  | _ -> None
 ;;
 
 let json_float_opt name json =

@@ -3255,6 +3255,20 @@ let test_claim_id_codec_roundtrip () =
     "claim_id round-trips intact"
     (Some "pr-123-open")
     decoded.Types.claim_id;
+  Alcotest.(check (option string))
+    "claim_id canonicalizes formatting variants"
+    (Some "pr-123-open")
+    (Types.normalize_claim_id " PR #123_Open ");
+  Alcotest.(check (option string))
+    "punctuation-only claim_id degrades to None"
+    None
+    (Types.normalize_claim_id " #!? ");
+  let messy_id = { with_id with Types.claim_id = Some " PR #123_Open " } in
+  let decoded_messy = Option.get (Types.fact_of_json (Types.fact_to_json messy_id)) in
+  Alcotest.(check (option string))
+    "claim_id stores canonical slug"
+    (Some "pr-123-open")
+    decoded_messy.Types.claim_id;
   let no_id = fact_fixture ~now () in
   let no_id_json = Yojson.Safe.to_string (Types.fact_to_json no_id) in
   Alcotest.(check bool) "claim_id key omitted when None" false (contains "claim_id" no_id_json);
@@ -3262,7 +3276,18 @@ let test_claim_id_codec_roundtrip () =
   Alcotest.(check (option string))
     "claim_id round-trips to None"
     None
-    decoded_none.Types.claim_id
+    decoded_none.Types.claim_id;
+  let invalid_id = { with_id with Types.claim_id = Some " #!? " } in
+  let invalid_id_json = Yojson.Safe.to_string (Types.fact_to_json invalid_id) in
+  Alcotest.(check bool)
+    "invalid claim_id is omitted"
+    false
+    (contains "claim_id" invalid_id_json);
+  let decoded_invalid_id = Option.get (Types.fact_of_json (Types.fact_to_json invalid_id)) in
+  Alcotest.(check (option string))
+    "invalid claim_id decodes to None"
+    None
+    decoded_invalid_id.Types.claim_id
 ;;
 
 (* RFC-0259 §3.7 (P6/E): [claim_identity] keys on the producer-emitted [claim_id]
@@ -3296,6 +3321,11 @@ let test_claim_identity_keys_on_claim_id () =
     (Types.claim_identity a)
     (Types.claim_identity b);
   Alcotest.(check string) "claim_id key uses the id: prefix" "id:pr-123-open" (Types.claim_identity a);
+  let sloppy_id = { b with Types.claim_id = Some " PR #123_Open " } in
+  Alcotest.(check string)
+    "claim_id key canonicalizes harmless id formatting"
+    (Types.claim_identity a)
+    (Types.claim_identity sloppy_id);
   (* DIFFERENT claim_id, SAME external_ref -> distinct identity (no over-merge). *)
   let c = { a with Types.claim = "PR #123 was merged"; Types.claim_id = Some "pr-123-merged" } in
   Alcotest.(check bool)
@@ -3313,7 +3343,12 @@ let test_claim_identity_keys_on_claim_id () =
   Alcotest.(check string)
     "blank claim_id falls back to claim:<normalize_claim>"
     ("claim:" ^ Types.normalize_claim blank_id.Types.claim)
-    (Types.claim_identity blank_id)
+    (Types.claim_identity blank_id);
+  let invalid_id = { no_id with Types.claim_id = Some " #!? " } in
+  Alcotest.(check string)
+    "invalid claim_id falls back to claim:<normalize_claim>"
+    (Types.claim_identity no_id)
+    (Types.claim_identity invalid_id)
 ;;
 
 (* RFC-0259 §3.7 (P6/E+F): the production write upsert ([merge_and_cap_facts] keyed by

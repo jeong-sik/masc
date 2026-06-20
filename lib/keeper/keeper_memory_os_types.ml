@@ -429,6 +429,33 @@ let normalize_claim s =
   if n > 0 && r.[n - 1] = ' ' then String.sub r 0 (n - 1) else r
 ;;
 
+let normalize_claim_id raw =
+  let b = Buffer.create (String.length raw) in
+  let pending_sep = ref false in
+  let add_sep () =
+    if Buffer.length b > 0 then pending_sep := true
+  in
+  let flush_sep () =
+    if !pending_sep && Buffer.length b > 0 then Buffer.add_char b '-';
+    pending_sep := false
+  in
+  String.iter
+    (fun c ->
+       match c with
+       | 'A' .. 'Z' ->
+         flush_sep ();
+         Buffer.add_char b (Char.lowercase_ascii c)
+       | 'a' .. 'z' | '0' .. '9' ->
+         flush_sep ();
+         Buffer.add_char b c
+       | '-' | '_' | ' ' | '\t' | '\r' | '\n' -> add_sep ()
+       | _ -> add_sep ())
+    (String.trim raw);
+  match Buffer.contents b with
+  | "" -> None
+  | id -> Some id
+;;
+
 (* RFC-0259 §3.7 (P6): the producer-identity dedup key. When the librarian emits a
    [claim_id] — a stable slug for the claim's CONCLUSION (not its wording) — that id
    is the key, so a reworded re-extraction of the same conclusion UPSERTs the one
@@ -443,9 +470,9 @@ let normalize_claim s =
    the single dedup SSOT: the write upsert, recall dedup, GC dedup, and Tier-2
    consolidation MUST all key on this one function. *)
 let claim_identity (f : fact) =
-  match f.claim_id with
-  | Some id when String.trim id <> "" -> "id:" ^ id
-  | Some _ | None -> "claim:" ^ normalize_claim f.claim
+  match Option.bind f.claim_id normalize_claim_id with
+  | Some id -> "id:" ^ id
+  | None -> "claim:" ^ normalize_claim f.claim
 ;;
 
 let optional_float_field key = function
@@ -478,7 +505,7 @@ let fact_to_json f =
     (* RFC-0259 §3.7 (P6): the producer-emitted conclusion slug. Omitted when
        [None] so legacy / id-less rows stay byte-identical, and appended LAST to
        keep the prior key order stable for the snapshot fingerprint. *)
-    @ (match f.claim_id with
+    @ (match Option.bind f.claim_id normalize_claim_id with
        | Some id -> [ "claim_id", `String id ]
        | None -> [])
   in
@@ -532,7 +559,7 @@ let fact_of_json (json : Yojson.Safe.t) =
           in
           (* RFC-0259 §3.7 (P6): absent on legacy / id-less rows, defaulting to
              [None] so [claim_identity] falls back to [normalize_claim] for them. *)
-          let claim_id = json_string_field "claim_id" fields in
+          let claim_id = Option.bind (json_string_field "claim_id" fields) normalize_claim_id in
           Some
             { claim
             ; (* Parse-once at the read boundary; legacy free-string categories

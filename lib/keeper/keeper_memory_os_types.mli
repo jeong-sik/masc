@@ -185,6 +185,12 @@ type episode =
     write-time upsert so the two key identically. *)
 val normalize_claim : string -> string
 
+(** Canonicalize a producer-emitted [claim_id] at the typed boundary. Formatting
+    differences from the LLM such as whitespace, case, underscores, or stray
+    punctuation normalize to the same lowercase kebab slug; blank/empty ids
+    degrade to [None]. *)
+val normalize_claim_id : string -> string option
+
 (** RFC-0259 §3.7 (P6): the producer-identity dedup SSOT. When the librarian emits
     a [claim_id] (a stable slug for the claim's CONCLUSION, not its wording) that id
     is the key, so reworded re-extractions of the same conclusion UPSERT one row and

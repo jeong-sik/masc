@@ -165,8 +165,19 @@ let test_board_post_consumer_rejects_read_only_risk () =
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing"
    | Some stored ->
-     check string "schedule remains due" "due"
+     check string "schedule failed" "failed"
        (Schedule_domain.schedule_status_to_string stored.status));
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing unsupported execution"
+   | Some execution ->
+     check string "execution failed" "failed"
+       (Schedule_domain.execution_status_to_string execution.status);
+     check (option string) "execution error"
+       (Some "masc.board_post requires a side-effecting risk_class")
+       execution.error);
   check int "no post" 0 (List.length (Board_dispatch.list_posts ~limit:10 ()))
 ;;
 

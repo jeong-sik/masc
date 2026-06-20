@@ -227,7 +227,7 @@ let grant_error_to_string = function
   | Approver_is_requester -> "requester cannot approve execution"
   | Approver_is_scheduler -> "scheduler cannot approve execution"
   | Schedule_terminal -> "schedule is already terminal"
-  | Schedule_not_pending_approval -> "schedule is not pending approval"
+  | Schedule_not_pending_approval -> "schedule is not pending approval or due"
   | Evidence_schedule_id_mismatch -> "grant evidence schedule_id mismatch"
   | Evidence_payload_digest_mismatch -> "grant evidence payload_digest mismatch"
   | Evidence_due_at_mismatch -> "grant evidence due_at mismatch"
@@ -775,7 +775,8 @@ let create_execution_grant
 let validate_execution_grant (request : schedule_request) (grant : execution_grant) =
   if grant.schedule_id <> request.schedule_id then Error Grant_schedule_id_mismatch
   else if is_terminal request.status then Error Schedule_terminal
-  else if request.status <> Pending_approval then Error Schedule_not_pending_approval
+  else if request.status <> Pending_approval && request.status <> Due then
+    Error Schedule_not_pending_approval
   else if requires_separate_human_grant request && grant.approved_by.kind <> Human_operator
   then Error Approver_not_human
   else if requires_separate_human_grant request
@@ -800,12 +801,34 @@ let validate_execution_grant (request : schedule_request) (grant : execution_gra
 let apply_execution_grant (request : schedule_request) (grant : execution_grant) =
   let* () = validate_execution_grant request grant in
   match grant.decision with
-  | Approve -> Ok { request with status = Scheduled }
+  | Approve ->
+    let status =
+      match request.status with
+      | Pending_approval -> Scheduled
+      | Due -> Due
+      | Scheduled
+      | Running
+      | Succeeded
+      | Failed
+      | Rejected
+      | Cancelled
+      | Expired ->
+        request.status
+    in
+    Ok { request with status }
   | Reject _ -> Ok { request with status = Rejected }
+;;
+
+let expired_at ~now (request : schedule_request) =
+  match request.expires_at with
+  | Some expires_at when expires_at <= now -> true
+  | None | Some _ -> false
 ;;
 
 let mark_due ~now (request : schedule_request) =
   match request.status with
+  | Pending_approval | Scheduled | Due when expired_at ~now request ->
+    { request with status = Expired }
   | Scheduled when request.due_at <= now -> { request with status = Due }
   | _ -> request
 ;;

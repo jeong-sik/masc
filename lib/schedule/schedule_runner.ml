@@ -236,9 +236,13 @@ let candidate_signals ~now state =
 let blocked_approval_signals ~now (state : Schedule_store.state) =
   state.schedules
   |> List.filter (fun (request : Schedule_domain.schedule_request) ->
-    request.status = Pending_approval
-    && request.due_at <= now
-    && Schedule_domain.requires_separate_human_grant request)
+    request.due_at <= now
+    && Schedule_domain.requires_separate_human_grant request
+    &&
+    match request.status with
+    | Pending_approval -> true
+    | Due -> not (Schedule_store.has_current_approved_grant state request)
+    | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled | Expired -> false)
   |> List.map (make_signal ~now Due_blocked_approval)
 ;;
 
@@ -268,7 +272,16 @@ let dispatch_candidate config ~now consumer (request : Schedule_domain.schedule_
   let schedule_id = request.Schedule_domain.schedule_id in
   match consumer.accepts request with
   | Error reason ->
-    dispatch_result ~error:reason schedule_id Dispatch_unsupported
+    (match Schedule_store.fail_due_candidate config ~now ~schedule_id ~error:reason with
+     | Ok _ -> dispatch_result ~error:reason schedule_id Dispatch_unsupported
+     | Error err ->
+       let error =
+         Printf.sprintf
+           "%s; failed to mark schedule failed: %s"
+           reason
+           (Schedule_store.store_error_to_string err)
+       in
+       dispatch_result ~error schedule_id Dispatch_unsupported)
   | Ok () ->
     (match Schedule_store.start_due_candidate config ~now ~schedule_id with
      | Error err ->

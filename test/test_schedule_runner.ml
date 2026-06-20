@@ -1,5 +1,4 @@
 open Alcotest
-open Masc
 open Schedule_domain
 open Schedule_runner
 open Schedule_service
@@ -32,8 +31,8 @@ let with_workspace f =
   Eio.Switch.run
   @@ fun sw ->
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
-  let config = Workspace.default_config dir in
-  ignore (Workspace.init config ~agent_name:(Some "test"));
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
   f config
 ;;
 
@@ -146,7 +145,7 @@ let test_tick_dispatches_due_candidate_to_success () =
       | _ -> fail "execution detail missing"))
 ;;
 
-let test_tick_leaves_unsupported_candidate_due () =
+let test_tick_marks_unsupported_candidate_failed () =
   with_workspace
   @@ fun config ->
   let calls = ref [] in
@@ -162,7 +161,23 @@ let test_tick_leaves_unsupported_candidate_due () =
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing after unsupported"
    | Some stored ->
-     check string "still due" "due" (schedule_status_to_string stored.status))
+     check string "stored failed" "failed" (schedule_status_to_string stored.status));
+  (match
+     Schedule_store.last_execution_for_schedule (Schedule_store.read_state config)
+       ~schedule_id:request.schedule_id
+   with
+   | None -> fail "missing unsupported execution"
+   | Some execution ->
+     check string "unsupported execution status" "failed"
+       (Schedule_domain.execution_status_to_string execution.status);
+     check (option string) "unsupported execution error" (Some "unsupported")
+       execution.error);
+  let repeated =
+    tick_ok config ~now:202.0
+      ~consumer:(accepting_consumer ~accept:(Error "unsupported") calls)
+  in
+  check int "unsupported does not dispatch repeatedly" 0
+    (List.length repeated.dispatches)
 ;;
 
 let test_tick_emits_approval_blocker_then_candidate_after_grant () =
@@ -245,6 +260,54 @@ let test_tick_dispatches_recurring_candidate_to_next_due () =
      check (float 0.001) "recurring execution due" 200.0 execution.due_at)
 ;;
 
+let test_tick_blocks_recurring_side_effect_until_fresh_grant () =
+  with_workspace
+  @@ fun config ->
+  let calls = ref [] in
+  let request =
+    create_ok ~schedule_id:"write-loop-dispatch-1" ~risk_class:Workspace_write
+      ~recurrence:(Interval { interval_sec = 60 })
+      config
+  in
+  (match
+     approve config ~grant_id:"grant-loop-1" ~approved_at:150.0
+       ~schedule_id:request.schedule_id ~approved_by:(human "approver-1") ()
+   with
+   | Ok _ -> ()
+   | Error err -> fail (service_error_to_string err));
+  let first =
+    tick_ok config ~now:201.0 ~consumer:(accepting_consumer calls)
+  in
+  check int "first dispatch" 1 (List.length first.dispatches);
+  check Alcotest.(list string) "first consumer call" [ request.schedule_id ] !calls;
+  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
+   | None -> fail "schedule missing after first dispatch"
+   | Some stored ->
+     check string "stored scheduled after first dispatch" "scheduled"
+       (schedule_status_to_string stored.status);
+     check (float 0.001) "second due_at" 260.0 stored.due_at);
+  let blocked =
+    tick_ok config ~now:260.0 ~consumer:(accepting_consumer calls)
+  in
+  check int "blocked signal" 1 (List.length blocked.emitted);
+  check_kind "blocked kind" Due_blocked_approval (List.hd blocked.emitted).kind;
+  check int "no stale-grant dispatch" 0 (List.length blocked.dispatches);
+  check Alcotest.(list string) "no second consumer call yet" [ request.schedule_id ] !calls;
+  (match
+     approve config ~grant_id:"grant-loop-2" ~approved_at:260.5
+       ~schedule_id:request.schedule_id ~approved_by:(human "approver-2") ()
+   with
+   | Ok stored -> check string "fresh grant keeps due" "due" (schedule_status_to_string stored.status)
+   | Error err -> fail (service_error_to_string err));
+  let second =
+    tick_ok config ~now:261.0 ~consumer:(accepting_consumer calls)
+  in
+  check int "second dispatch" 1 (List.length second.dispatches);
+  check Alcotest.(list string) "second consumer call"
+    [ request.schedule_id; request.schedule_id ]
+    !calls
+;;
+
 let test_tick_marks_dispatch_failure_failed () =
   with_workspace
   @@ fun config ->
@@ -279,14 +342,16 @@ let () =
             test_tick_emits_due_candidate_once
         ; test_case "dispatches due candidate to success" `Quick
             test_tick_dispatches_due_candidate_to_success
-        ; test_case "leaves unsupported candidate due" `Quick
-            test_tick_leaves_unsupported_candidate_due
+        ; test_case "marks unsupported candidate failed" `Quick
+            test_tick_marks_unsupported_candidate_failed
         ; test_case "emits approval blocker then candidate after grant" `Quick
             test_tick_emits_approval_blocker_then_candidate_after_grant
         ; test_case "reschedules recurring candidate after signal" `Quick
             test_tick_reschedules_recurring_candidate_after_signal
         ; test_case "dispatches recurring candidate to next due" `Quick
             test_tick_dispatches_recurring_candidate_to_next_due
+        ; test_case "blocks recurring side-effect until fresh grant" `Quick
+            test_tick_blocks_recurring_side_effect_until_fresh_grant
         ; test_case "marks dispatch failure failed" `Quick
             test_tick_marks_dispatch_failure_failed
         ] )

@@ -287,6 +287,39 @@ let test_dispatch_create_rejects_negative_board_ttl () =
   check int "no schedule persisted" 0 (List.length state.schedules)
 ;;
 
+let test_dispatch_create_rejects_payload_mixed_with_board_fields () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-payload-board-mixed"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "payload", payload
+      ; "board_content", `String "Daily schedule fired"
+      ; "board_hearth", `String "ops"
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects payload and board fields" false
+       (Tool_result.is_success result);
+     check (option string) "failure class" (Some "workflow_rejection")
+       (Option.map Tool_result.tool_failure_class_to_string
+          (Tool_result.failure_class result));
+     check string "message" "use either payload or board_* convenience fields, not both"
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
+;;
+
 let test_dispatch_create_rejects_board_payload_without_content () =
   with_config
   @@ fun config ->
@@ -559,6 +592,8 @@ let () =
             test_dispatch_create_board_post_convenience_payload
         ; test_case "dispatch create rejects negative board ttl" `Quick
             test_dispatch_create_rejects_negative_board_ttl
+        ; test_case "dispatch create rejects payload mixed with board fields" `Quick
+            test_dispatch_create_rejects_payload_mixed_with_board_fields
         ; test_case "dispatch create rejects board payload without content" `Quick
             test_dispatch_create_rejects_board_payload_without_content
         ; test_case "dispatch create rejects read-only board payload" `Quick

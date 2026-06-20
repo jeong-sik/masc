@@ -167,13 +167,12 @@ export async function hydrateKeeperChatHistory(
   setRecordValue(keeperHydrating, keeperName, true)
   try {
     const history = await fetchKeeperChatHistory(keeperName)
+    // Tool outputs are stored on a separate durable endpoint. Hydrate even
+    // when chat history is empty so a keeper panel can still join recently
+    // fetched tool rows from the rail/inspector.
+    void hydrateKeeperToolOutputs(keeperName)
     if (history.length === 0) return
     mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
-    // Tool outputs live on a separate surface (the chat stream carries only
-    // arguments); fetch them so ToolCallBubble can show results. Fire-and-
-    // forget so transcript hydration latency is unchanged, and the store
-    // update re-renders the affected bubbles when it lands.
-    void hydrateKeeperToolOutputs(keeperName)
   } catch (err) {
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
@@ -607,6 +606,7 @@ export async function sendKeeperThreadMessage(
   setActiveStream(keeperName, assistantId, controller)
   let requestId: string | null = null
   let requestTerminalSeen = false
+  let toolCallEnded = false
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
@@ -639,6 +639,10 @@ export async function sendKeeperThreadMessage(
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
           throw new Error(error)
+        }
+        if (event.type === 'TOOL_CALL_END') {
+          toolCallEnded = true
+          void hydrateKeeperToolOutputs(keeperName)
         }
       },
     })
@@ -674,6 +678,7 @@ export async function sendKeeperThreadMessage(
         error: cutMessage,
       })
       setRecordValue(keeperActionErrors, keeperName, cutMessage)
+      if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
       return
     }
 
@@ -689,6 +694,7 @@ export async function sendKeeperThreadMessage(
       timestamp: new Date().toISOString(),
       error: null,
     })
+    if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
     if (requestId) removePendingKeeperChatRequest(requestId)
   } catch (err) {
     if (isAbortError(err)) {

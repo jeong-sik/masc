@@ -183,6 +183,28 @@ describe('applyKeeperStreamEvent', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.streamState).toBe('thinking')
     expect(entry?.delivery).toBe('streaming')
+    expect(entry?.traceSteps).toEqual([
+      { kind: 'think', text: 'reasoning about the problem...' },
+    ])
+  })
+
+  it('appends multiple thinking deltas to one trace step', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'checking ' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'tools' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.traceSteps).toEqual([
+      { kind: 'think', text: 'checking tools' },
+    ])
   })
 })
 

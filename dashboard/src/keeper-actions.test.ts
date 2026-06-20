@@ -31,6 +31,9 @@ const {
   })),
   streamKeeperMessage: vi.fn(),
 }))
+const { fetchKeeperToolCalls } = vi.hoisted(() => ({
+  fetchKeeperToolCalls: vi.fn(async () => ({ entries: [] })),
+}))
 
 vi.mock('./api/mcp', () => ({ callMcpTool }))
 vi.mock('./api/core', () => ({ runOperatorAction }))
@@ -43,6 +46,7 @@ vi.mock('./api/keeper', () => ({
   queuedKeeperMessageToReply,
   streamKeeperMessage,
 }))
+vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
 vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard }))
 
 import {
@@ -76,6 +80,11 @@ import {
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperConversationAttachment, KeeperStatusDetail } from './types'
+
+beforeEach(() => {
+  fetchKeeperToolCalls.mockReset()
+  fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
+})
 
 describe('noteKeeperChatAppended', () => {
   beforeEach(() => {
@@ -162,6 +171,14 @@ describe('hydrateKeeperChatHistory', () => {
     await hydrateKeeperChatHistory('echo')
 
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('hydrates tool outputs even when the chat history is empty', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await hydrateKeeperChatHistory('echo')
+
+    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 100)
   })
 
   it('allows a retry after a failed fetch', async () => {
@@ -291,6 +308,21 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+
+  it('hydrates tool outputs when a live stream finishes a tool call', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'keeper_board_list' },
+      { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
+      { type: 'TEXT_MESSAGE_START' },
+      { type: 'TEXT_MESSAGE_CONTENT', delta: '완료' },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 100)
   })
 
   it('derives text and media user blocks when only attachments are supplied', async () => {

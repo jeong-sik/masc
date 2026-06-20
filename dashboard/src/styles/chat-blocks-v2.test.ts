@@ -14,4 +14,13 @@ describe('chat-blocks-v2.css', () => {
     expect(trace.flex).toBe('none')
     expect(trace['flex-direction']).toBe('column')
   })
+
+  it('keeps work trace and answer in one fixed-width turn bundle', () => {
+    const bundle = declarationsForSelector(css, '.chat-turn-bundle')
+    expect(bundle.display).toBe('flex')
+    expect(bundle.flex).toBe('none')
+    expect(bundle['flex-direction']).toBe('column')
+    expect(bundle['align-self']).toBe('flex-start')
+    expect(bundle.width).toBe('82%')
+  })
 })

@@ -156,9 +156,6 @@ let run_keepalive_unified_turn
       in
       let scheduling =
         decide_keepalive_scheduling
-          ~runtime_resilience_of_name:(fun name ->
-            if Health.is_healthy ~agent_name:name then None
-            else Some "unhealthy")
           ~runtime_status_of_name:
             (runtime_status_of_health_snapshot ~base_path:ctx.config.base_path)
           ~stop

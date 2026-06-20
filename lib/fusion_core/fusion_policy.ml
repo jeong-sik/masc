@@ -19,7 +19,7 @@ let max_panel = 8
 
 (* 패널/심판 호출 구조적 타임아웃 기본값 (preset이 명시 안 할 때). 운영 노브 —
    행동 휴리스틱이 아니므로 named SSOT 상수로 둔다 (Magic Number 회피). *)
-let default_timeout_s = 120.0
+let default_timeout_s = 300.0
 
 let preset_size_ok (p : preset) =
   let n = List.length p.panel in

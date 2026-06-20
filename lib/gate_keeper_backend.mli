@@ -30,6 +30,27 @@ val dispatch :
     connector fields are injected into the keeper-visible message body so
     external user identity survives memory and handoff boundaries. *)
 
+val dispatch_with_text_snapshot :
+  on_text_snapshot:(string -> unit) ->
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
+  config:Workspace.config ->
+  channel:string ->
+  channel_user_id:string ->
+  channel_user_name:string ->
+  channel_workspace_id:string ->
+  keeper_name:string ->
+  metadata:(string * string) list ->
+  content:string ->
+  Gate_protocol.dispatch_result
+(** Streaming-capable variant of {!dispatch}. The callback receives the
+    accumulated assistant text after keeper-scoped secret redaction, so
+    connector transports can update one visible message without leaking raw
+    provider deltas. The final {!Gate_protocol.dispatch_result} remains the
+    authoritative turn result. *)
+
 val agent_name_for_channel_actor :
   channel:string ->
   channel_workspace_id:string ->
@@ -54,11 +75,14 @@ val persist_connector_assistant_reply :
   keeper_name:string ->
   source:string ->
   ?conversation_id:string ->
+  ?turn_ref:Ids.Turn_ref.t ->
   reply:string ->
   unit ->
   unit
 (** Persist a completed connector direct reply on the same chat lane that
-    received the inbound user line. Empty replies are ignored. *)
+    received the inbound user line. Empty replies are ignored.
+    [turn_ref] (RFC-0233 §7) is the join key the keeper minted into the
+    reply payload, stamped on the assistant row. *)
 
 val filesystem_safe_or_unknown : string -> string
 (** Sanitize a value for use as a filesystem path component.

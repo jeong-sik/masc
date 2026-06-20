@@ -1,5 +1,4 @@
 open Alcotest
-open Masc
 open Schedule_domain
 open Schedule_service
 
@@ -31,8 +30,8 @@ let with_workspace f =
   Eio.Switch.run
   @@ fun sw ->
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
-  let config = Workspace.default_config dir in
-  ignore (Workspace.init config ~agent_name:(Some "test"));
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
   f config
 ;;
 

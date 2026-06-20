@@ -45,7 +45,14 @@ type schedule_source =
     [Daily.timezone] is a fixed-offset selector, not full civil-timezone
     support. It accepts UTC aliases, Asia/Seoul/KST as +09:00 aliases, and
     explicit fixed offsets such as [+09:00] or [UTC+09:00]. It never consults
-    host local time or DST rules. *)
+    host local time or DST rules.
+
+    [Cron.expression] is a standard 5-field expression
+    [minute hour day-of-month month day-of-week]. It supports wildcards,
+    comma lists, numeric ranges, and step syntax such as [*/15] and [1-5/2].
+    Day-of-week accepts [0] or [7] for Sunday. When both day-of-month and
+    day-of-week are restricted, matching follows Vixie cron semantics: either
+    field may match. *)
 type recurrence =
   | One_shot
   | Interval of { interval_sec : int }
@@ -53,6 +60,10 @@ type recurrence =
       { hour : int
       ; minute : int
       ; second : int
+      ; timezone : string
+      }
+  | Cron of
+      { expression : string
       ; timezone : string
       }
 
@@ -147,6 +158,10 @@ val is_terminal : schedule_status -> bool
 val is_side_effecting : risk_class -> bool
 val requires_separate_human_grant : schedule_request -> bool
 val is_recurring : recurrence -> bool
+val first_due_after : now:float -> recurrence -> float option
+(** Compute the first due time for calendar recurrences that do not need an
+    explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)
+
 val next_due_after : now:float -> schedule_request -> float option
 val reschedule_after_due_signal : now:float -> schedule_request -> schedule_request option
 
@@ -170,6 +185,9 @@ val apply_execution_grant :
   schedule_request -> execution_grant -> (schedule_request, grant_error) result
 
 val mark_due : now:float -> schedule_request -> schedule_request
+(** Observes time for active requests. [Pending_approval], [Scheduled], and
+    [Due] requests whose [expires_at <= now] become [Expired]; otherwise
+    [Scheduled] requests whose [due_at <= now] become [Due]. *)
 
 val actor_kind_to_string : actor_kind -> string
 val actor_kind_of_string : string -> (actor_kind, string) result
@@ -180,6 +198,10 @@ val schedule_status_of_string : string -> (schedule_status, string) result
 val schedule_source_to_string : schedule_source -> string
 val schedule_source_of_string : string -> (schedule_source, string) result
 val recurrence_kind_to_string : recurrence -> string
+val recurrence_summary : recurrence -> string
+(** Stable, human-readable recurrence summary for dashboard and keeper tool
+    outputs. This is presentation-only; schedule eligibility still uses the
+    typed [recurrence] value. *)
 val execution_status_to_string : execution_status -> string
 val execution_status_of_string : string -> (execution_status, string) result
 val grant_error_to_string : grant_error -> string

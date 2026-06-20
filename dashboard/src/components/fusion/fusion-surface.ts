@@ -6,6 +6,7 @@ import { boardLoading, boardPosts, refreshBoard } from '../../store'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { AgentAvatar } from '../overview/agent-avatar'
+import { FusionRunsPanel } from './fusion-runs-panel'
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
 type FusionTone = 'ok' | 'warn' | 'bad' | 'volt' | 'muted'
@@ -392,6 +393,8 @@ export function FusionSurface() {
             disabled=${boardLoading.value}
           >${boardLoading.value ? 'Refreshing...' : 'Refresh'}</button>
         </header>
+
+        <${FusionRunsPanel} />
 
         <section class="fus-top-kpis" aria-label="Fusion overview">
           <${FusionMetric} label="runs" value=${runs.length} tone=${runs.length ? 'ok' : 'muted'} />

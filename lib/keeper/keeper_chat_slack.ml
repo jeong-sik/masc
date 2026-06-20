@@ -20,8 +20,36 @@ let slack_block_text_limit = 3000
 
 let redact content = Observability_redact.redact_text content
 
-let truncate_to_limit s limit =
-  if String.length s <= limit then s else String.sub s 0 limit
+let split_at_codepoint s ~limit =
+  let len = String.length s in
+  if limit <= 0 || len = 0 then ("", s)
+  else
+    let rec walk pos count =
+      if pos >= len then (s, "")
+      else if count >= limit then
+        (String.sub s 0 pos, String.sub s pos (len - pos))
+      else
+        let dec = String.get_utf_8_uchar s pos in
+        let step = max 1 (Uchar.utf_decode_length dec) in
+        let step = min step (len - pos) in
+        walk (pos + step) (count + 1)
+    in
+    walk 0 0
+
+let truncate_to_limit s limit = fst (split_at_codepoint s ~limit)
+
+let escape_mrkdwn_text s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (function
+      | '&' -> Buffer.add_string buf "&amp;"
+      | '<' -> Buffer.add_string buf "&lt;"
+      | '>' -> Buffer.add_string buf "&gt;"
+      | c -> Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+
+let truncate_block_text s = truncate_to_limit s slack_block_text_limit
 
 let strip_trailing_slash s =
   let len = String.length s in
@@ -38,15 +66,15 @@ let public_voice_audio_url ?base_url token =
 (* ── Rich block builders ─────────────────────────────────────────── *)
 
 let link_block_json ~url ~title ~description =
-  let title = redact title in
+  let url = escape_mrkdwn_text url in
+  let title = redact title |> escape_mrkdwn_text in
   let desc =
     match description with
     | None -> ""
-    | Some d -> "\n" ^ redact d
+    | Some d -> "\n" ^ (redact d |> escape_mrkdwn_text)
   in
   let text =
-    Printf.sprintf "*<%s|%s>*%s" url title desc
-    |> fun s -> truncate_to_limit s slack_block_text_limit
+    Printf.sprintf "*<%s|%s>*%s" url title desc |> truncate_block_text
   in
   `Assoc
     [ ("type", `String "section")
@@ -62,11 +90,11 @@ let image_block_json ~url ~caption =
     ]
 
 let audio_block_json ~base_url ~token ~message_text =
-  let url = public_voice_audio_url ?base_url token in
-  let message_text = redact message_text in
+  let url = public_voice_audio_url ?base_url token |> escape_mrkdwn_text in
+  let message_text = redact message_text |> escape_mrkdwn_text in
   let text =
     Printf.sprintf "🎙 <%s|Voice message> (%s)" url message_text
-    |> fun s -> truncate_to_limit s slack_block_text_limit
+    |> truncate_block_text
   in
   `Assoc
     [ ("type", `String "section")
@@ -74,15 +102,16 @@ let audio_block_json ~base_url ~token ~message_text =
     ]
 
 let tool_context_block_json ~name ~args_summary ~result_summary =
-  let args_summary = redact args_summary in
+  let name = redact name |> escape_mrkdwn_text in
+  let args_summary = redact args_summary |> escape_mrkdwn_text in
   let result =
     match result_summary with
     | None -> ""
-    | Some r -> Printf.sprintf "\nresult: %s" (redact r)
+    | Some r -> Printf.sprintf "\nresult: %s" (redact r |> escape_mrkdwn_text)
   in
   let text =
-    Printf.sprintf "*Tool: %s*\nargs: %s%s" name args_summary result
-    |> fun s -> truncate_to_limit s slack_block_text_limit
+    Printf.sprintf "*Tool:* %s\nargs: %s%s" name args_summary result
+    |> truncate_block_text
   in
   `Assoc
     [ ("type", `String "section")
@@ -91,90 +120,56 @@ let tool_context_block_json ~name ~args_summary ~result_summary =
 
 (* ── Content → Slack blocks ──────────────────────────────────────── *)
 
-let image_extensions = [ ".png"; ".jpg"; ".jpeg"; ".gif"; ".webp"; ".svg" ]
-
-let is_image_url url =
-  try
-    let ext = String.lowercase_ascii (Filename.extension (Uri.of_string url |> Uri.path)) in
-    List.mem ext image_extensions
-  with _ -> false
-
-let hostname_of_url url =
-  try
-    match Uri.of_string url |> Uri.host with
-    | Some "" | None -> url
-    | Some host ->
-        let len = String.length host in
-        if len > 4 && String.sub host 0 4 = "www." then
-          String.sub host 4 (len - 4)
-        else host
-  with _ -> url
-
-let standalone_url_re =
-  Re.Pcre.re ~flags:[ `CASELESS ] "^https?://\\S+$" |> Re.compile
-
-let markdown_image_re =
-  Re.Pcre.re "!\\[([^\\]]*)\\]\\(([^)]+)\\)" |> Re.compile
-
-let is_standalone_url line = Re.execp standalone_url_re (String.trim line)
-
-let line_to_block line =
-  let trimmed = String.trim line in
-  if trimmed = "" then None
-  else if is_standalone_url trimmed then
-    if is_image_url trimmed then
-      Some (image_block_json ~url:trimmed ~caption:None)
-    else
-      let title = hostname_of_url trimmed in
-      Some (link_block_json ~url:trimmed ~title ~description:None)
-  else None
+let slack_block_of_chat_block = function
+  | Keeper_chat_blocks.Image { src; cap } ->
+      Some (image_block_json ~url:src ~caption:cap)
+  | Keeper_chat_blocks.Link { url; title; meta = _ } ->
+      Some (link_block_json ~url ~title ~description:None)
+  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Fusion _ -> None
 
 let content_blocks_of_text text =
-  let rec scan_images acc pos =
-    if pos >= String.length text then List.rev acc
-    else
-      match Re.exec_opt ~pos markdown_image_re text with
-      | Some group ->
-        let start = Re.Group.start group 0 in
-        let before = String.sub text pos (start - pos) in
-        let alt = Re.Group.get group 1 in
-        let url = Re.Group.get group 2 in
-        let next = Re.Group.stop group 0 in
-        scan_images ((before, Some url, Some alt) :: acc) next
-      | None ->
-        let rest = String.sub text pos (String.length text - pos) in
-        List.rev ((rest, None, None) :: acc)
-  in
-  let fragments = scan_images [] 0 in
-  List.fold_left
-    (fun blocks (fragment, image_url, image_alt) ->
-      let blocks =
-        match image_url with
-        | Some url ->
-            let caption =
-              match image_alt with
-              | Some "" | None -> None
-              | Some alt -> Some alt
-            in
-            image_block_json ~url ~caption :: blocks
-        | None -> blocks
-      in
-      let lines = String.split_on_char '\n' fragment in
-      List.fold_left
-        (fun blocks line ->
-          match line_to_block line with
-          | Some block -> block :: blocks
-          | None -> blocks)
-        blocks
-        lines)
-    []
-    fragments
-  |> List.rev
+  text
+  |> redact
+  |> Keeper_chat_blocks.parse_text_to_blocks
+  |> List.filter_map slack_block_of_chat_block
+
+let final_message_blocks ~content ~event_blocks =
+  content_blocks_of_text content @ event_blocks
 
 (* ── HTTP delivery ───────────────────────────────────────────────── *)
 
+let omitted_blocks_notice omitted =
+  let text =
+    Printf.sprintf
+      ":warning: %d Slack block(s) omitted because Slack allows at most %d \
+       blocks per message."
+      omitted slack_max_blocks
+  in
+  `Assoc
+    [ ("type", `String "section")
+    ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String text) ])
+    ]
+
+let rec take n xs =
+  if n <= 0 then []
+  else
+    match xs with
+    | [] -> []
+    | x :: rest -> x :: take (n - 1) rest
+
+let limit_blocks_for_slack blocks =
+  let count = List.length blocks in
+  if count <= slack_max_blocks then blocks
+  else
+    let keep = max 0 (slack_max_blocks - 1) in
+    take keep blocks @ [ omitted_blocks_notice (count - keep) ]
+
 let send_message_with_blocks ~token ~channel ~content ~blocks =
-  let content = redact content |> fun s -> truncate_to_limit s slack_message_limit in
+  let content =
+    redact content |> escape_mrkdwn_text |> fun s ->
+    truncate_to_limit s slack_message_limit
+  in
+  let blocks = limit_blocks_for_slack blocks in
   let fields =
     [ ("channel", `String channel); ("text", `String content) ]
   in
@@ -225,8 +220,7 @@ let send_message ~token ~channel ~content =
 
 (* ── Adapter loop ────────────────────────────────────────────────── *)
 
-let add_block acc block =
-  if List.length acc >= slack_max_blocks then acc else block :: acc
+let add_block acc block = block :: acc
 
 let adapter_loop ~token ~channel ~events ?base_url () =
   let rec loop ~acc_text ~acc_blocks ~run_id_opt =
@@ -236,7 +230,10 @@ let adapter_loop ~token ~channel ~events ?base_url () =
     | Text_message_end ->
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Run_finished { run_id = _ } ->
-        let blocks = List.rev acc_blocks in
+        let blocks =
+          final_message_blocks ~content:acc_text
+            ~event_blocks:(List.rev acc_blocks)
+        in
         if String.length acc_text > 0 || List.length blocks > 0 then
           ignore
             (send_message_with_blocks ~token ~channel ~content:acc_text ~blocks
@@ -275,10 +272,14 @@ let adapter_loop ~token ~channel ~events ?base_url () =
   loop ~acc_text:"" ~acc_blocks:[] ~run_id_opt:None
 
 module For_testing = struct
+  let escape_mrkdwn_text = escape_mrkdwn_text
+  let truncate_to_limit = truncate_to_limit
+  let limit_blocks_for_slack = limit_blocks_for_slack
   let public_voice_audio_url = public_voice_audio_url
   let link_block_json = link_block_json
   let image_block_json = image_block_json
   let audio_block_json = audio_block_json
   let tool_context_block_json = tool_context_block_json
   let content_blocks_of_text = content_blocks_of_text
+  let final_message_blocks = final_message_blocks
 end

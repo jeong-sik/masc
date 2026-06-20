@@ -143,6 +143,24 @@ type automation_label =
   | Smoke_named         (* contains "smoke" *)
   | Probe_named         (* contains "probe" *)
 
+(* RFC-0233 §7: typed provenance of a board post — which keeper turn produced
+   it and through which channel. Replaces the fusion [meta_json] [run_id]
+   smuggle with a first-class field that a real index can key on (no
+   meta_json substring scan, RFC §7.6 guard #2).
+
+   [source] is the channel's [Surface_ref.lane_label] string, NOT a typed
+   [Surface_ref.t]: Surface_ref lives in the [masc] umbrella, which depends on
+   [masc_board], so referencing the typed variant here would form a cycle.
+
+   [turn_ref] and [fusion_run_id] are distinct (RFC §7.6 guard #5): turn_ref is
+   the turn-level join key, fusion_run_id correlates a fusion deliberation run.
+   All sub-fields optional; an all-[None] origin is represented as [origin = None]. *)
+type post_origin = {
+  turn_ref: Ids.Turn_ref.t option;
+  source: string option;
+  fusion_run_id: string option;
+}
+
 type post = {
   id: Post_id.t;
   author: Agent_id.t;
@@ -161,6 +179,7 @@ type post = {
   pinned: bool;              (* Operator-curated pin (owner-gated): floats the post to the top of its category *)
   hearth: string option;     (* Topic category within the Board *)
   thread_id: string option;  (* Linked Conversation thread *)
+  origin: post_origin option; (* RFC-0233 §7: originating turn / channel provenance *)
 }
 
 type comment = {
@@ -320,4 +339,9 @@ type store = {
   flusher_inbox: flusher_msg Eio.Stream.t;                               (** Last deferred flush time *)
   sub_boards: (string, sub_board) Hashtbl.t;               (** sub_board_id -> sub_board *)
   sub_boards_by_slug: (string, string) Hashtbl.t;          (** slug -> sub_board_id *)
+  (* RFC-0233 §7 guard #2: real secondary indexes for origin lookup, mirroring
+     [sub_boards_by_slug]. Maintained on create and rebuilt on load (derive-on-
+     load, no separately-persisted SSOT). Never a meta_json substring scan. *)
+  posts_by_turn_ref: (string, string) Hashtbl.t;           (** Turn_ref.to_string -> post_id *)
+  posts_by_run_id: (string, string) Hashtbl.t;             (** fusion_run_id -> post_id *)
 }

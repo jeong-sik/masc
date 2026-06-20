@@ -20,7 +20,7 @@ Available actions (pick exactly one):
 - board_post: Post to the community board. Requires content and optional hearth.
 - board_comment: Comment on a board post. Requires post_id and content.
 - board_vote: Vote on a board post. Requires post_id and direction (up/down).
-- propose_spawn: Propose spawning a new agent. Requires topic and reason.{{multi_step_line}}
+- propose_spawn: Propose a delegation request for operator/keeper routing. Requires topic and reason. This records a MASC task seed; it does not directly spawn an agent.{{multi_step_line}}
 
 When self_directed_explore triggers, prefer actions that create value: board_post, board_comment, or broadcast. Avoid noop unless truly nothing is worth doing. (To create a task, call the `keeper_task_create` tool directly in your next turn — it is not a deliberation action.)
 

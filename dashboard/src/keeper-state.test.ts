@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { beforeEach } from 'vitest'
 import {
   THREAD_ENTRY_CAP,
+  appendAssistantThinkingDelta,
   appendThreadEntry,
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
+  finalizeAssistantEntry,
   insertThreadEntryBefore,
   isDefaultVisibleConversationEntry,
   isToolConversationEntry,
@@ -171,6 +173,42 @@ describe('thread history merge & persistence', () => {
     const matches = (keeperThreads.value.echo ?? []).filter(e => e.text === 'gg')
     expect(matches).toHaveLength(1)
     expect(matches[0]?.delivery).toBe('history')
+  })
+
+  it('preserves live assistant thinking trace when matching server history replaces the entry', () => {
+    appendThreadEntry('echo', entry({
+      id: 'assistant-live',
+      role: 'assistant',
+      text: 'final answer',
+      rawText: 'final answer',
+      delivery: 'streaming',
+      streamState: 'streaming',
+    }))
+    appendAssistantThinkingDelta('echo', 'assistant-live', 'checking ')
+    appendAssistantThinkingDelta('echo', 'assistant-live', 'context')
+    finalizeAssistantEntry('echo', 'assistant-live', {
+      delivery: 'delivered',
+      streamState: null,
+    })
+
+    mergeServerHistoryEntries('echo', [
+      entry({
+        id: 'assistant-history',
+        role: 'assistant',
+        text: 'final answer',
+        rawText: 'final answer',
+        delivery: 'history',
+        timestamp: '2026-06-10T00:00:05.000Z',
+      }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread).toHaveLength(1)
+    expect(thread[0]?.id).toBe('assistant-history')
+    expect(thread[0]?.delivery).toBe('history')
+    expect(thread[0]?.traceSteps).toEqual([
+      { kind: 'think', text: 'checking context' },
+    ])
   })
 
   it('keeps local entries the server has not persisted yet', () => {
@@ -395,6 +433,40 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.label).toBe('echo')
   })
 
+  it('preserves valid turn_ref on every persisted chat-history path and rejects malformed values', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'query', ts: 1_780_000_000, turn_ref: 'trace-a#1' },
+      {
+        role: 'tool',
+        content: '{"q":1}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_turn',
+        tool_call_name: 'masc_status',
+        turn_ref: 'trace-a#1',
+      },
+      { role: 'assistant', content: 'answer', ts: 1_780_000_000, turn_ref: 'trace-a#1' },
+      { role: 'assistant', content: 'legacy answer', ts: 1_780_000_001 },
+      { role: 'user', content: 'bad user ref', ts: 1_780_000_002, turn_ref: 42 as unknown as string },
+      {
+        role: 'tool',
+        content: '{"q":2}',
+        ts: 1_780_000_003,
+        tool_call_id: 'toolu_bad_ref',
+        tool_call_name: 'masc_status',
+        turn_ref: 42 as unknown as string,
+      },
+    ])
+
+    expect(entries.map(e => e.turnRef)).toEqual([
+      'trace-a#1',
+      'trace-a#1',
+      'trace-a#1',
+      null,
+      null,
+      null,
+    ])
+  })
+
   it('dedups a rehydrated tool row against the live tool entry', () => {
     appendThreadEntry('echo', entry({
       id: 'tool-toolu_3',
@@ -420,6 +492,37 @@ describe('thread history merge & persistence', () => {
     const thread = keeperThreads.value.echo ?? []
     expect(thread.filter(e => e.role === 'tool')).toHaveLength(1)
     expect(thread.map(e => e.role)).toEqual(['user', 'tool', 'assistant'])
+  })
+
+  it('dedups a streaming live tool row when matching history arrives', () => {
+    appendThreadEntry('echo', entry({
+      id: 'tool-toolu_streaming',
+      role: 'tool',
+      source: 'tool_result',
+      label: 'Read',
+      text: '{"path":"x"}',
+      rawText: '{"path":"x"}',
+      delivery: 'streaming',
+      streamState: 'streaming',
+    }))
+
+    mergeServerHistoryEntries('echo', chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'query', ts: 1_780_000_000 },
+      {
+        role: 'tool',
+        content: '{"path":"x"}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_streaming',
+        tool_call_name: 'Read',
+      },
+      { role: 'assistant', content: 'answer', ts: 1_780_000_000 },
+    ]))
+
+    const tools = (keeperThreads.value.echo ?? []).filter(e => e.role === 'tool')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]?.id).toBe('tool-toolu_streaming')
+    expect(tools[0]?.delivery).toBe('history')
+    expect(tools[0]?.streamState).toBeNull()
   })
 
   it('inserts before the target entry and appends when the target is missing', () => {

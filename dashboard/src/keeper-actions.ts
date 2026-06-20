@@ -33,6 +33,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  activeStreamEntryId,
   appendThreadEntry,
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
@@ -43,6 +44,9 @@ import {
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
   removeThreadEntries,
+  claimLiveSendRequest,
+  liveSendOwnsRequest,
+  releaseLiveSendRequest,
   setActiveStream,
   setRecordValue,
   setStatusDetail,
@@ -164,13 +168,12 @@ export async function hydrateKeeperChatHistory(
   setRecordValue(keeperHydrating, keeperName, true)
   try {
     const history = await fetchKeeperChatHistory(keeperName)
+    // Tool outputs are stored on a separate durable endpoint. Hydrate even
+    // when chat history is empty so a keeper panel can still join recently
+    // fetched tool rows from the rail/inspector.
+    void hydrateKeeperToolOutputs(keeperName)
     if (history.length === 0) return
     mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
-    // Tool outputs live on a separate surface (the chat stream carries only
-    // arguments); fetch them so ToolCallBubble can show results. Fire-and-
-    // forget so transcript hydration latency is unchanged, and the store
-    // update re-renders the affected bubbles when it lands.
-    void hydrateKeeperToolOutputs(keeperName)
   } catch (err) {
     // Allow a later mount to retry instead of caching the failure.
     hydratedChatKeepers.delete(keeperName)
@@ -182,9 +185,10 @@ export async function hydrateKeeperChatHistory(
   }
 }
 
-// Recent-window size for the tool-call output fetch; mirrors the inspector's
-// fetchKeeperToolCalls(name, 100) so the chat join covers the same horizon.
-const TOOL_OUTPUT_FETCH_LIMIT = 100
+// Match the visible chat history window. A keeper that calls many tools can
+// easily have >100 tool rows inside the 200-row transcript; using the same
+// horizon keeps every visible row eligible for output join.
+const TOOL_OUTPUT_FETCH_LIMIT = KEEPER_HISTORY_TAIL_MESSAGES
 
 /** Best-effort hydration of tool-call outputs into the shared store so the
  *  chat ToolCallBubble can join results onto transcript rows by tool_use_id.
@@ -331,9 +335,47 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
 let localIdCounter = 0
 
 const resumingKeeperChatRequests = new Set<string>()
+const sendingKeeperThreadMessages = new Set<string>()
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 
+function keeperThreadMessageSendKey(
+  keeperName: string,
+  clientActionId: string | undefined,
+): string | null {
+  const actionId = clientActionId?.trim() ?? ''
+  return actionId ? `${keeperName}\u0000${actionId}` : null
+}
+
+function keeperThreadMessageSendKeys(
+  keeperName: string,
+  clientActionIds: readonly (string | undefined)[],
+): string[] {
+  const keys = new Set<string>()
+  for (const clientActionId of clientActionIds) {
+    const key = keeperThreadMessageSendKey(keeperName, clientActionId)
+    if (key) keys.add(key)
+  }
+  return Array.from(keys)
+}
+
+export function _resetKeeperThreadMessageSendGuardsForTests(): void {
+  sendingKeeperThreadMessages.clear()
+}
+
+export function isKeeperThreadMessageSendInFlight(
+  keeperName: string,
+  clientActionId: string | undefined,
+): boolean {
+  const sendKey = keeperThreadMessageSendKey(keeperName, clientActionId)
+  return sendKey ? sendingKeeperThreadMessages.has(sendKey) : false
+}
+
 async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
+  // A live in-session send stream still owns this request (e.g. the panel
+  // remounted on an SPA route change while the reply was pending). Defer to
+  // it rather than minting a duplicate pending entry + a second poll loop.
+  // After a full page reload this map is empty, so cold-start resume runs.
+  if (liveSendOwnsRequest(request.requestId)) return
   const key = `${request.keeperName}:${request.requestId}`
   if (resumingKeeperChatRequests.has(key)) return
   resumingKeeperChatRequests.add(key)
@@ -356,6 +398,12 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       const isCancelled = result.status === 'cancelled'
       const isError = !isCancelled && (result.status !== 'done' || result.ok === false)
       const errorMessage = isError ? queuedKeeperMessageError(result) : null
+      let userDelivery: KeeperConversationDelivery = 'delivered'
+      if (isCancelled) {
+        userDelivery = 'cancelled'
+      } else if (isError) {
+        userDelivery = 'error'
+      }
       let assistantDelivery: KeeperConversationDelivery = 'delivered'
       if (isCancelled) {
         assistantDelivery = 'cancelled'
@@ -365,7 +413,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         assistantDelivery = 'error'
       }
       finalizeAssistantEntry(request.keeperName, pendingUserEntryId(request.requestId), {
-        delivery: isCancelled ? 'cancelled' : isError ? 'error' : 'delivered',
+        delivery: userDelivery,
         error: errorMessage,
       })
       finalizeAssistantEntry(request.keeperName, assistantId, {
@@ -547,6 +595,8 @@ export async function sendKeeperThreadMessage(
   prompt: string,
   options: {
     attachments?: KeeperConversationAttachment[]
+    clientActionId?: string
+    clientActionIds?: readonly string[]
     userBlocks?: KeeperUserInputBlock[]
   } = {},
 ): Promise<void> {
@@ -559,6 +609,12 @@ export async function sendKeeperThreadMessage(
       : deriveUserBlocks(prompt, attachments)
   const message = prompt.trim() || fallbackMessageForUserBlocks(userBlocks ?? [])
   if (!keeperName || !message) return
+  const sendKeys = keeperThreadMessageSendKeys(keeperName, [
+    options.clientActionId,
+    ...(options.clientActionIds ?? []),
+  ])
+  if (sendKeys.some(key => sendingKeeperThreadMessages.has(key))) return
+  sendKeys.forEach(key => sendingKeeperThreadMessages.add(key))
   abortKeeperThreadMessage(keeperName)
   const localId = `local-${++localIdCounter}-${Date.now()}`
   const assistantId = `reply-${++localIdCounter}-${Date.now()}`
@@ -593,6 +649,7 @@ export async function sendKeeperThreadMessage(
   setActiveStream(keeperName, assistantId, controller)
   let requestId: string | null = null
   let requestTerminalSeen = false
+  let toolCallEnded = false
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
@@ -605,6 +662,9 @@ export async function sendKeeperThreadMessage(
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {
           requestId = asString(event.value.request_id, '').trim() || requestId
           if (requestId) {
+            // This live send now owns the request; resume must defer to it
+            // (and not mint a duplicate pending entry) until handoff/finally.
+            claimLiveSendRequest(requestId, keeperName)
             upsertPendingKeeperChatRequest({
               requestId,
               keeperName,
@@ -623,6 +683,10 @@ export async function sendKeeperThreadMessage(
         if (error) {
           throw new Error(error)
         }
+        if (event.type === 'TOOL_CALL_END') {
+          toolCallEnded = true
+          void hydrateKeeperToolOutputs(keeperName)
+        }
       },
     })
 
@@ -633,6 +697,9 @@ export async function sendKeeperThreadMessage(
     if (!outcome.terminal) {
       if (requestId) {
         removeThreadEntries(keeperName, [localId, assistantId])
+        // Hand off to resume: release ownership FIRST so our own resume
+        // call below is not blocked by the guard we just set.
+        releaseLiveSendRequest(requestId)
         await resumePendingKeeperChatRequest({
           requestId,
           keeperName,
@@ -654,6 +721,7 @@ export async function sendKeeperThreadMessage(
         error: cutMessage,
       })
       setRecordValue(keeperActionErrors, keeperName, cutMessage)
+      if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
       return
     }
 
@@ -669,6 +737,7 @@ export async function sendKeeperThreadMessage(
       timestamp: new Date().toISOString(),
       error: null,
     })
+    if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
     if (requestId) removePendingKeeperChatRequest(requestId)
   } catch (err) {
     if (isAbortError(err)) {
@@ -729,10 +798,17 @@ export async function sendKeeperThreadMessage(
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
-    clearActiveStream(keeperName)
-    setRecordValue(keeperSending, keeperName, false)
-    setRecordValue(keeperStreamStartedAt, keeperName, null)
-    setRecordValue(keeperStreamLastEventAt, keeperName, null)
+    // Release ownership on every exit (success/abort/error). Idempotent:
+    // the non-terminal handoff above already released, so this is a no-op
+    // there; Map.delete of an absent key is harmless.
+    if (requestId) releaseLiveSendRequest(requestId)
+    sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
+    if (activeStreamEntryId(keeperName) === assistantId) {
+      clearActiveStream(keeperName)
+      setRecordValue(keeperSending, keeperName, false)
+      setRecordValue(keeperStreamStartedAt, keeperName, null)
+      setRecordValue(keeperStreamLastEventAt, keeperName, null)
+    }
     // No refreshDashboardState() here: forcing a full dashboard
     // refetch after every chat message re-rendered every panel and was
     // the main "the screen keeps refreshing" complaint. Keeper status

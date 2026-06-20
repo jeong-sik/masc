@@ -1,6 +1,7 @@
 open Alcotest
 
 module D = Masc.Keeper_deliberation
+module R = Masc.Keeper_delegation_request
 module Keeper_types = Keeper_types
 
 let has_prompt_root path =
@@ -33,6 +34,15 @@ let contains_substring text needle =
     ignore (Str.search_forward (Str.regexp_string needle) text 0);
     true
   with Not_found -> false
+
+let json_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let json_string_field key json =
+  match json_field key json with
+  | Some (`String value) -> value
+  | _ -> fail ("expected string field " ^ key)
 
 let test_triage_skip_on_empty_observation () =
   let result = D.triage base_obs in
@@ -354,7 +364,9 @@ let test_prompt_contains_action_list () =
      with Not_found -> false);
   check bool "mentions broadcast action" true
     (try ignore (Str.search_forward (Str.regexp_string "broadcast") prompt 0); true
-     with Not_found -> false)
+     with Not_found -> false);
+  check bool "mentions delegation request semantics" true
+    (contains_substring prompt "does not directly spawn an agent")
 
 (* ---------- parse_deliberation_response tests ---------- *)
 
@@ -493,6 +505,103 @@ let test_execute_structured_result_falls_back_to_baseline () =
   | D.Noop reason ->
       check string "fallback noop" "no_trigger" reason
   | _ -> fail "expected fallback noop action"
+
+let test_delegation_request_from_propose_spawn_action () =
+  let request =
+    match
+      R.of_action ~requester:"planner" ~goal:"ship scheduler hardening"
+        (D.ProposeSpawn
+           {
+             topic = "Audit Slack connector rendering";
+             reason = "needs channel-specific formatter work";
+           })
+    with
+    | Some request -> request
+    | None -> fail "expected delegation request"
+  in
+  check string "requester" "planner" request.requester;
+  check string "source action" "propose_spawn" request.source_action;
+  check string "promotion state" "candidate"
+    (R.promotion_state_to_string request.promotion_state);
+  check string "task title" "Delegate: Audit Slack connector rendering"
+    request.task_seed.title;
+  check bool "requester tag" true
+    (List.mem "requester:planner" request.task_seed.tags);
+  check bool "spawn is not direct" true
+    (contains_substring request.task_seed.description
+       "not a direct child-agent spawn")
+
+let test_delegation_request_from_execution_result_uses_selected_action () =
+  let obs = D.{ base_obs with active_goal_count = 1 } in
+  let structured =
+    D.
+      {
+        action =
+          ProposeSpawn
+            {
+              topic = "Review non-dashboard rendering";
+              reason = "existing channels lose rich blocks";
+            };
+        reasoning = "delegate channel-specific work";
+        confidence = 0.7;
+      }
+  in
+  let result = D.execute_structured_result obs structured in
+  let request =
+    match R.of_execution_result ~requester:"rondo" ~goal:"connector parity" result with
+    | Some request -> request
+    | None -> fail "expected delegation request from selected action"
+  in
+  let json = R.to_json request in
+  check string "schema" "masc.keeper_delegation_request.v1"
+    (json_string_field "schema" json);
+  check string "json requester" "rondo"
+    (json_string_field "requester" json);
+  check string "json source action" "propose_spawn"
+    (json_string_field "source_action" json);
+  match json_field "task_seed" json with
+  | Some task_seed ->
+      check string "task seed title"
+        "Delegate: Review non-dashboard rendering"
+        (json_string_field "title" task_seed)
+  | None -> fail "expected task_seed"
+
+let test_delegation_request_multistep_first_spawn_wins () =
+  let action =
+    D.MultiStep
+      [
+        D.BoardPost { content = "announce intent"; hearth = None };
+        D.ProposeSpawn
+          { topic = "First delegation"; reason = "primary projection" };
+        D.ProposeSpawn
+          { topic = "Second delegation"; reason = "must not replace first" };
+      ]
+  in
+  match R.of_action ~requester:"planner" action with
+  | Some request ->
+      check string "first spawn topic" "First delegation" request.topic;
+      check string "first spawn reason" "primary projection" request.reason
+  | None -> fail "expected first delegation request"
+
+let test_delegation_request_id_includes_goal () =
+  let a =
+    R.make ~requester:"planner" ~goal:"goal-a" ~topic:"same topic"
+      ~reason:"same reason" ()
+  in
+  let b =
+    R.make ~requester:"planner" ~goal:"goal-b" ~topic:"same topic"
+      ~reason:"same reason" ()
+  in
+  check bool "goal changes id" true (not (String.equal a.id b.id))
+
+let test_delegation_request_title_truncates_utf8_boundary () =
+  let topic = String.make 79 'a' ^ "\xed\x95\x9c" in
+  let request =
+    R.make ~requester:"planner" ~topic ~reason:"unicode boundary" ()
+  in
+  check string "title stops before partial codepoint"
+    ("Delegate: " ^ String.make 79 'a')
+    request.task_seed.title
 
 let test_parse_json_with_code_fences_rejected () =
   let raw =
@@ -1092,6 +1201,16 @@ let () =
             test_execute_structured_result_keeps_legal_action;
           test_case "falls back to baseline" `Quick
             test_execute_structured_result_falls_back_to_baseline;
+          test_case "delegation request from propose_spawn action" `Quick
+            test_delegation_request_from_propose_spawn_action;
+          test_case "delegation request from selected execution" `Quick
+            test_delegation_request_from_execution_result_uses_selected_action;
+          test_case "delegation request multi_step first spawn wins" `Quick
+            test_delegation_request_multistep_first_spawn_wins;
+          test_case "delegation request id includes goal" `Quick
+            test_delegation_request_id_includes_goal;
+          test_case "delegation request truncates utf8 at boundary" `Quick
+            test_delegation_request_title_truncates_utf8_boundary;
         ] );
       ( "parse_deliberation_response",
         [

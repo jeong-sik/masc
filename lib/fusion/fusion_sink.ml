@@ -117,20 +117,41 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
    Eio 구조적 취소(Cancelled)는 재전파한다(record_recovery_stimulus_turn_started 패턴).
    Paused 키퍼는 강제 재개하지 않는다(board wake와 동일 보수적 기본값, wakeup_keeper가
    Running 항목만 깨움) — 결과는 board/chat 영속으로 남는다. *)
+(* RFC-0266 §7 Phase 4: push the registry delta to the dashboard fusion-runs
+   panel so a [Running] card flips to completed/failed live (no polling). Reads
+   the canonical run back from the registry and serializes it through the shared
+   [Fusion_run_registry.run_to_yojson] so the SSE payload matches the HTTP list
+   endpoint exactly. Like wake, this is best-effort: a broadcast failure must not
+   abort the fusion sink, so every non-cancel exception is swallowed + logged
+   (mirrors Keeper_chat_broadcast). An unknown run_id is a no-op. *)
+let broadcast_run_status ~registry ~run_id =
+  try
+    match Fusion_run_registry.get registry ~run_id with
+    | None -> ()
+    | Some run ->
+      Sse.broadcast
+        (`Assoc
+           [ ("type", `String "fusion_run_status")
+           ; ("run", Fusion_run_registry.run_to_yojson run)
+           ])
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn "fusion_run_broadcast run_id=%s failed: %s" run_id
+      (Printexc.to_string exn)
+
 let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id =
   try
-    (* post_id 폴백 규칙은 keeper_world_observation.pending_board_event_of_fusion_completion
-       과 동일해야 한다(둘 다 board_post_id에서 유도) — dedup 일관성. *)
-    let post_id =
-      if String.equal board_post_id "" then "fusion-run:" ^ run_id else board_post_id
+    let fusion_completion =
+      Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id }
     in
+    let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
     let stimulus : Keeper_event_queue.stimulus =
       { Keeper_event_queue.post_id
       ; urgency = Keeper_event_queue.Normal
       ; arrived_at = Time_compat.now ()
-      ; payload =
-          Keeper_event_queue.Fusion_completed { run_id; ok; resolved_answer; board_post_id }
+      ; payload = Keeper_event_queue.Fusion_completed fusion_completion
       }
     in
     Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
@@ -184,10 +205,21 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
     in
     (* board post를 *먼저* 만들어 post id를 확보한다 — 이 id가 키퍼 chat의 fusion block
        lazy-fetch 키이기 때문이다(대시보드가 board meta_json에서 패널/심판을 펼친다). *)
+    (* RFC-0233 §7: typed origin. [fusion_run_id] is in scope here ([run_id]),
+       so a real index ([posts_by_run_id]) can key on it instead of the legacy
+       meta_json substring. [turn_ref = None]: fusion is an out-of-band
+       server-root-switch fork, so the triggering keeper's turn_ref is not in
+       this scope; threading it through [fusion_request] is a separate change.
+       The legacy meta_json [run_id] (above) is kept ADDITIVELY this release —
+       existing dashboard / on-disk readers depend on it; its removal is a
+       later migration, not this PR. *)
+    let origin : Board.post_origin =
+      { turn_ref = None; source = Some "fusion"; fusion_run_id = Some run_id }
+    in
     let board_result =
       Board_dispatch.create_post ~author:keeper ~content:board_headline
         ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
-        ~ttl_hours:board_post_ttl_hours ()
+        ~ttl_hours:board_post_ttl_hours ~origin ()
     in
     (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
        상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat
@@ -231,6 +263,10 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
          | Ok j -> true, j.Fusion_types.resolved_answer
          | Error e -> false, Printf.sprintf "judge failed: %s" e
        in
+       (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake와 무관하게 run
+          상태를 반영해야 하므로 wake 직전 무조건 호출. *)
+       Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok;
+       broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
        wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok ~resolved_answer
          ~board_post_id:(Board.Post_id.to_string post.id);
        Ok ()

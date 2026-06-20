@@ -164,6 +164,18 @@ val send_message :
     Must be called inside an Eio context (the underlying REST
     client uses the piaf-backed http pool). *)
 
+val edit_message :
+  channel_id:string ->
+  message_id:string ->
+  content:string ->
+  unit ->
+  (unit, send_error) result
+(** Patch a previously-created Discord message. Used by the in-process
+    gateway to project keeper streaming snapshots into one edited reply.
+    Content exceeding Discord's message limit is truncated by
+    {!Discord_rest_client.edit_message}; callers that need overflow delivery
+    must send follow-up messages separately. *)
+
 val trigger_typing :
   channel_id:string ->
   unit ->

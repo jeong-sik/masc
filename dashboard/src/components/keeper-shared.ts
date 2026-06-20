@@ -12,7 +12,6 @@ import type {
   KeeperConversationAttachment,
   KeeperConversationEntry,
   KeeperDiagnostic,
-  KeeperUserInputBlock,
 } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -28,6 +27,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
   recoverKeeperRuntime,
   resumePendingKeeperChatRequests,
@@ -39,11 +39,12 @@ import {
   clearInputQueue,
   getQueueLength,
   getQueuedMessages,
+  hasQueuedInputClientAction,
   updateQueuedMessage,
   removeQueuedMessage,
   type QueuedMessage,
 } from '../keeper-chat-store'
-import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize } from './chat/primitives'
+import { AttachDraftChip, ChatComposer, ChatTranscript, STREAM_STALL_THRESHOLD_S, formatAttachmentSize, type ChatComposerSendPayload } from './chat/primitives'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { shellAuthSummary } from '../store'
@@ -222,7 +223,9 @@ function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnosti
   return detail?.diagnostic ?? keeper.diagnostic ?? null
 }
 
-/** Case-insensitive substring filter over entry text. Empty or
+/** Case-insensitive substring filter over entry text. Tool rows also match on
+ *  the tool label because their visible name often is not present in `{}` args.
+ *  Empty or
  *  whitespace-only queries return the input unchanged. Migrated from
  *  the former keeper-chat-panel.ts (filterChatMessages). */
 export function filterConversationEntries(
@@ -231,7 +234,11 @@ export function filterConversationEntries(
 ): KeeperConversationEntry[] {
   const q = query.trim().toLowerCase()
   if (!q) return entries
-  return entries.filter(entry => entry.text.toLowerCase().includes(q))
+  return entries.filter(entry => {
+    if (entry.text.toLowerCase().includes(q)) return true
+    if ((entry.rawText ?? '').toLowerCase().includes(q)) return true
+    return entry.role === 'tool' && entry.label.toLowerCase().includes(q)
+  })
 }
 
 function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[] {
@@ -515,27 +522,34 @@ export function KeeperConversationPanel({
   }
 
   const drainQueue = async () => {
-    const queued = getQueuedMessages(keeperName)
-    if (queued.length === 0) return
-    clearInputQueue(keeperName)
-    bumpQueue()
+    for (;;) {
+      const queued = getQueuedMessages(keeperName)
+      if (queued.length === 0) return
+      clearInputQueue(keeperName)
+      bumpQueue()
 
-    const batchedContent = queued.map(q => q.content.trim()).filter(Boolean).join('\n\n---\n\n')
-    const batchedAttachments = queued.flatMap(q => q.attachments ?? [])
-    if (!batchedContent && batchedAttachments.length === 0) return
+      const batchedContent = queued.map(q => q.content.trim()).filter(Boolean).join('\n\n---\n\n')
+      const batchedAttachments = queued.flatMap(q => q.attachments ?? [])
+      const batchedClientActionIds = queued
+        .map(q => q.clientActionId?.trim())
+        .filter((clientActionId): clientActionId is string => Boolean(clientActionId))
+      if (!batchedContent && batchedAttachments.length === 0) continue
 
-    try {
-      await sendKeeperThreadMessage(keeperName, batchedContent, {
-        attachments: batchedAttachments.length > 0 ? batchedAttachments : undefined,
-      })
-    } catch (err) {
-      if (isAbortError(err)) return
-      const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
-      showToast(message, 'error')
+      try {
+        await sendKeeperThreadMessage(keeperName, batchedContent, {
+          attachments: batchedAttachments.length > 0 ? batchedAttachments : undefined,
+          clientActionIds: batchedClientActionIds,
+        })
+      } catch (err) {
+        if (isAbortError(err)) return
+        const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
+        showToast(message, 'error')
+        return
+      }
     }
   }
 
-  const submit = async ({ blocks, userBlocks }: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => {
+  const submit = async ({ blocks, userBlocks, clientActionId }: ChatComposerSendPayload) => {
     const prompt = draft.trim()
     if (chatAccess.blocked) {
       showToast(chatAccess.message, 'error')
@@ -545,12 +559,23 @@ export function KeeperConversationPanel({
     const attachments = blocksToAttachments(blocks)
     setDraft('')
     if (keeperSending.value[keeperName]) {
-      enqueueInput(keeperName, prompt, attachments.length > 0 ? attachments : undefined)
+      if (
+        isKeeperThreadMessageSendInFlight(keeperName, clientActionId)
+        || hasQueuedInputClientAction(keeperName, clientActionId)
+      ) {
+        return
+      }
+      enqueueInput(
+        keeperName,
+        prompt,
+        attachments.length > 0 ? attachments : undefined,
+        clientActionId,
+      )
       bumpQueue()
       return
     }
     try {
-      await sendKeeperThreadMessage(keeperName, prompt, { attachments, userBlocks })
+      await sendKeeperThreadMessage(keeperName, prompt, { attachments, clientActionId, userBlocks })
     } catch (err) {
       if (isAbortError(err)) return
       const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
@@ -681,7 +706,7 @@ export function KeeperConversationPanel({
               queueEnabled=${true}
               queueCount=${queueCount}
               onDraftChange=${setDraft}
-              onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
+              onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
               onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
               layout="primary"
             />
@@ -796,7 +821,7 @@ export function KeeperConversationPanel({
             queueEnabled=${true}
             queueCount=${queueCount}
             onDraftChange=${setDraft}
-            onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
+            onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
             layout="primary"
           />
@@ -909,7 +934,7 @@ export function KeeperConversationPanel({
             queueEnabled=${true}
             queueCount=${queueCount}
             onDraftChange=${setDraft}
-            onSend=${(payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => { void submit(payload) }}
+            onSend=${(payload: ChatComposerSendPayload) => { void submit(payload) }}
             onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
           />
         </div>

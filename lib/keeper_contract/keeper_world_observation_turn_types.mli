@@ -23,7 +23,6 @@ type turn_reason =
   | Task_reactive_cooldown_elapsed
   | Never_started
   | Min_interval_elapsed
-  | Entropic_oscillation
 
 type skip_reason =
   | Keeper_paused

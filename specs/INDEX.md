@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-06-17T10:55:41Z (HEAD: 034279325c)
+Generated: 2026-06-20T02:08:36Z (HEAD: dcea119f1e)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 91 |
-| Manual specs | 91 |
+| Total .tla files | 92 |
+| Manual specs | 92 |
 | TTrace (auto-generated) | 0 |
 | Directories | 19 |
-| Total .cfg files | 188 |
-| Buggy .cfg (bug-model pair) | 96 |
+| Total .cfg files | 190 |
+| Buggy .cfg (bug-model pair) | 97 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -204,10 +204,11 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | StateProduct.tla | StateProduct | manual | 2 | 1 | clean={inv:SafetyInvariant, prop:StoppedIsForever} buggy={inv:TypeOK, inv:BoundaryViolated} | a73732449a73 |
 | WorkspaceProduct.tla | WorkspaceProduct | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 0d1b9a859a47 |
 
-### specs/task-lifecycle (1 specs)
+### specs/task-lifecycle (2 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
+| CompletionAuthority.tla | CompletionAuthority | manual | 2 | 1 | clean={inv:TypeOK, inv:CompletionRequiresAuthority} buggy={inv:TypeOK, inv:CompletionRequiresAuthority} | fe9bfbe0fbbd |
 | TaskLifecycle.tla | TaskLifecycle | manual | 2 | 1 | clean={inv:TypeOK, inv:DoneRequiresApproval, inv:InProgressRequiresClaim} buggy={inv:TypeOK, inv:DoneRequiresApproval, inv:InProgressRequiresClaim} | 798af3813447 |
 
 ## Notes

@@ -1727,7 +1727,20 @@ let schedule_request_active (request : Schedule_domain.schedule_request) =
   not (Schedule_domain.is_terminal request.status)
 ;;
 
+let schedule_effectively_expired ~now (request : Schedule_domain.schedule_request) =
+  match request.status, request.expires_at with
+  | (Schedule_domain.Pending_approval | Schedule_domain.Scheduled | Schedule_domain.Due), Some expires_at
+    when expires_at <= now -> true
+  | _ -> false
+;;
+
+let schedule_request_effectively_active ~now request =
+  schedule_request_active request && not (schedule_effectively_expired ~now request)
+;;
+
 let schedule_effectively_due ~now (request : Schedule_domain.schedule_request) =
+  (not (schedule_effectively_expired ~now request))
+  &&
   match request.status with
   | Schedule_domain.Due -> true
   | Schedule_domain.Scheduled -> request.due_at <= now
@@ -1754,9 +1767,10 @@ let schedule_due_candidate (request : Schedule_domain.schedule_request) =
     false
 ;;
 
-let schedule_next_due_at schedules =
+let schedule_next_due_at ~now schedules =
   schedules
-  |> List.filter schedule_due_candidate
+  |> List.filter (fun request ->
+    schedule_due_candidate request && not (schedule_effectively_expired ~now request))
   |> List.fold_left
        (fun acc (request : Schedule_domain.schedule_request) ->
          match acc with
@@ -1765,21 +1779,108 @@ let schedule_next_due_at schedules =
        None
 ;;
 
-let schedule_fsm_state ~now schedules =
+let schedule_blocked_approval ~now state (request : Schedule_domain.schedule_request) =
+  (not (schedule_effectively_expired ~now request))
+  && request.due_at <= now
+  && Schedule_domain.requires_separate_human_grant request
+  &&
+  match request.status with
+  | Schedule_domain.Pending_approval -> true
+  | Schedule_domain.Due -> not (Schedule_store.has_current_approved_grant state request)
+  | Schedule_domain.Scheduled
+  | Schedule_domain.Running
+  | Schedule_domain.Succeeded
+  | Schedule_domain.Failed
+  | Schedule_domain.Rejected
+  | Schedule_domain.Cancelled
+  | Schedule_domain.Expired ->
+    false
+;;
+
+let schedule_effective_status ~now state (request : Schedule_domain.schedule_request) =
+  if schedule_effectively_expired ~now request
+  then "expired"
+  else
+    match request.status with
+    | Schedule_domain.Pending_approval when request.due_at <= now -> "blocked_approval"
+    | Pending_approval -> "pending_approval"
+    | Scheduled when request.due_at <= now -> "due"
+    | Scheduled -> "scheduled"
+    | Due when schedule_blocked_approval ~now state request -> "blocked_approval"
+    | Due -> "ready"
+    | Running -> "running"
+    | Succeeded -> "succeeded"
+    | Failed -> "failed"
+    | Rejected -> "rejected"
+    | Cancelled -> "cancelled"
+    | Expired -> "expired"
+;;
+
+let schedule_execution_readiness ~now state (request : Schedule_domain.schedule_request) =
+  if schedule_effectively_expired ~now request
+  then "expired"
+  else if Schedule_domain.is_terminal request.status
+  then "terminal"
+  else if request.status = Schedule_domain.Running
+  then "running"
+  else if schedule_blocked_approval ~now state request
+  then "blocked_approval"
+  else if Schedule_store.has_current_approved_grant state request
+  then "approved"
+  else
+    match request.status with
+    | Schedule_domain.Pending_approval -> "awaiting_approval"
+    | Scheduled when request.due_at <= now -> "due_pending_refresh"
+    | Scheduled -> "scheduled"
+    | Due -> "ready"
+    | Running -> "running"
+    | Succeeded | Failed | Rejected | Cancelled | Expired -> "terminal"
+;;
+
+let schedule_operator_action ~now state (request : Schedule_domain.schedule_request) =
+  match schedule_execution_readiness ~now state request with
+  | "blocked_approval" | "awaiting_approval" -> `String "approve_or_reject"
+  | "due_pending_refresh" -> `String "wait_for_runner_tick"
+  | "expired" -> `String "inspect_or_recreate"
+  | "ready" | "approved" -> `String "wait_for_dispatch"
+  | "scheduled" | "running" | "terminal" -> `Null
+  | _ -> `Null
+;;
+
+let schedule_fsm_state ~now state schedules =
   let count status = schedule_status_count schedules status in
+  let count_non_expired status =
+    List.fold_left
+      (fun count (request : Schedule_domain.schedule_request) ->
+         if request.status = status && not (schedule_effectively_expired ~now request)
+         then count + 1
+         else count)
+      0 schedules
+  in
   let due_effective_count =
     List.fold_left
       (fun count request -> if schedule_effectively_due ~now request then count + 1 else count)
       0 schedules
   in
+  let blocked_approval_count =
+    List.fold_left
+      (fun count request ->
+         if schedule_blocked_approval ~now state request then count + 1 else count)
+      0 schedules
+  in
   if count Schedule_domain.Running > 0
   then "running"
-  else if count Schedule_domain.Pending_approval > 0
-  then "pending_approval"
+  else if blocked_approval_count > 0
+  then "blocked_approval"
   else if due_effective_count > 0
   then "due"
-  else if count Schedule_domain.Scheduled > 0
+  else if count_non_expired Schedule_domain.Pending_approval > 0
+  then "pending_approval"
+  else if count_non_expired Schedule_domain.Scheduled > 0
   then "scheduled"
+  else if
+    List.exists (fun request -> schedule_effectively_expired ~now request) schedules
+  then "expired"
   else "idle"
 ;;
 
@@ -1804,12 +1905,21 @@ let execution_record_dashboard_json (execution : Schedule_domain.execution_recor
 ;;
 
 let schedule_request_dashboard_json
+  ~now
+  ~state
   ?last_execution
   (request : Schedule_domain.schedule_request)
   =
+  let next_due_at =
+    if Schedule_domain.is_terminal request.status then None else Some request.due_at
+  in
+  let requires_grant = Schedule_domain.requires_separate_human_grant request in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
+    ; "effective_status", `String (schedule_effective_status ~now state request)
+    ; "execution_readiness", `String (schedule_execution_readiness ~now state request)
+    ; "operator_action", schedule_operator_action ~now state request
     ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
     ; "approval_required", `Bool request.approval_required
     ; "source", `String (Schedule_domain.schedule_source_to_string request.source)
@@ -1819,10 +1929,22 @@ let schedule_request_dashboard_json
     ; "requested_at_iso", unix_iso_json request.requested_at
     ; "due_at", `Float request.due_at
     ; "due_at_iso", unix_iso_json request.due_at
+    ; ( "next_due_at"
+      , match next_due_at with
+        | None -> `Null
+        | Some ts -> `Float ts )
+    ; "next_due_at_iso", unix_iso_option_json next_due_at
     ; "expires_at", (match request.expires_at with None -> `Null | Some ts -> `Float ts)
     ; "expires_at_iso", unix_iso_option_json request.expires_at
     ; "recurrence", Schedule_domain.recurrence_to_yojson request.recurrence
     ; "recurrence_kind", `String (Schedule_domain.recurrence_kind_to_string request.recurrence)
+    ; "recurrence_summary", `String (Schedule_domain.recurrence_summary request.recurrence)
+    ; ( "requires_separate_human_grant", `Bool requires_grant )
+    ; ( "approval_policy"
+      , `String
+          (if requires_grant
+           then "separate_human_grant_required"
+           else "no_separate_grant_required") )
     ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
     ; ( "payload_kind"
       , match schedule_payload_kind request with
@@ -1843,14 +1965,33 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
   let schedules = state.schedules in
   let active_count =
     List.fold_left
-      (fun count request -> if schedule_request_active request then count + 1 else count)
+      (fun count request ->
+         if schedule_request_effectively_active ~now request then count + 1 else count)
       0 schedules
   in
   let terminal_count = List.length schedules - active_count in
+  let expired_effective_count =
+    List.fold_left
+      (fun count request ->
+         if schedule_effectively_expired ~now request then count + 1 else count)
+      0 schedules
+  in
   let due_effective_count =
     List.fold_left
       (fun count request -> if schedule_effectively_due ~now request then count + 1 else count)
       0 schedules
+  in
+  let blocked_approval_count =
+    List.fold_left
+      (fun count request ->
+         if schedule_blocked_approval ~now state request then count + 1 else count)
+      0 schedules
+  in
+  let due_execution_ready_count =
+    state
+    |> Schedule_store.due_execution_candidates
+    |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
+    |> List.length
   in
   let sorted =
     schedules
@@ -1858,11 +1999,15 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
       match
         ( schedule_request_active left
         , schedule_request_active right
+        , schedule_request_effectively_active ~now left
+        , schedule_request_effectively_active ~now right
         , compare left.due_at right.due_at )
       with
-      | true, false, _ -> -1
-      | false, true, _ -> 1
-      | _, _, due_cmp when due_cmp <> 0 -> due_cmp
+      | _, _, true, false, _ -> -1
+      | _, _, false, true, _ -> 1
+      | true, false, _, _, _ -> -1
+      | false, true, _, _, _ -> 1
+      | _, _, _, _, due_cmp when due_cmp <> 0 -> due_cmp
       | _ -> String.compare left.schedule_id right.schedule_id)
   in
   let request_rows = take schedule_projection_request_limit sorted in
@@ -1874,13 +2019,19 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
     ; "request_limit", `Int schedule_projection_request_limit
     ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
     ; "counts", schedule_counts_json schedules
-    ; "derived_counts", `Assoc [ "due_effective", `Int due_effective_count ]
+    ; ( "derived_counts"
+      , `Assoc
+          [ "due_effective", `Int due_effective_count
+          ; "blocked_approval", `Int blocked_approval_count
+          ; "due_execution_ready", `Int due_execution_ready_count
+          ; "expired_effective", `Int expired_effective_count
+          ] )
     ; ( "fsm"
       , `Assoc
-          [ "state", `String (schedule_fsm_state ~now schedules)
+          [ "state", `String (schedule_fsm_state ~now state schedules)
           ; "active_count", `Int active_count
           ; "terminal_count", `Int terminal_count
-          ; "next_due_at", unix_iso_option_json (schedule_next_due_at schedules)
+          ; "next_due_at", unix_iso_option_json (schedule_next_due_at ~now schedules)
           ] )
     ; ( "requests"
       , `List
@@ -1890,7 +2041,7 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                   Schedule_store.last_execution_for_schedule state
                     ~schedule_id:request.Schedule_domain.schedule_id
                 in
-                schedule_request_dashboard_json ?last_execution request)
+                schedule_request_dashboard_json ~now ~state ?last_execution request)
              request_rows) )
     ]
 ;;

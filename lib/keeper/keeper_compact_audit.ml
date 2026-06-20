@@ -446,7 +446,28 @@ let handle_event ~received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_
       run_id;
     } in
     (match persist_complete ~base_path ~retention_days r with
-     | Ok () -> ()
+     | Ok () ->
+       (try
+          ignore
+            (Keeper_memory_os_gc.run_gc
+               ~keeper_id:agent_name
+               ~now:(Time_compat.now ())
+               ())
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string CompactAuditFailures)
+            ~labels:
+              [ ( "keeper"
+                , agent_name )
+              ; ( "site"
+                , Keeper_compact_audit_failure_site.(to_label Handle_event) )
+              ]
+            ();
+          Log.Keeper.warn
+            "keeper_compact_audit: memory os gc failed after persist_complete: %s"
+            (Printexc.to_string exn))
      | Error (Io_failure m | Serialize_failure m) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CompactAuditFailures)

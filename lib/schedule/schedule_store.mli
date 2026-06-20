@@ -130,6 +130,23 @@ val fail_running :
   (Schedule_domain.schedule_request, store_error) result
 (** Marks a [Running] request and its matching execution attempt [Failed]. *)
 
+val fail_due_candidate :
+  Workspace_utils.config ->
+  now:float ->
+  schedule_id:string ->
+  error:string ->
+  (Schedule_domain.schedule_request, store_error) result
+(** Atomically marks an approved [Due] request [Failed] and records the failed
+    execution attempt. This is used when a runner-side consumer rejects the
+    payload before work starts, so the schedule does not remain due forever. *)
+
 val due_execution_candidates :
   state -> Schedule_domain.schedule_request list
 (** Returns only due requests that are no longer pending approval. *)
+
+val has_current_approved_grant :
+  state -> Schedule_domain.schedule_request -> bool
+(** Whether [state] contains an approved grant whose evidence matches the
+    request's current [schedule_id], payload digest, [risk_class], and [due_at].
+    Recurring requests therefore need fresh approval for each new occurrence
+    when they require a separate human grant. *)

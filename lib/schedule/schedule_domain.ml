@@ -55,6 +55,10 @@ type recurrence =
       ; second : int
       ; timezone : string
       }
+  | Cron of
+      { expression : string
+      ; timezone : string
+      }
 
 type payload =
   { kind : string
@@ -206,6 +210,15 @@ let recurrence_kind_to_string = function
   | One_shot -> "one_shot"
   | Interval _ -> "interval"
   | Daily _ -> "daily"
+  | Cron _ -> "cron"
+;;
+
+let recurrence_summary = function
+  | One_shot -> "one_shot"
+  | Interval { interval_sec } -> Printf.sprintf "every %ds" interval_sec
+  | Daily { hour; minute; second; timezone } ->
+    Printf.sprintf "daily %02d:%02d:%02d %s" hour minute second timezone
+  | Cron { expression; timezone } -> Printf.sprintf "cron %s %s" expression timezone
 ;;
 
 let execution_status_to_string = function
@@ -227,7 +240,7 @@ let grant_error_to_string = function
   | Approver_is_requester -> "requester cannot approve execution"
   | Approver_is_scheduler -> "scheduler cannot approve execution"
   | Schedule_terminal -> "schedule is already terminal"
-  | Schedule_not_pending_approval -> "schedule is not pending approval"
+  | Schedule_not_pending_approval -> "schedule is not pending approval or due"
   | Evidence_schedule_id_mismatch -> "grant evidence schedule_id mismatch"
   | Evidence_payload_digest_mismatch -> "grant evidence payload_digest mismatch"
   | Evidence_due_at_mismatch -> "grant evidence due_at mismatch"
@@ -250,7 +263,7 @@ let requires_separate_human_grant request =
 
 let is_recurring = function
   | One_shot -> false
-  | Interval _ | Daily _ -> true
+  | Interval _ | Daily _ | Cron _ -> true
 ;;
 
 let rec canonical_json = function
@@ -388,6 +401,151 @@ let validate_daily ~hour ~minute ~second ~timezone =
         "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00; DST-aware IANA zones are not supported")
 ;;
 
+type cron_field =
+  { any : bool
+  ; values : int list
+  }
+
+type cron_spec =
+  { minute : cron_field
+  ; hour : cron_field
+  ; dom : cron_field
+  ; month : cron_field
+  ; dow : cron_field
+  }
+
+let split_char sep value =
+  let rec loop acc start idx =
+    if idx >= String.length value
+    then List.rev (String.sub value start (idx - start) :: acc)
+    else if Char.equal value.[idx] sep
+    then loop (String.sub value start (idx - start) :: acc) (idx + 1) (idx + 1)
+    else loop acc start (idx + 1)
+  in
+  loop [] 0 0
+;;
+
+let int_of_token ~field token =
+  try Ok (int_of_string token) with
+  | Failure _ -> Error (Printf.sprintf "recurrence.cron.%s has non-numeric token: %s" field token)
+;;
+
+let dedupe_sorted values =
+  values
+  |> List.sort_uniq Int.compare
+;;
+
+let range_values ~field ~min_v ~max_v ~map_value start stop step =
+  if step <= 0
+  then Error (Printf.sprintf "recurrence.cron.%s step must be positive" field)
+  else if start > stop
+  then Error (Printf.sprintf "recurrence.cron.%s range start must be <= end" field)
+  else if start < min_v || stop > max_v
+  then
+    Error
+      (Printf.sprintf
+         "recurrence.cron.%s value must be in %d..%d"
+         field
+         min_v
+         max_v)
+  else (
+    let rec loop acc value =
+      if value > stop
+      then Ok (List.rev acc)
+      else
+        let* mapped = map_value value in
+        loop (mapped :: acc) (value + step)
+    in
+    loop [] start)
+;;
+
+let parse_cron_atom ~field ~min_v ~max_v ~map_value atom =
+  let atom = String.trim atom in
+  if String.equal atom ""
+  then Error (Printf.sprintf "recurrence.cron.%s contains an empty token" field)
+  else (
+    let base, step =
+      match split_char '/' atom with
+      | [ base ] -> base, 1
+      | [ base; step_s ] ->
+        (match int_of_token ~field step_s with
+         | Ok step -> base, step
+         | Error _ -> base, -1)
+      | _ -> atom, -1
+    in
+    if step <= 0
+    then Error (Printf.sprintf "recurrence.cron.%s step must be positive" field)
+    else if String.equal base "*"
+    then range_values ~field ~min_v ~max_v ~map_value min_v max_v step
+    else (
+      match split_char '-' base with
+      | [ one ] ->
+        let* value = int_of_token ~field one in
+        range_values ~field ~min_v ~max_v ~map_value value value step
+      | [ start_s; stop_s ] ->
+        let* start = int_of_token ~field start_s in
+        let* stop = int_of_token ~field stop_s in
+        range_values ~field ~min_v ~max_v ~map_value start stop step
+      | _ ->
+        Error
+          (Printf.sprintf
+             "recurrence.cron.%s token must be *, n, n-m, */s, or n-m/s: %s"
+             field
+             atom)))
+;;
+
+let parse_cron_field ~field ~min_v ~max_v ?(map_value = fun value -> Ok value) raw =
+  let raw = String.trim raw in
+  if String.equal raw ""
+  then Error (Printf.sprintf "recurrence.cron.%s must be non-empty" field)
+  else (
+    let atoms = split_char ',' raw in
+    let rec loop acc = function
+      | [] -> Ok { any = String.equal raw "*"; values = dedupe_sorted acc }
+      | atom :: rest ->
+        let* values = parse_cron_atom ~field ~min_v ~max_v ~map_value atom in
+        loop (List.rev_append values acc) rest
+    in
+    loop [] atoms)
+;;
+
+let parse_cron_expression expression =
+  let fields =
+    expression
+    |> String.trim
+    |> String.split_on_char ' '
+    |> List.filter (fun part -> not (String.equal part ""))
+  in
+  match fields with
+  | [ minute_s; hour_s; dom_s; month_s; dow_s ] ->
+    let dow_map value =
+      match value with
+      | 7 -> Ok 0
+      | value -> Ok value
+    in
+    let* minute = parse_cron_field ~field:"minute" ~min_v:0 ~max_v:59 minute_s in
+    let* hour = parse_cron_field ~field:"hour" ~min_v:0 ~max_v:23 hour_s in
+    let* dom = parse_cron_field ~field:"day_of_month" ~min_v:1 ~max_v:31 dom_s in
+    let* month = parse_cron_field ~field:"month" ~min_v:1 ~max_v:12 month_s in
+    let* dow = parse_cron_field ~field:"day_of_week" ~min_v:0 ~max_v:7 ~map_value:dow_map dow_s in
+    Ok { minute; hour; dom; month; dow }
+  | _ ->
+    Error
+      "recurrence.cron.expression must be a 5-field cron expression: minute hour day-of-month month day-of-week"
+;;
+
+let validate_cron ~expression ~timezone =
+  let* expression = nonempty "recurrence.cron.expression" expression in
+  let* timezone = nonempty "recurrence.timezone" timezone in
+  match timezone_offset_seconds timezone with
+  | None ->
+    Error
+      "recurrence.timezone must be UTC, Asia/Seoul, KST, or a fixed offset like +09:00; DST-aware IANA zones are not supported"
+  | Some _ ->
+    let* _ = parse_cron_expression expression in
+    Ok (Cron { expression; timezone })
+;;
+
 let validate_recurrence = function
   | One_shot -> Ok One_shot
   | Interval { interval_sec } ->
@@ -395,6 +553,7 @@ let validate_recurrence = function
     Ok (Interval { interval_sec })
   | Daily { hour; minute; second; timezone } ->
     validate_daily ~hour ~minute ~second ~timezone
+  | Cron { expression; timezone } -> validate_cron ~expression ~timezone
 ;;
 
 let recurrence_to_yojson = function
@@ -407,6 +566,12 @@ let recurrence_to_yojson = function
       ; "hour", `Int hour
       ; "minute", `Int minute
       ; "second", `Int second
+      ; "timezone", `String timezone
+      ]
+  | Cron { expression; timezone } ->
+    `Assoc
+      [ "kind", `String "cron"
+      ; "expression", `String expression
       ; "timezone", `String timezone
       ]
 ;;
@@ -432,6 +597,10 @@ let recurrence_of_yojson = function
        in
        let* timezone = string_field "timezone" fields in
        validate_recurrence (Daily { hour; minute; second; timezone })
+     | "cron" ->
+       let* expression = string_field "expression" fields in
+       let* timezone = string_field "timezone" fields in
+       validate_recurrence (Cron { expression; timezone })
      | other -> Error ("unknown recurrence kind: " ^ other))
   | _ -> Error "expected recurrence object"
 ;;
@@ -515,6 +684,54 @@ let next_daily_due_after ~hour ~minute ~second ~timezone ~now =
     if target_utc > now then Some target_utc else Some (target_utc +. seconds_per_day)
 ;;
 
+let field_matches field value = List.mem value field.values
+
+let cron_day_matches spec tm =
+  let dom_matches = field_matches spec.dom tm.Unix.tm_mday in
+  let dow_matches = field_matches spec.dow tm.Unix.tm_wday in
+  match spec.dom.any, spec.dow.any with
+  | true, true -> true
+  | true, false -> dow_matches
+  | false, true -> dom_matches
+  | false, false -> dom_matches || dow_matches
+;;
+
+let cron_matches spec tm =
+  field_matches spec.minute tm.Unix.tm_min
+  && field_matches spec.hour tm.Unix.tm_hour
+  && field_matches spec.month (tm.Unix.tm_mon + 1)
+  && cron_day_matches spec tm
+;;
+
+let next_cron_due_after ~expression ~timezone ~now =
+  match parse_cron_expression expression, timezone_offset_seconds timezone with
+  | Error _, _ | _, None -> None
+  | Ok spec, Some offset ->
+    let first_candidate =
+      ((floor (now /. 60.0) *. 60.0) +. 60.0) |> int_of_float
+    in
+    let offset = float_of_int offset in
+    let max_minutes = 5 * 366 * 24 * 60 in
+    let rec loop remaining candidate =
+      if remaining <= 0
+      then None
+      else (
+        let local_ts = float_of_int candidate +. offset in
+        let tm = Unix.gmtime local_ts in
+        if cron_matches spec tm
+        then Some (float_of_int candidate)
+        else loop (remaining - 1) (candidate + 60))
+    in
+    loop max_minutes first_candidate
+;;
+
+let first_due_after ~now = function
+  | One_shot | Interval _ -> None
+  | Daily { hour; minute; second; timezone } ->
+    next_daily_due_after ~hour ~minute ~second ~timezone ~now
+  | Cron { expression; timezone } -> next_cron_due_after ~expression ~timezone ~now
+;;
+
 let next_due_after ~now (request : schedule_request) =
   match request.recurrence with
   | One_shot -> None
@@ -525,6 +742,7 @@ let next_due_after ~now (request : schedule_request) =
       ~anchor:request.due_at
   | Daily { hour; minute; second; timezone } ->
     next_daily_due_after ~hour ~minute ~second ~timezone ~now
+  | Cron { expression; timezone } -> next_cron_due_after ~expression ~timezone ~now
 ;;
 
 let reschedule_after_due_signal ~now (request : schedule_request) =
@@ -772,10 +990,18 @@ let create_execution_grant
   }
 ;;
 
+let expired_at ~now (request : schedule_request) =
+  match request.expires_at with
+  | Some expires_at when expires_at <= now -> true
+  | None | Some _ -> false
+;;
+
 let validate_execution_grant (request : schedule_request) (grant : execution_grant) =
   if grant.schedule_id <> request.schedule_id then Error Grant_schedule_id_mismatch
   else if is_terminal request.status then Error Schedule_terminal
-  else if request.status <> Pending_approval then Error Schedule_not_pending_approval
+  else if expired_at ~now:grant.approved_at request then Error Schedule_terminal
+  else if request.status <> Pending_approval && request.status <> Due then
+    Error Schedule_not_pending_approval
   else if requires_separate_human_grant request && grant.approved_by.kind <> Human_operator
   then Error Approver_not_human
   else if requires_separate_human_grant request
@@ -800,12 +1026,28 @@ let validate_execution_grant (request : schedule_request) (grant : execution_gra
 let apply_execution_grant (request : schedule_request) (grant : execution_grant) =
   let* () = validate_execution_grant request grant in
   match grant.decision with
-  | Approve -> Ok { request with status = Scheduled }
+  | Approve ->
+    let status =
+      match request.status with
+      | Pending_approval -> Scheduled
+      | Due -> Due
+      | Scheduled
+      | Running
+      | Succeeded
+      | Failed
+      | Rejected
+      | Cancelled
+      | Expired ->
+        request.status
+    in
+    Ok { request with status }
   | Reject _ -> Ok { request with status = Rejected }
 ;;
 
 let mark_due ~now (request : schedule_request) =
   match request.status with
+  | Pending_approval | Scheduled | Due when expired_at ~now request ->
+    { request with status = Expired }
   | Scheduled when request.due_at <= now -> { request with status = Due }
   | _ -> request
 ;;

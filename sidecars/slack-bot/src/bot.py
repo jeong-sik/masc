@@ -27,7 +27,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from .config import get_config
-from .formatters import response_blocks, strip_state_blocks
+from .formatters import fallback_text, response_blocks, strip_state_blocks
 from .gate_client import GateClient, GateResponse
 
 logging.basicConfig(
@@ -266,18 +266,19 @@ class SlackGateBot:
                 duration_ms=response.duration_ms,
                 tokens_used=response.tokens_used,
             )
+            text = fallback_text(reply)
             if thinking_ts:
                 try:
                     app.client.chat_update(
                         channel=channel_id,
                         ts=thinking_ts,
-                        text=reply,
+                        text=text,
                         blocks=blocks,
                     )
                 except Exception:
-                    say(text=reply, blocks=blocks)
+                    say(text=text, blocks=blocks)
             else:
-                say(text=reply, blocks=blocks)
+                say(text=text, blocks=blocks)
             self._messages_processed += 1
             self._last_message_at = datetime.now(tz=timezone.utc).isoformat()
         elif response.error:

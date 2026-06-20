@@ -21,13 +21,14 @@ let request
   ?(approval_required = false)
   ?(requested_by = human "requester")
   ?(scheduled_by = human "scheduler")
+  ?expires_at
   ?recurrence
   ()
   =
   match
     create_request ~schedule_id:"sched-1" ~requested_by ~scheduled_by
       ~requested_at:100.0 ~due_at:200.0
-      ~payload:(payload_json ()) ~risk_class ~approval_required
+      ?expires_at ~payload:(payload_json ()) ~risk_class ~approval_required
       ~source:Operator_request ?recurrence ()
   with
   | Ok request -> request
@@ -114,6 +115,21 @@ let test_reject_grant_marks_rejected () =
   match apply_execution_grant req grant with
   | Error err -> fail (grant_error_to_string err)
   | Ok updated -> check_status "rejected schedule status" Rejected updated.status
+;;
+
+let test_due_grant_keeps_request_due () =
+  let due = { (request ()) with status = Due } in
+  let grant = grant due in
+  match apply_execution_grant due grant with
+  | Error err -> fail (grant_error_to_string err)
+  | Ok updated -> check_status "due approval stays due" Due updated.status
+;;
+
+let test_expired_schedule_blocks_grant () =
+  let req = request ~expires_at:149.0 () in
+  let grant = grant req in
+  check_error "expired approval" Schedule_terminal
+    (validate_execution_grant req grant)
 ;;
 
 let test_requester_cannot_approve () =
@@ -217,6 +233,43 @@ let test_daily_recurrence_rejects_dst_iana_timezone () =
       msg
 ;;
 
+let test_cron_recurrence_next_due_weekdays () =
+  let req =
+    request ~risk_class:Read_only
+      ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
+      ()
+  in
+  check bool "is recurring" true (is_recurring req.recurrence);
+  match next_due_after ~now:32400.0 req with
+  | None -> fail "expected next cron due"
+  | Some due_at -> check (float 0.001) "next weekday 09:00" 118800.0 due_at
+;;
+
+let test_cron_recurrence_supports_steps_ranges_and_sunday_alias () =
+  let req =
+    request ~risk_class:Read_only
+      ~recurrence:(Cron { expression = "*/30 9-10 * * 7"; timezone = "UTC" })
+      ()
+  in
+  match next_due_after ~now:259199.0 req with
+  | None -> fail "expected next Sunday cron due"
+  | Some due_at -> check (float 0.001) "Sunday 09:00" 291600.0 due_at
+;;
+
+let test_cron_recurrence_rejects_invalid_expression () =
+  match
+    create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+      ~payload:(payload_json ()) ~risk_class:Read_only
+      ~approval_required:false ~source:Operator_request
+      ~recurrence:(Cron { expression = "*/0 9 * * 1-5"; timezone = "UTC" })
+      ()
+  with
+  | Ok _ -> fail "expected invalid cron rejection"
+  | Error msg ->
+    check string "cron error" "recurrence.cron.minute step must be positive" msg
+;;
+
 let test_schedule_roundtrip () =
   let req =
     request ~risk_class:Cost_bearing ~approval_required:true
@@ -232,6 +285,35 @@ let test_schedule_roundtrip () =
       (recurrence_kind_to_string decoded.recurrence);
     check string "payload digest" (payload_digest req.payload)
       (payload_digest decoded.payload)
+;;
+
+let test_cron_schedule_roundtrip () =
+  let req =
+    request ~risk_class:Read_only
+      ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "Asia/Seoul" })
+      ()
+  in
+  match schedule_request_to_yojson req |> schedule_request_of_yojson with
+  | Error msg -> fail msg
+  | Ok decoded ->
+    check string "recurrence" "cron"
+      (recurrence_kind_to_string decoded.recurrence);
+    (match decoded.recurrence with
+     | Cron { expression; timezone } ->
+       check string "expression" "0 9 * * 1-5" expression;
+       check string "timezone" "Asia/Seoul" timezone
+     | _ -> fail "expected cron recurrence")
+;;
+
+let test_recurrence_summary () =
+  check string "one-shot summary" "one_shot" (recurrence_summary One_shot);
+  check string "interval summary" "every 900s"
+    (recurrence_summary (Interval { interval_sec = 900 }));
+  check string "daily summary" "daily 09:05:07 Asia/Seoul"
+    (recurrence_summary
+       (Daily { hour = 9; minute = 5; second = 7; timezone = "Asia/Seoul" }));
+  check string "cron summary" "cron 0 9 * * 1-5 UTC"
+    (recurrence_summary (Cron { expression = "0 9 * * 1-5"; timezone = "UTC" }))
 ;;
 
 let test_missing_recurrence_defaults_one_shot () =
@@ -311,12 +393,22 @@ let () =
             test_daily_recurrence_next_due_accepts_explicit_fixed_offset;
           test_case "daily recurrence rejects DST IANA timezone" `Quick
             test_daily_recurrence_rejects_dst_iana_timezone;
+          test_case "cron recurrence next due weekdays" `Quick
+            test_cron_recurrence_next_due_weekdays;
+          test_case "cron recurrence supports steps ranges and Sunday alias" `Quick
+            test_cron_recurrence_supports_steps_ranges_and_sunday_alias;
+          test_case "cron recurrence rejects invalid expression" `Quick
+            test_cron_recurrence_rejects_invalid_expression;
         ] );
       ( "grant",
         [
           test_case "separate human approval accepts" `Quick
             test_separate_human_approval_accepts;
           test_case "reject grant marks rejected" `Quick test_reject_grant_marks_rejected;
+          test_case "due grant keeps request due" `Quick
+            test_due_grant_keeps_request_due;
+          test_case "expired schedule blocks grant" `Quick
+            test_expired_schedule_blocks_grant;
           test_case "requester cannot approve" `Quick test_requester_cannot_approve;
           test_case "scheduler cannot approve" `Quick test_scheduler_cannot_approve;
           test_case "automated actor cannot approve side-effecting" `Quick
@@ -328,6 +420,8 @@ let () =
       ( "codec",
         [
           test_case "schedule roundtrip" `Quick test_schedule_roundtrip;
+          test_case "cron schedule roundtrip" `Quick test_cron_schedule_roundtrip;
+          test_case "recurrence summary" `Quick test_recurrence_summary;
           test_case "missing recurrence defaults one-shot" `Quick
             test_missing_recurrence_defaults_one_shot;
           test_case "grant roundtrip" `Quick test_grant_roundtrip;

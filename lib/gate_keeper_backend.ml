@@ -115,20 +115,26 @@ let metadata_value key metadata =
   | None -> None
 
 let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
-    ?conversation_id ~reply () =
+    ?conversation_id ?turn_ref ~reply () =
   let content = String.trim reply in
   if content <> "" then begin
     (* RFC-0232 P5: the gate recorder knows the connector label only;
        coordinates ride [conversation_id] as before. *)
     let surface = Surface_ref.Gate { label = source; address = [] } in
+    (* RFC-0233 §7: [turn_ref] is the join key the keeper minted into the
+       reply payload, carried onto this connector turn's assistant row. *)
     Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name
-      ~content ~surface ?conversation_id ();
+      ~content ~surface ?conversation_id ?turn_ref ();
     Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ()
   end
 
-let dispatch ~sw ~clock ~proc_mgr ~net ~config
+(* Trailing [()] keeps [?on_text_snapshot] erasable (warning 16): the wrappers
+   below either pass it ([dispatch_with_text_snapshot]) or omit it so it defaults
+   to [None] ([dispatch]). Without the unit the optional leaks into [dispatch]'s
+   inferred type and breaks the .mli signature. Do not drop the [()]. *)
+let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~metadata ~content =
+    ~keeper_name ~metadata ~content () =
   let keeper_name = String.trim keeper_name in
   let redaction =
     Keeper_secret_redaction.snapshot
@@ -217,10 +223,25 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
     net;
   } in
   let start_time = Unix.gettimeofday () in
+  let on_text_delta =
+    match on_text_snapshot with
+    | None -> (fun _ -> ())
+    | Some publish_snapshot ->
+        let streamed_text = Buffer.create 1024 in
+        fun delta ->
+          Buffer.add_string streamed_text delta;
+          let snapshot = redact_text (Buffer.contents streamed_text) in
+          (try publish_snapshot snapshot with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | exn ->
+               Log.Server.warn
+                 "channel gate text snapshot callback failed (keeper=%s): %s"
+                 keeper_name (Printexc.to_string exn))
+  in
   (* Channel gate needs the final keeper reply, not the async request ACK that
      plain [Keeper_tool_surface.dispatch] returns for masc_keeper_msg. *)
   match
-    Keeper_tool_surface.dispatch_stream ~on_text_delta:(fun _ -> ()) keeper_ctx
+    Keeper_tool_surface.dispatch_stream ~on_text_delta keeper_ctx
       ~name:"masc_keeper_msg" ~args
   with
   | Some result when Tool_result.is_success result ->
@@ -234,11 +255,31 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
         | Some s -> Some { s with duration_ms }
         | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
+      (* RFC-0233 §7: pull the turn's join key out of the same reply payload
+         (parse, don't repair) so the connector assistant row joins to its
+         Turn_record. *)
+      let turn_ref =
+        Keeper_turn_outcome.turn_ref_of_reply_payload
+          (try Some (Yojson.Safe.from_string body)
+           with Yojson.Json_error _ -> None)
+      in
       persist_connector_assistant_reply
         ~base_dir:config.Workspace.base_path ~keeper_name ~source:lane
-        ?conversation_id ~reply ();
+        ?conversation_id ?turn_ref ~reply ();
       Gate_protocol.Reply { content = reply; structured; stats }
   | Some result ->
       Gate_protocol.Keeper_error_result (redact_text (Tool_result.message result))
   | None ->
       Gate_protocol.Unavailable_result
+
+let dispatch ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content =
+  dispatch_core ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content ()
+
+let dispatch_with_text_snapshot ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
+    ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
+    ~keeper_name ~metadata ~content =
+  dispatch_core ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config ~channel
+    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+    ~metadata ~content ()

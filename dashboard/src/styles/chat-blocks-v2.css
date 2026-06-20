@@ -35,10 +35,37 @@
 
 /* ── Trace (collapsible reasoning / tool steps) ──────────────── */
 .chat-block-trace {
-  border: 1px solid var(--color-border-default);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  border: 1px solid var(--chat-tool-border, var(--color-border-default));
   border-radius: var(--r-1);
-  background: var(--color-bg-surface);
+  background: linear-gradient(180deg, var(--chat-tool-bg, var(--color-bg-surface)), var(--color-bg-surface));
   overflow: hidden;
+}
+
+.chat-turn-bundle {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-self: flex-start;
+  gap: 8px;
+  width: 82%;
+  max-width: 100%;
+}
+
+.chat-turn-bundle .chat-block-trace,
+.chat-turn-bundle .chat-bubble {
+  width: 100%;
+  max-width: 100%;
+}
+
+.chat-turn-bundle .chat-block-trace {
+  border-bottom-left-radius: var(--r-0);
+}
+
+.chat-turn-bundle .chat-bubble.assistant {
+  border-top-left-radius: var(--r-0);
 }
 
 .chat-block-trace-hd {
@@ -66,6 +93,7 @@
 
 .chat-block-trace-label {
   font-weight: var(--fw-semi);
+  color: var(--chat-tool-fg, var(--color-fg-secondary));
 }
 
 .chat-block-trace-count,
@@ -138,7 +166,7 @@
 .chat-block-tstep-name {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  color: var(--color-fg-secondary);
+  color: var(--chat-tool-fg, var(--color-fg-secondary));
 }
 
 .chat-block-tstep-status {

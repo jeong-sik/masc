@@ -26,6 +26,16 @@ let () =
   in
   assert (not (is_board_signal (fusion_payload ())));
   assert (String.equal (payload_kind_label (fusion_payload ())) "fusion_completed");
+  assert (
+    String.equal
+      (fusion_completion_post_id
+         { run_id = "fus-1"; ok = true; resolved_answer = "ok"; board_post_id = "post-1" })
+      "post-1");
+  assert (
+    String.equal
+      (fusion_completion_post_id
+         { run_id = "fus-2"; ok = false; resolved_answer = "sink_failed"; board_post_id = "" })
+      "fusion-run:fus-2");
 
   (* --- queue operations preserved --- *)
   let board_stim =
@@ -77,5 +87,79 @@ let () =
   let empty_board, empty_rest = drain_board_window empty in
   assert (List.length empty_board = 0);
   assert (is_empty empty_rest);
+
+  (* --- durable snapshot codec: preserves FIFO order and typed payloads --- *)
+  let queue_for_snapshot =
+    let q = enqueue empty board_stim in
+    let q = enqueue q bootstrap_stim in
+    let q =
+      enqueue
+        q
+         { post_id = "np1"
+         ; urgency = Immediate
+         ; arrived_at = 1.5
+         ; payload = No_progress_recovery
+         }
+    in
+    enqueue
+      q
+         { post_id = "fp1"
+         ; urgency = Low
+         ; arrived_at = 2.5
+         ; payload =
+             Fusion_completed
+               { run_id = "fus-3"
+               ; ok = false
+               ; resolved_answer = "denied"
+               ; board_post_id = ""
+               }
+         }
+  in
+  let restored =
+    match queue_of_yojson (queue_to_yojson queue_for_snapshot) with
+    | Ok queue -> queue
+    | Error msg -> Alcotest.fail ("queue snapshot round-trip failed: " ^ msg)
+  in
+  assert (length restored = 4);
+  let first, restored =
+    match dequeue restored with
+    | Some item -> item
+    | None -> Alcotest.fail "snapshot restore should preserve first item"
+  in
+  assert (String.equal first.post_id "p1");
+  let second, restored =
+    match dequeue restored with
+    | Some item -> item
+    | None -> Alcotest.fail "snapshot restore should preserve second item"
+  in
+  assert (String.equal second.post_id "bootstrap");
+  let third, restored =
+    match dequeue restored with
+    | Some item -> item
+    | None -> Alcotest.fail "snapshot restore should preserve third item"
+  in
+  assert (String.equal third.post_id "np1");
+  assert (
+    match third.payload with
+    | No_progress_recovery -> true
+    | _ -> false);
+  let fourth, restored =
+    match dequeue restored with
+    | Some item -> item
+    | None -> Alcotest.fail "snapshot restore should preserve fourth item"
+  in
+  assert (String.equal fourth.post_id "fp1");
+  assert (
+    match fourth.payload with
+    | Fusion_completed { run_id; ok; resolved_answer; board_post_id } ->
+      String.equal run_id "fus-3"
+      && (not ok)
+      && String.equal resolved_answer "denied"
+      && String.equal board_post_id ""
+    | _ -> false);
+  assert (is_empty restored);
+  (match queue_of_yojson (`Assoc [ "schema", `String "wrong"; "items", `List [] ]) with
+   | Ok _ -> Alcotest.fail "wrong queue snapshot schema should be rejected"
+   | Error _ -> ());
 
   print_endline "test_keeper_event_queue: all passed"

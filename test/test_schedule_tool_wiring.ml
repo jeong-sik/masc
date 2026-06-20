@@ -65,11 +65,23 @@ let schedule_tool_name action =
 
 let test_schema_and_descriptor_exposed () =
   let create_name = schedule_tool_name Tool_schemas_schedule.Create_request in
+  let approve_schema =
+    (schedule_definition Tool_schemas_schedule.Approve_request).schema
+  in
+  let reject_schema =
+    (schedule_definition Tool_schemas_schedule.Reject_request).schema
+  in
   let schema_names =
     Config.raw_all_tool_schemas
     |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
   in
   check bool "raw schema has create" true (List.mem create_name schema_names);
+  check string "approve describes due grants"
+    "Record a separate human execution grant for a pending or due scheduled request. Recurring side-effecting requests need a fresh grant for each due occurrence."
+    approve_schema.description;
+  check string "reject describes due decisions"
+    "Reject a pending or due scheduled request with a human decision."
+    reject_schema.description;
   check bool "tag registered" true
     (Tool_dispatch.lookup_tag create_name = Some Tool_dispatch.Mod_schedule);
   let descriptor_names =
@@ -127,6 +139,52 @@ let test_dispatch_create_persists_recurrence () =
          (Schedule_domain.recurrence_kind_to_string request.recurrence))
 ;;
 
+let test_dispatch_create_derives_due_at_for_cron_recurrence () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-cron"
+      ; "requested_at_unix", `Float 32400.0
+      ; "risk_class", `String "read_only"
+      ; "payload", payload
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ; "recurrence_kind", `String "cron"
+      ; "recurrence_cron", `String "0 9 * * 1-5"
+      ; "recurrence_timezone", `String "UTC"
+      ]
+  in
+  match
+    Tool_schedule.dispatch (schedule_ctx config)
+      ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+      ~args
+  with
+  | None -> fail "dispatch returned None"
+  | Some result ->
+    check bool "create succeeds" true (Tool_result.is_success result);
+    let data = Tool_result.data result in
+    let open Yojson.Safe.Util in
+    check string "result recurrence kind" "cron"
+      (data |> member "recurrence_kind" |> to_string);
+    check string "result recurrence summary" "cron 0 9 * * 1-5 UTC"
+      (data |> member "recurrence_summary" |> to_string);
+    check (float 0.001) "result next due_at" 118800.0
+      (data |> member "next_due_at" |> to_float);
+    check string "result next due_at iso" "1970-01-02T09:00:00Z"
+      (data |> member "next_due_at_iso" |> to_string);
+    check bool "result separate grant" false
+      (data |> member "requires_separate_human_grant" |> to_bool);
+    check string "result approval policy" "no_separate_grant_required"
+      (data |> member "approval_policy" |> to_string);
+    (match Schedule_store.get_schedule config ~schedule_id:"sched-cron" with
+     | None -> fail "schedule missing"
+     | Some request ->
+       check string "recurrence" "cron"
+         (Schedule_domain.recurrence_kind_to_string request.recurrence);
+       check (float 0.001) "derived due_at" 118800.0 request.due_at)
+;;
+
 let test_dispatch_cancel_persists_status () =
   with_config
   @@ fun config ->
@@ -163,6 +221,7 @@ let test_dispatch_cancel_persists_status () =
 
 let create_schedule_exn
   config
+  ?expires_at
   ?recurrence
   ~schedule_id
   ~due_at
@@ -174,7 +233,7 @@ let create_schedule_exn
   match
     Schedule_service.create config ~schedule_id ~requested_at:100.0
       ~requested_by ~scheduled_by ~due_at ~payload ~risk_class
-      ~source:Schedule_domain.Operator_request ?recurrence ()
+      ~source:Schedule_domain.Operator_request ?expires_at ?recurrence ()
   with
   | Ok request -> request
   | Error err ->
@@ -184,6 +243,9 @@ let create_schedule_exn
 let test_dashboard_projection_surfaces_schedule_fsm () =
   with_config
   @@ fun config ->
+  let now = Time_compat.now () in
+  let past_due = now -. 10.0 in
+  let future_due = now +. 3600.0 in
   ignore
     (create_schedule_exn config ~schedule_id:"sched-exec" ~due_at:50.0
        ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
@@ -200,11 +262,11 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
      Schedule_store.complete_running config ~now:53.0 ~schedule_id:"sched-exec"
        ~detail:(`Assoc [ "kind", `String "test.exec" ])
        ()
-   with
-   | Ok _ -> ()
-   | Error err -> fail (Schedule_store.store_error_to_string err));
+  with
+  | Ok _ -> ()
+  | Error err -> fail (Schedule_store.store_error_to_string err));
   ignore
-    (create_schedule_exn config ~schedule_id:"sched-due" ~due_at:1.0
+    (create_schedule_exn config ~schedule_id:"sched-due" ~due_at:past_due
        ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
        ~scheduled_by:(automated "scheduler-agent")
        ~recurrence:
@@ -213,8 +275,21 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
        ()
       : Schedule_domain.schedule_request);
   ignore
-    (create_schedule_exn config ~schedule_id:"sched-approval" ~due_at:300.0
+    (create_schedule_exn config ~schedule_id:"sched-approval" ~due_at:future_due
        ~risk_class:Schedule_domain.Workspace_write ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+       ()
+      : Schedule_domain.schedule_request);
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-blocked" ~due_at:past_due
+       ~risk_class:Schedule_domain.Workspace_write ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+       ()
+      : Schedule_domain.schedule_request);
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-expired-effective"
+       ~due_at:past_due ~expires_at:(now -. 1.0) ~risk_class:Schedule_domain.Read_only
+       ~requested_by:(human "operator")
        ~scheduled_by:(automated "scheduler-agent")
        ()
       : Schedule_domain.schedule_request);
@@ -224,23 +299,73 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
   let open Yojson.Safe.Util in
   check string "schema" "masc.dashboard.scheduled_automation.v1"
     (json |> member "schema" |> to_string);
-  check int "request count" 3 (json |> member "request_count" |> to_int);
-  check string "fsm state" "pending_approval"
+  check int "request count" 5 (json |> member "request_count" |> to_int);
+  check string "fsm state" "blocked_approval"
     (json |> member "fsm" |> member "state" |> to_string);
-  check int "pending count" 1
+  check int "effective active count" 3
+    (json |> member "fsm" |> member "active_count" |> to_int);
+  check int "effective terminal count" 2
+    (json |> member "fsm" |> member "terminal_count" |> to_int);
+  check int "pending count" 2
     (json |> member "counts" |> member "pending_approval" |> to_int);
-  check int "scheduled count" 1
+  check int "scheduled count" 2
     (json |> member "counts" |> member "scheduled" |> to_int);
   check int "due effective count" 1
     (json |> member "derived_counts" |> member "due_effective" |> to_int);
+  check int "blocked approval count" 1
+    (json |> member "derived_counts" |> member "blocked_approval" |> to_int);
+  check int "due execution ready count" 0
+    (json |> member "derived_counts" |> member "due_execution_ready" |> to_int);
+  check int "expired effective count" 1
+    (json |> member "derived_counts" |> member "expired_effective" |> to_int);
   let requests = json |> member "requests" |> to_list in
-  (match requests with
-   | first :: _ ->
-     check string "recurrence kind" "daily"
-       (first |> member "recurrence_kind" |> to_string);
-     check string "recurrence object kind" "daily"
-       (first |> member "recurrence" |> member "kind" |> to_string)
-   | [] -> fail "expected dashboard requests");
+  let find_request schedule_id =
+    match
+      List.find_opt
+        (fun row -> String.equal (row |> member "schedule_id" |> to_string) schedule_id)
+        requests
+    with
+    | Some row -> row
+    | None -> fail ("schedule missing from dashboard projection: " ^ schedule_id)
+  in
+  let due_row = find_request "sched-due" in
+  check string "due recurrence kind" "daily"
+    (due_row |> member "recurrence_kind" |> to_string);
+  check string "due recurrence object kind" "daily"
+    (due_row |> member "recurrence" |> member "kind" |> to_string);
+  check string "due recurrence summary" "daily 09:00:00 Asia/Seoul"
+    (due_row |> member "recurrence_summary" |> to_string);
+  check string "due next due iso"
+    (due_row |> member "due_at_iso" |> to_string)
+    (due_row |> member "next_due_at_iso" |> to_string);
+  check bool "due separate grant" false
+    (due_row |> member "requires_separate_human_grant" |> to_bool);
+  check string "due approval policy" "no_separate_grant_required"
+    (due_row |> member "approval_policy" |> to_string);
+  check string "due effective status" "due"
+    (due_row |> member "effective_status" |> to_string);
+  check string "due readiness" "due_pending_refresh"
+    (due_row |> member "execution_readiness" |> to_string);
+  check string "due action" "wait_for_runner_tick"
+    (due_row |> member "operator_action" |> to_string);
+  let blocked_row = find_request "sched-blocked" in
+  check bool "blocked separate grant" true
+    (blocked_row |> member "requires_separate_human_grant" |> to_bool);
+  check string "blocked approval policy" "separate_human_grant_required"
+    (blocked_row |> member "approval_policy" |> to_string);
+  check string "blocked effective status" "blocked_approval"
+    (blocked_row |> member "effective_status" |> to_string);
+  check string "blocked readiness" "blocked_approval"
+    (blocked_row |> member "execution_readiness" |> to_string);
+  check string "blocked action" "approve_or_reject"
+    (blocked_row |> member "operator_action" |> to_string);
+  let expired_row = find_request "sched-expired-effective" in
+  check string "expired effective status" "expired"
+    (expired_row |> member "effective_status" |> to_string);
+  check string "expired readiness" "expired"
+    (expired_row |> member "execution_readiness" |> to_string);
+  check string "expired action" "inspect_or_recreate"
+    (expired_row |> member "operator_action" |> to_string);
   let exec_row =
     List.find_opt
       (fun row -> String.equal (row |> member "schedule_id" |> to_string) "sched-exec")
@@ -249,6 +374,10 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
   match exec_row with
   | None -> fail "sched-exec missing from dashboard projection"
   | Some row ->
+    check string "terminal effective status" "succeeded"
+      (row |> member "effective_status" |> to_string);
+    check string "terminal readiness" "terminal"
+      (row |> member "execution_readiness" |> to_string);
     check string "last execution status" "succeeded"
       (row |> member "last_execution" |> member "status" |> to_string);
     check string "last execution detail" "test.exec"
@@ -264,6 +393,8 @@ let () =
             test_dispatch_create_persists_schedule
         ; test_case "dispatch create persists recurrence" `Quick
             test_dispatch_create_persists_recurrence
+        ; test_case "dispatch create derives due_at for cron recurrence" `Quick
+            test_dispatch_create_derives_due_at_for_cron_recurrence
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
         ; test_case "dashboard projection surfaces schedule FSM" `Quick

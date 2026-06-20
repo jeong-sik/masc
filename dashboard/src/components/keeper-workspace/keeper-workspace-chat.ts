@@ -392,6 +392,7 @@ function TurnInspectorDrawer({
         </div>
         <${KeeperTurnInspector}
           keeperName=${keeperName}
+          initialTurnRef=${triggerEntry?.turnRef ?? null}
           initialTurnTimestamp=${triggerEntry?.timestamp ?? null}
         />
       </div>

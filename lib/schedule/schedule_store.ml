@@ -268,15 +268,23 @@ let grant_exists state grant_id =
     state.grants
 ;;
 
-let has_approved_grant state schedule_id =
+let grant_matches_current_request (request : schedule_request) (grant : execution_grant) =
+  let expected = Schedule_domain.evidence_of_request request in
+  String.equal grant.schedule_id request.schedule_id
+  &&
+  match grant.decision with
+  | Reject _ -> false
+  | Approve ->
+    String.equal grant.evidence.schedule_id expected.schedule_id
+    && String.equal grant.evidence.payload_digest expected.payload_digest
+    && grant.evidence.due_at = expected.due_at
+    && grant.evidence.risk_class = expected.risk_class
+;;
+
+let has_current_approved_grant state (request : schedule_request) =
   List.exists
     (fun (grant : execution_grant) ->
-      let grant_matches = String.equal grant.schedule_id schedule_id in
-      grant_matches
-      &&
-      (match grant.decision with
-       | Approve -> true
-       | Reject _ -> false))
+      grant_matches_current_request request grant)
     state.grants
 ;;
 
@@ -284,7 +292,7 @@ let is_due_execution_candidate state (request : schedule_request) =
   match request.status with
   | Due ->
     (not (requires_separate_human_grant request))
-    || has_approved_grant state request.schedule_id
+    || has_current_approved_grant state request
   | Pending_approval | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled
   | Expired ->
     false
@@ -560,6 +568,30 @@ let fail_running config ~now ~schedule_id ~error =
                ; error = Some error
                })
         in
+        let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
+        write_state config next_state;
+        Ok updated)
+;;
+
+let fail_due_candidate config ~now ~schedule_id ~error =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      if not (is_due_execution_candidate state request) then
+        Error Schedule_not_due_candidate
+      else
+        let updated = { request with status = Failed } in
+        let execution =
+          { (make_execution_record ~now request) with
+            status = Execution_failed
+          ; finished_at = Some now
+          ; error = Some error
+          }
+        in
+        let schedules = replace_schedule state.schedules updated in
+        let executions = execution :: state.executions in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
         write_state config next_state;
         Ok updated)

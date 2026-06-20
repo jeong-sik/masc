@@ -45,6 +45,12 @@ export const THREAD_ENTRY_CAP = 200
 
 const keeperStreamControllers = new Map<string, AbortController>()
 const keeperStreamEntryIds = new Map<string, string>()
+// requestId -> keeperName: which queued requests a live in-session send
+// stream currently owns. Resume defers to this so an SPA remount does not
+// spin up a second handler/entry for a request the live send already drives.
+// Module state, so it survives unmount/remount exactly like the controller
+// maps above; a full page reload resets it, leaving cold-start resume intact.
+const liveSendRequestOwners = new Map<string, string>()
 
 // --- Helpers ---
 
@@ -696,6 +702,8 @@ function normalizeHistoryEntry(
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
+  // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
+  const turnRef = asString(raw.turn_ref) ?? null
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
   // apart from a real reply. Map it to the existing error delivery state so
@@ -719,6 +727,7 @@ function normalizeHistoryEntry(
     text,
     rawText,
     timestamp,
+    turnRef,
     delivery,
     streamState: null,
     details: null,
@@ -829,6 +838,30 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
   }))
 }
 
+export function appendAssistantThinkingDelta(name: string, entryId: string, delta: string): void {
+  if (!delta.trim()) return
+  updateThreadEntry(name, entryId, entry => {
+    const existing = entry.traceSteps ?? []
+    const last = existing[existing.length - 1]
+    const traceSteps: ChatTraceStep[] =
+      last?.kind === 'think'
+        ? [
+            ...existing.slice(0, -1),
+            { kind: 'think', text: `${last.text}${delta}` },
+          ]
+        : [
+            ...existing,
+            { kind: 'think', text: delta.trimStart() },
+          ]
+    return {
+      ...entry,
+      traceSteps,
+      streamState: 'thinking',
+      delivery: 'streaming',
+    }
+  })
+}
+
 export function finalizeAssistantEntry(
   name: string,
   entryId: string,
@@ -844,24 +877,17 @@ export function finalizeAssistantEntry(
 }
 
 // Dedup key for merging server history with locally-appended entries.
-// Compares role + text only: the server stamps a message pair with its
-// completion time while the local entry carries the send time, so
-// timestamp equality never holds for the same logical message and
-// produced duplicate bubbles on every history merge. Source is also
-// excluded — REST history has no source field, so the derived source
-// can differ from the local one for the same message.
-//
-// R3 made every history entry carry the producer-assigned server id, so
-// render keys are now stable; this optimistic-vs-server dedup still keys
-// on role+text because a locally-appended entry is created before the
-// server mints its id and so cannot match by id yet. Replacing it with id
-// equality needs a send-response id handshake (the POST returning the
-// minted id for the optimistic entry to adopt) — tracked as the R3
-// follow-up, deliberately out of this change's scope.
+// Server ids win when both sides have already converged. User/assistant
+// optimistic rows still fall back to role + text because the POST can create
+// the local row before the server-minted id is known. Tool rows are execution
+// facts and can share argument/output text across separate calls, so they only
+// dedup by the explicit `tool-<tool_call_id>` id shape.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
 ): boolean {
+  if (left.id === right.id) return true
+  if (left.role === 'tool' || right.role === 'tool') return false
   return left.role === right.role && left.text === right.text
 }
 
@@ -878,6 +904,24 @@ function entryTimeMs(entry: KeeperConversationEntry): number {
   return Number.isFinite(ms) ? ms : TIMESTAMP_SORT_FALLBACK
 }
 
+function mergeLocalAssistantTraceSteps(
+  historyEntry: KeeperConversationEntry,
+  localEntries: KeeperConversationEntry[],
+): KeeperConversationEntry {
+  if (historyEntry.role !== 'assistant') return historyEntry
+  const localTraceSource = localEntries.find(
+    entry =>
+      entry.role === 'assistant'
+      && (entry.traceSteps?.length ?? 0) > 0
+      && sameConversationEntry(entry, historyEntry),
+  )
+  if (!localTraceSource?.traceSteps?.length) return historyEntry
+  return {
+    ...historyEntry,
+    traceSteps: localTraceSource.traceSteps,
+  }
+}
+
 function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // An empty history payload means the caller did not request history
   // (e.g. hydrateKeeperStatus fast path with tail_messages: 0), not
@@ -886,15 +930,22 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // refresh / probe / recover.
   if (entries.length === 0) return
   const existing = keeperThreads.value[name] ?? []
+  const historyEntries = entries.map(entry => mergeLocalAssistantTraceSteps(entry, existing))
   const localEntries = existing.filter(
-    entry =>
-      entry.delivery !== 'history'
+    entry => {
+      const coveredByHistory = historyEntries.some(historyEntry => sameConversationEntry(entry, historyEntry))
+      // Tool rows are durable execution facts. If the server history already
+      // has the same tool_call_id, keep the canonical history row even while a
+      // local live row is still marked streaming; otherwise the live row can
+      // later flip to delivered and leave a duplicate "작업 과정" card behind.
+      const isCoveredToolRow = entry.role === 'tool' && coveredByHistory
       // In-flight (sending/streaming/queued) entries represent live state and
       // must survive history merges until they finalize. Otherwise a queued
       // assistant with empty text can be mistaken for an older empty-text
       // history row and dropped, making the queued reply look like an error.
-      && (isInFlightDelivery(entry.delivery)
-        || !entries.some(historyEntry => sameConversationEntry(entry, historyEntry))),
+      const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery) || !coveredByHistory
+      return entry.delivery !== 'history' && !isCoveredToolRow && shouldKeepLocalEntry
+    },
   )
   // Render strictly oldest→newest by timestamp. Server /chat/history is
   // chronological, but locally-appended entries (a live turn's transport error,
@@ -904,7 +955,7 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
   // position; no-timestamp entries sort last (in-flight tail stays at the
   // bottom) and the original array index breaks ties so same-second tool calls
   // keep their issued order.
-  const merged = [...entries, ...localEntries]
+  const merged = [...historyEntries, ...localEntries]
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => entryTimeMs(a.entry) - entryTimeMs(b.entry) || a.index - b.index)
     .map(({ entry }) => entry)
@@ -937,6 +988,8 @@ interface RestChatHistoryMessage {
   tool_call_name?: string
   source?: string
   surface?: SurfaceRef
+  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
+  turn_ref?: string | null
   audio?: unknown
   // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
   // KeeperConversationAttachment at consume time so reload keeps the cards.
@@ -976,6 +1029,9 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     streamState: null,
     details: null,
     surface: message.surface ?? null,
+    // Tool rows share the same untrusted REST boundary; reject malformed
+    // turn_ref values here too so this path matches normalizeHistoryEntry.
+    turnRef: asString(message.turn_ref) ?? null,
   }
 }
 
@@ -1005,6 +1061,7 @@ export function chatHistoryEntriesFromRest(
         attachments: message.attachments,
         kind: message.kind,
         blocks: message.blocks,
+        turn_ref: message.turn_ref,
       },
       keeperName,
       previousSource,
@@ -1043,4 +1100,22 @@ export function activeStreamEntryId(name: string): string | null {
 
 export function getStreamController(name: string): AbortController | undefined {
   return keeperStreamControllers.get(name)
+}
+
+// --- Live send ownership (in-session, requestId-keyed) ---
+
+export function claimLiveSendRequest(requestId: string, name: string): void {
+  liveSendRequestOwners.set(requestId, name)
+}
+
+export function releaseLiveSendRequest(requestId: string): void {
+  liveSendRequestOwners.delete(requestId)
+}
+
+export function liveSendOwnsRequest(requestId: string): boolean {
+  return liveSendRequestOwners.has(requestId)
+}
+
+export function _resetLiveSendRequestOwnersForTests(): void {
+  liveSendRequestOwners.clear()
 }

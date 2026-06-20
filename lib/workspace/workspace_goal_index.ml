@@ -128,29 +128,57 @@ let write_goal_task_links config links =
   write_json config (goal_task_links_recovery_path config) json
 ;;
 
+let goal_task_links_lock_path config =
+  Filename.concat (tasks_dir config) ".goal-task-links"
+;;
+
+let goal_ids_for_task links ~task_id =
+  List.fold_left
+    (fun acc (goal_id, task_ids) ->
+       if List.mem task_id task_ids then goal_id :: acc else acc)
+    []
+    links
+  |> List.sort_uniq String.compare
+;;
+
+let add_link_to_links links ~goal_id ~task_id =
+  let updated = ref false in
+  let links =
+    List.map
+      (fun (candidate_goal_id, task_ids) ->
+         if String.equal candidate_goal_id goal_id then (
+           updated := true;
+           if List.mem task_id task_ids then candidate_goal_id, task_ids
+           else candidate_goal_id, task_ids @ [ task_id ])
+         else candidate_goal_id, task_ids)
+      links
+  in
+  if !updated then links else links @ [ goal_id, [ task_id ] ]
+;;
+
 let link_task_to_goal config ~goal_id ~task_id =
   let goal_id = String.trim goal_id in
   let task_id = String.trim task_id in
   if String.equal goal_id "" || String.equal task_id "" then ()
   else
-    let lock_path = Filename.concat (tasks_dir config) ".goal-task-links" in
-    with_file_lock config lock_path (fun () ->
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
       let links = read_goal_task_links config in
-      let links =
-        let updated = ref false in
-        let links =
-          List.map
-            (fun (candidate_goal_id, task_ids) ->
-               if String.equal candidate_goal_id goal_id then (
-                 updated := true;
-                 if List.mem task_id task_ids then candidate_goal_id, task_ids
-                 else candidate_goal_id, task_ids @ [ task_id ])
-               else candidate_goal_id, task_ids)
-            links
-        in
-        if !updated then links else links @ [ goal_id, [ task_id ] ]
-      in
+      let links = add_link_to_links links ~goal_id ~task_id in
       write_goal_task_links config links)
+;;
+
+let link_goalless_task_to_goal config ~goal_id ~task_id =
+  let goal_id = String.trim goal_id in
+  let task_id = String.trim task_id in
+  if String.equal goal_id "" || String.equal task_id "" then Ok ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      let links = read_goal_task_links config in
+      match goal_ids_for_task links ~task_id with
+      | [] ->
+        write_goal_task_links config (add_link_to_links links ~goal_id ~task_id);
+        Ok ()
+      | existing_goal_ids -> Error existing_goal_ids)
 ;;
 
 let link_tasks_to_goals config links =
@@ -230,7 +258,11 @@ let build_task_goal_index
        List.iter
          (fun task_id ->
             let existing = try Hashtbl.find tbl task_id with Not_found -> [] in
-            Hashtbl.replace tbl task_id (goal_id :: existing))
+            (* Preserve registry order for consumers that need a canonical
+               first-linked goal for a task. Multi-goal task links are legacy
+               invariant violations, but the projection must still be stable
+               and match the persisted link order. *)
+            Hashtbl.replace tbl task_id (existing @ [ goal_id ]))
          task_ids)
     goal_task_links;
   tbl

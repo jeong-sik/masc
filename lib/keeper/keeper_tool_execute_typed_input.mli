@@ -18,11 +18,12 @@
       [find . -name *.ml] because [*.ml] is a [find]-internal pattern, not a
       shell glob; it also accepts multiline `gh --body` text because the
       argument is passed directly to [gh].
-    - **Pipelines are explicit**.  [Pipeline.stages] enumerates each
-      [exec_stage] separately; [|]-delimited strings are never parsed.  A
+    - **Pipelines are explicit**.  The top-level JSON [pipeline] field
+      enumerates each [exec_stage] separately; [|]-delimited strings are never
+      parsed.  A
       standalone pipe operator token (["|"] / ["|&"]) in direct [Exec.argv] is
       rejected because it can only become bogus argv data (for example
-      [tail: |: No such file or directory]); use [Pipeline] instead.
+      [tail: |: No such file or directory]); use [pipeline] instead.
     - **Forbidden argv shapes**: [NUL], standalone pipe operator tokens, and
       shell redirection operator tokens.  [NUL] cannot be represented in an
       execve argv string.  Pipe/redirection operator tokens are rejected as
@@ -92,9 +93,10 @@ type validation_error =
     }
       (** Standalone shell pipeline operator token (["|"] or ["|&"]) in
           [Exec.argv].  These tokens are never interpreted as pipelines by
-          execve and commonly become bogus filenames/arguments.  Use
-          [Pipeline.stages]; payload tokens containing pipe characters (for
-          example ["foo|bar"] or multiline markdown bodies) remain valid. *)
+          execve and commonly become bogus filenames/arguments.  Use the
+          top-level JSON [pipeline] field; payload tokens containing pipe
+          characters (for example ["foo|bar"] or multiline markdown bodies)
+          remain valid. *)
   | Argv_contains_shell_redirection of {
       executable : string;
       index : int;

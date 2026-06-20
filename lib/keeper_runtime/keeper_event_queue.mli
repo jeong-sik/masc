@@ -75,6 +75,11 @@ and fusion_completion = {
     answer (or a failure label when [ok = false]); [board_post_id] correlates to
     the sink's board evidence post ("" when none was created). *)
 
+val fusion_completion_post_id : fusion_completion -> post_id
+(** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
+    sink created a board evidence post, otherwise falls back to
+    ["fusion-run:<run_id>"]. *)
+
 type stimulus = {
   post_id : post_id;
   urgency : urgency;
@@ -124,3 +129,15 @@ val drain_board_window : ?window_sec:float -> t -> stimulus list * t
     the queue.  Board signals are urgency-sorted; non-board stimuli and
     board signals outside the window remain in the returned queue in
     their original order. *)
+
+val stimulus_to_yojson : stimulus -> Yojson.Safe.t
+(** Stable JSON representation used by MASC-owned durable queue snapshots. *)
+
+val stimulus_of_yojson : Yojson.Safe.t -> (stimulus, string) result
+(** Parse a stimulus written by [stimulus_to_yojson]. *)
+
+val queue_to_yojson : t -> Yojson.Safe.t
+(** Stable JSON representation of the queue in FIFO order. *)
+
+val queue_of_yojson : Yojson.Safe.t -> (t, string) result
+(** Parse a queue written by [queue_to_yojson]. *)

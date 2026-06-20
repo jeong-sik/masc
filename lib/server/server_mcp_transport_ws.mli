@@ -3,7 +3,7 @@
     replacing SSE for dashboard / agent connections that
     need full-duplex.
 
-    External surface (17 entries + 3 types):
+    External surface (20 entries + 5 types):
     - {b session record} ({!ws_session}) — concrete because
       [server_ws_standalone] passes session values to
       {!read_inbound_message_frame} /
@@ -23,7 +23,10 @@
       {!session_count}, {!sessions}, {!with_sessions_rw},
       {!next_id}).
     - {b inbound framing}
-      ({!read_inbound_message_frame}).
+      ({!read_inbound_message_frame},
+      {!max_inbound_dispatches_per_session},
+      {!try_begin_inbound_dispatch},
+      {!finish_inbound_dispatch}).
     - {b dashboard JSON-RPC handlers}
       ({!dashboard_hello}, {!dashboard_subscribe},
       {!dashboard_unsubscribe}, {!dashboard_ping},
@@ -45,6 +48,8 @@
     [next_dashboard_seq], [valid_dashboard_slice] /
     [dashboard_slice_for_sse_type],
     [dashboard_session_result], [find_session],
+    [detach_session_for_close] / [close_detached_session_wsd] /
+    [update_ws_session_count_metric],
     [dashboard_snapshot_provider] cell,
     [dashboard_auth_success_payload],
     [verify_dashboard_token], [dashboard_snapshot],
@@ -93,6 +98,7 @@ type ws_session = {
   mutable dashboard_last_delta_at : float;
   mutable inbound_partial_text : Buffer.t option;
   mutable inbound_partial_text_bytes : int;
+  inbound_dispatches : int Atomic.t;
 }
 (** Per-WS session state.  Concrete record because
     [server_ws_standalone] threads the value through
@@ -211,6 +217,19 @@ type inbound_size_decision =
 (** Pure decision used before allocating inbound payload buffers and before
     appending fragmented messages. *)
 
+type inbound_dispatch_rejection = {
+  reason : string;
+  limit : int;
+  in_flight : int;
+}
+(** Structured reject reason for per-session inbound dispatch admission. *)
+
+type inbound_dispatch_admission =
+  | Inbound_dispatch_admitted of ws_session
+  | Inbound_dispatch_rejected of inbound_dispatch_rejection
+  | Inbound_dispatch_session_gone
+(** Result of attempting to reserve one per-session inbound dispatch slot. *)
+
 val read_inbound_message_frame :
   ws_session ->
   on_message:(string -> string -> unit) ->
@@ -222,6 +241,17 @@ val read_inbound_message_frame :
     accumulates partial-text fragments across [is_fin =
     false] frames, and invokes [on_message ~session_id
     ~body] when a final fragment arrives. *)
+
+val max_inbound_dispatches_per_session : unit -> int
+(** Maximum concurrent JSON-RPC dispatch fibers admitted from one WS session.
+    [0] disables the admission cap. *)
+
+val try_begin_inbound_dispatch : string -> inbound_dispatch_admission
+(** Reserve one inbound dispatch slot for [session_id].  Returns
+    {!Inbound_dispatch_session_gone} if the session is already detached. *)
+
+val finish_inbound_dispatch : ws_session -> unit
+(** Release a dispatch slot reserved by {!try_begin_inbound_dispatch}. *)
 
 val upgrade_connection :
   ?sw:Eio.Switch.t ->

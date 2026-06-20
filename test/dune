@@ -32,6 +32,7 @@
   test_rfc0259_reconcile
   test_keeper_memory_lane
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_no_signal_silence
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -126,6 +127,7 @@
   test_sse_stream
   test_health
   test_masc_oas_bridge_timeout_guard
+  test_fusion_oas_error_detail
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
@@ -329,6 +331,7 @@
   test_keeper_memory_lane
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
+  test_keeper_no_signal_silence
   test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -423,6 +426,7 @@
   test_sse_stream
   test_health
   test_masc_oas_bridge_timeout_guard
+  test_fusion_oas_error_detail
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
@@ -643,6 +647,14 @@
  (modules test_fusion_wake)
  (libraries masc_test_deps))
 
+; RFC-0266 Phase 3: masc_fusion_status tool — JSON projection of the run
+; registry + keeper-LLM visibility (Pass B Default gate). Needs masc.fusion_core
+; for the Fusion_run_registry module (not re-exported via masc_test_deps).
+(test
+ (name test_fusion_status_tool)
+ (modules test_fusion_status_tool)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 
 (test
@@ -656,6 +668,21 @@
  (name test_runtime_modality_reroute)
  (modules test_runtime_modality_reroute)
  (libraries masc_test_deps))
+
+; RFC-0267 Phase 1: registry goal_id projection onto the /execution task wire.
+
+(test
+ (name test_dashboard_goal_id_projection)
+ (modules test_dashboard_goal_id_projection)
+ (libraries masc_test_deps))
+
+; RFC-0267 Phase 2: validated task->goal assignment
+; (Task.Goal_assignment.set_task_goal).
+
+(test
+ (name test_goal_task_assignment)
+ (modules test_goal_task_assignment)
+ (libraries masc_test_deps unix))
 
 ; Group 2: Property-based tests (QCheck)
 
@@ -723,6 +750,7 @@
   test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
+  test_server_hibernation
   test_server_base_path_diagnostics
   test_server_timing
   test_server_startup_takeover
@@ -909,6 +937,7 @@
   test_dashboard_namespace_truth
   test_dashboard_snapshot
   test_server_runtime_bootstrap
+  test_server_hibernation
   test_server_base_path_diagnostics
   test_server_timing
   test_server_startup_takeover
@@ -1147,17 +1176,17 @@
 (test
  (name test_schedule_store)
  (modules test_schedule_store)
- (libraries masc_test_deps masc_schedule))
+ (libraries alcotest eio eio_main fs_compat masc_workspace masc_schedule unix yojson))
 
 (test
  (name test_schedule_service)
  (modules test_schedule_service)
- (libraries masc_test_deps masc_schedule))
+ (libraries alcotest eio eio_main fs_compat masc_workspace masc_schedule unix yojson))
 
 (test
  (name test_schedule_runner)
  (modules test_schedule_runner)
- (libraries masc_test_deps masc_schedule))
+ (libraries alcotest eio eio_main fs_compat masc_workspace masc_schedule unix yojson))
 
 (test
  (name test_schedule_consumer_dispatch)
@@ -1398,6 +1427,8 @@
 (include stanzas/test_board_api_e2e.inc)
 
 (include stanzas/test_board_persistence_load_contract.inc)
+
+(include stanzas/test_board_post_origin.inc)
 
 (include stanzas/test_board_sse_canonical_event_type.inc)
 

@@ -156,6 +156,19 @@ export interface BoardActorIdentity {
   runtime_agent_name?: string
 }
 
+/**
+ * RFC-0233 §7: originating-turn provenance of a board post. `turn_ref` is the
+ * join key "<trace_id>#<absolute_turn>" identical to the chat row the same turn
+ * produced (board post -> exact chat turn navigation). `fusion_run_id` is the
+ * distinct fusion run correlation id. All optional: legacy/system posts have no
+ * origin.
+ */
+export interface BoardPostOrigin {
+  turn_ref?: string | null
+  source?: string | null
+  fusion_run_id?: string | null
+}
+
 export interface BoardPost {
   id: string
   author: string
@@ -186,6 +199,7 @@ export interface BoardPost {
   moderation_status?: BoardModerationStatus
   contributor_quality?: BoardContributorQuality | null
   reactions?: BoardReactionSummary[]
+  origin?: BoardPostOrigin | null
 }
 
 export interface BoardComment {
@@ -873,10 +887,15 @@ export interface KeeperConversationEntry {
   text: string
   rawText?: string | null
   timestamp?: string | null
+  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" join key. Carries the
+  // chat message's originating turn so turn consumers can prefer exact matching
+  // over timestamp-window fallback.
+  turnRef?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   attachments?: KeeperConversationAttachment[]
   blocks?: ChatBlock[]
+  traceSteps?: ChatTraceStep[]
   details?: KeeperConversationDetails | null
   error?: string | null
   surface?: SurfaceRef | null

@@ -579,6 +579,14 @@ let direct_reply_visible_text body =
 let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args result =
   if get_bool args "direct_reply" false && tool_result_success result then (
     let user_content = get_string args "message" "" |> String.trim in
+    (* RFC-0233 §7: the join key the keeper minted into the reply payload,
+       threaded onto the persisted row of this agent-initiated / connector
+       turn (parse, don't repair — absent/malformed reads as None). *)
+    let turn_ref =
+      Keeper_turn_outcome.turn_ref_of_reply_payload
+        (try Some (Yojson.Safe.from_string (tool_result_body result))
+         with Yojson.Json_error _ -> None)
+    in
     match user_content, direct_reply_visible_text (tool_result_body result) with
     | "", _ | _, None -> ()
     | _, Some assistant_content ->
@@ -601,6 +609,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
             ~user_attachments:[]
             ~surface:Surface_ref.Agent
             ~assistant_content
+            ?turn_ref
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent"
             ~content:assistant_content
@@ -612,6 +621,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
             ~keeper_name:name
             ~content:assistant_content
             ~surface:(Surface_ref.Gate { label = channel; address = [] })
+            ?turn_ref
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel
             ~content:assistant_content

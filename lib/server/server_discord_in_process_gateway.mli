@@ -9,9 +9,11 @@
     2. For each accepted [Message_create] event, looks up the
        channel→keeper binding
        ({!Channel_gate_discord_state.keeper_for_channel}), runs the
-       keeper turn through {!Channel_gate.handle_inbound}, and posts
-       the reply back to the same channel via
-       {!Channel_gate_discord_state.send_message}.
+       keeper turn through {!Channel_gate.handle_inbound_streaming},
+       projects redacted text snapshots by posting/editing one Discord
+       reply, and falls back to
+       {!Channel_gate_discord_state.send_message} when streaming never
+       starts or fails.
 
     Always-on by design: there is no [MASC_DISCORD_BUILTIN]-style
     toggle. The legacy Python sidecar is gone — there is no

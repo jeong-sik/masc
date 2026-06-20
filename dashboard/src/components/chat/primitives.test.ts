@@ -4,9 +4,9 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatBlock, KeeperConversationEntry, KeeperUserInputBlock } from '../../types'
+import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
-import { ChatComposer, ChatTranscript } from './primitives'
+import { ChatComposer, ChatTranscript, type ChatComposerSendPayload } from './primitives'
 import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
 import { fetchBoardPost } from '../../api/board'
@@ -1182,7 +1182,7 @@ describe('ChatComposer multimodal', () => {
 
   function renderComposer(props: {
     draft?: string
-    onSend?: (payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => void
+    onSend?: (payload: ChatComposerSendPayload) => void
     disabled?: boolean
     streaming?: boolean
   } = {}) {
@@ -1322,6 +1322,81 @@ describe('ChatComposer multimodal', () => {
       },
       { type: 'text', text: 'check this <tag>' },
     ])
+    const clientActionId = onSend.mock.calls[0]?.[0].clientActionId
+    expect(clientActionId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(clientActionId).not.toContain('check this <tag>')
+    expect(clientActionId).not.toContain('att-img')
+  })
+
+  it('mints content-independent client action ids for repeated sends', async () => {
+    const onSend = vi.fn()
+    renderComposer({ draft: 'same text', onSend })
+
+    const sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(2)
+    const firstId = onSend.mock.calls[0]?.[0].clientActionId
+    const secondId = onSend.mock.calls[1]?.[0].clientActionId
+    expect(firstId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(secondId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(firstId).not.toBe(secondId)
+    expect(firstId).not.toContain('same text')
+    expect(secondId).not.toContain('same text')
+  })
+
+  it('does not derive client action ids from attachment payloads', async () => {
+    const baseAttachment: Omit<KeeperConversationAttachment, 'data'> = {
+      id: 'att-same',
+      type: 'image',
+      name: 'screen.png',
+      size: 1024,
+      mimeType: 'image/png',
+      dims: '100×100',
+    }
+    vi.mocked(collectAttachments)
+      .mockResolvedValueOnce({
+        attachments: [{ ...baseAttachment, data: 'data:image/png;base64,AAAA' }],
+        errors: [],
+      })
+      .mockResolvedValueOnce({
+        attachments: [{ ...baseAttachment, data: 'data:image/png;base64,BBBB' }],
+        errors: [],
+      })
+
+    const onSend = vi.fn()
+    renderComposer({ draft: 'same text', onSend })
+
+    let fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['a'], 'screen.png', { type: 'image/png' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    let sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['b'], 'screen.png', { type: 'image/png' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(2)
+    const firstId = onSend.mock.calls[0]?.[0].clientActionId
+    const secondId = onSend.mock.calls[1]?.[0].clientActionId
+    expect(firstId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(secondId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(firstId).not.toBe(secondId)
+    expect(firstId).not.toContain('same text')
+    expect(firstId).not.toContain('att-same')
+    expect(firstId).not.toContain('AAAA')
+    expect(secondId).not.toContain('BBBB')
   })
 
   it('preserves audio attachments as audio user blocks', async () => {
@@ -1361,6 +1436,8 @@ describe('ChatComposer multimodal', () => {
         size: 2048,
       },
     ])
+    expect(onSend.mock.calls[0]?.[0].clientActionId).toMatch(/^composer-send-\d+-\d+$/)
+    expect(onSend.mock.calls[0]?.[0].clientActionId).not.toContain('att-audio')
   })
 
   it('keeps send disabled until there is content', () => {
@@ -1554,8 +1631,95 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(cards[0]?.textContent).toContain('작업 과정')
     expect(cards[0]?.textContent).toContain('2단계')
     expect(cards[0]?.textContent).toContain('도구 2')
+    expect(cards[0]?.textContent).toContain('keeper_board_list')
+    expect(cards[0]?.textContent).toContain('keeper_tasks_list')
     // Grouped surface keeps no standalone per-row tool bubbles.
     expect(container.querySelectorAll('[data-chat-variant="tool-call"]').length).toBe(0)
+  })
+
+  it('keeps grouped tool calls connected to the following assistant answer', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'keeper_board_list', turnRef: 'trace-a#1' }),
+          entry({
+            id: 'a',
+            text: '도구 결과로 답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-a#1',
+            traceSteps: [{ kind: 'think', text: 'reading tool output' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    expect(bundle?.querySelector('[data-chat-work-trace]')).not.toBeNull()
+    expect(bundle?.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
+    expect(bundle?.textContent).toContain('Thinking')
+    expect(bundle?.textContent).toContain('reading tool output')
+    expect(bundle?.textContent).toContain('keeper_board_list')
+    expect(bundle?.textContent).toContain('도구 결과로 답합니다')
+  })
+
+  it('does not attach a turn_ref-mismatched tool run to the following assistant', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'keeper_board_list', turnRef: 'trace-a#1' }),
+          entry({
+            id: 'a',
+            text: '다른 턴 답변',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-b#2',
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-tool-trace]')
+    expect(container.querySelector('[data-chat-turn-bundle]')).toBeNull()
+    expect(trace?.textContent).toContain('keeper_board_list')
+    expect(trace?.textContent).not.toContain('다른 턴 답변')
+  })
+
+  it('renders assistant thinking as 작업 과정 even without tool calls', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '곧 답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: 'checking context' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    expect(bundle?.textContent).toContain('작업 과정')
+    expect(bundle?.textContent).toContain('1단계')
+    expect(bundle?.textContent).toContain('Thinking')
+    expect(bundle?.textContent).toContain('checking context')
+    expect(bundle?.textContent).toContain('곧 답합니다')
   })
 
   it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
@@ -1586,8 +1750,6 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
       container,
     )
     expect(container.querySelector('[data-chat-tool-trace]')?.textContent).toContain('실패 1')
-    ;(container.querySelector('.chat-block-trace-hd') as HTMLButtonElement).click()
-    await flushUi()
     const step = container.querySelector('[data-chat-trace-step="tool"]') as HTMLElement
     expect(step.querySelector('.chat-block-tstep-status.bad')).not.toBeNull()
     ;(step.querySelector('.chat-block-tstep-row') as HTMLElement).click()

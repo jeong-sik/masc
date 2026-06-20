@@ -58,6 +58,7 @@ type runtime_handler =
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
   | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -148,6 +149,7 @@ let runtime_handler_to_string = function
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
+  | Tool_masc_fusion_status -> "tool_masc_fusion_status"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
@@ -777,11 +779,22 @@ let masc_fusion_schema =
     ]
 ;;
 
+let masc_fusion_status_schema =
+  object_schema
+    [ property
+        "run_id"
+        "string"
+        "Optional fusion run id (the run_id returned by masc_fusion). When \
+         given, returns that single run's status; when omitted, lists every \
+         tracked run (in-progress and recently completed)."
+    ]
+;;
+
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
-      ()
+      ?(visibility = Tool_catalog.Hidden) ()
   =
   policy
-    ~visibility:Tool_catalog.Hidden
+    ~visibility
     ~readonly:true
     ~effect_domain:Tool_catalog.Read_only
     ~approval:No_approval
@@ -1183,6 +1196,25 @@ let internal_descriptors : t list =
          쓰면 키퍼가 도구를 못 봐 자율 호출이 불가능해 RFC 의도와 모순된다. *)
       ~policy:(write_in_process_policy ~visibility:Tool_catalog.Default ())
       ~handler:Tool_masc_fusion_dispatch
+    (* ── fusion status (RFC-0266 §7 Phase 3) ──────────────────── *)
+  ; in_process_descriptor
+      ~id:"masc.fusion.status"
+      ~name:"masc_fusion_status"
+      ~description:
+        "Read the status of out-of-band fusion deliberations started by \
+         masc_fusion. With no argument, lists tracked runs (in-progress and \
+         recently completed); with a run_id, returns that single run. Each run \
+         reports keeper, preset, started_at (unix seconds), and status \
+         (running | completed | failed). Read-only — does not start a \
+         deliberation. In-memory and server-lifetime: runs do not survive a \
+         restart."
+      ~input_schema:masc_fusion_status_schema
+      (* read-only, but visibility=Default so the keeper LLM can poll its own
+         fusion runs (sibling to masc_fusion, which is also Default). Without
+         the override read_only_in_process_policy defaults to Hidden and the
+         keeper could not see the tool. *)
+      ~policy:(read_only_in_process_policy ~visibility:Tool_catalog.Default ())
+      ~handler:Tool_masc_fusion_status
     (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
   ; voice_descriptor
       "keeper_voice_speak"
@@ -1194,8 +1226,9 @@ let internal_descriptors : t list =
       ~readonly:true
   ; voice_descriptor
       "keeper_voice_agent"
-      "Invoke the realtime voice agent for the current keeper."
-      ~readonly:false
+      "Read the keeper voice capability, assigned voice, and active turn-based \
+       session state. This does not start a realtime audio stream."
+      ~readonly:true
   ; voice_descriptor
       "keeper_voice_sessions"
       "List active voice sessions for this keeper."

@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
+import { ChevronDown, MessageCircle, PanelRightClose, PanelRightOpen, Send, Sparkles, X } from 'lucide-preact'
 import { persistentSignal } from '../lib/persistent-signal'
 import { globalShortcutManager } from '../lib/global-shortcut-manager'
 import { route } from '../router'
@@ -39,13 +40,6 @@ interface DockStreaming {
   full: string
   sug: string[]
 }
-
-const SPARK_SVG = html`
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 3l1.7 4.8L18.5 9.5l-4.8 1.7L12 16l-1.7-4.8L5.5 9.5l4.8-1.7z" />
-    <path d="M18.5 14l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z" />
-  </svg>
-`
 
 const DOCK_STARTERS: string[] = [
   '이 화면 요약해줘',
@@ -425,25 +419,29 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
         class=${`dock-head ${docked ? '' : 'drag'}`}
         onMouseDown=${docked ? undefined : drag}
       >
-        <div class="dock-title"><span class="dock-spark">${SPARK_SVG}</span>Chat</div>
+        <div class="dock-title"><span class="dock-spark"><${Sparkles} size=${16} aria-hidden="true" /></span>Chat</div>
         <div class="spacer"></div>
         <button
           type="button"
           class="dock-iconbtn"
+          aria-label=${docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'}
           title=${docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'}
           onMouseDown=${(e: MouseEvent) => e.stopPropagation()}
           onClick=${() => dock.setMode(docked ? 'float' : 'dock')}
         >
-          ${docked ? '⧉' : '▭'}
+          ${docked
+            ? html`<${PanelRightOpen} size=${15} aria-hidden="true" />`
+            : html`<${PanelRightClose} size=${15} aria-hidden="true" />`}
         </button>
         <button
           type="button"
           class="dock-iconbtn"
+          aria-label="닫기"
           title="닫기 (Esc)"
           onMouseDown=${(e: MouseEvent) => e.stopPropagation()}
           onClick=${dock.close}
         >
-          ✕
+          <${X} size=${15} aria-hidden="true" />
         </button>
       </div>
 
@@ -458,7 +456,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
           >
             <${DockAvatar} keeper=${keeper} size=${20} beat=${statusLooksRunning(keeper.status)} />
             <span class="nm">${keeper.kr}</span>
-            <span class="cv">▾</span>
+            <span class="cv"><${ChevronDown} size=${12} aria-hidden="true" /></span>
           </button>
           ${pickOpen
             ? html`
@@ -505,7 +503,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
         ${msgs.length === 0 && !streaming
           ? html`
               <div class="dock-empty">
-                <div class="ico">◈</div>
+                <div class="ico"><${MessageCircle} size=${26} aria-hidden="true" /></div>
                 <div class="t">${ctx.label}</div>
                 <div class="s">이 화면에 대해 ${keeper.kr}에게 바로 물어보세요. 같은 맥락을 보고 답합니다.</div>
                 <div class="dsug" style=${{ width: '100%' }}>
@@ -548,10 +546,11 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
           <button
             type="button"
             class="dock-send"
+            aria-label="메시지 전송"
             disabled=${!val.trim() || !!dock.streaming.value}
             onClick=${() => doSend()}
           >
-            ↑
+            <${Send} size=${14} aria-hidden="true" />
           </button>
         </div>
         <div class="dock-foot">
@@ -571,10 +570,9 @@ export function CopilotDockFab({ dock }: { dock: CopilotDockApi }) {
       onClick=${dock.open}
       data-testid="copilot-dock-fab"
       aria-label="Open Chat Dock"
+      title="Chat Dock 열기 (⌘J)"
     >
-      <span class="spark">${SPARK_SVG}</span>
-      <span>Chat</span>
-      <kbd>⌘J</kbd>
+      <span class="spark"><${MessageCircle} size=${22} strokeWidth=${2.4} aria-hidden="true" /></span>
     </button>
   `
 }
@@ -589,7 +587,7 @@ export function CopilotDockTopBarButton({ dock }: { dock: CopilotDockApi }) {
       data-testid="copilot-dock-topbar-button"
       aria-label="Toggle Chat Dock"
     >
-      <span class="spark">${SPARK_SVG}</span>
+      <${MessageCircle} class="spark" size=${14} strokeWidth=${2.2} aria-hidden="true" />
       <span>Chat</span>
       <kbd>⌘J</kbd>
     </button>

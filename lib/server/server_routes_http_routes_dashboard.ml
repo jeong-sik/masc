@@ -256,6 +256,23 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  (* RFC-0266 §7 Phase 4: read-only snapshot of the in-memory fusion run registry
+     (in-progress + recently completed). The fusion panel fetches this on load and
+     re-fetches on the [fusion_run_status] SSE event. Registry reads are O(runs)
+     in-memory, so no Dashboard_cache layer; each run serializes through the shared
+     Fusion_run_registry.run_to_yojson so the shape matches the SSE delta. *)
+  |> Http.Router.get "/api/v1/dashboard/fusion-runs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let runs = Fusion_run_registry.list_runs Fusion_run_registry.global in
+         let json =
+           `Assoc
+             [ ("generated_at", `String (Masc_domain.now_iso ()))
+             ; ("count", `Int (List.length runs))
+             ; ("runs", `List (List.map Fusion_run_registry.run_to_yojson runs))
+             ]
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/branches" (fun request reqd ->
        with_public_read (fun state req reqd ->
          (* /branches spawns `git -C <repo> branch` via Exec_gate. Cache +

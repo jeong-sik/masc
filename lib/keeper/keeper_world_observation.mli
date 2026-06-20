@@ -139,7 +139,6 @@ type turn_reason =
   | Task_reactive_cooldown_elapsed
   | Never_started
   | Min_interval_elapsed
-  | Entropic_oscillation
 
 (** Typed reason for skipping a keeper turn. *)
 type skip_reason =
@@ -324,17 +323,6 @@ val provider_capacity_blocked_task_count :
   claimable_task_count:int ->
   unit ->
   int
-
-val entropic_oscillation_interval_sec : int
-(** Minimum scheduled-autonomous silence before entropy injection can wake a
-    keeper. *)
-
-val entropic_oscillation_probability_percent : int
-(** Percent chance sampled after the interval gate has elapsed. *)
-
-val should_inject_entropic_oscillation :
-  since_last_scheduled_autonomous:int -> draw_percent:int -> bool
-(** Deterministic policy predicate for the stochastic entropy wakeup. *)
 
 val keeper_cycle_decision :
   ?provider_cooldown_remaining_sec:

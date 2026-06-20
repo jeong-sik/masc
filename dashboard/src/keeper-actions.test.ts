@@ -31,6 +31,9 @@ const {
   })),
   streamKeeperMessage: vi.fn(),
 }))
+const { fetchKeeperToolCalls } = vi.hoisted(() => ({
+  fetchKeeperToolCalls: vi.fn(async () => ({ entries: [] })),
+}))
 
 vi.mock('./api/mcp', () => ({ callMcpTool }))
 vi.mock('./api/core', () => ({ runOperatorAction }))
@@ -43,22 +46,28 @@ vi.mock('./api/keeper', () => ({
   queuedKeeperMessageToReply,
   streamKeeperMessage,
 }))
+vi.mock('./api/dashboard', () => ({ fetchKeeperToolCalls }))
 vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard }))
 
 import {
+  _resetLiveSendRequestOwnersForTests,
+  activeStreamEntryId,
   activeKeeperName,
   keeperActionErrors,
   keeperHydrating,
   keeperProbing,
   keeperRecovering,
+  keeperSending,
   keeperStatusDetails,
   keeperThreads,
 } from './keeper-state'
 import {
+  _resetKeeperThreadMessageSendGuardsForTests,
   _resetChatHydrationForTests,
   dispatchKeeperInterjectAction,
   hydrateKeeperChatHistory,
   hydrateKeeperStatus,
+  isKeeperThreadMessageSendInFlight,
   loadFullKeeperHistory,
   noteKeeperChatAppended,
   probeKeeperRuntime,
@@ -75,6 +84,11 @@ import {
 import { KEEPER_HISTORY_TAIL_MESSAGES } from './config/constants'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperConversationAttachment, KeeperStatusDetail } from './types'
+
+beforeEach(() => {
+  fetchKeeperToolCalls.mockReset()
+  fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
+})
 
 describe('noteKeeperChatAppended', () => {
   beforeEach(() => {
@@ -163,6 +177,14 @@ describe('hydrateKeeperChatHistory', () => {
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
   })
 
+  it('hydrates tool outputs even when the chat history is empty', async () => {
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await hydrateKeeperChatHistory('echo')
+
+    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
+  })
+
   it('allows a retry after a failed fetch', async () => {
     fetchKeeperChatHistory.mockRejectedValueOnce(new Error('HTTP 502'))
     fetchKeeperChatHistory.mockResolvedValueOnce([
@@ -183,6 +205,8 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
     _clearPendingKeeperChatRequestsForTests()
+    _resetKeeperThreadMessageSendGuardsForTests()
+    _resetLiveSendRequestOwnersForTests()
     streamKeeperMessage.mockReset()
     fetchKeeperChatHistory.mockReset()
     fetchQueuedKeeperMessageResult.mockReset()
@@ -208,6 +232,218 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       return { terminal }
     }
   }
+
+  function abortError(): Error {
+    const err = new Error('Aborted')
+    err.name = 'AbortError'
+    return err
+  }
+
+  it('does not content-deduplicate repeated same-text sends', async () => {
+    streamKeeperMessage
+      .mockImplementationOnce(async (
+        _name: string,
+        _message: string,
+        opts: { signal?: AbortSignal },
+      ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      }))
+      .mockResolvedValueOnce({ terminal: true })
+
+    const firstSend = sendKeeperThreadMessage('echo', '진행 상황?').catch(err => err)
+    await Promise.resolve()
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect((keeperThreads.value.echo ?? []).filter(entry => entry.role === 'user')).toHaveLength(2)
+    expect((keeperThreads.value.echo ?? []).filter(entry => entry.role === 'assistant')).toHaveLength(2)
+    const firstError = await firstSend
+    expect(firstError).toBeInstanceOf(Error)
+    expect(firstError.name).toBe('AbortError')
+  })
+
+  it('dedupes repeated firing of the same client action id while in flight', async () => {
+    let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage
+      .mockImplementationOnce(async () => new Promise<{ terminal: boolean }>(resolve => {
+        resolveStream = resolve
+      }))
+      .mockResolvedValueOnce({ terminal: true })
+
+    const firstSend = sendKeeperThreadMessage('echo', '진행 상황?', {
+      clientActionId: 'send-button-click-1',
+    })
+    await Promise.resolve()
+
+    await sendKeeperThreadMessage('echo', '진행 상황?', {
+      clientActionId: 'send-button-click-1',
+    })
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(1)
+    expect((keeperThreads.value.echo ?? []).filter(entry => entry.role === 'assistant')).toHaveLength(1)
+
+    resolveStream({ terminal: true })
+    await firstSend
+
+    await sendKeeperThreadMessage('echo', '진행 상황?', {
+      clientActionId: 'send-button-click-2',
+    })
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps queued client action ids guarded while a batched queue send is in flight', async () => {
+    let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementationOnce(async () => new Promise<{ terminal: boolean }>(resolve => {
+      resolveStream = resolve
+    }))
+
+    const firstSend = sendKeeperThreadMessage('echo', 'queued drafts', {
+      clientActionIds: ['queue-click-1', 'queue-click-2'],
+    })
+    await Promise.resolve()
+
+    expect(isKeeperThreadMessageSendInFlight('echo', 'queue-click-1')).toBe(true)
+    expect(isKeeperThreadMessageSendInFlight('echo', 'queue-click-2')).toBe(true)
+
+    await sendKeeperThreadMessage('echo', 'queued drafts', {
+      clientActionId: 'queue-click-1',
+    })
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(1)
+
+    resolveStream({ terminal: true })
+    await firstSend
+
+    expect(isKeeperThreadMessageSendInFlight('echo', 'queue-click-1')).toBe(false)
+    expect(isKeeperThreadMessageSendInFlight('echo', 'queue-click-2')).toBe(false)
+  })
+
+  it('does not suppress the same text when the attachment payload differs', async () => {
+    const firstAttachment: KeeperConversationAttachment = {
+      id: 'att-first',
+      type: 'image',
+      name: 'first.png',
+      size: 128,
+      mimeType: 'image/png',
+      data: 'data:image/png;base64,first',
+    }
+    const secondAttachment: KeeperConversationAttachment = {
+      id: 'att-second',
+      type: 'image',
+      name: 'second.png',
+      size: 256,
+      mimeType: 'image/png',
+      data: 'data:image/png;base64,second',
+    }
+    streamKeeperMessage
+      .mockImplementationOnce(async (
+        _name: string,
+        _message: string,
+        opts: { signal?: AbortSignal },
+      ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      }))
+      .mockResolvedValueOnce({ terminal: true })
+
+    const firstSend = sendKeeperThreadMessage('echo', 'describe this', {
+      attachments: [firstAttachment],
+    }).catch(err => err)
+    await Promise.resolve()
+
+    await sendKeeperThreadMessage('echo', 'describe this', {
+      attachments: [secondAttachment],
+    })
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect(streamKeeperMessage.mock.calls[1]?.[2]).toEqual(expect.objectContaining({
+      attachments: [secondAttachment],
+    }))
+    const firstError = await firstSend
+    expect(firstError).toBeInstanceOf(Error)
+    expect(firstError.name).toBe('AbortError')
+  })
+
+  it('keeps a replacement stream active when the superseded send aborts later', async () => {
+    let resolveSecond: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage
+      .mockImplementationOnce(async (
+        _name: string,
+        _message: string,
+        opts: { signal?: AbortSignal },
+      ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => { reject(abortError()) }, { once: true })
+      }))
+      .mockImplementationOnce(async () => new Promise<{ terminal: boolean }>(resolve => {
+        resolveSecond = resolve
+      }))
+
+    const firstSend = sendKeeperThreadMessage('echo', 'first').catch(err => err)
+    await Promise.resolve()
+
+    const secondSend = sendKeeperThreadMessage('echo', 'second')
+    await Promise.resolve()
+
+    const firstError = await firstSend
+    expect(firstError).toBeInstanceOf(Error)
+    expect(firstError.name).toBe('AbortError')
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect(keeperSending.value.echo).toBe(true)
+    const activeAssistant = (keeperThreads.value.echo ?? [])
+      .find(entry => entry.role === 'assistant' && entry.delivery === 'sending')
+    expect(activeStreamEntryId('echo')).toBe(activeAssistant?.id)
+
+    resolveSecond({ terminal: true })
+    await secondSend
+    expect(keeperSending.value.echo).toBe(false)
+    expect(activeStreamEntryId('echo')).toBeNull()
+  })
+
+  it('does not duplicate the pending assistant when a live send is still streaming and the panel remounts', async () => {
+    // A send whose SSE stream stays open (reply pending). The mock fires the
+    // queue-request event synchronously, then returns a promise we resolve
+    // only at cleanup, so the send is still in-flight during the "remount".
+    let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>(resolve => {
+        resolveStream = resolve
+      })
+    })
+
+    // Start the send without awaiting — the stream stays live.
+    const sendPromise = sendKeeperThreadMessage('echo', '진행 상황?')
+    await Promise.resolve()
+
+    // Preconditions: one optimistic assistant entry + the request persisted.
+    const before = (keeperThreads.value.echo ?? []).filter(e => e.role === 'assistant')
+    expect(before).toHaveLength(1)
+    expect(before[0]?.id).toMatch(/^reply-\d+-\d+$/)
+    expect(before[0]?.delivery).toBe('queued')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toHaveLength(1)
+
+    // SPA remount: the mount effect re-runs resume while the send is live.
+    await resumePendingKeeperChatRequests('echo')
+
+    // Fix: no second handler — exactly one assistant entry, no pending-* twin,
+    // and resume started no competing poll loop for the owned request.
+    const after = (keeperThreads.value.echo ?? []).filter(e => e.role === 'assistant')
+    expect(after).toHaveLength(1)
+    expect(after.some(e => e.id === 'pending-assistant-kmsg_echo_1')).toBe(false)
+    expect(fetchQueuedKeeperMessageResult).not.toHaveBeenCalled()
+
+    // Cleanup: end the stream terminally so the send settles.
+    resolveStream({ terminal: true })
+    await sendPromise
+  })
 
   it('marks the reply interrupted when the stream ends without a terminal event', async () => {
     streamKeeperMessage.mockImplementation(emitting([
@@ -243,6 +479,21 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+
+  it('hydrates tool outputs when a live stream finishes a tool call', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      { type: 'TOOL_CALL_START', toolCallId: 'tc-1', toolCallName: 'keeper_board_list' },
+      { type: 'TOOL_CALL_END', toolCallId: 'tc-1' },
+      { type: 'TEXT_MESSAGE_START' },
+      { type: 'TEXT_MESSAGE_CONTENT', delta: '완료' },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '진행 상황?')
+
+    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
   })
 
   it('derives text and media user blocks when only attachments are supplied', async () => {
@@ -412,6 +663,43 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['assistant', '여기까지 했습니다.', 'delivered'],
     ])
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+  })
+
+  it('resumes repeated same-message sends as distinct request ids', async () => {
+    const submittedAt = Date.UTC(2026, 5, 15, 9, 0, 0)
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: 'status?',
+      submittedAt,
+    })
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_2',
+      keeperName: 'echo',
+      message: 'status?',
+      submittedAt,
+    })
+    fetchQueuedKeeperMessageResult.mockImplementation(async (requestId: string) => ({
+      requestId,
+      keeperName: 'echo',
+      status: 'done',
+      ok: true,
+      result: { reply: requestId === 'kmsg_echo_1' ? 'first reply' : 'second reply' },
+    }))
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledTimes(2)
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenNthCalledWith(1, 'kmsg_echo_1')
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenNthCalledWith(2, 'kmsg_echo_2')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    expect((keeperThreads.value.echo ?? []).map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', 'status?', 'delivered'],
+      ['assistant', 'first reply', 'delivered'],
+      ['user', 'status?', 'delivered'],
+      ['assistant', 'second reply', 'delivered'],
+    ])
   })
 
   it('marks a recovered orphan request as lost instead of polling forever', async () => {

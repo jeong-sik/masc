@@ -32,6 +32,105 @@ let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
+type model_catalog_env_resolution =
+  { path : string
+  ; source : string
+  }
+
+let nonempty_env env name =
+  match env name with
+  | Some value ->
+    let value = String.trim value in
+    if String.equal value "" then None else Some value
+  | None -> None
+
+let existing_file path =
+  let path = String.trim path in
+  if String.equal path "" then
+    None
+  else
+    try
+      if Sys.file_exists path && not (Sys.is_directory path) then Some path else None
+    with
+    | Sys_error _ -> None
+
+let rec find_in_parents filename dir depth =
+  if depth <= 0 then
+    None
+  else
+    let path = Filename.concat dir filename in
+    match existing_file path with
+    | Some _ as found -> found
+    | None ->
+      let parent = Filename.dirname dir in
+      if String.equal parent dir then None else find_in_parents filename parent (depth - 1)
+
+let find_catalog_in_parents ~source dir =
+  match find_in_parents "models.toml" dir 10 with
+  | Some path -> Some { path; source = source ^ ":models.toml" }
+  | None ->
+    (match find_in_parents "oas-models.toml" dir 10 with
+     | Some path -> Some { path; source = source ^ ":oas-models.toml" }
+     | None -> None)
+
+let absolute_or_cwd ~cwd path =
+  let path = String.trim path in
+  if String.equal path "" then
+    None
+  else if String.length path > 0 && Char.equal path.[0] '/' then
+    Some path
+  else
+    Some (Filename.concat cwd path)
+
+let argv0_parent_dir ~cwd argv0 =
+  match absolute_or_cwd ~cwd argv0 with
+  | None -> None
+  | Some path -> Some (Filename.dirname path)
+
+let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
+  match nonempty_env env "OAS_MODEL_CATALOG" with
+  | Some path -> Some { path; source = "OAS_MODEL_CATALOG" }
+  | None ->
+    (match nonempty_env env "MASC_MODEL_CATALOG" with
+     | Some path -> Some { path; source = "MASC_MODEL_CATALOG" }
+     | None ->
+       let cwd =
+         match cwd with
+         | Some cwd when String.trim cwd <> "" -> cwd
+         | _ ->
+           (try Sys.getcwd () with
+            | Sys_error _ -> ".")
+       in
+       let argv0 =
+         match argv0 with
+         | Some argv0 -> argv0
+         | None ->
+           (match Array.to_list Sys.argv with
+            | head :: _ -> head
+            | [] -> "")
+       in
+       (match find_catalog_in_parents ~source:"cwd-parent" cwd with
+        | Some _ as found -> found
+        | None ->
+          (match argv0_parent_dir ~cwd argv0 with
+           | Some dir -> find_catalog_in_parents ~source:"argv0-parent" dir
+           | None -> None)))
+
+let configure_oas_model_catalog_env () =
+  match resolve_oas_model_catalog_path () with
+  | Some { source = "OAS_MODEL_CATALOG"; path } as resolution ->
+    Log.Misc.info "model_catalog: OAS_MODEL_CATALOG=%s already configured" path;
+    resolution
+  | Some { source; path } as resolution ->
+    Unix.putenv "OAS_MODEL_CATALOG" path;
+    Log.Misc.info "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s" path source;
+    resolution
+  | None ->
+    Log.Misc.warn
+      "model_catalog: no OAS model catalog resolved; capability lookups may fall \
+       back to provider_default";
+    None
+
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -86,19 +185,7 @@ let init_runtime_context env =
   let domain_mgr = Eio.Stdenv.domain_mgr env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let fs = Eio.Stdenv.fs env in
-  (* MASC_MODEL_CATALOG as convenience alias for OAS_MODEL_CATALOG.
-     OAS auto-discovers from ~/.masc/config/models.toml, cwd parents,
-     and $OAS_MODEL_CATALOG. Setting MASC_MODEL_CATALOG forwards it
-     so masc operators don't need to know OAS internals.
-     OAS lazily loads the catalog on first model capability query. *)
-  (match Sys.getenv_opt "MASC_MODEL_CATALOG" with
-   | Some path when Sys.getenv_opt "OAS_MODEL_CATALOG" = None ->
-     Unix.putenv "OAS_MODEL_CATALOG" path;
-     Log.Misc.info "model_catalog: MASC_MODEL_CATALOG=%s forwarded to OAS" path
-   | Some _ ->
-     Log.Misc.info "model_catalog: OAS_MODEL_CATALOG already set, MASC_MODEL_CATALOG ignored"
-   | None ->
-     ());
+  let (_ : model_catalog_env_resolution option) = configure_oas_model_catalog_env () in
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
 let metric_keeper_runtime_config_load_failures =
@@ -848,38 +935,97 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->
-          Eio.Fiber.fork ~sw (fun () ->
-            try
-              let response_json =
-                Mcp_eio.handle_request ~clock ~sw
-                  ~mcp_session_id:ws_session_id state body_str
-              in
-              let response_str = Yojson.Safe.to_string response_json in
-              if response_str <> "null" then begin
-                (* #10648: split the single conflated WARN into two paths so
-                   operators can distinguish "client disconnected" (expected,
-                   noise) from "transport write failed" (real bug warranting
-                   attention). *)
-                match
-                  Server_mcp_transport_ws.send_to_session_result
-                    ws_session_id response_str
-                with
-                | Sent -> ()
-                | Session_gone ->
-                    Log.Server.debug
-                      "WS send dropped: session=%s gone (client disconnected, \
-                       expected)"
-                      ws_session_id
-                | Send_failed ->
-                    Log.Server.warn
-                      "WS send_to_session WRITE FAILED for session=%s \
-                       (transport-side error; session cleaned up)"
-                      ws_session_id
-              end
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)));
+          let jsonrpc_id_opt body =
+            match Yojson.Safe.from_string body with
+            | `Assoc fields -> (
+                match List.assoc_opt "id" fields with
+                | Some ((`Int _ | `String _ | `Null) as id) -> Some id
+                | Some _ -> Some `Null
+                | None -> None)
+            | _ -> None
+            | exception _ -> None
+          in
+          let send_overloaded_response rejection =
+            Log.Server.debug
+              "WS inbound dispatch rejected: session=%s reason=%s in_flight=%d limit=%d"
+              ws_session_id
+              rejection.Server_mcp_transport_ws.reason
+              rejection.in_flight
+              rejection.limit;
+            match jsonrpc_id_opt body_str with
+            | None -> ()
+            | Some id ->
+                let response_json =
+                  `Assoc
+                    [
+                      ("jsonrpc", `String "2.0");
+                      ("id", id);
+                      ( "error",
+                        `Assoc
+                          [
+                            ("code", `Int (-32000));
+                            ( "message",
+                              `String
+                                "WebSocket inbound dispatch limit exceeded" );
+                            ( "data",
+                              `Assoc
+                                [
+                                  ("reason", `String rejection.reason);
+                                  ("limit", `Int rejection.limit);
+                                  ("in_flight", `Int rejection.in_flight);
+                                ] );
+                          ] );
+                    ]
+                in
+                let response_str = Yojson.Safe.to_string response_json in
+                ignore
+                  (Server_mcp_transport_ws.send_to_session_result
+                     ws_session_id response_str)
+          in
+          match Server_mcp_transport_ws.try_begin_inbound_dispatch ws_session_id with
+          | Server_mcp_transport_ws.Inbound_dispatch_session_gone ->
+              Log.Server.debug
+                "WS inbound dispatch dropped: session=%s gone before dispatch"
+                ws_session_id
+          | Server_mcp_transport_ws.Inbound_dispatch_rejected rejection ->
+              send_overloaded_response rejection
+          | Server_mcp_transport_ws.Inbound_dispatch_admitted session ->
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio_guard.protect
+                  ~finally:(fun () ->
+                    Server_mcp_transport_ws.finish_inbound_dispatch session)
+                  (fun () ->
+                    try
+                      let response_json =
+                        Mcp_eio.handle_request ~clock ~sw
+                          ~mcp_session_id:ws_session_id state body_str
+                      in
+                      let response_str = Yojson.Safe.to_string response_json in
+                      if response_str <> "null" then begin
+                        (* #10648: split the single conflated WARN into two paths so
+                           operators can distinguish "client disconnected" (expected,
+                           noise) from "transport write failed" (real bug warranting
+                           attention). *)
+                        match
+                          Server_mcp_transport_ws.send_to_session_result
+                            ws_session_id response_str
+                        with
+                        | Sent -> ()
+                        | Session_gone ->
+                            Log.Server.debug
+                              "WS send dropped: session=%s gone (client disconnected, \
+                               expected)"
+                              ws_session_id
+                        | Send_failed ->
+                            Log.Server.warn
+                              "WS send_to_session WRITE FAILED for session=%s \
+                               (transport-side error; session cleaned up)"
+                              ws_session_id
+                      end
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                      Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn))));
       (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
       if Server_webrtc_transport.is_enabled () then (
         Log.Server.info "WebRTC DataChannel transport enabled";

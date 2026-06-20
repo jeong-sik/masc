@@ -740,6 +740,17 @@ let send_message ~channel_id ~content ?reply_to_message_id () =
       in
       send_chunks true content
 
+let edit_message ~channel_id ~message_id ~content () =
+  match bot_token_opt () with
+  | None -> Error Missing_token
+  | Some token ->
+      (match
+         Discord_rest_client.edit_message ~token ~channel_id ~message_id
+           ~content ()
+       with
+       | Ok () -> Ok ()
+       | Error e -> Error (Rest_error e))
+
 let trigger_typing ~channel_id () =
   match bot_token_opt () with
   | None -> Error Missing_token

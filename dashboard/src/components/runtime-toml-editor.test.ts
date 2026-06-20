@@ -147,6 +147,9 @@ describe('RuntimeTomlEditor', () => {
       expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(false)
       expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
     })
+    expect(container.querySelector('[data-testid="runtime-toml-impact-preview"]')?.textContent).toContain('적용 미리보기')
+    expect(container.querySelector('[data-testid="runtime-toml-default-impact"]')?.textContent).toContain('default unchanged')
+    expect(container.querySelector('[data-testid="runtime-toml-assignments-impact"]')?.textContent).toContain('assignments changed')
 
     fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
 
@@ -156,6 +159,7 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(saveButton.disabled).toBe(true)
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(nextSource)
+    expect(container.querySelector('[data-testid="runtime-toml-impact-preview"]')).toBeNull()
   })
 
   it('edits runtime environment fields through the structured controls', async () => {

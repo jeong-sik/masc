@@ -92,13 +92,19 @@ let statuses =
 let actor_kinds = [ "human_operator"; "automated_actor"; "system" ]
 
 let sources = [ "operator_request"; "automated_request"; "system_request" ]
-let recurrence_kinds = [ "one_shot"; "interval"; "daily" ]
+let recurrence_kinds = [ "one_shot"; "interval"; "daily"; "cron" ]
 
 let create_schema =
   object_schema
     ~required:[ "risk_class" ]
-    [ number_prop ~description:"Unix timestamp in seconds. Provide this or due_at_iso." "due_at_unix"
-    ; string_prop ~description:"ISO-8601 timestamp. Provide this or due_at_unix." "due_at_iso"
+    [ number_prop
+        ~description:
+          "Unix timestamp in seconds. Provide this, due_at_iso, or a calendar recurrence (daily/cron) that can derive the first due time."
+        "due_at_unix"
+    ; string_prop
+        ~description:
+          "ISO-8601 timestamp. Provide this, due_at_unix, or a calendar recurrence (daily/cron) that can derive the first due time."
+        "due_at_iso"
     ; object_prop
         ~description:
           "Typed schedule payload envelope: {kind:string, schema_version:int, body:object}."
@@ -132,7 +138,11 @@ let create_schema =
         "recurrence_second"
     ; string_prop
         ~description:
-          "Required when recurrence_kind is daily. Fixed-offset only: UTC, Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. DST-aware IANA zones are not supported."
+          "Required when recurrence_kind is cron. Standard 5-field cron expression: minute hour day-of-month month day-of-week. Supports wildcards, comma lists, numeric ranges, and steps such as */15 or 1-5/2."
+        "recurrence_cron"
+    ; string_prop
+        ~description:
+          "Required when recurrence_kind is daily or cron. Fixed-offset only: UTC, Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. DST-aware IANA zones are not supported."
         "recurrence_timezone"
     ; string_prop ~description:"Requester actor id. Defaults to operator." "requested_by_id"
     ; string_prop ~enum:actor_kinds "requested_by_kind"
@@ -167,7 +177,7 @@ let cancel_schema =
 
 let approve_schema =
   object_schema ~required:[ "schedule_id"; "approved_by_id" ]
-    [ string_prop ~description:"Pending schedule id to approve." "schedule_id"
+    [ string_prop ~description:"Pending or due schedule id to approve." "schedule_id"
     ; string_prop ~description:"Human approver id; cannot equal requester or scheduler." "approved_by_id"
     ; string_prop ~description:"Approver display name." "approved_by_display_name"
     ; string_prop ~description:"Optional stable grant id." "grant_id"
@@ -177,7 +187,7 @@ let approve_schema =
 
 let reject_schema =
   object_schema ~required:[ "schedule_id"; "approved_by_id"; "reason" ]
-    [ string_prop ~description:"Pending schedule id to reject." "schedule_id"
+    [ string_prop ~description:"Pending or due schedule id to reject." "schedule_id"
     ; string_prop ~description:"Human approver id; cannot equal requester or scheduler." "approved_by_id"
     ; string_prop ~description:"Approver display name." "approved_by_display_name"
     ; string_prop ~description:"Optional stable grant id." "grant_id"
@@ -208,7 +218,7 @@ let definition ~action ~id ~name ~description ~input_schema ~read_only =
 let definitions : definition list =
   [ definition ~action:Create_request ~id:"create" ~name:"masc_schedule_create"
       ~description:
-        "Create a durable scheduled internal automation request. Side-effecting requests start pending approval and require a later separate human grant."
+        "Create a durable scheduled internal automation request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. Side-effecting requests start pending approval and require a later separate human grant."
       ~input_schema:create_schema ~read_only:false
   ; definition ~action:List_requests ~id:"list" ~name:"masc_schedule_list"
       ~description:"List durable scheduled internal automation requests."
@@ -222,10 +232,10 @@ let definitions : definition list =
       ~input_schema:cancel_schema ~read_only:false
   ; definition ~action:Approve_request ~id:"approve" ~name:"masc_schedule_approve"
       ~description:
-        "Record a separate human execution grant for a pending scheduled request."
+        "Record a separate human execution grant for a pending or due scheduled request. Recurring side-effecting requests need a fresh grant for each due occurrence."
       ~input_schema:approve_schema ~read_only:false
   ; definition ~action:Reject_request ~id:"reject" ~name:"masc_schedule_reject"
-      ~description:"Reject a pending scheduled request with a human decision."
+      ~description:"Reject a pending or due scheduled request with a human decision."
       ~input_schema:reject_schema ~read_only:false
   ]
 ;;

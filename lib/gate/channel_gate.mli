@@ -100,6 +100,21 @@ type dispatch_fn =
   content:string ->
   Gate_protocol.dispatch_result
 
+type streaming_dispatch_fn =
+  on_text_snapshot:(string -> unit) ->
+  channel:string ->
+  channel_user_id:string ->
+  channel_user_name:string ->
+  channel_workspace_id:string ->
+  keeper_name:string ->
+  metadata:(string * string) list ->
+  content:string ->
+  Gate_protocol.dispatch_result
+(** Streaming dispatch function signature. [on_text_snapshot] receives a
+    connector-visible accumulated text snapshot suitable for transports that
+    edit one message in place. {!Gate_keeper_backend.dispatch_with_text_snapshot}
+    redacts provider deltas before invoking it. *)
+
 val handle_inbound :
   dispatch:dispatch_fn ->
   inbound_message ->
@@ -107,6 +122,16 @@ val handle_inbound :
 (** Validate, dedup, dispatch to keeper, return response.
     The only non-deterministic step is the keeper turn itself
     (which is on the other side of the [dispatch] boundary). *)
+
+val handle_inbound_streaming :
+  dispatch:streaming_dispatch_fn ->
+  on_text_snapshot:(string -> unit) ->
+  inbound_message ->
+  (outbound_message, gate_error) result
+(** Streaming variant of {!handle_inbound}. Validation, deduplication,
+    metrics, and result mapping are identical; only the injected dispatch
+    receives [on_text_snapshot]. Validation failures never invoke the
+    streaming callback. *)
 
 (** {1 JSON helpers} *)
 

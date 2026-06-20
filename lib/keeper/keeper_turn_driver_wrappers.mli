@@ -57,6 +57,7 @@ val run_named_with_masc_tools :
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
+  ?max_turns:int ->
   ?max_idle_turns:int ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->

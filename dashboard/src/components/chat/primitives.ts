@@ -19,7 +19,7 @@ import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, Ch
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
-import { lookupToolCallOutput } from '../../tool-call-output-store'
+import { lookupToolCallOutput, toolCallOutputsById } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
@@ -30,6 +30,12 @@ export interface SigilBadgeKeeper {
   slot: number
   id: string
   sigil?: string
+}
+
+export interface ChatComposerSendPayload {
+  blocks: ChatBlock[]
+  userBlocks: KeeperUserInputBlock[]
+  clientActionId: string
 }
 
 /** Status dot wrapper — maps keeper-v2 status strings to shared StatusDot tones. */
@@ -300,6 +306,13 @@ function isRenderableImageAttachment(attachment: KeeperConversationAttachment): 
 
 function attachmentMeta(attachment: KeeperConversationAttachment): string {
   return [attachment.mimeType, formatAttachmentSize(attachment.size)].filter(Boolean).join(' · ')
+}
+
+let composerActionSeq = 0
+
+function nextComposerClientActionId(): string {
+  composerActionSeq += 1
+  return `composer-send-${Date.now()}-${composerActionSeq}`
 }
 
 function dataUriToText(data: string): string | null {
@@ -953,7 +966,7 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row">
             <span class="chat-block-tstep-kind">Thinking</span>
-            <span>${step.text}</span>
+            <span class="chat-block-tstep-text">${step.text}</span>
           </div>
         </div>
       </div>
@@ -2097,24 +2110,28 @@ function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; outp
   `
 }
 
-// Groups a turn's consecutive tool-call entries into one folded "작업 과정"
-// trace card placed above the answer bubble — the v2 layout, built from live
-// data. Folded by default so a turn with many probes (a dozen keeper_board_list
-// / keeper_tasks_list calls) collapses to a single summary line instead of a
-// wall of raw-JSON rows. No think/reason steps are synthesised: the live
-// transcript has no reasoning channel, so the card omits them rather than
-// fabricate the v2 reference's mock reasoning.
-function ToolTraceCard({ tools }: { tools: KeeperConversationEntry[] }) {
-  const [open, setOpen] = useState(false)
+// Groups a turn's explicit progress/tool entries into one "작업 과정" trace
+// card placed above the answer bubble. The step list is visible by default so
+// operators can see thinking progress, tool names, and status without opening
+// each raw args/result body.
+function ToolTraceCard({
+  tools,
+  traceSteps = [],
+}: {
+  tools: KeeperConversationEntry[]
+  traceSteps?: ChatTraceStep[]
+}) {
+  const [open, setOpen] = useState(true)
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const failN = steps.filter(
     (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),
   ).length
   const totalMs = steps.reduce((sum, s) => sum + (s.output?.duration_ms ?? 0), 0)
   const durLabel = totalMs > 0 ? formatMsCompact(totalMs) : null
+  const stepN = traceSteps.length + tools.length
 
   return html`
-    <div class="chat-block-trace ${open ? 'open' : ''}" data-chat-block="trace" data-chat-tool-trace>
+    <div class="chat-block-trace ${open ? 'open' : ''}" data-chat-block="trace" data-chat-work-trace data-chat-tool-trace>
       <button
         type="button"
         class="chat-block-trace-hd"
@@ -2124,9 +2141,9 @@ function ToolTraceCard({ tools }: { tools: KeeperConversationEntry[] }) {
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span>◈</span>
         <span class="chat-block-trace-label">작업 과정</span>
-        <span class="chat-block-trace-count">${tools.length}단계</span>
+        <span class="chat-block-trace-count">${stepN}단계</span>
         <span class="chat-block-trace-meta">
-          <span>도구 ${tools.length}</span>
+          ${tools.length > 0 ? html`<span>도구 ${tools.length}</span>` : null}
           ${failN > 0 ? html`<span class="text-[var(--color-status-err)]">실패 ${failN}</span>` : null}
           ${durLabel ? html`<span class="tnum">${durLabel}</span>` : null}
         </span>
@@ -2135,10 +2152,41 @@ function ToolTraceCard({ tools }: { tools: KeeperConversationEntry[] }) {
         ? html`
             <div class="chat-block-trace-steps">
               <span class="chat-block-trace-rail"></span>
+              ${traceSteps.map((step, index) => html`<${ChatTraceStep} key=${`trace-${index}`} step=${step} />`)}
               ${steps.map(({ entry, output }) => html`<${ToolTraceStep} key=${entry.id} entry=${entry} output=${output} />`)}
             </div>
           `
         : null}
+    </div>
+  `
+}
+
+function TurnWorkBundle({
+  tools,
+  assistant,
+  showMetadata,
+  variant,
+  showSourceBadge,
+  action,
+}: {
+  tools: KeeperConversationEntry[]
+  assistant: KeeperConversationEntry
+  showMetadata?: boolean
+  variant: ChatTranscriptVariant
+  showSourceBadge: boolean
+  action?: ChatTranscriptAction
+}) {
+  const traceSteps = assistant.traceSteps ?? []
+  return html`
+    <div class="chat-turn-bundle" data-chat-turn-bundle>
+      <${ToolTraceCard} tools=${tools} traceSteps=${traceSteps} />
+      <${ChatMessageBubble}
+        entry=${assistant}
+        showMetadata=${showMetadata !== false}
+        variant=${variant}
+        showSourceBadge=${showSourceBadge}
+        action=${action}
+      />
     </div>
   `
 }
@@ -2151,14 +2199,43 @@ const STICK_TO_BOTTOM_THRESHOLD_PX = 80
 type ChatRenderUnit =
   | { kind: 'entry'; entry: KeeperConversationEntry }
   | { kind: 'toolGroup'; id: string; entries: KeeperConversationEntry[] }
+  | { kind: 'turnBundle'; id: string; entries: KeeperConversationEntry[]; entry: KeeperConversationEntry }
 
-// Fold maximal runs of consecutive tool-call entries into one group so they
-// render as a single "작업 과정" trace card. Adjacency is the only turn signal
-// on the transcript — chat entries carry no turn/trace id (that lives on the
-// separate ToolCallEntry) — and the live stream inserts a turn's tool rows
-// immediately before its assistant bubble (keeper-stream.ts), so a run of
-// role:'tool' entries is exactly that turn's tool set. With grouping off every
-// entry stays its own unit, leaving the flat render unchanged.
+function entryTurnRef(entry: KeeperConversationEntry): string | null {
+  const value = entry.turnRef?.trim()
+  return value ? value : null
+}
+
+function canAppendToolToRun(run: KeeperConversationEntry[], entry: KeeperConversationEntry): boolean {
+  if (run.length === 0) return true
+  const first = run[0]
+  if (!first) return true
+  const firstTurnRef = entryTurnRef(first)
+  const nextTurnRef = entryTurnRef(entry)
+  if (firstTurnRef || nextTurnRef) {
+    return firstTurnRef !== null && nextTurnRef !== null && firstTurnRef === nextTurnRef
+  }
+  return true
+}
+
+function canBundleToolsWithAssistant(run: KeeperConversationEntry[], assistant: KeeperConversationEntry): boolean {
+  if (run.length === 0) return true
+  const first = run[0]
+  if (!first) return true
+  const toolTurnRef = entryTurnRef(first)
+  const assistantTurnRef = entryTurnRef(assistant)
+  if (toolTurnRef || assistantTurnRef) {
+    return toolTurnRef !== null && assistantTurnRef !== null && toolTurnRef === assistantTurnRef
+  }
+  return true
+}
+
+// Fold maximal runs of consecutive tool-call entries into one group. Persisted
+// rows carry turnRef; use it as the hard join key when present, falling back to
+// adjacency only for legacy/live rows that have no turn provenance. When the run
+// belongs to the following assistant entry, render both as one turn bundle so
+// "작업 과정" visually belongs to the answer it produced. Assistant traceSteps
+// can also produce a bundle without tools (thinking-only turns).
 function buildChatRenderUnits(
   entries: KeeperConversationEntry[],
   groupToolCalls: boolean,
@@ -2168,14 +2245,40 @@ function buildChatRenderUnits(
   let run: KeeperConversationEntry[] = []
   const flush = () => {
     if (run.length === 0) return
-    units.push({ kind: 'toolGroup', id: `tracegroup-${run[0]!.id}`, entries: run })
+    const first = run[0]
+    if (!first) return
+    units.push({ kind: 'toolGroup', id: `tracegroup-${first.id}`, entries: run })
     run = []
   }
   for (const entry of entries) {
     if (entry.role === 'tool') {
+      if (!canAppendToolToRun(run, entry)) flush()
       run.push(entry)
     } else {
+      if (
+        entry.role === 'assistant'
+        && (run.length > 0 || (entry.traceSteps?.length ?? 0) > 0)
+        && canBundleToolsWithAssistant(run, entry)
+      ) {
+        units.push({
+          kind: 'turnBundle',
+          id: `turn-${run[0]?.id ?? entry.id}`,
+          entries: run,
+          entry,
+        })
+        run = []
+        continue
+      }
       flush()
+      if (entry.role === 'assistant' && (entry.traceSteps?.length ?? 0) > 0) {
+        units.push({
+          kind: 'turnBundle',
+          id: `turn-${entry.id}`,
+          entries: [],
+          entry,
+        })
+        continue
+      }
       units.push({ kind: 'entry', entry })
     }
   }
@@ -2201,7 +2304,10 @@ function renderChatTranscriptBody(opts: {
   // second divider for a day already shown above.
   let lastDayKey: string | null = null
   for (const unit of units) {
-    const ts = unit.kind === 'entry' ? unit.entry.timestamp : unit.entries[0]?.timestamp
+    const ts =
+      unit.kind === 'entry'
+        ? unit.entry.timestamp
+        : unit.entries[0]?.timestamp ?? (unit.kind === 'turnBundle' ? unit.entry.timestamp : null)
     if (showDayDividers) {
       const dk = dayKey(ts)
       if (dk && dk !== lastDayKey) {
@@ -2211,6 +2317,16 @@ function renderChatTranscriptBody(opts: {
     }
     if (unit.kind === 'toolGroup') {
       out.push(html`<${ToolTraceCard} key=${unit.id} tools=${unit.entries} />`)
+    } else if (unit.kind === 'turnBundle') {
+      out.push(html`<${TurnWorkBundle}
+        key=${unit.id}
+        tools=${unit.entries}
+        assistant=${unit.entry}
+        showMetadata=${showMetadata}
+        variant=${variant}
+        showSourceBadge=${showSourceBadge}
+        action=${action}
+      />`)
     } else if (unit.entry.role === 'tool') {
       out.push(html`<${ToolCallBubble} key=${unit.entry.id} entry=${unit.entry} />`)
     } else {
@@ -2225,6 +2341,16 @@ function renderChatTranscriptBody(opts: {
     }
   }
   return out
+}
+
+function traceStepsSignature(entry: KeeperConversationEntry): string {
+  const steps = entry.traceSteps
+  if (!steps?.length) return ''
+  return steps.map((step) => {
+    if (step.kind === 'think') return `think:${step.text.length}`
+    if (step.kind === 'reason') return `reason:${step.text.length}:${step.detail?.length ?? 0}`
+    return `tool:${step.name}:${step.status ?? ''}:${step.dur ?? ''}:${step.result?.length ?? 0}`
+  }).join(',')
 }
 
 export function ChatTranscript({
@@ -2256,8 +2382,20 @@ export function ChatTranscript({
   const pinnedRef = useRef(true)
   const [unread, setUnread] = useState(false)
   const lastSignature = useMemo(
-    () => entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}:${entry.streamState ?? ''}`).join('|'),
+    () => entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}:${entry.streamState ?? ''}:${traceStepsSignature(entry)}`).join('|'),
     [entries],
+  )
+  const toolOutputSignature = useMemo(
+    () => entries
+      .filter(entry => entry.role === 'tool')
+      .map((entry) => {
+        const output = lookupToolCallOutput(entry.id)
+        return output
+          ? `${entry.id}:${output.success}:${output.semantic_success ?? ''}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
+          : `${entry.id}:pending`
+      })
+      .join('|'),
+    [entries, toolCallOutputsById.value],
   )
 
   const scrollToBottom = () => {
@@ -2287,7 +2425,7 @@ export function ChatTranscript({
     } else {
       setUnread(true)
     }
-  }, [lastSignature])
+  }, [lastSignature, toolOutputSignature])
 
   const isPrimary = size === 'primary'
   const heightClass = isPrimary
@@ -2408,7 +2546,7 @@ export function ChatComposer({
   queueEnabled?: boolean
   queueCount?: number
   onDraftChange: (value: string) => void
-  onSend: (payload: { blocks: ChatBlock[]; userBlocks: KeeperUserInputBlock[] }) => void | Promise<void>
+  onSend: (payload: ChatComposerSendPayload) => void | Promise<void>
   onAbort?: () => void
   layout?: 'default' | 'primary'
 }) {
@@ -2517,7 +2655,11 @@ export function ChatComposer({
       blocks.push({ t: 'p', html: escapeHtml(text) } as ChatBlock)
       userBlocks.push({ type: 'text', text })
     }
-    void onSend({ blocks, userBlocks })
+    void onSend({
+      blocks,
+      userBlocks,
+      clientActionId: nextComposerClientActionId(),
+    })
     onDraftChange('')
     setAttachments([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'

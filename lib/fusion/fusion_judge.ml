@@ -40,7 +40,7 @@ let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
   let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
   match
     Fusion_oas.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
-      ~max_tool_calls judge_model
+      ~max_tool_calls ~timeout_s judge_model
   with
   | Error reason ->
     Error
@@ -52,7 +52,11 @@ let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
        Masc_oas_bridge.run_safe ~caller:"fusion_judge" ~timeout_s (fun () ->
          Ok (Agent_sdk.Async_agent.all ~sw [ (agent, prompt) ]))
      with
-     | Error e -> Error ("judge run failed: " ^ Agent_sdk.Error.to_string e)
+     | Error e ->
+       Error
+         ("judge run failed: "
+          ^ Fusion_oas.provider_error_detail ~runtime_id:judge_model
+              (Agent_sdk.Error.to_string e))
      | Ok [] -> Error "judge: empty result"
      | Ok ((_name, Ok resp) :: _) ->
        let text = Fusion_oas.answer_text resp in
@@ -63,4 +67,7 @@ let run ~sw ~net ~timeout_s ~judge_system_prompt ~judge_model ~question ~panel
            (fun synthesis -> (synthesis, Fusion_oas.usage_of resp))
            (Fusion_judge_parse.of_string text)
      | Ok ((_name, Error e) :: _) ->
-       Error ("judge provider error: " ^ Agent_sdk.Error.to_string e))
+       Error
+         ("judge provider error: "
+          ^ Fusion_oas.provider_error_detail ~runtime_id:judge_model
+              (Agent_sdk.Error.to_string e)))

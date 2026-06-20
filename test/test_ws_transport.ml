@@ -7,6 +7,125 @@
 module Ws = Server_mcp_transport_ws
 module Sse = Masc.Sse
 
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let rec find_source_root_from dir hops rel =
+  if hops > 8 then None
+  else if Sys.file_exists (Filename.concat dir rel) then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None
+    else find_source_root_from parent (hops + 1) rel
+
+let source_root () =
+  let anchor = "lib/server/server_mcp_transport_ws.ml" in
+  match find_source_root_from (Sys.getcwd ()) 0 anchor with
+  | Some root -> root
+  | None ->
+      Alcotest.failf "could not locate repo source root from cwd=%s" (Sys.getcwd ())
+
+let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    i + needle_len <= haystack_len
+    && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
+  in
+  needle_len = 0 || loop 0
+
+let count_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i acc =
+    if needle_len = 0 || i + needle_len > haystack_len then acc
+    else if String.equal (String.sub haystack i needle_len) needle then
+      loop (i + needle_len) (acc + 1)
+    else loop (i + 1) acc
+  in
+  loop 0 0
+
+let substring_between source ~start_marker ~end_marker =
+  let start_len = String.length start_marker in
+  let end_len = String.length end_marker in
+  let source_len = String.length source in
+  let rec find_from marker marker_len i =
+    if i + marker_len > source_len then None
+    else if String.equal (String.sub source i marker_len) marker then Some i
+    else find_from marker marker_len (i + 1)
+  in
+  match find_from start_marker start_len 0 with
+  | None -> Alcotest.failf "missing marker %S" start_marker
+  | Some start_pos -> (
+      let body_start = start_pos + start_len in
+      match find_from end_marker end_len body_start with
+      | None -> Alcotest.failf "missing marker %S" end_marker
+      | Some end_pos -> String.sub source body_start (end_pos - body_start))
+
+let find_substring_from source needle start =
+  let source_len = String.length source in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if needle_len = 0 then Some start
+    else if i + needle_len > source_len then None
+    else if String.equal (String.sub source i needle_len) needle then Some i
+    else loop (i + 1)
+  in
+  loop start
+
+let skip_spaces source i =
+  let len = String.length source in
+  let rec loop pos =
+    if pos >= len then pos
+    else
+      match source.[pos] with
+      | ' ' | '\n' | '\r' | '\t' -> loop (pos + 1)
+      | _ -> pos
+  in
+  loop i
+
+let matching_paren source open_pos =
+  let len = String.length source in
+  if open_pos >= len || not (Char.equal source.[open_pos] '(') then None
+  else
+    let rec loop pos depth =
+      if pos >= len then None
+      else
+        match source.[pos] with
+        | '(' -> loop (pos + 1) (depth + 1)
+        | ')' ->
+            let next_depth = depth - 1 in
+            if next_depth = 0 then Some pos else loop (pos + 1) next_depth
+        | _ -> loop (pos + 1) depth
+    in
+    loop open_pos 0
+
+let function_call_spans source marker =
+  let marker_len = String.length marker in
+  let rec loop from acc =
+    match find_substring_from source marker from with
+    | None -> List.rev acc
+    | Some marker_pos -> (
+        let args_start = skip_spaces source (marker_pos + marker_len) in
+        if args_start >= String.length source
+           || not (Char.equal source.[args_start] '(')
+        then loop (marker_pos + marker_len) acc
+        else
+          match matching_paren source args_start with
+          | None -> loop (marker_pos + marker_len) acc
+          | Some args_end ->
+              let span =
+                String.sub source marker_pos (args_end - marker_pos + 1)
+              in
+              loop (args_end + 1) (span :: acc))
+  in
+  loop 0 []
+
 (* ====== Session Registry ====== *)
 
 let test_initial_session_count () =
@@ -18,6 +137,44 @@ let test_close_all_empty () =
   Eio_main.run (fun _env ->
     let closed = Ws.close_all () in
     Alcotest.(check int) "close_all on empty returns 0" 0 closed)
+
+let test_session_close_wire_calls_stay_outside_registry_lock () =
+  let source = read_source_file "lib/server/server_mcp_transport_ws.ml" in
+  let close_marker = "Httpun_ws.Wsd.close" in
+  let detach_helper =
+    substring_between source
+      ~start_marker:"let detach_session_for_close"
+      ~end_marker:"let close_detached_session_wsd"
+  in
+  let close_helper =
+    substring_between source
+      ~start_marker:"let close_detached_session_wsd"
+      ~end_marker:"let update_ws_session_count_metric"
+  in
+  Alcotest.(check int)
+    "all WSD close calls are isolated in the detached close helper"
+    (count_substring source close_marker)
+    (count_substring close_helper close_marker);
+  Alcotest.(check bool)
+    "detaching from the registry does not wait on the session writer lock"
+    false
+    (contains_substring detach_helper "write_mutex");
+  Alcotest.(check bool)
+    "detaching from the registry does not close the wire"
+    false
+    (contains_substring detach_helper close_marker);
+  Alcotest.(check bool)
+    "wire close helper does not acquire sessions_mutex"
+    false
+    (contains_substring close_helper "with_sessions_rw");
+  List.iteri
+    (fun i span ->
+      Alcotest.(check bool)
+        (Printf.sprintf
+           "registry lock span %d does not invoke detached wire close" i)
+        false
+        (contains_substring span "close_detached_session_wsd"))
+    (function_call_spans source "with_sessions_rw")
 
 (* ====== SHA1 (httpun-ws handshake) ====== *)
 
@@ -510,6 +667,73 @@ let test_inbound_size_env_defaults () =
     Alcotest.(check int) "default message cap is 2 MiB"
       2097152 (Ws.max_inbound_message_bytes ()))
 
+(* ====== Inbound dispatch admission ====== *)
+
+let with_registered_test_session sid f =
+  let session = Ws.new_session ~id:sid ~wsd:(Obj.magic ()) in
+  Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions sid session);
+  Fun.protect
+    ~finally:(fun () ->
+      Ws.with_sessions_rw (fun () -> Hashtbl.remove Ws.sessions sid))
+    (fun () -> f session)
+
+let test_inbound_dispatch_default_limit () =
+  with_env_var "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION" "" (fun () ->
+    Alcotest.(check int) "default concurrent dispatch cap"
+      32 (Ws.max_inbound_dispatches_per_session ()))
+
+let test_inbound_dispatch_rejects_at_session_limit () =
+  with_env_var "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION" "2" (fun () ->
+    with_registered_test_session "ws-dispatch-limit" (fun session ->
+      let first =
+        match Ws.try_begin_inbound_dispatch session.id with
+        | Ws.Inbound_dispatch_admitted s -> s
+        | _ -> Alcotest.fail "first dispatch should be admitted"
+      in
+      let second =
+        match Ws.try_begin_inbound_dispatch session.id with
+        | Ws.Inbound_dispatch_admitted s -> s
+        | _ -> Alcotest.fail "second dispatch should be admitted"
+      in
+      (match Ws.try_begin_inbound_dispatch session.id with
+       | Ws.Inbound_dispatch_rejected r ->
+           Alcotest.(check string) "reason"
+             "too_many_inbound_dispatches" r.reason;
+           Alcotest.(check int) "limit" 2 r.limit;
+           Alcotest.(check int) "in_flight" 2 r.in_flight
+       | _ -> Alcotest.fail "third dispatch should be rejected");
+      Ws.finish_inbound_dispatch first;
+      let third =
+        match Ws.try_begin_inbound_dispatch session.id with
+        | Ws.Inbound_dispatch_admitted s -> s
+        | _ -> Alcotest.fail "slot released after finish"
+      in
+      Ws.finish_inbound_dispatch second;
+      Ws.finish_inbound_dispatch third;
+      Alcotest.(check int) "all slots released"
+        0 (Atomic.get session.inbound_dispatches)))
+
+let test_inbound_dispatch_zero_limit_disables_gate () =
+  with_env_var "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION" "0" (fun () ->
+    with_registered_test_session "ws-dispatch-disabled" (fun session ->
+      for _ = 1 to 5 do
+        match Ws.try_begin_inbound_dispatch session.id with
+        | Ws.Inbound_dispatch_admitted _ -> ()
+        | _ -> Alcotest.fail "zero limit should admit every dispatch"
+      done;
+      Alcotest.(check int) "all five admitted"
+        5 (Atomic.get session.inbound_dispatches)))
+
+let test_inbound_dispatch_rejects_gone_or_closed_session () =
+  (match Ws.try_begin_inbound_dispatch "ws-dispatch-missing" with
+   | Ws.Inbound_dispatch_session_gone -> ()
+   | _ -> Alcotest.fail "missing session should be gone");
+  with_registered_test_session "ws-dispatch-closed" (fun session ->
+    Atomic.set session.closed true;
+    match Ws.try_begin_inbound_dispatch session.id with
+    | Ws.Inbound_dispatch_session_gone -> ()
+    | _ -> Alcotest.fail "closed session should be gone")
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -769,7 +993,9 @@ let test_new_session_initializes_pong_state () =
     true
     (session.dashboard_last_delta_at <= Unix.gettimeofday ());
   Alcotest.(check int) "partial inbound byte count starts empty"
-    0 session.inbound_partial_text_bytes
+    0 session.inbound_partial_text_bytes;
+  Alcotest.(check int) "inbound dispatch count starts empty"
+    0 (Atomic.get session.inbound_dispatches)
 
 let test_record_pong_refreshes_last_pong_at () =
   let session = Ws.new_session ~id:"pong-refresh" ~wsd:(Obj.magic ()) in
@@ -823,10 +1049,12 @@ let test_missed_pong_threshold_reads_env () =
 
 let () =
   Alcotest.run "WebSocket Transport" [
-    ("session_registry", [
-      Alcotest.test_case "initial count" `Quick test_initial_session_count;
-      Alcotest.test_case "close_all empty" `Quick test_close_all_empty;
-    ]);
+	    ("session_registry", [
+	      Alcotest.test_case "initial count" `Quick test_initial_session_count;
+	      Alcotest.test_case "close_all empty" `Quick test_close_all_empty;
+	      Alcotest.test_case "wire close stays outside registry lock" `Quick
+	        test_session_close_wire_calls_stay_outside_registry_lock;
+	    ]);
     ("sha1", [
       Alcotest.test_case "produces 20 bytes" `Quick test_sha1_produces_20_bytes;
       Alcotest.test_case "deterministic" `Quick test_sha1_deterministic;
@@ -903,6 +1131,16 @@ let () =
         test_inbound_message_size_rejects_overflow_sum;
       Alcotest.test_case "size cap env defaults" `Quick
         test_inbound_size_env_defaults;
+    ]);
+    ("inbound_dispatch_admission", [
+      Alcotest.test_case "default concurrent dispatch cap is bounded" `Quick
+        test_inbound_dispatch_default_limit;
+      Alcotest.test_case "session cap rejects excess dispatches" `Quick
+        test_inbound_dispatch_rejects_at_session_limit;
+      Alcotest.test_case "zero cap disables admission gate" `Quick
+        test_inbound_dispatch_zero_limit_disables_gate;
+      Alcotest.test_case "missing or closed sessions are rejected" `Quick
+        test_inbound_dispatch_rejects_gone_or_closed_session;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

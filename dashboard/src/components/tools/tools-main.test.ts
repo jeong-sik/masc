@@ -115,9 +115,14 @@ describe('Tools', () => {
         request_limit: 20,
         truncated: false,
         counts: { pending_approval: 1 },
-        derived_counts: { due_effective: 0 },
+        derived_counts: {
+          due_effective: 0,
+          blocked_approval: 1,
+          due_execution_ready: 0,
+          expired_effective: 0,
+        },
         fsm: {
-          state: 'pending_approval',
+          state: 'blocked_approval',
           active_count: 1,
           terminal_count: 0,
           next_due_at: '2026-06-13T01:00:00Z',
@@ -126,11 +131,14 @@ describe('Tools', () => {
           {
             schedule_id: 'sched-1',
             status: 'pending_approval',
+            effective_status: 'blocked_approval',
+            execution_readiness: 'blocked_approval',
+            operator_action: 'approve_or_reject',
             risk_class: 'workspace_write',
             approval_required: true,
             source: 'operator_request',
-            recurrence: { kind: 'daily', hour: 9, minute: 30, second: 0, timezone: 'Asia/Seoul' },
-            recurrence_kind: 'daily',
+            recurrence: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Seoul' },
+            recurrence_kind: 'cron',
             payload_kind: 'test.reminder',
             due_at_iso: '2026-06-13T01:00:00Z',
             last_execution: {
@@ -148,10 +156,12 @@ describe('Tools', () => {
     render(html`<${Tools} />`, container)
     await flush()
 
-    expect(container.textContent).toContain('pending approval')
+    expect(container.textContent).toContain('blocked approval')
+    expect(container.textContent).toContain('raw pending approval')
+    expect(container.textContent).toContain('approve or reject')
     expect(container.textContent).toContain('sched-1')
     expect(container.textContent).toContain('workspace write')
-    expect(container.textContent).toContain('09:30:00 Asia/Seoul')
+    expect(container.textContent).toContain('cron 0 9 * * 1-5 Asia/Seoul')
     expect(container.textContent).toContain('succeeded')
     expect(container.textContent).toContain('test.reminder')
     expect(container.querySelector('.v2-lab-table')).not.toBeNull()

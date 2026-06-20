@@ -3,6 +3,7 @@ import { parseTextToChatBlocks } from './lib/chat-blocks'
 import type { KeeperChatStreamEvent } from './api'
 import {
   appendAssistantDelta,
+  appendAssistantThinkingDelta,
   setAssistantStreamState,
   updateThreadEntry,
   insertThreadEntryBefore,
@@ -118,7 +119,17 @@ export function applyKeeperStreamEvent(
     }
     case 'CUSTOM':
       if (event.name === 'KEEPER_THINKING_DELTA') {
-        setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
+        const delta = isRecord(event.value)
+          ? (typeof event.value.delta === 'string'
+              ? event.value.delta
+              : typeof event.value.text === 'string'
+                ? event.value.text
+                : undefined)
+          : typeof event.value === 'string'
+            ? event.value
+            : undefined
+        if (delta) appendAssistantThinkingDelta(keeperName, assistantEntryId, delta)
+        else setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
         return null
       }
       if (event.name === 'KEEPER_QUEUE_REQUEST') {

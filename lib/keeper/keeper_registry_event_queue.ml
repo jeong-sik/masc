@@ -5,7 +5,8 @@
     [event_queue : Keeper_event_queue.t Atomic.t] — these wrappers do
     CAS on that per-entry atomic after locating the entry via the
     central registry's public [get]. No coupling to the central
-    Atomic state primitive. *)
+    Atomic state primitive. CAS-successful mutations are mirrored to
+    [Keeper_event_queue_persistence] for restart replay. *)
 
 let enqueue ~base_path name stimulus =
   match Keeper_registry.get ~base_path name with
@@ -18,7 +19,9 @@ let enqueue ~base_path name stimulus =
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
       let next = Keeper_event_queue.enqueue cur stimulus in
-      if not (Atomic.compare_and_set entry.event_queue cur next) then loop ()
+      if Atomic.compare_and_set entry.event_queue cur next
+      then Keeper_event_queue_persistence.persist ~base_path:entry.base_path ~keeper_name:name next
+      else loop ()
     in
     loop ()
 ;;
@@ -38,7 +41,14 @@ let dequeue ~base_path name =
       match Keeper_event_queue.dequeue cur with
       | None -> None
       | Some (stim, rest) ->
-        if Atomic.compare_and_set entry.event_queue cur rest then Some stim else loop ()
+        if Atomic.compare_and_set entry.event_queue cur rest
+        then (
+          Keeper_event_queue_persistence.persist
+            ~base_path:entry.base_path
+            ~keeper_name:name
+            rest;
+          Some stim)
+        else loop ()
     in
     loop ()
 ;;
@@ -50,7 +60,14 @@ let drain_board ?window_sec ~base_path name =
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
       let board, rest = Keeper_event_queue.drain_board_window ?window_sec cur in
-      if Atomic.compare_and_set entry.event_queue cur rest then board else loop ()
+      if Atomic.compare_and_set entry.event_queue cur rest
+      then (
+        Keeper_event_queue_persistence.persist
+          ~base_path:entry.base_path
+          ~keeper_name:name
+          rest;
+        board)
+      else loop ()
     in
     loop ()
 ;;

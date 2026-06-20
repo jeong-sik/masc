@@ -41,6 +41,10 @@ and fusion_completion = {
   (* correlates to the sink's board evidence post; "" if none was created. *)
 }
 
+let fusion_completion_post_id (fc : fusion_completion) =
+  if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
+  else fc.board_post_id
+
 type stimulus = {
   post_id : post_id;
   urgency : urgency;
@@ -124,3 +128,178 @@ let summary (queue : t) : string =
   Printf.sprintf "%d stimulus%s pending"
     queue.length
     (if queue.length = 1 then "" else "es")
+
+let urgency_to_string = function
+  | Immediate -> "immediate"
+  | Normal -> "normal"
+  | Low -> "low"
+
+let urgency_of_string = function
+  | "immediate" -> Ok Immediate
+  | "normal" -> Ok Normal
+  | "low" -> Ok Low
+  | value -> Error (Printf.sprintf "unknown urgency: %s" value)
+
+let board_stimulus_kind_to_string = function
+  | Post_created -> "post_created"
+  | Comment_added -> "comment_added"
+
+let board_stimulus_kind_of_string = function
+  | "post_created" -> Ok Post_created
+  | "comment_added" -> Ok Comment_added
+  | value -> Error (Printf.sprintf "unknown board stimulus kind: %s" value)
+
+let option_json f = function
+  | Some value -> f value
+  | None -> `Null
+
+let ( let* ) = Result.bind
+
+let assoc_fields ~context = function
+  | `Assoc fields -> Ok fields
+  | _ -> Error (Printf.sprintf "%s must be a JSON object" context)
+
+let required_field ~context name fields =
+  match List.assoc_opt name fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s missing required field %s" context name)
+
+let optional_field name fields =
+  match List.assoc_opt name fields with
+  | Some `Null | None -> None
+  | Some value -> Some value
+
+let string_of_json ~context = function
+  | `String value -> Ok value
+  | _ -> Error (Printf.sprintf "%s must be a string" context)
+
+let bool_of_json ~context = function
+  | `Bool value -> Ok value
+  | _ -> Error (Printf.sprintf "%s must be a boolean" context)
+
+let float_of_json ~context = function
+  | `Float value -> Ok value
+  | `Int value -> Ok (float_of_int value)
+  | _ -> Error (Printf.sprintf "%s must be a number" context)
+
+let optional_string_field ~context name fields =
+  match optional_field name fields with
+  | None -> Ok None
+  | Some json ->
+    let* value = string_of_json ~context:(context ^ "." ^ name) json in
+    Ok (Some value)
+
+let optional_float_field ~context name fields =
+  match optional_field name fields with
+  | None -> Ok None
+  | Some json ->
+    let* value = float_of_json ~context:(context ^ "." ^ name) json in
+    Ok (Some value)
+
+let string_field ~context name fields =
+  let* json = required_field ~context name fields in
+  string_of_json ~context:(context ^ "." ^ name) json
+
+let bool_field ~context name fields =
+  let* json = required_field ~context name fields in
+  bool_of_json ~context:(context ^ "." ^ name) json
+
+let float_field ~context name fields =
+  let* json = required_field ~context name fields in
+  float_of_json ~context:(context ^ "." ^ name) json
+
+let payload_to_yojson = function
+  | Board_signal board ->
+    `Assoc
+      [ "kind", `String "board_signal"
+      ; "board_kind", `String (board_stimulus_kind_to_string board.kind)
+      ; "author", `String board.author
+      ; "title", `String board.title
+      ; "content", `String board.content
+      ; "hearth", option_json (fun value -> `String value) board.hearth
+      ; "updated_at_unix", option_json (fun value -> `Float value) board.updated_at
+      ]
+  | Bootstrap -> `Assoc [ "kind", `String "bootstrap" ]
+  | No_progress_recovery -> `Assoc [ "kind", `String "no_progress_recovery" ]
+  | Fusion_completed fusion ->
+    `Assoc
+      [ "kind", `String "fusion_completed"
+      ; "run_id", `String fusion.run_id
+      ; "ok", `Bool fusion.ok
+      ; "resolved_answer", `String fusion.resolved_answer
+      ; "board_post_id", `String fusion.board_post_id
+      ]
+
+let payload_of_yojson json =
+  let context = "stimulus.payload" in
+  let* fields = assoc_fields ~context json in
+  let* kind = string_field ~context "kind" fields in
+  match kind with
+  | "board_signal" ->
+    let* board_kind = string_field ~context "board_kind" fields in
+    let* kind = board_stimulus_kind_of_string board_kind in
+    let* author = string_field ~context "author" fields in
+    let* title = string_field ~context "title" fields in
+    let* content = string_field ~context "content" fields in
+    let* hearth = optional_string_field ~context "hearth" fields in
+    let* updated_at = optional_float_field ~context "updated_at_unix" fields in
+    Ok (Board_signal { kind; author; title; content; hearth; updated_at })
+  | "bootstrap" -> Ok Bootstrap
+  | "no_progress_recovery" -> Ok No_progress_recovery
+  | "fusion_completed" ->
+    let* run_id = string_field ~context "run_id" fields in
+    let* ok = bool_field ~context "ok" fields in
+    let* resolved_answer = string_field ~context "resolved_answer" fields in
+    let* board_post_id = string_field ~context "board_post_id" fields in
+    Ok (Fusion_completed { run_id; ok; resolved_answer; board_post_id })
+  | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
+
+let stimulus_to_yojson (stimulus : stimulus) =
+  `Assoc
+    [ "post_id", `String stimulus.post_id
+    ; "urgency", `String (urgency_to_string stimulus.urgency)
+    ; "arrived_at_unix", `Float stimulus.arrived_at
+    ; "payload", payload_to_yojson stimulus.payload
+    ]
+
+let stimulus_of_yojson json =
+  let context = "stimulus" in
+  let* fields = assoc_fields ~context json in
+  let* post_id = string_field ~context "post_id" fields in
+  let* urgency_s = string_field ~context "urgency" fields in
+  let* urgency = urgency_of_string urgency_s in
+  let* arrived_at = float_field ~context "arrived_at_unix" fields in
+  let* payload_json = required_field ~context "payload" fields in
+  let* payload = payload_of_yojson payload_json in
+  Ok { post_id; urgency; arrived_at; payload }
+
+let schema = "keeper.event_queue.v1"
+
+let queue_to_yojson queue =
+  `Assoc
+    [ "schema", `String schema
+    ; "length", `Int (length queue)
+    ; "items", `List (List.map stimulus_to_yojson (to_list queue))
+    ]
+
+let list_of_json ~context f = function
+  | `List items ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let* parsed = f item in
+        loop (parsed :: acc) rest
+    in
+    loop [] items
+  | _ -> Error (Printf.sprintf "%s must be a JSON list" context)
+
+let queue_of_yojson json =
+  let context = "keeper event queue snapshot" in
+  let* fields = assoc_fields ~context json in
+  let* schema_value = string_field ~context "schema" fields in
+  if not (String.equal schema_value schema)
+  then Error (Printf.sprintf "unsupported keeper event queue schema: %s" schema_value)
+  else (
+    let* items_json = required_field ~context "items" fields in
+    let* items = list_of_json ~context:"keeper event queue snapshot.items" stimulus_of_yojson items_json in
+    Ok (of_list items))

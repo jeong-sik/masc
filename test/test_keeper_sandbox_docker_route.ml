@@ -752,7 +752,7 @@ let test_execute_typed_single_stage_pipeline_rejected () =
     ~meta
     ~args:(tool_execute_typed_single_stage_pipeline_args ~cwd:playground)
     ()
-  |> check_typed_validation_error "Pipeline.stages requires at least two stages"
+  |> check_typed_validation_error "pipeline requires at least two stages"
 
 let test_execute_typed_repeated_executable_is_deterministic () =
   setup ~sandbox:Keeper_types_profile_sandbox.Local

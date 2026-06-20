@@ -220,6 +220,64 @@ export function parseContextThresholds(
 // that could drift independently. SSOT now lives in `./dashboard-hot`.
 export { fetchDashboardNamespaceTruth } from './dashboard-hot'
 
+// --- RFC-0266 §7 Phase 4: fusion run registry (in-progress + recent) ---
+
+/** Status of a tracked fusion deliberation, mirroring the backend
+    Fusion_run_registry.status_label vocabulary: a run is `running`, or finished
+    `completed` (judge ok) / `failed` (denied / sink-failed / aborted). */
+export type FusionRunStatusLabel = 'running' | 'completed' | 'failed'
+
+/** One row of the fusion run registry from GET /api/v1/dashboard/fusion-runs.
+    The registry tracks what the board-post view cannot: an in-progress
+    deliberation has no board post yet, so only the registry shows it as
+    `running`. Distinct from `FusionRunView` (board-meta-derived detail). */
+export interface FusionRunRecord {
+  runId: string
+  keeper: string
+  preset: string
+  startedAt: number // unix seconds
+  status: FusionRunStatusLabel
+}
+
+export interface DashboardFusionRunsResponse {
+  runs: FusionRunRecord[]
+  count: number
+  generatedAt: string | null
+}
+
+// The backend emits a closed three-label enum, so an unrecognized value can only
+// come from a protocol break. Map it to `failed` (conservative: never let a
+// garbled row pose as a healthy `completed` or an active `running`) rather than
+// to a convenient default — see CLAUDE.md "Unknown → Permissive Default".
+function asFusionRunStatus(value: unknown): FusionRunStatusLabel {
+  return value === 'running' || value === 'completed' || value === 'failed' ? value : 'failed'
+}
+
+export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsResponse {
+  const root = isRecord(raw) ? raw : {}
+  const runs: FusionRunRecord[] = asRecordArray(root.runs)
+    .map(row => ({
+      runId: asString(row.run_id) ?? '',
+      keeper: asString(row.keeper) ?? '',
+      preset: asString(row.preset) ?? '',
+      startedAt: asNumber(row.started_at) ?? 0,
+      status: asFusionRunStatus(row.status),
+    }))
+    .filter(run => run.runId.length > 0)
+  return {
+    runs,
+    count: asInt(root.count) ?? runs.length,
+    generatedAt: asString(root.generated_at) ?? null,
+  }
+}
+
+export async function fetchFusionRuns(
+  opts?: AbortableRequestOptions,
+): Promise<DashboardFusionRunsResponse> {
+  const raw = await get<unknown>('/api/v1/dashboard/fusion-runs', { signal: opts?.signal })
+  return parseFusionRunsResponse(raw)
+}
+
 export function fetchDashboardExecution(opts?: AbortableRequestOptions): Promise<DashboardExecutionResponse> {
   return get('/api/v1/dashboard/execution', { signal: opts?.signal })
 }
@@ -1759,6 +1817,9 @@ export interface DashboardScheduledAutomationExecution {
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: string
+  effective_status?: string
+  execution_readiness?: string
+  operator_action?: string | null
   risk_class: string
   approval_required: boolean
   source: string
@@ -1768,6 +1829,7 @@ export interface DashboardScheduledAutomationRequest {
     hour?: number
     minute?: number
     second?: number
+    expression?: string
     timezone?: string
   }
   recurrence_kind?: string
@@ -1775,10 +1837,15 @@ export interface DashboardScheduledAutomationRequest {
   requested_at_iso?: string
   due_at?: number
   due_at_iso?: string
+  next_due_at?: number | null
+  next_due_at_iso?: string | null
   expires_at?: number | null
   expires_at_iso?: string | null
   payload_digest?: string
   payload_kind?: string | null
+  recurrence_summary?: string | null
+  requires_separate_human_grant?: boolean
+  approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
 }
 

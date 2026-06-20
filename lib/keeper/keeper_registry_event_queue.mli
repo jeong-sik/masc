@@ -3,7 +3,9 @@
     SSOT for enqueueing / draining the per-keeper stimulus queue.
     Internal CAS retry on the entry-owned
     [event_queue : Keeper_event_queue.t Atomic.t] field; no central
-    registry Atomic touched. *)
+    registry Atomic touched. Successful mutations are mirrored to the
+    MASC-owned durable queue snapshot so a keeper restart can replay
+    pending stimuli. *)
 
 (** Enqueue a stimulus on the keeper's event queue.
     Logs a warning when the keeper is not registered. *)

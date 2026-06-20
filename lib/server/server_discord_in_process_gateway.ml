@@ -130,6 +130,107 @@ let with_response_wait_typing_indicator ~clock ~channel_id f =
         finish ();
         raise exn)
 
+type stream_finish =
+  | Stream_not_started
+  | Stream_completed
+  | Stream_final_edit_failed of State.send_error
+  | Stream_overflow_send_failed of State.send_error
+
+type discord_stream_reply =
+  { channel_id : string
+  ; reply_to_message_id : string
+  ; mutable message_id : string option
+  ; mutable last_edit_time : float
+  ; mutable last_edited_text : string
+  ; mutable disabled : bool
+  }
+
+let streaming_edit_interval_s = 1.0
+
+let make_discord_stream_reply ~channel_id ~reply_to_message_id =
+  { channel_id
+  ; reply_to_message_id
+  ; message_id = None
+  ; last_edit_time = 0.0
+  ; last_edited_text = ""
+  ; disabled = false
+  }
+
+let discord_stream_content snapshot =
+  snapshot
+  |> Observability_redact.redact_text
+  |> Discord_rest_client.truncate_to_limit
+
+let log_stream_error stage state error =
+  Log.Server.warn
+    "discord streaming %s failed (channel=%s reply_to=%s): %s"
+    stage state.channel_id state.reply_to_message_id
+    (Format.asprintf "%a" State.pp_send_error error)
+
+let publish_discord_stream_snapshot state snapshot =
+  if not state.disabled then begin
+    let content = discord_stream_content snapshot in
+    if not (String.equal content "" || String.equal content state.last_edited_text)
+    then
+      match state.message_id with
+      | None -> (
+          match
+            State.send_message ~channel_id:state.channel_id ~content
+              ~reply_to_message_id:state.reply_to_message_id ()
+          with
+          | Ok message_id ->
+              state.message_id <- Some message_id;
+              state.last_edit_time <- Unix.gettimeofday ();
+              state.last_edited_text <- content
+          | Error error ->
+              state.disabled <- true;
+              log_stream_error "initial send" state error)
+      | Some message_id ->
+          let elapsed = Unix.gettimeofday () -. state.last_edit_time in
+          if elapsed >= streaming_edit_interval_s then
+            match
+              State.edit_message ~channel_id:state.channel_id ~message_id
+                ~content ()
+            with
+            | Ok () ->
+                state.last_edit_time <- Unix.gettimeofday ();
+                state.last_edited_text <- content
+            | Error error ->
+                log_stream_error "edit" state error
+  end
+
+let finish_discord_stream_reply state ~final_content =
+  match state.message_id with
+  | None -> Stream_not_started
+  | Some message_id ->
+      let redacted = Observability_redact.redact_text final_content in
+      let head, overflow =
+        Discord_rest_client.split_at_codepoint redacted
+          ~limit:Discord_rest_client.message_content_limit
+      in
+      let edit_result =
+        if String.equal head state.last_edited_text then Ok ()
+        else
+          State.edit_message ~channel_id:state.channel_id ~message_id
+            ~content:head ()
+      in
+      (match edit_result with
+       | Error error ->
+           log_stream_error "final edit" state error;
+           Stream_final_edit_failed error
+       | Ok () ->
+           state.last_edited_text <- head;
+           if String.equal overflow "" then Stream_completed
+           else
+             match
+               State.send_message ~channel_id:state.channel_id
+                 ~content:overflow ()
+             with
+             | Ok _ -> Stream_completed
+             | Error error ->
+                 log_stream_error "overflow send" state error;
+                 Stream_overflow_send_failed error)
+
 let metadata_opt key = function
   | None -> []
   | Some value ->
@@ -315,9 +416,15 @@ let handle_message_create ~dispatch
       ; metadata
       }
     in
+    let stream_reply =
+      make_discord_stream_reply ~channel_id ~reply_to_message_id:message_id
+    in
+    let on_text_snapshot =
+      publish_discord_stream_snapshot stream_reply
+    in
     (match
        with_response_wait_typing_indicator ~clock ~channel_id (fun () ->
-         Channel_gate.handle_inbound ~dispatch msg)
+         Channel_gate.handle_inbound_streaming ~dispatch ~on_text_snapshot msg)
      with
      | Error gate_err ->
        (match gate_err with
@@ -365,25 +472,47 @@ let handle_message_create ~dispatch
          Discord_observability.record_reply Discord_observability.Reply_empty
        end
        else
-         (match State.send_message ~channel_id ~content:out.content ~reply_to_message_id:message_id () with
-          | Ok _ ->
-            (match attention_event_id with
-             | Some event_id ->
-                 mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                   ~reason:"discord_reply_sent"
-             | None -> ());
-            Discord_observability.record_inbound_dispatch
-              Discord_observability.Reply_sent;
-            Discord_observability.record_reply
-              Discord_observability.Reply_send_ok
-          | Error e ->
-            Discord_observability.record_inbound_dispatch
-              Discord_observability.Reply_send_error;
-            Discord_observability.record_reply
-              Discord_observability.Reply_send_failed;
-            Log.Server.error "discord send_message failed (channel=%s): %s"
-              channel_id
-              (Format.asprintf "%a" State.pp_send_error e)))
+         (match finish_discord_stream_reply stream_reply ~final_content:out.content with
+          | Stream_completed ->
+              (match attention_event_id with
+               | Some event_id ->
+                   mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                     ~reason:"discord_reply_streamed"
+               | None -> ());
+              Discord_observability.record_inbound_dispatch
+                Discord_observability.Reply_sent;
+              Discord_observability.record_reply
+                Discord_observability.Reply_send_ok
+          | Stream_not_started | Stream_final_edit_failed _ ->
+              (match State.send_message ~channel_id ~content:out.content ~reply_to_message_id:message_id () with
+               | Ok _ ->
+                 (match attention_event_id with
+                  | Some event_id ->
+                      mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                        ~reason:"discord_reply_sent"
+                  | None -> ());
+                 Discord_observability.record_inbound_dispatch
+                   Discord_observability.Reply_sent;
+                 Discord_observability.record_reply
+                   Discord_observability.Reply_send_ok
+               | Error e ->
+                 Discord_observability.record_inbound_dispatch
+                   Discord_observability.Reply_send_error;
+                 Discord_observability.record_reply
+                   Discord_observability.Reply_send_failed;
+                 Log.Server.error "discord send_message failed (channel=%s): %s"
+                   channel_id
+                   (Format.asprintf "%a" State.pp_send_error e))
+          | Stream_overflow_send_failed _ ->
+              (match attention_event_id with
+               | Some event_id ->
+                   mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                     ~reason:"discord_reply_partial_overflow"
+               | None -> ());
+              Discord_observability.record_inbound_dispatch
+                Discord_observability.Reply_send_error;
+              Discord_observability.record_reply
+                Discord_observability.Reply_send_failed))
 
 let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
   match ev with
@@ -511,7 +640,7 @@ let start ~sw ~env ~clock ~state =
     let policy = resolved_trigger_policy () in
     State.set_trigger_policy policy;
     let dispatch =
-      Gate_keeper_backend.dispatch
+      Gate_keeper_backend.dispatch_with_text_snapshot
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net

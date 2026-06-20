@@ -557,6 +557,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
         ~starting_keepers:0 ~requested_keepers:24 () );
     ("fd_accountant", fd_accountant_json);
+    ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
     ("keeper_reaction_ledger", reaction_ledger_json);

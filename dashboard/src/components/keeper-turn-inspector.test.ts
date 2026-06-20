@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchKeeperTurnRecords, type TurnRecordsResponse } from '../api/dashboard'
 import {
   initialTurnRowForTimestamp,
+  initialTurnRowForTurnRef,
   KeeperMemoryOsRecallPanel,
   KeeperTurnInspector,
 } from './keeper-turn-inspector'
@@ -209,6 +210,31 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(initialTurnRowForTimestamp(response.entries, nearTurn42)?.record.absolute_turn).toBe(42)
     expect(initialTurnRowForTimestamp(response.entries, farFromRetainedTurns)).toBeNull()
     expect(initialTurnRowForTimestamp(response.entries, 'not-a-date')).toBeNull()
+  })
+
+  it('matches an exact turn_ref (trace_id + absolute_turn), no fuzzy fallback', () => {
+    const response = turnRecordsWithMemoryOs()
+
+    // Exact key hits the precise row, not the nearest by time.
+    expect(
+      initialTurnRowForTurnRef(response.entries, 'trace-active#42')?.record.absolute_turn,
+    ).toBe(42)
+    expect(
+      initialTurnRowForTurnRef(response.entries, 'trace-active#41')?.record.absolute_turn,
+    ).toBe(41)
+
+    // A present-but-unmatched key returns null (never a window guess).
+    expect(initialTurnRowForTurnRef(response.entries, 'trace-active#999')).toBeNull()
+    expect(initialTurnRowForTurnRef(response.entries, 'trace-other#42')).toBeNull()
+
+    // Malformed keys decode to null, never throw.
+    expect(initialTurnRowForTurnRef(response.entries, 'no-separator')).toBeNull()
+    expect(initialTurnRowForTurnRef(response.entries, 'trace-active#abc')).toBeNull()
+    expect(initialTurnRowForTurnRef(response.entries, 'trace-active#')).toBeNull()
+    expect(initialTurnRowForTurnRef(response.entries, '#42')).toBeNull()
+    expect(initialTurnRowForTurnRef(response.entries, null)).toBeNull()
+    expect(initialTurnRowForTurnRef(response.entries, undefined)).toBeNull()
+    expect(initialTurnRowForTurnRef([], 'trace-active#42')).toBeNull()
   })
 
   it('opens the detail drawer when an initial timestamp matches a retained turn', async () => {

@@ -39,7 +39,43 @@ let create_store () =
   ; flusher_inbox = Eio.Stream.create 1000
   ; sub_boards = Hashtbl.create 64
   ; sub_boards_by_slug = Hashtbl.create 64
+  ; posts_by_turn_ref = Hashtbl.create 256
+  ; posts_by_run_id = Hashtbl.create 256
   }
+;;
+
+(* RFC-0233 §7: maintain the origin secondary indexes. Shared by the create
+   path (create_fresh) and the load path (load_persisted_posts) so the two
+   stay in lockstep — a single maintenance site, not an N-of-M copy. *)
+let index_post_origin store (post : post) =
+  match post.origin with
+  | None -> ()
+  | Some (o : post_origin) ->
+    let pid = Post_id.to_string post.id in
+    (match o.turn_ref with
+     | Some tr -> Hashtbl.replace store.posts_by_turn_ref (Ids.Turn_ref.to_string tr) pid
+     | None -> ());
+    (match o.fusion_run_id with
+     | Some run_id -> Hashtbl.replace store.posts_by_run_id run_id pid
+     | None -> ())
+;;
+
+(* Prune the origin indexes when a post is swept / cap-evicted, mirroring the
+   [comments_by_post] cleanup in the sweeper. Without this the index tables
+   would grow unbounded over the store lifetime (the double-lookup in
+   [find_post_by_*] keeps a stale key from returning a wrong post, but the
+   entry would still leak). Single-valued [remove] matches the single-valued
+   [replace] in [index_post_origin]. *)
+let unindex_post_origin store (post : post) =
+  match post.origin with
+  | None -> ()
+  | Some (o : post_origin) ->
+    (match o.turn_ref with
+     | Some tr -> Hashtbl.remove store.posts_by_turn_ref (Ids.Turn_ref.to_string tr)
+     | None -> ());
+    (match o.fusion_run_id with
+     | Some run_id -> Hashtbl.remove store.posts_by_run_id run_id
+     | None -> ())
 ;;
 
 (** {1 Comment Rate Limiting}  Per-author sliding-window tracker extracted to [Board_comment_rate_limit] (godfile decomp). Module-level Hashtbl avoids changing the store type; all access is inside the ... *)
@@ -114,6 +150,9 @@ let sweep store =
     in
     List.iter
       (fun id ->
+         (match Hashtbl.find_opt store.posts id with
+          | Some p -> unindex_post_origin store p
+          | None -> ());
          Hashtbl.remove store.posts id;
          Hashtbl.remove store.comments_by_post id;
          Stdlib.decr store.post_count)
@@ -173,6 +212,7 @@ let sweep store =
              List.iter
                (fun (post : post) ->
                   let id = Post_id.to_string post.id in
+                  unindex_post_origin store post;
                   Hashtbl.remove store.posts id;
                   Hashtbl.remove store.comments_by_post id;
                   Stdlib.decr store.post_count;
@@ -380,6 +420,7 @@ let create_post_with_outcome
       ?(ttl_hours = Limits.default_ttl_hours)
   ?hearth
   ?thread_id
+  ?origin
   ()
   : (create_post_outcome, board_error) Result.t
   =
@@ -487,9 +528,11 @@ let create_post_with_outcome
                     ; pinned = false
                     ; hearth
                     ; thread_id
+                    ; origin
                     }
                   in
                   Hashtbl.add store.posts (Post_id.to_string post.id) post;
+                  index_post_origin store post;
                   Stdlib.incr store.post_count;
                   invalidate_post_caches store;
                   Ok (`Fresh post)
@@ -578,6 +621,7 @@ let create_post
       ?ttl_hours
       ?hearth
       ?thread_id
+      ?origin
       ()
   =
   match
@@ -593,6 +637,7 @@ let create_post
       ?ttl_hours
       ?hearth
       ?thread_id
+      ?origin
       ()
   with
   | Ok outcome -> Ok (post_of_create_post_outcome outcome)

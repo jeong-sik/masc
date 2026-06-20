@@ -212,9 +212,16 @@ path (the runtime stays static/deterministic per §3.4):
   `scripts/ollama-caps-baseline.json`.
 - `--check` (CI; no network) — compares each config-declared media flag against
   the baseline. Hard-fails on `UNDER-DECLARED` (a vision model whose config
-  omits `supports-image-input` → reroute can't see it) or `OVER-DECLARED`
-  (config claims a modality the model lacks → provider 400 at dispatch). Wired
-  into `.github/workflows/ci.yml`.
+  omits `supports-image-input` → reroute can't see it), `OVER-DECLARED`
+  (config claims a modality the model lacks → provider 400 at dispatch), or
+  `UNVERIFIED-DECLARED` (config declares image/audio but the model has no
+  `/api/show` evidence in the baseline). The last case closes the loop: a media
+  capability is valid only when backed by a baseline snapshot, so adding a vision
+  model to the config without refreshing the baseline fails CI instead of passing
+  on a soft warning (the gap that let a 31-model config expansion through
+  unverified). A *text-only* model absent from the baseline is fail-closed safe
+  and only soft-warns (`--strict` fails those too). Wired into
+  `.github/workflows/ci.yml`.
 - `--emit` — prints the recommended `[models.<id>.capabilities]` media lines for
   the operator to merge into the live `runtime.toml`.
 

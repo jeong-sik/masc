@@ -64,8 +64,10 @@ let voice_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_voice_agent"
     ; description =
-        "Get your own voice configuration (assigned voice, available voices). No network \
-         required."
+        "Get your own voice capability and configuration. Reports assigned voice, \
+         available voices, active turn-based voice session state, and \
+         realtime_supported=false when no full-duplex live audio stream is bound to \
+         keeper turns. No network required."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ; { name = "keeper_voice_sessions"

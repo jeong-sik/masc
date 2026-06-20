@@ -1226,8 +1226,9 @@ let internal_descriptors : t list =
       ~readonly:true
   ; voice_descriptor
       "keeper_voice_agent"
-      "Invoke the realtime voice agent for the current keeper."
-      ~readonly:false
+      "Read the keeper voice capability, assigned voice, and active turn-based \
+       session state. This does not start a realtime audio stream."
+      ~readonly:true
   ; voice_descriptor
       "keeper_voice_sessions"
       "List active voice sessions for this keeper."

@@ -275,11 +275,11 @@ describe('KeeperWorkspaceRoster', () => {
   })
 
   it('shows the keeper basepath (sandbox_target) as the row sub-line, shortened with a full-path title', () => {
-    keepers.value = [mk({ name: 'miso', status: 'running', sandbox_target: '/Users/dancer/me/.worktrees/keeper-miso' })]
+    keepers.value = [mk({ name: 'miso', status: 'running', sandbox_target: '/workspace/keepers/keeper-miso' })]
     render(html`<${KeeperWorkspaceRoster} activeName="miso" />`, host)
     const handle = host.querySelector('.kw-kp-handle') as HTMLElement
-    expect(handle?.textContent).toBe('…/.worktrees/keeper-miso')
-    expect(handle?.getAttribute('title')).toBe('/Users/dancer/me/.worktrees/keeper-miso')
+    expect(handle?.textContent).toBe('…/keepers/keeper-miso')
+    expect(handle?.getAttribute('title')).toBe('/workspace/keepers/keeper-miso')
   })
 
   it('falls back to the scope proxy when a keeper has no sandbox_target', () => {

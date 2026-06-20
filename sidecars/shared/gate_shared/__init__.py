@@ -16,7 +16,7 @@ from .diagnostics import (
 )
 from .gate_client_base import BreakerSnapshot, GateClientBase
 from .gate_response import GateResponse
-from .structured_content import response_text, structured_plain_text
+from .structured_content import SUPPORTED_BLOCK_TYPES, response_text, structured_plain_text
 
 __all__ = [
     "AutoFix",
@@ -29,6 +29,7 @@ __all__ = [
     "GateResponse",
     "NETWORK_TIMEOUT_SEC",
     "Severity",
+    "SUPPORTED_BLOCK_TYPES",
     "check_dependencies_installed",
     "exit_code_for",
     "render_fix_outcomes",

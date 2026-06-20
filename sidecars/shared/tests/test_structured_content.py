@@ -2,7 +2,36 @@
 
 from __future__ import annotations
 
-from gate_shared import GateResponse, response_text, structured_plain_text
+from gate_shared import (
+    GateResponse,
+    SUPPORTED_BLOCK_TYPES,
+    response_text,
+    structured_plain_text,
+)
+
+
+def test_supported_block_types_match_server_contract() -> None:
+    # Keep this in sync with keeper_chat_blocks.ml / keeper-chat-history.ts.
+    # "video" is intentionally absent as a top-level block kind; video files are
+    # represented as attachments with kind="video".
+    assert SUPPORTED_BLOCK_TYPES == frozenset(
+        {
+            "p",
+            "h4",
+            "ul",
+            "callout",
+            "table",
+            "image",
+            "code",
+            "mermaid",
+            "svg",
+            "link",
+            "voice",
+            "audio",
+            "attach",
+            "fusion",
+        }
+    )
 
 
 class TestStructuredPlainText:
@@ -50,11 +79,6 @@ class TestStructuredPlainText:
                         "src": "https://example.com/clip.mp4",
                         "kind": "video",
                     },
-                    {
-                        "t": "video",
-                        "src": "https://example.com/demo.mp4",
-                        "cap": "Demo",
-                    },
                     {"t": "fusion", "board_post_id": "p-123", "run_id": "fus-9"},
                 ]
             }
@@ -73,7 +97,6 @@ class TestStructuredPlainText:
         assert "Post\nhttps://example.com/post\nexample.com" in text
         assert "Audio (tts)\nspoken memo\nhttps://example.com/a.mp3" in text
         assert "Attachment (video): clip.mp4\nhttps://example.com/clip.mp4" in text
-        assert "Video: Demo\nhttps://example.com/demo.mp4" in text
         assert "Fusion result\nboard_post_id: p-123\nrun_id: fus-9" in text
 
     def test_ignores_malformed_blocks(self) -> None:

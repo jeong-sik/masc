@@ -10,6 +10,25 @@ from .gate_response import GateResponse
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
+SUPPORTED_BLOCK_TYPES = frozenset(
+    {
+        "p",
+        "h4",
+        "ul",
+        "callout",
+        "table",
+        "image",
+        "code",
+        "mermaid",
+        "svg",
+        "link",
+        "voice",
+        "audio",
+        "attach",
+        "fusion",
+    }
+)
+
 
 def _string(value: Any) -> str:
     return str(value) if isinstance(value, str) else ""
@@ -150,17 +169,6 @@ def _attach_part(raw: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _video_part(raw: dict[str, Any]) -> str:
-    src = _string(raw.get("src")).strip()
-    caption = _string(raw.get("cap")).strip() or _string(raw.get("name")).strip()
-    if not src and not caption:
-        return ""
-    lines = [f"Video: {caption or src}"]
-    if src and src != caption:
-        lines.append(src)
-    return "\n".join(lines)
-
-
 def _fusion_part(raw: dict[str, Any]) -> str:
     board_post_id = _string(raw.get("board_post_id")).strip()
     if not board_post_id:
@@ -200,8 +208,6 @@ def _plain_part(raw: Any) -> str:
         return _voice_part(raw)
     if block_type == "attach":
         return _attach_part(raw)
-    if block_type == "video":
-        return _video_part(raw)
     if block_type == "fusion":
         return _fusion_part(raw)
     return ""

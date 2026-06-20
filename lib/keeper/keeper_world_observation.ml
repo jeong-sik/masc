@@ -56,6 +56,8 @@ type scheduled_automation_item =
   ; recurrence_summary : string
   ; risk_class : string
   ; due_at : float
+  ; keeper_next_tool : string option
+  ; keeper_next_action : string
   }
 
 type scheduled_automation_observation =
@@ -260,6 +262,19 @@ let schedule_blocked_approval ~now state (request : Schedule_domain.schedule_req
   | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled | Expired -> false
 ;;
 
+let keeper_next_tool_for_schedule_action = function
+  | "dispatch_ready" | "approve_or_reject" -> Some "masc_schedule_get"
+  | _ -> None
+;;
+
+let keeper_next_action_for_schedule_action = function
+  | "dispatch_ready" ->
+    "Inspect the schedule if needed and monitor dispatch; do not create a duplicate schedule."
+  | "approve_or_reject" ->
+    "Inspect details, then wait for an explicit human decision before calling masc_schedule_approve or masc_schedule_reject."
+  | _ -> "Inspect the schedule before taking action."
+;;
+
 let schedule_attention_item action (request : Schedule_domain.schedule_request) =
   { schedule_id = request.schedule_id
   ; action
@@ -268,6 +283,8 @@ let schedule_attention_item action (request : Schedule_domain.schedule_request) 
   ; recurrence_summary = Schedule_domain.recurrence_summary request.recurrence
   ; risk_class = Schedule_domain.risk_class_to_string request.risk_class
   ; due_at = request.due_at
+  ; keeper_next_tool = keeper_next_tool_for_schedule_action action
+  ; keeper_next_action = keeper_next_action_for_schedule_action action
   }
 ;;
 

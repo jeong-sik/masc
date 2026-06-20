@@ -134,6 +134,9 @@ describe('Tools', () => {
             effective_status: 'blocked_approval',
             execution_readiness: 'blocked_approval',
             operator_action: 'approve_or_reject',
+            keeper_next_tool: 'masc_schedule_get',
+            keeper_next_action:
+              'Inspect details, then wait for an explicit human decision before calling masc_schedule_approve or masc_schedule_reject.',
             risk_class: 'workspace_write',
             approval_required: true,
             source: 'operator_request',
@@ -159,6 +162,8 @@ describe('Tools', () => {
     expect(container.textContent).toContain('blocked approval')
     expect(container.textContent).toContain('raw pending approval')
     expect(container.textContent).toContain('approve or reject')
+    expect(container.textContent).toContain('masc_schedule_get')
+    expect(container.textContent).toContain('explicit human decision')
     expect(container.textContent).toContain('sched-1')
     expect(container.textContent).toContain('workspace write')
     expect(container.textContent).toContain('cron 0 9 * * 1-5 Asia/Seoul')

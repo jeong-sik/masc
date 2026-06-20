@@ -1820,6 +1820,8 @@ export interface DashboardScheduledAutomationRequest {
   effective_status?: string
   execution_readiness?: string
   operator_action?: string | null
+  keeper_next_tool?: string | null
+  keeper_next_action?: string | null
   risk_class: string
   approval_required: boolean
   source: string

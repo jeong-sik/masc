@@ -1847,6 +1847,31 @@ let schedule_operator_action ~now state (request : Schedule_domain.schedule_requ
   | _ -> `Null
 ;;
 
+let schedule_keeper_next_tool = function
+  | "blocked_approval" | "awaiting_approval" | "due_pending_refresh" | "expired"
+  | "ready" | "approved" ->
+    `String "masc_schedule_get"
+  | "scheduled" | "running" | "terminal" -> `Null
+  | _ -> `Null
+;;
+
+let schedule_keeper_next_action = function
+  | "blocked_approval" | "awaiting_approval" ->
+    `String
+      "Inspect details, then wait for an explicit human decision before calling masc_schedule_approve or masc_schedule_reject."
+  | "due_pending_refresh" ->
+    `String
+      "The schedule is due but the runner has not refreshed it yet; inspect if needed, otherwise wait for the runner tick."
+  | "expired" ->
+    `String
+      "Inspect the expired schedule and recreate it with masc_schedule_create only if the operator still wants it."
+  | "ready" | "approved" ->
+    `String
+      "Monitor dispatch; do not create a duplicate schedule for this due item."
+  | "scheduled" | "running" | "terminal" -> `Null
+  | _ -> `Null
+;;
+
 let schedule_fsm_state ~now state schedules =
   let count status = schedule_status_count schedules status in
   let count_non_expired status =
@@ -1908,12 +1933,15 @@ let schedule_request_dashboard_json
   let payload_target, payload_summary =
     Schedule_payload_projection.target_summary request
   in
+  let execution_readiness = schedule_execution_readiness ~now state request in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
     ; "effective_status", `String (schedule_effective_status ~now state request)
-    ; "execution_readiness", `String (schedule_execution_readiness ~now state request)
+    ; "execution_readiness", `String execution_readiness
     ; "operator_action", schedule_operator_action ~now state request
+    ; "keeper_next_tool", schedule_keeper_next_tool execution_readiness
+    ; "keeper_next_action", schedule_keeper_next_action execution_readiness
     ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
     ; "approval_required", `Bool request.approval_required
     ; "source", `String (Schedule_domain.schedule_source_to_string request.source)

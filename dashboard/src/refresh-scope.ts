@@ -1,6 +1,6 @@
 import type { RouteState } from './types'
 
-export type RouteRefreshTarget = 'execution' | 'board' | 'operator' | 'activity'
+export type RouteRefreshTarget = 'execution' | 'board' | 'operator' | 'activity' | 'fusion'
 
 export function routeWantsRefreshTarget(
   routeState: Pick<RouteState, 'tab' | 'params'>,
@@ -15,6 +15,10 @@ export function routeWantsRefreshTarget(
       return routeState.tab === 'command' && routeState.params.view !== 'inspector'
     case 'activity':
       return routeState.tab === 'monitoring' && routeState.params.section === 'observatory'
+    case 'fusion':
+      // The fusion run-status panel only mounts on the top-level fusion surface,
+      // so its registry refetch is scoped to that route (RFC-0266 Phase 4).
+      return routeState.tab === 'fusion'
   }
 }
 

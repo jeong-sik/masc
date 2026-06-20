@@ -33,6 +33,7 @@ import {
   refreshDashboard,
   refreshExecution,
   refreshBoard,
+  refreshFusionRuns,
   serverStatus,
   boardPosts,
   boardSortMode,
@@ -160,6 +161,10 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   reaction_changed:     { target: 'board' },
   // Observatory activity telemetry
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
+  // Fusion run registry — emitted by lib/fusion/fusion_sink.ml broadcast_run_status.
+  // Without this entry the live WS router dropped the event and the run-status
+  // panel only refreshed on the ~120s periodic poll / route revisit (RFC-0266 Phase 4).
+  fusion_run_status:    { target: 'fusion' },
 }
 
 const BOARD_HEARTH_REFRESH_EVENTS = new Set([
@@ -184,6 +189,7 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
   activity:  () => {
     for (const fn of _refreshActivityFns) fn()
   },
+  fusion:    () => { void refreshFusionRuns() },
 }
 
 function scheduleTargetRefresh(

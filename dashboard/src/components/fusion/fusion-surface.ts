@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useMemo } from 'preact/hooks'
 import type { BoardPost } from '../../types'
 import { navigate, replaceRoute, route } from '../../router'
-import { boardLoading, boardPosts, refreshBoard } from '../../store'
+import { boardLoading, boardPosts, fusionRunsLoading, refreshBoard, refreshFusionRuns } from '../../store'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { AgentAvatar } from '../overview/agent-avatar'
@@ -389,9 +389,9 @@ export function FusionSurface() {
           <button
             type="button"
             class=${`fus-refresh ${ringFocusClasses()}`}
-            onClick=${() => void refreshBoard()}
-            disabled=${boardLoading.value}
-          >${boardLoading.value ? 'Refreshing...' : 'Refresh'}</button>
+            onClick=${() => { void refreshBoard(); void refreshFusionRuns() }}
+            disabled=${boardLoading.value || fusionRunsLoading.value}
+          >${boardLoading.value || fusionRunsLoading.value ? 'Refreshing...' : 'Refresh'}</button>
         </header>
 
         <${FusionRunsPanel} />

@@ -227,10 +227,11 @@ describe('parseSSEMessage', () => {
   })
 
   it('keeps fusion_run_status events so the RFC-0266 Phase 4 live panel refresh is not dropped', () => {
-    // Regression: the dashboard sse.ts dispatch has a `case 'fusion_run_status'`,
-    // but it is unreachable unless the type also passes this parse boundary.
-    // If this drops to null, the running -> completed/failed live flip silently
-    // stops working and the panel only updates on tab re-navigation.
+    // Regression: the live WS router (sse-store.ts routeServerPushEvent ->
+    // SIMPLE_ROUTES['fusion_run_status'] -> refreshFusionRuns) only sees the event
+    // if it first passes this parse boundary. If this drops to null, the
+    // running -> completed/failed live flip silently stops working and the panel
+    // only updates on the periodic poll / tab re-navigation.
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const msg = parseSSEMessage({
       type: 'fusion_run_status',

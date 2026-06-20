@@ -267,6 +267,41 @@ let rewrite_facts_atomically ~keeper_id facts =
   write_file_atomically path content
 ;;
 
+(* ---------- Facts snapshot CAS (optimistic concurrency) ---------- *)
+
+(* Byte-level snapshot identity for the read-outside-lock, rewrite-under-lock
+   pattern. [fact_to_json] has a stable key order (see Keeper_memory_os_types — the
+   external_ref key is appended last specifically to keep this fingerprint stable),
+   so a fact's canonical JSON is a sound content key. [same_fact_snapshot snapshot
+   current] is true iff the two lists are positionally byte-identical: any
+   concurrent append (longer), cap/GC (shorter), or re-observation (a row's bytes
+   change) makes them differ, so a caller that classified [snapshot] outside the
+   lock can re-read under the lock and abandon a stale rewrite. Line count and file
+   size are NOT sound CAS keys — [cap_facts]/[merge_and_cap_facts] can hold either
+   steady while rows differ. SSOT for the reconcile and consolidation rewrite
+   paths. *)
+let fact_fingerprint fact = fact_to_json fact |> Yojson.Safe.to_string
+
+let rec same_fact_snapshot left right =
+  match left, right with
+  | [], [] -> true
+  | l :: ls, r :: rs ->
+    String.equal (fact_fingerprint l) (fact_fingerprint r) && same_fact_snapshot ls rs
+  | [], _ :: _ | _ :: _, [] -> false
+;;
+
+(* Run [f] holding the per-keeper facts lock. On lock-acquisition timeout (another
+   writer holds the flock past the retry budget) [on_timeout msg] decides the
+   caller's result rather than letting [Flock_timeout] escape — callers that want a
+   typed skip/no-op outcome pass it here instead of catching the exception
+   themselves. *)
+let with_facts_lock ?clock ~keeper_id ~on_timeout f =
+  try File_lock_eio.with_lock ?clock (facts_path ~keeper_id) f with
+  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
+    on_timeout (Printf.sprintf "lock timeout: %s after %d attempts" path attempts)
+  | Failure msg -> on_timeout ("lock timeout: " ^ msg)
+;;
+
 let save_tool_result ~keeper_id ~tool_call_id json =
   let path = tool_result_path ~keeper_id ~tool_call_id in
   write_file_atomically path (Yojson.Safe.pretty_to_string json)

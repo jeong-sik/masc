@@ -75,6 +75,12 @@ type apply_report =
           (demote-not-delete: never deleted on terminal state alone) *)
   ; advanced : int (** [Stale_open] facts whose [last_verified_at] moved to [now] *)
   ; kept : int (** [Fresh] / [Stale_unknown] facts left unchanged *)
+  ; committed : bool
+      (** whether the advance was actually persisted this cycle. False for a
+          [dry_run], a no-advance pass (nothing to write), a CAS-abandoned rewrite (a
+          concurrent writer committed during the off-lock verify), or a
+          lock-acquisition timeout. The classification counts above are still
+          reported even when [committed] is false. *)
   }
 
 (** RFC-0259 §3.4 (P3): the pure reconcile core. Classifies each fact and maps the
@@ -99,12 +105,20 @@ val reconcile_facts
     tests — can tell a preserve-over-delete abort apart from a normal reconcile. *)
 exception Fact_store_corrupt of string
 
-(** RFC-0259 §3.4 (P3): apply the reconciler to one keeper's store under the
-    per-keeper facts lock (the lock GC/librarian/consolidation already hold on
-    [facts_path], so no concurrent writer's update is lost). Reads strictly — a
-    corrupt store aborts rather than being partially dropped and overwritten — and
-    rewrites atomically. [dry_run:true] computes the report without writing (the
-    default, mirroring the GC rollout). Must run inside an Eio context. *)
+(** RFC-0259 §3.4 (P3): apply the reconciler to one keeper's store. The strict read
+    and the injected [verify] (one external lookup per ref-bearing past-horizon fact)
+    run WITHOUT the per-keeper facts lock, so a slow [verify] does not stall the
+    librarian/GC/consolidation writes that share that lock. The lock is taken only
+    when an advance must be persisted, to re-read and rewrite: the rewrite is applied
+    only if the store is still byte-for-byte the snapshot that was classified
+    (optimistic concurrency — {!Keeper_memory_os_io.same_fact_snapshot}); if a
+    concurrent writer committed during the verify window the rewrite is abandoned and
+    retried on the next tick, never clobbering the concurrent write. A re-read that
+    fails to parse raises [Fact_store_corrupt] rather than being overwritten (preserve
+    over delete). [dry_run:true] computes the report without taking the lock or
+    writing (the default, mirroring the GC rollout). [report.committed] is true iff
+    the rewrite was persisted this cycle. A lock-acquisition timeout yields a no-op
+    cycle (committed=false) instead of raising. Must run inside an Eio context. *)
 val run_reconcile
   :  ?dry_run:bool
   -> keeper_id:string

@@ -11,7 +11,6 @@
 
 module Io = Keeper_memory_os_io
 module Consolidation = Keeper_memory_os_consolidation
-module Types = Keeper_memory_os_types
 
 (* Same shape as [Keeper_memory_llm_summary.complete_fn]; the LLM call is
    injectable so the loop is driveable with a fake completion in tests. *)
@@ -74,23 +73,16 @@ type outcome =
 
 (* Serialize only the final snapshot validation + rewrite against the per-keeper
    facts file. The provider call runs without this lock, then the locked rewrite
-   validates that the fact snapshot still matches the model input. *)
+   validates that the fact snapshot still matches the model input
+   ([Io.same_fact_snapshot]). Wraps the shared [Io.with_facts_lock] so a contended
+   cycle becomes a typed [Transport_failed] rather than an escaping [Flock_timeout]
+   (the lock/CAS helpers are the SSOT shared with the reconcile rewrite path). *)
 let with_facts_lock ?clock ~keeper_id f =
-  try File_lock_eio.with_lock ?clock (Io.facts_path ~keeper_id) f with
-  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
-    Transport_failed
-      (Printf.sprintf "consolidation lock timeout: %s after %d attempts" path attempts)
-  | Failure msg -> Transport_failed ("consolidation lock timeout: " ^ msg)
-;;
-
-let fact_fingerprint fact = Types.fact_to_json fact |> Yojson.Safe.to_string
-
-let rec same_fact_snapshot left right =
-  match left, right with
-  | [], [] -> true
-  | l :: ls, r :: rs ->
-    String.equal (fact_fingerprint l) (fact_fingerprint r) && same_fact_snapshot ls rs
-  | [], _ :: _ | _ :: _, [] -> false
+  Io.with_facts_lock
+    ?clock
+    ~keeper_id
+    ~on_timeout:(fun msg -> Transport_failed ("consolidation " ^ msg))
+    f
 ;;
 
 let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
@@ -130,7 +122,7 @@ let rewrite_if_snapshot_current ?clock ~keeper_id ~facts ~survivors ~before ~aft
     | Error msg ->
       Unparseable ("consolidation fact store changed before rewrite: " ^ msg)
     | Ok current ->
-      if not (same_fact_snapshot facts current)
+      if not (Io.same_fact_snapshot facts current)
       then Snapshot_changed { before; current = List.length current }
       else (
         Io.rewrite_facts_atomically ~keeper_id survivors;

@@ -94,9 +94,12 @@ type apply_report =
   ; terminal_kept : int
   ; advanced : int
   ; kept : int
+  ; committed : bool
   }
 
-let empty_apply = { scanned = 0; terminal_kept = 0; advanced = 0; kept = 0 }
+let empty_apply =
+  { scanned = 0; terminal_kept = 0; advanced = 0; kept = 0; committed = false }
+;;
 
 let reconcile_facts ~now ~horizon ~verify (facts : fact list)
   : fact list * apply_report
@@ -135,20 +138,47 @@ let reconcile_facts ~now ~horizon ~verify (facts : fact list)
 ;;
 
 let run_reconcile ?(dry_run = false) ~keeper_id ~now ~horizon ~verify () : apply_report =
-  (* Same per-keeper facts lock as GC/librarian/consolidation: the verify IO runs
-     inside the lock, but it only reads external state (gh) and never touches the
-     store, so unlike the consolidation runtime there is no unlocked read-modify gap
-     to guard with a snapshot CAS — the whole read-classify-rewrite is atomic. *)
-  File_lock_eio.with_lock (Io.facts_path ~keeper_id) (fun () ->
-    match Io.read_facts_all_strict ~keeper_id with
-    | Error message ->
-      raise
-        (Fact_store_corrupt ("memory os reconcile fact store read failed: " ^ message))
-    | Ok facts ->
-      let survivors, report = reconcile_facts ~now ~horizon ~verify facts in
-      (* Only [Stale_open] advances mutate the store; demoted terminal facts are left
-         byte-identical, so a pass that finds no still-open ref writes nothing. *)
-      if (not dry_run) && report.advanced > 0
-      then Io.rewrite_facts_atomically ~keeper_id survivors;
-      report)
+  (* Phase 1 — NO LOCK. The strict read and the injected [verify] (one gh call per
+     ref-bearing past-horizon fact, ~10s each) run WITHOUT the per-keeper facts lock.
+     The earlier design held the lock across the whole verify loop "because verify
+     never touches the store"; that is true for correctness but holds the lock —
+     shared with librarian/GC/consolidation — across K*10s of network IO, stalling
+     every memory write for the keeper. Off-lock verify removes that stall; the cost
+     is an unlocked read-modify gap, closed by the snapshot CAS in Phase 2. *)
+  match Io.read_facts_all_strict ~keeper_id with
+  | Error message ->
+    raise (Fact_store_corrupt ("memory os reconcile fact store read failed: " ^ message))
+  | Ok facts ->
+    let survivors, report = reconcile_facts ~now ~horizon ~verify facts in
+    if dry_run
+    then report
+    else if report.advanced = 0
+    then
+      (* Only [Stale_open] advances mutate the store (demoted terminal facts stay
+         byte-identical), so a pass with no still-open ref writes nothing and never
+         takes the lock. *)
+      report
+    else
+      (* Phase 2 — LOCK. Re-read under the lock and rewrite only if the store is
+         still byte-for-byte the snapshot we classified (optimistic concurrency CAS,
+         mirroring the consolidation runtime). If a concurrent writer committed
+         during the verify window the snapshot differs, so abandon this cycle's
+         rewrite — the reconciler is periodic and re-runs next tick — rather than
+         clobber the concurrent write with stale survivors. The re-read and rewrite
+         share one lock acquisition, so no third writer can interleave between them.
+         A lock-acquisition timeout yields a no-op cycle (committed=false). *)
+      Io.with_facts_lock ~keeper_id ~on_timeout:(fun _ -> report) (fun () ->
+        match Io.read_facts_all_strict ~keeper_id with
+        | Error message ->
+          (* Preserve over delete: a re-read that now fails to parse must NOT be
+             overwritten by the snapshot's survivors — surface the corruption. *)
+          raise
+            (Fact_store_corrupt
+               ("memory os reconcile fact store changed before rewrite: " ^ message))
+        | Ok current ->
+          if Io.same_fact_snapshot facts current
+          then (
+            Io.rewrite_facts_atomically ~keeper_id survivors;
+            { report with committed = true })
+          else report)
 ;;

@@ -17,6 +17,12 @@ type link_block = {
 
 type text_block = { html : string }
 
+type code_block = {
+  cap : string option;
+  html : string;
+  source : string option;
+}
+
 type fusion_block = {
   board_post_id : string;
   run_id : string;
@@ -24,6 +30,7 @@ type fusion_block = {
 
 type chat_block =
   | Text of text_block
+  | Code of code_block
   | Image of image_block
   | Link of link_block
   | Fusion of fusion_block
@@ -120,11 +127,38 @@ let push_text_fragment acc fragment =
 
 let md_image_re = Re.Pcre.re "!\\[([^\\]]*)\\]\\(([^)]+)\\)" |> Re.compile
 
+let code_fence_re =
+  Re.Pcre.re
+    "```([A-Za-z0-9_+.#-]*)[ \t]*\r?\n([\\s\\S]*?)\r?\n```[ \t]*(?:\r?\n|$)"
+  |> Re.compile
+
+type next_match =
+  | Image_match of Re.Group.t
+  | Code_match of Re.Group.t
+
+let earlier_match left right =
+  match left, right with
+  | None, None -> None
+  | Some _, None -> left
+  | None, Some _ -> right
+  | Some (Image_match image), Some (Code_match code) ->
+    if Re.Group.start code 0 <= Re.Group.start image 0 then right else left
+  | Some (Code_match code), Some (Image_match image) ->
+    if Re.Group.start code 0 <= Re.Group.start image 0 then left else right
+  | Some _, Some _ -> left
+
 let parse_text_to_blocks text : chat_block list =
   let rec scan acc last_index =
-    match Re.exec_opt ~pos:last_index md_image_re text with
-    | None -> push_text_fragment acc (String.sub text last_index (String.length text - last_index))
-    | Some group ->
+    let next_image =
+      Option.map (fun group -> Image_match group) (Re.exec_opt ~pos:last_index md_image_re text)
+    in
+    let next_code =
+      Option.map (fun group -> Code_match group) (Re.exec_opt ~pos:last_index code_fence_re text)
+    in
+    match earlier_match next_image next_code with
+    | None ->
+      push_text_fragment acc (String.sub text last_index (String.length text - last_index))
+    | Some (Image_match group) ->
       let start = Re.Group.start group 0 in
       let stop = Re.Group.stop group 0 in
       let before = String.sub text last_index (start - last_index) in
@@ -138,6 +172,16 @@ let parse_text_to_blocks text : chat_block list =
       else
         let fallback = String.sub text start (stop - start) in
         scan (push_text_fragment acc fallback) stop
+    | Some (Code_match group) ->
+      let start = Re.Group.start group 0 in
+      let stop = Re.Group.stop group 0 in
+      let before = String.sub text last_index (start - last_index) in
+      let lang = Re.Group.get group 1 |> String.trim in
+      let source = Re.Group.get group 2 in
+      let cap = if lang = "" then None else Some (String.lowercase_ascii lang) in
+      let acc = push_text_fragment acc before in
+      let acc = Code { cap; html = escape_html source; source = Some source } :: acc in
+      scan acc stop
   in
   List.rev (scan [] 0)
 ;;
@@ -145,6 +189,19 @@ let parse_text_to_blocks text : chat_block list =
 let block_to_yojson = function
   | Text { html } ->
     `Assoc [ ("t", `String "p"); ("html", `String html) ]
+  | Code { cap; html; source } ->
+    let fields = [ ("t", `String "code"); ("html", `String html) ] in
+    let fields =
+      match cap with
+      | None -> fields
+      | Some c -> fields @ [ ("cap", `String c) ]
+    in
+    let fields =
+      match source with
+      | None -> fields
+      | Some s -> fields @ [ ("source", `String s) ]
+    in
+    `Assoc fields
   | Image { src; cap } ->
     let fields = [ ("t", `String "image"); ("src", `String src) ] in
     let fields =
@@ -181,6 +238,11 @@ let block_of_yojson json : chat_block option =
     (match get_string "t" with
      | Some "p" ->
        Option.map (fun html -> Text { html }) (get_string "html")
+     | Some "code" ->
+       Option.bind (get_string "html") (fun html ->
+         let cap = get_string "cap" in
+         let source = get_string "source" in
+         Some (Code { cap; html; source }))
      | Some "image" ->
        Option.bind (get_string "src") (fun src ->
          let cap = get_string "cap" in

@@ -16,6 +16,7 @@ from .diagnostics import (
 )
 from .gate_client_base import BreakerSnapshot, GateClientBase
 from .gate_response import GateResponse
+from .structured_content import structured_plain_text
 
 __all__ = [
     "AutoFix",
@@ -33,4 +34,5 @@ __all__ = [
     "render_fix_outcomes",
     "render_json",
     "render_pretty",
+    "structured_plain_text",
 ]

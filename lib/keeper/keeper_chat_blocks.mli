@@ -5,6 +5,7 @@
     blocks verbatim.
 
     Supported shapes:
+    - Matched fenced code blocks become code blocks with escaped HTML and raw source.
     - Markdown images [![alt](url)] become image blocks.
     - Bare image URLs (png/jpg/gif/webp/svg) on their own line become image blocks.
     - Other standalone URLs become link blocks with a hostname-derived title.
@@ -23,6 +24,12 @@ type link_block = {
 
 type text_block = { html : string }
 
+type code_block = {
+  cap : string option;
+  html : string;
+  source : string option;
+}
+
 (** A reference from a keeper chat message to a fusion deliberation's board
     post (RFC-0252). Carries only ids — the dashboard lazy-fetches the board
     post by [board_post_id] and renders the panel answers + judge synthesis
@@ -35,6 +42,7 @@ type fusion_block = {
 
 type chat_block =
   | Text of text_block
+  | Code of code_block
   | Image of image_block
   | Link of link_block
   | Fusion of fusion_block

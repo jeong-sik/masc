@@ -260,7 +260,7 @@ let rich_embed_of_chat_block = function
       Some
         (Discord_rest_client.link_embed ~url ~title ~description:None
            ~image:None)
-  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Fusion _ -> None
+  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Code _ | Keeper_chat_blocks.Fusion _ -> None
 
 let rich_embeds_of_text text =
   text

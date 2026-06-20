@@ -125,7 +125,7 @@ let slack_block_of_chat_block = function
       Some (image_block_json ~url:src ~caption:cap)
   | Keeper_chat_blocks.Link { url; title; meta = _ } ->
       Some (link_block_json ~url ~title ~description:None)
-  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Fusion _ -> None
+  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Code _ | Keeper_chat_blocks.Fusion _ -> None
 
 let content_blocks_of_text text =
   text

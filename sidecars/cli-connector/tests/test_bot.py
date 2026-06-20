@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import re
-
-from src.bot import _strip_state, CLIGateClient
+from src.bot import _response_text, _strip_state, CLIGateClient, GateResponse
 
 
 class TestStripState:
@@ -19,6 +17,27 @@ class TestStripState:
 
     def test_handles_empty(self) -> None:
         assert _strip_state("") == ""
+
+
+class TestResponseText:
+    def test_prefers_structured_plain_text(self) -> None:
+        response = GateResponse(
+            ok=True,
+            keeper_name="sangsu",
+            reply="fallback",
+            model_used="",
+            duration_ms=0,
+            tokens_used=0,
+            error="",
+            structured={
+                "blocks": [
+                    {"t": "p", "html": "hello &lt;cli&gt;"},
+                    {"t": "image", "src": "https://example.com/a.png"},
+                ]
+            },
+        )
+
+        assert _response_text(response) == "hello <cli>\n\nImage: https://example.com/a.png"
 
 
 class TestCLIGateClient:

@@ -265,6 +265,7 @@ class SlackGateBot:
                 model_used=response.model_used,
                 duration_ms=response.duration_ms,
                 tokens_used=response.tokens_used,
+                structured=response.structured,
             )
             text = fallback_text(reply)
             if thinking_ts:

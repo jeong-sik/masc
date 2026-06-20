@@ -63,6 +63,40 @@ let test_inline_url_stays_in_text () =
     [ `Assoc [ ("t", `String "p"); ("html", `String "See https://example.com for more.") ] ]
     (blocks_to_json_list blocks)
 
+let test_code_fence_becomes_code_block () =
+  let blocks = B.parse_text_to_blocks "before\n```OCaml\nlet x = 1 < 2\n```\nafter" in
+  Alcotest.(check (list yojson_testable))
+    "code block with surrounding text"
+    [
+      `Assoc [ ("t", `String "p"); ("html", `String "before") ];
+      `Assoc
+        [
+          ("t", `String "code");
+          ("html", `String "let x = 1 &lt; 2");
+          ("cap", `String "ocaml");
+          ("source", `String "let x = 1 < 2");
+        ];
+      `Assoc [ ("t", `String "p"); ("html", `String "after") ];
+    ]
+    (blocks_to_json_list blocks)
+
+let test_code_fence_preserves_markdown_image_literal () =
+  let blocks =
+    B.parse_text_to_blocks "```md\n![alt](https://example.com/a.png)\n```"
+  in
+  Alcotest.(check (list yojson_testable))
+    "image syntax inside code stays code"
+    [
+      `Assoc
+        [
+          ("t", `String "code");
+          ("html", `String "![alt](https://example.com/a.png)");
+          ("cap", `String "md");
+          ("source", `String "![alt](https://example.com/a.png)");
+        ];
+    ]
+    (blocks_to_json_list blocks)
+
 let test_multiple_images_and_text_lines () =
   let blocks = B.parse_text_to_blocks "intro\n![a](https://x.com/1.jpg)\nhttps://x.com/2.gif\noutro" in
   Alcotest.(check (list yojson_testable))
@@ -116,6 +150,18 @@ let test_blocks_of_yojson_roundtrip () =
       (blocks_to_json_list original)
       (blocks_to_json_list parsed)
   | None -> Alcotest.fail "blocks_of_yojson rejected valid blocks"
+
+let test_code_block_roundtrip () =
+  let original =
+    [ B.Code { cap = Some "sh"; html = "echo &lt;ok&gt;"; source = Some "echo <ok>" } ]
+  in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some parsed ->
+    Alcotest.(check (list yojson_testable))
+      "code roundtrip json"
+      (blocks_to_json_list original)
+      (blocks_to_json_list parsed)
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid code block"
 
 let test_non_http_markdown_image_becomes_text () =
   let blocks = B.parse_text_to_blocks "before ![alt](ftp://example.com/a.png) after" in
@@ -206,6 +252,10 @@ let () =
             test_standalone_non_image_url_becomes_link;
           Alcotest.test_case "inline url stays in text" `Quick
             test_inline_url_stays_in_text;
+          Alcotest.test_case "code fence becomes code block" `Quick
+            test_code_fence_becomes_code_block;
+          Alcotest.test_case "code fence preserves markdown image literal" `Quick
+            test_code_fence_preserves_markdown_image_literal;
           Alcotest.test_case "multiple images and text lines" `Quick
             test_multiple_images_and_text_lines;
           Alcotest.test_case "empty lines ignored" `Quick
@@ -225,6 +275,8 @@ let () =
         [
           Alcotest.test_case "blocks roundtrip through yojson" `Quick
             test_blocks_of_yojson_roundtrip;
+          Alcotest.test_case "code block roundtrip" `Quick
+            test_code_block_roundtrip;
           Alcotest.test_case "blocks_of_yojson rejects malformed" `Quick
             test_blocks_of_yojson_rejects_malformed;
           Alcotest.test_case "fusion block roundtrip" `Quick

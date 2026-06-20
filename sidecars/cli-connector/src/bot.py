@@ -29,7 +29,7 @@ _shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
 if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
-from gate_shared import GateClientBase, GateResponse  # noqa: E402
+from gate_shared import GateClientBase, GateResponse, structured_plain_text  # noqa: E402
 
 
 class CLIGateClient(GateClientBase):
@@ -47,6 +47,10 @@ class CLIGateClient(GateClientBase):
 
 def _strip_state(text: str) -> str:
     return _RE_STATE_BLOCK.sub("", text).strip()
+
+
+def _response_text(response: GateResponse) -> str:
+    return _strip_state(structured_plain_text(response.structured) or response.reply)
 
 
 async def _interactive_loop(client: CLIGateClient, keeper: str) -> None:
@@ -130,8 +134,7 @@ async def _interactive_loop(client: CLIGateClient, keeper: str) -> None:
             idempotency_key=f"cli-{os.getpid()}-{msg_counter}",
         )
 
-        if response.ok and response.reply:
-            reply = _strip_state(response.reply)
+        if response.ok and (reply := _response_text(response)):
             print(f"\n\033[33m{reply}\033[0m")
             # Footer
             footer_parts: list[str] = []

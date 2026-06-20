@@ -287,6 +287,64 @@ let test_dispatch_create_rejects_negative_board_ttl () =
   check int "no schedule persisted" 0 (List.length state.schedules)
 ;;
 
+let test_dispatch_create_rejects_board_payload_without_content () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-board-empty"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "payload_kind", `String "masc.board_post"
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects missing board content" false
+       (Tool_result.is_success result);
+     check string "message"
+       "masc.board_post payload requires non-empty body.content; use board_content for board schedules"
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
+;;
+
+let test_dispatch_create_rejects_read_only_board_payload () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-board-readonly"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "read_only"
+      ; "board_content", `String "Daily schedule fired"
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects read-only board payload" false
+       (Tool_result.is_success result);
+     check string "message"
+       "masc.board_post requires a side-effecting risk_class such as workspace_write"
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
+;;
+
 let test_dispatch_cancel_persists_status () =
   with_config
   @@ fun config ->
@@ -501,6 +559,10 @@ let () =
             test_dispatch_create_board_post_convenience_payload
         ; test_case "dispatch create rejects negative board ttl" `Quick
             test_dispatch_create_rejects_negative_board_ttl
+        ; test_case "dispatch create rejects board payload without content" `Quick
+            test_dispatch_create_rejects_board_payload_without_content
+        ; test_case "dispatch create rejects read-only board payload" `Quick
+            test_dispatch_create_rejects_read_only_board_payload
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
         ; test_case "dashboard projection surfaces schedule FSM" `Quick

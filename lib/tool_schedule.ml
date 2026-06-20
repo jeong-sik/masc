@@ -245,6 +245,42 @@ let payload_from_args args =
     else generic_payload_from_args args
 ;;
 
+let assoc_string_opt key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> trim_nonempty value
+  | _ -> None
+;;
+
+let validate_known_payload_request ~payload ~risk_class =
+  match payload with
+  | `Assoc fields ->
+    (match assoc_string_opt "kind" fields with
+     | Some "masc.board_post" ->
+       let* () =
+         match List.assoc_opt "schema_version" fields with
+         | Some (`Int 1) -> Ok ()
+         | Some (`Int _) -> Error "masc.board_post only supports payload_schema_version=1"
+         | Some _ -> Error "masc.board_post payload.schema_version must be an integer"
+         | None -> Error "masc.board_post payload requires schema_version=1"
+       in
+       if not (Schedule_domain.is_side_effecting risk_class)
+       then Error "masc.board_post requires a side-effecting risk_class such as workspace_write"
+       else (
+         match List.assoc_opt "body" fields with
+         | Some (`Assoc body) ->
+           (match assoc_string_opt "content" body with
+            | Some _ -> Ok ()
+            | None ->
+              Error
+                "masc.board_post payload requires non-empty body.content; use board_content for board schedules")
+         | Some _ -> Error "masc.board_post payload.body must be an object"
+         | None ->
+           Error
+             "masc.board_post payload requires object body with non-empty content; use board_content for board schedules")
+     | _ -> Ok ())
+  | _ -> Ok ()
+;;
+
 let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
   let next_due_at =
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
@@ -337,6 +373,7 @@ let handle_create ~tool_name ~start_time ctx args =
   let result =
     let* payload = payload_from_args args in
     let* risk_class = risk_class_of_arg args in
+    let* () = validate_known_payload_request ~payload ~risk_class in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
     let requested_at =

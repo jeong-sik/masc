@@ -218,7 +218,7 @@ let definition ~action ~id ~name ~description ~input_schema ~read_only =
 let definitions : definition list =
   [ definition ~action:Create_request ~id:"create" ~name:"masc_schedule_create"
       ~description:
-        "Create a durable scheduled internal automation request. Side-effecting requests start pending approval and require a later separate human grant."
+        "Create a durable scheduled internal automation request. For 'every day at 09:00 KST', use recurrence_kind=daily, recurrence_hour=9, recurrence_minute=0, recurrence_timezone=Asia/Seoul. For compact calendar rules, use recurrence_kind=cron with a 5-field recurrence_cron such as '0 9 * * 1-5'. Side-effecting requests start pending approval and require a later separate human grant."
       ~input_schema:create_schema ~read_only:false
   ; definition ~action:List_requests ~id:"list" ~name:"masc_schedule_list"
       ~description:"List durable scheduled internal automation requests."

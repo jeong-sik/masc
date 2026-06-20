@@ -162,16 +162,37 @@ let payload_from_args args =
 ;;
 
 let schedule_request_json ?last_execution (request : Schedule_domain.schedule_request) =
+  let next_due_at =
+    if Schedule_domain.is_terminal request.status then None else Some request.due_at
+  in
+  let requires_grant = Schedule_domain.requires_separate_human_grant request in
   match Schedule_domain.schedule_request_to_yojson request with
   | `Assoc fields ->
     `Assoc
       (fields
        @ [ ( "due_at_iso"
            , `String (Masc_domain.iso8601_of_unix_seconds request.due_at) )
+         ; ( "next_due_at"
+           , match next_due_at with
+             | None -> `Null
+             | Some ts -> `Float ts )
+         ; ( "next_due_at_iso"
+           , match next_due_at with
+             | None -> `Null
+             | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts) )
          ; ( "requested_at_iso"
            , `String (Masc_domain.iso8601_of_unix_seconds request.requested_at) )
+         ; ( "recurrence_kind"
+           , `String (Schedule_domain.recurrence_kind_to_string request.recurrence) )
+         ; ( "recurrence_summary"
+           , `String (Schedule_domain.recurrence_summary request.recurrence) )
          ; ( "requires_separate_human_grant"
-           , `Bool (Schedule_domain.requires_separate_human_grant request) )
+           , `Bool requires_grant )
+         ; ( "approval_policy"
+           , `String
+               (if requires_grant
+                then "separate_human_grant_required"
+                else "no_separate_grant_required") )
          ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
          ; ( "last_execution"
            , match last_execution with

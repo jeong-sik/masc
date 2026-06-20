@@ -1837,10 +1837,15 @@ export interface DashboardScheduledAutomationRequest {
   requested_at_iso?: string
   due_at?: number
   due_at_iso?: string
+  next_due_at?: number | null
+  next_due_at_iso?: string | null
   expires_at?: number | null
   expires_at_iso?: string | null
   payload_digest?: string
   payload_kind?: string | null
+  recurrence_summary?: string | null
+  requires_separate_human_grant?: boolean
+  approval_policy?: string | null
   last_execution?: DashboardScheduledAutomationExecution | null
 }
 

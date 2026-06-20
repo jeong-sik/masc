@@ -163,6 +163,20 @@ let test_dispatch_create_derives_due_at_for_cron_recurrence () =
   | None -> fail "dispatch returned None"
   | Some result ->
     check bool "create succeeds" true (Tool_result.is_success result);
+    let data = Tool_result.data result in
+    let open Yojson.Safe.Util in
+    check string "result recurrence kind" "cron"
+      (data |> member "recurrence_kind" |> to_string);
+    check string "result recurrence summary" "cron 0 9 * * 1-5 UTC"
+      (data |> member "recurrence_summary" |> to_string);
+    check (float 0.001) "result next due_at" 118800.0
+      (data |> member "next_due_at" |> to_float);
+    check string "result next due_at iso" "1970-01-02T09:00:00Z"
+      (data |> member "next_due_at_iso" |> to_string);
+    check bool "result separate grant" false
+      (data |> member "requires_separate_human_grant" |> to_bool);
+    check string "result approval policy" "no_separate_grant_required"
+      (data |> member "approval_policy" |> to_string);
     (match Schedule_store.get_schedule config ~schedule_id:"sched-cron" with
      | None -> fail "schedule missing"
      | Some request ->
@@ -319,6 +333,15 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
     (due_row |> member "recurrence_kind" |> to_string);
   check string "due recurrence object kind" "daily"
     (due_row |> member "recurrence" |> member "kind" |> to_string);
+  check string "due recurrence summary" "daily 09:00:00 Asia/Seoul"
+    (due_row |> member "recurrence_summary" |> to_string);
+  check string "due next due iso"
+    (due_row |> member "due_at_iso" |> to_string)
+    (due_row |> member "next_due_at_iso" |> to_string);
+  check bool "due separate grant" false
+    (due_row |> member "requires_separate_human_grant" |> to_bool);
+  check string "due approval policy" "no_separate_grant_required"
+    (due_row |> member "approval_policy" |> to_string);
   check string "due effective status" "due"
     (due_row |> member "effective_status" |> to_string);
   check string "due readiness" "due_pending_refresh"
@@ -326,6 +349,10 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
   check string "due action" "wait_for_runner_tick"
     (due_row |> member "operator_action" |> to_string);
   let blocked_row = find_request "sched-blocked" in
+  check bool "blocked separate grant" true
+    (blocked_row |> member "requires_separate_human_grant" |> to_bool);
+  check string "blocked approval policy" "separate_human_grant_required"
+    (blocked_row |> member "approval_policy" |> to_string);
   check string "blocked effective status" "blocked_approval"
     (blocked_row |> member "effective_status" |> to_string);
   check string "blocked readiness" "blocked_approval"

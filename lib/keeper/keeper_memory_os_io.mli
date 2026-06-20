@@ -44,6 +44,30 @@ val with_episode_bundle_lock :
 
 val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
+
+(** {1 Facts snapshot CAS} *)
+
+(** Canonical-JSON fingerprint of a fact (stable key order — see
+    {!Keeper_memory_os_types}). *)
+val fact_fingerprint : fact -> string
+
+(** [same_fact_snapshot snapshot current] is true iff the two fact lists are
+    positionally byte-identical. Used for read-outside-lock / rewrite-under-lock
+    optimistic concurrency: a snapshot classified without the lock is revalidated
+    under the lock and a stale rewrite abandoned if any concurrent writer changed
+    the store. Line count / file size are NOT sound CAS keys. *)
+val same_fact_snapshot : fact list -> fact list -> bool
+
+(** [with_facts_lock ?clock ~keeper_id ~on_timeout f] runs [f] holding the
+    per-keeper facts lock. On flock-acquisition timeout, [on_timeout msg] produces
+    the result instead of raising {!File_lock_eio.Flock_timeout}, so callers can
+    return a typed skip/no-op for a contended cycle. *)
+val with_facts_lock :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keeper_id:string
+  -> on_timeout:(string -> 'a)
+  -> (unit -> 'a)
+  -> 'a
 val save_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t -> unit
 val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t option
 

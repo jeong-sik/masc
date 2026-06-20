@@ -247,15 +247,20 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                 if report.Keeper_memory_os_reconcile.terminal_kept > 0
                    || report.advanced > 0
                 then
+                  (* [committed] distinguishes a persisted advance from a cycle whose
+                     rewrite was abandoned because a concurrent writer changed the
+                     store during the off-lock verify (advanced>0 but committed=false
+                     — re-runs next tick). *)
                   Log.Server.info
                     "memory_os_reconcile[%s]: keeper=%s scanned=%d terminal_kept=%d \
-                     advanced=%d kept=%d"
+                     advanced=%d kept=%d committed=%b"
                     mode
                     keeper_id
                     report.scanned
                     report.terminal_kept
                     report.advanced
                     report.kept
+                    report.committed
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->

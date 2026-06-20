@@ -212,8 +212,44 @@ let test_parse_minimal_scenario () =
       Alcotest.(check string) "id" "test-001" s.Eval_harness.id;
       Alcotest.(check string) "goal" "Do something" s.Eval_harness.goal;
       Alcotest.(check string) "category default" "general" s.Eval_harness.category;
-      Alcotest.(check int) "max_turns default" 5 s.Eval_harness.max_turns
+      Alcotest.(check int) "max_turns default" 5 s.Eval_harness.max_turns;
+      Alcotest.(check bool) "ownership default" true
+        (s.Eval_harness.ownership = Eval_harness.Foreign)
   | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
+
+let test_parse_self_owned_ownership () =
+  let json = Yojson.Safe.from_string {|{
+    "id": "self-owned-001",
+    "goal": "Measure an owned completion claim",
+    "ownership": "self_owned"
+  }|} in
+  match Eval_harness.scenario_of_json json with
+  | Ok s ->
+      Alcotest.(check bool) "ownership" true
+        (s.Eval_harness.ownership = Eval_harness.Self_owned)
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
+
+let test_parse_rejects_invalid_ownership () =
+  let assert_invalid label json_text =
+    let json = Yojson.Safe.from_string json_text in
+    match Eval_harness.scenario_of_json json with
+    | Ok _ -> Alcotest.failf "%s unexpectedly parsed" label
+    | Error e ->
+        Alcotest.(check bool) (label ^ " mentions ownership") true
+          (String_util.contains_substring e "ownership")
+  in
+  assert_invalid "typo"
+    {|{
+      "id": "self-owned-typo",
+      "goal": "Measure an owned completion claim",
+      "ownership": "self-owned"
+    }|};
+  assert_invalid "non-string"
+    {|{
+      "id": "self-owned-non-string",
+      "goal": "Measure an owned completion claim",
+      "ownership": 1
+    }|}
 
 let test_parse_full_scenario () =
   let json = Yojson.Safe.from_string {|{
@@ -390,6 +426,10 @@ let () =
     ]);
     ("scenario_parsing", [
       Alcotest.test_case "minimal" `Quick test_parse_minimal_scenario;
+      Alcotest.test_case "self_owned ownership" `Quick
+        test_parse_self_owned_ownership;
+      Alcotest.test_case "reject invalid ownership" `Quick
+        test_parse_rejects_invalid_ownership;
       Alcotest.test_case "full scenario" `Quick test_parse_full_scenario;
       Alcotest.test_case "regex grader" `Quick test_parse_regex_grader;
       Alcotest.test_case "tool_name fallback" `Quick

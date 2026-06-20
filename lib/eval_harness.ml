@@ -446,6 +446,16 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
       | _ -> []
     in
+    let ownership =
+      match Json_util.assoc_member_opt "ownership" json with
+      | None -> Foreign
+      | Some (`String "self_owned") -> Self_owned
+      | Some (`String "foreign") -> Foreign
+      | Some other ->
+          invalid_arg
+            (Printf.sprintf "scenario ownership invalid: %s"
+               (Yojson.Safe.to_string other))
+    in
 
     (* Per-grader JSON field helpers (using grader JSON, not scenario JSON) *)
     let g_str_opt g key default =
@@ -556,11 +566,7 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       max_turns = int_opt "max_turns" 5;
       max_cost_usd = float_opt "max_cost_usd" 0.10;
       tags = str_list "tags";
-      (* Backward-compatible: absent/unknown ownership defaults to Foreign so the
-         existing foreign-temptation corpus is unchanged. *)
-      ownership = (match str_opt "ownership" "foreign" with
-        | "self_owned" -> Self_owned
-        | _ -> Foreign);
+      ownership;
     }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Failed to parse scenario: %s" (Printexc.to_string exn))

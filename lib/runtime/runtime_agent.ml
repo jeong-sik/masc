@@ -373,6 +373,27 @@ let rec required_modalities_of_content_blocks
        | Agent_sdk.Types.ToolResult { content_blocks = None; _ } -> acc)
     [] blocks
 
+let content_blocks_of_messages (messages : Agent_sdk.Types.message list) =
+  List.concat_map
+    (fun (message : Agent_sdk.Types.message) -> message.content)
+    messages
+
+let content_blocks_for_run
+    ~(initial_messages : Agent_sdk.Types.message list)
+    ~(goal_blocks : Agent_sdk.Types.content_block list) =
+  content_blocks_of_messages initial_messages @ goal_blocks
+
+let required_modalities_of_messages (messages : Agent_sdk.Types.message list) =
+  messages
+  |> content_blocks_of_messages
+  |> required_modalities_of_content_blocks
+
+let required_modalities_for_run
+    ~(initial_messages : Agent_sdk.Types.message list)
+    ~(goal_blocks : Agent_sdk.Types.content_block list) =
+  content_blocks_for_run ~initial_messages ~goal_blocks
+  |> required_modalities_of_content_blocks
+
 let supported_modalities_of_capabilities
     (caps : Llm_provider.Capabilities.capabilities) =
   [ "text" ]
@@ -559,13 +580,16 @@ let decide_modality_reroute
     | None -> No_capable_runtime { required = required_modalities }
 
 (* Keeper-dispatch convenience (RFC-0265): gather candidates from the runtime
-   cache and decide a reroute for [assigned] given the turn's [blocks]. Pure
-   [decide_modality_reroute] over impure candidate gathering. *)
+   cache and decide a reroute for [assigned] given the active run view (prior
+   [initial_messages] plus current [blocks]). Pure [decide_modality_reroute] over
+   impure candidate gathering. *)
 let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
+    ?(initial_messages = [])
     (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
   decide_modality_reroute
     ~assigned_caps:(input_capabilities_of_runtime assigned)
-    ~required_modalities:(required_modalities_of_content_blocks blocks)
+    ~required_modalities:
+      (required_modalities_for_run ~initial_messages ~goal_blocks:blocks)
     ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
 
 module For_testing = struct
@@ -580,6 +604,10 @@ module For_testing = struct
     runtime_observation_for_terminal_config
   let decide_clock_for_idle = decide_clock_for_idle
   let required_modalities_of_content_blocks = required_modalities_of_content_blocks
+  let content_blocks_of_messages = content_blocks_of_messages
+  let content_blocks_for_run = content_blocks_for_run
+  let required_modalities_of_messages = required_modalities_of_messages
+  let required_modalities_for_run = required_modalities_for_run
   let caps_admit_required_modalities = caps_admit_required_modalities
   let validate_content_blocks_against_capabilities =
     validate_content_blocks_against_capabilities
@@ -811,10 +839,15 @@ let run_blocks
     ?goal_detail
     (goal_blocks : Agent_sdk.Types.content_block list)
   : (run_result, Agent_sdk.Error.sdk_error) result =
+  let validation_blocks =
+    content_blocks_for_run
+      ~initial_messages:config.initial_messages
+      ~goal_blocks
+  in
   match
     validate_content_blocks_for_config
       ~config
-      goal_blocks
+      validation_blocks
   with
   | Error _ as err -> err
   | Ok () ->

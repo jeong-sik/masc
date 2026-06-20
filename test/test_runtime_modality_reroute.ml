@@ -27,6 +27,14 @@ let decide ~assigned ~required ~candidates =
     ~required_modalities:required
     ~candidates
 
+let message_with_blocks blocks =
+  { Agent_sdk.Types.role = Agent_sdk.Types.User
+  ; content = blocks
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
 (* A text turn ([required = []]) is admitted by any runtime, so it never reroutes
    — the common path stays untouched. *)
 let test_text_turn_no_reroute () =
@@ -55,6 +63,30 @@ let test_image_turn_reroutes_to_first_capable () =
   check string "reroute to first capable in order"
     "reroute:vision_c:assigned runtime lacks image input"
     (decision_to_string (decide ~assigned:(caps ()) ~required:[ "image" ] ~candidates))
+
+(* Regression: media retained in initial history must drive the same reroute as
+   media in the current turn. The dashboard image turn succeeds first; the next
+   text-only follow-up still carries that image in OAS history. *)
+let test_initial_message_media_drives_reroute () =
+  let initial_messages =
+    [ message_with_blocks
+        [ Agent_sdk.Types.Text "previous image turn"
+        ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+        ]
+    ]
+  in
+  let required =
+    Runtime_agent.For_testing.required_modalities_for_run
+      ~initial_messages
+      ~goal_blocks:[ Agent_sdk.Types.Text "follow up" ]
+  in
+  check string "history image reroutes"
+    "reroute:vision_c:assigned runtime lacks image input"
+    (decision_to_string
+       (decide
+          ~assigned:(caps ())
+          ~required
+          ~candidates:[ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ]))
 
 (* Candidate ordering is the caller's contract: with the same capable set in a
    different order, the first listed wins. This pins media_failover precedence. *)
@@ -108,6 +140,8 @@ let () =
             test_image_turn_on_capable_no_reroute
         ; test_case "reroute to first capable" `Quick
             test_image_turn_reroutes_to_first_capable
+        ; test_case "initial message media drives reroute" `Quick
+            test_initial_message_media_drives_reroute
         ; test_case "candidate order honored" `Quick test_candidate_order_is_honored
         ; test_case "no capable floor" `Quick test_no_capable_runtime_floor
         ; test_case "deterministic" `Quick test_decision_is_deterministic

@@ -7,6 +7,66 @@
 module Ws = Server_mcp_transport_ws
 module Sse = Masc.Sse
 
+let read_file path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+
+let rec find_source_root_from dir hops rel =
+  if hops > 8 then None
+  else if Sys.file_exists (Filename.concat dir rel) then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None
+    else find_source_root_from parent (hops + 1) rel
+
+let source_root () =
+  let anchor = "lib/server/server_mcp_transport_ws.ml" in
+  match find_source_root_from (Sys.getcwd ()) 0 anchor with
+  | Some root -> root
+  | None ->
+      Alcotest.failf "could not locate repo source root from cwd=%s" (Sys.getcwd ())
+
+let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
+
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    i + needle_len <= haystack_len
+    && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
+  in
+  needle_len = 0 || loop 0
+
+let count_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i acc =
+    if needle_len = 0 || i + needle_len > haystack_len then acc
+    else if String.equal (String.sub haystack i needle_len) needle then
+      loop (i + needle_len) (acc + 1)
+    else loop (i + 1) acc
+  in
+  loop 0 0
+
+let substring_between source ~start_marker ~end_marker =
+  let start_len = String.length start_marker in
+  let end_len = String.length end_marker in
+  let source_len = String.length source in
+  let rec find_from marker marker_len i =
+    if i + marker_len > source_len then None
+    else if String.equal (String.sub source i marker_len) marker then Some i
+    else find_from marker marker_len (i + 1)
+  in
+  match find_from start_marker start_len 0 with
+  | None -> Alcotest.failf "missing marker %S" start_marker
+  | Some start_pos -> (
+      let body_start = start_pos + start_len in
+      match find_from end_marker end_len body_start with
+      | None -> Alcotest.failf "missing marker %S" end_marker
+      | Some end_pos -> String.sub source body_start (end_pos - body_start))
+
 (* ====== Session Registry ====== *)
 
 let test_initial_session_count () =
@@ -18,6 +78,36 @@ let test_close_all_empty () =
   Eio_main.run (fun _env ->
     let closed = Ws.close_all () in
     Alcotest.(check int) "close_all on empty returns 0" 0 closed)
+
+let test_session_close_wire_calls_stay_outside_registry_lock () =
+  let source = read_source_file "lib/server/server_mcp_transport_ws.ml" in
+  let close_marker = "Httpun_ws.Wsd.close" in
+  let detach_helper =
+    substring_between source
+      ~start_marker:"let detach_session_for_close"
+      ~end_marker:"let close_detached_session_wsd"
+  in
+  let close_helper =
+    substring_between source
+      ~start_marker:"let close_detached_session_wsd"
+      ~end_marker:"let update_ws_session_count_metric"
+  in
+  Alcotest.(check int)
+    "all WSD close calls are isolated in the detached close helper"
+    (count_substring source close_marker)
+    (count_substring close_helper close_marker);
+  Alcotest.(check bool)
+    "detaching from the registry does not wait on the session writer lock"
+    false
+    (contains_substring detach_helper "write_mutex");
+  Alcotest.(check bool)
+    "detaching from the registry does not close the wire"
+    false
+    (contains_substring detach_helper close_marker);
+  Alcotest.(check bool)
+    "wire close helper does not acquire sessions_mutex"
+    false
+    (contains_substring close_helper "with_sessions_rw")
 
 (* ====== SHA1 (httpun-ws handshake) ====== *)
 
@@ -823,10 +913,12 @@ let test_missed_pong_threshold_reads_env () =
 
 let () =
   Alcotest.run "WebSocket Transport" [
-    ("session_registry", [
-      Alcotest.test_case "initial count" `Quick test_initial_session_count;
-      Alcotest.test_case "close_all empty" `Quick test_close_all_empty;
-    ]);
+	    ("session_registry", [
+	      Alcotest.test_case "initial count" `Quick test_initial_session_count;
+	      Alcotest.test_case "close_all empty" `Quick test_close_all_empty;
+	      Alcotest.test_case "wire close stays outside registry lock" `Quick
+	        test_session_close_wire_calls_stay_outside_registry_lock;
+	    ]);
     ("sha1", [
       Alcotest.test_case "produces 20 bytes" `Quick test_sha1_produces_20_bytes;
       Alcotest.test_case "deterministic" `Quick test_sha1_deterministic;

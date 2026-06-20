@@ -45,7 +45,7 @@ last_tool=Execute last_tool_effect=mutating  (도구 ~29회 후 발생)
 | 거부 판정 발원 | `lib/keeper_tooling/keeper_tool_response.ml:34-42` | `has_deliverable_content`가 false면 `{kind=No_usable_progress; reason}`. |
 | deliverable 판정 | `agent_sdk/.../response_shape.ml:90,96-103` | `has_deliverable_content = text_chars>0 ‖ tool_use_count>0`. `thinking_only` = thinking_blocks>0 ∧ text=0 ∧ tool=0. |
 | 거부 후 즉시 종결 | `lib/keeper/keeper_turn_driver_try_runtime.ml:196-212` | `Ok run_result`(accept-rejected) 분기는 `accept_rejected_error` 생성 후 즉시 `Error err`. `rest` 후보로 loop 안 함. recovery arm 0. |
-| 거부 사유 이미 typed | `lib/keeper/keeper_internal_error.ml:105` | `Accept_rejected{reason}`는 이미 typed variant. **string 분류기 추가 불필요** (RFC-0042 준수). |
+| 거부 사유 이미 typed | `lib/keeper_runtime/keeper_internal_error.ml:135` | `Accept_rejected of { scope; model; reason_kind; reason }`는 이미 typed variant. **string 분류기 추가 불필요** (RFC-0042 준수). |
 | budget parse-only | `lib/runtime/runtime_toml.ml:413,452` → `runtime_schema.ml:142` | `max_thinking_budget` 파싱되어 schema에 저장. |
 | budget 소비자 0 | `lib/runtime/runtime_inference.ml:26-32` | `thinking_budget=None` 고정. 주석: "ceiling일 뿐 active budget 아님". request-path consumer 0건(rg). |
 | request 미wiring | `lib/worker_oas.ml:67,180-181` | `enable_thinking`만 설정, `with_thinking_budget` 호출 0. |

@@ -71,8 +71,13 @@ val get_store : unit -> Dated_jsonl.t
 val reset_store_for_testing : unit -> unit
 (** Reset the store reference.  For testing only. *)
 
+val set_store : base_dir:string -> unit
+(** Set the process-local verdict store to an explicit isolated directory.
+    Used by offline eval tooling after verdict-store isolation checks and by
+    tests through [set_store_for_testing]. *)
+
 val set_store_for_testing : base_dir:string -> unit
-(** Set store to a custom directory.  For testing only. *)
+(** Compatibility alias for [set_store] used by tests. *)
 
 val resolve_record_verdicts_store :
   ?cwd:string ->

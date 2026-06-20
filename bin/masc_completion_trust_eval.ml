@@ -568,7 +568,7 @@ let () =
           server wires at boot; verdicts go to the isolated store resolved above,
           never the live ledger. *)
        Masc.Workspace_metric_hooks.install ();
-       Cal.set_store_for_testing ~base_dir:verdict_dir;
+       Cal.set_store ~base_dir:verdict_dir;
        let judge_label =
          match evaluator_runtime with
          | Some id -> id

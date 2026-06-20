@@ -197,17 +197,7 @@ let write_candidates ~base_path candidates =
   loop [] candidates
 ;;
 
-let read_file_opt path =
-  if not (Sys.file_exists path)
-  then None
-  else (
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-         let len = in_channel_length ic in
-         Some (really_input_string ic len)))
-;;
+let read_file_opt = Fs_compat.load_file_opt
 
 let write_candidate_if_changed ~base_path candidate =
   let json_path = candidate_json_path ~base_path candidate in

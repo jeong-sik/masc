@@ -274,6 +274,19 @@ let file_exists (path : string) : bool =
        | Eio.Io _ -> false)
 ;;
 
+(** Load entire file contents as string, or [None] when the file is
+    missing. Option-returning sibling of {!load_file} (which raises on a
+    missing path). [Sys_error] from a vanished file (TOCTOU race after the
+    [file_exists] check) is also mapped to [None]; other I/O failures of an
+    existing file propagate as [Sys_error], matching {!load_file}. *)
+let load_file_opt (path : string) : string option =
+  if not (file_exists path)
+  then None
+  else (
+    try Some (load_file path) with
+    | Sys_error _ when not (file_exists path) -> None)
+;;
+
 let file_size (path : string) : int option =
   with_fs_or_fallback
     ~path

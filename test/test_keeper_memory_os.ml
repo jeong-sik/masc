@@ -8,7 +8,6 @@ module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
-module Reconcile = Masc.Keeper_memory_os_reconcile
 module Consolidator = Masc.Keeper_memory_os_consolidator
 module Reconcile = Masc.Keeper_memory_os_reconcile
 

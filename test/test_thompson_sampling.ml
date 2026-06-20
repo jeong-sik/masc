@@ -9,6 +9,21 @@ open Masc
    identical behavior — the inversion changed plumbing, not the algorithm. *)
 let is_healthy = Health.is_healthy
 
+let rec rm_rf path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
 (** {1 Beta Distribution Sampling Tests} *)
 
 let test_sample_beta_range () =
@@ -364,6 +379,53 @@ let test_selection_entropy_empty () =
   (* With some agents having selections, entropy should be positive *)
   check bool "entropy is non-negative" true (entropy >= 0.0)
 
+(** {1 Persistence Tests} *)
+
+let find_stats_row name rows =
+  let open Yojson.Safe.Util in
+  List.find_opt
+    (fun json -> json |> member "name" |> to_string = name)
+    rows
+
+let test_persistence_loads_and_saves_pending_votes () =
+  with_temp_dir "thompson-persistence" @@ fun base_path ->
+  let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+  Fs_compat.mkdir_p masc_dir;
+  let path = Filename.concat masc_dir "autonomy_stats.jsonl" in
+  let loaded_agent = "persist-load-agent" in
+  let pending_agent = "persist-pending-agent" in
+  let existing =
+    `Assoc
+      [
+        ("name", `String loaded_agent);
+        ("alpha", `Float 3.0);
+        ("beta", `Float 2.0);
+        ("selections", `Int 7);
+        ("last_selected_at", `Float 10.0);
+        ("total_votes_up", `Int 4);
+        ("total_votes_down", `Int 1);
+        ("posts_created", `Int 2);
+        ("comments_created", `Int 3);
+        ("skips", `Int 1);
+        ("guard_penalties_total", `Int 0);
+        ("updated_at", `Float 11.0);
+      ]
+  in
+  Fs_compat.save_file path (Yojson.Safe.to_string existing ^ "\n");
+  Thompson_sampling.set_base_path base_path;
+  Thompson_sampling.load_stats ();
+  let loaded = Thompson_sampling.get_stats loaded_agent in
+  check (float 0.01) "loaded alpha" 3.0 loaded.alpha;
+  check int "loaded selections" 7 loaded.selections;
+  Thompson_sampling.record_vote ~agent_name:pending_agent ~direction:`Up;
+  let rows = Fs_compat.load_jsonl path in
+  match find_stats_row pending_agent rows with
+  | Some json ->
+      let open Yojson.Safe.Util in
+      check int "pending vote persisted" 1
+        (json |> member "total_votes_up" |> to_int)
+  | None -> fail "pending vote row not persisted"
+
 (** {1 Test Runner} *)
 
 let () =
@@ -413,5 +475,9 @@ let () =
     ];
     "monitoring", [
       test_case "selection entropy" `Quick test_selection_entropy_empty;
+    ];
+    "persistence", [
+      test_case "load stats and save pending votes" `Quick
+        test_persistence_loads_and_saves_pending_votes;
     ];
   ]

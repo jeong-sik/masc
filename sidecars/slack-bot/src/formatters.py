@@ -9,7 +9,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .config import SLACK_MESSAGE_LIMIT
+SLACK_MESSAGE_LIMIT = 4000
+SLACK_MAX_BLOCKS = 50
+SLACK_BLOCK_TEXT_LIMIT = 3000
+TRUNCATION_NOTICE = "\n[truncated: Slack block limit]"
 
 _RE_STATE_BLOCK = re.compile(
     r"\[STATE\].*?(?:\[/STATE\]|$)", re.DOTALL
@@ -49,6 +52,16 @@ def chunk_text(text: str, limit: int = SLACK_MESSAGE_LIMIT) -> list[str]:
     return chunks
 
 
+def escape_mrkdwn_text(text: str) -> str:
+    """Escape Slack mrkdwn control characters."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def fallback_text(text: str) -> str:
+    """Build a Slack-safe top-level text fallback."""
+    return escape_mrkdwn_text(text)[:SLACK_MESSAGE_LIMIT]
+
+
 def format_context_block(
     keeper_name: str,
     model_used: str,
@@ -71,9 +84,26 @@ def format_context_block(
     return {
         "type": "context",
         "elements": [
-            {"type": "mrkdwn", "text": " | ".join(parts)},
+            {"type": "mrkdwn", "text": escape_mrkdwn_text(" | ".join(parts))},
         ],
     }
+
+
+def _section_block(text: str) -> dict[str, Any]:
+    return {
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": text[:SLACK_BLOCK_TEXT_LIMIT],
+        },
+    }
+
+
+def _append_truncation_notice(text: str) -> str:
+    if len(text) + len(TRUNCATION_NOTICE) <= SLACK_BLOCK_TEXT_LIMIT:
+        return text + TRUNCATION_NOTICE
+    keep = max(0, SLACK_BLOCK_TEXT_LIMIT - len(TRUNCATION_NOTICE))
+    return text[:keep] + TRUNCATION_NOTICE
 
 
 def response_blocks(
@@ -84,13 +114,14 @@ def response_blocks(
     tokens_used: int = 0,
 ) -> list[dict[str, Any]]:
     """Build Slack Block Kit blocks for a keeper response."""
-    blocks: list[dict[str, Any]] = [
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": text[:SLACK_MESSAGE_LIMIT]},
-        },
-    ]
     ctx = format_context_block(keeper_name, model_used, duration_ms, tokens_used)
+    text_budget = SLACK_MAX_BLOCKS - (1 if ctx is not None else 0)
+    chunks = chunk_text(escape_mrkdwn_text(text), limit=SLACK_BLOCK_TEXT_LIMIT)
+    if len(chunks) > text_budget:
+        chunks = chunks[:text_budget]
+        chunks[-1] = _append_truncation_notice(chunks[-1])
+
+    blocks: list[dict[str, Any]] = [_section_block(chunk) for chunk in chunks]
     if ctx is not None:
         blocks.append(ctx)
     return blocks

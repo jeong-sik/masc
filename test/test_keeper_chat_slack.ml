@@ -37,6 +37,23 @@ let test_link_block_renders_section () =
   check bool "link syntax" true (contains s "*<https://example.com|Example>*");
   check bool "description" true (contains s "A description")
 
+let test_escape_mrkdwn_control_chars () =
+  check string "control chars escaped"
+    "&lt;@U123&gt; &amp; &lt;b&gt;"
+    (S.escape_mrkdwn_text "<@U123> & <b>")
+
+let test_link_block_escapes_mrkdwn_fields () =
+  let json =
+    S.link_block_json ~url:"https://example.com/?a=1&b=2"
+      ~title:"<@U123> & title" ~description:(Some "a > b")
+  in
+  let s = json_string json in
+  check bool "raw mention removed" false (contains s "<@U123>");
+  check bool "title escaped" true (contains s "&lt;@U123&gt; &amp; title");
+  check bool "url escaped" true
+    (contains s "<https://example.com/?a=1&amp;b=2|");
+  check bool "description escaped" true (contains s "a &gt; b")
+
 let test_image_block_renders_image () =
   let json =
     S.image_block_json ~url:"https://example.com/img.png"
@@ -58,6 +75,15 @@ let test_audio_block_renders_voice_link () =
     (contains s "<https://chat.example.com/api/v1/voice/audio/tok456|Voice message>");
   check bool "message text" true (contains s "hello")
 
+let test_audio_block_escapes_message_text () =
+  let json =
+    S.audio_block_json ~base_url:(Some "https://chat.example.com") ~token:"tok456"
+      ~message_text:"<@U123> & done"
+  in
+  let s = json_string json in
+  check bool "raw mention removed" false (contains s "<@U123>");
+  check bool "message escaped" true (contains s "&lt;@U123&gt; &amp; done")
+
 let test_tool_context_block_renders_tool () =
   let json =
     S.tool_context_block_json ~name:"read_file" ~args_summary:"path: foo.txt"
@@ -65,9 +91,37 @@ let test_tool_context_block_renders_tool () =
   in
   let s = json_string json in
   check bool "type section" true (contains s "\"type\":\"section\"");
-  check bool "tool name" true (contains s "*Tool: read_file*");
+  check bool "tool name" true (contains s "*Tool:* read_file");
   check bool "args" true (contains s "args: path: foo.txt");
   check bool "result" true (contains s "result: contents")
+
+let test_tool_context_block_escapes_summaries () =
+  let json =
+    S.tool_context_block_json ~name:"<tool>" ~args_summary:"<@U123> & args"
+      ~result_summary:(Some "result > ok")
+  in
+  let s = json_string json in
+  check bool "raw mention removed" false (contains s "<@U123>");
+  check bool "name escaped" true (contains s "&lt;tool&gt;");
+  check bool "args escaped" true (contains s "&lt;@U123&gt; &amp; args");
+  check bool "result escaped" true (contains s "result &gt; ok")
+
+let test_truncate_to_limit_keeps_utf8_boundary () =
+  let s = String.concat "" (List.init 10 (fun _ -> "가")) in
+  let truncated = S.truncate_to_limit s 4 in
+  check bool "valid utf8" true (String.is_valid_utf_8 truncated);
+  check string "first four codepoints" "가가가가" truncated
+
+let test_limit_blocks_adds_visible_omission_notice () =
+  let mk_block n =
+    S.link_block_json ~url:(Printf.sprintf "https://example.com/%d" n)
+      ~title:(Printf.sprintf "item %d" n) ~description:None
+  in
+  let blocks = List.init 55 mk_block |> S.limit_blocks_for_slack in
+  check int "max 50 blocks" 50 (List.length blocks);
+  let last = List.nth blocks 49 |> json_string in
+  check bool "visible omission notice" true
+    (contains last "6 Slack block(s) omitted")
 
 (* ── content_blocks_of_text ─────────────────────────────────────── *)
 
@@ -118,11 +172,23 @@ let () =
         ] )
     ; ( "block-rendering"
       , [ test_case "link block renders section" `Quick test_link_block_renders_section
+        ; test_case "escapes mrkdwn control chars" `Quick
+            test_escape_mrkdwn_control_chars
+        ; test_case "link block escapes mrkdwn fields" `Quick
+            test_link_block_escapes_mrkdwn_fields
         ; test_case "image block renders image" `Quick test_image_block_renders_image
         ; test_case "audio block renders voice link" `Quick
             test_audio_block_renders_voice_link
+        ; test_case "audio block escapes message text" `Quick
+            test_audio_block_escapes_message_text
         ; test_case "tool context block renders tool" `Quick
             test_tool_context_block_renders_tool
+        ; test_case "tool context block escapes summaries" `Quick
+            test_tool_context_block_escapes_summaries
+        ; test_case "truncate keeps utf8 boundary" `Quick
+            test_truncate_to_limit_keeps_utf8_boundary
+        ; test_case "block limit adds visible omission notice" `Quick
+            test_limit_blocks_adds_visible_omission_notice
         ] )
     ; ( "content-blocks"
       , [ test_case "empty for plain text" `Quick

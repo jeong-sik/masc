@@ -10,6 +10,7 @@ type t =
   | Count_running_keeper_fibers
   | Cursor_stale
   | Board_events
+  | Scheduled_automation
   | Empty_run_reasons
   | Reconcile_read_meta (** Supervisor reconcile-loop meta read failure (#14828 sweep). *)
 

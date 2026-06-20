@@ -18,6 +18,7 @@ type layer_id =
   | Namespace_state
   | Context_health
   | Autonomous_trigger
+  | Scheduled_automation
   | Continuity
   | Pending_mentions
   | Scope_messages

@@ -54,6 +54,19 @@ val write_candidates
   -> Skill_candidate_projection.skill_candidate list
   -> (stored_draft list, string) result
 
+(** Close the post-turn Memory OS -> draft skill loop for one keeper.
+
+    Reads recent Memory OS facts for [keeper_id] and crystallized procedural
+    memories, projects only reviewable candidates, and writes changed drafts
+    under [.masc/draft-skills/]. This remains advisory: it never installs a
+    skill or changes Keeper runtime capability. *)
+val write_post_turn_candidates
+  :  base_path:string
+  -> keeper_id:string
+  -> fact_tail_limit:int
+  -> procedure_limit:int
+  -> (stored_draft list, string) result
+
 (** Read the latest unique candidate rows from [.masc/draft-skills/index.jsonl],
     newest first. Missing index files return an empty listing. *)
 val list_drafts : base_path:string -> limit:int -> (draft_listing, string) result

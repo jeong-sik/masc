@@ -63,6 +63,18 @@ let draft_dir ~base_path (candidate : Skill_candidate_projection.skill_candidate
   Filename.concat (drafts_dir ~base_path) (safe_component candidate.id)
 ;;
 
+let candidate_json_path ~base_path candidate =
+  Filename.concat (draft_dir ~base_path candidate) "candidate.json"
+;;
+
+let candidate_toml_path ~base_path candidate =
+  Filename.concat (draft_dir ~base_path candidate) "candidate.toml"
+;;
+
+let candidate_skill_md_path ~base_path candidate =
+  Filename.concat (draft_dir ~base_path candidate) "SKILL.md"
+;;
+
 let string_escape_toml s =
   let buf = Buffer.create (String.length s + 8) in
   String.iter
@@ -155,17 +167,17 @@ let append_index index_path event =
 
 let ( let* ) = Result.bind
 
+let candidate_json_content candidate =
+  Yojson.Safe.pretty_to_string (Skill_candidate_projection.to_json candidate) ^ "\n"
+;;
+
 let write_candidate ~base_path (candidate : Skill_candidate_projection.skill_candidate) =
   let dir = draft_dir ~base_path candidate in
-  let json_path = Filename.concat dir "candidate.json" in
-  let toml_path = Filename.concat dir "candidate.toml" in
-  let skill_md_path = Filename.concat dir "SKILL.md" in
+  let json_path = candidate_json_path ~base_path candidate in
+  let toml_path = candidate_toml_path ~base_path candidate in
+  let skill_md_path = candidate_skill_md_path ~base_path candidate in
   let index_path = index_path ~base_path in
-  let* () =
-    write_file json_path
-      (Yojson.Safe.pretty_to_string (Skill_candidate_projection.to_json candidate)
-       ^ "\n")
-  in
+  let* () = write_file json_path (candidate_json_content candidate) in
   let* () = write_file toml_path (render_candidate_toml candidate) in
   let* () = write_file skill_md_path (Skill_candidate_projection.render_skill_draft candidate) in
   let* () =
@@ -181,6 +193,68 @@ let write_candidates ~base_path candidates =
     | candidate :: rest ->
       let* stored = write_candidate ~base_path candidate in
       loop (stored :: acc) rest
+  in
+  loop [] candidates
+;;
+
+let read_file_opt path =
+  if not (Sys.file_exists path)
+  then None
+  else (
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let len = in_channel_length ic in
+         Some (really_input_string ic len)))
+;;
+
+let write_candidate_if_changed ~base_path candidate =
+  let json_path = candidate_json_path ~base_path candidate in
+  match read_file_opt json_path with
+  | Some content when String.equal content (candidate_json_content candidate) -> Ok None
+  | Some _ | None ->
+    let* stored = write_candidate ~base_path candidate in
+    Ok (Some stored)
+;;
+
+let dedup_candidates candidates =
+  let seen = Hashtbl.create 16 in
+  List.filter
+    (fun (candidate : Skill_candidate_projection.skill_candidate) ->
+       if Hashtbl.mem seen candidate.id
+       then false
+       else (
+         Hashtbl.add seen candidate.id ();
+         true))
+    candidates
+;;
+
+let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure_limit =
+  let facts =
+    if fact_tail_limit <= 0
+    then []
+    else Keeper_memory_os_io.read_facts_tail ~keeper_id ~n:fact_tail_limit
+  in
+  let fact_candidates =
+    Skill_candidate_projection.candidates_of_memory_facts ~agent_name:keeper_id facts
+  in
+  let procedure_candidates =
+    if procedure_limit <= 0
+    then []
+    else Skill_candidate_projection.top_candidates ~agent_name:keeper_id ~limit:procedure_limit
+  in
+  let candidates = dedup_candidates (fact_candidates @ procedure_candidates) in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | candidate :: rest ->
+      let* stored = write_candidate_if_changed ~base_path candidate in
+      let acc =
+        match stored with
+        | Some stored -> stored :: acc
+        | None -> acc
+      in
+      loop acc rest
   in
   loop [] candidates
 ;;

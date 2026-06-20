@@ -5,6 +5,7 @@ module P = Masc.Procedural_memory
 module S = Masc.Skill_candidate_projection
 module Store = Masc.Skill_candidate_store
 module M = Masc.Keeper_memory_os_types
+module Memory_io = Masc.Keeper_memory_os_io
 
 let procedure ?(evidence = []) ?(success_count = 0) ?(failure_count = 0)
     ?(confidence = 0.0) ?(id = "proc-test") ?(pattern = "When a pattern appears, reuse the learned action") () : P.procedure =
@@ -291,6 +292,44 @@ let test_skill_candidate_store_lists_newest_unique_draft_per_id () =
   check string "keeps same candidate id" c1.id summary.id
 ;;
 
+let test_skill_candidate_store_writes_post_turn_memory_fact_candidates () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+    let fact =
+      memory_fact ~category:M.Lesson ~trace_id:"trace-skill" ~turn:11
+        ~tool_call_id:"tool-skill"
+        "When a recurring review succeeds, preserve the review checklist"
+    in
+    Memory_io.append_fact ~keeper_id:"keeper" fact;
+    let stored =
+      match
+        Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+          ~fact_tail_limit:16 ~procedure_limit:0
+      with
+      | Ok stored -> stored
+      | Error msg -> fail msg
+    in
+    check int "one draft written" 1 (List.length stored);
+    let summary =
+      match stored with
+      | [ item ] -> item
+      | _ -> fail "expected one stored candidate"
+    in
+    check string "source kind" "memory_os_fact" summary.candidate.source_kind;
+    check bool "candidate json exists" true (Sys.file_exists summary.json_path);
+    let second =
+      match
+        Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+          ~fact_tail_limit:16 ~procedure_limit:0
+      with
+      | Ok stored -> stored
+      | Error msg -> fail msg
+    in
+    check int "unchanged candidate skipped" 0 (List.length second))
+;;
+
 let test_skill_candidate_store_sanitizes_candidate_id_path () =
   with_temp_base_path
   @@ fun base_path ->
@@ -354,6 +393,8 @@ let () =
             test_skill_candidate_store_lists_latest_reviewable_drafts;
           test_case "lists newest unique draft per id" `Quick
             test_skill_candidate_store_lists_newest_unique_draft_per_id;
+          test_case "writes post-turn memory fact candidates" `Quick
+            test_skill_candidate_store_writes_post_turn_memory_fact_candidates;
           test_case "sanitizes candidate id path" `Quick
             test_skill_candidate_store_sanitizes_candidate_id_path;
         ] );

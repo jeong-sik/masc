@@ -87,6 +87,39 @@ let test_prefix_is_dead () =
             (TO.wire_key, `String "continuation_checkpoint")
           ]))
 
+let turn_ref_t : Ids.Turn_ref.t testable =
+  testable
+    (fun fmt t -> Format.pp_print_string fmt (Ids.Turn_ref.to_string t))
+    Ids.Turn_ref.equal
+
+(* RFC-0233 §7: the consumer-side decode of the turn join key the keeper
+   minted into the reply payload.  Parse, don't repair — absent and
+   malformed both decode to None; of_string splits on the LAST '#'. *)
+let test_turn_ref_payload_decode () =
+  check (option turn_ref_t) "no payload -> None" None
+    (TO.turn_ref_of_reply_payload None);
+  check (option turn_ref_t) "field absent -> None" None
+    (TO.turn_ref_of_reply_payload (payload [ ("reply", `String "hi") ]));
+  check (option turn_ref_t) "valid join key decodes"
+    (Some
+       (Ids.Turn_ref.make ~trace_id:"trace-1780648779957-00000"
+          ~absolute_turn:4071))
+    (TO.turn_ref_of_reply_payload
+       (payload
+          [ (TO.turn_ref_wire_key, `String "trace-1780648779957-00000#4071") ]));
+  check (option turn_ref_t) "inner '#' splits on the last separator"
+    (Some (Ids.Turn_ref.make ~trace_id:"weird#trace" ~absolute_turn:12))
+    (TO.turn_ref_of_reply_payload
+       (payload [ (TO.turn_ref_wire_key, `String "weird#trace#12") ]));
+  check (option turn_ref_t) "no separator -> None (never repaired)" None
+    (TO.turn_ref_of_reply_payload
+       (payload [ (TO.turn_ref_wire_key, `String "no-separator") ]));
+  check (option turn_ref_t) "non-int suffix -> None" None
+    (TO.turn_ref_of_reply_payload
+       (payload [ (TO.turn_ref_wire_key, `String "trace#abc") ]));
+  check (option turn_ref_t) "non-string field -> None" None
+    (TO.turn_ref_of_reply_payload (payload [ (TO.turn_ref_wire_key, `Int 5) ]))
+
 let body fields = Yojson.Safe.to_string (`Assoc fields)
 
 let test_direct_reply_visible_text () =
@@ -127,6 +160,8 @@ let () =
         [
           test_case "decode policy" `Quick test_payload_decode;
           test_case "prefix is dead" `Quick test_prefix_is_dead;
+          test_case "turn_ref decode (parse, don't repair)" `Quick
+            test_turn_ref_payload_decode;
         ] );
       ( "direct_reply",
         [

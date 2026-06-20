@@ -24,6 +24,8 @@ let of_label = function
 
 let wire_key = "turn_outcome"
 
+let turn_ref_wire_key = "turn_ref"
+
 let of_stop_reason = function
   | Runtime_agent.Completed -> Visible_reply
   | Runtime_agent.TurnBudgetExhausted _ -> Continuation_checkpoint
@@ -48,3 +50,13 @@ let of_reply_payload payload =
                  visible_reply"
                 label;
               Visible_reply))
+
+let turn_ref_of_reply_payload payload =
+  (* RFC-0233 §7: read the turn's join key the keeper minted into the
+     reply payload.  Parse, don't repair — an absent field (legacy or
+     transport-failure rows) or a malformed value both decode to [None];
+     [Ids.Turn_ref.of_string] never raises and never guesses. *)
+  Option.bind payload (fun json ->
+      match Json_util.get_string json turn_ref_wire_key with
+      | None -> None
+      | Some s -> Ids.Turn_ref.of_string s)

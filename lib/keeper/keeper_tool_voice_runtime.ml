@@ -248,11 +248,62 @@ let append_assoc_fields json fields =
   | `Assoc existing -> `Assoc (existing @ fields)
   | other -> `Assoc (("voice_config", other) :: fields)
 
+let requested_conversation_mode ~(args : Yojson.Safe.t) =
+  match
+    Safe_ops.json_string_opt "conversation_mode" args
+    |> Option.map (fun raw -> String.lowercase_ascii (String.trim raw))
+  with
+  | None | Some "" | Some "turn_based" | Some "turn-based" ->
+    Ok Voice_session_manager.Turn_based
+  | Some ("realtime" | "realtime_bridge" | "realtime-bridge") ->
+    (match Voice_session_manager.realtime_bridge_endpoint () with
+     | Some endpoint -> Ok (Voice_session_manager.Realtime_bridge { endpoint })
+     | None ->
+       Error
+         (Tool_args.error_response_with
+            [ "message", `String "voice realtime bridge unavailable"
+            ; "error", `String "voice_realtime_bridge_unavailable"
+            ; "requested_conversation_mode", `String "realtime_bridge"
+            ; "required_env", `String Voice_session_manager.realtime_bridge_env
+            ; "fallback_conversation_mode", `String "turn_based"
+            ; "fallback_tool", `String "keeper_voice_session_start"
+            ]))
+  | Some mode ->
+    Error
+      (Tool_args.error_response_with
+         [ "message", `String "invalid voice conversation_mode"
+         ; "error", `String "invalid_voice_conversation_mode"
+         ; "conversation_mode", `String mode
+         ; ( "accepted_modes"
+           , `List [ `String "turn_based"; `String "realtime_bridge" ] )
+         ])
+
 let voice_agent_capability_fields ~(meta : keeper_meta) =
   let mgr = Keeper_voice_local.get_session_manager () in
   let active_session = Voice_session_manager.get_session mgr ~agent_id:meta.name in
-  [ "conversation_mode", `String "turn_based"
-  ; "realtime_supported", `Bool false
+  let active_mode =
+    match active_session with
+    | Some session -> Voice_session_manager.session_conversation_mode session
+    | None -> Voice_session_manager.Turn_based
+  in
+  let realtime_endpoint = Voice_session_manager.realtime_bridge_endpoint () in
+  let realtime_configured = Option.is_some realtime_endpoint in
+  [ ( "conversation_mode"
+    , `String (Voice_session_manager.string_of_conversation_mode active_mode) )
+  ; ( "transport_mode"
+    , `String (Voice_session_manager.transport_mode_of_conversation_mode active_mode) )
+  ; ( "realtime_supported"
+    , `Bool (realtime_configured || Voice_session_manager.realtime_supported active_mode) )
+  ; ( "realtime_bridge"
+    , Voice_session_manager.realtime_bridge_public_json ?endpoint:realtime_endpoint () )
+  ; ( "available_conversation_modes"
+    , `List
+        ([ `String "turn_based" ]
+         @ if realtime_configured then [ `String "realtime_bridge" ] else []) )
+  ; ( "voice_loop"
+    , Voice_session_manager.voice_loop_json
+        ~session_active:(Option.is_some active_session)
+        active_mode )
   ; "session_active", `Bool (Option.is_some active_session)
   ; ( "active_session"
     , match active_session with
@@ -303,9 +354,15 @@ let handle_session_start ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
     | Some s when s <> "" -> Some s
     | _ -> None
   in
-  let mgr = Keeper_voice_local.get_session_manager () in
-  let session = Voice_session_manager.start_session mgr ~agent_id:meta.name ?voice () in
-  Yojson.Safe.to_string (Voice_session_manager.session_to_json session)
+  match requested_conversation_mode ~args with
+  | Error response -> response
+  | Ok conversation_mode ->
+    let mgr = Keeper_voice_local.get_session_manager () in
+    let session =
+      Voice_session_manager.start_session mgr ~agent_id:meta.name ?voice
+        ~conversation_mode ()
+    in
+    Yojson.Safe.to_string (Voice_session_manager.session_to_json session)
 
 let handle_session_end ~(meta : keeper_meta) =
   let mgr = Keeper_voice_local.get_session_manager () in

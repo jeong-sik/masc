@@ -67,6 +67,22 @@ let mkdir_if_missing path =
   if not (Sys.file_exists path) then Unix.mkdir path 0o755
 ;;
 
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
+    in
+    loop 0
+;;
+
+let check_json_omits label needle json =
+  check bool label false (contains_substring ~needle (Yojson.Safe.to_string json))
+;;
+
 let test_resolve_voice_aliases () =
   let elevenlabs = Option.get (Voice.resolve_adapter "elevenlabs") in
   check string "elevenlabs alias" "elevenlabs-direct" elevenlabs.canonical_name;
@@ -458,6 +474,16 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
     let voice = Yojson.Safe.Util.(member "voice" json |> to_string) in
     check bool "session_name is not persisted as voice" true
       (not (String.equal session_name voice));
+    let voice_loop = Yojson.Safe.Util.member "voice_loop" json in
+    check string "session start loop mode" "turn_based_batch"
+      Yojson.Safe.Util.(member "mode" voice_loop |> to_string);
+    check bool "session start loop active" true
+      Yojson.Safe.Util.(member "session_active" voice_loop |> to_bool);
+    check bool "session start realtime unsupported" false
+      Yojson.Safe.Util.(member "realtime_supported" voice_loop |> to_bool);
+    check string "session start output tool" "keeper_voice_speak"
+      Yojson.Safe.Util.(
+        member "keeper_output" voice_loop |> member "tool" |> to_string);
     ignore
       (Masc.Keeper_tool_voice_runtime.handle_voice_tool
          ~config
@@ -465,6 +491,43 @@ let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
          ~name:"keeper_voice_session_end"
          ~args:(`Assoc [])
          ()))
+;;
+
+let test_voice_realtime_bridge_endpoint_validation () =
+  let getenv_missing _ = None in
+  check
+    (option string)
+    "missing bridge endpoint"
+    None
+    (Masc.Voice_session_manager.realtime_bridge_endpoint ~getenv:getenv_missing ());
+  let getenv_blank _ = Some "   " in
+  check
+    (option string)
+    "blank bridge endpoint"
+    None
+    (Masc.Voice_session_manager.realtime_bridge_endpoint ~getenv:getenv_blank ());
+  let getenv_http _ = Some "https://voice.example.test/ws" in
+  check
+    (option string)
+    "http bridge endpoint rejected"
+    None
+    (Masc.Voice_session_manager.realtime_bridge_endpoint ~getenv:getenv_http ());
+  let getenv_ws _ = Some " ws://127.0.0.1:9999/voice " in
+  check
+    (option string)
+    "ws bridge endpoint accepted"
+    (Some "ws://127.0.0.1:9999/voice")
+    (Masc.Voice_session_manager.realtime_bridge_endpoint ~getenv:getenv_ws ());
+  let getenv_wss _ = Some "wss://voice.example.test/live" in
+  check
+    (option string)
+    "wss bridge endpoint accepted"
+    (Some "wss://voice.example.test/live")
+    (Masc.Voice_session_manager.realtime_bridge_endpoint ~getenv:getenv_wss ())
+;;
+
+let json_string_list json =
+  Yojson.Safe.Util.to_list json |> List.map Yojson.Safe.Util.to_string
 ;;
 
 let test_keeper_voice_session_end_reports_ended () =
@@ -502,7 +565,61 @@ let test_keeper_voice_session_end_reports_ended () =
       (Yojson.Safe.Util.member "discarded_voice_queue_jobs" end_json = `Null))
 ;;
 
+let test_keeper_voice_session_start_realtime_requires_bridge_env () =
+  with_env Masc.Voice_session_manager.realtime_bridge_env None (fun () ->
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let clock = Eio.Stdenv.clock env in
+    let mono_clock = Eio.Stdenv.mono_clock env in
+    Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+      let config = test_config () in
+      let meta = make_keeper_meta "voice-realtime-missing-bridge" in
+      ignore
+        (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+           ~config
+           ~meta
+           ~name:"keeper_voice_session_end"
+           ~args:(`Assoc [])
+           ());
+      let raw =
+        Masc.Keeper_tool_voice_runtime.handle_voice_tool
+          ~config
+          ~meta
+          ~name:"keeper_voice_session_start"
+          ~args:(`Assoc [ "conversation_mode", `String "realtime_bridge" ])
+          ()
+      in
+      let json = Yojson.Safe.from_string raw in
+      check
+        string
+        "realtime start rejected"
+        "voice_realtime_bridge_unavailable"
+        Yojson.Safe.Util.(member "error" json |> to_string);
+      check
+        string
+        "bridge env surfaced"
+        Masc.Voice_session_manager.realtime_bridge_env
+        Yojson.Safe.Util.(member "required_env" json |> to_string);
+      check string "fallback mode surfaced" "turn_based"
+        Yojson.Safe.Util.(member "fallback_conversation_mode" json |> to_string);
+      let agent_raw =
+        Masc.Keeper_tool_voice_runtime.handle_voice_tool
+          ~config
+          ~meta
+          ~name:"keeper_voice_agent"
+          ~args:(`Assoc [])
+          ()
+      in
+      let agent_json = Yojson.Safe.from_string agent_raw in
+      check bool "rejected realtime start does not create session" false
+        Yojson.Safe.Util.(member "session_active" agent_json |> to_bool)))
+;;
+
 let test_keeper_voice_agent_reports_turn_based_capability () =
+  with_env Masc.Voice_session_manager.realtime_bridge_env None (fun () ->
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -535,8 +652,30 @@ let test_keeper_voice_agent_reports_turn_based_capability () =
     let before = read_agent () in
     check string "conversation mode" "turn_based"
       Yojson.Safe.Util.(member "conversation_mode" before |> to_string);
+    check string "transport mode" "batch_stt_tts"
+      Yojson.Safe.Util.(member "transport_mode" before |> to_string);
     check bool "realtime unsupported" false
       Yojson.Safe.Util.(member "realtime_supported" before |> to_bool);
+    let realtime_bridge = Yojson.Safe.Util.member "realtime_bridge" before in
+    check bool "realtime bridge unconfigured" false
+      Yojson.Safe.Util.(member "configured" realtime_bridge |> to_bool);
+    check
+      string
+      "realtime bridge env surfaced"
+      Masc.Voice_session_manager.realtime_bridge_env
+      Yojson.Safe.Util.(member "required_env" realtime_bridge |> to_string);
+    check bool "realtime bridge endpoint absent" true
+      (Yojson.Safe.Util.member "endpoint" realtime_bridge = `Null);
+    check (list string) "available conversation modes" [ "turn_based" ]
+      Yojson.Safe.Util.(
+        member "available_conversation_modes" before |> json_string_list);
+    let before_loop = Yojson.Safe.Util.member "voice_loop" before in
+    check string "loop input route" "POST /api/v1/voice/transcribe"
+      Yojson.Safe.Util.(
+        member "operator_input" before_loop |> member "server_route" |> to_string);
+    check string "loop output route" "GET /api/v1/voice/audio/<token>"
+      Yojson.Safe.Util.(
+        member "keeper_output" before_loop |> member "browser_route" |> to_string);
     check bool "no active session" false
       Yojson.Safe.Util.(member "session_active" before |> to_bool);
     check bool "active_session is null" true
@@ -553,7 +692,116 @@ let test_keeper_voice_agent_reports_turn_based_capability () =
       Yojson.Safe.Util.(member "session_active" after |> to_bool);
     check string "active session agent" meta.name
       Yojson.Safe.Util.(member "active_session" after |> member "agent_id" |> to_string);
-    end_session ())
+    check string "active session loop mode" "turn_based_batch"
+      Yojson.Safe.Util.(
+        member "active_session" after
+        |> member "voice_loop"
+        |> member "mode"
+        |> to_string);
+    end_session ()))
+;;
+
+let test_keeper_voice_agent_reports_realtime_bridge_capability () =
+  let bridge_endpoint = "wss://token:secret@bridge.example/live?token=abc123" in
+  with_env
+    Masc.Voice_session_manager.realtime_bridge_env
+    (Some bridge_endpoint)
+    (fun () ->
+      Eio_main.run
+      @@ fun env ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let net = Eio.Stdenv.net env in
+      let clock = Eio.Stdenv.clock env in
+      let mono_clock = Eio.Stdenv.mono_clock env in
+      Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+        let config = test_config () in
+        let meta = make_keeper_meta "voice-realtime-bridge-keeper" in
+        let read_agent () =
+          Masc.Keeper_tool_voice_runtime.handle_voice_tool
+            ~config
+            ~meta
+            ~name:"keeper_voice_agent"
+            ~args:(`Assoc [])
+            ()
+          |> Yojson.Safe.from_string
+        in
+        let end_session () =
+          ignore
+            (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+               ~config
+               ~meta
+               ~name:"keeper_voice_session_end"
+               ~args:(`Assoc [])
+               ())
+        in
+        end_session ();
+        let before = read_agent () in
+        check string "default conversation mode" "turn_based"
+          Yojson.Safe.Util.(member "conversation_mode" before |> to_string);
+        check bool "realtime bridge makes realtime available" true
+          Yojson.Safe.Util.(member "realtime_supported" before |> to_bool);
+        let realtime_bridge = Yojson.Safe.Util.member "realtime_bridge" before in
+        check bool "realtime bridge configured" true
+          Yojson.Safe.Util.(member "configured" realtime_bridge |> to_bool);
+        check bool "realtime bridge endpoint hidden" true
+          (Yojson.Safe.Util.member "endpoint" realtime_bridge = `Null);
+        check_json_omits "agent capability omits raw endpoint" bridge_endpoint before;
+        check_json_omits "agent capability omits endpoint secret" "secret" before;
+        check
+          (list string)
+          "available realtime conversation modes"
+          [ "turn_based"; "realtime_bridge" ]
+          Yojson.Safe.Util.(
+            member "available_conversation_modes" before |> json_string_list);
+        let start_raw =
+          Masc.Keeper_tool_voice_runtime.handle_voice_tool
+            ~config
+            ~meta
+            ~name:"keeper_voice_session_start"
+            ~args:(`Assoc [ "conversation_mode", `String "realtime_bridge" ])
+            ()
+        in
+        let start_json = Yojson.Safe.from_string start_raw in
+        check string "realtime session mode" "realtime_bridge"
+          Yojson.Safe.Util.(member "conversation_mode" start_json |> to_string);
+        check string "realtime transport" "websocket_audio_bridge"
+          Yojson.Safe.Util.(member "transport_mode" start_json |> to_string);
+        check bool "realtime session supported" true
+          Yojson.Safe.Util.(member "realtime_supported" start_json |> to_bool);
+        check bool "realtime endpoint not serialized" true
+          (Yojson.Safe.Util.member "realtime_bridge_endpoint" start_json = `Null);
+        check_json_omits "session start omits raw endpoint" bridge_endpoint start_json;
+        check_json_omits "session start omits endpoint secret" "secret" start_json;
+        let voice_loop = Yojson.Safe.Util.member "voice_loop" start_json in
+        check string "realtime loop mode" "realtime_bridge"
+          Yojson.Safe.Util.(member "mode" voice_loop |> to_string);
+        check string "realtime protocol" "masc.voice.realtime_bridge.v1"
+          Yojson.Safe.Util.(member "protocol" voice_loop |> to_string);
+        check bool "realtime loop bridge endpoint hidden" true
+          (Yojson.Safe.Util.member "bridge_endpoint" voice_loop = `Null);
+        let loop_bridge = Yojson.Safe.Util.member "realtime_bridge" voice_loop in
+        check bool "realtime loop bridge configured" true
+          Yojson.Safe.Util.(member "configured" loop_bridge |> to_bool);
+        check bool "realtime loop bridge endpoint hidden" true
+          (Yojson.Safe.Util.member "endpoint" loop_bridge = `Null);
+        let after = read_agent () in
+        check_json_omits "active agent omits raw endpoint" bridge_endpoint after;
+        check_json_omits "active agent omits endpoint secret" "secret" after;
+        check string "active realtime conversation mode" "realtime_bridge"
+          Yojson.Safe.Util.(member "conversation_mode" after |> to_string);
+        check string "active realtime session mode" "realtime_bridge"
+          Yojson.Safe.Util.(
+            member "active_session" after
+            |> member "conversation_mode"
+            |> to_string);
+        check string "active realtime loop mode" "realtime_bridge"
+          Yojson.Safe.Util.(
+            member "active_session" after
+            |> member "voice_loop"
+            |> member "mode"
+            |> to_string);
+        end_session ()))
 ;;
 
 let test_playback_timeout_parsers_and_budget () =
@@ -714,13 +962,25 @@ let () =
             `Quick
             test_keeper_voice_session_start_does_not_store_session_name_as_voice
         ; test_case
+            "realtime bridge endpoint validation"
+            `Quick
+            test_voice_realtime_bridge_endpoint_validation
+        ; test_case
             "session_end reports ended without queue field"
             `Quick
             test_keeper_voice_session_end_reports_ended
         ; test_case
+            "realtime session start requires bridge env"
+            `Quick
+            test_keeper_voice_session_start_realtime_requires_bridge_env
+        ; test_case
             "voice_agent reports turn-based capability"
             `Quick
             test_keeper_voice_agent_reports_turn_based_capability
+        ; test_case
+            "voice_agent reports realtime bridge capability"
+            `Quick
+            test_keeper_voice_agent_reports_realtime_bridge_capability
         ] )
     ; ( "playback_timeout"
       , [ test_case

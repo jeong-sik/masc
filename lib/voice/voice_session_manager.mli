@@ -23,6 +23,14 @@ type session_status =
 (** Wire-format strings: ["active"] / ["idle"] / ["suspended"]. See
     {!status_of_string_opt}. *)
 
+type conversation_mode =
+  | Turn_based
+  | Realtime_bridge of { endpoint : string }
+(** Voice loop transport mode. [Realtime_bridge] is only valid when an
+    operator-provided realtime bridge endpoint is configured; MASC still owns
+    session state and Keeper tool visibility, while the bridge owns live audio
+    frames. *)
+
 type session
 (** A single agent's active voice session. Mutable internals
     ([last_activity], [turn_count], [status]) are guarded by the
@@ -44,9 +52,35 @@ val status_of_string_opt : string -> session_status option
 (** [Some] only for the three wire-format names; any other input
     returns [None] (#8612 — never silently maps unknowns to [Idle]). *)
 
+val string_of_conversation_mode : conversation_mode -> string
+val transport_mode_of_conversation_mode : conversation_mode -> string
+val realtime_supported : conversation_mode -> bool
+val realtime_bridge_env : string
+
+val realtime_bridge_endpoint : ?getenv:(string -> string option) -> unit -> string option
+(** Configured realtime voice bridge endpoint from [MASC_VOICE_REALTIME_WS_URL].
+    Blank, non-[ws://], and non-[wss://] values are treated as unavailable. *)
+
+val realtime_bridge_public_json : ?endpoint:string -> unit -> Yojson.Safe.t
+(** Keeper-visible bridge metadata. The raw websocket endpoint stays
+    internal-only and is never serialized into this JSON. *)
+
+val session_conversation_mode : session -> conversation_mode
+
 (** {1 JSON conversion} *)
 
 val session_to_json : session -> Yojson.Safe.t
+(** Includes the durable session fields plus the dashboard/keeper-visible
+    voice-loop contract. Realtime bridge JSON exposes configured metadata only;
+    the raw websocket endpoint is intentionally redacted. *)
+
+val turn_based_voice_loop_json : session_active:bool -> Yojson.Safe.t
+(** Structured capability contract for the current voice implementation.
+    MASC voice sessions are batch STT/TTS loops: operator audio is first
+    transcribed to text, then delivered through the normal keeper turn;
+    keeper output uses [keeper_voice_speak] and dashboard audio clips. *)
+
+val voice_loop_json : session_active:bool -> conversation_mode -> Yojson.Safe.t
 
 val session_of_json : Yojson.Safe.t -> session
 (** Decode failures on individual fields raise [Yojson] exceptions.
@@ -62,7 +96,7 @@ val create : config_path:string -> t
     disk — call {!restore} for that. *)
 
 val start_session :
-  t -> agent_id:string -> ?voice:string -> unit -> session
+  t -> agent_id:string -> ?voice:string -> ?conversation_mode:conversation_mode -> unit -> session
 (** Re-activates an existing session if one is registered for
     [agent_id]; otherwise creates a fresh session with [voice]
     (defaulting to [Voice_bridge.get_voice_for_agent agent_id]) and

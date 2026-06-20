@@ -107,6 +107,22 @@ let remove_noerr path =
   | Sys_error _ | Unix.Unix_error _ -> ()
 ;;
 
+(* Run [f] against [oc] then close it, guaranteeing the descriptor is released
+   on every exit. [close_out] runs inside the body so a flush failure (e.g.
+   ENOSPC on the buffered tail) propagates to the caller; [close_out_noerr] in
+   the [Fun.protect] finally is a no-op after a clean close and reclaims the fd
+   when [close_out]'s flush raised before [close_out_channel] could run (OCaml's
+   [close_out = flush; close_out_channel] never reaches the close on flush
+   failure). [close_out_noerr] never raises, so it cannot mask the body's
+   exception via [Fun.Finally_raised]. *)
+let with_out_channel oc ~f =
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       f oc;
+       close_out oc)
+;;
+
 let write_file_atomically path content =
   ensure_dir (Filename.dirname path);
   let rec open_tmp attempt =
@@ -123,15 +139,13 @@ let write_file_atomically path content =
     | Unix.Unix_error (Unix.EEXIST, _, _) -> open_tmp (attempt + 1)
   in
   let tmp, oc = open_tmp 0 in
-  let close_attempted = ref false in
+  (* The rename stays OUTSIDE [with_out_channel]: it runs only after the write
+     and close both succeed, and the exception path removes the temp file. *)
   try
-    output_string oc content;
-    close_attempted := true;
-    close_out oc;
+    with_out_channel oc ~f:(fun oc -> output_string oc content);
     Sys.rename tmp path
   with
   | exn ->
-    if not !close_attempted then close_out_noerr oc;
     remove_noerr tmp;
     raise exn
 ;;
@@ -220,15 +234,7 @@ let unique_episode_path ~keeper_id episode =
 let append_line path line =
   ensure_dir (Filename.dirname path);
   let oc = open_out_gen [ Open_append; Open_creat; Open_text ] 0o644 path in
-  let close_attempted = ref false in
-  try
-    output_string oc (line ^ "\n");
-    close_attempted := true;
-    close_out oc
-  with
-  | exn ->
-    if not !close_attempted then close_out_noerr oc;
-    raise exn
+  with_out_channel oc ~f:(fun oc -> output_string oc (line ^ "\n"))
 ;;
 
 let append_json path json =

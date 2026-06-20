@@ -32,6 +32,13 @@ val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:strin
 
 (** {1 Atomic writes} *)
 
+(** Run [f] against the channel then close it, releasing the descriptor on every
+    exit path — including when [close_out]'s flush raises, which OCaml's
+    [close_out] leaves the fd open on. The body's exception propagates (so
+    callers can skip a rename / report the write failure). Exposed for testing
+    the fd-release guarantee. *)
+val with_out_channel : out_channel -> f:(out_channel -> unit) -> unit
+
 val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit

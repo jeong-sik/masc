@@ -203,7 +203,9 @@ val update_goal :
 val delete_goal :
   Workspace_utils.config -> goal_id:string -> (unit, string) result
 (** Removes the goal whose [.id] matches.  Errors when the
-    id is unknown. *)
+    id is unknown.  Goal-task link cleanup is best-effort across
+    separate files; a cleanup failure returns [Error] after the goal
+    delete has already been committed. *)
 
 (** {1 List + upsert} *)
 

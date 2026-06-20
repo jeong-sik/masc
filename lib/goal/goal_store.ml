@@ -494,8 +494,26 @@ let delete_goal config ~goal_id =
   match deleted with
   | Error _ as error -> error
   | Ok () ->
-    Workspace_goal_index.prune_links_for_goal config ~goal_id;
-    Ok ()
+    (* This is best-effort cascade cleanup across two file stores, not a
+       cross-file transaction. A structural fix would either co-locate
+       goal-task links with goals or add a higher-level transaction lock that
+       covers every goal/link mutation path. *)
+    (try
+       Workspace_goal_index.prune_links_for_goal config ~goal_id;
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       let detail = Printexc.to_string exn in
+       Log.Misc.warn
+         "goal_store.delete_goal: goal %s removed but goal_task_links prune failed: %s"
+         goal_id
+         detail;
+       Error
+         (Printf.sprintf
+            "goal deleted but failed to prune goal_task_links for %s: %s"
+            goal_id
+            detail))
 
 let sort_goals goals =
   let horizon_rank = function

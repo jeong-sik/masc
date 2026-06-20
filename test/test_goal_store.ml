@@ -126,6 +126,31 @@ let test_delete_goal_prunes_goal_task_links () =
           String.equal goal_id "g-2" && List.mem "task-c" task_ids)
        links)
 
+let test_delete_goal_wraps_prune_failure_after_goal_delete () =
+  with_workspace
+  @@ fun config ->
+  let deleted = make_goal "g-1" "deleted goal" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ deleted ] };
+  Workspace_goal_index.write_goal_task_links config [ "g-1", [ "task-a" ] ];
+  let links_path = Workspace_goal_index.goal_task_links_path config in
+  Sys.remove links_path;
+  Unix.mkdir links_path 0o755;
+  (match Goal_store.delete_goal config ~goal_id:"g-1" with
+   | Ok () -> fail "expected prune failure to return contextual Error"
+   | Error msg ->
+     check bool
+       "error explains partial delete"
+       true
+       (String.starts_with
+          ~prefix:"goal deleted but failed to prune goal_task_links for g-1:"
+          msg));
+  let goals = (Goal_store.read_state config).goals in
+  check bool
+    "goal deletion already committed"
+    false
+    (List.exists (fun goal -> String.equal goal.Goal_store.id "g-1") goals)
+
 let test_legacy_status_defaults_phase () =
   with_workspace @@ fun config ->
   Workspace.write_json config (Goal_store.goals_path config)
@@ -251,6 +276,8 @@ let () =
             test_updated_at_also_refreshed;
           test_case "delete prunes goal_task_links" `Quick
             test_delete_goal_prunes_goal_task_links;
+          test_case "prune failure reports partial delete" `Quick
+            test_delete_goal_wraps_prune_failure_after_goal_delete;
           test_case "legacy status defaults phase" `Quick
             test_legacy_status_defaults_phase;
           test_case "blocked phase projects legacy status" `Quick

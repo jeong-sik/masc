@@ -49,6 +49,23 @@ let test_keeps_already_attributed_error () =
     detail
 ;;
 
+let test_panel_failure_detail_rewrites_unknown_provider () =
+  let detail =
+    Fusion_oas.panel_failure_detail ~runtime_id:"ollama_cloud.kimi-k2-6"
+      (Fusion_types.Provider_error
+         "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout")
+  in
+  Alcotest.(check string)
+    "panel failure detail"
+    "Provider 'ollama_cloud.kimi-k2-6' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout"
+    detail;
+  Alcotest.(check string)
+    "panel failure code"
+    "provider_error"
+    (Fusion_oas.panel_failure_code
+       (Fusion_types.Provider_error "Provider 'unknown' timeout"))
+;;
+
 let test_timeout_budget_does_not_set_total_execution_ceiling () =
   let config =
     Fusion_oas.For_testing.apply_timeout_budget
@@ -85,6 +102,10 @@ let () =
             "keeps already attributed error"
             `Quick
             test_keeps_already_attributed_error
+        ; Alcotest.test_case
+            "panel failure detail rewrites unknown provider"
+            `Quick
+            test_panel_failure_detail_rewrites_unknown_provider
         ; Alcotest.test_case
             "timeout budget does not arm OAS total execution ceiling"
             `Quick

@@ -1,8 +1,11 @@
 # MASC runtime seed model catalog for OAS capability lookup.
 #
-# OAS discovers this file by walking cwd parents for oas-models.toml. Keep this
-# catalog scoped to models referenced by config/runtime.toml; provider/model
-# capability interpretation remains in OAS.
+# OAS discovers this file by walking cwd parents for oas-models.toml. This is a
+# runtime-binding projection scoped to models referenced by config/runtime.toml,
+# not a full mirror of the canonical OAS models.toml catalog. Provider/model
+# capability interpretation remains in OAS; provider-qualified rows here exist
+# to validate MASC runtime bindings without redefining global bare-model
+# semantics.
 
 # DeepSeek Models
 [[models]]

@@ -960,7 +960,6 @@ let close_session_for_inbound_reject session rejection =
     rejection.reason
     rejection.actual
     rejection.limit;
-  Atomic.set session.closed true;
   let detached = detach_session_for_close session.id in
   update_ws_session_count_metric ();
   Sse.unsubscribe_external session.id;

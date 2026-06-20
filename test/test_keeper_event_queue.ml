@@ -1,8 +1,5 @@
 let temp_dir prefix =
-  let dir = Filename.temp_file prefix "" in
-  Unix.unlink dir;
-  Unix.mkdir dir 0o755;
-  dir
+  Filename.temp_dir prefix ""
 
 let rec rm_rf path =
   if Sys.file_exists path

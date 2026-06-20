@@ -9,6 +9,7 @@ open Alcotest
 open Masc_domain
 
 module DE = Dashboard_execution
+module WGI = Workspace_goal_index
 
 let make_task ~id =
   { id
@@ -33,6 +34,10 @@ let index pairs =
   h
 ;;
 
+let index_from_registry goal_task_links =
+  WGI.build_task_goal_index ~goal_task_links ()
+;;
+
 (* Extract the projected goal_id field from a serialized task. *)
 let goal_id_of json =
   let open Yojson.Safe.Util in
@@ -43,13 +48,13 @@ let goal_id_of json =
 ;;
 
 let test_linked_task_projects_goal_id () =
-  let idx = index [ "task-1", [ "goal-a" ] ] in
+  let idx = index_from_registry [ "goal-a", [ "task-1" ] ] in
   let j = DE.task_json ~goal_task_index:idx (make_task ~id:"task-1") in
   check (option string) "linked task carries its goal_id" (Some "goal-a") (goal_id_of j)
 ;;
 
 let test_unlinked_task_projects_null () =
-  let idx = index [ "task-1", [ "goal-a" ] ] in
+  let idx = index_from_registry [ "goal-a", [ "task-1" ] ] in
   let j = DE.task_json ~goal_task_index:idx (make_task ~id:"task-2") in
   check (option string) "task absent from index -> goal_id null" None (goal_id_of j)
 ;;
@@ -62,12 +67,17 @@ let test_empty_link_list_projects_null () =
 
 let test_multi_goal_projects_first () =
   (* Legacy registry rows may link a task to >1 goal; the projection is
-     deterministic (first match) and the board adopts a single-goal model. *)
-  let idx = index [ "task-1", [ "goal-a"; "goal-b"; "goal-c" ] ] in
+     deterministic (first registry match) and the board adopts a single-goal
+     model. This must go through the production index builder so the test pins
+     the persisted link-order semantics rather than a hand-built list. *)
+  let idx =
+    index_from_registry
+      [ "goal-a", [ "task-1" ]; "goal-b", [ "task-1" ]; "goal-c", [ "task-1" ] ]
+  in
   let j = DE.task_json ~goal_task_index:idx (make_task ~id:"task-1") in
   check
     (option string)
-    "multi-goal task -> deterministic first goal"
+    "multi-goal task -> deterministic first registry goal"
     (Some "goal-a")
     (goal_id_of j)
 ;;
@@ -80,7 +90,7 @@ let () =
         ; test_case "unlinked task projects null" `Quick test_unlinked_task_projects_null
         ; test_case "empty link list projects null" `Quick test_empty_link_list_projects_null
         ; test_case
-            "multi-goal projects deterministic first"
+            "multi-goal projects deterministic first registry goal"
             `Quick
             test_multi_goal_projects_first
         ] )

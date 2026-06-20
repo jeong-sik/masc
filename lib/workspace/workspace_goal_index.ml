@@ -230,7 +230,11 @@ let build_task_goal_index
        List.iter
          (fun task_id ->
             let existing = try Hashtbl.find tbl task_id with Not_found -> [] in
-            Hashtbl.replace tbl task_id (goal_id :: existing))
+            (* Preserve registry order for consumers that need a canonical
+               first-linked goal for a task. Multi-goal task links are legacy
+               invariant violations, but the projection must still be stable
+               and match the persisted link order. *)
+            Hashtbl.replace tbl task_id (existing @ [ goal_id ]))
          task_ids)
     goal_task_links;
   tbl

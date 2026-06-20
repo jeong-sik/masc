@@ -144,6 +144,10 @@ type fact =
   ; schema_version : string
   }
 
+(** Whether a fact's hard-expiry horizon still admits it at [now]. Facts with no
+    [valid_until] are durable and current. *)
+val fact_is_current : now:float -> fact -> bool
+
 (** A librarian extraction result: a summary plus structured claims. *)
 type episode =
   { trace_id : string

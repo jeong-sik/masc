@@ -56,12 +56,6 @@ let sanitize_atom text =
     | c -> c)
 ;;
 
-let fact_is_current ~now (fact : fact) =
-  match fact.valid_until with
-  | None -> true
-  | Some ts -> ts >= now
-;;
-
 let eligible_category = function
   | Preference | Constraint -> true
   | Code_change | Fact | Blocker | Goal | Ephemeral | Validated_approach | Lesson

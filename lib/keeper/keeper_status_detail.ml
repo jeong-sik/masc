@@ -770,6 +770,24 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                    ])
            | other -> other
          in
+         let chat_queue =
+           let pending_messages =
+             match
+               try
+                 Eio.Fiber.yield ();
+                 Some ()
+               with
+               | Effect.Unhandled _ -> None
+             with
+             | None -> `Null
+             | Some () -> `Int (Keeper_chat_queue.length ~keeper_name:m.name)
+           in
+           `Assoc
+             [
+               ("pending_messages", pending_messages);
+               ("durable_replay_enabled", `Bool (Keeper_chat_queue.persistence_configured ()));
+             ]
+         in
 
          let json = `Assoc ([
            ("name", `String name);
@@ -952,6 +970,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("models_resolved", models_resolved);
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
+           ("chat_queue", chat_queue);
            ("runtime", runtime_surface_json config m);
            ("workspace", workspace_surface_json m);
            ("sources", source_provenance_json config m);

@@ -38,6 +38,10 @@ type queued_message = {
     snapshots into memory for queue-consumer replay. *)
 val configure_persistence : base_path:string -> unit
 
+(** [persistence_configured ()] reports whether durable snapshots are enabled
+    in this process. *)
+val persistence_configured : unit -> bool
+
 (** [enqueue keeper_name msg] adds [msg] to the tail of [keeper_name]'s
     queue.  Creates the queue lazily if it does not yet exist. *)
 val enqueue : keeper_name:string -> queued_message -> unit

@@ -219,6 +219,11 @@ let persist_if_configured ~keeper_name q =
   | None -> ()
   | Some base_path -> persist_snapshot ~base_path ~keeper_name q
 
+let persistence_configured () =
+  match Atomic.get persistence_base_path with
+  | None -> false
+  | Some _ -> true
+
 let get_or_create_entry keeper_name =
   match Hashtbl.find_opt registry keeper_name with
   | Some entry -> entry

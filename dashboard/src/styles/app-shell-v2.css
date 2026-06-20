@@ -165,8 +165,18 @@
     radial-gradient(900px 500px at -5% 110%, rgba(0, 0, 0, 0.02), transparent 60%);
 }
 
-/* Ensure shell children render above the decorative background. */
-.v2-app > * {
+/* Lift in-flow shell children above the decorative .v2-app::before plane
+   (z-index:0). Fixed/absolute overlays are excluded: they carry their own
+   position + z-[var(--z-overlay-*)] stacking, and forcing position:relative on
+   them would drop them into normal flow — which is what pushed the toast host
+   off-screen to the bottom of the h-screen column. The Tailwind .fixed/.absolute
+   utilities live in @layer utilities, which this unlayered rule would otherwise
+   override (unlayered styles always win over layered ones). .dock-fab and
+   .twk-panel position via custom classes rather than the utility, so they are
+   excluded by name as well.
+   Follow-up: migrate every overlay onto the .fixed utility or a shared overlay
+   class so this rule no longer has to enumerate them. */
+.v2-app > *:not(.fixed):not(.absolute):not(.dock-fab):not(.twk-panel) {
   position: relative;
   z-index: 1;
 }

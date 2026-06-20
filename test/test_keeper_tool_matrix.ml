@@ -286,8 +286,8 @@ let test_keeper_inventory_materializes_masc_fusion_schema () =
    web_search / web_fetch into the panel and judge. If the keeper-facing schema
    omits web_tools, the keeper LLM has no surfaced way to enable it (the field is
    only reachable by guessing the exact name). Assert the *materialized* schema —
-   what the keeper actually receives — declares it, so descriptor<->handler drift
-   on this arg fails the build. *)
+   what the keeper actually receives — declares it as a boolean, so
+   descriptor<->handler drift on this arg fails the build. *)
 let test_masc_fusion_schema_declares_web_tools () =
   match
     List.find_opt
@@ -308,7 +308,18 @@ let test_masc_fusion_schema_declares_web_tools () =
       check bool
         "masc_fusion schema declares web_tools (descriptor<->handler parity)"
         true
-        (List.mem_assoc "web_tools" props)
+        (List.mem_assoc "web_tools" props);
+      let web_tools_type =
+        match List.assoc_opt "web_tools" props with
+        | Some (`Assoc fields) -> List.assoc_opt "type" fields
+        | _ -> None
+      in
+      check (option string)
+        "masc_fusion web_tools schema type matches handler bool parser"
+        (Some "boolean")
+        (match web_tools_type with
+         | Some (`String value) -> Some value
+         | _ -> None)
 
 let test_keeper_oas_bundle_materializes_masc_fusion_tool () =
   let marker = Filename.temp_file "keeper-fusion-schema-" ".tmp" in

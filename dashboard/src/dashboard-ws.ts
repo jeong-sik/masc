@@ -38,13 +38,20 @@ type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
 interface DashboardWsDiscovery {
   enabled?: boolean
   listening?: boolean
+  reachable?: boolean
+  listen_status?: string | null
   ws_url?: string | null
+  unavailable_reason?: string | null
+  same_origin_upgrade_enabled?: boolean
+  same_origin_upgrade_path?: string | null
+  same_origin_ws_url?: string | null
 }
 
 interface DashboardWsDiscoveryResult {
   wsUrl: string | null
   retry: boolean
   fromCache: boolean
+  reason?: string
 }
 
 const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v1'
@@ -152,6 +159,34 @@ function maybeInvalidateDiscoveryCache(): void {
     clearCachedWsUrl()
     resetDiscoveryCacheFailures()
   }
+}
+
+function nonBlankString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function discoveryUnavailableReason(data: DashboardWsDiscovery): string {
+  const serverReason = nonBlankString(data.unavailable_reason)
+  if (serverReason) return serverReason
+  if (data.enabled !== true) return 'disabled'
+  if (data.listening !== true) {
+    const listenStatus = nonBlankString(data.listen_status)
+    return listenStatus ? `not listening (${listenStatus})` : 'not listening'
+  }
+  if (typeof data.ws_url !== 'string') {
+    const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
+    if (sameOriginWsUrl && data.same_origin_upgrade_enabled !== true) {
+      return 'standalone websocket URL unavailable; same-origin upgrade disabled'
+    }
+    return 'websocket URL unavailable'
+  }
+  return 'unavailable'
+}
+
+function dashboardWsUnavailableMessage(reason?: string): string {
+  return reason ? `dashboard websocket unavailable: ${reason}` : 'dashboard websocket unavailable'
 }
 
 // Phase 2 (PR-4.6): rAF accumulator for inbound WS messages.
@@ -372,13 +407,30 @@ async function discoverWsUrl(): Promise<DashboardWsDiscoveryResult> {
   if (cachedUrl) return { wsUrl: cachedUrl, retry: false, fromCache: true }
 
   const response = await fetch('/ws', { credentials: 'same-origin' })
-  if (!response.ok) return { wsUrl: null, retry: true, fromCache: false }
+  if (!response.ok) {
+    return {
+      wsUrl: null,
+      retry: true,
+      fromCache: false,
+      reason: `discovery HTTP ${response.status}`,
+    }
+  }
   const data = await response.json() as DashboardWsDiscovery
   if (data.enabled !== true) {
-    return { wsUrl: null, retry: false, fromCache: false }
+    return {
+      wsUrl: null,
+      retry: false,
+      fromCache: false,
+      reason: discoveryUnavailableReason(data),
+    }
   }
   if (data.listening !== true || typeof data.ws_url !== 'string') {
-    return { wsUrl: null, retry: true, fromCache: false }
+    return {
+      wsUrl: null,
+      retry: true,
+      fromCache: false,
+      reason: discoveryUnavailableReason(data),
+    }
   }
   return { wsUrl: data.ws_url, retry: false, fromCache: false }
 }
@@ -618,7 +670,7 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     if (generation === connectGeneration) clearCachedWsUrl()
     if (generation === connectGeneration && shouldReconnect && discovery.retry) {
       batch(() => {
-        dashboardWsLastError.value = 'dashboard websocket unavailable'
+        dashboardWsLastError.value = dashboardWsUnavailableMessage(discovery.reason)
       })
       scheduleReconnect()
     }

@@ -351,6 +351,7 @@ describe('dashboard websocket route subscriptions', () => {
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toBe('dashboard websocket unavailable: not listening')
 
     await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()
@@ -368,6 +369,7 @@ describe('dashboard websocket route subscriptions', () => {
         enabled: true,
         listening: true,
         ws_url: null,
+        unavailable_reason: 'standalone_ws_loopback_only',
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -377,6 +379,9 @@ describe('dashboard websocket route subscriptions', () => {
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     expect(mockSockets).toHaveLength(0)
+    expect(dashboardWsLastError.value).toBe(
+      'dashboard websocket unavailable: standalone_ws_loopback_only',
+    )
 
     await vi.advanceTimersByTimeAsync(60_000)
     await flushPromises()

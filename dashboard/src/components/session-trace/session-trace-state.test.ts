@@ -349,7 +349,7 @@ describe('buildTraceEvents', () => {
           turn: 1,
           round: 1,
           tool_name: 'keeper_fs_read',
-          args: { file_path: '/tmp/trajectory.txt' },
+          args: { file_path: 'trajectory.txt' },
           result: 'trajectory result',
           duration_ms: 50,
           gate: { status: 'pass' },
@@ -364,7 +364,7 @@ describe('buildTraceEvents', () => {
           ts: 1712397700,
           keeper: 'test',
           tool: 'keeper_fs_read',
-          input: { file_path: '/tmp/full.txt' },
+          input: { file_path: 'full.txt' },
           output: 'full file contents',
           success: true,
           duration_ms: 50,
@@ -379,10 +379,68 @@ describe('buildTraceEvents', () => {
     )
     const toolEvents = events.filter(e => e.kind === 'tool_call')
     expect(toolEvents).toHaveLength(1)
-    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: '/tmp/full.txt' })
+    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: 'full.txt' })
     expect(toolEvents[0]!.toolResult).toBe('full file contents')
     expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
     expect(toolEvents[0]!.detail.lane).toBe('runtime_mcp')
+  })
+
+  it('preserves trajectory duration when the richer tool-call row has no duration', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
+      },
+      {
+        keeper: 'test',
+        trace_id: 'trace-1',
+        generation: 1,
+        total_entries: 1,
+        showing: 1,
+        entries: [{
+          ts: 1712397700,
+          ts_iso: '2024-04-06T10:01:40Z',
+          turn: 1,
+          round: 1,
+          tool_name: 'keeper_fs_read',
+          args: { file_path: 'trajectory.txt' },
+          result: 'trajectory result',
+          duration_ms: 812,
+          gate: { status: 'pass' },
+          cost_usd: 0.001,
+          error: null,
+          execution_id: 'exec-1712397700000-duration',
+        }],
+      },
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'keeper_fs_read',
+          input: { file_path: 'full.txt' },
+          output: 'full file contents',
+          success: true,
+          duration_ms: null,
+          trace_id: 'trace-1',
+          session_id: 'trace-1',
+          turn: 1,
+          keeper_turn_id: 1,
+          task_id: 'task-1',
+          lane: 'runtime_mcp',
+          execution_id: 'exec-1712397700000-duration',
+        }],
+      },
+    )
+    const toolEvents = events.filter(e => e.kind === 'tool_call')
+    expect(toolEvents).toHaveLength(1)
+    expect(toolEvents[0]!.duration_ms).toBe(812)
+    expect(toolEvents[0]!.toolArgs).toEqual({ file_path: 'full.txt' })
+    expect(toolEvents[0]!.toolResult).toBe('full file contents')
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
   })
 
   it('creates synthetic tool_call rows from tool-call log when trajectory is missing', () => {

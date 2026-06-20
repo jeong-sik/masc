@@ -2771,7 +2771,7 @@ export type ToolCallEntry = {
   input: unknown
   output: string | ToolCallOutputBlob
   success: boolean
-  duration_ms: number
+  duration_ms: number | null
   model?: string
   trace_id?: string
   session_id?: string
@@ -2842,7 +2842,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     input: raw.input,
     output: decodeToolCallOutput(raw.output),
     success: asBoolean(raw.success, false),
-    duration_ms: asNumber(raw.duration_ms, 0),
+    duration_ms: asNumber(raw.duration_ms) ?? null,
     model: asString(raw.model),
     trace_id: asString(raw.trace_id),
     session_id: asString(raw.session_id),

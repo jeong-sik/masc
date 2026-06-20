@@ -134,12 +134,20 @@ let run_named
      untouched; when no runtime qualifies the assigned runtime stands and the
      loud capability gate in [Runtime_agent.run_blocks] rejects (the floor). The
      reroute is visible via a WARN log (non-silent — RFC-0126/0145). *)
+  let current_goal_blocks =
+    match goal_blocks with
+    | Some blocks -> blocks
+    | None ->
+      (* A missing current block payload means the current keeper goal is
+         text-only; [initial_messages] still participate in reroute below. *)
+      []
+  in
   let runtime_id, runtime =
     match
       Runtime_agent.decide_modality_reroute_for_runtime
         ~assigned:assigned_runtime
         ~initial_messages
-        (Option.value goal_blocks ~default:[])
+        current_goal_blocks
     with
     | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
       runtime_id, assigned_runtime

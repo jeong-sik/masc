@@ -80,7 +80,7 @@ const GROUP_ORDER: { bucket: KeeperBucket; label: string }[] = [
 
 /** Flattened roster item used by the virtualized render path. */
 type RosterItem =
-  | { type: 'header'; bucket: KeeperBucket; label: string }
+  | { type: 'header'; bucket: KeeperBucket; label: string; count: number }
   | { type: 'row'; keeper: Keeper }
 
 /** Switch to the shared VirtualList once the roster is long enough that DOM
@@ -118,9 +118,30 @@ function keeperScope(keeper: Keeper): string | null {
   return keeper.skill_primary ?? keeper.active_model ?? keeper.model ?? null
 }
 
+/** The keeper's sandbox location — the design's roster identity sub-line
+ *  (rails.jsx renders `k.basepath` here). The live field is `sandbox_target`
+ *  (keeper-detail-alert-strip.ts:252 uses the same field); for a `local`
+ *  profile it is the worktree root path, for `docker` the container target.
+ *  Unlike the alert strip, this deliberately does NOT fall back to
+ *  `sandbox_profile`: a bare 'local'/'docker' literal is not a useful roster
+ *  identity, so RosterRow falls through to the scope proxy (skill/model) instead. */
+function keeperBasepath(keeper: Keeper): string {
+  return keeper.sandbox_target?.trim() ?? ''
+}
+
+/** Local worktree roots are long absolute paths that end-ellipsis to an
+ *  unhelpful common prefix in the narrow column, so show the last two segments
+ *  (the identifying tail) with the full path in `title`. Non-path targets
+ *  (e.g. a docker target) are shown verbatim. */
+function shortBasepath(value: string): string {
+  if (!value.startsWith('/')) return value
+  const parts = value.split('/').filter(Boolean)
+  return parts.length <= 2 ? value : `…/${parts.slice(-2).join('/')}`
+}
+
 function matchesQuery(keeper: Keeper, q: string): boolean {
   if (!q) return true
-  const hay = `${keeper.name} ${keeper.koreanName ?? ''} ${keeperScope(keeper) ?? ''} ${keeper.model ?? ''}`.toLowerCase()
+  const hay = `${keeper.name} ${keeper.koreanName ?? ''} ${keeperScope(keeper) ?? ''} ${keeper.model ?? ''} ${keeperBasepath(keeper)}`.toLowerCase()
   return hay.includes(q.toLowerCase())
 }
 
@@ -141,6 +162,11 @@ function RosterRow({
   const tone = keeperStatusTone(keeper)
   const att = attentionCount(keeper)
   const scope = keeperScope(keeper)
+  const basepath = keeperBasepath(keeper)
+  // Design roster identity sub-line = basepath; fall back to the scope proxy
+  // when a keeper has no sandbox target yet so the row never loses its sub-label.
+  const handle = basepath ? shortBasepath(basepath) : scope
+  const handleTitle = basepath || scope || ''
   const activity = keeperActivityDisplay(keeper)
   const work = keeperWorkPreview(keeper)
   const select = () => onSelect(keeper.name)
@@ -158,12 +184,12 @@ function RosterRow({
         select()
       }}
     >
-      <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${bucket === 'running'} />
+      <${WorkspaceSigil} id=${keeper.name} size=${38} beat=${bucket === 'running'} />
       <div class="kw-kp-meta">
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
           <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${bucket === 'running'} />${keeperPhaseLabel(keeper)}</span>
-          ${scope ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle">${scope}</span>` : null}
+          ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
         <div class="kw-kp-work" title=${work ?? ''}>${work ?? '최근 작업 요약 없음'}</div>
       </div>
@@ -322,11 +348,19 @@ export function KeeperWorkspaceRoster({
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
+    // Esc closes the menu (was: any key — typing in the search box dismissed it);
+    // scroll closes it too (capture phase) so the row-anchored menu can't drift
+    // away from its row. Mirrors the design roster menu (rails.jsx).
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenu(null)
+    }
     window.addEventListener('click', close)
-    window.addEventListener('keydown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('click', close)
-      window.removeEventListener('keydown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
     }
   }, [menu])
 
@@ -394,7 +428,7 @@ export function KeeperWorkspaceRoster({
     for (const group of GROUP_ORDER) {
       const rows = visible.filter(k => keeperBucket(k) === group.bucket)
       if (rows.length === 0) continue
-      items.push({ type: 'header', bucket: group.bucket, label: group.label })
+      items.push({ type: 'header', bucket: group.bucket, label: group.label, count: rows.length })
       for (const keeper of rows) {
         items.push({ type: 'row', keeper })
       }
@@ -411,7 +445,7 @@ export function KeeperWorkspaceRoster({
 
   function renderItem(item: RosterItem): VNode {
     if (item.type === 'header') {
-      return html`<div class="kw-roster-group v2-monitoring-row">${item.label}</div>`
+      return html`<div class="kw-roster-group v2-monitoring-row"><span class="kw-roster-group-label">${item.label}</span><span class="kw-roster-group-n">${item.count}</span></div>`
     }
     return html`<${RosterRow} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} />`
   }
@@ -471,7 +505,7 @@ export function KeeperWorkspaceRoster({
             />`
           : html`<div class="kw-roster-list">
               ${items.map(item => item.type === 'header'
-                ? html`<div class="kw-roster-group v2-monitoring-row" key=${`h:${item.bucket}`}>${item.label}</div>`
+                ? html`<div class="kw-roster-group v2-monitoring-row" key=${`h:${item.bucket}`}><span class="kw-roster-group-label">${item.label}</span><span class="kw-roster-group-n">${item.count}</span></div>`
                 : html`<${RosterRow} key=${item.keeper.name} keeper=${item.keeper} active=${item.keeper.name === activeName} onSelect=${select} onMenu=${openMenu} style=${rowStyle} />`)}
             </div>`}
         `}

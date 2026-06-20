@@ -47,10 +47,10 @@ afterEach(() => {
 describe('KeeperWorkspaceRoster', () => {
   it('renders status groups with keeper rows', () => {
     render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
-    const groups = Array.from(host.querySelectorAll('.kw-roster-group')).map(g => g.textContent)
-    expect(groups).toContain('실행 중')
-    expect(groups).toContain('대기 · 일시정지')
-    expect(groups).toContain('중지 · 종료됨')
+    const labels = Array.from(host.querySelectorAll('.kw-roster-group-label')).map(g => g.textContent)
+    expect(labels).toContain('실행 중')
+    expect(labels).toContain('대기 · 일시정지')
+    expect(labels).toContain('중지 · 종료됨')
     expect(host.querySelectorAll('.kw-kp-row').length).toBe(3)
   })
 
@@ -272,5 +272,56 @@ describe('KeeperWorkspaceRoster', () => {
     )
     // blocked-3 (score 3) > flagged (flag → score 1) > calm (score 0)
     expect(order).toEqual(['blocked-3', 'flagged', 'calm'])
+  })
+
+  it('shows the keeper basepath (sandbox_target) as the row sub-line, shortened with a full-path title', () => {
+    keepers.value = [mk({ name: 'miso', status: 'running', sandbox_target: '/Users/dancer/me/.worktrees/keeper-miso' })]
+    render(html`<${KeeperWorkspaceRoster} activeName="miso" />`, host)
+    const handle = host.querySelector('.kw-kp-handle') as HTMLElement
+    expect(handle?.textContent).toBe('…/.worktrees/keeper-miso')
+    expect(handle?.getAttribute('title')).toBe('/Users/dancer/me/.worktrees/keeper-miso')
+  })
+
+  it('falls back to the scope proxy when a keeper has no sandbox_target', () => {
+    keepers.value = [mk({ name: 'nobase', status: 'running', model: 'anthropic/claude-x' })]
+    render(html`<${KeeperWorkspaceRoster} activeName="nobase" />`, host)
+    const handle = host.querySelector('.kw-kp-handle') as HTMLElement
+    expect(handle?.textContent).toBe('anthropic/claude-x')
+  })
+
+  it('matches a search query against the basepath', () => {
+    keepers.value = [
+      mk({ name: 'alpha', status: 'running', sandbox_target: '/srv/worktrees/alpha-tree' }),
+      mk({ name: 'beta', status: 'running', sandbox_target: '/srv/worktrees/beta-tree' }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="alpha" />`, host)
+    fireEvent.input(host.querySelector('.kw-roster-search') as HTMLInputElement, { target: { value: 'beta-tree' } })
+    const rows = host.querySelectorAll('.kw-kp-row')
+    expect(rows.length).toBe(1)
+    expect(rows[0]?.textContent).toContain('beta')
+  })
+
+  it('renders a per-group keeper count in the status group header', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const counts = Array.from(host.querySelectorAll('.kw-roster-group-n')).map(n => n.textContent)
+    // FIXTURE: 1 running, 1 paused, 1 stopped
+    expect(counts).toEqual(['1', '1', '1'])
+  })
+
+  it('closes the row command menu on Escape only (not on any keypress) and on scroll', () => {
+    render(html`<${KeeperWorkspaceRoster} activeName="masc-improver" />`, host)
+    const open = () => fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-sangsu"]') as HTMLButtonElement)
+
+    open()
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull()
+    fireEvent.keyDown(document, { key: 'a' })
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull() // a non-Esc key must NOT close it
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
+
+    open()
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull()
+    fireEvent.scroll(document)
+    expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
   })
 })

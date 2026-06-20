@@ -2097,15 +2097,15 @@ function ToolTraceStep({ entry, output }: { entry: KeeperConversationEntry; outp
   `
 }
 
-// Groups a turn's consecutive tool-call entries into one folded "작업 과정"
+// Groups a turn's consecutive tool-call entries into one "작업 과정"
 // trace card placed above the answer bubble — the v2 layout, built from live
-// data. Folded by default so a turn with many probes (a dozen keeper_board_list
-// / keeper_tasks_list calls) collapses to a single summary line instead of a
-// wall of raw-JSON rows. No think/reason steps are synthesised: the live
-// transcript has no reasoning channel, so the card omits them rather than
+// data. The step list is visible by default so operators can see tool names and
+// status without opening the card; each step's raw args/result body remains
+// collapsed to avoid a wall of JSON. No think/reason steps are synthesised: the
+// live transcript has no reasoning channel, so the card omits them rather than
 // fabricate the v2 reference's mock reasoning.
 function ToolTraceCard({ tools }: { tools: KeeperConversationEntry[] }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const failN = steps.filter(
     (s) => s.output !== null && (s.output.success === false || s.output.semantic_success === false),

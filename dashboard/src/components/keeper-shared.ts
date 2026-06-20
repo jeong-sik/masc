@@ -222,7 +222,9 @@ function effectiveDiagnostic(keeper: Keeper | null | undefined): KeeperDiagnosti
   return detail?.diagnostic ?? keeper.diagnostic ?? null
 }
 
-/** Case-insensitive substring filter over entry text. Empty or
+/** Case-insensitive substring filter over entry text. Tool rows also match on
+ *  the tool label because their visible name often is not present in `{}` args.
+ *  Empty or
  *  whitespace-only queries return the input unchanged. Migrated from
  *  the former keeper-chat-panel.ts (filterChatMessages). */
 export function filterConversationEntries(
@@ -231,7 +233,11 @@ export function filterConversationEntries(
 ): KeeperConversationEntry[] {
   const q = query.trim().toLowerCase()
   if (!q) return entries
-  return entries.filter(entry => entry.text.toLowerCase().includes(q))
+  return entries.filter(entry => {
+    if (entry.text.toLowerCase().includes(q)) return true
+    if ((entry.rawText ?? '').toLowerCase().includes(q)) return true
+    return entry.role === 'tool' && entry.label.toLowerCase().includes(q)
+  })
 }
 
 function blocksToAttachments(blocks: ChatBlock[]): KeeperConversationAttachment[] {

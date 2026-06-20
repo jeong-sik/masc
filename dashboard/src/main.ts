@@ -88,15 +88,16 @@ import { startNavTelemetry } from './lib/nav-telemetry'
 import { THEME_STORAGE_KEYS, THEME_SEARCH_PARAM, type ThemeId } from './lib/theme'
 
 function normalizeTheme(raw: string | null): ThemeId {
-  if (raw === 'styleseed' || raw === 'light') {
+  const value = raw?.trim().toLowerCase() ?? null
+  if (value === 'styleseed' || value === 'light') {
     return 'styleseed'
   }
-  if (raw === 'paper') {
+  if (value === 'paper') {
     return 'paper'
   }
   // Preserve compatibility with existing callers that may send dark-themed values
   // while treating explicit dark values as an opt-out to the legacy palette.
-  if (raw === 'dark' || raw === 'dark-fantasy') {
+  if (value === 'dark' || value === 'dark-fantasy') {
     return null
   }
   return null

@@ -88,7 +88,7 @@ const baseResponse: MemorySubsystemsResponse = {
     total: 1,
     shown: 1,
     limit: 100,
-    index_path: '/tmp/masc/.masc/draft-skills/index.jsonl',
+    index_path: '<base-path>/.masc/draft-skills/index.jsonl',
     items: [
       {
         id: 'skill-candidate-repeatable-debug-loop',
@@ -96,10 +96,10 @@ const baseResponse: MemorySubsystemsResponse = {
         source_kind: 'procedure',
         source_ref: 'procedure://keeper-alpha/repeatable-debug-loop',
         promotion_state: 'candidate',
-        dir: '/tmp/masc/.masc/draft-skills/skill-candidate-repeatable-debug-loop',
-        json_path: '/tmp/masc/.masc/draft-skills/skill-candidate-repeatable-debug-loop/candidate.json',
-        toml_path: '/tmp/masc/.masc/draft-skills/skill-candidate-repeatable-debug-loop/candidate.toml',
-        skill_md_path: '/tmp/masc/.masc/draft-skills/skill-candidate-repeatable-debug-loop/SKILL.md',
+        dir: '<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop',
+        json_path: '<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop/candidate.json',
+        toml_path: '<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop/candidate.toml',
+        skill_md_path: '<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop/SKILL.md',
         created_at: 1,
       },
     ],
@@ -216,7 +216,7 @@ describe('MemorySubsystems focus targets', () => {
     await vi.waitFor(() => {
       expect(container.textContent).toContain('skill-candidate-repeatable-debug-loop')
       expect(container.textContent).toContain('candidate')
-      expect(container.textContent).toContain('/tmp/masc/.masc/draft-skills/skill-candidate-repeatable-debug-loop/SKILL.md')
+      expect(container.textContent).toContain('<base-path>/.masc/draft-skills/skill-candidate-repeatable-debug-loop/SKILL.md')
     })
     expect(container.querySelector('[data-testid="draft-skill-candidates"]')).not.toBeNull()
   })

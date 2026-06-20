@@ -38,6 +38,8 @@ export type SSEEventType =
   | 'keeper_tool_skipped'
   | 'keeper_turn_complete'
   | 'masc/keeper_turn_complete'
+  // RFC-0266 Phase 4: fusion run-status transitions pushed to the dashboard.
+  | 'fusion_run_status'
   | 'client_input_approved'
   | 'client_input_rejected'
   | 'client_input_updated'

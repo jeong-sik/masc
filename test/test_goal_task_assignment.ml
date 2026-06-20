@@ -11,6 +11,8 @@ open Alcotest
 open Masc_domain
 open Masc
 
+module Goal_assignment = Masc.Task.Goal_assignment
+
 let with_test_env f =
   Eio_main.run
   @@ fun env ->
@@ -52,15 +54,15 @@ let make_unassigned_task config ~title =
   | [] -> fail "task was not created"
 ;;
 
-let err_to_string = Task.Goal_assignment.set_task_goal_error_to_string
+let err_to_string = Goal_assignment.set_task_goal_error_to_string
 
 let test_unknown_task () =
   with_test_env (fun config ->
     make_goal config ~id:"goal-a";
     match
-      Task.Goal_assignment.set_task_goal config ~task_id:"task-nope" ~goal_id:"goal-a"
+      Goal_assignment.set_task_goal config ~task_id:"task-nope" ~goal_id:"goal-a"
     with
-    | Error (Task.Goal_assignment.Unknown_task t) ->
+    | Error (Goal_assignment.Unknown_task t) ->
       check string "names the missing task" "task-nope" t
     | Ok () -> fail "expected Unknown_task, got Ok"
     | Error other -> failf "expected Unknown_task, got %s" (err_to_string other))
@@ -70,9 +72,9 @@ let test_unknown_goal () =
   with_test_env (fun config ->
     let task_id = make_unassigned_task config ~title:"t" in
     match
-      Task.Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-nope"
+      Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-nope"
     with
-    | Error (Task.Goal_assignment.Unknown_goal g) ->
+    | Error (Goal_assignment.Unknown_goal g) ->
       check string "names the missing goal" "goal-nope" g
     | Ok () -> fail "expected Unknown_goal, got Ok"
     | Error other -> failf "expected Unknown_goal, got %s" (err_to_string other))
@@ -82,7 +84,7 @@ let test_links_goalless_task () =
   with_test_env (fun config ->
     make_goal config ~id:"goal-a";
     let task_id = make_unassigned_task config ~title:"t" in
-    (match Task.Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
      | Ok () -> ()
      | Error e -> failf "expected Ok, got %s" (err_to_string e));
     let links = Workspace_goal_index.read_goal_task_links config in
@@ -101,11 +103,11 @@ let test_rejects_reassignment () =
     make_goal config ~id:"goal-a";
     make_goal config ~id:"goal-b";
     let task_id = make_unassigned_task config ~title:"t" in
-    (match Task.Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
      | Ok () -> ()
      | Error e -> failf "first assign should succeed: %s" (err_to_string e));
-    match Task.Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-b" with
-    | Error (Task.Goal_assignment.Already_assigned { task_id = t; existing_goal_ids }) ->
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-b" with
+    | Error (Goal_assignment.Already_assigned { task_id = t; existing_goal_ids }) ->
       check string "error names the task" task_id t;
       check (list string) "reports the existing link" [ "goal-a" ] existing_goal_ids
     | Ok () -> fail "expected Already_assigned, got Ok (reassignment must be rejected)"

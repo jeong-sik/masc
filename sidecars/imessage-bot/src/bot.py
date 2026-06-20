@@ -25,7 +25,7 @@ if str(_shared_root) not in sys.path:
     sys.path.insert(0, str(_shared_root))
 
 from gate_shared.bindings_store import load_bindings  # noqa: E402
-from gate_shared.structured_content import structured_plain_text  # noqa: E402
+from gate_shared.structured_content import response_text  # noqa: E402
 
 from .config import get_config  # noqa: E402
 from .gate_client import GateClient, GateResponse  # noqa: E402
@@ -118,7 +118,7 @@ class IMessageBot:
         return redact_chat_guid(msg.chat_guid or msg.chat_identifier)
 
     def _response_text(self, response: GateResponse) -> str:
-        return structured_plain_text(response.structured) or response.reply
+        return response_text(response)
 
     async def _handle_message(self, msg: InboundMessage) -> bool:
         """Process one inbound message: gate dispatch + reply.

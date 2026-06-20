@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from gate_shared.bindings_store import load_bindings, save_bindings
+from gate_shared.structured_content import response_text
 from gate_shared.status_store import ConnectorRuntimeStatus, StatusStore
 
 from telegram import Message, Update
@@ -360,7 +361,7 @@ class TelegramGateBot:
             message_id=update.message.message_id,
         )
 
-        if response.ok and response.reply:
+        if response.ok and response_text(response):
             reply = strip_state_blocks(response.reply)
             rendered_reply, parse_mode = render_response_text(
                 reply,

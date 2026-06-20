@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gate_shared import structured_plain_text
+from gate_shared import GateResponse, response_text, structured_plain_text
 
 
 class TestStructuredPlainText:
@@ -81,3 +81,33 @@ class TestStructuredPlainText:
 
     def test_rejects_missing_blocks_array(self) -> None:
         assert structured_plain_text({"blocks": "bad"}) == ""
+
+
+class TestResponseText:
+    def test_prefers_structured_text_when_reply_is_empty(self) -> None:
+        response = GateResponse(
+            ok=True,
+            keeper_name="sangsu",
+            reply="",
+            model_used="",
+            duration_ms=0,
+            tokens_used=0,
+            error="",
+            structured={"blocks": [{"t": "p", "html": "approved"}]},
+        )
+
+        assert response_text(response) == "approved"
+
+    def test_falls_back_to_reply_without_structured_text(self) -> None:
+        response = GateResponse(
+            ok=True,
+            keeper_name="sangsu",
+            reply="plain reply",
+            model_used="",
+            duration_ms=0,
+            tokens_used=0,
+            error="",
+            structured=None,
+        )
+
+        assert response_text(response) == "plain reply"

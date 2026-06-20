@@ -6,6 +6,8 @@ import html
 import re
 from typing import Any
 
+from .gate_response import GateResponse
+
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
@@ -214,3 +216,8 @@ def structured_plain_text(structured: dict[str, Any] | None) -> str:
         return ""
     parts = [part for raw in raw_blocks if (part := _plain_part(raw))]
     return "\n\n".join(parts)
+
+
+def response_text(response: GateResponse) -> str:
+    """Return the renderable response body independent of reply vs structured shape."""
+    return structured_plain_text(response.structured) or response.reply

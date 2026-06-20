@@ -125,6 +125,82 @@ let make_config_root root =
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
+let test_model_catalog_resolution_prefers_explicit_env () =
+  let env = function
+    | "OAS_MODEL_CATALOG" -> Some "/explicit/oas-models.toml"
+    | "MASC_MODEL_CATALOG" -> Some "/ignored/masc-models.toml"
+    | _ -> None
+  in
+  (match
+     Server_runtime_bootstrap.resolve_oas_model_catalog_path
+       ~env
+       ~cwd:"/tmp/outside"
+       ~argv0:"/tmp/repo/_build/default/bin/main_eio.exe"
+       ()
+   with
+   | None -> Alcotest.fail "expected explicit OAS_MODEL_CATALOG resolution"
+   | Some resolution ->
+     Alcotest.(check string)
+       "source"
+       "OAS_MODEL_CATALOG"
+       resolution.Server_runtime_bootstrap.source;
+     Alcotest.(check string)
+       "path"
+       "/explicit/oas-models.toml"
+       resolution.Server_runtime_bootstrap.path);
+  let env = function
+    | "MASC_MODEL_CATALOG" -> Some "/explicit/masc-models.toml"
+    | _ -> None
+  in
+  match
+    Server_runtime_bootstrap.resolve_oas_model_catalog_path
+      ~env
+      ~cwd:"/tmp/outside"
+      ~argv0:"/tmp/repo/_build/default/bin/main_eio.exe"
+      ()
+  with
+  | None -> Alcotest.fail "expected MASC_MODEL_CATALOG resolution"
+  | Some resolution ->
+    Alcotest.(check string)
+      "source"
+      "MASC_MODEL_CATALOG"
+      resolution.Server_runtime_bootstrap.source;
+    Alcotest.(check string)
+      "path"
+      "/explicit/masc-models.toml"
+      resolution.Server_runtime_bootstrap.path
+
+let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path () =
+  with_temp_dir "model-catalog-bootstrap" (fun dir ->
+    let repo = Filename.concat dir "repo" in
+    let bin_dir = Filename.concat repo "_build/default/bin" in
+    mkdir_p bin_dir;
+    let outside = Filename.concat dir "base-path" in
+    Unix.mkdir outside 0o755;
+    let catalog = Filename.concat repo "oas-models.toml" in
+    write_file catalog "# repo-local OAS catalog\n";
+    let argv0 = Filename.concat bin_dir "main_eio.exe" in
+    let env _ = None in
+    match
+      Server_runtime_bootstrap.resolve_oas_model_catalog_path
+        ~env
+        ~cwd:outside
+        ~argv0
+        ()
+    with
+    | None ->
+      Alcotest.fail
+        "expected repo oas-models.toml from executable parent when cwd has no catalog"
+    | Some resolution ->
+      Alcotest.(check string)
+        "source"
+        "argv0-parent:oas-models.toml"
+        resolution.Server_runtime_bootstrap.source;
+      Alcotest.(check string)
+        "path"
+        catalog
+        resolution.Server_runtime_bootstrap.path)
+
 let write_config_root_keeper_toml config_root name =
   write_file
     (Filename.concat (Filename.concat config_root "keepers") (name ^ ".toml"))
@@ -3048,6 +3124,13 @@ let () =
           Alcotest.test_case
             "storage enforcement fallback reason is visible"
             `Quick test_storage_enforcement_fallback_reason;
+          Alcotest.test_case
+            "model catalog resolution prefers explicit env"
+            `Quick test_model_catalog_resolution_prefers_explicit_env;
+          Alcotest.test_case
+            "model catalog resolution falls back to executable parent"
+            `Quick
+            test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path;
           Alcotest.test_case
             "bootstrap base-path config copies shared seed only"
             `Quick

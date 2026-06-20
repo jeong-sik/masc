@@ -16,6 +16,20 @@ val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 val bootstrap_base_path_config_root : base_path:string -> unit
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
 
+type model_catalog_env_resolution =
+  { path : string
+  ; source : string
+  }
+
+val resolve_oas_model_catalog_path :
+  ?env:(string -> string option) ->
+  ?cwd:string ->
+  ?argv0:string ->
+  unit ->
+  model_catalog_env_resolution option
+
+val configure_oas_model_catalog_env : unit -> model_catalog_env_resolution option
+
 (** {1 Runtime Context}
 
     Extracts Eio resources from the standard environment.

@@ -46,6 +46,53 @@ describe('DashboardMain solo mode', () => {
   })
 })
 
+describe('DashboardMain primary heading', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    dashboardLoading.value = false
+    connected.value = true
+    namespaceTruthInitializing.value = false
+    document.title = 'MASC Dashboard'
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it.each([
+    ['monitoring', 'Keeper Fleet'],
+    ['command', 'Actions'],
+    ['lab', 'Tools'],
+    ['board', 'Board'],
+  ] as const)(
+    'renders the generic lead for %s as the primary h1',
+    (tab, label) => {
+      route.value = { tab, params: {}, postId: null }
+
+      render(h(DashboardMain, {}), container)
+
+      const leadTitle = container.querySelector('.v2-shell-panel h1')
+      expect(leadTitle?.textContent?.trim()).toBe(label)
+    },
+  )
+
+  it('renders a bespoke-header surface with one h1 and no generic lead h1', async () => {
+    route.value = { tab: 'overview', params: {}, postId: null }
+
+    render(h(DashboardMain, {}), container)
+
+    await waitFor(() => {
+      expect([...container.querySelectorAll('h1')].map(node => node.textContent?.trim()))
+        .toEqual(['운영 개요'])
+    }, { timeout: 5000 })
+    expect(container.querySelector('.v2-shell-panel h1')).toBeNull()
+  })
+})
+
 describe('isKeeperDetailDashboardRoute', () => {
   it('detects monitor keeper detail drilldowns', () => {
     expect(isKeeperDetailDashboardRoute({

@@ -326,9 +326,11 @@ export function App() {
                         `
                       : null}
                   </div>
-                  <h1 class="v2-header-title mt-1 min-w-0 truncate font-display text-xs font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
-                    ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
-                  </h1>
+                  ${/* No title heading here: each surface owns its primary header
+                       (single source of truth), so the global chrome shows only the
+                       crumb — matching the v2 design top bar, which carries a slim
+                       breadcrumb and no page title. A title here duplicated every
+                       surface-level heading/header. */ ''}
                 </div>
               </div>
             </div>

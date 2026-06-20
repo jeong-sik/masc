@@ -58,7 +58,9 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('.v2-header-brand')).not.toBeNull()
     expect(container.querySelector('.v2-header-mark')).not.toBeNull()
     expect(container.querySelector('.v2-header-crumb')).not.toBeNull()
-    expect(container.querySelector('.v2-header-title')).not.toBeNull()
+    // The global chrome no longer renders a page title: surface-level headers
+    // own the title source of truth, so the shell header carries only the crumb.
+    expect(container.querySelector('.v2-header-title')).toBeNull()
     expect(container.querySelector('.v2-header-actions')).not.toBeNull()
     expect(container.querySelector('.v2-shell-tabs')).toBeNull()
     expect(container.querySelector('.v2-app-header-status')).not.toBeNull()

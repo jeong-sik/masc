@@ -10,6 +10,18 @@ open Masc
 
 let failures = ref 0
 
+let temp_dir prefix = Filename.temp_dir prefix ""
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
+;;
+
 let check name cond =
   if cond
   then Printf.printf "  ✓ %s\n%!" name
@@ -38,6 +50,12 @@ let image_block ~attachment_id =
 ;;
 
 let contents batch = List.map (fun m -> m.Keeper_chat_queue.content) batch
+
+let chat_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    "chat-queue.json"
+;;
 
 let test_same_source () =
   Printf.printf "Test 1: same_source pairs reply routes correctly\n%!";
@@ -154,12 +172,69 @@ let test_in_flight_accessor () =
     (Keeper_turn_admission.in_flight ~base_path ~keeper_name = None)
 ;;
 
+let test_persistence_replay () =
+  Printf.printf "Test 5: queued chat messages persist and replay after restart\n%!";
+  let base_path = temp_dir "keeper-chat-queue-persistence" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "chat-queue-persistence" in
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      Keeper_chat_queue.enqueue
+        ~keeper_name
+        { (msg ~content:"persist-1" ~ts:1.0 ~attachments:[ attachment ~id:"persist-a" ]
+             Keeper_chat_queue.Dashboard)
+          with
+          Keeper_chat_queue.user_blocks = [ image_block ~attachment_id:"persist-a" ]
+        };
+      Keeper_chat_queue.enqueue ~keeper_name
+        (msg ~content:"persist-2" ~ts:2.0 Keeper_chat_queue.Dashboard);
+      check
+        "snapshot file is written"
+        (Sys.file_exists (chat_snapshot_path ~base_path ~keeper_name));
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      check
+        "restored keeper name is visible to consumer"
+        (List.mem keeper_name (Keeper_chat_queue.all_keeper_names ()));
+      let batch = Keeper_chat_queue.dequeue_batch ~keeper_name in
+      check "replayed batch preserves FIFO content" (contents batch = [ "persist-1"; "persist-2" ]);
+      check "queue is empty after replay drain" (Keeper_chat_queue.length ~keeper_name = 0);
+      (match batch with
+       | first :: _ ->
+         check
+           "replayed source route is preserved"
+           (Keeper_chat_queue.same_source
+              first.Keeper_chat_queue.source
+              Keeper_chat_queue.Dashboard);
+         check
+           "replayed attachment survives"
+           (List.map
+              (fun (a : Keeper_chat_store.attachment) -> a.Keeper_chat_store.id)
+              first.Keeper_chat_queue.attachments
+            = [ "persist-a" ]);
+         check
+           "replayed semantic user block survives"
+           (Keeper_multimodal_input.modalities first.Keeper_chat_queue.user_blocks
+            = [ "image" ])
+       | [] -> check "replayed batch is non-empty" false);
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      check
+        "empty persisted queue does not replay after drain"
+        (Keeper_chat_queue.dequeue_batch ~keeper_name = []))
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_same_source ();
   test_dequeue_batch_runs ();
   test_merge_batch ();
   test_in_flight_accessor ();
+  test_persistence_replay ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

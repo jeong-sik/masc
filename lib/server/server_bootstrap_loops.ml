@@ -906,8 +906,10 @@ let start_keeper_loops
       (* Start queue consumer fiber for async queue drain.
          handle_turn wires process_single_turn for actual turn execution. *)
       (try
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         Keeper_chat_queue.configure_persistence ~base_path;
          Keeper_chat_consumer.start ~sw ~clock
-           ~base_path:(Mcp_server.workspace_config state).base_path
+           ~base_path
            ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
              let open Server_routes_http_keeper_stream in
              let now = Time_compat.now () in

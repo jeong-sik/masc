@@ -4,7 +4,9 @@
     arrive while the keeper is already processing a previous message.
     When a stream finishes, the queue is drained automatically.
 
-    The queue is transient (not persisted).  Lost on server restart.
+    Once [configure_persistence] is called from server bootstrap, queue
+    mutations are mirrored to a per-keeper durable snapshot and replayed on
+    restart.
 
     Queue drain is handled by [Keeper_chat_consumer], started from
     server bootstrap.  The [source] field preserves connector context
@@ -30,6 +32,11 @@ type queued_message = {
 }
 
 (** {1 Queue operations} *)
+
+(** [configure_persistence base_path] enables durable per-keeper queue
+    snapshots under the runtime keeper directory and loads any non-empty
+    snapshots into memory for queue-consumer replay. *)
+val configure_persistence : base_path:string -> unit
 
 (** [enqueue keeper_name msg] adds [msg] to the tail of [keeper_name]'s
     queue.  Creates the queue lazily if it does not yet exist. *)
@@ -68,3 +75,7 @@ val clear : keeper_name:string -> unit
 (** [all_keeper_names ()] returns a snapshot list of all keeper names
     that currently have a queue in the registry. *)
 val all_keeper_names : unit -> string list
+
+module For_testing : sig
+  val reset : unit -> unit
+end

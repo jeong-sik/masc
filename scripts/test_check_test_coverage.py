@@ -98,6 +98,50 @@ class CheckTestCoverageTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 1)
 
+    def test_many_code_file_deletions_without_tests_do_not_trigger_rule_2(self):
+        code_files = ["lib/a.ml", "lib/b.ml", "lib/c.ml", "lib/d.ml"]
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"PR_BODY": ""}, clear=False):
+            with mock.patch("check_test_coverage.is_opt_out_commit", return_value=False):
+                with mock.patch(
+                    "check_test_coverage.get_changed_covered_files",
+                    return_value=code_files,
+                ):
+                    with mock.patch(
+                        "check_test_coverage.get_changed_test_files", return_value=[]
+                    ):
+                        with mock.patch(
+                            "check_test_coverage.get_added_lines_count", return_value=0
+                        ):
+                            with self.assertRaises(SystemExit) as raised:
+                                with contextlib.redirect_stdout(out):
+                                    coverage.check_coverage()
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn("Test coverage check passed.", out.getvalue())
+
+    def test_many_code_files_with_additions_without_tests_trigger_rule_2(self):
+        code_files = ["lib/a.ml", "lib/b.ml", "lib/c.ml", "lib/d.ml"]
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"PR_BODY": ""}, clear=False):
+            with mock.patch("check_test_coverage.is_opt_out_commit", return_value=False):
+                with mock.patch(
+                    "check_test_coverage.get_changed_covered_files",
+                    return_value=code_files,
+                ):
+                    with mock.patch(
+                        "check_test_coverage.get_changed_test_files", return_value=[]
+                    ):
+                        with mock.patch(
+                            "check_test_coverage.get_added_lines_count", return_value=1
+                        ):
+                            with self.assertRaises(SystemExit) as raised:
+                                with contextlib.redirect_stdout(out):
+                                    coverage.check_coverage()
+
+        self.assertEqual(raised.exception.code, 1)
+        self.assertIn("Changed 4 files", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

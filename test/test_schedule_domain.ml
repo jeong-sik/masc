@@ -233,6 +233,43 @@ let test_daily_recurrence_rejects_dst_iana_timezone () =
       msg
 ;;
 
+let test_cron_recurrence_next_due_weekdays () =
+  let req =
+    request ~risk_class:Read_only
+      ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
+      ()
+  in
+  check bool "is recurring" true (is_recurring req.recurrence);
+  match next_due_after ~now:32400.0 req with
+  | None -> fail "expected next cron due"
+  | Some due_at -> check (float 0.001) "next weekday 09:00" 118800.0 due_at
+;;
+
+let test_cron_recurrence_supports_steps_ranges_and_sunday_alias () =
+  let req =
+    request ~risk_class:Read_only
+      ~recurrence:(Cron { expression = "*/30 9-10 * * 7"; timezone = "UTC" })
+      ()
+  in
+  match next_due_after ~now:259199.0 req with
+  | None -> fail "expected next Sunday cron due"
+  | Some due_at -> check (float 0.001) "Sunday 09:00" 291600.0 due_at
+;;
+
+let test_cron_recurrence_rejects_invalid_expression () =
+  match
+    create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+      ~payload:(payload_json ()) ~risk_class:Read_only
+      ~approval_required:false ~source:Operator_request
+      ~recurrence:(Cron { expression = "*/0 9 * * 1-5"; timezone = "UTC" })
+      ()
+  with
+  | Ok _ -> fail "expected invalid cron rejection"
+  | Error msg ->
+    check string "cron error" "recurrence.cron.minute step must be positive" msg
+;;
+
 let test_schedule_roundtrip () =
   let req =
     request ~risk_class:Cost_bearing ~approval_required:true
@@ -248,6 +285,24 @@ let test_schedule_roundtrip () =
       (recurrence_kind_to_string decoded.recurrence);
     check string "payload digest" (payload_digest req.payload)
       (payload_digest decoded.payload)
+;;
+
+let test_cron_schedule_roundtrip () =
+  let req =
+    request ~risk_class:Read_only
+      ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "Asia/Seoul" })
+      ()
+  in
+  match schedule_request_to_yojson req |> schedule_request_of_yojson with
+  | Error msg -> fail msg
+  | Ok decoded ->
+    check string "recurrence" "cron"
+      (recurrence_kind_to_string decoded.recurrence);
+    (match decoded.recurrence with
+     | Cron { expression; timezone } ->
+       check string "expression" "0 9 * * 1-5" expression;
+       check string "timezone" "Asia/Seoul" timezone
+     | _ -> fail "expected cron recurrence")
 ;;
 
 let test_missing_recurrence_defaults_one_shot () =
@@ -327,6 +382,12 @@ let () =
             test_daily_recurrence_next_due_accepts_explicit_fixed_offset;
           test_case "daily recurrence rejects DST IANA timezone" `Quick
             test_daily_recurrence_rejects_dst_iana_timezone;
+          test_case "cron recurrence next due weekdays" `Quick
+            test_cron_recurrence_next_due_weekdays;
+          test_case "cron recurrence supports steps ranges and Sunday alias" `Quick
+            test_cron_recurrence_supports_steps_ranges_and_sunday_alias;
+          test_case "cron recurrence rejects invalid expression" `Quick
+            test_cron_recurrence_rejects_invalid_expression;
         ] );
       ( "grant",
         [
@@ -348,6 +409,7 @@ let () =
       ( "codec",
         [
           test_case "schedule roundtrip" `Quick test_schedule_roundtrip;
+          test_case "cron schedule roundtrip" `Quick test_cron_schedule_roundtrip;
           test_case "missing recurrence defaults one-shot" `Quick
             test_missing_recurrence_defaults_one_shot;
           test_case "grant roundtrip" `Quick test_grant_roundtrip;

@@ -1771,6 +1771,7 @@ export interface DashboardScheduledAutomationRequest {
     hour?: number
     minute?: number
     second?: number
+    expression?: string
     timezone?: string
   }
   recurrence_kind?: string

@@ -263,6 +263,29 @@ let test_reschedule_due_recurring_advances_only_matching_recurring_rows () =
   | _ -> fail "schedules missing"
 ;;
 
+let test_reschedule_due_cron_advances_to_next_match () =
+  with_workspace
+  @@ fun config ->
+  let cron =
+    make_request ~schedule_id:"cron-1" ~risk_class:Read_only
+      ~recurrence:(Cron { expression = "0 9 * * 1-5"; timezone = "UTC" })
+      ()
+  in
+  let cron = { cron with due_at = 32400.0 } in
+  ignore (insert_ok config cron);
+  (match refresh_due config ~now:32401.0 with
+   | Ok (_, changed) -> check int "cron due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match reschedule_due_recurring config ~now:32401.0 ~schedule_ids:[ "cron-1" ] with
+   | Error err -> fail (store_error_to_string err)
+   | Ok (_, changed) -> check int "cron rescheduled" 1 changed);
+  match get_schedule config ~schedule_id:"cron-1" with
+  | Some stored ->
+    check_status "cron scheduled" Scheduled stored.status;
+    check (float 0.001) "cron next due" 118800.0 stored.due_at
+  | None -> fail "cron schedule missing"
+;;
+
 let test_recovers_from_last_good () =
   with_workspace
   @@ fun config ->
@@ -540,6 +563,8 @@ let () =
             test_refresh_due_expires_pending_scheduled_and_due;
           test_case "reschedule due recurring rows" `Quick
             test_reschedule_due_recurring_advances_only_matching_recurring_rows;
+          test_case "reschedule due cron rows" `Quick
+            test_reschedule_due_cron_advances_to_next_match;
           test_case "start and complete persist execution record" `Quick
             test_start_and_complete_persist_execution_record;
           test_case "fail due candidate records failed execution" `Quick

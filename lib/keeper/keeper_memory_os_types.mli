@@ -64,6 +64,11 @@ val category_of_string : string -> category
     compile time. *)
 val is_promotable : category -> bool
 
+(** Whether a category belongs to the keeper user model projected from memory.
+    Keep prompt recall, dashboard projection, and keeper projection on one
+    taxonomy predicate. *)
+val is_user_model_category : category -> bool
+
 (** RFC-0259 §3.2(b): the kind of external state a claim references. Closed sum so
     the grounding reconciler (P2/P3) must handle every kind at compile time. *)
 type external_ref_kind =
@@ -143,6 +148,9 @@ type fact =
   ; last_verified_at : float option
   ; schema_version : string
   }
+
+(** Whether a fact belongs to the keeper user model projected from memory. *)
+val is_user_model_fact : fact -> bool
 
 (** A librarian extraction result: a summary plus structured claims. *)
 type episode =

@@ -58,19 +58,6 @@ let fact_is_current ~now (fact : fact) =
   | Some ts -> ts >= now
 ;;
 
-let fact_is_user_model (fact : fact) =
-  match fact.category with
-  | Preference | Constraint -> true
-  | Blocker
-  | Code_change
-  | Ephemeral
-  | Fact
-  | Goal
-  | Lesson
-  | Validated_approach
-  | Unknown _ -> false
-;;
-
 let episode_is_current ~now (episode : episode) =
   match episode.valid_until with
   | None -> true
@@ -360,12 +347,12 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
       let ranked_facts = all_facts |> facts_recency_ranked ~now in
       let user_model_facts =
         ranked_facts
-        |> List.filter fact_is_user_model
+        |> List.filter is_user_model_fact
         |> take default_max_user_model_facts
       in
       let facts =
         ranked_facts
-        |> List.filter (fun fact -> not (fact_is_user_model fact))
+        |> List.filter (fun fact -> not (is_user_model_fact fact))
         |> take max_facts
       in
       (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own,
@@ -390,10 +377,10 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
               not (List.mem (normalize_claim f.claim) private_keys))
           in
           ( ranked_shared
-            |> List.filter fact_is_user_model
+            |> List.filter is_user_model_fact
             |> take default_max_shared_user_model_facts
           , ranked_shared
-            |> List.filter (fun fact -> not (fact_is_user_model fact))
+            |> List.filter (fun fact -> not (is_user_model_fact fact))
             |> take default_max_shared_facts )
       in
       ( user_model_facts

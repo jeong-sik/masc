@@ -2785,6 +2785,50 @@ let test_is_promotable_durable_kinds () =
     blocked
 ;;
 
+let test_user_model_predicate_shared_taxonomy () =
+  let fact category =
+    { Types.claim = "user prefers terse operator replies"
+    ; Types.category
+    ; Types.external_ref = None
+    ; Types.source = { Types.trace_id = "trace-user-model"; Types.turn = 1; Types.tool_call_id = None }
+    ; Types.observed_by = []
+    ; Types.first_seen = 1_000_000.0
+    ; Types.valid_until = None
+    ; Types.last_verified_at = None
+    ; Types.schema_version = Types.schema_version
+    }
+  in
+  let user_model = [ Types.Preference; Types.Constraint ] in
+  let non_user_model =
+    [ Types.Fact; Types.Blocker; Types.Goal; Types.Code_change
+    ; Types.Ephemeral; Types.Validated_approach; Types.Lesson
+    ; Types.Unknown "novel"
+    ]
+  in
+  List.iter
+    (fun c ->
+       Alcotest.(check bool)
+         (Types.category_to_string c ^ " is user model category")
+         true
+         (Types.is_user_model_category c);
+       Alcotest.(check bool)
+         (Types.category_to_string c ^ " is user model fact")
+         true
+         (Types.is_user_model_fact (fact c)))
+    user_model;
+  List.iter
+    (fun c ->
+       Alcotest.(check bool)
+         (Types.category_to_string c ^ " is not user model category")
+         false
+         (Types.is_user_model_category c);
+       Alcotest.(check bool)
+         (Types.category_to_string c ^ " is not user model fact")
+         false
+         (Types.is_user_model_fact (fact c)))
+    non_user_model
+;;
+
 (* RFC-0247 §2.3: retention is category-driven. Only Ephemeral gets a finite TTL;
    every durable arm returns None (never hard-expires). Exhaustive so a new
    category must be classified here. The companion lifetime-cycles (truth-decay
@@ -3434,6 +3478,10 @@ let () =
             "durable kinds promote incl. validated_approach/lesson (RFC-0247 §6)"
             `Quick
             test_is_promotable_durable_kinds
+        ; Alcotest.test_case
+            "user model predicate is shared taxonomy"
+            `Quick
+            test_user_model_predicate_shared_taxonomy
         ; Alcotest.test_case
             "retention TTL/lifetime is category-driven (RFC-0247 §2.3)"
             `Quick

@@ -90,6 +90,12 @@ let is_promotable = function
   | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
 ;;
 
+let is_user_model_category = function
+  | Preference | Constraint -> true
+  | Code_change | Fact | Blocker | Goal | Ephemeral | Validated_approach | Lesson
+  | Unknown _ -> false
+;;
+
 (* RFC-0259 §3.2(b): an external-state reference named by a claim. A claim that
    names a PR/issue/task id is about *volatile* external state — true when
    extracted, false once the world moves on — so [fact_valid_until] gives it a
@@ -263,6 +269,8 @@ type fact =
   ; last_verified_at : float option
   ; schema_version : string
   }
+
+let is_user_model_fact (fact : fact) = is_user_model_category fact.category
 
 type episode =
   { trace_id : string

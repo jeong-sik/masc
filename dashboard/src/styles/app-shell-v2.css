@@ -14,7 +14,24 @@
    Defined at :root so v2-shell.css and shell components can share them.
    ═══════════════════════════════════════════════════════════════ */
 
-@layer app-shell, theme-defaults, theme-overrides, utilities;
+/* ── Cascade layer order (SSOT) ──────────────────────────────────
+   This statement is the single source of truth for cascade-layer precedence.
+   It lives here (not in global.css) because the Tailwind v4 Vite plugin drops
+   bare `@layer` statements from the entry stylesheet, whereas a regular imported
+   file's statement survives bundling and is emitted near the top — ahead of the
+   Tailwind layer blocks (theme/base/components/utilities) that the plugin
+   injects later. So this statement is processed first and fixes the order.
+
+   The order must keep Tailwind's internal `theme < base < components <
+   utilities` so utility classes override Preflight/base/components. `app-shell`
+   sits below utilities so positioned overlay utilities (.fixed/.absolute) win;
+   `theme-defaults`/`theme-overrides` sit above utilities so theming overrides
+   win. Naming Tailwind's layers explicitly here pins them BEFORE utilities;
+   omitting them (or naming only utilities, as #21846 did) lets Tailwind's
+   later-emitted base/components blocks append AFTER utilities and invert the
+   cascade, clobbering every utility class. Do not name only a subset that
+   includes utilities. */
+@layer app-shell, theme, base, components, utilities, theme-defaults, theme-overrides;
 
 @layer theme-defaults {
   :root {

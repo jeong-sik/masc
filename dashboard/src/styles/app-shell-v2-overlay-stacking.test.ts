@@ -1,19 +1,33 @@
 // @vitest-environment happy-dom
 //
-// Regression guard for the `.v2-app > *` stacking rule (app-shell-v2.css).
+// Regression guard for the cascade-layer ORDER that governs app-shell-v2.css.
 //
-// Tailwind v4's `.fixed` / `.absolute` / `.top-5` / `.right-5` utilities are
-// emitted inside `@layer utilities`. A bare unlayered `.v2-app > * { position:
-// relative }` silently overrides the layered `.fixed` of any direct-child
-// overlay, dropping it into normal flow. That is exactly what pushed the toast
-// host off-screen to the bottom of the `h-screen; overflow-hidden` shell column.
+// Two failure modes this file locks down, both seen in production:
 //
-// happy-dom resolves no cascade/layout, so this defect is invisible to a normal
-// component test. This guard asserts the SOURCE rule stays in a lower cascade
-// layer than Tailwind utilities, locking the fix against a future unlayered
-// revert or overlay-class allowlist.
+//  1. Overlay stacking: Tailwind v4's `.fixed` / `.absolute` / `.top-5` utilities
+//     live in `@layer utilities`. The `.v2-app > * { position: relative }` rule
+//     must sit in a layer BELOW utilities (it is in `@layer app-shell`) so it does
+//     not force positioned overlays (toast, modals) back into normal flow.
+//
+//  2. Cascade inversion (#21846): the canonical layer order is declared by a bare
+//     `@layer …;` statement at the top of app-shell-v2.css. Because Tailwind v4
+//     emits theme/base/components/utilities as cascade-layer BLOCKS (no leading
+//     order statement of its own) which the Vite plugin injects AFTER the imported
+//     stylesheets, whichever bare `@layer …;` statement is emitted first decides
+//     precedence. #21846 used `@layer app-shell, theme-defaults, theme-overrides,
+//     utilities;` — it pinned `utilities` before Tailwind's later base/components
+//     blocks, so those blocks appended AFTER utilities and BEAT every utility class
+//     (Preflight reset + components clobbered all of Tailwind). The statement must
+//     name base AND components BEFORE utilities to preserve Tailwind's internal
+//     `theme < base < components < utilities` order.
+//
+// happy-dom resolves no cascade/layout, so neither defect is visible to a DOM test.
+// These checks parse the SOURCE statement; they are a sound proxy for the merged
+// build order because (a) app-shell-v2.css is the SOLE source file declaring a
+// utilities-naming bare `@layer` statement (asserted below) and (b) Tailwind's own
+// blocks are emitted after it. The authoritative check remains `vite build` output.
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { parse } from 'postcss'
 
@@ -65,16 +79,20 @@ function v2AppChildRules(): ChildRule[] {
   return rules
 }
 
-function topLevelLayerOrder(): string[] {
-  const order: string[] = []
-  parse(css).walkAtRules('layer', (rule) => {
+/** Names declared by each root-level bare `@layer a, b, c;` statement in [src]
+ *  (block form `@layer x { … }` is excluded — only ordering statements). */
+function bareLayerStatements(src: string): string[][] {
+  const statements: string[][] = []
+  parse(src).walkAtRules('layer', (rule) => {
     if (rule.parent?.type !== 'root') return
-    if (rule.nodes !== undefined) return
-    for (const name of rule.params.split(',')) {
-      order.push(name.trim())
-    }
+    if (rule.nodes !== undefined) return // block form, not an ordering statement
+    statements.push(rule.params.split(',').map((name) => name.trim()))
   })
-  return order
+  return statements
+}
+
+function topLevelLayerOrder(): string[] {
+  return bareLayerStatements(css).flat()
 }
 
 describe('app-shell-v2.css `.v2-app > *` stacking rule', () => {
@@ -94,11 +112,41 @@ describe('app-shell-v2.css `.v2-app > *` stacking rule', () => {
     }
   })
 
-  it('declares app-shell before utilities so Tailwind positioning wins', () => {
+  it('orders app-shell + Tailwind base/components before utilities, theming after', () => {
     const order = topLevelLayerOrder()
-    expect(order).toContain('app-shell')
-    expect(order).toContain('utilities')
-    expect(order.indexOf('app-shell')).toBeLessThan(order.indexOf('utilities'))
+    const idx = (name: string): number => {
+      const i = order.indexOf(name)
+      expect(i, `layer "${name}" must be named in the order statement`).toBeGreaterThanOrEqual(0)
+      return i
+    }
+    const utilities = idx('utilities')
+    // app-shell below utilities → positioned overlay utilities (.fixed) win (toast fix).
+    expect(idx('app-shell')).toBeLessThan(utilities)
+    // Tailwind's own layers must stay below utilities so utility classes override
+    // Preflight/base/components. #21846 pinned utilities ahead of base/components and
+    // inverted this, letting the Preflight reset clobber every utility class.
+    expect(idx('theme')).toBeLessThan(utilities)
+    expect(idx('base')).toBeLessThan(utilities)
+    expect(idx('components')).toBeLessThan(utilities)
+    // Theming layers above utilities so [data-theme="paper"] overrides win.
+    expect(idx('theme-defaults')).toBeGreaterThan(utilities)
+    expect(idx('theme-overrides')).toBeGreaterThan(utilities)
+  })
+
+  it('is the only source stylesheet that pins the utilities layer order', () => {
+    // The merged cascade order is set by the first bare `@layer …;` statement emitted
+    // before Tailwind's blocks. If another source file also declared a utilities-naming
+    // bare statement it could be emitted first and re-invert the cascade. Keep
+    // app-shell-v2.css the single authority so the checks above stay a sound proxy.
+    const dir = __dirname
+    const offenders = readdirSync(dir)
+      .filter((file) => file.endsWith('.css') && file !== 'app-shell-v2.css')
+      .filter((file) =>
+        bareLayerStatements(readFileSync(resolve(dir, file), 'utf-8')).some((names) =>
+          names.includes('utilities'),
+        ),
+      )
+    expect(offenders).toEqual([])
   })
 
   it('does not bake overlay class exclusions into the shell child selector', () => {

@@ -15,25 +15,25 @@ let drafts_dir ~base_path =
     "draft-skills"
 ;;
 
+let component_hash raw =
+  Digestif.SHA256.(digest_string raw |> to_hex) |> fun hex -> String.sub hex 0 16
+;;
+
+let component_prefix raw =
+  let safe =
+    Workspace_utils_backend_setup.sanitize_namespace_segment raw
+    |> String.lowercase_ascii
+  in
+  let safe =
+    match safe with
+    | "default" when String.equal (String.trim raw) "" -> "untitled"
+    | other -> other
+  in
+  if String.length safe > 48 then String.sub safe 0 48 else safe
+;;
+
 let safe_component raw =
-  let raw = raw |> String.trim |> String.lowercase_ascii in
-  let buf = Buffer.create (String.length raw) in
-  String.iter
-    (function
-      | 'a' .. 'z' | '0' .. '9' | '-' | '_' as c -> Buffer.add_char buf c
-      | _ -> Buffer.add_char buf '-')
-    raw;
-  let s = Buffer.contents buf in
-  let len = String.length s in
-  let rec left i =
-    if i >= len then len else if Char.equal s.[i] '-' then left (i + 1) else i
-  in
-  let rec right i =
-    if i < 0 then -1 else if Char.equal s.[i] '-' then right (i - 1) else i
-  in
-  let l = left 0 in
-  let r = right (len - 1) in
-  if l > r then "untitled" else String.sub s l (r - l + 1)
+  component_prefix raw ^ "-" ^ component_hash raw
 ;;
 
 let draft_dir ~base_path (candidate : Skill_candidate_projection.skill_candidate) =

@@ -198,10 +198,9 @@ let test_skill_candidate_store_writes_reviewable_draft_files () =
     | Error msg -> fail msg
   in
   check string "draft dir"
-    (Filename.concat
-       (Filename.concat (Filename.concat base_path ".masc") "draft-skills")
-       c.id)
+    (Store.draft_dir ~base_path c)
     stored.dir;
+  check string "draft dir parent" (Store.drafts_dir ~base_path) (Filename.dirname stored.dir);
   check bool "candidate json exists" true (Sys.file_exists stored.json_path);
   check bool "candidate toml exists" true (Sys.file_exists stored.toml_path);
   check bool "skill md exists" true (Sys.file_exists stored.skill_md_path);
@@ -229,17 +228,21 @@ let test_skill_candidate_store_sanitizes_candidate_id_path () =
          ~failure_count:0 ~confidence:1.0 ())
   in
   let c : S.skill_candidate = { base with id = "../Escape Candidate" } in
-  in
   let stored =
     match Store.write_candidate ~base_path c with
     | Ok stored -> stored
     | Error msg -> fail msg
   in
   check string "sanitized draft dir"
-    (Filename.concat
-       (Filename.concat (Filename.concat base_path ".masc") "draft-skills")
-       "escape-candidate")
+    (Store.draft_dir ~base_path c)
     stored.dir;
+  check string "sanitized draft parent"
+    (Store.drafts_dir ~base_path)
+    (Filename.dirname stored.dir);
+  check bool "sanitized draft keeps readable prefix" true
+    (contains_substring ~needle:"escape-candidate" (Filename.basename stored.dir));
+  check bool "sanitized draft removes traversal marker" false
+    (contains_substring ~needle:".." (Filename.basename stored.dir));
   check bool "escaped parent not written" false
     (Sys.file_exists
        (Filename.concat (Filename.concat base_path ".masc") "Escape Candidate"))

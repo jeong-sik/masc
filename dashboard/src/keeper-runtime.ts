@@ -24,6 +24,7 @@ export {
   noteKeeperChatAppended,
   resumePendingKeeperChatRequests,
   sendKeeperThreadMessage,
+  isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
   recoverKeeperRuntime,
 } from './keeper-actions'

@@ -61,15 +61,18 @@ val realtime_bridge_endpoint : ?getenv:(string -> string option) -> unit -> stri
 (** Configured realtime voice bridge endpoint from [MASC_VOICE_REALTIME_WS_URL].
     Blank, non-[ws://], and non-[wss://] values are treated as unavailable. *)
 
+val realtime_bridge_public_json : ?endpoint:string -> unit -> Yojson.Safe.t
+(** Keeper-visible bridge metadata. The raw websocket endpoint stays
+    internal-only and is never serialized into this JSON. *)
+
 val session_conversation_mode : session -> conversation_mode
 
 (** {1 JSON conversion} *)
 
 val session_to_json : session -> Yojson.Safe.t
 (** Includes the durable session fields plus the dashboard/keeper-visible
-    turn-based voice-loop contract:
-    [conversation_mode="turn_based"], [transport_mode="batch_stt_tts"],
-    [realtime_supported=false], and [voice_loop]. *)
+    voice-loop contract. Realtime bridge JSON exposes configured metadata only;
+    the raw websocket endpoint is intentionally redacted. *)
 
 val turn_based_voice_loop_json : session_active:bool -> Yojson.Safe.t
 (** Structured capability contract for the current voice implementation.

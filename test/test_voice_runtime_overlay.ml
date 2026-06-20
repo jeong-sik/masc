@@ -67,6 +67,22 @@ let mkdir_if_missing path =
   if not (Sys.file_exists path) then Unix.mkdir path 0o755
 ;;
 
+let contains_substring ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  if needle_len = 0 then true
+  else
+    let rec loop idx =
+      idx + needle_len <= haystack_len
+      && (String.sub haystack idx needle_len = needle || loop (idx + 1))
+    in
+    loop 0
+;;
+
+let check_json_omits label needle json =
+  check bool label false (contains_substring ~needle (Yojson.Safe.to_string json))
+;;
+
 let test_resolve_voice_aliases () =
   let elevenlabs = Option.get (Voice.resolve_adapter "elevenlabs") in
   check string "elevenlabs alias" "elevenlabs-direct" elevenlabs.canonical_name;
@@ -686,7 +702,7 @@ let test_keeper_voice_agent_reports_turn_based_capability () =
 ;;
 
 let test_keeper_voice_agent_reports_realtime_bridge_capability () =
-  let bridge_endpoint = "ws://127.0.0.1:9999/voice" in
+  let bridge_endpoint = "wss://token:secret@bridge.example/live?token=abc123" in
   with_env
     Masc.Voice_session_manager.realtime_bridge_env
     (Some bridge_endpoint)
@@ -728,8 +744,10 @@ let test_keeper_voice_agent_reports_realtime_bridge_capability () =
         let realtime_bridge = Yojson.Safe.Util.member "realtime_bridge" before in
         check bool "realtime bridge configured" true
           Yojson.Safe.Util.(member "configured" realtime_bridge |> to_bool);
-        check string "realtime bridge endpoint surfaced" bridge_endpoint
-          Yojson.Safe.Util.(member "endpoint" realtime_bridge |> to_string);
+        check bool "realtime bridge endpoint hidden" true
+          (Yojson.Safe.Util.member "endpoint" realtime_bridge = `Null);
+        check_json_omits "agent capability omits raw endpoint" bridge_endpoint before;
+        check_json_omits "agent capability omits endpoint secret" "secret" before;
         check
           (list string)
           "available realtime conversation modes"
@@ -751,17 +769,25 @@ let test_keeper_voice_agent_reports_realtime_bridge_capability () =
           Yojson.Safe.Util.(member "transport_mode" start_json |> to_string);
         check bool "realtime session supported" true
           Yojson.Safe.Util.(member "realtime_supported" start_json |> to_bool);
-        check string "realtime endpoint persisted" bridge_endpoint
-          Yojson.Safe.Util.(
-            member "realtime_bridge_endpoint" start_json |> to_string);
+        check bool "realtime endpoint not serialized" true
+          (Yojson.Safe.Util.member "realtime_bridge_endpoint" start_json = `Null);
+        check_json_omits "session start omits raw endpoint" bridge_endpoint start_json;
+        check_json_omits "session start omits endpoint secret" "secret" start_json;
         let voice_loop = Yojson.Safe.Util.member "voice_loop" start_json in
         check string "realtime loop mode" "realtime_bridge"
           Yojson.Safe.Util.(member "mode" voice_loop |> to_string);
         check string "realtime protocol" "masc.voice.realtime_bridge.v1"
           Yojson.Safe.Util.(member "protocol" voice_loop |> to_string);
-        check string "realtime loop bridge endpoint" bridge_endpoint
-          Yojson.Safe.Util.(member "bridge_endpoint" voice_loop |> to_string);
+        check bool "realtime loop bridge endpoint hidden" true
+          (Yojson.Safe.Util.member "bridge_endpoint" voice_loop = `Null);
+        let loop_bridge = Yojson.Safe.Util.member "realtime_bridge" voice_loop in
+        check bool "realtime loop bridge configured" true
+          Yojson.Safe.Util.(member "configured" loop_bridge |> to_bool);
+        check bool "realtime loop bridge endpoint hidden" true
+          (Yojson.Safe.Util.member "endpoint" loop_bridge = `Null);
         let after = read_agent () in
+        check_json_omits "active agent omits raw endpoint" bridge_endpoint after;
+        check_json_omits "active agent omits endpoint secret" "secret" after;
         check string "active realtime conversation mode" "realtime_bridge"
           Yojson.Safe.Util.(member "conversation_mode" after |> to_string);
         check string "active realtime session mode" "realtime_bridge"

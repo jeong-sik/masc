@@ -295,14 +295,7 @@ let voice_agent_capability_fields ~(meta : keeper_meta) =
   ; ( "realtime_supported"
     , `Bool (realtime_configured || Voice_session_manager.realtime_supported active_mode) )
   ; ( "realtime_bridge"
-    , `Assoc
-        [ "configured", `Bool realtime_configured
-        ; "required_env", `String Voice_session_manager.realtime_bridge_env
-        ; ( "endpoint"
-          , match realtime_endpoint with
-            | Some endpoint -> `String endpoint
-            | None -> `Null )
-        ] )
+    , Voice_session_manager.realtime_bridge_public_json ?endpoint:realtime_endpoint () )
   ; ( "available_conversation_modes"
     , `List
         ([ `String "turn_based" ]

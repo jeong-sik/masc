@@ -102,6 +102,13 @@ let realtime_bridge_endpoint ?(getenv = Sys.getenv_opt) () =
     then None
     else Some endpoint
 
+let realtime_bridge_public_json ?endpoint () =
+  `Assoc
+    [ "configured", `Bool (Option.is_some endpoint)
+    ; "required_env", `String realtime_bridge_env
+    ; "endpoint", `Null
+    ]
+
 let session_conversation_mode session = session.conversation_mode
 
 let turn_based_voice_loop_json ~session_active =
@@ -140,8 +147,8 @@ let realtime_bridge_voice_loop_json ~session_active ~endpoint =
     ; "transport_mode", `String "websocket_audio_bridge"
     ; "realtime_supported", `Bool true
     ; "session_active", `Bool session_active
-    ; "bridge_endpoint", `String endpoint
     ; "protocol", `String "masc.voice.realtime_bridge.v1"
+    ; "realtime_bridge", realtime_bridge_public_json ~endpoint ()
     ; ( "operator_input"
       , `Assoc
           [ "capture", `String "dashboard_microphone_stream"
@@ -182,7 +189,12 @@ let session_to_json session =
   let bridge_endpoint =
     match mode with
     | Turn_based -> `Null
-    | Realtime_bridge { endpoint } -> `String endpoint
+    | Realtime_bridge _ -> `Null
+  in
+  let realtime_bridge =
+    match mode with
+    | Turn_based -> realtime_bridge_public_json ()
+    | Realtime_bridge { endpoint } -> realtime_bridge_public_json ~endpoint ()
   in
   `Assoc [
     ("session_id", `String session.session_id);
@@ -196,15 +208,15 @@ let session_to_json session =
     ("transport_mode", `String (transport_mode_of_conversation_mode mode));
     ("realtime_supported", `Bool (realtime_supported mode));
     ("realtime_bridge_endpoint", bridge_endpoint);
+    ("realtime_bridge", realtime_bridge);
     ("voice_loop", voice_loop_json ~session_active mode);
   ]
 
 let conversation_mode_of_json json =
   match Json_util.get_string json "conversation_mode" with
   | Some "realtime_bridge" | Some "realtime" ->
-    (match Json_util.get_string json "realtime_bridge_endpoint" with
-     | Some endpoint when valid_realtime_bridge_endpoint (String.trim endpoint) ->
-       Realtime_bridge { endpoint = String.trim endpoint }
+    (match realtime_bridge_endpoint () with
+     | Some endpoint -> Realtime_bridge { endpoint }
      | _ -> Turn_based)
   | _ -> Turn_based
 

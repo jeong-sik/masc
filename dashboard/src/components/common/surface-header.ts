@@ -1,0 +1,38 @@
+// SurfaceHeader — generic per-surface header for surfaces that do not render a
+// richer bespoke header of their own (monitoring, board, command, lab). Shows
+// the current section/surface title + description (from the nav registry) plus
+// the shared header actions. Surfaces opt in by rendering <SurfaceHeader/> at
+// the top of their body.
+//
+// This replaces the former shell-level SurfaceLead, which decided per-surface
+// whether to render a generic lead via a hand-maintained allow-list
+// (SURFACE_OWN_LEAD_IDS) — an N-of-M list the compiler could not enforce.
+// Now each surface owns the decision to render its header (bespoke or this
+// generic one) at the call site, so there is a single, co-located source for
+// every surface's title.
+import { html } from 'htm/preact'
+import type { VNode } from 'preact'
+import { route } from '../../router'
+import { DASHBOARD_NAV_ITEMS, currentSectionForRoute } from '../../config/navigation'
+import { SurfaceHeaderActions } from './surface-header-actions'
+
+export function SurfaceHeader(): VNode {
+  const currentTab = route.value.tab
+  const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
+  const currentSection = currentSectionForRoute(route.value)
+  const title = currentSection?.label ?? currentView?.label ?? 'Home'
+  const description = currentSection?.description ?? currentView?.description ?? null
+  return html`
+    <header class="v2-surface-header mb-3 flex flex-col gap-1.5" data-testid="surface-header">
+      <div class="flex items-center gap-2">
+        <h1 class="text-lg font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
+          ${title}
+        </h1>
+        <${SurfaceHeaderActions} label=${title} />
+      </div>
+      ${description
+        ? html`<p class="m-0 max-w-[72rem] text-xs leading-[var(--lh-body)] text-[var(--color-fg-muted)]">${description}</p>`
+        : null}
+    </header>
+  `
+}

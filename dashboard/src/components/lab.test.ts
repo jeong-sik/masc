@@ -7,7 +7,7 @@ const route = { value: { tab: 'lab' as string, params: {} as Record<string, stri
 
 async function loadLab() {
   vi.resetModules()
-  vi.doMock('../router', () => ({ route }))
+  vi.doMock('../router', () => ({ route, hashForRoute: () => '#lab' }))
   vi.doMock('./tools/tools-main', () => ({
     Tools: () => html`<div data-testid="lab-tools">Tools</div>`,
   }))

@@ -21,9 +21,10 @@ vi.mock('../../store', async (importOriginal) => {
 })
 
 vi.mock('../../router', () => ({
-  route: { value: { params: {} } },
+  route: { value: { tab: 'board', params: {}, postId: null } },
   navigate: vi.fn(),
   navigateToPost: vi.fn(),
+  hashForRoute: vi.fn(() => '#board'),
 }))
 
 vi.mock('../../api', () => ({

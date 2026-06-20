@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { fireEvent } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { bootKeeper, shutdownKeeper } = vi.hoisted(() => ({
@@ -57,7 +57,7 @@ vi.mock('./common/toast', () => ({
 
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
 import { keeperStatusDetails } from '../keeper-runtime'
-import { hydrateKeeperStatus, isKeeperThreadMessageSendInFlight } from '../keeper-runtime'
+import { hydrateKeeperStatus, isKeeperThreadMessageSendInFlight, sendKeeperThreadMessage } from '../keeper-runtime'
 import { _resetChatStoreForTests, enqueueInput, getQueueLength } from '../keeper-chat-store'
 import { shellAuthSummary } from '../store'
 import type { KeeperConversationEntry } from '../types'
@@ -141,6 +141,8 @@ describe('KeeperConversationPanel', () => {
     keeperStreamStartedAt.value = {}
     shellAuthSummary.value = null
     _resetChatStoreForTests()
+    vi.mocked(sendKeeperThreadMessage).mockReset()
+    vi.mocked(sendKeeperThreadMessage).mockResolvedValue(undefined)
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
     vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
   })
@@ -356,6 +358,60 @@ describe('KeeperConversationPanel', () => {
     fireEvent.click(sendButton)
 
     expect(getQueueLength('sangsu')).toBe(1)
+  })
+
+  it('keeps queued client action ids attached when draining the queue', async () => {
+    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
+    enqueueInput('sangsu', 'queued two', undefined, 'queued-click-2')
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'trigger drain' } })
+    await Promise.resolve()
+
+    const sendButton = container.querySelector('.send') as HTMLButtonElement
+    fireEvent.click(sendButton)
+
+    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(2))
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one\n\n---\n\nqueued two')
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[2]).toEqual(expect.objectContaining({
+      clientActionIds: ['queued-click-1', 'queued-click-2'],
+    }))
+  })
+
+  it('continues draining messages queued while a queue batch is in flight', async () => {
+    vi.mocked(sendKeeperThreadMessage).mockImplementation(async (_keeperName, message) => {
+      if (message === 'queued one') {
+        enqueueInput('sangsu', 'queued during drain', undefined, 'queued-click-3')
+      }
+    })
+    enqueueInput('sangsu', 'queued one', undefined, 'queued-click-1')
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'trigger drain' } })
+    await Promise.resolve()
+
+    const sendButton = container.querySelector('.send') as HTMLButtonElement
+    fireEvent.click(sendButton)
+
+    await waitFor(() => expect(sendKeeperThreadMessage).toHaveBeenCalledTimes(3))
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[1]?.[1]).toBe('queued one')
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[1]).toBe('queued during drain')
+    expect(vi.mocked(sendKeeperThreadMessage).mock.calls[2]?.[2]).toEqual(expect.objectContaining({
+      clientActionIds: ['queued-click-3'],
+    }))
+    expect(getQueueLength('sangsu')).toBe(0)
   })
 
   it('forwards the message-level turn inspector action to the transcript', async () => {

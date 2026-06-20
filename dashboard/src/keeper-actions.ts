@@ -345,6 +345,18 @@ function keeperThreadMessageSendKey(
   return actionId ? `${keeperName}\u0000${actionId}` : null
 }
 
+function keeperThreadMessageSendKeys(
+  keeperName: string,
+  clientActionIds: readonly (string | undefined)[],
+): string[] {
+  const keys = new Set<string>()
+  for (const clientActionId of clientActionIds) {
+    const key = keeperThreadMessageSendKey(keeperName, clientActionId)
+    if (key) keys.add(key)
+  }
+  return Array.from(keys)
+}
+
 export function _resetKeeperThreadMessageSendGuardsForTests(): void {
   sendingKeeperThreadMessages.clear()
 }
@@ -583,6 +595,7 @@ export async function sendKeeperThreadMessage(
   options: {
     attachments?: KeeperConversationAttachment[]
     clientActionId?: string
+    clientActionIds?: readonly string[]
     userBlocks?: KeeperUserInputBlock[]
   } = {},
 ): Promise<void> {
@@ -595,9 +608,12 @@ export async function sendKeeperThreadMessage(
       : deriveUserBlocks(prompt, attachments)
   const message = prompt.trim() || fallbackMessageForUserBlocks(userBlocks ?? [])
   if (!keeperName || !message) return
-  const sendKey = keeperThreadMessageSendKey(keeperName, options.clientActionId)
-  if (sendKey && sendingKeeperThreadMessages.has(sendKey)) return
-  if (sendKey) sendingKeeperThreadMessages.add(sendKey)
+  const sendKeys = keeperThreadMessageSendKeys(keeperName, [
+    options.clientActionId,
+    ...(options.clientActionIds ?? []),
+  ])
+  if (sendKeys.some(key => sendingKeeperThreadMessages.has(key))) return
+  sendKeys.forEach(key => sendingKeeperThreadMessages.add(key))
   abortKeeperThreadMessage(keeperName)
   const localId = `local-${++localIdCounter}-${Date.now()}`
   const assistantId = `reply-${++localIdCounter}-${Date.now()}`
@@ -785,7 +801,7 @@ export async function sendKeeperThreadMessage(
     // the non-terminal handoff above already released, so this is a no-op
     // there; Map.delete of an absent key is harmless.
     if (requestId) releaseLiveSendRequest(requestId)
-    if (sendKey) sendingKeeperThreadMessages.delete(sendKey)
+    sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
     if (activeStreamEntryId(keeperName) === assistantId) {
       clearActiveStream(keeperName)
       setRecordValue(keeperSending, keeperName, false)

@@ -522,23 +522,30 @@ export function KeeperConversationPanel({
   }
 
   const drainQueue = async () => {
-    const queued = getQueuedMessages(keeperName)
-    if (queued.length === 0) return
-    clearInputQueue(keeperName)
-    bumpQueue()
+    for (;;) {
+      const queued = getQueuedMessages(keeperName)
+      if (queued.length === 0) return
+      clearInputQueue(keeperName)
+      bumpQueue()
 
-    const batchedContent = queued.map(q => q.content.trim()).filter(Boolean).join('\n\n---\n\n')
-    const batchedAttachments = queued.flatMap(q => q.attachments ?? [])
-    if (!batchedContent && batchedAttachments.length === 0) return
+      const batchedContent = queued.map(q => q.content.trim()).filter(Boolean).join('\n\n---\n\n')
+      const batchedAttachments = queued.flatMap(q => q.attachments ?? [])
+      const batchedClientActionIds = queued
+        .map(q => q.clientActionId?.trim())
+        .filter((clientActionId): clientActionId is string => Boolean(clientActionId))
+      if (!batchedContent && batchedAttachments.length === 0) continue
 
-    try {
-      await sendKeeperThreadMessage(keeperName, batchedContent, {
-        attachments: batchedAttachments.length > 0 ? batchedAttachments : undefined,
-      })
-    } catch (err) {
-      if (isAbortError(err)) return
-      const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
-      showToast(message, 'error')
+      try {
+        await sendKeeperThreadMessage(keeperName, batchedContent, {
+          attachments: batchedAttachments.length > 0 ? batchedAttachments : undefined,
+          clientActionIds: batchedClientActionIds,
+        })
+      } catch (err) {
+        if (isAbortError(err)) return
+        const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
+        showToast(message, 'error')
+        return
+      }
     }
   }
 

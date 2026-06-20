@@ -67,6 +67,7 @@ import {
   dispatchKeeperInterjectAction,
   hydrateKeeperChatHistory,
   hydrateKeeperStatus,
+  isKeeperThreadMessageSendInFlight,
   loadFullKeeperHistory,
   noteKeeperChatAppended,
   probeKeeperRuntime,
@@ -289,6 +290,33 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       clientActionId: 'send-button-click-2',
     })
     expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps queued client action ids guarded while a batched queue send is in flight', async () => {
+    let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementationOnce(async () => new Promise<{ terminal: boolean }>(resolve => {
+      resolveStream = resolve
+    }))
+
+    const firstSend = sendKeeperThreadMessage('echo', 'queued drafts', {
+      clientActionIds: ['queue-click-1', 'queue-click-2'],
+    })
+    await Promise.resolve()
+
+    expect(isKeeperThreadMessageSendInFlight('echo', 'queue-click-1')).toBe(true)
+    expect(isKeeperThreadMessageSendInFlight('echo', 'queue-click-2')).toBe(true)
+
+    await sendKeeperThreadMessage('echo', 'queued drafts', {
+      clientActionId: 'queue-click-1',
+    })
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(1)
+
+    resolveStream({ terminal: true })
+    await firstSend
+
+    expect(isKeeperThreadMessageSendInFlight('echo', 'queue-click-1')).toBe(false)
+    expect(isKeeperThreadMessageSendInFlight('echo', 'queue-click-2')).toBe(false)
   })
 
   it('does not suppress the same text when the attachment payload differs', async () => {

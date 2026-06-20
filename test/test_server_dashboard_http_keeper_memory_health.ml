@@ -6,12 +6,11 @@ module Health = Server_dashboard_http_keeper_memory_health
 
 let test_now = 1_700_000_000.0
 
-let fresh_dir prefix =
-  let path = Filename.temp_file prefix ".dir" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
-;;
+(* [Filename.temp_dir] creates the directory atomically. The prior
+   temp_file -> remove -> mkdir form left a TOCTOU window where another process
+   could claim the path between the remove and the mkdir, which would flake this
+   regression gate. *)
+let fresh_dir prefix = Filename.temp_dir prefix ""
 
 let fact ?(external_ref = None) ?(valid_until = None) ~now claim =
   { Types.claim

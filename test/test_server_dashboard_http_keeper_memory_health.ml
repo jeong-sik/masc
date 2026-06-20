@@ -2,7 +2,7 @@
 
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
-module Health = Masc.Server_dashboard_http_keeper_memory_health
+module Health = Server_dashboard_http_keeper_memory_health
 
 let fresh_dir prefix =
   let path = Filename.temp_file prefix ".dir" in

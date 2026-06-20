@@ -79,6 +79,18 @@ describe('DashboardMain primary heading', () => {
       expect(leadTitle?.textContent?.trim()).toBe(label)
     },
   )
+
+  it('renders a bespoke-header surface with one h1 and no generic lead h1', async () => {
+    route.value = { tab: 'overview', params: {}, postId: null }
+
+    render(h(DashboardMain, {}), container)
+
+    await waitFor(() => {
+      expect([...container.querySelectorAll('h1')].map(node => node.textContent?.trim()))
+        .toEqual(['운영 개요'])
+    }, { timeout: 5000 })
+    expect(container.querySelector('.v2-shell-panel h1')).toBeNull()
+  })
 })
 
 describe('isKeeperDetailDashboardRoute', () => {

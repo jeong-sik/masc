@@ -1,4 +1,5 @@
 # MASC runtime seed model catalog for OAS capability lookup.
+# Provenance: the canonical full catalog lives in ../oas/models.toml.
 #
 # OAS discovers this file by walking cwd parents for oas-models.toml. This is a
 # runtime-binding projection scoped to models referenced by config/runtime.toml,

@@ -14,7 +14,19 @@
    Defined at :root so v2-shell.css and shell components can share them.
    ═══════════════════════════════════════════════════════════════ */
 
-@layer app-shell, theme-defaults, theme-overrides, utilities;
+/* Declare ONLY app-shell's own layers here — never a Tailwind-owned layer
+   (theme / base / components / utilities). The bundler hoists this statement
+   to the top of the built stylesheet, so it is what fixes each named layer's
+   position. Naming `utilities` here pinned it at index 3, which forced
+   Tailwind's own `theme, base, components, utilities` to emit AFTER it —
+   leaving base/components ABOVE utilities. Preflight (base) then beat every
+   utility class: list-style, h1 font-size, and margins all reset to their
+   element defaults (the #21846 cascade-layer regression).
+   app-shell stays first (lowest priority) so `.v2-app > *` (app-shell layer,
+   below) ranks under Tailwind's `.fixed`/`.absolute` (utilities) and overlays
+   keep position:fixed. theme-defaults/theme-overrides only carry :root token
+   values, so their position relative to Tailwind's layers is immaterial. */
+@layer app-shell, theme-defaults, theme-overrides;
 
 @layer theme-defaults {
   :root {

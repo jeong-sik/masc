@@ -46,6 +46,7 @@ vi.mock('./api/keeper', () => ({
 vi.mock('./store', () => ({ invalidateDashboardCache, refreshDashboard }))
 
 import {
+  _resetLiveSendRequestOwnersForTests,
   activeKeeperName,
   keeperActionErrors,
   keeperHydrating,
@@ -183,6 +184,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
     _clearPendingKeeperChatRequestsForTests()
+    _resetLiveSendRequestOwnersForTests()
     streamKeeperMessage.mockReset()
     fetchKeeperChatHistory.mockReset()
     fetchQueuedKeeperMessageResult.mockReset()
@@ -208,6 +210,52 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       return { terminal }
     }
   }
+
+  it('does not duplicate the pending assistant when a live send is still streaming and the panel remounts', async () => {
+    // A send whose SSE stream stays open (reply pending). The mock fires the
+    // queue-request event synchronously, then returns a promise we resolve
+    // only at cleanup, so the send is still in-flight during the "remount".
+    let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_QUEUE_REQUEST',
+        value: { request_id: 'kmsg_echo_1', status: 'queued' },
+      })
+      return new Promise<{ terminal: boolean }>(resolve => {
+        resolveStream = resolve
+      })
+    })
+
+    // Start the send without awaiting — the stream stays live.
+    const sendPromise = sendKeeperThreadMessage('echo', '진행 상황?')
+    await Promise.resolve()
+
+    // Preconditions: one optimistic assistant entry + the request persisted.
+    const before = (keeperThreads.value.echo ?? []).filter(e => e.role === 'assistant')
+    expect(before).toHaveLength(1)
+    expect(before[0]?.id).toMatch(/^reply-\d+-\d+$/)
+    expect(before[0]?.delivery).toBe('queued')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toHaveLength(1)
+
+    // SPA remount: the mount effect re-runs resume while the send is live.
+    await resumePendingKeeperChatRequests('echo')
+
+    // Fix: no second handler — exactly one assistant entry, no pending-* twin,
+    // and resume started no competing poll loop for the owned request.
+    const after = (keeperThreads.value.echo ?? []).filter(e => e.role === 'assistant')
+    expect(after).toHaveLength(1)
+    expect(after.some(e => e.id === 'pending-assistant-kmsg_echo_1')).toBe(false)
+    expect(fetchQueuedKeeperMessageResult).not.toHaveBeenCalled()
+
+    // Cleanup: end the stream terminally so the send settles.
+    resolveStream({ terminal: true })
+    await sendPromise
+  })
 
   it('marks the reply interrupted when the stream ends without a terminal event', async () => {
     streamKeeperMessage.mockImplementation(emitting([

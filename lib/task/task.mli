@@ -1,6 +1,7 @@
 module Tool : module type of Tool_task
 module Anti_rationalization : module type of Anti_rationalization
 module Dispatch : module type of Task_dispatch
+module Goal_assignment : module type of Task_goal_assignment
 module Transition_state : module type of Task_transition_state
 module Schemas : module type of Tool_task_schemas
 module Payloads : module type of Tool_task_payloads

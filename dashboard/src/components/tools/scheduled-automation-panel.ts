@@ -104,7 +104,7 @@ function KeeperActionCell({ request }: { request: DashboardScheduledAutomationRe
   return html`
     <div class="max-w-[16rem]">
       ${nextTool
-        ? html`<div class="font-mono text-3xs text-[var(--color-fg-secondary)]">${nextTool}</div>`
+        ? html`<div class="truncate font-mono text-3xs text-[var(--color-fg-secondary)]">${nextTool}</div>`
         : null}
       ${nextAction
         ? html`<div class="mt-1 truncate text-3xs text-[var(--color-fg-muted)]" title=${nextAction}>${nextAction}</div>`

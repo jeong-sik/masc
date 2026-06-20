@@ -27,9 +27,14 @@ interface ToolRunCluster {
 const MAX_FINDINGS = 3
 const RECENT_EVENT_LIMIT = 16
 const RECENT_TOOL_LIMIT = 12
+
+// Two repeats are often a normal retry; the third repeat is the first useful loop signal.
 const REPEATED_TOOL_THRESHOLD = 3
+// Eight tool calls without a completion marker is enough churn to justify an advisory checkpoint.
 const TOOL_CHURN_THRESHOLD = 8
+// Five minutes avoids nagging active work while still catching stale operator-facing traces.
 const STALE_TRACE_MS = 5 * 60 * 1000
+// Sub-350ms calls are usually UI/test plumbing; 350-800ms repeated calls often indicate sampling misses.
 const SHORT_TOOL_MIN_MS = 350
 const SHORT_TOOL_MAX_MS = 800
 

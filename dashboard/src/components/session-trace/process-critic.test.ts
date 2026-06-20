@@ -43,6 +43,9 @@ function ids(findings: readonly ProcessCriticFinding[]): string[] {
   return findings.map(finding => finding.id)
 }
 
+const advisoryFindingFields = ['action', 'detail', 'evidence', 'id', 'severity', 'title']
+const advisorySeverities = ['action', 'warning', 'notice']
+
 describe('evaluateProcessTrace', () => {
   it('returns no findings for an empty trace', () => {
     expect(evaluateProcessTrace({ events: [], summary: summary() })).toEqual([])
@@ -62,6 +65,21 @@ describe('evaluateProcessTrace', () => {
       action: 'Inspect latest error',
     })
     expect(findings[0]?.evidence[0]).toContain('HTTP 429')
+  })
+
+  it('keeps findings advisory-only without control fields', () => {
+    const findings = evaluateProcessTrace({
+      events: [
+        event({ summary: 'exec', toolName: 'exec', error: 'HTTP 429' }),
+      ],
+      summary: summary({ tool_call_count: 1 }),
+    })
+
+    expect(findings).not.toHaveLength(0)
+    for (const finding of findings) {
+      expect(Object.keys(finding).sort()).toEqual(advisoryFindingFields)
+      expect(advisorySeverities).toContain(finding.severity)
+    }
   })
 
   it('detects repeated short tool loops', () => {

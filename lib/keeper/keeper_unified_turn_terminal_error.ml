@@ -11,6 +11,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       ~labels:[ "edge", "kcl_to_ktc_exhaustion" ]
       ();
     Log.Keeper.warn
+      ~keeper_name
       "%s: all runtimes exhausted (terminal) — last_err=%s attempt=%d \
        attempted_runtimes=[%s]"
       keeper_name
@@ -38,6 +39,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
         ]
       ();
     Log.Keeper.warn
+      ~keeper_name
       "%s: turn terminal (non-exhaustion error) — err=%s attempt=%d"
       keeper_name
       (Agent_sdk.Error.to_string err)

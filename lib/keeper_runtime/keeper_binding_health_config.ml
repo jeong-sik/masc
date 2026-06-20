@@ -137,6 +137,19 @@ let soft_rate_limit_max_clamp_sec =
     ~default:120.0
     ()
 
+(** Cooldown applied immediately on HTTP 5xx provider server errors.
+
+    Generic [record_failure] uses a short thresholded cooldown, which is too
+    weak for scheduled keeper turns: a minute-scale cadence can let the 30s
+    cooldown expire between every cycle, producing repeated operator pages
+    against the same unhealthy cloud lane. Five minutes suppresses the loop
+    while staying far shorter than hard-quota/terminal structural blackouts. *)
+let server_error_cooldown_sec =
+  read_float_setting
+    ~primary:"MASC_RUNTIME_SERVER_ERROR_COOLDOWN_SEC"
+    ~default:300.0
+    ()
+
 (** Synthetic backoff for [Capacity_backpressure] with no [retry_after_sec].
 
     5.0 s was too short — providers rotated back into selection before

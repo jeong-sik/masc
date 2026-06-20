@@ -170,6 +170,9 @@ val apply_execution_grant :
   schedule_request -> execution_grant -> (schedule_request, grant_error) result
 
 val mark_due : now:float -> schedule_request -> schedule_request
+(** Observes time for active requests. [Pending_approval], [Scheduled], and
+    [Due] requests whose [expires_at <= now] become [Expired]; otherwise
+    [Scheduled] requests whose [due_at <= now] become [Due]. *)
 
 val actor_kind_to_string : actor_kind -> string
 val actor_kind_of_string : string -> (actor_kind, string) result

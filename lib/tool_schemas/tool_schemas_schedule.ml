@@ -167,7 +167,7 @@ let cancel_schema =
 
 let approve_schema =
   object_schema ~required:[ "schedule_id"; "approved_by_id" ]
-    [ string_prop ~description:"Pending schedule id to approve." "schedule_id"
+    [ string_prop ~description:"Pending or due schedule id to approve." "schedule_id"
     ; string_prop ~description:"Human approver id; cannot equal requester or scheduler." "approved_by_id"
     ; string_prop ~description:"Approver display name." "approved_by_display_name"
     ; string_prop ~description:"Optional stable grant id." "grant_id"
@@ -177,7 +177,7 @@ let approve_schema =
 
 let reject_schema =
   object_schema ~required:[ "schedule_id"; "approved_by_id"; "reason" ]
-    [ string_prop ~description:"Pending schedule id to reject." "schedule_id"
+    [ string_prop ~description:"Pending or due schedule id to reject." "schedule_id"
     ; string_prop ~description:"Human approver id; cannot equal requester or scheduler." "approved_by_id"
     ; string_prop ~description:"Approver display name." "approved_by_display_name"
     ; string_prop ~description:"Optional stable grant id." "grant_id"
@@ -222,10 +222,10 @@ let definitions : definition list =
       ~input_schema:cancel_schema ~read_only:false
   ; definition ~action:Approve_request ~id:"approve" ~name:"masc_schedule_approve"
       ~description:
-        "Record a separate human execution grant for a pending scheduled request."
+        "Record a separate human execution grant for a pending or due scheduled request. Recurring side-effecting requests need a fresh grant for each due occurrence."
       ~input_schema:approve_schema ~read_only:false
   ; definition ~action:Reject_request ~id:"reject" ~name:"masc_schedule_reject"
-      ~description:"Reject a pending scheduled request with a human decision."
+      ~description:"Reject a pending or due scheduled request with a human decision."
       ~input_schema:reject_schema ~read_only:false
   ]
 ;;

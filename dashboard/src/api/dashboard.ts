@@ -1759,6 +1759,9 @@ export interface DashboardScheduledAutomationExecution {
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: string
+  effective_status?: string
+  execution_readiness?: string
+  operator_action?: string | null
   risk_class: string
   approval_required: boolean
   source: string

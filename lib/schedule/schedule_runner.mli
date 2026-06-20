@@ -73,4 +73,6 @@ val tick :
 (** Refresh due state and append at-most-once generic wake signals for newly
     observable due work or due approval blockers. Recurring due work is advanced
     after the generic due signal path succeeds when no consumer is installed; a
-    consumer dispatch can instead complete/fail the request. *)
+    consumer dispatch can instead complete/fail the request. Consumer payload
+    rejection is recorded as a failed execution instead of leaving the request
+    due forever. *)

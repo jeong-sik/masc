@@ -15,9 +15,14 @@ function automationTone(status: string | null | undefined): StatusChipTone {
   switch (status) {
     case 'running':
     case 'scheduled':
+    case 'ready':
+    case 'approved':
       return 'ok'
     case 'pending_approval':
     case 'due':
+    case 'blocked_approval':
+    case 'awaiting_approval':
+    case 'due_pending_refresh':
       return 'warn'
     case 'failed':
     case 'rejected':
@@ -71,12 +76,20 @@ function lastExecutionLabel(request: DashboardScheduledAutomationRequest): strin
 }
 
 function ScheduleRow({ request }: { request: DashboardScheduledAutomationRequest }) {
+  const effectiveStatus = request.effective_status ?? request.status
+  const readiness = request.execution_readiness ?? '-'
+  const action = request.operator_action ?? '-'
   return html`
     <tr class="v2-lab-row border-t border-[var(--color-border-default)]">
       <td class="py-2 pr-3 font-mono text-xs text-[var(--color-fg-secondary)]">${request.schedule_id}</td>
       <td class="py-2 pr-3">
-        <${StatusChip} tone=${automationTone(request.status)} uppercase=${false}>${enumLabel(request.status)}<//>
+        <${StatusChip} tone=${automationTone(effectiveStatus)} uppercase=${false}>${enumLabel(effectiveStatus)}<//>
+        ${effectiveStatus !== request.status
+          ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">raw ${enumLabel(request.status)}</div>`
+          : null}
       </td>
+      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(readiness)}</td>
+      <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(action)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${enumLabel(request.risk_class)}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${request.payload_kind ?? '-'}</td>
       <td class="py-2 pr-3 text-xs text-[var(--color-fg-muted)]">${recurrenceLabel(request)}</td>
@@ -104,6 +117,9 @@ export function ScheduledAutomationPanel({
     .filter(([, count]) => count > 0)
   const rows = automation.requests ?? []
   const dueEffective = automation.derived_counts?.due_effective ?? 0
+  const blockedApproval = automation.derived_counts?.blocked_approval ?? 0
+  const dueExecutionReady = automation.derived_counts?.due_execution_ready ?? 0
+  const expiredEffective = automation.derived_counts?.expired_effective ?? 0
 
   return html`
     <div class="grid gap-4">
@@ -122,6 +138,15 @@ export function ScheduledAutomationPanel({
         </span>
         <span class="text-[var(--color-fg-muted)]">
           due effective <span class="font-mono text-[var(--color-fg-secondary)]">${dueEffective.toLocaleString()}</span>
+        </span>
+        <span class="text-[var(--color-fg-muted)]">
+          blocked <span class="font-mono text-[var(--color-fg-secondary)]">${blockedApproval.toLocaleString()}</span>
+        </span>
+        <span class="text-[var(--color-fg-muted)]">
+          ready <span class="font-mono text-[var(--color-fg-secondary)]">${dueExecutionReady.toLocaleString()}</span>
+        </span>
+        <span class="text-[var(--color-fg-muted)]">
+          expired <span class="font-mono text-[var(--color-fg-secondary)]">${expiredEffective.toLocaleString()}</span>
         </span>
         <span class="text-[var(--color-fg-muted)]">
           next due <span class="font-mono text-[var(--color-fg-secondary)]">${formatDateTimeKo(automation.fsm.next_due_at ?? null)}</span>
@@ -143,6 +168,8 @@ export function ScheduledAutomationPanel({
                   <tr>
                     <th class="pb-2 pr-3 font-medium">schedule</th>
                     <th class="pb-2 pr-3 font-medium">status</th>
+                    <th class="pb-2 pr-3 font-medium">readiness</th>
+                    <th class="pb-2 pr-3 font-medium">action</th>
                     <th class="pb-2 pr-3 font-medium">risk</th>
                     <th class="pb-2 pr-3 font-medium">payload</th>
                     <th class="pb-2 pr-3 font-medium">recurrence</th>

@@ -116,6 +116,14 @@ let test_reject_grant_marks_rejected () =
   | Ok updated -> check_status "rejected schedule status" Rejected updated.status
 ;;
 
+let test_due_grant_keeps_request_due () =
+  let due = { (request ()) with status = Due } in
+  let grant = grant due in
+  match apply_execution_grant due grant with
+  | Error err -> fail (grant_error_to_string err)
+  | Ok updated -> check_status "due approval stays due" Due updated.status
+;;
+
 let test_requester_cannot_approve () =
   let requested_by = human "same-human" in
   let req = request ~requested_by () in
@@ -317,6 +325,8 @@ let () =
           test_case "separate human approval accepts" `Quick
             test_separate_human_approval_accepts;
           test_case "reject grant marks rejected" `Quick test_reject_grant_marks_rejected;
+          test_case "due grant keeps request due" `Quick
+            test_due_grant_keeps_request_due;
           test_case "requester cannot approve" `Quick test_requester_cannot_approve;
           test_case "scheduler cannot approve" `Quick test_scheduler_cannot_approve;
           test_case "automated actor cannot approve side-effecting" `Quick

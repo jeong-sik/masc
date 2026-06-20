@@ -1,5 +1,4 @@
 open Alcotest
-open Masc
 open Schedule_domain
 open Schedule_store
 
@@ -31,8 +30,8 @@ let with_workspace f =
   Eio.Switch.run
   @@ fun sw ->
   Eio.Switch.on_release sw (fun () -> rm_rf dir);
-  let config = Workspace.default_config dir in
-  ignore (Workspace.init config ~agent_name:(Some "test"));
+  let config = Workspace_core.default_config dir in
+  ignore (Workspace_core.init config ~agent_name:(Some "test"));
   f config
 ;;
 
@@ -49,13 +48,14 @@ let payload_json () =
 let make_request
   ?(schedule_id = "sched-1")
   ?(risk_class = Workspace_write)
+  ?expires_at
   ?recurrence
   ()
   =
   match
     create_request ~schedule_id ~requested_by:(human "requester")
       ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
-      ~payload:(payload_json ()) ~risk_class ~approval_required:false
+      ?expires_at ~payload:(payload_json ()) ~risk_class ~approval_required:false
       ~source:Operator_request ?recurrence ()
   with
   | Ok request -> request
@@ -194,6 +194,44 @@ let test_read_only_due_candidate_does_not_need_grant () =
     (List.length (due_execution_candidates (read_state config)))
 ;;
 
+let test_refresh_due_expires_pending_scheduled_and_due () =
+  with_workspace
+  @@ fun config ->
+  let pending =
+    make_request ~schedule_id:"expire-pending" ~risk_class:Workspace_write
+      ~expires_at:150.0 ()
+  in
+  let scheduled =
+    make_request ~schedule_id:"expire-scheduled" ~risk_class:Read_only
+      ~expires_at:150.0 ()
+  in
+  let due =
+    make_request ~schedule_id:"expire-due" ~risk_class:Read_only
+      ~expires_at:250.0 ()
+  in
+  ignore (insert_ok config pending);
+  ignore (insert_ok config scheduled);
+  ignore (insert_ok config due);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "pending expired, scheduled expired, due marked" 3 changed
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:251.0 with
+   | Ok (_, changed) -> check int "due expired" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match
+     get_schedule config ~schedule_id:"expire-pending",
+     get_schedule config ~schedule_id:"expire-scheduled",
+     get_schedule config ~schedule_id:"expire-due"
+   with
+   | Some pending, Some scheduled, Some due ->
+     check_status "pending expired" Expired pending.status;
+     check_status "scheduled expired" Expired scheduled.status;
+     check_status "due expired" Expired due.status;
+     check int "expired schedules are not due candidates" 0
+       (List.length (due_execution_candidates (read_state config)))
+   | _ -> fail "expired schedules missing")
+;;
+
 let test_reschedule_due_recurring_advances_only_matching_recurring_rows () =
   with_workspace
   @@ fun config ->
@@ -230,7 +268,7 @@ let test_recovers_from_last_good () =
   @@ fun config ->
   let req = make_request ~risk_class:Read_only () in
   ignore (insert_ok config req);
-  Workspace.write_text config (schedules_path config) "{not json";
+  Workspace_core.write_text config (schedules_path config) "{not json";
   let recovered = read_state config in
   check int "recovered schedule" 1 (List.length recovered.schedules)
 ;;
@@ -242,8 +280,8 @@ let recovery_path config = schedules_path config ^ ".last-good"
    with non-JSON to simulate out-of-band corruption (e.g. partial write / schema
    evolution). *)
 let corrupt_both config =
-  Workspace.write_text config (schedules_path config) "{not json";
-  Workspace.write_text config (recovery_path config) "}also not json"
+  Workspace_core.write_text config (schedules_path config) "{not json";
+  Workspace_core.write_text config (recovery_path config) "}also not json"
 ;;
 
 let test_load_fresh_when_file_absent () =
@@ -306,6 +344,84 @@ let test_start_and_complete_persist_execution_record () =
      | _ -> fail "detail missing")
 ;;
 
+let test_fail_due_candidate_records_failed_execution () =
+  with_workspace
+  @@ fun config ->
+  let req = make_request ~schedule_id:"unsupported-1" ~risk_class:Read_only () in
+  ignore (insert_ok config req);
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "became due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  (match
+     fail_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id
+       ~error:"unsupported payload"
+   with
+   | Ok stored -> check_status "failed" Failed stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match get_schedule config ~schedule_id:req.schedule_id with
+   | Some stored -> check_status "stored failed" Failed stored.status
+   | None -> fail "schedule missing");
+  (match
+     last_execution_for_schedule (read_state config) ~schedule_id:req.schedule_id
+   with
+   | None -> fail "missing failed execution"
+   | Some execution ->
+     check string "failed execution status" "failed"
+       (execution_status_to_string execution.status);
+     check (option string) "failed execution error" (Some "unsupported payload")
+       execution.error;
+     check (option (float 0.001)) "finished at" (Some 202.0)
+       execution.finished_at)
+;;
+
+let test_recurring_grant_is_scoped_to_current_due_at () =
+  with_workspace
+  @@ fun config ->
+  let req =
+    make_request ~schedule_id:"write-loop-1" ~risk_class:Workspace_write
+      ~recurrence:(Interval { interval_sec = 60 })
+      ()
+  in
+  ignore (insert_ok config req);
+  (match record_grant config (grant req) with
+   | Ok stored -> check_status "approved first occurrence" Scheduled stored.status
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:201.0 with
+   | Ok (_, changed) -> check int "first due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  check int "first occurrence candidate" 1
+    (List.length (due_execution_candidates (read_state config)));
+  (match start_due_candidate config ~now:202.0 ~schedule_id:req.schedule_id with
+   | Ok running -> check_status "running first occurrence" Running running.status
+   | Error err -> fail (store_error_to_string err));
+  (match complete_running config ~now:203.0 ~schedule_id:req.schedule_id () with
+   | Ok stored ->
+     check_status "rescheduled" Scheduled stored.status;
+     check (float 0.001) "next due" 260.0 stored.due_at
+   | Error err -> fail (store_error_to_string err));
+  (match refresh_due config ~now:260.0 with
+   | Ok (_, changed) -> check int "second due" 1 changed
+   | Error err -> fail (store_error_to_string err));
+  let state = read_state config in
+  let due =
+    match get_schedule config ~schedule_id:req.schedule_id with
+    | Some due -> due
+    | None -> fail "rescheduled request missing"
+  in
+  check bool "old grant is stale" false (has_current_approved_grant state due);
+  check int "second occurrence blocked before fresh grant" 0
+    (List.length (due_execution_candidates state));
+  let fresh_grant =
+    create_execution_grant ~grant_id:"grant-2" ~approved_by:(human "approver-2")
+      ~approved_at:261.0 ~decision:Approve due
+  in
+  (match record_grant config fresh_grant with
+   | Ok stored -> check_status "fresh due grant keeps due" Due stored.status
+   | Error err -> fail (store_error_to_string err));
+  check int "second occurrence candidate after fresh grant" 1
+    (List.length (due_execution_candidates (read_state config)))
+;;
+
 let test_load_corrupt_when_both_unparseable () =
   with_workspace
   @@ fun config ->
@@ -340,14 +456,14 @@ let test_mutation_refused_and_preserves_corrupt_ledger () =
   let req = make_request ~risk_class:Read_only () in
   ignore (insert_ok config req);
   corrupt_both config;
-  let primary_before = Workspace.read_text config (schedules_path config) in
-  let recovery_before = Workspace.read_text config (recovery_path config) in
+  let primary_before = Workspace_core.read_text config (schedules_path config) in
+  let recovery_before = Workspace_core.read_text config (recovery_path config) in
   (match insert_request config (make_request ~schedule_id:"sched-2" ~risk_class:Read_only ()) with
    | Ok _ -> fail "insert on corrupt ledger unexpectedly succeeded"
    | Error (Corrupt_ledger _) -> ()
    | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err));
-  let primary_after = Workspace.read_text config (schedules_path config) in
-  let recovery_after = Workspace.read_text config (recovery_path config) in
+  let primary_after = Workspace_core.read_text config (schedules_path config) in
+  let recovery_after = Workspace_core.read_text config (recovery_path config) in
   check string "corrupt primary preserved" primary_before primary_after;
   check string "corrupt recovery preserved" recovery_before recovery_after
 ;;
@@ -370,7 +486,7 @@ let test_last_good_is_parseable_after_good_write () =
   @@ fun config ->
   let req = make_request ~risk_class:Read_only () in
   ignore (insert_ok config req);
-  let recovery_json = Workspace.read_json config (recovery_path config) in
+  let recovery_json = Workspace_core.read_json config (recovery_path config) in
   match Schedule_store.state_of_yojson recovery_json with
   | Ok state -> check int "last-good holds the schedule" 1 (List.length state.schedules)
   | Error msg -> fail (".last-good is not parseable: " ^ msg)
@@ -420,10 +536,16 @@ let () =
             test_due_candidates_require_approval_grant;
           test_case "read-only due candidate does not need grant" `Quick
             test_read_only_due_candidate_does_not_need_grant;
+          test_case "refresh_due expires pending scheduled and due" `Quick
+            test_refresh_due_expires_pending_scheduled_and_due;
           test_case "reschedule due recurring rows" `Quick
             test_reschedule_due_recurring_advances_only_matching_recurring_rows;
           test_case "start and complete persist execution record" `Quick
             test_start_and_complete_persist_execution_record;
+          test_case "fail due candidate records failed execution" `Quick
+            test_fail_due_candidate_records_failed_execution;
+          test_case "recurring grant is scoped to current due_at" `Quick
+            test_recurring_grant_is_scoped_to_current_due_at;
         ] );
     ]
 ;;

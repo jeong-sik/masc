@@ -7,7 +7,7 @@
 
     The IO (a [gh] call) is injected as {!verify_fn}, so the classification core is
     pure and fake-testable. P2 only classifies (dry-run, default-OFF fiber); P3
-    turns the verdicts into the actual [last_verified_at] advance / retraction
+    turns the verdicts into the actual [last_verified_at] advance / terminal-demote
     under the facts lock. The boundary is RFC-0259's: deciding *which* claim is
     externally-referenced is deterministic; the external state is the only IO. *)
 
@@ -29,12 +29,13 @@ type external_state =
 type verify_fn = external_ref -> external_state
 
 (** Per-fact reconciliation verdict. P2 classifies only; P3 maps these to the
-    real advance/retract. *)
+    real advance/demote. *)
 type verdict =
   | Fresh (** no [external_ref], or last verified within the horizon — leave alone *)
   | Stale_open (** past horizon, ref still open — P3 advances [last_verified_at] *)
   | Stale_terminal
-      (** past horizon, ref terminal — P3 retracts (the live-store false-fact class) *)
+      (** past horizon, ref terminal — P3 demotes: left for the volatile TTL/GC to
+          remove (deletion-by-state would erase true "was merged" records) *)
   | Stale_unknown
       (** past horizon, ref unverifiable — skip; never delete on uncertainty *)
 
@@ -69,18 +70,21 @@ val dry_run
 (** RFC-0259 §3.4 (P3): the outcome of applying the verdicts to a keeper's facts. *)
 type apply_report =
   { scanned : int
-  ; retracted : int (** [Stale_terminal] facts removed (the false-fact class) *)
+  ; terminal_kept : int
+      (** [Stale_terminal] facts left in place for the volatile TTL/GC to remove
+          (demote-not-delete: never deleted on terminal state alone) *)
   ; advanced : int (** [Stale_open] facts whose [last_verified_at] moved to [now] *)
   ; kept : int (** [Fresh] / [Stale_unknown] facts left unchanged *)
   }
 
-(** RFC-0259 §3.4 (P3): the pure retraction core. Classifies each fact and maps the
+(** RFC-0259 §3.4 (P3): the pure reconcile core. Classifies each fact and maps the
     verdict to a fact-list transform:
-    - [Stale_terminal] -> dropped (the merged/closed-PR false-fact class)
+    - [Stale_terminal] -> kept, left for the volatile TTL/GC to remove (demote, not
+      delete: terminal state alone does not prove the claim false)
     - [Stale_open]     -> kept, [last_verified_at] advanced to [now]
     - [Fresh] / [Stale_unknown] -> kept unchanged (uncertainty never deletes)
-    Order-preserving. Pure: the only IO is the injected [verify]. The [run_reconcile]
-    wrapper persists the result under the facts lock. *)
+    No fact is ever dropped; order-preserving. Pure: the only IO is the injected
+    [verify]. The [run_reconcile] wrapper persists the result under the facts lock. *)
 val reconcile_facts
   :  now:float
   -> horizon:float

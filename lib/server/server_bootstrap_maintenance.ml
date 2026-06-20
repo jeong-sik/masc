@@ -184,8 +184,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      every [interval]s it re-checks each Tier-1 fact that names verifiable external
      state (a PR/issue id, P1's [external_ref]) against the source of truth through
      GitHub GraphQL: a still-open ref has its [last_verified_at] advanced; a
-     merged/closed ref backing an in-progress claim is retracted (the live-store
-     false-fact class that had keepers acting on a closed PR for ~30 turns);
+     merged/closed ref is demoted — left in place for P1's volatile TTL/GC to remove
+     rather than deleted, since terminal state alone does not prove the claim false
+     (a true "PR #X was merged at <sha>" reads terminal too);
      [Unverifiable] (GitHub failure / missing token / non-GitHub kind) is never acted
      on — uncertainty is not contradiction. The write happens under the per-keeper
      facts lock ({!Keeper_memory_os_reconcile.run_reconcile}).
@@ -243,16 +244,16 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                     ~verify
                     ()
                 in
-                if report.Keeper_memory_os_reconcile.retracted > 0
+                if report.Keeper_memory_os_reconcile.terminal_kept > 0
                    || report.advanced > 0
                 then
                   Log.Server.info
-                    "memory_os_reconcile[%s]: keeper=%s scanned=%d retracted=%d \
+                    "memory_os_reconcile[%s]: keeper=%s scanned=%d terminal_kept=%d \
                      advanced=%d kept=%d"
                     mode
                     keeper_id
                     report.scanned
-                    report.retracted
+                    report.terminal_kept
                     report.advanced
                     report.kept
               with

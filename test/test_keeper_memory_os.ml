@@ -10,7 +10,6 @@ module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Reconcile = Masc.Keeper_memory_os_reconcile
 module Consolidator = Masc.Keeper_memory_os_consolidator
-module Reconcile = Masc.Keeper_memory_os_reconcile
 
 let contains substring s =
   let sub_len = String.length substring in

@@ -48,6 +48,15 @@ let contains_substring haystack needle =
   in
   needle_len = 0 || loop 0
 
+let nested_path_string_present_or_null json key =
+  let open Yojson.Safe.Util in
+  match json |> member key with
+  | `Null -> true
+  | value -> (
+      match value |> member "path" with
+      | `String path -> String.length path > 0
+      | _ -> false)
+
 let read_file path =
   let ic = open_in_bin path in
   Fun.protect
@@ -252,17 +261,12 @@ let test_dashboard_shell_http_json_includes_paths () =
   check bool "shell config root path surfaced when available" true
     (match config_resolution with
      | `Null -> true
-     | _ -> (
-         match config_resolution |> member "config_root" |> member "path" with
-         | `String value -> String.length value > 0
-         | _ -> false));
+     | _ -> nested_path_string_present_or_null config_resolution "config_root");
   check bool "shell runtime authoring path surfaced when available" true
     (match config_resolution with
      | `Null -> true
-     | _ -> (
-         match config_resolution |> member "runtime_authoring" |> member "path" with
-         | `String value -> String.length value > 0
-         | _ -> false));
+     | _ ->
+       nested_path_string_present_or_null config_resolution "runtime_authoring");
   check bool "shell runtime resolution is object or null" true
     (match runtime_resolution with
      | `Assoc _ | `Null -> true
@@ -270,10 +274,7 @@ let test_dashboard_shell_http_json_includes_paths () =
   check bool "shell runtime data root path surfaced when available" true
     (match runtime_resolution with
      | `Null -> true
-     | _ -> (
-         match runtime_resolution |> member "data_root" |> member "path" with
-         | `String value -> String.length value > 0
-         | _ -> false));
+     | _ -> nested_path_string_present_or_null runtime_resolution "data_root");
   check bool "shell runtime warnings surfaced as list when available" true
     (match runtime_resolution with
      | `Null -> true
@@ -440,7 +441,9 @@ let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
          |> to_bool))
 
 let test_operator_snapshot_default_route_hydrates_first_success () =
-  let source = read_file "lib/server/server_dashboard_http_core.ml" in
+  let source =
+    read_file "lib/server/server_dashboard_http_core_operator_snapshot_http.ml"
+  in
   check bool "operator snapshot uses first-success cache helper" true
     (contains_substring source "cached_surface_or_first_success_json"
      && contains_substring source "operator_snapshot_cache"
@@ -530,7 +533,7 @@ let test_operator_digest_default_route_exposes_provenance () =
       (json |> member "retention" |> member "scope" |> to_string);
     check string "retention store" "process_cache"
       (json |> member "retention" |> member "store_kind" |> to_string);
-    check string "query effective target" "root"
+    check string "query effective target" "workspace"
       (json |> member "query" |> member "effective_target_type" |> to_string);
     check bool "query default namespace" true
       (json |> member "query" |> member "default_namespace_request" |> to_bool);

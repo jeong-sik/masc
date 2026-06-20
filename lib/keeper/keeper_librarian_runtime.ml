@@ -311,13 +311,17 @@ type attempt_outcome =
     (* provider returned output we could not parse into an episode — retryable *)
   | Transport_failed of string (* timeout / HTTP error — not retried here *)
 
+type parse_retry_error =
+  | Retry_exhausted_unparseable of string
+  | Retry_transport_failed of string
+
 let rec run_with_parse_retries ~max_retries ~attempt messages =
   match attempt messages with
   | Parsed episode -> Ok episode
-  | Transport_failed msg -> Error msg
+  | Transport_failed msg -> Error (Retry_transport_failed msg)
   | Unparseable msg ->
     if max_retries <= 0
-    then Error msg
+    then Error (Retry_exhausted_unparseable msg)
     else
       run_with_parse_retries
         ~max_retries:(max_retries - 1)
@@ -383,6 +387,87 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> None)
 ;;
 
+let unstructured_note_max_chars = 900
+
+let collapse_for_unstructured_note raw =
+  let buf = Buffer.create (String.length raw) in
+  let previous_space = ref true in
+  String.iter
+    (fun c ->
+       match c with
+       | '\n' | '\r' | '\t' | ' ' ->
+         if not !previous_space then Buffer.add_char buf ' ';
+         previous_space := true
+       | c ->
+         Buffer.add_char buf c;
+         previous_space := false)
+    raw;
+  Buffer.contents buf |> String.trim
+
+let truncate_utf8_prefix max_len s =
+  if String.length s <= max_len
+  then s
+  else (
+    let len = min max_len (String.length s) in
+    let rec boundary i =
+      if i <= 0
+      then 0
+      else
+        let code = Char.code s.[i] in
+        if code land 0b1100_0000 = 0b1000_0000 then boundary (i - 1) else i
+    in
+    String.sub s 0 (boundary len))
+
+let unstructured_episode ~generation (inp : Keeper_librarian.input) ~reason ~raw =
+  let now = Unix.gettimeofday () in
+  let raw_excerpt =
+    raw
+    |> collapse_for_unstructured_note
+    |> truncate_utf8_prefix unstructured_note_max_chars
+  in
+  let note =
+    if String.equal raw_excerpt ""
+    then Printf.sprintf "unstructured_note: librarian parse fallback (%s): <empty response>" reason
+    else Printf.sprintf "unstructured_note: librarian parse fallback (%s): %s" reason raw_excerpt
+  in
+  let source_turn_range =
+    match List.length inp.messages with
+    | 0 -> None
+    | n -> Some (0, n - 1)
+  in
+  let fact : Keeper_memory_os_types.fact =
+    { claim = note
+    ; category = Keeper_memory_os_types.Ephemeral
+    ; external_ref = None
+    ; source = { trace_id = inp.trace_id; turn = 0; tool_call_id = None }
+    ; observed_by = []
+    ; first_seen = now
+    ; valid_until =
+        Keeper_memory_os_types.fact_valid_until
+          ~now
+          ~external_ref:None
+          Keeper_memory_os_types.Ephemeral
+    ; last_verified_at = Some now
+    ; schema_version = Keeper_memory_os_types.schema_version
+    }
+  in
+  { Keeper_memory_os_types.trace_id = inp.trace_id
+  ; generation
+  ; episode_summary = "Unstructured librarian note preserved after parse failure"
+  ; claims = [ fact ]
+  ; open_items = []
+  ; constraints = []
+  ; preserved_tool_refs = []
+  ; source_turn_range
+  ; created_at = now
+  ; valid_until =
+      Keeper_memory_os_types.category_valid_until
+        ~now
+        Keeper_memory_os_types.Ephemeral
+  ; terminal_marker = Some "librarian_unstructured_fallback"
+  ; schema_version = Keeper_memory_os_types.schema_version
+  }
+
 let extract_with_provider
     ?(complete = default_complete)
     ?clock
@@ -397,6 +482,7 @@ let extract_with_provider
   | Error _ as e -> e
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
+    let last_unparseable_raw = ref None in
     let attempt messages =
       match
         with_timeout ?clock ~timeout_sec (fun () ->
@@ -407,16 +493,32 @@ let extract_with_provider
       | Some (Ok response) ->
         let raw = Agent_sdk_response.text_of_response response |> String.trim in
         if String.equal raw ""
-        then Unparseable "librarian provider returned empty response"
+        then (
+          last_unparseable_raw := Some raw;
+          Unparseable "librarian provider returned empty response")
         else (
           match Keeper_librarian.episode_of_output ~generation inp raw with
           | Some episode -> Parsed episode
-          | None -> Unparseable "librarian provider returned invalid episode JSON")
+          | None ->
+            last_unparseable_raw := Some raw;
+            Unparseable "librarian provider returned invalid episode JSON")
     in
-    run_with_parse_retries
-      ~max_retries:librarian_max_parse_retries
-      ~attempt
-      messages
+    (match
+       run_with_parse_retries
+         ~max_retries:librarian_max_parse_retries
+         ~attempt
+         messages
+     with
+     | Ok episode -> Ok episode
+     | Error (Retry_transport_failed msg) -> Error msg
+     | Error (Retry_exhausted_unparseable msg) ->
+       let raw = Option.value !last_unparseable_raw ~default:"" in
+       Log.Keeper.warn
+         "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
+         inp.trace_id
+         generation
+         msg;
+       Ok (unstructured_episode ~generation inp ~reason:msg ~raw))
 ;;
 
 let extract_and_append_with_provider

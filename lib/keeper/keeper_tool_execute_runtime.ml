@@ -11,6 +11,97 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
+type path_probe =
+  { path_argument : string
+  ; resolved_path : string
+  ; parent_argument : string
+  ; resolved_parent : string
+  ; parent_exists : bool
+  ; parent_is_directory : bool
+  ; wildcard_like : bool
+  ; parent_entries : string list
+  }
+
+let path_contains_glob_meta s =
+  String.exists
+    (function
+      | '*' | '?' | '[' | ']' | '{' | '}' -> true
+      | _ -> false)
+    s
+
+let resolve_against_cwd ~cwd path =
+  if Filename.is_relative path then Filename.concat cwd path else path
+
+let take n xs =
+  let rec loop acc remaining = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | x :: rest -> loop (x :: acc) (remaining - 1) rest
+  in
+  loop [] n xs
+
+let path_probe ~cwd path_argument =
+  let resolved_path = resolve_against_cwd ~cwd path_argument in
+  let parent_argument = Filename.dirname path_argument in
+  let resolved_parent = resolve_against_cwd ~cwd parent_argument in
+  let parent_exists =
+    try Sys.file_exists resolved_parent with
+    | Sys_error _ -> false
+  in
+  let parent_is_directory =
+    parent_exists
+    &&
+    try Sys.is_directory resolved_parent with
+    | Sys_error _ -> false
+  in
+  let parent_entries =
+    if parent_is_directory
+    then
+      try
+        Sys.readdir resolved_parent
+        |> Array.to_list
+        |> List.sort String.compare
+        |> take 40
+      with
+      | Sys_error _ | Unix.Unix_error _ -> []
+    else []
+  in
+  { path_argument
+  ; resolved_path
+  ; parent_argument
+  ; resolved_parent
+  ; parent_exists
+  ; parent_is_directory
+  ; wildcard_like = path_contains_glob_meta path_argument
+  ; parent_entries
+  }
+
+let path_probe_json probe =
+  `Assoc
+    [ "path_argument", `String probe.path_argument
+    ; "resolved_path", `String probe.resolved_path
+    ; "parent_argument", `String probe.parent_argument
+    ; "resolved_parent", `String probe.resolved_parent
+    ; "parent_exists", `Bool probe.parent_exists
+    ; "parent_is_directory", `Bool probe.parent_is_directory
+    ; "wildcard_like", `Bool probe.wildcard_like
+    ; ( "parent_entries"
+      , `List (List.map (fun name -> `String name) probe.parent_entries) )
+    ; ( "hint"
+      , `String
+          (if probe.wildcard_like
+           then
+             "The missing path looks like a glob pattern. Probe the parent \
+              directory first, then use Grep glob/pattern fields or find -name; \
+              do not pass wildcard literals as path arguments."
+           else
+             "Probe the parent directory first and retry with an existing child \
+              path; do not infer module names as directory paths.") )
+    ]
+
+let path_probe_fields ~cwd path_argument =
+  [ "path_probe", path_probe_json (path_probe ~cwd path_argument) ]
+
 (* Pre-dispatch path existence validation for typed commands.
    Uses Shell_ir_typed GADT path annotations (exhaustive, no
    string heuristics). Only validates Safe (read-only) Simple
@@ -59,6 +150,7 @@ let typed_execute_response_cwd_json
 
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
+  let path_probe_json ~cwd path = path_probe_json (path_probe ~cwd path)
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
 end
 
@@ -360,7 +452,14 @@ let handle_tool_execute_typed
           @ response_cwd_field
           @ execution_location_fields cwd
         in
-        let blocked_result ?deterministic_reason ~error ~reason ~alternatives () =
+        let blocked_result
+              ?deterministic_reason
+              ?(extra_fields = [])
+              ~error
+              ~reason
+              ~alternatives
+              ()
+          =
           (* RFC-0208 P1: a blocked typed command emits a Keeper-level audit
              line so denials are greppable, not only returned as tool_error
              JSON to the agent. Covers destructive-block and write-gate; the
@@ -393,6 +492,7 @@ let handle_tool_execute_typed
                     ; "typed", `Bool true
                     ; "execution_time_ms", `Int 0
                     ]
+                  @ extra_fields
                   @ response_cwd_field
                   @ execution_location_fields cwd)
                ())
@@ -413,16 +513,34 @@ let handle_tool_execute_typed
         match path_missing with
         | Some missing_path ->
           let parent = Filename.dirname missing_path in
+          let probe = path_probe ~cwd missing_path in
+          let wildcard_hint =
+            if probe.wildcard_like
+            then
+              " The path also contains glob metacharacters; use Grep \
+               glob/pattern fields or probe the parent with ls/find instead of \
+               passing a wildcard literal as a path."
+            else ""
+          in
           blocked_result
             ~deterministic_reason:Keeper_tool_deterministic_error.Path_not_found
+            ~extra_fields:(path_probe_fields ~cwd missing_path)
             ~error:"path_not_found"
             ~reason:(Printf.sprintf
-              "The path argument %S does not exist. Probe the parent \
-               directory before retrying; do not infer package or module \
-               names as directory paths."
-              missing_path)
+              "The path argument %S does not exist.%s Probe the parent \
+               directory before retrying; do not infer package or module names \
+               as directory paths."
+              missing_path wildcard_hint)
             ~alternatives:
-              [ Printf.sprintf "Use executable=\"ls\" argv=[%S]." parent ]
+              [ Printf.sprintf "Use executable=\"ls\" argv=[%S]." parent
+              ; (if probe.wildcard_like
+                 then
+                   "For filename patterns, prefer Grep with pattern/glob or \
+                    Execute find -name after the parent path is confirmed."
+                 else
+                   "Read path_probe.parent_entries and retry with an existing \
+                    child path.")
+              ]
             ()
         | None ->
           let env_snap =

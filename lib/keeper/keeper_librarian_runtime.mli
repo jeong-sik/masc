@@ -101,16 +101,21 @@ type attempt_outcome =
   | Unparseable of string
   | Transport_failed of string
 
+type parse_retry_error =
+  | Retry_exhausted_unparseable of string
+  | Retry_transport_failed of string
+
 val run_with_parse_retries
   :  max_retries:int
   -> attempt:(Agent_sdk.Types.message list -> attempt_outcome)
   -> Agent_sdk.Types.message list
-  -> (Keeper_memory_os_types.episode, string) result
-(** Drive [attempt] over a growing message list. Returns immediately on [Parsed]
-    (Ok) and [Transport_failed] (Error); on [Unparseable], appends
-    {!parse_retry_nudge} and retries up to [max_retries] times before returning
-    the last error. Pure given a pure [attempt] — the provider side effect lives
-    in the [attempt] supplied by {!extract_with_provider}. *)
+  -> (Keeper_memory_os_types.episode, parse_retry_error) result
+(** Drive [attempt] over a growing message list. Returns immediately on [Parsed].
+    [Transport_failed] returns [Retry_transport_failed] without retry. On
+    [Unparseable], appends {!parse_retry_nudge} and retries up to [max_retries]
+    times before returning [Retry_exhausted_unparseable]. Pure given a pure
+    [attempt] — the provider side effect lives in the [attempt] supplied by
+    {!extract_with_provider}. *)
 
 val global_slot_capacity : unit -> int
 (** Fleet-wide librarian provider gate capacity from

@@ -560,10 +560,13 @@ let pp_validation_error ppf = function
     Format.fprintf
       ppf
       "executable %S argv[%d]=%S is a shell pipeline operator; argv tokens \
-       are passed verbatim to execve and never create pipelines. Split the \
-       command into typed Pipeline.stages instead."
+       are passed verbatim to execve and never create pipelines. Retry \
+       Execute with the top-level pipeline field, e.g. \
+       pipeline=[{executable;argv},...]. Do not wrap this in sh/bash and do \
+       not put %S in argv."
       executable
       index
+      token
       token
   | Argv_contains_shell_redirection { executable; index; token } ->
     Format.fprintf
@@ -571,7 +574,8 @@ let pp_validation_error ppf = function
       "executable %S argv[%d]=%S is a shell redirection operator; argv \
        tokens are passed verbatim to execve and never interpreted as \
        redirection. Use the typed redirect fields (RFC-0198 Phase B: \
-       discard_stderr/stdout/stderr) or split into a Pipeline."
+       stderr={discard:true}, stdout={discard:true}, or \
+       {file:\"/abs/path\"}) or use Execute.pipeline."
       executable
       index
       token
@@ -591,17 +595,17 @@ let pp_validation_error ppf = function
       path
   | Cwd_not_absolute path ->
     Format.fprintf ppf "cwd %S is not absolute" path
-  | Pipeline_empty -> Format.pp_print_string ppf "Pipeline.stages is empty"
+  | Pipeline_empty -> Format.pp_print_string ppf "pipeline is empty"
   | Pipeline_too_short ->
-    Format.pp_print_string ppf "Pipeline.stages requires at least two stages"
+    Format.pp_print_string ppf "pipeline requires at least two stages"
   | Env_key_invalid k ->
     Format.fprintf ppf "env key %S is not [A-Za-z0-9_]+" k
 ;;
 
 let validation_error_alternatives : validation_error -> string list = function
   | Argv_contains_shell_metachar _ -> []
-  | Argv_contains_shell_pipeline_operator _ -> [ "Pipeline" ]
+  | Argv_contains_shell_pipeline_operator _ -> [ "Execute.pipeline" ]
   | Argv_contains_shell_redirection _ ->
-    [ "discard_stderr"; "discard_stdout"; "Pipeline" ]
+    [ "stderr:{discard:true}"; "stdout:{discard:true}"; "Execute.pipeline" ]
   | _ -> []
 ;;

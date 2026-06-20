@@ -76,6 +76,76 @@ let typed_validation_deterministic_retry_fields
   Keeper_tool_deterministic_error.deterministic_retry_fields
     Keeper_tool_deterministic_error.Command_shape_blocked
 
+let typed_validation_recovery_fields
+      (err : Keeper_tool_execute_typed_input.validation_error)
+  =
+  let diagnosis ~rule_id =
+    [ ( "diagnosis"
+      , `Assoc
+          [ "rule_id", `String rule_id
+          ; "tool_suggestion", `String "Execute"
+          ; "scope_policy", `String "observe"
+          ] )
+    ]
+  in
+  let recovery_plan ~input_shape ~instruction ~example =
+    [ ( "recovery_plan"
+      , `Assoc
+          [ "next_tool", `String "Execute"
+          ; "input_shape", `String input_shape
+          ; "instruction", `String instruction
+          ; "example", example
+          ] )
+    ]
+  in
+  match err with
+  | Keeper_tool_execute_typed_input.Argv_contains_shell_pipeline_operator _ ->
+    diagnosis ~rule_id:"execute_pipeline_operator_in_argv"
+    @ recovery_plan
+        ~input_shape:"pipeline"
+        ~instruction:
+          "Retry Execute with top-level pipeline=[{executable,argv}, ...], \
+           removing executable/argv from the top level. Do not use sh -c and \
+           do not put '|' in argv."
+        ~example:
+          (`Assoc
+             [ ( "pipeline"
+               , `List
+                   [ `Assoc
+                       [ "executable", `String "git"
+                       ; "argv", `List [ `String "log"; `String "--oneline" ]
+                       ]
+                   ; `Assoc
+                       [ "executable", `String "head"
+                       ; "argv", `List [ `String "-20" ]
+                       ]
+                   ] )
+             ; "cwd", `String "repos/<repo>"
+             ])
+  | Keeper_tool_execute_typed_input.Argv_contains_shell_redirection _ ->
+    diagnosis ~rule_id:"execute_redirection_operator_in_argv"
+    @ recovery_plan
+        ~input_shape:"typed_redirect"
+        ~instruction:
+          "Retry Execute with the typed stdin/stdout/stderr fields and remove \
+           shell redirection tokens from argv. For discarded stderr use \
+           stderr={discard:true}; do not use sh -c."
+        ~example:
+          (`Assoc
+             [ "executable", `String "find"
+             ; "argv", `List [ `String "."; `String "-name"; `String "*.ml" ]
+             ; "stderr", `Assoc [ "discard", `Bool true ]
+             ; "cwd", `String "repos/<repo>"
+             ])
+  | Keeper_tool_execute_typed_input.Empty_executable _
+  | Keeper_tool_execute_typed_input.Executable_repeated_in_argv0 _
+  | Keeper_tool_execute_typed_input.Argv_contains_shell_metachar _
+  | Keeper_tool_execute_typed_input.Redirect_path_not_absolute _
+  | Keeper_tool_execute_typed_input.Cwd_not_absolute _
+  | Keeper_tool_execute_typed_input.Pipeline_empty
+  | Keeper_tool_execute_typed_input.Pipeline_too_short
+  | Keeper_tool_execute_typed_input.Env_key_invalid _ -> []
+
 let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
@@ -157,6 +227,7 @@ let handle_tool_execute_typed
              [ "typed", `Bool true; "cwd", `String cwd ]
              @ execution_location_fields cwd
              @ typed_validation_deterministic_retry_fields e
+             @ typed_validation_recovery_fields e
              @
              (match alts with
               | [] -> []
@@ -264,6 +335,7 @@ let handle_tool_execute_typed
             @ response_cwd_field
             @ execution_location_fields cwd
             @ typed_validation_deterministic_retry_fields e
+            @ typed_validation_recovery_fields e
             @
             (match alts with
              | [] -> []

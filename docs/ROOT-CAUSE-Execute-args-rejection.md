@@ -93,9 +93,9 @@ The validation entry point in MASC is:
 
 ## 4. Why `args` can appear in the input
 
-The field name `args` is used in several places, but it is **never** a valid field inside the `Execute` schema. It can leak into the tool input through these paths:
+The field name `args` is used in several places, but it is **never** a valid field inside the `Execute` schema. It can reach the validation boundary through these paths:
 
-### 4.1 Gemini provider wire format
+### 4.1 Gemini provider wire format (normal path already unwraps)
 
 Gemini sends tool-call arguments under the key `functionCall.args`:
 
@@ -109,7 +109,7 @@ The parser unwraps `args` into `ToolUse.input`:
 ToolUse { id; name; input = args }
 ```
 
-If this unwrap has a bug (e.g., reading the wrong nesting level, or the response shape differing from expectation), the literal `{"args": ...}` object can become `ToolUse.input`, and MASC validation rejects it.
+Therefore the normal Gemini parser path is **not** evidence that Gemini leaks the literal wrapper into MASC. A Gemini-specific parser edge case remains possible only if raw response capture shows the parser received a response shape where `ToolUse.input` still became `{"args": ...}` after parsing.
 
 ### 4.2 Model emits `args` inside a text block
 
@@ -149,17 +149,17 @@ This is correct, but if any few-shot example, memory, or older prompt template s
 
 ---
 
-## 5. Most likely cause for `issue_king`
+## 5. Most defensible cause for `issue_king`
 
 `issue_king` is a normal keeper with no special `Execute` handling. It uses the same descriptor-backed tool surface as every other keeper.
 
-Given the error, the most likely scenarios are:
+The exact upstream source is **not yet proven** without a raw provider response or captured `ToolUse.input`. Given the current code, the defensible scenarios are:
 
-1. **Gemini parser edge case** — if `issue_king` is configured to use a Gemini-compatible provider, the `args` field from `functionCall.args` is being passed through without unwrap under some response shape.
-2. **Model hallucinated `args`** — the flattened OAS bridge schema plus a confused prompt caused the model to emit `{"args": ...}` instead of `{"executable": ..., "argv": ...}`.
-3. **Legacy alias not applied** — the model called `Execute` directly while thinking it was `execute_command`/`Bash`, and included a `command` or `args` field. (The error would normally say `command`/`cmd` is unsupported, but if the field is `args`, this scenario is also possible.)
+1. **Model hallucinated `args`** — the flattened OAS bridge schema plus a confused prompt caused the model to emit `{"args": ...}` instead of `{"executable": ..., "argv": ...}`.
+2. **Legacy alias not applied** — the model called `Execute` directly while thinking it was `execute_command`/`Bash`, and included a `command` or `args` field. (The error would normally say `command`/`cmd` is unsupported, but if the field is `args`, this scenario is also possible.)
+3. **Provider parser edge case** — possible only if capture proves a provider parser returned `ToolUse.input = {"args": ...}`. The normal Gemini non-streaming and streaming paths already unwrap `functionCall.args` into the inner object, so Gemini should not be treated as the leading suspect without that evidence.
 
-The error says **`args`**, not `command`/`cmd`, which points most strongly to **scenario 1 (Gemini)** or a model-level JSON hallucination.
+The error says **`args`**, not `command`/`cmd`, which is consistent with a model-level envelope hallucination or an unverified provider-specific parser edge. The read-side MASC normalization in this PR is still justified as defense-in-depth for that exact envelope shape; it should not be framed as proof that the Gemini parser is broken.
 
 ---
 
@@ -182,7 +182,7 @@ Add a log line in `lib/tool_input_validation.ml:411` to print `name` and the ful
 
 ### 6.3 Check provider binding for `issue_king`
 
-Look at `config/keepers/issue_king.toml` and its runtime binding to see which provider/model is used. If it is a Gemini model, focus on `backend_gemini.ml`.
+Look at `config/keepers/issue_king.toml` and its runtime binding to see which provider/model is used. If it is a Gemini model, compare raw `functionCall.args` with parsed `ToolUse.input`; do not assume a parser bug unless the parsed input still contains the outer `args` wrapper.
 
 ### 6.4 Check trajectory / telemetry
 
@@ -195,17 +195,18 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king
 ### Immediate mitigation
 
 1. **Add defensive normalization in MASC for `Execute`**
-   - In `lib/keeper/keeper_tool_descriptor_resolution.ml` or `lib/keeper/keeper_tools_oas_handler.ml`, before calling `Tool_input_validation.validate`, normalize legacy shapes:
-     - If `input` has `args` object, unwrap it.
-     - If `input` has `command`/`cmd` string, rewrite to `executable`/`argv` (reuse OAS alias logic).
-   - This mirrors what OAS already does for `execute_command`/`Bash`/`Shell` aliases.
+   - In the validation boundary, unwrap only the exact provider/tool-call envelope shape:
+     `{"args": {"executable": ..., "argv": ...}}` → `{"executable": ..., "argv": ...}`.
+   - Keep `{"command": ...}`, `{"cmd": ...}`, `{"args": [...]}`, and mixed envelopes rejected unless a separate policy explicitly reintroduces legacy shell-string coercion.
+   - This preserves the typed argv contract while tolerating one narrow envelope shape that providers/models commonly use around function arguments.
 
-2. **Improve `tool_use_recovery.ml` to recognize `args`**
-   - Add `args` as an accepted tool-call envelope in text-block recovery.
+2. **Only consider `tool_use_recovery.ml` changes with separate evidence**
+   - Text-block recovery currently does not recognize `args`, so text that merely resembles a tool call should stay text.
+   - Add `args` as a recovery envelope only if there is evidence that valid provider/tool-call content is otherwise stranded in text blocks, and keep the same narrow inner-object validation.
 
-3. **Fix Gemini parser if `args` is leaking**
-   - Add an assertion in `backend_gemini.ml` that `ToolUse.input` never literally equals `{"args": ...}`.
-   - Add regression test with a mocked Gemini response containing nested `args`.
+3. **Add provider parser regression only if capture proves a leak**
+   - The normal Gemini parser already unwraps `functionCall.args` into `ToolUse.input`.
+   - If capture proves any provider returns parsed `ToolUse.input = {"args": ...}`, add a provider-local assertion/regression for that exact parser edge.
 
 ### Structural improvements
 
@@ -247,4 +248,4 @@ Search `.masc/trajectories/`, `logs/`, or telemetry for the affected `issue_king
 1. Identify which provider `issue_king` was using for the affected turn.
 2. Add a one-line diagnostic log in `lib/tool_input_validation.ml:411` to print the rejected `input` JSON.
 3. Reproduce or wait for the next occurrence; inspect the raw LLM response.
-4. Apply the fix corresponding to the actual leak path (most likely Gemini `args` unwrap or model hallucination via flattened schema).
+4. Apply the fix corresponding to the actual leak path (most likely model hallucination via flattened schema unless capture proves a provider parser edge).

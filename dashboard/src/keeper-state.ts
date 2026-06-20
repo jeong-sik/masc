@@ -45,6 +45,12 @@ export const THREAD_ENTRY_CAP = 200
 
 const keeperStreamControllers = new Map<string, AbortController>()
 const keeperStreamEntryIds = new Map<string, string>()
+// requestId -> keeperName: which queued requests a live in-session send
+// stream currently owns. Resume defers to this so an SPA remount does not
+// spin up a second handler/entry for a request the live send already drives.
+// Module state, so it survives unmount/remount exactly like the controller
+// maps above; a full page reload resets it, leaving cold-start resume intact.
+const liveSendRequestOwners = new Map<string, string>()
 
 // --- Helpers ---
 
@@ -1043,4 +1049,22 @@ export function activeStreamEntryId(name: string): string | null {
 
 export function getStreamController(name: string): AbortController | undefined {
   return keeperStreamControllers.get(name)
+}
+
+// --- Live send ownership (in-session, requestId-keyed) ---
+
+export function claimLiveSendRequest(requestId: string, name: string): void {
+  liveSendRequestOwners.set(requestId, name)
+}
+
+export function releaseLiveSendRequest(requestId: string): void {
+  liveSendRequestOwners.delete(requestId)
+}
+
+export function liveSendOwnsRequest(requestId: string): boolean {
+  return liveSendRequestOwners.has(requestId)
+}
+
+export function _resetLiveSendRequestOwnersForTests(): void {
+  liveSendRequestOwners.clear()
 }

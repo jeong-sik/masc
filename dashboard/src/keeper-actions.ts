@@ -43,6 +43,9 @@ import {
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
   removeThreadEntries,
+  claimLiveSendRequest,
+  liveSendOwnsRequest,
+  releaseLiveSendRequest,
   setActiveStream,
   setRecordValue,
   setStatusDetail,
@@ -334,6 +337,11 @@ const resumingKeeperChatRequests = new Set<string>()
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 
 async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
+  // A live in-session send stream still owns this request (e.g. the panel
+  // remounted on an SPA route change while the reply was pending). Defer to
+  // it rather than minting a duplicate pending entry + a second poll loop.
+  // After a full page reload this map is empty, so cold-start resume runs.
+  if (liveSendOwnsRequest(request.requestId)) return
   const key = `${request.keeperName}:${request.requestId}`
   if (resumingKeeperChatRequests.has(key)) return
   resumingKeeperChatRequests.add(key)
@@ -605,6 +613,9 @@ export async function sendKeeperThreadMessage(
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {
           requestId = asString(event.value.request_id, '').trim() || requestId
           if (requestId) {
+            // This live send now owns the request; resume must defer to it
+            // (and not mint a duplicate pending entry) until handoff/finally.
+            claimLiveSendRequest(requestId, keeperName)
             upsertPendingKeeperChatRequest({
               requestId,
               keeperName,
@@ -633,6 +644,9 @@ export async function sendKeeperThreadMessage(
     if (!outcome.terminal) {
       if (requestId) {
         removeThreadEntries(keeperName, [localId, assistantId])
+        // Hand off to resume: release ownership FIRST so our own resume
+        // call below is not blocked by the guard we just set.
+        releaseLiveSendRequest(requestId)
         await resumePendingKeeperChatRequest({
           requestId,
           keeperName,
@@ -729,6 +743,10 @@ export async function sendKeeperThreadMessage(
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
+    // Release ownership on every exit (success/abort/error). Idempotent:
+    // the non-terminal handoff above already released, so this is a no-op
+    // there; Map.delete of an absent key is harmless.
+    if (requestId) releaseLiveSendRequest(requestId)
     clearActiveStream(keeperName)
     setRecordValue(keeperSending, keeperName, false)
     setRecordValue(keeperStreamStartedAt, keeperName, null)

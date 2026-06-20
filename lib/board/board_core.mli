@@ -189,6 +189,11 @@ val mark_dirty_comment : store -> string -> unit
 (** {1 Wire encoders} *)
 
 val post_to_yojson : post -> Yojson.Safe.t
+
+(** RFC-0233 §7: encode the typed post origin. Re-exported here so the
+    dashboard board serializer ({!Board_votes.post_to_yojson_with_karma}) can
+    reuse the single origin encoder. *)
+val post_origin_to_yojson : post_origin -> Yojson.Safe.t
 val comment_to_yojson : comment -> Yojson.Safe.t
 val reaction_to_yojson : reaction -> Yojson.Safe.t
 val reaction_of_yojson : Yojson.Safe.t -> reaction option

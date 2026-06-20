@@ -1007,4 +1007,10 @@ let post_to_yojson_with_karma (p : post) ~author_karma : Yojson.Safe.t =
     ("pinned", `Bool p.pinned);
   ] @ (match p.hearth with Some h -> [("hearth", `String h)] | None -> [])
     @ (match p.thread_id with Some t -> [("thread_id", `String t)] | None -> [])
+    (* RFC-0233 §7: the dashboard board serializer ([board_post_dashboard_json])
+       funnels every board list/detail route through this function, so emitting
+       [origin] here exposes the originating-turn provenance on every
+       dashboard-facing post in one place (no per-route N-of-M). Same encoder as
+       [post_to_yojson] so the wire shape is identical. *)
+    @ (match p.origin with Some o -> [("origin", post_origin_to_yojson o)] | None -> [])
     @ (match p.meta_json with Some meta -> [("meta", meta)] | None -> []))

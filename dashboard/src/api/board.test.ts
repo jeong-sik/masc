@@ -589,6 +589,66 @@ describe('fetchBoard', () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain('blind_votes=true')
   })
+
+  it('normalizes the RFC-0233 origin (turn_ref / source / fusion_run_id)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-origin',
+            author: 'fusion',
+            title: 'Fusion deliberation',
+            body: 'resolved',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+            origin: {
+              source: 'fusion',
+              fusion_run_id: 'fus-abc',
+              turn_ref: 'trace-1780648779957-00000#4071',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.origin).toEqual({
+      source: 'fusion',
+      fusion_run_id: 'fus-abc',
+      turn_ref: 'trace-1780648779957-00000#4071',
+    })
+  })
+
+  it('leaves origin null on legacy posts without dropping the post', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-legacy',
+            author: 'analyst',
+            title: 'No origin',
+            body: 'legacy row',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.id).toBe('post-legacy')
+    expect(result.posts[0]?.origin).toBeNull()
+  })
 })
 
 describe('fetchBoardHearths', () => {

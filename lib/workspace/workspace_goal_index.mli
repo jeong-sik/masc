@@ -60,6 +60,15 @@ val write_goal_task_links :
 val link_task_to_goal :
   Workspace_utils_backend_setup.config -> goal_id:string -> task_id:string -> unit
 
+(** Add one task-to-goal link only when [task_id] has no existing goal link.
+    The read/check/write sequence runs under the goal-task-links file lock.
+    Returns [Error existing_goal_ids] when the task is already linked. *)
+val link_goalless_task_to_goal :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  task_id:string ->
+  (unit, string list) result
+
 (** Add multiple task-to-goal links to the persistent registry. *)
 val link_tasks_to_goals :
   Workspace_utils_backend_setup.config -> (string * string option) list -> unit

@@ -92,6 +92,13 @@ val reconcile_facts
   -> fact list
   -> fact list * apply_report
 
+(** Raised by {!run_reconcile} when the store cannot be fully parsed: the corrupt
+    store is left byte-for-byte untouched and the error surfaced, rather than the
+    rewrite erasing the rows around one bad line (mirrors
+    {!Keeper_memory_os_gc.Fact_store_corrupt}). Exposed so callers — and the IO
+    tests — can tell a preserve-over-delete abort apart from a normal reconcile. *)
+exception Fact_store_corrupt of string
+
 (** RFC-0259 §3.4 (P3): apply the reconciler to one keeper's store under the
     per-keeper facts lock (the lock GC/librarian/consolidation already hold on
     [facts_path], so no concurrent writer's update is lost). Reads strictly — a

@@ -9,6 +9,7 @@ module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
+module Reconcile = Masc.Keeper_memory_os_reconcile
 
 let contains substring s =
   let sub_len = String.length substring in
@@ -1288,6 +1289,158 @@ let test_gc_preserves_corrupt_store () =
       "valid fact still on disk"
       1
       (List.length (Memory_io.read_facts_all ~keeper_id))))
+;;
+
+(* RFC-0259 P3: [run_reconcile] is the only code that persists reconciler verdicts
+   to disk. The pure [reconcile_facts] core is covered in test_rfc0259_reconcile;
+   these pin the IO path that had zero coverage (the merge-blocker from the
+   adversarial review): the dry-run write gate, the advance rewrite, the
+   demote-not-delete invariant on terminal state, and the corrupt-store abort. Each
+   test also fails under a specific mutation noted in its body, so they guard
+   behaviour rather than merely exercising it. *)
+
+let reconcile_verify_const state : Reconcile.verify_fn = fun _ref -> state
+
+(* A volatile, past-horizon, ref-bearing fact — the only shape [classify] routes to
+   a non-Fresh verdict (and thus to advance/demote). *)
+let stale_ref_fact ~now ~id claim =
+  { (fact_fixture ~now ()) with
+    Types.claim
+  ; Types.external_ref = Some { Types.kind = Types.Pr; id }
+  ; Types.first_seen = now -. 100_000.0
+  ; Types.last_verified_at = Some (now -. 100_000.0)
+  }
+;;
+
+let test_run_reconcile_dry_run_does_not_write () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "reconcile-dryrun-keeper" in
+      let now = 1_000_000.0 in
+      let horizon = 3600.0 in
+      (* A still-open ref is the only verdict that writes (advances), so it is the
+         case where the dry-run gate actually has to suppress a write. *)
+      Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
+      let path = Memory_io.facts_path ~keeper_id in
+      let read_raw () = In_channel.with_open_bin path In_channel.input_all in
+      let before = read_raw () in
+      let report =
+        Reconcile.run_reconcile
+          ~dry_run:true
+          ~keeper_id
+          ~now
+          ~horizon
+          ~verify:(reconcile_verify_const Reconcile.Still_open)
+          ()
+      in
+      (* The verdict is still computed — dry-run reports the advance it WOULD make ... *)
+      Alcotest.(check int) "dry-run still classifies the advance" 1 report.Reconcile.advanced;
+      (* ... but MUTATION: dropping [not dry_run] from the write guard would rewrite
+         the store here, and this byte-for-byte comparison would fail. This is the
+         default-OFF rollout's core promise (review logs before APPLY). *)
+      Alcotest.(check string)
+        "dry-run leaves the store byte-for-byte untouched"
+        before
+        (read_raw ())))
+;;
+
+let test_run_reconcile_apply_demotes_terminal_keeps_it () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "reconcile-demote-keeper" in
+      let now = 1_000_000.0 in
+      let horizon = 3600.0 in
+      (* A terminal ref alongside a still-open ref. The open ref's advance forces a
+         rewrite, so the terminal ref must SURVIVE that rewrite (demote-not-delete)
+         rather than being filtered out of the persisted survivors. A terminal-only
+         pass would not write at all (write guard is [advanced > 0]), so the
+         demote-vs-delete difference is only observable on disk when a rewrite
+         actually happens — hence the mix. *)
+      List.iter
+        (Memory_io.append_fact ~keeper_id)
+        [ stale_ref_fact ~now ~id:"21515" "PR #21515 merged"
+        ; stale_ref_fact ~now ~id:"2" "PR #2 in review"
+        ];
+      let verify : Reconcile.verify_fn =
+        fun r ->
+        if String.equal r.Types.id "21515" then Reconcile.Terminal else Reconcile.Still_open
+      in
+      let report =
+        Reconcile.run_reconcile ~dry_run:false ~keeper_id ~now ~horizon ~verify ()
+      in
+      Alcotest.(check int) "terminal ref demoted (counted)" 1 report.Reconcile.terminal_kept;
+      Alcotest.(check int) "open ref advanced (forces the rewrite)" 1 report.Reconcile.advanced;
+      (* Demote-not-delete (RFC-0259 §3.4): even though the store is rewritten for the
+         advance, the terminal-ref fact is persisted, not dropped — left for the
+         volatile TTL/GC to remove. MUTATION: reverting [Stale_terminal] to a drop
+         leaves only "PR #2 in review" on disk and this fails. *)
+      Alcotest.(check (list string))
+        "both refs still on disk (terminal demoted, not deleted)"
+        [ "PR #21515 merged"; "PR #2 in review" ]
+        (List.map (fun f -> f.Types.claim) (Memory_io.read_facts_all ~keeper_id))))
+;;
+
+let test_run_reconcile_apply_advance_persists () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "reconcile-advance-keeper" in
+      let now = 1_000_000.0 in
+      let horizon = 3600.0 in
+      Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
+      let report =
+        Reconcile.run_reconcile
+          ~dry_run:false
+          ~keeper_id
+          ~now
+          ~horizon
+          ~verify:(reconcile_verify_const Reconcile.Still_open)
+          ()
+      in
+      Alcotest.(check int) "advanced the still-open fact" 1 report.Reconcile.advanced;
+      Alcotest.(check int) "nothing demoted" 0 report.Reconcile.terminal_kept;
+      (* MUTATION: dropping the [advanced > 0] write guard skips this write, so
+         last_verified_at on disk would still read the old value and the ref would be
+         re-verified every cycle. *)
+      match Memory_io.read_facts_all ~keeper_id with
+      | [ s ] ->
+        Alcotest.(check (option (float 0.001)))
+          "last_verified_at advanced to now on disk"
+          (Some now)
+          s.Types.last_verified_at
+      | _ -> Alcotest.fail "expected exactly one survivor"))
+;;
+
+let test_run_reconcile_preserves_corrupt_store () =
+  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "reconcile-corrupt-keeper" in
+      let now = 1_000_000.0 in
+      let horizon = 3600.0 in
+      Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
+      let path = Memory_io.facts_path ~keeper_id in
+      let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
+      output_string oc "{ broken json\n";
+      close_out oc;
+      let read_raw () = In_channel.with_open_bin path In_channel.input_all in
+      let before = read_raw () in
+      (* MUTATION: swapping read_facts_all_strict for the lossy read_facts_all would
+         drop the bad line then rewrite — this would NOT raise and the bytes would
+         change. Both assertions guard the preserve-over-delete invariant. *)
+      (match
+         Reconcile.run_reconcile
+           ~dry_run:false
+           ~keeper_id
+           ~now
+           ~horizon
+           ~verify:(reconcile_verify_const Reconcile.Still_open)
+           ()
+       with
+       | _report -> Alcotest.fail "expected run_reconcile to raise on a corrupt store"
+       | exception Reconcile.Fact_store_corrupt _ -> ());
+      Alcotest.(check string)
+        "corrupt store left byte-for-byte untouched (no silent drop + overwrite)"
+        before
+        (read_raw ())))
 ;;
 
 let test_gc_waits_for_fact_writer_lock () =
@@ -2853,6 +3006,24 @@ let () =
             "retention rank demotes a volatile fact below durable"
             `Quick
             test_retention_rank_demotes_volatile
+        ] )
+    ; ( "rfc-0259 reconcile-io"
+      , [ Alcotest.test_case
+            "dry-run classifies but does not write (P3)"
+            `Quick
+            test_run_reconcile_dry_run_does_not_write
+        ; Alcotest.test_case
+            "apply demotes terminal ref but keeps it on disk (P3)"
+            `Quick
+            test_run_reconcile_apply_demotes_terminal_keeps_it
+        ; Alcotest.test_case
+            "apply advance persists last_verified_at (P3)"
+            `Quick
+            test_run_reconcile_apply_advance_persists
+        ; Alcotest.test_case
+            "corrupt store aborts without overwrite (P3)"
+            `Quick
+            test_run_reconcile_preserves_corrupt_store
         ] )
     ]
 ;;

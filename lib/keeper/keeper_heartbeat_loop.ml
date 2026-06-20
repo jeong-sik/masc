@@ -194,6 +194,11 @@ let run_keepalive_unified_turn
       in
       let scheduling =
         decide_keepalive_scheduling
+          ~runtime_resilience_of_name:(fun _runtime_id ->
+            (* Health circuit breakers are keyed by keeper/agent name. *)
+            if Health.is_healthy ~agent_name:meta_after_triage.name
+            then None
+            else Some "keeper_unhealthy")
           ~reactive_wake
           ~stop
           ~meta:meta_after_triage

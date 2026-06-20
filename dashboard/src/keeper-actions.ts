@@ -349,6 +349,14 @@ export function _resetKeeperThreadMessageSendGuardsForTests(): void {
   sendingKeeperThreadMessages.clear()
 }
 
+export function isKeeperThreadMessageSendInFlight(
+  keeperName: string,
+  clientActionId: string | undefined,
+): boolean {
+  const sendKey = keeperThreadMessageSendKey(keeperName, clientActionId)
+  return sendKey ? sendingKeeperThreadMessages.has(sendKey) : false
+}
+
 async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest): Promise<void> {
   // A live in-session send stream still owns this request (e.g. the panel
   // remounted on an SPA route change while the reply was pending). Defer to

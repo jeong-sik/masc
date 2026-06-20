@@ -27,6 +27,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  isKeeperThreadMessageSendInFlight,
   probeKeeperRuntime,
   recoverKeeperRuntime,
   resumePendingKeeperChatRequests,
@@ -38,6 +39,7 @@ import {
   clearInputQueue,
   getQueueLength,
   getQueuedMessages,
+  hasQueuedInputClientAction,
   updateQueuedMessage,
   removeQueuedMessage,
   type QueuedMessage,
@@ -550,7 +552,18 @@ export function KeeperConversationPanel({
     const attachments = blocksToAttachments(blocks)
     setDraft('')
     if (keeperSending.value[keeperName]) {
-      enqueueInput(keeperName, prompt, attachments.length > 0 ? attachments : undefined)
+      if (
+        isKeeperThreadMessageSendInFlight(keeperName, clientActionId)
+        || hasQueuedInputClientAction(keeperName, clientActionId)
+      ) {
+        return
+      }
+      enqueueInput(
+        keeperName,
+        prompt,
+        attachments.length > 0 ? attachments : undefined,
+        clientActionId,
+      )
       bumpQueue()
       return
     }

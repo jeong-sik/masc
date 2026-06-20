@@ -16,6 +16,7 @@ export interface QueuedMessage {
   timestamp: number
   sent: boolean
   attachments?: KeeperConversationAttachment[]
+  clientActionId?: string
 }
 
 export interface InputQueue {
@@ -40,17 +41,34 @@ export function enqueueInput(
   keeperName: string,
   content: string,
   attachments?: KeeperConversationAttachment[],
+  clientActionId?: string,
 ): QueuedMessage {
   const q = _ensureQueue(keeperName)
+  const actionId = clientActionId?.trim()
+  if (actionId) {
+    const existing = q.items.find(item => item.clientActionId === actionId)
+    if (existing) return existing
+  }
   const msg: QueuedMessage = {
     id: `${keeperName}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     content,
     timestamp: Date.now(),
     sent: false,
     ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    ...(actionId ? { clientActionId: actionId } : {}),
   }
   q.items.push(msg)
   return msg
+}
+
+export function hasQueuedInputClientAction(
+  keeperName: string,
+  clientActionId: string | undefined,
+): boolean {
+  const actionId = clientActionId?.trim()
+  if (!actionId) return false
+  const q = _queues.get(keeperName)
+  return q ? q.items.some(item => item.clientActionId === actionId) : false
 }
 
 /** Return all queued items for a keeper (newest last). */
@@ -69,8 +87,18 @@ export function updateQueuedMessage(
   if (!q) return null
   const item = q.items.find(i => i.id === id)
   if (!item) return null
+  let changed = false
   if (typeof updates.content === 'string') item.content = updates.content
-  if (updates.attachments) item.attachments = updates.attachments
+  if (typeof updates.content === 'string') changed = true
+  if ('attachments' in updates) {
+    if (updates.attachments && updates.attachments.length > 0) {
+      item.attachments = updates.attachments
+    } else {
+      delete item.attachments
+    }
+    changed = true
+  }
+  if (changed) delete item.clientActionId
   return item
 }
 

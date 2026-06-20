@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { bootKeeper, shutdownKeeper } = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ vi.mock('../keeper-runtime', async () => {
     recoverKeeperRuntime: vi.fn(),
     resumePendingKeeperChatRequests: vi.fn(async () => undefined),
     sendKeeperThreadMessage: vi.fn(async () => null),
+    isKeeperThreadMessageSendInFlight: vi.fn(() => false),
   }
 })
 
@@ -55,7 +57,8 @@ vi.mock('./common/toast', () => ({
 
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
 import { keeperStatusDetails } from '../keeper-runtime'
-import { hydrateKeeperStatus } from '../keeper-runtime'
+import { hydrateKeeperStatus, isKeeperThreadMessageSendInFlight } from '../keeper-runtime'
+import { _resetChatStoreForTests, getQueueLength } from '../keeper-chat-store'
 import { shellAuthSummary } from '../store'
 import type { KeeperConversationEntry } from '../types'
 import {
@@ -137,11 +140,15 @@ describe('KeeperConversationPanel', () => {
     keeperActionErrors.value = {}
     keeperStreamStartedAt.value = {}
     shellAuthSummary.value = null
+    _resetChatStoreForTests()
+    vi.mocked(isKeeperThreadMessageSendInFlight).mockReset()
+    vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(false)
   })
 
   afterEach(() => {
     render(null, container)
     container.remove()
+    _resetChatStoreForTests()
     vi.unstubAllGlobals()
   })
 
@@ -308,6 +315,26 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[title="이미지·파일 첨부"]')).not.toBeNull()
     expect(container.querySelector('input[type="file"]')).not.toBeNull()
     expect(container.querySelector('input[name="keeper_chat_search"]')).not.toBeNull()
+  })
+
+  it('does not enqueue a duplicate submit for the active client action', async () => {
+    keeperSending.value = { sangsu: true }
+    vi.mocked(isKeeperThreadMessageSendInFlight).mockReturnValue(true)
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'same draft' } })
+    await Promise.resolve()
+
+    const sendButton = container.querySelector('.send') as HTMLButtonElement
+    fireEvent.click(sendButton)
+
+    expect(getQueueLength('sangsu')).toBe(0)
   })
 
   it('forwards the message-level turn inspector action to the transcript', async () => {

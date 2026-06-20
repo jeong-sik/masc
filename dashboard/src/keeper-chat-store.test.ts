@@ -5,8 +5,10 @@ import {
   dequeueInput,
   markInputSent,
   clearInputQueue,
+  hasQueuedInputClientAction,
   getQueueLength,
   getQueueTotal,
+  updateQueuedMessage,
 } from './keeper-chat-store'
 
 describe('keeper-chat-store input queue', () => {
@@ -21,6 +23,18 @@ describe('keeper-chat-store input queue', () => {
   it('enqueues a message while streaming', () => {
     enqueueInput('keeper-q', 'hello queue')
     expect(getQueueLength('keeper-q')).toBe(1)
+  })
+
+  it('dedupes queued messages by client action id, not content', () => {
+    const first = enqueueInput('keeper-q', 'same text', undefined, 'click-1')
+    const duplicate = enqueueInput('keeper-q', 'same text', undefined, 'click-1')
+    const repeatedContent = enqueueInput('keeper-q', 'same text', undefined, 'click-2')
+
+    expect(duplicate).toBe(first)
+    expect(repeatedContent).not.toBe(first)
+    expect(getQueueLength('keeper-q')).toBe(2)
+    expect(hasQueuedInputClientAction('keeper-q', 'click-1')).toBe(true)
+    expect(hasQueuedInputClientAction('keeper-q', 'missing')).toBe(false)
   })
 
   it('dequeues messages in FIFO order', () => {
@@ -96,5 +110,15 @@ describe('keeper-chat-store input queue', () => {
     enqueueInput('keeper-q', 'plain')
     const msg = dequeueInput('keeper-q')
     expect(msg!.attachments).toBeUndefined()
+  })
+
+  it('clears the client action id when a queued message is edited', () => {
+    const msg = enqueueInput('keeper-q', 'original', undefined, 'click-1')
+
+    updateQueuedMessage('keeper-q', msg.id, { content: 'edited' })
+
+    expect(hasQueuedInputClientAction('keeper-q', 'click-1')).toBe(false)
+    enqueueInput('keeper-q', 'original', undefined, 'click-1')
+    expect(getQueueLength('keeper-q')).toBe(2)
   })
 })

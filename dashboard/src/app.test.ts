@@ -99,6 +99,11 @@ describe('App v2 header chrome', () => {
     expect(status?.textContent).toContain('7 실행 중')
     expect(status?.textContent).toContain('스케줄러')
     expect(status?.textContent).toContain('정상')
+    const liveChip = status?.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip?.getAttribute('title')).toBe('실행 중인 keeper 수 (shell 스냅샷 기준)')
+    const schedulerChip = Array.from(status?.querySelectorAll('.v2-statchip') ?? [])
+      .find(chip => chip !== liveChip) as HTMLElement | undefined
+    expect(schedulerChip?.getAttribute('title')).toBe('서버 상태로 추정한 스케줄러 상태')
     expect(
       status?.querySelector('.v2-statchip.live span')?.classList.contains('motion-safe:animate-pulse'),
     ).toBe(true)

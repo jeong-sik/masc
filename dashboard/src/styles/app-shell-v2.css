@@ -14,19 +14,24 @@
    Defined at :root so v2-shell.css and shell components can share them.
    ═══════════════════════════════════════════════════════════════ */
 
-/* Declare ONLY app-shell's own layers here — never a Tailwind-owned layer
-   (theme / base / components / utilities). The bundler hoists this statement
-   to the top of the built stylesheet, so it is what fixes each named layer's
-   position. Naming `utilities` here pinned it at index 3, which forced
-   Tailwind's own `theme, base, components, utilities` to emit AFTER it —
-   leaving base/components ABOVE utilities. Preflight (base) then beat every
-   utility class: list-style, h1 font-size, and margins all reset to their
-   element defaults (the #21846 cascade-layer regression).
-   app-shell stays first (lowest priority) so `.v2-app > *` (app-shell layer,
-   below) ranks under Tailwind's `.fixed`/`.absolute` (utilities) and overlays
-   keep position:fixed. theme-defaults/theme-overrides only carry :root token
-   values, so their position relative to Tailwind's layers is immaterial. */
-@layer app-shell, theme-defaults, theme-overrides;
+/* ── Cascade layer order (SSOT) ──────────────────────────────────
+   This statement is the single source of truth for cascade-layer precedence.
+   It lives here (not in global.css) because the Tailwind v4 Vite plugin drops
+   bare `@layer` statements from the entry stylesheet, whereas a regular imported
+   file's statement survives bundling and is emitted near the top — ahead of the
+   Tailwind layer blocks (theme/base/components/utilities) that the plugin
+   injects later. So this statement is processed first and fixes the order.
+
+   The order must keep Tailwind's internal `theme < base < components <
+   utilities` so utility classes override Preflight/base/components. `app-shell`
+   sits below utilities so positioned overlay utilities (.fixed/.absolute) win;
+   `theme-defaults`/`theme-overrides` sit above utilities so theming overrides
+   win. Naming Tailwind's layers explicitly here pins them BEFORE utilities;
+   omitting them (or naming only utilities, as #21846 did) lets Tailwind's
+   later-emitted base/components blocks append AFTER utilities and invert the
+   cascade, clobbering every utility class. Do not name only a subset that
+   includes utilities. */
+@layer app-shell, theme, base, components, utilities, theme-defaults, theme-overrides;
 
 @layer theme-defaults {
   :root {

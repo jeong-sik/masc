@@ -387,8 +387,11 @@ let save_stats () =
       snapshot;
     let content = Buffer.contents buf in
     let count = List.length snapshot in
-    Fs_compat.save_file path content;
-    Log.Metrics.debug "thompson sampling saved stats for %d agents" count
+    match Fs_compat.save_file_atomic path content with
+    | Ok () ->
+        Log.Metrics.debug "thompson sampling saved stats for %d agents" count
+    | Error msg ->
+        Log.Thompson.error "Error saving stats: %s" msg
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->

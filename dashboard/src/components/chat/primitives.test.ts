@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChatBlock, KeeperConversationEntry } from '../../types'
+import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
 import { ChatComposer, ChatTranscript, type ChatComposerSendPayload } from './primitives'
 import { collectAttachments } from './attachments'
@@ -1341,6 +1341,52 @@ describe('ChatComposer multimodal', () => {
     const secondId = onSend.mock.calls[1]?.[0].clientActionId
     expect(firstId).toBe(secondId)
     expect(firstId).toContain('same text')
+  })
+
+  it('changes the client action id when attachment data changes', async () => {
+    const baseAttachment: Omit<KeeperConversationAttachment, 'data'> = {
+      id: 'att-same',
+      type: 'image',
+      name: 'screen.png',
+      size: 1024,
+      mimeType: 'image/png',
+      dims: '100×100',
+    }
+    vi.mocked(collectAttachments)
+      .mockResolvedValueOnce({
+        attachments: [{ ...baseAttachment, data: 'data:image/png;base64,AAAA' }],
+        errors: [],
+      })
+      .mockResolvedValueOnce({
+        attachments: [{ ...baseAttachment, data: 'data:image/png;base64,BBBB' }],
+        errors: [],
+      })
+
+    const onSend = vi.fn()
+    renderComposer({ draft: 'same text', onSend })
+
+    let fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['a'], 'screen.png', { type: 'image/png' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    let sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    fileInput = container.querySelector('input[type="file"]') as HTMLInputElement
+    setInputFiles(fileInput, [new File(['b'], 'screen.png', { type: 'image/png' })])
+    fileInput.dispatchEvent(new Event('change'))
+    await new Promise((r) => setTimeout(r, 10))
+
+    sendBtn = container.querySelector('.send') as HTMLButtonElement
+    sendBtn.click()
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(onSend).toHaveBeenCalledTimes(2)
+    const firstId = onSend.mock.calls[0]?.[0].clientActionId
+    const secondId = onSend.mock.calls[1]?.[0].clientActionId
+    expect(firstId).not.toBe(secondId)
   })
 
   it('preserves audio attachments as audio user blocks', async () => {

@@ -58,7 +58,7 @@ vi.mock('./common/toast', () => ({
 import { keeperActionErrors, keeperHydrating, keeperSending, keeperStreamStartedAt, keeperThreads } from '../keeper-runtime'
 import { keeperStatusDetails } from '../keeper-runtime'
 import { hydrateKeeperStatus, isKeeperThreadMessageSendInFlight } from '../keeper-runtime'
-import { _resetChatStoreForTests, getQueueLength } from '../keeper-chat-store'
+import { _resetChatStoreForTests, enqueueInput, getQueueLength } from '../keeper-chat-store'
 import { shellAuthSummary } from '../store'
 import type { KeeperConversationEntry } from '../types'
 import {
@@ -335,6 +335,27 @@ describe('KeeperConversationPanel', () => {
     fireEvent.click(sendButton)
 
     expect(getQueueLength('sangsu')).toBe(0)
+  })
+
+  it('does not enqueue a duplicate submit for an already queued client action', async () => {
+    keeperSending.value = { sangsu: true }
+    const clientActionId = JSON.stringify({ text: 'same draft', attachments: [] })
+    enqueueInput('sangsu', 'same draft', undefined, clientActionId)
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: 'same draft' } })
+    await Promise.resolve()
+
+    const sendButton = container.querySelector('.send') as HTMLButtonElement
+    fireEvent.click(sendButton)
+
+    expect(getQueueLength('sangsu')).toBe(1)
   })
 
   it('forwards the message-level turn inspector action to the transcript', async () => {

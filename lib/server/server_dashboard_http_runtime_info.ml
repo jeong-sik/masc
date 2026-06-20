@@ -1884,15 +1884,6 @@ let schedule_fsm_state ~now state schedules =
   else "idle"
 ;;
 
-let schedule_payload_kind request =
-  match Schedule_domain.payload_to_yojson request.Schedule_domain.payload with
-  | `Assoc fields ->
-    (match List.assoc_opt "kind" fields with
-     | Some (`String kind) -> Some kind
-     | _ -> None)
-  | _ -> None
-;;
-
 let execution_record_dashboard_json (execution : Schedule_domain.execution_record) =
   match Schedule_domain.execution_record_to_yojson execution with
   | `Assoc fields ->
@@ -1914,6 +1905,9 @@ let schedule_request_dashboard_json
     if Schedule_domain.is_terminal request.status then None else Some request.due_at
   in
   let requires_grant = Schedule_domain.requires_separate_human_grant request in
+  let payload_target, payload_summary =
+    Schedule_payload_projection.target_summary request
+  in
   `Assoc
     [ "schedule_id", `String request.schedule_id
     ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
@@ -1947,9 +1941,17 @@ let schedule_request_dashboard_json
            else "no_separate_grant_required") )
     ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
     ; ( "payload_kind"
-      , match schedule_payload_kind request with
+      , match Schedule_payload_projection.kind request with
         | None -> `Null
         | Some kind -> `String kind )
+    ; ( "payload_target"
+      , match payload_target with
+        | None -> `Null
+        | Some target -> `String target )
+    ; ( "payload_summary"
+      , match payload_summary with
+        | None -> `Null
+        | Some summary -> `String summary )
     ; ( "last_execution"
       , match last_execution with
         | None -> `Null

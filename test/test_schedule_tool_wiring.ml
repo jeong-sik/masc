@@ -2,9 +2,7 @@ open Alcotest
 open Masc
 
 let with_config f =
-  let path = Filename.temp_file "schedule_tool_wiring_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o700;
+  let path = Filename.temp_dir "schedule_tool_wiring_test" "" in
   Fun.protect
     ~finally:(fun () ->
       let rec rm path =
@@ -183,6 +181,168 @@ let test_dispatch_create_derives_due_at_for_cron_recurrence () =
        check string "recurrence" "cron"
          (Schedule_domain.recurrence_kind_to_string request.recurrence);
        check (float 0.001) "derived due_at" 118800.0 request.due_at)
+;;
+
+let test_dispatch_create_board_post_convenience_payload () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-board-post"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "board_title", `String "Scheduled check-in"
+      ; "board_content", `String "Daily schedule fired"
+      ; "board_hearth", `String "ops"
+      ; "board_author", `String "schedule-bot"
+      ; "board_ttl_hours", `Int 2
+      ; "board_meta", `Assoc [ "purpose", `String "operator-request" ]
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create succeeds" true (Tool_result.is_success result);
+     let data = Tool_result.data result in
+     let open Yojson.Safe.Util in
+     check string "result payload kind" "masc.board_post"
+       (data |> member "payload_kind" |> to_string);
+     check string "result payload target" "hearth:ops"
+       (data |> member "payload_target" |> to_string);
+     check string "result payload summary" "Scheduled check-in"
+       (data |> member "payload_summary" |> to_string);
+     check bool "result separate grant" true
+       (data |> member "requires_separate_human_grant" |> to_bool));
+  (match Schedule_store.get_schedule config ~schedule_id:"sched-board-post" with
+   | None -> fail "schedule missing"
+   | Some request ->
+     check string "status" "pending_approval"
+       (Schedule_domain.schedule_status_to_string request.status);
+     let payload = Schedule_domain.payload_to_yojson request.payload in
+     let open Yojson.Safe.Util in
+     check string "stored payload kind" "masc.board_post"
+       (payload |> member "kind" |> to_string);
+     check string "stored title" "Scheduled check-in"
+       (payload |> member "body" |> member "title" |> to_string);
+     check string "stored content" "Daily schedule fired"
+       (payload |> member "body" |> member "content" |> to_string);
+     check string "stored hearth" "ops"
+       (payload |> member "body" |> member "hearth" |> to_string);
+     check int "stored ttl" 2
+       (payload |> member "body" |> member "ttl_hours" |> to_int));
+  let dashboard =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  let row =
+    dashboard
+    |> member "requests"
+    |> to_list
+    |> function
+    | [ row ] -> row
+    | rows -> failf "expected one dashboard row, got %d" (List.length rows)
+  in
+  check string "dashboard payload kind" "masc.board_post"
+    (row |> member "payload_kind" |> to_string);
+  check string "dashboard payload target" "hearth:ops"
+    (row |> member "payload_target" |> to_string);
+  check string "dashboard payload summary" "Scheduled check-in"
+    (row |> member "payload_summary" |> to_string)
+;;
+
+let test_dispatch_create_rejects_negative_board_ttl () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-negative-ttl"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "board_content", `String "Daily schedule fired"
+      ; "board_ttl_hours", `Int (-1)
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects negative ttl" false (Tool_result.is_success result);
+     check (option string) "failure class" (Some "workflow_rejection")
+       (Option.map Tool_result.tool_failure_class_to_string
+          (Tool_result.failure_class result));
+     check string "message" "board_ttl_hours must be non-negative"
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
+;;
+
+let test_dispatch_create_rejects_board_payload_without_content () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-board-empty"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "workspace_write"
+      ; "payload_kind", `String "masc.board_post"
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects missing board content" false
+       (Tool_result.is_success result);
+     check string "message"
+       "masc.board_post payload requires non-empty body.content; use board_content for board schedules"
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
+;;
+
+let test_dispatch_create_rejects_read_only_board_payload () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-board-readonly"
+      ; "due_at_unix", `Float 200.0
+      ; "risk_class", `String "read_only"
+      ; "board_content", `String "Daily schedule fired"
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ]
+  in
+  (match
+     Tool_schedule.dispatch (schedule_ctx config)
+       ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+       ~args
+   with
+   | None -> fail "dispatch returned None"
+   | Some result ->
+     check bool "create rejects read-only board payload" false
+       (Tool_result.is_success result);
+     check string "message"
+       "masc.board_post requires a side-effecting risk_class such as workspace_write"
+       (Tool_result.message result));
+  let state = Schedule_store.read_state config in
+  check int "no schedule persisted" 0 (List.length state.schedules)
 ;;
 
 let test_dispatch_cancel_persists_status () =
@@ -438,6 +598,14 @@ let () =
             test_dispatch_create_persists_recurrence
         ; test_case "dispatch create derives due_at for cron recurrence" `Quick
             test_dispatch_create_derives_due_at_for_cron_recurrence
+        ; test_case "dispatch create accepts board-post convenience payload" `Quick
+            test_dispatch_create_board_post_convenience_payload
+        ; test_case "dispatch create rejects negative board ttl" `Quick
+            test_dispatch_create_rejects_negative_board_ttl
+        ; test_case "dispatch create rejects board payload without content" `Quick
+            test_dispatch_create_rejects_board_payload_without_content
+        ; test_case "dispatch create rejects read-only board payload" `Quick
+            test_dispatch_create_rejects_read_only_board_payload
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
         ; test_case "dashboard projection surfaces schedule FSM" `Quick

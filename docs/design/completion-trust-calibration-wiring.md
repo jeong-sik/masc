@@ -74,9 +74,11 @@ workflow (`record_human_label` over a sampled verdict set) is a separate, deferr
 **D3 — isolation is mandatory.** The verdict-recording path drives the real cross-model judge
 (`Anti_rationalization.review`, `lib/task/anti_rationalization.mli:78-85`) and writes
 `data/verdicts/YYYY-MM/DD.jsonl` (`lib/eval_calibration.ml:102-103,215`). Run it behind an
-isolated `MASC_BASE_PATH` (temp base) and `Eval_calibration.set_store_for_testing ~base_dir`
-(scratch store, `lib/eval_calibration.mli:74-75`), seed a self-owned task fixture, and install
-the two hooks the CLI does not currently install: `record_verdict_fn`
+explicit temp workspace base path (prefer a CLI `--base`/`--base-path` argument over ambient
+environment; `MASC_BASE_PATH` is only a process-bound fallback) and
+`Eval_calibration.set_store_for_testing ~base_dir` (scratch store,
+`lib/eval_calibration.mli:74-75`), seed a self-owned task fixture, and install the two hooks
+the CLI does not currently install: `record_verdict_fn`
 (default no-op, `lib/task/tool_task_handlers.ml:28-30`; wired to `Eval_calibration.record_verdict`
 only at server boot, `lib/mcp_server.ml:530-531`) and `run_llm_reviewer_fn`
 (installed only in `lib/workspace_metric_hooks.ml:458`). It must never mutate live workspace
@@ -127,9 +129,10 @@ role-separation contract references this design note rather than claiming to be 
 
 1. Author ≥1 `self_owned` weak-evidence scenario + add the `ownership` field to the schema and
    `Eval_harness` scenario type.
-2. Add `--record-verdicts` mode: isolated `MASC_BASE_PATH` + `set_store_for_testing`, seed the
+2. Add `--record-verdicts` mode: explicit temp workspace base path (`--base`/`--base-path`,
+   with `MASC_BASE_PATH` only as a process-bound fallback) + `set_store_for_testing`, seed the
    self-owned task, install `record_verdict_fn` + `run_llm_reviewer_fn`, call
-   `Anti_rationalization.review` with `~on_verdict → record_verdict` on completion-tool dispatch
-   for self-owned scenarios only.
+   `Anti_rationalization.review` with `~on_verdict → record_verdict` on completion-tool
+   dispatch for self-owned scenarios only.
 3. Report `cross_model_rate` (+ verdict counts/gate distribution); keep `agreement_rate` out.
 4. Deferred: a human-labeling workflow to make `agreement_rate` meaningful.

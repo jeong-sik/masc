@@ -89,10 +89,14 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
       ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
       ]
   | Fusion_types.Failed { failed_model; reason } ->
+    let reason_code = Fusion_oas.panel_failure_code reason in
+    let reason_detail = Fusion_oas.panel_failure_detail ~runtime_id:failed_model reason in
     `Assoc
       [ ("model", `String failed_model)
       ; ("status", `String "failed")
-      ; ("reason", `String (Fusion_types.show_panel_failure reason))
+      ; ("reason_code", `String reason_code)
+      ; ("reason_detail", `String reason_detail)
+      ; ("reason", `String reason_detail)
       ]
 
 (* 심판 결과를 board meta_json 원소로. *)

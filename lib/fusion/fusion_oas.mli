@@ -41,6 +41,12 @@ end
     panel/judge runtime id, so it patches that display boundary locally. *)
 val provider_error_detail : runtime_id:string -> string -> string
 
+(** Stable machine-readable panel failure class. *)
+val panel_failure_code : Fusion_types.panel_failure -> string
+
+(** Human-readable panel failure detail with runtime attribution when available. *)
+val panel_failure_detail : runtime_id:string -> Fusion_types.panel_failure -> string
+
 (** [masc_web_search] / [masc_web_fetch]를 [Agent_sdk.Tool.t]로 변환한 목록.
     [Keeper_tool_descriptor]에서 descriptor를 찾지 못하면 빈 목록을 반환한다. *)
 val web_tool_bundle : unit -> Agent_sdk.Tool.t list

@@ -89,6 +89,47 @@ let load_memory_subsystems_entries ~(config : Workspace_utils.config) =
        rows, errors)
 ;;
 
+let memory_os_fact_is_current ~now (fact : Keeper_memory_os_types.fact) =
+  match fact.valid_until with
+  | None -> true
+  | Some valid_until -> valid_until > now
+;;
+
+let is_user_model_fact (fact : Keeper_memory_os_types.fact) =
+  match fact.category with
+  | Keeper_memory_os_types.Preference | Keeper_memory_os_types.Constraint -> true
+  | Keeper_memory_os_types.Blocker
+  | Keeper_memory_os_types.Code_change
+  | Keeper_memory_os_types.Ephemeral
+  | Keeper_memory_os_types.Fact
+  | Keeper_memory_os_types.Goal
+  | Keeper_memory_os_types.Lesson
+  | Keeper_memory_os_types.Validated_approach
+  | Keeper_memory_os_types.Unknown _ -> false
+;;
+
+let load_user_model_facts () =
+  let now = Time_compat.now () in
+  Keeper_memory_os_io.list_fact_store_keeper_ids ()
+  |> List.fold_left
+       (fun (items_acc, errors_acc) keeper ->
+         try
+           let items =
+             Keeper_memory_os_io.read_facts_tail
+               ~keeper_id:keeper
+               ~n:Keeper_memory_os_io.fact_store_max
+             |> List.filter is_user_model_fact
+             |> List.filter (memory_os_fact_is_current ~now)
+             |> List.map (fun fact -> keeper, fact)
+           in
+           List.rev_append items items_acc, errors_acc
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> items_acc, (keeper, Printexc.to_string exn) :: errors_acc)
+       ([], [])
+  |> fun (items, errors) -> List.rev items, List.rev errors
+;;
+
 let dashboard_memory_subsystems_http_json
       ~(config : Workspace_utils.config)
       ?include_memory_entries
@@ -146,11 +187,36 @@ let dashboard_memory_subsystems_http_json
       ; "ts_unix", `Float row.ts_unix
       ]
   in
+  let user_model_item_to_json
+        (keeper : string)
+        (fact : Keeper_memory_os_types.fact)
+    : Yojson.Safe.t
+    =
+    `Assoc
+      [ "keeper", `String keeper
+      ; "kind", `String (Keeper_memory_os_types.category_to_string fact.category)
+      ; "claim", `String fact.claim
+      ; ( "source_ref"
+        , `String
+            (Skill_candidate_projection.source_memory_fact_ref ~agent_name:keeper fact)
+        )
+      ; "source_trace_id", `String fact.source.trace_id
+      ; "source_turn", `Int fact.source.turn
+      ; "first_seen", `Float fact.first_seen
+      ; ( "last_verified_at"
+        , match fact.last_verified_at with
+          | Some ts -> `Float ts
+          | None -> `Null )
+      ; ( "observed_by"
+        , `List (List.map (fun keeper -> `String keeper) fact.observed_by) )
+      ]
+  in
   let all_memory_entries, memory_entry_errors =
     if include_memory_entries
     then load_memory_subsystems_entries ~config
     else [], []
   in
+  let all_user_model_items, user_model_errors = load_user_model_facts () in
   let memory_total = List.length all_memory_entries in
   let memory_filtered =
     all_memory_entries
@@ -176,6 +242,41 @@ let dashboard_memory_subsystems_http_json
              (_, (a : Keeper_memory_policy.keeper_memory_line))
               (_, (b : Keeper_memory_policy.keeper_memory_line))
             -> compare b.ts_unix a.ts_unix)
+    |> take limit
+  in
+  let user_model_filtered =
+    all_user_model_items
+    |> List.filter (fun (keeper, (fact : Keeper_memory_os_types.fact)) ->
+      let keeper_ok =
+        match keeper_filter with
+        | None -> true
+        | Some k -> String.equal keeper k
+      in
+      let search_ok =
+        match search with
+        | None -> true
+        | Some q ->
+          contains_ci keeper q
+          || contains_ci (Keeper_memory_os_types.category_to_string fact.category) q
+          || contains_ci fact.claim q
+      in
+      keeper_ok && search_ok)
+  in
+  let user_model_items =
+    user_model_filtered
+    |> List.sort
+         (fun
+             (_, (a : Keeper_memory_os_types.fact))
+            (_, (b : Keeper_memory_os_types.fact))
+            ->
+            (* DET-OK: absent [last_verified_at] falls back to [first_seen] so
+               legacy facts keep a deterministic dashboard ordering. *)
+            let a_ts = Option.value ~default:a.first_seen a.last_verified_at in
+            let b_ts =
+              Option.value ~default:b.first_seen b.last_verified_at
+              (* DET-OK: same deterministic legacy fallback as [a_ts]. *)
+            in
+            Float.compare b_ts a_ts)
     |> take limit
   in
   let filtered =
@@ -220,7 +321,9 @@ let dashboard_memory_subsystems_http_json
       |> List.concat_map (fun (e : Institution_eio.episode) -> e.participants)
     in
     let memory_keepers = List.map fst all_memory_entries in
-    episode_keepers @ memory_keepers |> List.sort_uniq String.compare
+    let user_model_keepers = List.map fst all_user_model_items in
+    episode_keepers @ memory_keepers @ user_model_keepers
+    |> List.sort_uniq String.compare
   in
   let known_memory_kinds =
     all_memory_entries
@@ -258,6 +361,26 @@ let dashboard_memory_subsystems_http_json
                        ; "error_class", `String error_class
                        ])
                    memory_entry_errors) )
+          ] )
+    ; ( "user_model"
+      , `Assoc
+          [ "schema", `String "masc.user_model.memory_projection.v1"
+          ; "source", `String "memory_os_facts"
+          ; "total", `Int (List.length all_user_model_items)
+          ; "filtered", `Int (List.length user_model_filtered)
+          ; "shown", `Int (List.length user_model_items)
+          ; "limit", `Int limit
+          ; ( "items"
+            , `List
+                (List.map
+                   (fun (keeper, fact) -> user_model_item_to_json keeper fact)
+                   user_model_items) )
+          ; ( "errors"
+            , `List
+                (List.map
+                   (fun (keeper, error) ->
+                     `Assoc [ "keeper", `String keeper; "error", `String error ])
+                   user_model_errors) )
           ] )
     ; ( "filters"
       , `Assoc

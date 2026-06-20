@@ -44,6 +44,39 @@ const baseResponse: MemorySubsystemsResponse = {
       },
     ],
   },
+  user_model: {
+    schema: 'masc.user_model.memory_projection.v1',
+    source: 'memory_os_facts',
+    total: 2,
+    filtered: 2,
+    shown: 2,
+    limit: 100,
+    items: [
+      {
+        keeper: 'keeper-alpha',
+        kind: 'preference',
+        claim: 'User prefers terse operational summaries',
+        source_ref: 'memory-os-fact://keeper-alpha/trace-1/user-prefers-terse-operational-summaries',
+        source_trace_id: 'trace-1',
+        source_turn: 7,
+        first_seen: 1,
+        last_verified_at: 2,
+        observed_by: [],
+      },
+      {
+        keeper: 'keeper-alpha',
+        kind: 'constraint',
+        claim: 'Use worktrees for repo changes',
+        source_ref: 'memory-os-fact://keeper-alpha/trace-2/use-worktrees-for-repo-changes',
+        source_trace_id: 'trace-2',
+        source_turn: 8,
+        first_seen: 1,
+        last_verified_at: null,
+        observed_by: [],
+      },
+    ],
+    errors: [],
+  },
   filters: {
     keepers: ['keeper-alpha'],
     outcomes: ['success'],
@@ -128,6 +161,20 @@ describe('MemorySubsystems focus targets', () => {
       expect(focusMock.mock.contexts).toContain(target)
       expect(scrollIntoViewMock.mock.contexts).toContain(target)
     })
+  })
+
+  it('renders user model projection rows from memory facts', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(baseResponse))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(html`<${MemorySubsystems} />`, container)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('User model')
+      expect(container.textContent).toContain('User prefers terse operational summaries')
+      expect(container.textContent).toContain('Use worktrees for repo changes')
+    })
+    expect(container.querySelector('[data-testid="user-model-projection"]')).not.toBeNull()
   })
 
   it('focuses the episodes section without requesting memory entries for episodes focus', async () => {

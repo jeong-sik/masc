@@ -13,6 +13,8 @@ import {
   type MemorySubsystemsEpisode,
   type MemorySubsystemsMemoryEntry,
   type MemorySubsystemsMemoryEntryError,
+  type MemorySubsystemsUserModelItem,
+  type MemorySubsystemsUserModelError,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -74,6 +76,8 @@ export const ARCHITECTURE_FLOW = `graph LR
 
     F1 --> D1
     G1 --> D1
+    F1 --> U1[user_model projection]
+    U1 --> D1
     D1 --> UI[기억 서브시스템 패널]
 
     %% dark-fantasy palette (mermaid can't use CSS vars): store=bg/mold,
@@ -82,7 +86,7 @@ export const ARCHITECTURE_FLOW = `graph LR
     classDef action fill:#16210f,stroke:#5a7a3a,color:#e8d8b8
     classDef ui fill:#2a1d08,stroke:#c4461a,color:#e8d8b8
     class F1,G1 store
-    class M1,M3,H1,H2,T2 action
+    class M1,M3,H1,H2,T2,U1 action
     class UI ui`
 
 const shortAgentLabel = (name: string) => {
@@ -530,6 +534,81 @@ function MemoryEntryRow({ entry }: { readonly entry: MemorySubsystemsMemoryEntry
   `
 }
 
+function UserModelRow({ item }: { readonly item: MemorySubsystemsUserModelItem }) {
+  const verifiedAt = item.last_verified_at ?? item.first_seen
+  return html`
+    <div
+      class="v2-monitoring-row grid grid-cols-[8rem_7rem_minmax(0,1fr)_7rem] items-start gap-2 border-b border-[var(--color-border-default)] px-2 py-2 text-xs last:border-b-0 max-md:grid-cols-[5.5rem_minmax(0,1fr)]"
+      role="listitem"
+      aria-label=${`${item.keeper} · ${item.kind} · ${item.claim}`}
+    >
+      <span class="truncate font-mono text-[var(--color-fg-muted)]" title=${item.keeper}>
+        ${item.keeper}
+      </span>
+      <span class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-center font-mono text-[var(--color-accent-fg)]">
+        ${item.kind}
+      </span>
+      <span class="min-w-0 text-[var(--color-fg-primary)] max-md:col-span-2" title=${item.source_ref}>
+        ${item.claim}
+      </span>
+      <span class="text-right font-mono text-[var(--color-fg-disabled)] max-md:hidden">
+        ${formatTimeAgo(verifiedAt * 1000)}
+      </span>
+    </div>
+  `
+}
+
+function UserModelPanel({
+  items,
+  total,
+  filtered,
+  errors,
+}: {
+  readonly items: readonly MemorySubsystemsUserModelItem[]
+  readonly total: number
+  readonly filtered: number
+  readonly errors?: readonly MemorySubsystemsUserModelError[]
+}) {
+  return html`
+    <section data-testid="user-model-projection" class="flex flex-col gap-2" aria-label=${`User model · ${items.length} rows`}>
+      <div class="flex flex-wrap items-center gap-2">
+        <h3 class="text-base font-semibold text-[var(--color-fg-muted)]">User model</h3>
+        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
+          memory_os preferences / constraints
+        </span>
+        <span class="ml-auto text-xs text-[var(--color-fg-muted)]">
+          total ${total} · filtered ${filtered} · shown ${items.length}
+        </span>
+      </div>
+      ${
+        errors && errors.length > 0
+          ? html`<div
+              role="alert"
+              class="rounded-[var(--r-1)] border border-[var(--warn-fg)] bg-[var(--warn-bg)] px-3 py-2 text-2xs text-[var(--color-fg-primary)]"
+            >
+              ${errors.length} user-model source${errors.length > 1 ? 's' : ''} unavailable
+            </div>`
+          : null
+      }
+      ${
+        items.length === 0
+          ? html`<div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 text-center text-sm text-[var(--color-fg-muted)]">
+              user model entries 없음
+            </div>`
+          : html`
+              <div
+                class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]"
+                role="list"
+                aria-label=${`${items.length} user model entries`}
+              >
+                ${items.map(item => html`<${UserModelRow} item=${item} />`)}
+              </div>
+            `
+      }
+    </section>
+  `
+}
+
 export function MemoryEntriesPanel({
   entries,
   visibleEntries,
@@ -693,6 +772,8 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
   const totalEntries = data?.memory_entries?.total ?? entries.length
   const filteredEntries = data?.memory_entries?.filtered ?? entries.length
   const knownMemoryKinds = data?.filters?.memory_kinds ?? Array.from(new Set(entries.map(e => e.kind))).sort()
+  const userModel = data?.user_model
+  const userModelItems = userModel?.items ?? []
   const visibleEntries = useMemo(
     () => filterMemoryEntries(entries, memoryKindFilter.value),
     [entries, memoryKindFilter.value],
@@ -766,6 +847,13 @@ export function MemorySubsystems({ focus }: MemorySubsystemsProps = {}) {
             : null
         }
       </section>
+
+      <${UserModelPanel}
+        items=${userModelItems}
+        total=${userModel?.total ?? userModelItems.length}
+        filtered=${userModel?.filtered ?? userModelItems.length}
+        errors=${userModel?.errors ?? []}
+      />
 
       ${
         showMemoryEntries

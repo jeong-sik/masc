@@ -462,6 +462,43 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
   })
 
+  it('resumes repeated same-message sends as distinct request ids', async () => {
+    const submittedAt = Date.UTC(2026, 5, 15, 9, 0, 0)
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: 'status?',
+      submittedAt,
+    })
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_2',
+      keeperName: 'echo',
+      message: 'status?',
+      submittedAt,
+    })
+    fetchQueuedKeeperMessageResult.mockImplementation(async (requestId: string) => ({
+      requestId,
+      keeperName: 'echo',
+      status: 'done',
+      ok: true,
+      result: { reply: requestId === 'kmsg_echo_1' ? 'first reply' : 'second reply' },
+    }))
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenCalledTimes(2)
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenNthCalledWith(1, 'kmsg_echo_1')
+    expect(fetchQueuedKeeperMessageResult).toHaveBeenNthCalledWith(2, 'kmsg_echo_2')
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    expect((keeperThreads.value.echo ?? []).map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', 'status?', 'delivered'],
+      ['assistant', 'first reply', 'delivered'],
+      ['user', 'status?', 'delivered'],
+      ['assistant', 'second reply', 'delivered'],
+    ])
+  })
+
   it('marks a recovered orphan request as lost instead of polling forever', async () => {
     upsertPendingKeeperChatRequest({
       requestId: 'kmsg_echo_1',

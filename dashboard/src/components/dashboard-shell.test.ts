@@ -88,7 +88,7 @@ describe('shouldRenderSurfaceLead', () => {
     },
   )
 
-  it.each(['monitoring', 'command', 'lab'] as const)(
+  it.each(['monitoring', 'command', 'lab', 'board'] as const)(
     'keeps the generic lead for %s (surface has no own header)',
     (tab) => {
       expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(true)

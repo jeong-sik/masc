@@ -1424,7 +1424,7 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
 // them — otherwise the screen shows a duplicate title: the generic <h2> nav
 // label stacked over the surface's own <h1>. When a surface component renders
 // its own top-of-body header, add its TabId here (keep this in sync with the
-// route registry). Verified against the v2 design audit (2026-06-21): the
+// route registry). Verified against the v2 design audit (2026-06-20): the
 // design gives every surface a single bespoke header plus a slim top-bar crumb,
 // with no generic lead.
 //

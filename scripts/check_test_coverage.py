@@ -5,7 +5,7 @@ Checks that code changes to covered paths have accompanying test changes.
 
 Rules (checked for every non-skipped PR that touches covered code paths):
 - added_code_lines > 10 && test_files == 0 -> warn (enforced)
-- changed_code_files > 3 - changed_code_files > 3 && test_files == 0 -> warn (enforced)- changed_code_files > 3 && test_files == 0 -> warn (enforced) added_lines > 0 - changed_code_files > 3 && test_files == 0 -> warn (enforced)- changed_code_files > 3 && test_files == 0 -> warn (enforced) test_files == 0 -> warn (enforced)
+- changed_code_files > 3 && added_code_lines > 0 && test_files == 0 -> warn (enforced)
 
 Opt-out mechanisms (checked in order):
 1. Branch name contains "ci-skip" — workflow if: guard

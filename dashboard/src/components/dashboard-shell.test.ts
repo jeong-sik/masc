@@ -81,13 +81,19 @@ describe('shouldRenderSurfaceLead', () => {
     })).toBe(false)
   })
 
-  it('keeps the generic lead for ordinary sectioned surfaces', () => {
-    expect(shouldRenderSurfaceLead({
-      tab: 'workspace',
-      params: { section: 'work' },
-      postId: null,
-    })).toBe(true)
-  })
+  it.each(['overview', 'approvals', 'fusion', 'workspace', 'logs', 'cockpit', 'settings'] as const)(
+    'suppresses the generic lead for %s (surface renders its own bespoke header)',
+    (tab) => {
+      expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(false)
+    },
+  )
+
+  it.each(['monitoring', 'command', 'lab', 'board'] as const)(
+    'keeps the generic lead for %s (surface has no own header)',
+    (tab) => {
+      expect(shouldRenderSurfaceLead({ tab, params: {}, postId: null })).toBe(true)
+    },
+  )
 })
 
 describe('summarizeAttentionPreview', () => {

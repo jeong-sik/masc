@@ -229,6 +229,9 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
          | Ok j -> true, j.Fusion_types.resolved_answer
          | Error e -> false, Printf.sprintf "judge failed: %s" e
        in
+       (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake와 무관하게 run
+          상태를 반영해야 하므로 wake 직전 무조건 호출. *)
+       Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok;
        wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok ~resolved_answer
          ~board_post_id:(Board.Post_id.to_string post.id);
        Ok ()

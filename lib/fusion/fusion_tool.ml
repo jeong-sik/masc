@@ -35,6 +35,9 @@ let append_chat_failure ~base_dir ~keeper ~run_id content =
   (* RFC-0266: 실패도 호출 키퍼를 ok=false로 깨워 "결과 안 옴" 폴링 대신 능동 통지한다
      (성공 경로의 fusion_sink.emit wake와 대칭). content가 실패 사유 라벨이 된다.
      wake는 자체 예외 안전하므로 chat append 실패와 독립적으로 시도된다. *)
+  (* RFC-0266 §7: registry를 Completed{ok=false}로 갱신(가시성). wake와 무관하게
+     run 상태를 반영해야 하므로 별도 호출(Running 키퍼만 깨우는 wake와 달리 무조건). *)
+  Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok:false;
   Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
     ~resolved_answer:content ~board_post_id:""
 
@@ -63,6 +66,11 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
         ; ("reason", `String (Fusion_types.deny_reason_label reason))
         ]
     | Fusion_types.Allow allowed ->
+      (* RFC-0266 §7: 진행중 가시성을 위해 fork 직전 run을 Running으로 등록한다
+         (sink/실패 경로가 Completed로 갱신). 등록은 부수효과 없는 in-memory 기록일
+         뿐, 키퍼를 깨우지 않는다(wake는 별개). *)
+      Fusion_run_registry.register_running Fusion_run_registry.global ~run_id ~keeper
+        ~preset ~started_at:now_unix;
       (* out-of-band: fiber fork → 키퍼 턴은 즉시 진행, 결과는 sink가 chat lane에.
          예산은 orchestrator가 원자적으로 소비한다. 배경 fiber 실패/거부/싱크
          실패는 동일한 chat lane에 기록해 started-but-failed 상태가 남지 않도록 한다.

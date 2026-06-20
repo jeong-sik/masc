@@ -3,12 +3,18 @@
 
 ## Unreleased
 
+
+## [0.19.47] - 2026-06-20
+
 ### Changed
 - `agent_sdk`: bumped the OAS runtime pin from `v0.207.3` (`57ed7272`) to
-  `v0.207.5` (`6fe842bf`, OAS `main` HEAD, release 0.207.5 #2140) and raised
-  the dependency floor to `>= 0.207.5` in `dune-project` / `masc.opam`.
-  Pin metadata, lock metadata, generated docs, and the API surface fingerprint
-  were refreshed for the new OAS release.
+  `v0.207.6` (`57371405`, OAS `main` HEAD, release 0.207.6 #2149) and raised
+  the dependency floor to `>= 0.207.6` in `dune-project` / `masc.opam`. The
+  pinned SHA is now the `v0.207.6` release-tag commit; the prior pin carried a
+  `v0.207.5` label but pointed at a post-tag `main` commit (`8a30a9a2`) rather
+  than the `v0.207.5` tag commit (`6fe842bf`), so this release restores the
+  tag-SHA invariant. Pin metadata, lock metadata, generated docs, and the API
+  surface fingerprint were refreshed for the new OAS release.
 
 ### Fixed
 - `runtime`: corrected a stale `runtime_toml.mli` doc comment that claimed the

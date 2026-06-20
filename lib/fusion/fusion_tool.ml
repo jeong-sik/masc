@@ -19,6 +19,17 @@ let append_chat_failure ~base_dir ~keeper ~run_id content =
      별도 "fusion/<run_id>" 스레드는 메인 오염을 막지 못하면서 한 run의 성공/실패만
      다른 lane으로 흩어지는 split-brain을 만든다. denied/sink_failed/aborted는 키퍼가
      다음 턴에 인지해야 할 운영 실패이므로 메인 lane이 옳다(run_id는 content에 포함). *)
+  (* RFC-0266 §7: 종료 상태(Completed{ok=false})를 *suspending append 이전* 에 확정한다.
+     [mark_completed]는 순수 in-memory CAS(suspension 없음)라 취소 컨텍스트에서도 안전한
+     반면, 아래 append는 Eio 파일 I/O라 셧다운/형제 fiber Switch.fail 시 Cancelled를
+     재전파(아래 with 분기)하며 함수를 빠져나간다. finalize를 append *뒤* 에 두면 그 경로에서
+     run이 registry([global], 서버 수명)에 "running"으로 남는다(prune는 Running을 evict 안 함
+     — fusion_run_registry.ml). 순수 프로세스 셧다운이면 global이 프로세스와 함께 소멸하므로,
+     *영구* 잔존은 프로세스가 살아남는 형제 Switch.fail/sub-switch 취소에 한한다. #21784는
+     orchestrator-level Cancelled(handle fork match)
+     만 막았고 이 내부 append window는 못 막았다. Denied/Sink_failed/aborted 종료 분기가 모두
+     이 함수를 경유하므로 같은 누수의 형제 경로다. *)
+  Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok:false;
   (try
      Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
      Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
@@ -26,7 +37,7 @@ let append_chat_failure ~base_dir ~keeper ~run_id content =
        ()
    with
    | Eio.Cancel.Cancelled _ as exn ->
-     (* 구조적 취소는 재전파. *)
+     (* 구조적 취소는 재전파. registry는 위에서 이미 Completed로 확정됨. *)
      raise exn
    | exn ->
      Log.Keeper.warn ~keeper_name:keeper
@@ -34,10 +45,9 @@ let append_chat_failure ~base_dir ~keeper ~run_id content =
        (Printexc.to_string exn));
   (* RFC-0266: 실패도 호출 키퍼를 ok=false로 깨워 "결과 안 옴" 폴링 대신 능동 통지한다
      (성공 경로의 fusion_sink.emit wake와 대칭). content가 실패 사유 라벨이 된다.
-     wake는 자체 예외 안전하므로 chat append 실패와 독립적으로 시도된다. *)
-  (* RFC-0266 §7: registry를 Completed{ok=false}로 갱신(가시성). wake와 무관하게
-     run 상태를 반영해야 하므로 별도 호출(Running 키퍼만 깨우는 wake와 달리 무조건). *)
-  Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok:false;
+     broadcast/wake도 suspending I/O다. append가 Cancelled를 재전파하면 여기 도달하지 못하나
+     (generic append 실패는 warn 후 계속 진행해 도달한다), registry는 위에서 이미 갱신됐으므로
+     어느 경우든 가시성은 보존된다. *)
   Fusion_sink.broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
   Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
     ~resolved_answer:content ~board_post_id:""

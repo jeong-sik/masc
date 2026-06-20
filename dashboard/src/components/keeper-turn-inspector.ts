@@ -49,6 +49,31 @@ export function initialTurnRowForTimestamp(
   return best && best.delta <= INITIAL_TURN_MATCH_WINDOW_SEC ? best.row : null
 }
 
+// RFC-0233 §7: exact turn join-key match, superseding the 30-min timestamp
+// window (§7.6 guard #3). [turnRef] is "<trace_id>#<absolute_turn>" minted
+// MASC-side and carried on the originating chat row / board post; split on the
+// LAST '#' (a trace_id may itself contain '#') and match trace_id +
+// absolute_turn exactly against the server turn records. A malformed key or a
+// turn not present in the loaded records returns null — never a fuzzy
+// fallback, so an exact key cannot mis-attribute.
+export function initialTurnRowForTurnRef(
+  rows: TurnRecordRow[],
+  turnRef?: string | null,
+): TurnRecordRow | null {
+  if (!turnRef || rows.length === 0) return null
+  const hash = turnRef.lastIndexOf('#')
+  if (hash <= 0 || hash === turnRef.length - 1) return null
+  const suffix = turnRef.slice(hash + 1)
+  if (!/^\d+$/.test(suffix)) return null
+  const trace = turnRef.slice(0, hash)
+  const turn = Number(suffix)
+  return (
+    rows.find(
+      row => row.record.trace_id === trace && row.record.absolute_turn === turn,
+    ) ?? null
+  )
+}
+
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   const gap = coverageGapDisplay(data)
   return html`
@@ -769,14 +794,19 @@ function TurnRow({
 export function KeeperTurnInspector({
   keeperName,
   initialTurnTimestamp,
+  initialTurnRef,
 }: {
   keeperName: string
   initialTurnTimestamp?: string | null
+  // RFC-0233 §7: exact turn join key from the originating chat row / board
+  // post. When present it supersedes [initialTurnTimestamp] (exact match, no
+  // window). Callers thread it as the turn_ref data flows (PR-C / follow-up).
+  initialTurnRef?: string | null
 }) {
   const resource = useManagedAsyncResource<TurnRecordsResponse | null>(null)
   const [selectedRow, setSelectedRow] = useState<TurnRecordRow | null>(null)
   const [initialMatchState, setInitialMatchState] = useState<'idle' | 'matched' | 'missed'>('idle')
-  const appliedInitialTurnTimestamp = useRef<string | null>(null)
+  const appliedInitialTurnKey = useRef<string | null>(null)
 
   useEffect(() => {
     void resource.load(async (signal) => {
@@ -791,30 +821,41 @@ export function KeeperTurnInspector({
   const rows = response?.entries ?? EMPTY_TURN_RECORD_ROWS
   // Server returns oldest-first; show newest first.
   const sorted = useMemo(() => [...rows].reverse(), [rows])
-  const initialMatchedRow = useMemo(
-    () => initialTurnRowForTimestamp(rows, initialTurnTimestamp),
-    [rows, initialTurnTimestamp],
-  )
+  const initialMatchedRow = useMemo(() => {
+    const exact = initialTurnRowForTurnRef(rows, initialTurnRef)
+    if (exact) return exact
+    // WORKAROUND (RFC-0233 §7.6 #3): legacy chat rows / board posts carry no
+    // turn_ref, so fall back to the 30-min timestamp window for those only.
+    // When a turn_ref IS present, a miss stays null — no fuzzy attribution.
+    // removal target: turn_ref backfilled onto persisted rows + populated by
+    // every producer (RFC-0233 follow-up).
+    if (initialTurnRef) return null
+    return initialTurnRowForTimestamp(rows, initialTurnTimestamp)
+  }, [rows, initialTurnRef, initialTurnTimestamp])
+
+  // Identity of the requested turn: the exact join key when available, else the
+  // timestamp. Drives the apply-once tracking below so either entry point works.
+  const initialTurnKey = initialTurnRef ?? initialTurnTimestamp ?? null
 
   useEffect(() => {
-    appliedInitialTurnTimestamp.current = null
+    appliedInitialTurnKey.current = null
     setInitialMatchState('idle')
     setSelectedRow(null)
-  }, [keeperName, initialTurnTimestamp])
+  }, [keeperName, initialTurnKey])
 
   useEffect(() => {
     if (
-      !initialTurnTimestamp
+      !initialTurnKey
       || rows.length === 0
-      || appliedInitialTurnTimestamp.current === initialTurnTimestamp
+      || appliedInitialTurnKey.current === initialTurnKey
     ) {
       return
     }
 
     setSelectedRow(initialMatchedRow)
     setInitialMatchState(initialMatchedRow ? 'matched' : 'missed')
-    appliedInitialTurnTimestamp.current = initialTurnTimestamp
-  }, [initialTurnTimestamp, initialMatchedRow, rows.length])
+    appliedInitialTurnKey.current = initialTurnKey
+  }, [initialTurnKey, initialMatchedRow, rows.length])
 
   if (resource.state.value.loading) {
     return html`<${LoadingState}>턴 레코드 불러오는 중...<//>`
@@ -855,7 +896,9 @@ export function KeeperTurnInspector({
             class="rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--color-bg-surface)] px-2 py-1.5 text-2xs text-[var(--color-fg-muted)] v2-monitoring-row"
             data-testid="turn-linked-empty"
           >
-            메시지 시각과 30분 이내의 turn record 없음. 리스트에서 직접 선택하세요.
+            ${initialTurnRef
+              ? '연결된 turn record를 찾지 못했습니다. 리스트에서 직접 선택하세요.'
+              : '메시지 시각과 30분 이내의 turn record 없음. 리스트에서 직접 선택하세요.'}
           </div>
         `
         : null}

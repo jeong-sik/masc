@@ -44,6 +44,27 @@ type accept_rejection_kind =
 val accept_rejection_kind_to_string : accept_rejection_kind -> string
 val accept_rejection_kind_of_string : string -> accept_rejection_kind option
 
+type accept_response_shape =
+  | Accept_response_empty
+  | Accept_response_thinking_only
+  | Accept_response_blank_text_only
+  | Accept_response_tool_result_only
+  | Accept_response_media_only
+  | Accept_response_mixed_without_deliverable_content
+  | Accept_response_has_deliverable_content
+
+val accept_response_shape_to_string : accept_response_shape -> string
+val accept_response_shape_of_string : string -> accept_response_shape option
+val accept_response_shape_of_agent_sdk :
+  Agent_sdk.Response_shape.content_shape -> accept_response_shape
+
+type tool_progress_effect =
+  | Tool_effect_read_only
+  | Tool_effect_mutating
+
+val tool_progress_effect_to_string : tool_progress_effect -> string
+val tool_progress_effect_of_string : string -> tool_progress_effect option
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -64,6 +85,8 @@ type masc_internal_error =
       scope : string;
       model : string option;
       reason_kind : accept_rejection_kind option;
+      response_shape : accept_response_shape option;
+      last_tool_effect : tool_progress_effect option;
       reason : string;
     }
   | Admission_queue_timeout of {
@@ -115,6 +138,9 @@ val summary_of_masc_internal_error : masc_internal_error -> string option
 val kind_of_masc_internal_error : masc_internal_error -> string
 
 val runtime_id_of_masc_internal_error : masc_internal_error -> string
+
+val accept_rejection_has_read_only_no_progress_retry_hint :
+  masc_internal_error -> bool
 
 val sdk_error_of_masc_internal_error :
   masc_internal_error -> Agent_sdk.Error.sdk_error

@@ -144,6 +144,11 @@ let run_model_by_label
                                   (Boundary_redaction.to_string
                                      Boundary_redaction.runtime_model_label);
                               reason_kind;
+                              response_shape =
+                                Option.map
+                                  accept_response_shape_of_agent_sdk
+                                  rejection.response_shape;
+                              last_tool_effect = None;
                               reason = rejection.reason;
                             }))
                 | Error e -> Error e))

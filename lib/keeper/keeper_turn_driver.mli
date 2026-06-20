@@ -26,6 +26,10 @@ include
       Keeper_internal_error.runtime_exhaustion_reason
      and type accept_rejection_kind =
       Keeper_internal_error.accept_rejection_kind
+     and type accept_response_shape =
+      Keeper_internal_error.accept_response_shape
+     and type tool_progress_effect =
+      Keeper_internal_error.tool_progress_effect
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Provider error helpers} *)

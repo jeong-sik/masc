@@ -288,6 +288,12 @@ max-context = 1024
 tools-support = true
 thinking-support = true
 
+[models.no_tool]
+api-name = "no-tool"
+max-context = 1024
+tools-support = false
+thinking-support = true
+
 [models.b]
 api-name = "b"
 max-context = 1024
@@ -301,6 +307,8 @@ tools-support = true
 thinking-support = true
 
 [same.a]
+
+[same.no_tool]
 
 [same.b]
 
@@ -332,12 +340,14 @@ let provider_unavailable =
        { provider = "server-error-test"; detail = "HTTP 503 retry-after exhausted" })
 ;;
 
-let read_only_no_progress_err =
+let read_only_no_progress_err ~scope =
   KTD.sdk_error_of_masc_internal_error
     (KTD.Accept_rejected
-       { scope = "same.b"
+       { scope
        ; model = None
        ; reason_kind = Some KTD.Accept_no_usable_progress
+       ; response_shape = Some KTD.Accept_response_thinking_only
+       ; last_tool_effect = Some KTD.Tool_effect_read_only
        ; reason =
            "response rejected by accept (runtime=same.b): shape=thinking_only; \
             stop_reason=end_turn; last_tool=WebFetch; last_tool_effect=read_only"
@@ -479,7 +489,8 @@ let test_provider_unavailable_records_server_error_cooldown () =
 
 let test_read_only_no_progress_rotates_to_default_runtime () =
   init_rate_limit_pool_runtime ();
-  (match EC.recoverable_runtime_failure_reason read_only_no_progress_err with
+  let err = read_only_no_progress_err ~scope:"same.b" in
+  (match EC.recoverable_runtime_failure_reason err with
    | Some EC.Read_only_no_progress -> ()
    | Some reason ->
      Alcotest.failf
@@ -491,7 +502,7 @@ let test_read_only_no_progress_rotates_to_default_runtime () =
       ~base_runtime:"same.b"
       ~effective_runtime:"same.b"
       ~attempted_runtimes:[ "same.b" ]
-      read_only_no_progress_err
+      err
   with
   | Some { EC.next_runtime = "same.a"; fallback_reason = EC.Read_only_no_progress } ->
     ()
@@ -501,6 +512,27 @@ let test_read_only_no_progress_rotates_to_default_runtime () =
       (EC.degraded_retry_reason_to_string fallback_reason)
       next_runtime
   | None -> Alcotest.fail "expected read-only no-progress rotation"
+;;
+
+let test_read_only_no_progress_default_runtime_uses_tool_capable_candidate () =
+  init_rate_limit_pool_runtime ();
+  let err = read_only_no_progress_err ~scope:"same.a" in
+  match
+    EC.degraded_rotation_after_recoverable_error
+      ~base_runtime:"same.a"
+      ~effective_runtime:"same.a"
+      ~attempted_runtimes:[ "same.a" ]
+      err
+  with
+  | Some { EC.next_runtime = "same.b"; fallback_reason = EC.Read_only_no_progress } ->
+    ()
+  | Some { next_runtime; fallback_reason } ->
+    Alcotest.failf
+      "expected read_only_no_progress -> same.b, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None ->
+    Alcotest.fail "expected read-only no-progress to rotate to a tool-capable runtime"
 ;;
 
 let () =
@@ -563,6 +595,10 @@ let () =
             "read-only no-progress accept rejection rotates to default runtime"
             `Quick
             test_read_only_no_progress_rotates_to_default_runtime
+        ; Alcotest.test_case
+            "default runtime read-only no-progress uses tool-capable candidate"
+            `Quick
+            test_read_only_no_progress_default_runtime_uses_tool_capable_candidate
         ] )
     ]
 ;;

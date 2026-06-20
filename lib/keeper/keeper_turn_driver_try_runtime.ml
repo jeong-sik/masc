@@ -68,30 +68,10 @@ let is_accept_rejected_sdk_error err =
 
 let accept_no_progress_read_only_should_try_next err =
   match Keeper_internal_error.classify_masc_internal_error err with
-  | Some
-      (Keeper_internal_error.Accept_rejected
-        { reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
-        ; reason
-        ; _
-        }) ->
-    String_util.contains_substring reason "shape=thinking_only"
-    && String_util.contains_substring reason "last_tool_effect=read_only"
-  | Some
-      ( Keeper_internal_error.Accept_rejected _
-      | Keeper_internal_error.Runtime_exhausted _
-      | Keeper_internal_error.Capacity_backpressure _
-      | Keeper_internal_error.Resumable_cli_session _
-      | Keeper_internal_error.Admission_queue_timeout _
-      | Keeper_internal_error.Admission_queue_rejected _
-      | Keeper_internal_error.Turn_timeout _
-      | Keeper_internal_error.Provider_timeout _
-      | Keeper_internal_error.Max_tokens_ceiling_violation _
-      | Keeper_internal_error.Ambiguous_post_commit _
-      | Keeper_internal_error.Internal_unhandled_exception _
-      | Keeper_internal_error.Internal_bridge_exception _
-      | Keeper_internal_error.Internal_contract_rejected _ )
-  | None ->
-    false
+  | Some err ->
+    Keeper_internal_error.accept_rejection_has_read_only_no_progress_retry_hint
+      err
+  | None -> false
 
 let http_status_of_http_error = function
   | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
@@ -221,9 +201,13 @@ let run
          on_success ~provider_key:(Runtime_candidate.health_key candidate);
          Ok run_result
        | Ok run_result ->
+         let last_tool_context =
+           Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
+             run_result
+         in
          let err =
            Keeper_turn_driver_try_provider.accept_rejected_error
-             ~progress_context:None
+             ~last_tool_context
              ~runtime_id:ctx.error_runtime_id
              ~response:run_result.Runtime_agent.response
          in

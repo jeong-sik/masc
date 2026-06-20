@@ -24,6 +24,7 @@ type accept_rejection_kind =
 type accept_rejection =
   { kind : accept_rejection_kind
   ; reason : string
+  ; response_shape : Agent_sdk.Response_shape.content_shape option
   }
 
 let accept_rejection_kind_to_string = function
@@ -33,10 +34,12 @@ let accept_rejection_kind_to_string = function
 
 let response_accept_rejection (response : Agent_sdk.Types.api_response) =
   let shape = Agent_sdk.Response_shape.summarize response in
+  let response_shape = Agent_sdk.Response_shape.content_shape response shape in
   if not (Agent_sdk.Response_shape.has_deliverable_content shape) then
     Some
       { kind = No_usable_progress
       ; reason = Agent_sdk.Response_shape.diagnostic_summary response
+      ; response_shape = Some response_shape
       }
   else None
 ;;
@@ -52,12 +55,15 @@ let accept_rejection_of_response ~runtime_id response =
           rejection.reason
     }
   | None ->
+    let shape = Agent_sdk.Response_shape.summarize response in
     { kind = Predicate_rejected
     ; reason =
         Printf.sprintf
           "response rejected by accept (runtime=%s); \
            built_in_progress_contract=accepted"
           runtime_id
+    ; response_shape =
+        Some (Agent_sdk.Response_shape.content_shape response shape)
     }
 ;;
 

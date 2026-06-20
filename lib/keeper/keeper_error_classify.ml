@@ -271,30 +271,9 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
 let is_thinking_only_read_only_accept_rejection
     (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some
-      (Keeper_turn_driver.Accept_rejected
-        { reason_kind = Some Keeper_turn_driver.Accept_no_usable_progress
-        ; reason
-        ; _
-        }) ->
-    String_util.contains_substring reason "shape=thinking_only"
-    && String_util.contains_substring reason "last_tool_effect=read_only"
-  | Some
-      ( Keeper_turn_driver.Accept_rejected _
-      | Keeper_turn_driver.Runtime_exhausted _
-      | Keeper_turn_driver.Capacity_backpressure _
-      | Keeper_turn_driver.Resumable_cli_session _
-      | Keeper_turn_driver.Admission_queue_rejected _
-      | Keeper_turn_driver.Admission_queue_timeout _
-      | Keeper_turn_driver.Turn_timeout _
-      | Keeper_turn_driver.Provider_timeout _
-      | Keeper_turn_driver.Max_tokens_ceiling_violation _
-      | Keeper_turn_driver.Ambiguous_post_commit _
-      | Keeper_turn_driver.Internal_unhandled_exception _
-      | Keeper_turn_driver.Internal_bridge_exception _
-      | Keeper_turn_driver.Internal_contract_rejected _ )
-  | None ->
-    false
+  | Some err ->
+    Keeper_turn_driver.accept_rejection_has_read_only_no_progress_retry_hint err
+  | None -> false
 
 (* Classification of why a degraded retry is being attempted.  Closed set
    covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
@@ -565,6 +544,7 @@ let runtime_catalog_names () =
 
 let default_degraded_rotation_candidates
     ~catalog_names
+    ~(fallback_reason : degraded_retry_reason option)
     ~(base_runtime : string) =
   let normalized_base = normalized_runtime_id ~catalog_names base_runtime in
   let default_runtime =
@@ -574,7 +554,30 @@ let default_degraded_rotation_candidates
     normalized_runtime_id ~catalog_names
       (Runtime.get_default_runtime_id ())
   in
-  [ normalized_base; default_runtime; phase_recovery_runtime ]
+  let default_candidates = [ normalized_base; default_runtime; phase_recovery_runtime ] in
+  match fallback_reason with
+  | Some Read_only_no_progress ->
+    let tool_capable =
+      Runtime.get_runtimes ()
+      |> List.filter (fun (runtime : Runtime.t) -> runtime.model.tools_support)
+      |> List.map (fun (runtime : Runtime.t) ->
+             normalized_runtime_id ~catalog_names runtime.id)
+    in
+    dedupe_keep_order (default_candidates @ tool_capable)
+  | Some
+      ( Hard_quota
+      | Resumable_cli_session
+      | Admission_queue_timeout
+      | Provider_timeout
+      | Turn_timeout
+      | Runtime_candidates_filtered
+      | Runtime_exhausted
+      | Capacity_backpressure
+      | Rate_limit
+      | Server_error
+      | Auth_error )
+  | None ->
+    default_candidates
 
 let normalize_rotation_candidates ~catalog_names candidates =
   candidates
@@ -586,6 +589,7 @@ let normalize_rotation_candidates ~catalog_names candidates =
 
 let degraded_rotation_candidates
     ~catalog_names
+    ~(fallback_reason : degraded_retry_reason)
     ~(fallback_hint : string option)
     ~(base_runtime : string)
     ~(effective_runtime : string) =
@@ -593,7 +597,10 @@ let degraded_rotation_candidates
     normalized_runtime_id ~catalog_names effective_runtime
   in
   let raw_candidates =
-    default_degraded_rotation_candidates ~catalog_names ~base_runtime
+    default_degraded_rotation_candidates
+      ~catalog_names
+      ~fallback_reason:(Some fallback_reason)
+      ~base_runtime
   in
   let fallback_hint_candidate =
     match fallback_hint with
@@ -669,6 +676,7 @@ let degraded_rotation_after_recoverable_error
       let candidates =
         degraded_rotation_candidates
           ~catalog_names
+          ~fallback_reason
           ~fallback_hint
           ~base_runtime ~effective_runtime
       in

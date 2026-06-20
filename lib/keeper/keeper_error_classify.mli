@@ -158,7 +158,9 @@ val degraded_retry_after_recoverable_error :
 
 (** Returns the next untried runtime in the same-turn recovery group for a
     whole-runtime failure. Uses the default degraded rotation candidate set
-    (base/default/phase-recovery).
+    (base/default/phase-recovery). Read-only no-progress accept rejections also
+    append configured tool-capable runtimes so a default-runtime
+    thinking-only response can still rotate to another safe tool-capable model.
 
     [fallback_hint], when provided, is prepended to the candidate list so
     that single-provider profiles can declare an immediate escalation
@@ -173,8 +175,9 @@ val degraded_retry_after_recoverable_error :
     filtering is applied. Non-contract transient infrastructure errors
     (provider timeout, server error, capacity backpressure) allow cycling
     through candidates again when all are exhausted, because the same runtime may
-    succeed on a subsequent attempt. Contract violations and quota/rate-limit
-    classes cap rotation.
+    succeed on a subsequent attempt. Contract violations, read-only no-progress
+    accept rejections, and quota/rate-limit classes cap rotation after the
+    candidate set is exhausted.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?credential_pool_of_runtime_id:(string -> string option) ->

@@ -1419,10 +1419,36 @@ export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
     && routeState.params.keeper.trim() !== ''
 }
 
-// Surfaces that render their own primary header and therefore do not need the
-// generic dashboard section lead above them. Keep this in sync with the route
-// registry; currently only the Connectors prototype surface uses its own header.
-const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set(['connectors'])
+// Surfaces that render their own primary header (a bespoke per-surface title
+// block) and therefore must NOT get the generic dashboard SurfaceLead above
+// them — otherwise the screen shows a duplicate title: the generic <h2> nav
+// label stacked over the surface's own <h1>. When a surface component renders
+// its own top-of-body header, add its TabId here (keep this in sync with the
+// route registry). Verified against the v2 design audit (2026-06-21): the
+// design gives every surface a single bespoke header plus a slim top-bar crumb,
+// with no generic lead.
+//
+//   overview   → overview/overview.ts  <header class="ov-head">      <h1>운영 개요</h1>
+//   approvals  → approvals-surface.ts  <header class="ov-head">      <h1>승인 · HITL 큐</h1>
+//   fusion     → fusion-surface.ts     <header class="ov-head fus-head"> <h1>Fusion</h1>
+//   workspace  → work.ts               <header class="wk-head">      <h1>작업 · 목표</h1>
+//   logs       → logs.ts               <header class="v2-logs-head">  <h1>이벤트 로그</h1>
+//   cockpit    → cockpit/cockpit.ts    <header class="cp-head">      <h1>Cockpit</h1>
+//   settings   → settings-surface.ts   <header class="set-content-h"> <h1>…</h1>
+//   connectors → connector-status.ts   (prototype surface, own header)
+//
+// Surfaces WITHOUT their own header (monitoring, command, lab, board) keep the
+// generic SurfaceLead, which supplies their title.
+const SURFACE_OWN_LEAD_IDS: ReadonlySet<TabId> = new Set([
+  'overview',
+  'approvals',
+  'fusion',
+  'workspace',
+  'logs',
+  'cockpit',
+  'settings',
+  'connectors',
+])
 
 export function shouldRenderSurfaceLead(routeState: RouteState): boolean {
   if (isKeeperDetailDashboardRoute(routeState)) return false

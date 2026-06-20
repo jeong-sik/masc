@@ -60,6 +60,7 @@
   keeper_tool_persona_runtime
   keeper_model_labels
   keeper_fs
+  keeper_event_queue_persistence
   keeper_identity
   keeper_current_task_reconcile
   keeper_checkpoint_store

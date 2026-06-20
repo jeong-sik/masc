@@ -387,11 +387,17 @@ let find_stats_row name rows =
     (fun json -> json |> member "name" |> to_string = name)
     rows
 
-let test_persistence_loads_and_saves_pending_votes () =
-  with_temp_dir "thompson-persistence" @@ fun base_path ->
+let stats_path_for_base_path base_path =
   let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
   Fs_compat.mkdir_p masc_dir;
-  let path = Filename.concat masc_dir "autonomy_stats.jsonl" in
+  Filename.concat masc_dir "autonomy_stats.jsonl"
+
+let stats_rows path =
+  if Fs_compat.file_exists path then Fs_compat.load_jsonl path else []
+
+let test_persistence_loads_and_saves_pending_votes () =
+  with_temp_dir "thompson-persistence" @@ fun base_path ->
+  let path = stats_path_for_base_path base_path in
   let loaded_agent = "persist-load-agent" in
   let pending_agent = "persist-pending-agent" in
   let existing =
@@ -428,9 +434,7 @@ let test_persistence_loads_and_saves_pending_votes () =
 
 let test_persistence_load_skips_corrupt_and_nameless_rows () =
   with_temp_dir "thompson-corrupt-persistence" @@ fun base_path ->
-  let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
-  Fs_compat.mkdir_p masc_dir;
-  let path = Filename.concat masc_dir "autonomy_stats.jsonl" in
+  let path = stats_path_for_base_path base_path in
   let valid_agent = "persist-valid-after-corrupt" in
   let valid =
     `Assoc
@@ -491,6 +495,56 @@ let test_persistence_load_skips_corrupt_and_nameless_rows () =
   check bool "schema mismatch row skipped" false
     (List.mem "persist-schema-mismatch" loaded_names)
 
+let test_persistence_base_path_switch_replaces_state () =
+  with_temp_dir "thompson-persistence-a" @@ fun base_a ->
+  with_temp_dir "thompson-persistence-b" @@ fun base_b ->
+  let path_a = stats_path_for_base_path base_a in
+  let path_b = stats_path_for_base_path base_b in
+  let agent_a = "persist-base-a-agent" in
+  let pending_a = "persist-base-a-pending" in
+  let agent_b = "persist-base-b-agent" in
+  let existing_a =
+    `Assoc
+      [
+        ("name", `String agent_a);
+        ("alpha", `Float 5.0);
+        ("beta", `Float 1.0);
+        ("selections", `Int 3);
+        ("last_selected_at", `Float 20.0);
+        ("total_votes_up", `Int 2);
+        ("total_votes_down", `Int 0);
+        ("posts_created", `Int 0);
+        ("comments_created", `Int 0);
+        ("skips", `Int 0);
+        ("guard_penalties_total", `Int 0);
+        ("updated_at", `Float 21.0);
+      ]
+  in
+  Fs_compat.save_file path_a (Yojson.Safe.to_string existing_a ^ "\n");
+  Thompson_sampling.set_base_path base_a;
+  Thompson_sampling.load_stats ();
+  check bool "base A row loaded" true
+    (Option.is_some (find_stats_row agent_a (stats_rows path_a)));
+  Thompson_sampling.record_vote ~agent_name:pending_a ~direction:`Up;
+  Thompson_sampling.set_base_path base_b;
+  Thompson_sampling.load_stats ();
+  let loaded_names =
+    Thompson_sampling.get_all_stats ()
+    |> List.map (fun (s : Thompson_sampling.agent_stats) -> s.name)
+  in
+  check bool "base A loaded row cleared after switching base" false
+    (List.mem agent_a loaded_names);
+  check bool "base A pending row cleared after switching base" false
+    (List.mem pending_a loaded_names);
+  Thompson_sampling.record_selection ~agent_name:agent_b;
+  let rows_b = stats_rows path_b in
+  check bool "base B file contains only B row" true
+    (Option.is_some (find_stats_row agent_b rows_b));
+  check bool "base B file does not inherit A loaded row" false
+    (Option.is_some (find_stats_row agent_a rows_b));
+  check bool "base B file does not inherit A pending row" false
+    (Option.is_some (find_stats_row pending_a rows_b))
+
 (** {1 Test Runner} *)
 
 let () =
@@ -546,5 +600,7 @@ let () =
         test_persistence_loads_and_saves_pending_votes;
       test_case "load skips corrupt and nameless rows" `Quick
         test_persistence_load_skips_corrupt_and_nameless_rows;
+      test_case "base path switch replaces loaded state" `Quick
+        test_persistence_base_path_switch_replaces_state;
     ];
   ]

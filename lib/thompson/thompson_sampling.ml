@@ -75,9 +75,21 @@ let ts_mu = Eio.Mutex.create ()
 let with_ts_rw f = Eio_guard.with_mutex ts_mu f
 let with_ts_ro f = Eio_guard.with_mutex_ro ts_mu f
 
+let clear_in_memory_stats_unlocked () =
+  Hashtbl.clear stats_table;
+  Hashtbl.clear pending_votes
+;;
+
 (** Set base path for stats storage. Call during server init. *)
 let set_base_path path =
-  with_ts_rw (fun () -> base_path_ref := Some path)
+  with_ts_rw (fun () ->
+    let changed =
+      match !base_path_ref with
+      | Some current -> not (String.equal current path)
+      | None -> true
+    in
+    if changed then clear_in_memory_stats_unlocked ();
+    base_path_ref := Some path)
 
 (** Stats file path — uses cluster base_path, not execution directory *)
 let stats_path () =
@@ -320,6 +332,13 @@ let apply_vote_counts ~decay (s : agent_stats) ~votes_up ~votes_down =
 
 (** {1 Persistence} *)
 
+let replace_stats_snapshot parsed =
+  with_ts_rw (fun () ->
+    clear_in_memory_stats_unlocked ();
+    List.iter (fun s -> Hashtbl.replace stats_table s.name s) parsed;
+    Hashtbl.length stats_table)
+;;
+
 let load_stats () =
   let path = stats_path () in
   if Fs_compat.file_exists path then begin
@@ -345,9 +364,7 @@ let load_stats () =
         ) entries
       in
       let count =
-        with_ts_rw (fun () ->
-          List.iter (fun s -> Hashtbl.replace stats_table s.name s) parsed;
-          Hashtbl.length stats_table)
+        replace_stats_snapshot parsed
       in
       Log.Metrics.debug "thompson sampling loaded stats for %d agents" count
     with
@@ -355,6 +372,9 @@ let load_stats () =
     | e ->
       Log.Thompson.error "Error loading stats: %s"
         (Printexc.to_string e)
+  end else begin
+    let count = replace_stats_snapshot [] in
+    Log.Metrics.debug "thompson sampling loaded stats for %d agents" count
   end
 
 let stats_snapshot_for_persistence () =

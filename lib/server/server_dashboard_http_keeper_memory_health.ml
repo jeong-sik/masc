@@ -5,6 +5,7 @@
     /api/v1/dashboard/keeper-memory-health endpoint.
 
     Data sources:
+    - [Config_dir_resolver.keepers_dir_for_base_path] for request-scoped paths.
     - [Keeper_memory_os_io.list_fact_store_keeper_ids] for the keeper list.
     - [Keeper_memory_os_io.read_facts_all] and file stat for facts count/bytes.
     - [Keeper_memory_os_io.events_path] + file stat for events bytes.
@@ -60,19 +61,23 @@ let count_external_ref_facts facts =
     facts
 ;;
 
-let keeper_health ~now keeper_id =
+let keeper_health ~keepers_dir ~now keeper_id =
   let facts_count, external_ref_count =
     (* [read_facts_all] raises on malformed JSONL — treated as a read failure
        for this keeper; the caller catches and skips it. *)
-    let fs = Keeper_memory_os_io.read_facts_all ~keeper_id in
+    let fs = Keeper_memory_os_io.read_facts_all ~keepers_dir ~keeper_id in
     List.length fs, count_external_ref_facts fs
   in
-  let facts_bytes = file_size_bytes (Keeper_memory_os_io.facts_path ~keeper_id) in
-  let events_p = Keeper_memory_os_io.events_path ~keeper_id in
+  let facts_bytes =
+    file_size_bytes (Keeper_memory_os_io.facts_path ~keepers_dir ~keeper_id)
+  in
+  let events_p = Keeper_memory_os_io.events_path ~keepers_dir ~keeper_id in
   let events_bytes = file_size_bytes events_p in
   (* dry_run keeps the scan read-only: it reports what TTL-expiry + dedup WOULD
      prune without rewriting the store. *)
-  let gc_report = Keeper_memory_os_gc.run_gc ~dry_run:true ~keeper_id ~now () in
+  let gc_report =
+    Keeper_memory_os_gc.run_gc ~keepers_dir ~dry_run:true ~keeper_id ~now ()
+  in
   { keeper_id
   ; facts = facts_count
   ; facts_bytes
@@ -100,16 +105,17 @@ let keeper_health_to_json h : Yojson.Safe.t =
     ]
 ;;
 
-let keeper_memory_health_http_json () : Yojson.Safe.t =
+let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   (* NDT-OK: one wall-clock instant for the whole snapshot — used as the
      generated_at timestamp and as the [now] each per-keeper dry-run GC scans
      against; no retention or control logic depends on the exact value. *)
   let now = Unix.gettimeofday () in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let cadence_counter_entries = Keeper_librarian_runtime.cadence_counter_entries () in
   let entries =
-    Keeper_memory_os_io.list_fact_store_keeper_ids ()
+    Keeper_memory_os_io.list_fact_store_keeper_ids ~keepers_dir ()
     |> List.filter_map (fun keeper_id ->
-      match keeper_health ~now keeper_id with
+      match keeper_health ~keepers_dir ~now keeper_id with
       | h -> Some h
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception exn ->

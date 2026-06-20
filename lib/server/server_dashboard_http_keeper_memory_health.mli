@@ -4,4 +4,4 @@
     statistics, and the fleet-wide librarian cadence counter for the
     /api/v1/dashboard/keeper-memory-health endpoint. *)
 
-val keeper_memory_health_http_json : unit -> Yojson.Safe.t
+val keeper_memory_health_http_json : base_path:string -> Yojson.Safe.t

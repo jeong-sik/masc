@@ -612,12 +612,14 @@ let add_routes ~sw ~clock router =
            request reqd
        else with_public_read handler request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-memory-health" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let cache_key = "keeper_memory_health" in
+       with_public_read (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let cache_key = Printf.sprintf "keeper_memory_health:%s" base_path in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ()))
+               Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json
+                 ~base_path))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

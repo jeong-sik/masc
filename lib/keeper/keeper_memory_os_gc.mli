@@ -25,7 +25,8 @@ val ttl_expired : now:float -> fact -> bool
     malformed JSONL row raises [Fact_store_corrupt] and leaves the store
     untouched rather than dropping the bad row and overwriting the survivors. *)
 val run_gc
-  :  ?dry_run:bool
+  :  ?keepers_dir:string
+  -> ?dry_run:bool
   -> keeper_id:string
   -> now:float
   -> unit

@@ -555,6 +555,67 @@ let test_store_no_live_no_collision () =
   | _ -> fail "expected Ok (Some _) when there is no live store to collide with"
 
 (* ================================================================ *)
+(* resolve_record_verdicts_evaluator — cross-model guard            *)
+(* ================================================================ *)
+
+let test_evaluator_not_recording_passthrough () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:false
+      ~generator_runtime:"generator" ~evaluator_runtime:(Some " judge ")
+      ~cross_verifier_runtime:None
+  with
+  | Ok (Some id) -> check string "passthrough" " judge " id
+  | _ -> fail "expected non-recording path to preserve evaluator_runtime"
+
+let test_evaluator_requires_cross_verifier () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"generator" ~evaluator_runtime:None
+      ~cross_verifier_runtime:None
+  with
+  | Error msg ->
+    check bool "mentions cross_verifier" true (contains ~sub:"cross_verifier" msg)
+  | Ok _ -> fail "expected Error when cross_verifier is missing"
+
+let test_evaluator_rejects_default_same_as_generator () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"local.json" ~evaluator_runtime:None
+      ~cross_verifier_runtime:(Some " local.json ")
+  with
+  | Error msg ->
+    check bool "mentions distinct" true (contains ~sub:"distinct" msg);
+    check bool "mentions --runtime" true (contains ~sub:"--runtime" msg)
+  | Ok _ -> fail "expected Error when default cross_verifier equals generator"
+
+let test_evaluator_accepts_default_distinct_cross_verifier () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"generator" ~evaluator_runtime:None
+      ~cross_verifier_runtime:(Some "judge")
+  with
+  | Ok None -> ()
+  | _ -> fail "expected Ok None for distinct default cross_verifier"
+
+let test_evaluator_accepts_explicit_same_model_override () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"local.json" ~evaluator_runtime:(Some " local.json ")
+      ~cross_verifier_runtime:(Some "local.json")
+  with
+  | Ok (Some id) -> check string "trimmed explicit evaluator" "local.json" id
+  | _ -> fail "expected explicit same-model evaluator override to be accepted"
+
+let test_evaluator_rejects_empty_explicit_override () =
+  match
+    Cal.resolve_record_verdicts_evaluator ~record_verdicts:true
+      ~generator_runtime:"generator" ~evaluator_runtime:(Some "  ")
+      ~cross_verifier_runtime:(Some "judge")
+  with
+  | Error msg -> check bool "mentions empty" true (contains ~sub:"empty" msg)
+  | Ok _ -> fail "expected Error for empty explicit evaluator runtime"
+
+(* ================================================================ *)
 (* Test Suite                                                        *)
 (* ================================================================ *)
 
@@ -599,6 +660,18 @@ let () =
       test_case "rejects live store child" `Quick test_store_rejects_live_child;
       test_case "accepts isolated" `Quick test_store_accepts_isolated;
       test_case "no live store -> no collision" `Quick test_store_no_live_no_collision;
+    ];
+    "record_verdicts_evaluator", [
+      test_case "not recording passthrough" `Quick test_evaluator_not_recording_passthrough;
+      test_case "requires cross verifier" `Quick test_evaluator_requires_cross_verifier;
+      test_case "rejects default same as generator" `Quick
+        test_evaluator_rejects_default_same_as_generator;
+      test_case "accepts default distinct cross verifier" `Quick
+        test_evaluator_accepts_default_distinct_cross_verifier;
+      test_case "accepts explicit same-model override" `Quick
+        test_evaluator_accepts_explicit_same_model_override;
+      test_case "rejects empty explicit override" `Quick
+        test_evaluator_rejects_empty_explicit_override;
     ];
     "oas_conversion", [
       test_case "approve verdict" `Quick test_to_harness_verdict_approve;

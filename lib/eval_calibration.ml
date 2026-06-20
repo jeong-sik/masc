@@ -209,6 +209,39 @@ let resolve_record_verdicts_store ?cwd ~record_verdicts ~verdict_store_dir
     | Some d -> Ok (Some d)
 ;;
 
+let missing_cross_verifier_error =
+  "--record-verdicts without --evaluator-runtime requires [runtime].cross_verifier \
+   (routes.cross_verifier); configure it in runtime.toml or pass \
+   --evaluator-runtime ID"
+;;
+
+let resolve_record_verdicts_evaluator ~record_verdicts ~generator_runtime
+    ~evaluator_runtime ~cross_verifier_runtime : (string option, string) result =
+  if not record_verdicts then Ok evaluator_runtime
+  else
+    match evaluator_runtime with
+    | Some id ->
+      let id = String.trim id in
+      if id = "" then Error "--evaluator-runtime must not be empty"
+      else Ok (Some id)
+    | None -> (
+      let generator_runtime = String.trim generator_runtime in
+      match cross_verifier_runtime with
+      | Some id ->
+        let id = String.trim id in
+        if id = "" then Error missing_cross_verifier_error
+        else if String.equal id generator_runtime then
+          Error
+            (Printf.sprintf
+               "--record-verdicts without --evaluator-runtime requires \
+                [runtime].cross_verifier to be distinct from --runtime (%s); \
+                pass --evaluator-runtime ID to make same-model evaluation \
+                explicit."
+               generator_runtime)
+        else Ok None
+      | None -> Error missing_cross_verifier_error)
+;;
+
 (* ================================================================ *)
 (* Hashing                                                           *)
 (* ================================================================ *)

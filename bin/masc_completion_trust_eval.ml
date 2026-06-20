@@ -55,7 +55,8 @@ Options:
   --evaluator-runtime ID  runtime for the judge. Omit for cross-model separation
                      (the judge runs on routes.cross_verifier, a JSON-capable
                      model distinct from --runtime; --record-verdicts requires
-                     routes.cross_verifier when this flag is omitted);
+                     routes.cross_verifier when this flag is omitted; same-model
+                     verdicts require an explicit --evaluator-runtime);
                      cross_model_rate is only meaningful when the judge differs
                      from the generator.
   -h, --help         print this help
@@ -510,25 +511,6 @@ let runtime_toml_path ~base_path =
     Config_dir_resolver.runtime_toml_filename
 ;;
 
-let resolve_record_verdicts_evaluator ~(record_verdicts : bool)
-    ~(evaluator_runtime : string option) : string option =
-  if not record_verdicts then evaluator_runtime
-  else
-    match evaluator_runtime with
-    | Some id ->
-      let id = String.trim id in
-      if id = "" then error "--evaluator-runtime must not be empty"
-      else Some id
-    | None -> (
-      match Runtime.cross_verifier_runtime_id () with
-      | Some id when String.trim id <> "" -> None
-      | _ ->
-        error
-          "--record-verdicts without --evaluator-runtime requires \
-           [runtime].cross_verifier (routes.cross_verifier); configure it in \
-           runtime.toml or pass --evaluator-runtime ID")
-;;
-
 let () =
   let cfg = parse_args default_config (List.tl (Array.to_list Sys.argv)) in
   match EH.load_scenarios_from_file cfg.scenarios_path with
@@ -570,8 +552,15 @@ let () =
        exit 1
      | Ok () -> ());
     let evaluator_runtime =
-      resolve_record_verdicts_evaluator ~record_verdicts:cfg.record_verdicts
-        ~evaluator_runtime:cfg.evaluator_runtime
+      match
+        Cal.resolve_record_verdicts_evaluator
+          ~record_verdicts:cfg.record_verdicts
+          ~generator_runtime:cfg.runtime_id
+          ~evaluator_runtime:cfg.evaluator_runtime
+          ~cross_verifier_runtime:(Runtime.cross_verifier_runtime_id ())
+      with
+      | Ok v -> v
+      | Error msg -> error msg
     in
     (match verdict_store with
      | Some verdict_dir ->

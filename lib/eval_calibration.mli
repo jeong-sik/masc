@@ -87,6 +87,18 @@ val resolve_record_verdicts_store :
     isolated store; [Error] = missing/colliding-with-live store dir. Pass [~cwd]
     in tests to make relative-path normalization deterministic. *)
 
+val resolve_record_verdicts_evaluator :
+  record_verdicts:bool ->
+  generator_runtime:string ->
+  evaluator_runtime:string option ->
+  cross_verifier_runtime:string option ->
+  (string option, string) result
+(** Decide which runtime label is passed to the verdict judge. When recording
+    verdicts, an explicit [evaluator_runtime] is trimmed and accepted, including
+    intentional same-model overrides. When omitted, [cross_verifier_runtime] must
+    be configured and distinct from [generator_runtime], so the default path does
+    not silently collapse cross-model evaluation to the generator. *)
+
 (** {1 Hashing} *)
 
 val notes_hash : task_title:string -> notes:string -> string

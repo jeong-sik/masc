@@ -25,6 +25,7 @@
   agent_sdk
   agent_sdk.llm_provider
   eio
+  masc_eio_context
   masc.config
   masc.keeper_toml
   masc.config_dir_resolver

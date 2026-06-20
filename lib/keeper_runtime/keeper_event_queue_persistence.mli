@@ -9,5 +9,7 @@ val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit
-(** Atomically write the latest queue snapshot. Persistence failures are logged
-    and do not roll back the already-applied in-memory registry CAS update. *)
+(** Atomically write the latest queue snapshot. Runtime fibers use a yielding
+    Eio mutex; non-Eio setup/test callers use a Stdlib fallback mutex.
+    Persistence failures are logged and do not roll back the already-applied
+    in-memory registry CAS update. *)

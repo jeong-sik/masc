@@ -4,12 +4,16 @@
     module mirrors the post-CAS queue snapshot to disk so a keeper restart can
     replay pending stimuli instead of resetting to [Keeper_event_queue.empty].
 
-    Writes are serialized with a process-global [Stdlib.Mutex] so two fibers
-    cannot persist older snapshots after newer CAS updates. [Stdlib.Mutex] is
-    intentional here: registry setup and tests can reach this module without a
-    guaranteed Eio context. *)
+    Writes are serialized with an Eio mutex in runtime fibers. Setup/tests that
+    reach this module without an Eio context fall back to a Stdlib mutex. *)
 
-let write_mu = Stdlib.Mutex.create ()
+let eio_write_mu = Eio.Mutex.create ()
+let fallback_write_mu = Stdlib.Mutex.create ()
+
+let with_write_lock f =
+  match Eio_context.get_switch_opt () with
+  | Some _ -> Eio.Mutex.use_rw ~protect:true eio_write_mu f
+  | None -> Stdlib.Mutex.protect fallback_write_mu f
 
 let valid_keeper_name name =
   let valid_char = function
@@ -74,7 +78,7 @@ let persist ~base_path ~keeper_name queue =
   | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
   | Ok path ->
     (try
-       Stdlib.Mutex.protect write_mu (fun () ->
+       with_write_lock (fun () ->
          match save_json_atomic path (Keeper_event_queue.queue_to_yojson queue) with
          | Ok () -> ()
          | Error msg ->

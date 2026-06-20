@@ -15,6 +15,7 @@ import { useCallback, useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../../api/dashboard'
 import type { ToolCallEntry, ToolCallsResponse } from '../../api/dashboard'
+import { recordToolCallOutputs } from '../../tool-call-output-store'
 import { useManagedAsyncResource } from '../../lib/use-managed-async-resource'
 import { lastEvent } from '../../sse'
 import { isKeeperToolActivityEvent, sseEventMatchesKeeper } from '../keeper-sse-match'
@@ -91,7 +92,11 @@ export function KeeperWorkspaceRecentTools({ keeperName }: { keeperName: string 
   const expandedKey = useSignal<string | null>(null)
 
   const load = useCallback(
-    (signal: AbortSignal) => fetchKeeperToolCalls(keeperName, RECENT_LIMIT, { signal }),
+    async (signal: AbortSignal) => {
+      const response = await fetchKeeperToolCalls(keeperName, RECENT_LIMIT, { signal })
+      recordToolCallOutputs(response.entries)
+      return response
+    },
     [keeperName],
   )
 

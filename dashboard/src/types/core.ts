@@ -877,6 +877,7 @@ export interface KeeperConversationEntry {
   streamState?: KeeperConversationStreamState
   attachments?: KeeperConversationAttachment[]
   blocks?: ChatBlock[]
+  traceSteps?: ChatTraceStep[]
   details?: KeeperConversationDetails | null
   error?: string | null
   surface?: SurfaceRef | null

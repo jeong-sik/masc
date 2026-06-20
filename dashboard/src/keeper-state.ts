@@ -835,6 +835,30 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
   }))
 }
 
+export function appendAssistantThinkingDelta(name: string, entryId: string, delta: string): void {
+  if (!delta.trim()) return
+  updateThreadEntry(name, entryId, entry => {
+    const existing = entry.traceSteps ?? []
+    const last = existing[existing.length - 1]
+    const traceSteps: ChatTraceStep[] =
+      last?.kind === 'think'
+        ? [
+            ...existing.slice(0, -1),
+            { kind: 'think', text: `${last.text}${delta}` },
+          ]
+        : [
+            ...existing,
+            { kind: 'think', text: delta.trimStart() },
+          ]
+    return {
+      ...entry,
+      traceSteps,
+      streamState: 'thinking',
+      delivery: 'streaming',
+    }
+  })
+}
+
 export function finalizeAssistantEntry(
   name: string,
   entryId: string,

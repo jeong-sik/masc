@@ -1560,6 +1560,64 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(container.querySelectorAll('[data-chat-variant="tool-call"]').length).toBe(0)
   })
 
+  it('keeps grouped tool calls connected to the following assistant answer', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'keeper_board_list' }),
+          entry({
+            id: 'a',
+            text: '도구 결과로 답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: 'reading tool output' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    expect(bundle?.querySelector('[data-chat-work-trace]')).not.toBeNull()
+    expect(bundle?.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
+    expect(bundle?.textContent).toContain('Thinking')
+    expect(bundle?.textContent).toContain('reading tool output')
+    expect(bundle?.textContent).toContain('keeper_board_list')
+    expect(bundle?.textContent).toContain('도구 결과로 답합니다')
+  })
+
+  it('renders assistant thinking as 작업 과정 even without tool calls', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '곧 답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: 'checking context' }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const bundle = container.querySelector('[data-chat-turn-bundle]')
+    expect(bundle).not.toBeNull()
+    expect(bundle?.textContent).toContain('작업 과정')
+    expect(bundle?.textContent).toContain('1단계')
+    expect(bundle?.textContent).toContain('Thinking')
+    expect(bundle?.textContent).toContain('checking context')
+    expect(bundle?.textContent).toContain('곧 답합니다')
+  })
+
   it('keeps the flat per-row tool bubbles when grouping is off (default)', () => {
     render(
       html`<${ChatTranscript}

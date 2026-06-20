@@ -44,6 +44,30 @@
   overflow: hidden;
 }
 
+.chat-turn-bundle {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-self: flex-start;
+  gap: 8px;
+  width: 82%;
+  max-width: 100%;
+}
+
+.chat-turn-bundle .chat-block-trace,
+.chat-turn-bundle .chat-bubble {
+  width: 100%;
+  max-width: 100%;
+}
+
+.chat-turn-bundle .chat-block-trace {
+  border-bottom-left-radius: var(--r-0);
+}
+
+.chat-turn-bundle .chat-bubble.assistant {
+  border-top-left-radius: var(--r-0);
+}
+
 .chat-block-trace-hd {
   display: flex;
   align-items: center;

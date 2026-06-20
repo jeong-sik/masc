@@ -95,7 +95,18 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
           append_chat_failure ~base_dir ~keeper ~run_id
             (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id msg)
         | exception (Eio.Cancel.Cancelled _ as exn) ->
-          (* 구조적 취소는 흡수하지 않고 재전파 (Eio 규약). *)
+          (* RFC-0266 §7: 취소도 종료 상태다. register_running(위 line 73)으로 [Running]
+             으로 등록된 run을 [Completed{ok=false}]로 갱신하지 않으면, in-memory registry
+             ([global], 서버 수명)에 영구 "running"으로 남아 dashboard fusion-runs 패널과
+             masc_fusion_status가 거짓 "심의중"을 보인다(prune는 [Running]을 evict하지 않음 —
+             fusion_run_registry.ml). 다른 종료 분기(Denied/Sink_failed/exception)는
+             append_chat_failure 경유로 이미 mark_completed 하는데 이 분기만 빠져 있었다.
+             [mark_completed]는 순수 in-memory CAS(suspension 없음)라 취소 컨텍스트에서도
+             안전하다. broadcast는 [Sse.broadcast]가 mailbox에서 suspend/block할 수 있어
+             취소/셧다운 캐스케이드를 deadlock시킬 위험이 있으므로 이 경로에선 생략한다 —
+             registry가 정확해 다음 HTTP fetch / tab-refresh가 패널을 self-heal한다.
+             그 뒤 구조적 취소는 흡수하지 않고 재전파한다 (Eio 규약). *)
+          Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok:false;
           raise exn
         | exception exn ->
           append_chat_failure ~base_dir ~keeper ~run_id

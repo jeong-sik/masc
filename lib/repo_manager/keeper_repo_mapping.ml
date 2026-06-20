@@ -237,8 +237,6 @@ let repository_url_basename url =
       String.sub base 0 (String.length base - 4)
     else base
 
-let max_git_probe_file_bytes = 64 * 1024
-
 let safe_lstat path =
   try Some (Unix.lstat path)
   with Unix.Unix_error _ -> None
@@ -265,19 +263,7 @@ let safe_realpath path =
   try Some (Unix.realpath path)
   with Unix.Unix_error _ -> None
 
-let read_file_opt path =
-  match safe_lstat path with
-  | Some { Unix.st_kind = Unix.S_REG; st_size; _ }
-    when st_size <= max_git_probe_file_bytes -> (
-      try
-        Some
-          (In_channel.with_open_bin path (fun ic ->
-               really_input_string ic st_size))
-      with Sys_error _ | End_of_file -> None)
-  | Some { Unix.st_kind =
-             ( Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK
-             | Unix.S_FIFO | Unix.S_SOCK ); _ } -> None
-  | None -> None
+let read_file_opt = Fs_compat.load_file_opt
 
 let normalize_lexical_path path =
   let absolute = String.starts_with ~prefix:"/" path in

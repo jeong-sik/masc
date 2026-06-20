@@ -28,8 +28,17 @@ let is_slug_char = function
 let slugify raw =
   let raw = raw |> String.trim |> String.lowercase_ascii in
   let buf = Buffer.create (String.length raw) in
+  let last_dash = ref false in
   String.iter
-    (fun ch -> Buffer.add_char buf (if is_slug_char ch then ch else '-'))
+    (fun ch ->
+      if is_slug_char ch
+      then (
+        Buffer.add_char buf ch;
+        last_dash := false)
+      else if not !last_dash
+      then (
+        Buffer.add_char buf '-';
+        last_dash := true))
     raw;
   let s = Buffer.contents buf in
   let len = String.length s in

@@ -9,11 +9,34 @@ type stored_draft =
   ; index_path : string
   }
 
+type draft_summary =
+  { id : string
+  ; agent_name : string
+  ; source_kind : string
+  ; source_ref : string
+  ; promotion_state : string
+  ; dir : string
+  ; json_path : string
+  ; toml_path : string
+  ; skill_md_path : string
+  ; created_at : float option
+  }
+
+type draft_listing =
+  { total : int
+  ; shown : int
+  ; limit : int
+  ; index_path : string
+  ; items : draft_summary list
+  }
+
 let drafts_dir ~base_path =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path)
     "draft-skills"
 ;;
+
+let index_path ~base_path = Filename.concat (drafts_dir ~base_path) "index.jsonl"
 
 let component_hash raw =
   Digestif.SHA256.(digest_string raw |> to_hex) |> fun hex -> String.sub hex 0 16
@@ -137,7 +160,7 @@ let write_candidate ~base_path (candidate : Skill_candidate_projection.skill_can
   let json_path = Filename.concat dir "candidate.json" in
   let toml_path = Filename.concat dir "candidate.toml" in
   let skill_md_path = Filename.concat dir "SKILL.md" in
-  let index_path = Filename.concat (drafts_dir ~base_path) "index.jsonl" in
+  let index_path = index_path ~base_path in
   let* () =
     write_file json_path
       (Yojson.Safe.pretty_to_string (Skill_candidate_projection.to_json candidate)
@@ -160,4 +183,115 @@ let write_candidates ~base_path candidates =
       loop (stored :: acc) rest
   in
   loop [] candidates
+;;
+
+let json_string_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `String s -> Some s
+  | _ -> None
+;;
+
+let json_float_opt name json =
+  match Yojson.Safe.Util.member name json with
+  | `Float f -> Some f
+  | `Int i -> Some (float_of_int i)
+  | _ -> None
+;;
+
+let draft_summary_of_index_event json =
+  match
+    ( json_string_opt "id" json
+    , json_string_opt "agent_name" json
+    , json_string_opt "source_kind" json
+    , json_string_opt "source_ref" json
+    , json_string_opt "promotion_state" json
+    , json_string_opt "dir" json
+    , json_string_opt "json_path" json
+    , json_string_opt "toml_path" json
+    , json_string_opt "skill_md_path" json )
+  with
+  | ( Some id
+    , Some agent_name
+    , Some source_kind
+    , Some source_ref
+    , Some promotion_state
+    , Some dir
+    , Some json_path
+    , Some toml_path
+    , Some skill_md_path ) ->
+    Some
+      { id
+      ; agent_name
+      ; source_kind
+      ; source_ref
+      ; promotion_state
+      ; dir
+      ; json_path
+      ; toml_path
+      ; skill_md_path
+      ; created_at = json_float_opt "ts" json
+      }
+  | _ -> None
+;;
+
+let take n xs =
+  let rec loop acc remaining = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | x :: rest -> loop (x :: acc) (remaining - 1) rest
+  in
+  loop [] n xs
+;;
+
+let latest_unique summaries =
+  let seen = Hashtbl.create 16 in
+  List.filter
+    (fun (summary : draft_summary) ->
+      if Hashtbl.mem seen summary.id
+      then false
+      else (
+        Hashtbl.add seen summary.id ();
+        true))
+    summaries
+;;
+
+let list_drafts ~base_path ~limit =
+  let index_path = index_path ~base_path in
+  let limit = max 0 limit in
+  try
+    let items =
+      if Sys.file_exists index_path
+      then
+        Fs_compat.load_jsonl index_path
+        |> List.rev
+        |> List.filter_map draft_summary_of_index_event
+        |> latest_unique
+      else []
+    in
+    let total = List.length items in
+    let items = take limit items in
+    Ok { total; shown = List.length items; limit; index_path; items }
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
+;;
+
+let json_option_float = function
+  | Some f -> `Float f
+  | None -> `Null
+;;
+
+let draft_summary_to_json (summary : draft_summary) =
+  `Assoc
+    [ "id", `String summary.id
+    ; "agent_name", `String summary.agent_name
+    ; "source_kind", `String summary.source_kind
+    ; "source_ref", `String summary.source_ref
+    ; "promotion_state", `String summary.promotion_state
+    ; "dir", `String summary.dir
+    ; "json_path", `String summary.json_path
+    ; "toml_path", `String summary.toml_path
+    ; "skill_md_path", `String summary.skill_md_path
+    ; "created_at", json_option_float summary.created_at
+    ]
 ;;

@@ -3,6 +3,9 @@ open Alcotest
 module Json = Yojson.Safe.Util
 module Memory_subsystems = Server_dashboard_http_memory_subsystems
 module Memory_io = Masc.Keeper_memory_os_io
+module P = Masc.Procedural_memory
+module Projection = Masc.Skill_candidate_projection
+module Store = Masc.Skill_candidate_store
 module Types = Masc.Keeper_memory_os_types
 
 let request target =
@@ -181,6 +184,58 @@ let test_http_json_user_model_uses_config_base_path () =
         check (list string) "scoped claims" [ "Target workspace preference" ] claims))
 ;;
 
+let skill_candidate () =
+  let procedure : P.procedure =
+    { id = "dashboard-visible-skill"
+    ; agent_name = "keeper"
+    ; pattern = "When the same repair loop succeeds repeatedly, draft a skill"
+    ; evidence = [ "proof-store://abc"; "proof-store://def"; "proof-store://ghi" ]
+    ; success_count = 3
+    ; failure_count = 0
+    ; confidence = 1.0
+    ; created_at = 0.0
+    ; last_applied = 0.0
+    }
+  in
+  match Projection.candidate_of_procedure procedure with
+  | Some candidate -> candidate
+  | None -> fail "expected dashboard skill candidate"
+;;
+
+let test_http_json_surfaces_draft_skill_candidates () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let candidate = skill_candidate () in
+      (match Store.write_candidate ~base_path:dir candidate with
+       | Ok _ -> ()
+       | Error msg -> fail msg);
+      let json =
+        Memory_subsystems.dashboard_memory_subsystems_http_json
+          ~config
+          ~include_memory_entries:false
+          (request "/dashboard/memory-subsystems?limit=100")
+      in
+      let drafts = Json.(json |> member "draft_skill_candidates") in
+      check int "draft total" 1 Json.(drafts |> member "total" |> to_int);
+      check int "draft shown" 1 Json.(drafts |> member "shown" |> to_int);
+      check string "draft index path"
+        (Store.index_path ~base_path:dir)
+        Json.(drafts |> member "index_path" |> to_string);
+      let item =
+        match Json.(drafts |> member "items" |> to_list) with
+        | [ item ] -> item
+        | _ -> fail "expected one draft skill candidate"
+      in
+      check string "candidate id" candidate.id Json.(item |> member "id" |> to_string);
+      check string "candidate state" "candidate"
+        Json.(item |> member "promotion_state" |> to_string);
+       check string "skill path suffix" "SKILL.md"
+         (Filename.basename Json.(item |> member "skill_md_path" |> to_string)))
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   Alcotest.run
@@ -208,6 +263,10 @@ let () =
             "user model projection reads config base path"
             `Quick
             test_http_json_user_model_uses_config_base_path
+        ; test_case
+            "surfaces draft skill candidates"
+            `Quick
+            test_http_json_surfaces_draft_skill_candidates
         ] )
     ]
 ;;

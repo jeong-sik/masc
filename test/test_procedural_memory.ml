@@ -149,8 +149,9 @@ let test_skill_candidate_rejects_generic_memory_fact () =
 
 let test_skill_candidate_json_and_draft_are_candidate_only () =
   let p =
-    procedure ~evidence:[ "proof-store://abc" ] ~success_count:3 ~failure_count:1
-      ~confidence:0.75 ()
+    procedure
+      ~evidence:[ "proof-store://abc"; "proof-store://def"; "proof-store://ghi" ]
+      ~success_count:3 ~failure_count:1 ~confidence:0.75 ()
   in
   let c = require_candidate p in
   let json = S.to_json c in
@@ -188,7 +189,8 @@ let test_skill_candidate_store_writes_reviewable_draft_files () =
   with_temp_base_path
   @@ fun base_path ->
   let p =
-    procedure ~id:"Repeatable Debug Loop" ~evidence:[ "proof-store://abc" ]
+    procedure ~id:"Repeatable Debug Loop"
+      ~evidence:[ "proof-store://abc"; "proof-store://def"; "proof-store://ghi" ]
       ~success_count:3 ~failure_count:0 ~confidence:1.0 ()
   in
   let c = require_candidate p in
@@ -219,13 +221,84 @@ let test_skill_candidate_store_writes_reviewable_draft_files () =
   check bool "index references candidate" true (contains_substring ~needle:c.id index)
 ;;
 
+let test_skill_candidate_store_lists_latest_reviewable_drafts () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let p =
+    procedure ~id:"Listable Candidate"
+      ~evidence:[ "proof-store://abc"; "proof-store://def"; "proof-store://ghi" ]
+      ~success_count:3 ~failure_count:0 ~confidence:1.0 ()
+  in
+  let c = require_candidate p in
+  let _stored =
+    match Store.write_candidate ~base_path c with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  let listing =
+    match Store.list_drafts ~base_path ~limit:10 with
+    | Ok listing -> listing
+    | Error msg -> fail msg
+  in
+  check int "total" 1 listing.total;
+  check int "shown" 1 listing.shown;
+  check string "index path"
+    (Store.index_path ~base_path)
+    listing.index_path;
+  let summary =
+    match listing.items with
+    | [ item ] -> item
+    | _ -> fail "expected one draft summary"
+  in
+  check string "id" c.id summary.id;
+  check string "agent" c.agent_name summary.agent_name;
+  check string "state" "candidate" summary.promotion_state;
+  check string "source ref" c.source_ref summary.source_ref;
+  check bool "created_at present" true (Option.is_some summary.created_at)
+;;
+
+let test_skill_candidate_store_lists_newest_unique_draft_per_id () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let c1 =
+    require_candidate
+      (procedure ~id:"Duplicate Candidate"
+         ~evidence:[ "proof-store://abc"; "proof-store://def"; "proof-store://ghi" ]
+         ~success_count:3 ~failure_count:0 ~confidence:1.0 ())
+  in
+  let c2 : S.skill_candidate =
+    { c1 with pattern = "When a duplicate candidate is re-written, show latest" }
+  in
+  let write c =
+    match Store.write_candidate ~base_path c with
+    | Ok _ -> ()
+    | Error msg -> fail msg
+  in
+  write c1;
+  write c2;
+  let listing =
+    match Store.list_drafts ~base_path ~limit:10 with
+    | Ok listing -> listing
+    | Error msg -> fail msg
+  in
+  check int "deduplicated total" 1 listing.total;
+  check int "shown" 1 listing.shown;
+  let summary =
+    match listing.items with
+    | [ item ] -> item
+    | _ -> fail "expected one draft summary"
+  in
+  check string "keeps same candidate id" c1.id summary.id
+;;
+
 let test_skill_candidate_store_sanitizes_candidate_id_path () =
   with_temp_base_path
   @@ fun base_path ->
   let base =
     require_candidate
-      (procedure ~id:"Normal" ~evidence:[ "proof-store://abc" ] ~success_count:3
-         ~failure_count:0 ~confidence:1.0 ())
+      (procedure ~id:"Normal"
+         ~evidence:[ "proof-store://abc"; "proof-store://def"; "proof-store://ghi" ]
+         ~success_count:3 ~failure_count:0 ~confidence:1.0 ())
   in
   let c : S.skill_candidate = { base with id = "../Escape Candidate" } in
   let stored =
@@ -277,6 +350,10 @@ let () =
             test_skill_candidate_json_and_draft_are_candidate_only;
           test_case "writes durable reviewable draft files" `Quick
             test_skill_candidate_store_writes_reviewable_draft_files;
+          test_case "lists latest reviewable draft files" `Quick
+            test_skill_candidate_store_lists_latest_reviewable_drafts;
+          test_case "lists newest unique draft per id" `Quick
+            test_skill_candidate_store_lists_newest_unique_draft_per_id;
           test_case "sanitizes candidate id path" `Quick
             test_skill_candidate_store_sanitizes_candidate_id_path;
         ] );

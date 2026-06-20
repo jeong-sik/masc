@@ -182,7 +182,13 @@ let test_reject_reason_describes_thinking_only_response () =
   Alcotest.(check bool)
     "no-progress accept rejection is not runtime exhaustion"
     false
-    (Masc.Keeper_error_classify.is_runtime_exhausted_error err)
+    (Masc.Keeper_error_classify.is_runtime_exhausted_error err);
+  Alcotest.(check bool)
+    "thinking-only without read-only tool does not try next candidate"
+    false
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err)
 
 let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
   let result =
@@ -292,7 +298,7 @@ let test_accept_reason_includes_last_tool_context () =
            ]
          ())
   in
-  let _err, reason_kind, reason = expect_accept_rejected result in
+  let err, reason_kind, reason = expect_accept_rejected result in
   Alcotest.(check bool)
     "reason kind is no usable progress"
     true
@@ -304,7 +310,62 @@ let test_accept_reason_includes_last_tool_context () =
   Alcotest.(check bool)
     "reason includes last tool effect"
     true
-    (contains ~needle:"last_tool_effect=mutating" reason)
+    (contains ~needle:"last_tool_effect=mutating" reason);
+  Alcotest.(check bool)
+    "thinking-only after mutating tool does not try next candidate"
+    false
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err)
+
+let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
+  let checkpoint =
+    checkpoint_with_messages
+      [
+        message
+          [
+            tool_use
+              ~input:(`Assoc [ ("url", `String "https://example.com") ])
+              "WebFetch";
+          ];
+      ]
+  in
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-after-webfetch"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result
+         ~checkpoint
+         ~content:
+           [
+             Agent_sdk.Types.Thinking
+               { thinking_type = "reasoning"; content = "internal chain" };
+           ]
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies thinking-only shape"
+    true
+    (contains ~needle:"shape=thinking_only" reason);
+  Alcotest.(check bool)
+    "reason includes read-only tool name"
+    true
+    (contains ~needle:"last_tool=WebFetch" reason);
+  Alcotest.(check bool)
+    "reason includes read-only tool effect"
+    true
+    (contains ~needle:"last_tool_effect=read_only" reason);
+  Alcotest.(check bool)
+    "thinking-only after read-only tool tries next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err)
 
 let test_thinking_with_text_is_accepted () =
   let result =
@@ -586,6 +647,10 @@ let () =
             "accept rejection reason includes last tool context"
             `Quick
             test_accept_reason_includes_last_tool_context;
+          Alcotest.test_case
+            "thinking-only after read-only WebFetch tries next candidate"
+            `Quick
+            test_thinking_only_after_read_only_webfetch_can_try_next_candidate;
           Alcotest.test_case "thinking plus text is accepted" `Quick
             test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick

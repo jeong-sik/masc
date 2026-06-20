@@ -66,6 +66,33 @@ let is_accept_rejected_sdk_error err =
   | None ->
     false
 
+let accept_no_progress_read_only_should_try_next err =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some
+      (Keeper_internal_error.Accept_rejected
+        { reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
+        ; reason
+        ; _
+        }) ->
+    String_util.contains_substring reason "shape=thinking_only"
+    && String_util.contains_substring reason "last_tool_effect=read_only"
+  | Some
+      ( Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Capacity_backpressure _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Admission_queue_timeout _
+      | Keeper_internal_error.Admission_queue_rejected _
+      | Keeper_internal_error.Turn_timeout _
+      | Keeper_internal_error.Provider_timeout _
+      | Keeper_internal_error.Max_tokens_ceiling_violation _
+      | Keeper_internal_error.Ambiguous_post_commit _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _ )
+  | None ->
+    false
+
 let http_status_of_http_error = function
   | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
   | _ -> None
@@ -223,7 +250,10 @@ let run
            ~http_status:(http_status_of_http_error http_err);
          match http_err with
          | Some http_err
-           when (not is_last) && Runtime_attempt_fsm.should_try_next http_err ->
+           when (not is_last)
+                && (Runtime_attempt_fsm.should_try_next http_err
+                    || accept_no_progress_read_only_should_try_next original_error)
+           ->
            loop checkpoint_after (Some http_err) rest
          | Some http_err ->
            Error
@@ -232,3 +262,8 @@ let run
            if is_last then Error err else loop checkpoint_after last_err rest)
   in
   loop resume_checkpoint last_err candidates
+
+module For_testing = struct
+  let accept_no_progress_read_only_should_try_next =
+    accept_no_progress_read_only_should_try_next
+end

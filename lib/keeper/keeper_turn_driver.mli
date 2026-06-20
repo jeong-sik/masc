@@ -169,4 +169,7 @@ module For_testing : sig
     original_error:Agent_sdk.Error.sdk_error ->
     Llm_provider.Http_client.http_error ->
     Agent_sdk.Error.sdk_error
+
+  val accept_no_progress_read_only_should_try_next :
+    Agent_sdk.Error.sdk_error -> bool
 end

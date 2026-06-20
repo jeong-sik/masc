@@ -444,7 +444,12 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_preview = "";
             consecutive_noop_count = 0;
           };
-          generation = Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id:trace_id_t;
+          (* next_generation keys the per-(keeper, trace) counter by the trace_id
+             string; episodes live under that same string dir (ensure_dir/of
+             session_id above), so pass the raw [trace_id] string, not the typed
+             [trace_id_t]. trace_id_t is the typed wrapper stored in the record
+             field below. *)
+          generation = Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id;
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
@@ -479,7 +484,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:ctx0
-            ~generation:(Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id:trace_id_t)
+            ~generation:(Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

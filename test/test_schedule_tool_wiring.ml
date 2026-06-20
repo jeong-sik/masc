@@ -384,6 +384,49 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
       (row |> member "last_execution" |> member "detail" |> member "kind" |> to_string)
 ;;
 
+let test_keeper_observation_surfaces_schedule_attention () =
+  with_config
+  @@ fun config ->
+  let now = 1_000.0 in
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-ready" ~due_at:(now -. 10.0)
+       ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+       ()
+      : Schedule_domain.schedule_request);
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-blocked" ~due_at:(now -. 20.0)
+       ~risk_class:Schedule_domain.Workspace_write ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+       ()
+      : Schedule_domain.schedule_request);
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-future" ~due_at:(now +. 3600.0)
+       ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+       ()
+      : Schedule_domain.schedule_request);
+  (match Schedule_store.refresh_due config ~now with
+   | Ok _ -> ()
+   | Error err -> fail (Schedule_store.store_error_to_string err));
+  let observation =
+    Keeper_world_observation.read_scheduled_automation_observation ~config ~now
+  in
+  check int "active count" 3 observation.active_count;
+  check int "due ready count" 1 observation.due_ready_count;
+  check int "blocked approval count" 1 observation.blocked_approval_count;
+  check (option (float 0.001)) "next due" (Some (now -. 20.0))
+    observation.next_due_at;
+  check int "attention items" 2 (List.length observation.items);
+  (match observation.items with
+   | blocked :: ready :: [] ->
+     check string "blocked schedule first" "sched-blocked" blocked.schedule_id;
+     check string "blocked action" "approve_or_reject" blocked.action;
+     check string "ready schedule second" "sched-ready" ready.schedule_id;
+     check string "ready action" "dispatch_ready" ready.action
+   | _ -> fail "expected blocked and ready attention rows")
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
@@ -399,6 +442,8 @@ let () =
             test_dispatch_cancel_persists_status
         ; test_case "dashboard projection surfaces schedule FSM" `Quick
             test_dashboard_projection_surfaces_schedule_fsm
+        ; test_case "keeper observation surfaces schedule attention" `Quick
+            test_keeper_observation_surfaces_schedule_attention
         ] )
     ]
 ;;

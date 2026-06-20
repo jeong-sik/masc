@@ -11,6 +11,7 @@ type turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Scheduled_autonomous_turn
+  | Scheduled_automation_due
   | Idle_cooldown_elapsed of
       { idle_sec : int
       ; cooldown : int

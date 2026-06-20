@@ -185,6 +185,63 @@ let board_line_of_event
   else Observation_line line
 ;;
 
+let format_scheduled_automation_item
+    (item : Keeper_world_observation.scheduled_automation_item) : string =
+  let payload_kind =
+    match item.payload_kind with
+    | None -> "unknown"
+    | Some kind -> kind
+  in
+  Printf.sprintf
+    "- schedule_id=%s action=%s status=%s payload=%s recurrence=%S risk=%s due_at=%s"
+    item.schedule_id
+    item.action
+    item.status
+    payload_kind
+    item.recurrence_summary
+    item.risk_class
+    (Masc_domain.iso8601_of_unix_seconds item.due_at)
+;;
+
+let format_scheduled_automation_summary
+    (summary : Keeper_world_observation.scheduled_automation_observation)
+  : string option
+  =
+  let actionable =
+    summary.due_ready_count > 0 || summary.blocked_approval_count > 0
+  in
+  if (not actionable) && summary.active_count = 0
+  then None
+  else (
+    let ubuf = Buffer.create 256 in
+    Buffer.add_string ubuf "### Scheduled Automation\n";
+    Buffer.add_string ubuf
+      (Printf.sprintf
+         "- Active schedules: %d; ready: %d; blocked approval: %d\n"
+         summary.active_count
+         summary.due_ready_count
+         summary.blocked_approval_count);
+    (match summary.next_due_at with
+     | None -> ()
+     | Some due_at ->
+       Buffer.add_string ubuf
+         (Printf.sprintf
+            "- Next due: %s\n"
+            (Masc_domain.iso8601_of_unix_seconds due_at)));
+    if summary.items <> []
+    then (
+      Buffer.add_string ubuf "- Attention items:\n";
+      List.iter
+        (fun item ->
+           Buffer.add_string ubuf (format_scheduled_automation_item item);
+           Buffer.add_char ubuf '\n')
+        summary.items;
+      Buffer.add_string ubuf
+        "- Use masc_schedule_get for details; side-effecting schedules require a separate human grant before execution.\n");
+    Buffer.add_char ubuf '\n';
+    Some (Buffer.contents ubuf))
+;;
+
 let render_trusted_lines (lines : board_line list) : string =
   lines
   |> List.filter_map (function Trusted_line s -> Some s | Observation_line _ -> None)
@@ -840,7 +897,12 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ^ String.concat "\n" autonomous_trigger
           ^ "\n")
       else None
-    (* 6. Continuity — usually large and moderately stable, so keep it before
+    (* 6. Scheduled automation — durable MASC schedule store, not OAS/provider
+       state. Shows only identifiers and execution state so payload content does
+       not become trusted instruction text. *)
+    | Keeper_context_layers.Scheduled_automation ->
+      format_scheduled_automation_summary observation.scheduled_automation
+    (* 7. Continuity — usually large and moderately stable, so keep it before
        highly volatile reactive sections for better prefix reuse. Inject only
        forward-looking fields (Goal, Next plan, Next, OpenQuestions,
        Constraints). Backward-looking fields (Done, Progress, Decisions) are
@@ -859,7 +921,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ^ sanitized_continuity_for_prompt
           ^ "\n")
       else None
-    (* 7. Pending mentions — reactive trigger. *)
+    (* 8. Pending mentions — reactive trigger. *)
     | Keeper_context_layers.Pending_mentions ->
       if observation.pending_mentions <> [] then
         Some
@@ -868,7 +930,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ^ format_mentions observation.pending_mentions
           ^ "\n\n")
       else None
-    (* 8. Scope messages — reactive trigger. *)
+    (* 9. Scope messages — reactive trigger. *)
     | Keeper_context_layers.Scope_messages ->
       if observation.pending_scope_messages <> [] then
         Some
@@ -877,7 +939,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
           ^ format_scope_messages observation.pending_scope_messages
           ^ "\n\n")
       else None
-    (* 9. Claimable work — advisory operational guidance. Body lives at
+    (* 10. Claimable work — advisory operational guidance. Body lives at
        config/prompts/keeper.immediate_task_move.md. The OCaml side only owns
        the section header and the trailing blank line; the bullet prose stays in
        the markdown file alongside the other keeper prompts (see
@@ -891,7 +953,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
               Keeper_prompt_names.immediate_task_move
           ^ "\n")
       else None
-    (* 10. Board activity — reactive trigger.
+    (* 11. Board activity — reactive trigger.
        RFC-0247: partition by trust. Trusted = human-authored OR an explicit
        @mention (the Immediate-urgency actionable channel). Quarantined =
        fleet-authored narrative (self/peer/automation/unknown) — rendered inside

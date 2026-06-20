@@ -63,6 +63,28 @@ type pending_board_event = {
       trusted-vs-observational rendering split. *)
 }
 
+(** Read-only projection of one schedule row that needs keeper attention. *)
+type scheduled_automation_item = {
+  schedule_id : string;
+  action : string;
+  status : string;
+  payload_kind : string option;
+  recurrence_summary : string;
+  risk_class : string;
+  due_at : float;
+}
+
+(** Durable scheduled-automation summary from the MASC schedule store. *)
+type scheduled_automation_observation = {
+  active_count : int;
+  due_ready_count : int;
+  blocked_approval_count : int;
+  next_due_at : float option;
+  items : scheduled_automation_item list;
+}
+
+val empty_scheduled_automation_observation : scheduled_automation_observation
+
 (** Snapshot of the world as seen by a keeper at heartbeat time. *)
 type world_observation = {
   pending_mentions : (string * string) list;
@@ -105,6 +127,11 @@ type world_observation = {
   pending_verification_count : int;
   (** Number of tasks awaiting cross-agent verification. *)
 
+  scheduled_automation : scheduled_automation_observation;
+  (** Durable schedule-store state that needs keeper attention, such as due
+      requests ready to dispatch or side-effecting due requests blocked on a
+      separate human grant. *)
+
   backlog_updated_since_last_scheduled_autonomous : bool;
   (** [true] when the backlog changed after the keeper's last scheduled
       autonomous attempt. Lets task-triggered wakeups bypass cooldown once
@@ -133,6 +160,7 @@ type turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Scheduled_autonomous_turn
+  | Scheduled_automation_due
   | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }
   | Cooldown_elapsed
   | Task_backlog of { unclaimed : int; failed : int }
@@ -256,6 +284,11 @@ val read_continuity_summary :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   string
+
+val read_scheduled_automation_observation :
+  config:Workspace.config ->
+  now:float ->
+  scheduled_automation_observation
 
 (** Build a world observation from workspace state and keeper metadata.
 

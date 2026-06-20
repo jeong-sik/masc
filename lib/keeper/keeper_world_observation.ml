@@ -48,6 +48,33 @@ type pending_board_event =
       (* RFC-0247: computed at construction; drives trusted-vs-observational split *)
   }
 
+type scheduled_automation_item =
+  { schedule_id : string
+  ; action : string
+  ; status : string
+  ; payload_kind : string option
+  ; recurrence_summary : string
+  ; risk_class : string
+  ; due_at : float
+  }
+
+type scheduled_automation_observation =
+  { active_count : int
+  ; due_ready_count : int
+  ; blocked_approval_count : int
+  ; next_due_at : float option
+  ; items : scheduled_automation_item list
+  }
+
+let empty_scheduled_automation_observation =
+  { active_count = 0
+  ; due_ready_count = 0
+  ; blocked_approval_count = 0
+  ; next_due_at = None
+  ; items = []
+  }
+;;
+
 type world_observation =
   { pending_mentions : (string * string) list
   ; pending_board_events : pending_board_event list
@@ -61,6 +88,7 @@ type world_observation =
   ; provider_capacity_blocked_task_count : int
   ; failed_task_count : int
   ; pending_verification_count : int
+  ; scheduled_automation : scheduled_automation_observation
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; running_keeper_fiber_count : int
   ; connected_surfaces : Gate_surface.surface_presence list
@@ -78,6 +106,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Scheduled_autonomous_turn
+  | Scheduled_automation_due
   | Idle_cooldown_elapsed of
       { idle_sec : int
       ; cooldown : int
@@ -190,6 +219,144 @@ let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
 module Continuity = Keeper_world_observation_continuity
 
 let read_continuity_summary = Continuity.read_continuity_summary
+
+let scheduled_automation_item_limit = 5
+
+let schedule_payload_kind (request : Schedule_domain.schedule_request) =
+  match Schedule_domain.payload_to_yojson request.payload with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String kind) -> Some kind
+     | _ -> None)
+  | _ -> None
+;;
+
+let schedule_effectively_expired ~now (request : Schedule_domain.schedule_request) =
+  let open Schedule_domain in
+  match request.status, request.expires_at with
+  | (Pending_approval | Scheduled | Due), Some expires_at when expires_at <= now ->
+    true
+  | ( Pending_approval | Scheduled | Due | Running | Succeeded | Failed | Rejected
+    | Cancelled | Expired )
+    , _ ->
+    false
+;;
+
+let schedule_effectively_active ~now (request : Schedule_domain.schedule_request) =
+  (not (Schedule_domain.is_terminal request.status))
+  && not (schedule_effectively_expired ~now request)
+;;
+
+let schedule_blocked_approval ~now state (request : Schedule_domain.schedule_request)
+  =
+  let open Schedule_domain in
+  request.due_at <= now
+  && (not (schedule_effectively_expired ~now request))
+  && Schedule_domain.requires_separate_human_grant request
+  &&
+  match request.status with
+  | Pending_approval -> true
+  | Due -> not (Schedule_store.has_current_approved_grant state request)
+  | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled | Expired -> false
+;;
+
+let schedule_attention_item action (request : Schedule_domain.schedule_request) =
+  { schedule_id = request.schedule_id
+  ; action
+  ; status = Schedule_domain.schedule_status_to_string request.status
+  ; payload_kind = schedule_payload_kind request
+  ; recurrence_summary = Schedule_domain.recurrence_summary request.recurrence
+  ; risk_class = Schedule_domain.risk_class_to_string request.risk_class
+  ; due_at = request.due_at
+  }
+;;
+
+let compare_schedule_attention_item left right =
+  match compare left.due_at right.due_at with
+  | 0 -> String.compare left.schedule_id right.schedule_id
+  | cmp -> cmp
+;;
+
+let take n values =
+  let rec loop acc remaining = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | item :: rest -> loop (item :: acc) (remaining - 1) rest
+  in
+  loop [] n values
+;;
+
+let next_active_schedule_due_at ~now schedules =
+  schedules
+  |> List.filter (schedule_effectively_active ~now)
+  |> List.fold_left
+       (fun acc (request : Schedule_domain.schedule_request) ->
+          match acc with
+          | None -> Some request.due_at
+          | Some due_at -> Some (min due_at request.due_at))
+       None
+;;
+
+let schedule_query_failure_message = function
+  | Schedule_store.Corrupt_ledger_exn { primary_err; recovery_err } ->
+    (match recovery_err with
+     | None ->
+       Printf.sprintf
+         "schedule ledger corrupt while reading keeper observation: %s"
+         primary_err
+     | Some recovery_err ->
+       Printf.sprintf
+         "schedule ledger corrupt while reading keeper observation: %s; recovery: %s"
+         primary_err
+         recovery_err)
+  | exn -> Printexc.to_string exn
+;;
+
+let read_scheduled_automation_observation ~(config : Workspace.config) ~now =
+  try
+    let state = Schedule_store.read_state config in
+    let due_ready =
+      Schedule_store.due_execution_candidates state
+      |> List.filter (fun request -> not (schedule_effectively_expired ~now request))
+    in
+    let blocked =
+      state.schedules |> List.filter (schedule_blocked_approval ~now state)
+    in
+    let active_count =
+      state.schedules
+      |> List.fold_left
+           (fun count request ->
+              if schedule_effectively_active ~now request then count + 1 else count)
+           0
+    in
+    let due_items =
+      List.map (schedule_attention_item "dispatch_ready") due_ready
+    in
+    let blocked_items =
+      List.map (schedule_attention_item "approve_or_reject") blocked
+    in
+    { active_count
+    ; due_ready_count = List.length due_ready
+    ; blocked_approval_count = List.length blocked
+    ; next_due_at = next_active_schedule_due_at ~now state.schedules
+    ; items =
+        due_items @ blocked_items
+        |> List.sort compare_schedule_attention_item
+        |> take scheduled_automation_item_limit
+    }
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ObservationQueryFailures)
+      ~labels:
+        [ ( "operation"
+          , Runtime_observation_query_operation.(to_label Scheduled_automation) )
+        ]
+      ();
+    Log.Keeper.warn "%s" (schedule_query_failure_message exn);
+    empty_scheduled_automation_observation
+;;
 
 (** Board event cursor bootstrap window (seconds). *)
 let bootstrap_window_sec = Env_config.InternalTimers.bootstrap_window_sec
@@ -556,6 +723,9 @@ let observe
   in
   let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
+  let scheduled_automation =
+    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+  in
   (* Defer the checkpoint load (file read + Yojson parse + sanitize + O(n)
      tool-pair repair) out of [observe]. Most cycles are no-op skips where
      the gate decides not to run; on those, [context_ratio] is never forced
@@ -585,6 +755,7 @@ let observe
   ; provider_capacity_blocked_task_count
   ; failed_task_count
   ; pending_verification_count
+  ; scheduled_automation
   ; backlog_updated_since_last_scheduled_autonomous
   ; running_keeper_fiber_count
   ; connected_surfaces =
@@ -606,6 +777,9 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   let provider_capacity_blocked_task_count =
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
   in
+  let scheduled_automation =
+    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+  in
   { pending_mentions = []
   ; pending_board_events = []
   ; pending_scope_messages = []
@@ -618,6 +792,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; provider_capacity_blocked_task_count
   ; failed_task_count
   ; pending_verification_count
+  ; scheduled_automation
   ; backlog_updated_since_last_scheduled_autonomous
   ; running_keeper_fiber_count = count_running_keeper_fibers ~config
   ; connected_surfaces =
@@ -654,12 +829,17 @@ let durable_signal_present
       in
       events
   in
+  let scheduled_automation =
+    read_scheduled_automation_observation ~config ~now:(Time_compat.now ())
+  in
   pending_mentions <> []
   || pending_board_events <> []
   || pending_scope_messages <> []
   || claimable_task_count > 0
   || failed_task_count > 0
   || pending_verification_count > 0
+  || scheduled_automation.due_ready_count > 0
+  || scheduled_automation.blocked_approval_count > 0
 ;;
 
 let actionable_signal_present (observation : world_observation) =
@@ -669,6 +849,8 @@ let actionable_signal_present (observation : world_observation) =
   || observation.claimable_task_count > 0
   || observation.failed_task_count > 0
   || observation.pending_verification_count > 0
+  || observation.scheduled_automation.due_ready_count > 0
+  || observation.scheduled_automation.blocked_approval_count > 0
 ;;
 
 let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_observation) =
@@ -681,6 +863,8 @@ let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_obs
   || observation.pending_board_events <> []
   || observation.pending_scope_messages <> []
   || task_backlog_signal
+  || observation.scheduled_automation.due_ready_count > 0
+  || observation.scheduled_automation.blocked_approval_count > 0
   || Option.is_some meta.current_task_id
 ;;
 
@@ -819,10 +1003,18 @@ let keeper_cycle_decision
         let has_actionable_tasks =
           observation.claimable_task_count > 0 || observation.failed_task_count > 0
         in
+        let has_actionable_schedule =
+          observation.scheduled_automation.due_ready_count > 0
+          || observation.scheduled_automation.blocked_approval_count > 0
+        in
         let idle_gate_elapsed = observation.idle_seconds >= idle_gate_sec in
         let cooldown_elapsed = since_last_scheduled_autonomous >= effective_cooldown in
         let backlog_elapsed =
           has_actionable_tasks
+          && since_last_scheduled_autonomous >= task_reactive_cooldown
+        in
+        let schedule_elapsed =
+          has_actionable_schedule
           && since_last_scheduled_autonomous >= task_reactive_cooldown
         in
         let backlog_fresh =
@@ -875,9 +1067,11 @@ let keeper_cycle_decision
         let backlog_drives_turn =
           (not reactive_wake) && (backlog_fresh || backlog_elapsed)
         in
+        let schedule_drives_turn = (not reactive_wake) && schedule_elapsed in
         let should_run =
           is_bootstrap
           || min_interval_elapsed
+          || schedule_drives_turn
           || (proactive_work_ready
               && (backlog_drives_turn || (idle_gate_elapsed && cooldown_elapsed)))
         in
@@ -942,7 +1136,8 @@ let keeper_cycle_decision
                         ; failed = observation.failed_task_count
                         })
                  else None)
-              ; (if backlog_fresh || backlog_elapsed
+              ; (if has_actionable_schedule then Some Scheduled_automation_due else None)
+              ; (if backlog_fresh || backlog_elapsed || schedule_elapsed
                  then Some Task_reactive_cooldown_elapsed
                  else None)
               ]

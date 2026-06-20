@@ -66,7 +66,7 @@ function attentionFallback(keeper: Keeper): string | null {
   if (reason && action) return `${reason} · ${action}`
   if (reason) return `주의 원인: ${reason}`
   if (action) return `다음 조치: ${action}`
-  return '주의 플래그 있음 · 원인 미전달'
+  return 'runtime_attention.needs_attention=true · 원인/조치 미수신'
 }
 
 type AttentionItem = { sev: 'bad' | 'warn'; text: string }

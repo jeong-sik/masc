@@ -183,12 +183,12 @@
   width: 22px;
   height: 22px;
   flex: none;
-  color: #10131a;
+  color: currentColor;
 }
 .dock-fab .spark svg {
   display: block;
-  color: #10131a;
-  stroke: #10131a;
+  color: currentColor;
+  stroke: currentColor;
 }
 .dock-fab kbd { font-family: var(--font-mono); font-size: 9px; padding: 1px 5px; border-radius: var(--radius-xs); background: color-mix(in oklab, var(--volt-ink) 16%, transparent); }
 
@@ -212,10 +212,18 @@
 
 @media (max-width: 900px) {
   .v2-app[data-mobile="true"] .dock-fab {
+    right: max(14px, env(safe-area-inset-right, 0px));
+    width: 44px;
+    height: 44px;
     bottom: calc(68px + env(safe-area-inset-bottom, 0px));
   }
 
   .v2-app[data-mobile="true"][data-keeper-detail-mode="true"] .dock-fab {
-    bottom: 22px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .v2-app[data-mobile="true"] .dock-fab .spark {
+    width: 20px;
+    height: 20px;
   }
 }

@@ -113,7 +113,7 @@ describe('KeeperWorkspaceRail', () => {
   it('labels unqualified attention flags as missing cause data', () => {
     const k = mkKeeper({ needs_attention: true })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
-    expect(container.textContent).toContain('주의 플래그 있음 · 원인 미전달')
+    expect(container.textContent).toContain('runtime_attention.needs_attention=true · 원인/조치 미수신')
     expect(container.textContent).not.toContain('점검이 필요합니다')
   })
 

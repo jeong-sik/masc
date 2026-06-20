@@ -84,9 +84,12 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
       match Option.bind timeout_s timeout_budget_opt with
       | None -> base_config
       | Some timeout_s ->
+        (* Fusion owns the structural wall-clock budget via the outer
+           Masc_oas_bridge.run_safe call. Do not arm Runtime_agent's total
+           max_execution_time_s here; it can kill an active stream with the
+           wrong failure attribution. *)
         { base_config with
           stream_idle_timeout_s = Some timeout_s
-        ; max_execution_time_s = Some timeout_s
         ; body_timeout_s = Some timeout_s
         }
     in

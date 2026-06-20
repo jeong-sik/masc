@@ -11,6 +11,9 @@
     [tools]를 주면 패널/심판이 tool call을 할 수 있다.
     [max_tool_calls] > 0이면 에이전트의 [max_turns]를 해당 횟수+1로 제한해
     OpenRouter Fusion의 per-panel tool budget을 근사한다.
+    [timeout_s]는 OAS transport idle/body budget에만 매핑한다. Fusion의 구조적
+    wall-clock budget은 호출자가 [Masc_oas_bridge.run_safe]로 소유하며, OAS
+    [max_execution_time_s]에는 매핑하지 않는다.
     미존재 runtime·빌드 실패는 [panel_failure]로. *)
 val build_agent
   :  sw:Eio.Switch.t

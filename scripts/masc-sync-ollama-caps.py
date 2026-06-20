@@ -18,8 +18,11 @@ Why a separate baseline file:
 
 Modes:
   --check    (default) compare config-declared media caps against the baseline.
-             Hard-fails (exit 1) on a real mismatch (declared != reality).
-             Soft-warns (exit 0) when a config model is absent from the baseline.
+             Hard-fails (exit 1) on a real mismatch (declared != reality) OR on a
+             declared media capability with no baseline evidence (an unverified
+             over-declaration). Soft-warns (exit 0) only when a *text-only* model
+             is absent from the baseline (declaring nothing is fail-closed safe);
+             --strict fails those too.
   --refresh  probe /api/show for every Ollama-family model in the config and
              (re)write the baseline JSON. Requires network + provider key.
   --emit     print the recommended [models.<id>.capabilities] media lines for
@@ -124,6 +127,59 @@ class MediaFlags:
         if self.audio:
             lines.append("supports-audio-input = true")
         return lines
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """Per-model capability verdict from classify().
+
+    A hard verdict contributes to a non-zero exit (CI fails); a soft verdict is an
+    advisory warning that only fails the run under --strict.
+    """
+
+    hard: bool
+    soft: bool
+    kind: str
+
+
+def classify(declared: MediaFlags, expected: "MediaFlags | None") -> Verdict:
+    """Pure capability verdict for one model. The gate decision is this function.
+
+    `expected` is None when the model has no /api/show evidence in the baseline.
+    A declared media capability with no evidence is an unverified over-declaration
+    and fails: declaring supports-image-input=true with no baseline snapshot
+    proving it is exactly how a text-only model ends up receiving an image turn.
+    A text-only model with no evidence is fail-closed safe, so it only soft-warns.
+
+    When evidence exists, declared must equal it. Over-declaration (a modality the
+    model lacks) makes the provider 400 at dispatch; under-declaration hides a
+    modality the model has from the reroute/gate.
+    """
+    if expected is None:
+        if declared.image or declared.audio:
+            return Verdict(
+                hard=True,
+                soft=False,
+                kind="UNVERIFIED-DECLARED (capability claimed, no /api/show evidence)",
+            )
+        return Verdict(
+            hard=False, soft=True, kind="unverified (text-only, absent from baseline)"
+        )
+    if declared == expected:
+        return Verdict(hard=False, soft=False, kind="ok")
+    under = (expected.image and not declared.image) or (
+        expected.audio and not declared.audio
+    )
+    over = (declared.image and not expected.image) or (
+        declared.audio and not expected.audio
+    )
+    if under and over:
+        kind = "MISMATCH (both under- and over-declared)"
+    elif under:
+        kind = "UNDER-DECLARED (reroute/gate will not see a modality)"
+    else:
+        kind = "OVER-DECLARED (provider will 400 at dispatch)"
+    return Verdict(hard=True, soft=False, kind=kind)
 
 
 @dataclass(frozen=True)
@@ -310,39 +366,44 @@ def mode_check(config_path: Path, baseline_path: Path, strict: bool) -> int:
     for model in models:
         entry = baseline.get(model.api_name)
         if entry is None:
-            print(
-                f"::warning::{model.model_id} ({model.api_name}) not in baseline; "
-                f"run --refresh to verify",
-                file=sys.stderr,
-            )
-            soft += 1
+            verdict = classify(model.declared, None)
+            if verdict.hard:
+                print(
+                    f"DRIFT {model.model_id} ({model.api_name}): {verdict.kind}\n"
+                    f"  baseline: absent — run --refresh to record /api/show\n"
+                    f"  declared: image={model.declared.image} "
+                    f"audio={model.declared.audio}",
+                    file=sys.stderr,
+                )
+                hard += 1
+            elif verdict.soft:
+                print(
+                    f"::warning::{model.model_id} ({model.api_name}) "
+                    f"{verdict.kind}; run --refresh",
+                    file=sys.stderr,
+                )
+                soft += 1
             continue
+        # entry present: classify against /api/show evidence (never soft here).
         expected = MediaFlags.from_ollama_capabilities(entry["capabilities"])
-        declared = model.declared
-        if declared != expected:
-            under = (expected.image and not declared.image) or (
-                expected.audio and not declared.audio
-            )
-            over = (declared.image and not expected.image) or (
-                declared.audio and not expected.audio
-            )
-            if under and over:
-                kind = "MISMATCH (both under- and over-declared)"
-            elif under:
-                kind = "UNDER-DECLARED (reroute/gate will not see a modality)"
-            else:
-                kind = "OVER-DECLARED (provider will 400 at dispatch)"
+        verdict = classify(model.declared, expected)
+        if verdict.hard:
             print(
-                f"DRIFT {model.model_id} ({model.api_name}): {kind}\n"
+                f"DRIFT {model.model_id} ({model.api_name}): {verdict.kind}\n"
                 f"  /api/show caps = {entry['capabilities']}\n"
                 f"  expected: image={expected.image} audio={expected.audio}\n"
-                f"  declared: image={declared.image} audio={declared.audio}",
+                f"  declared: image={model.declared.image} "
+                f"audio={model.declared.audio}",
                 file=sys.stderr,
             )
             hard += 1
 
     if hard:
-        print(f"FAIL: {hard} model(s) drifted from /api/show reality", file=sys.stderr)
+        print(
+            f"FAIL: {hard} model(s) failed capability verification "
+            f"(drift or unverified declaration)",
+            file=sys.stderr,
+        )
         return 1
     if soft and strict:
         print(f"FAIL (strict): {soft} model(s) unverified", file=sys.stderr)
@@ -394,7 +455,27 @@ def mode_self_test() -> int:
         {"supports-image-input": True, "supports-multimodal-inputs": True}
     )
     assert declared == MediaFlags(True, False), declared
-    print(f"self-test OK ({len(cases)} mapping cases)")
+
+    # classify(): a declared capability with no baseline evidence must hard-fail;
+    # a text-only model with no evidence is fail-closed safe (soft only).
+    img = MediaFlags(True, False)
+    aud = MediaFlags(False, True)
+    none = MediaFlags(False, False)
+    classify_cases = [
+        (classify(img, None), True, False),  # declared image, no evidence -> hard
+        (classify(aud, None), True, False),  # declared audio, no evidence -> hard
+        (classify(none, None), False, True),  # text-only, no evidence -> soft
+        (classify(img, img), False, False),  # match -> ok
+        (classify(img, none), True, False),  # over-declared -> hard
+        (classify(none, img), True, False),  # under-declared -> hard
+    ]
+    for verdict, want_hard, want_soft in classify_cases:
+        assert verdict.hard is want_hard, f"{verdict} hard != {want_hard}"
+        assert verdict.soft is want_soft, f"{verdict} soft != {want_soft}"
+
+    print(
+        f"self-test OK ({len(cases)} mapping + {len(classify_cases)} classify cases)"
+    )
     return 0
 
 

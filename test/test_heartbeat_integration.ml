@@ -872,6 +872,8 @@ let test_keeper_health_backpressure_uses_keeper_name () =
    | Obs.Runtime_admitted -> fail "keeper health should reject turn")
 
 let test_crashed_cycle_records_health_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir "health-feed" in
   let keeper_name = "health-feed-keeper" in
   Health.record_success ~agent_name:keeper_name;

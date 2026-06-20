@@ -50,14 +50,10 @@ let compact_whitespace text =
   Buffer.contents buf
 
 let truncate ~max_len text =
-  if String.length text <= max_len then text
-  else
-    let rec utf8_boundary idx =
-      if idx <= 0 then 0
-      else if Char.code text.[idx] land 0xc0 = 0x80 then utf8_boundary (idx - 1)
-      else idx
-    in
-    String.sub text 0 (utf8_boundary max_len)
+  let prefix, _ =
+    Keeper_text_processing.truncate_utf8_prefix ~max_bytes:max_len text
+  in
+  prefix
 
 let digest_id ~requester ?goal ~topic ~reason () =
   let goal_text =

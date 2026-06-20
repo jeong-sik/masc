@@ -404,25 +404,11 @@ let collapse_for_unstructured_note raw =
     raw;
   Buffer.contents buf |> String.trim
 
-let truncate_utf8_prefix max_len s =
-  if String.length s <= max_len
-  then s
-  else (
-    let len = min max_len (String.length s) in
-    let rec boundary i =
-      if i <= 0
-      then 0
-      else
-        let code = Char.code s.[i] in
-        if code land 0b1100_0000 = 0b1000_0000 then boundary (i - 1) else i
-    in
-    String.sub s 0 (boundary len))
-
 let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason ~raw =
-  let raw_excerpt =
-    raw
-    |> collapse_for_unstructured_note
-    |> truncate_utf8_prefix unstructured_note_max_chars
+  let raw_excerpt, _ =
+    Keeper_text_processing.truncate_utf8_prefix
+      ~max_bytes:unstructured_note_max_chars
+      (collapse_for_unstructured_note raw)
   in
   let note =
     if String.equal raw_excerpt ""

@@ -187,10 +187,37 @@ let test_path_probe_lists_parent_entries_for_glob_like_miss () =
          (json_bool "parent_exists" probe);
        check (option bool) "parent is directory" (Some true)
          (json_bool "parent_is_directory" probe);
+       check (option bool) "parent stays inside cwd" (Some true)
+         (json_bool "parent_within_cwd" probe);
        match json_string_list "parent_entries" probe with
        | Some entries ->
          check bool "parent listing includes candidate" true
            (List.mem "keeper_memory_os_consolidator.ml" entries)
+       | None -> fail "path probe should include parent_entries")
+
+let test_path_probe_does_not_list_parent_outside_cwd () =
+  let base = temp_dir "typed_exec_path_probe_base_" in
+  let outside = temp_dir "typed_exec_path_probe_outside_" in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir base;
+      cleanup_dir outside)
+    (fun () ->
+       let oc = open_out (Filename.concat outside "outside_candidate.ml") in
+       close_out oc;
+       let probe =
+         Keeper_tool_execute_runtime.For_testing.path_probe_json
+           ~cwd:base
+           (Filename.concat outside "outside*")
+       in
+       check (option bool) "outside parent is not in cwd" (Some false)
+         (json_bool "parent_within_cwd" probe);
+       check (option bool) "outside parent existence is not probed" (Some false)
+         (json_bool "parent_exists" probe);
+       check (option bool) "outside parent directory is not probed" (Some false)
+         (json_bool "parent_is_directory" probe);
+       match json_string_list "parent_entries" probe with
+       | Some entries -> check (list string) "outside parent entries hidden" [] entries
        | None -> fail "path probe should include parent_entries")
 
 (* Source-level pin: assert that no [("cwd", `String <ident>)]
@@ -256,5 +283,8 @@ let () =
           test_case
             "glob-like missing path returns parent entries"
             `Quick test_path_probe_lists_parent_entries_for_glob_like_miss
+        ; test_case
+            "absolute missing path outside cwd does not list parent"
+            `Quick test_path_probe_does_not_list_parent_outside_cwd
         ] )
     ]

@@ -18,9 +18,12 @@ type path_probe =
   ; resolved_parent : string
   ; parent_exists : bool
   ; parent_is_directory : bool
+  ; parent_within_cwd : bool
   ; wildcard_like : bool
   ; parent_entries : string list
   }
+
+let path_probe_parent_entries_limit = 40
 
 let path_contains_glob_meta s =
   String.exists
@@ -44,7 +47,13 @@ let path_probe ~cwd path_argument =
   let resolved_path = resolve_against_cwd ~cwd path_argument in
   let parent_argument = Filename.dirname path_argument in
   let resolved_parent = resolve_against_cwd ~cwd parent_argument in
+  let cwd_norm = Keeper_alerting_path.normalize_path_for_check_stripped cwd in
+  let parent_within_cwd =
+    Keeper_alerting_path.is_within_root_norm ~root_norm:cwd_norm resolved_parent
+  in
   let parent_exists =
+    parent_within_cwd
+    &&
     try Sys.file_exists resolved_parent with
     | Sys_error _ -> false
   in
@@ -61,7 +70,7 @@ let path_probe ~cwd path_argument =
         Sys.readdir resolved_parent
         |> Array.to_list
         |> List.sort String.compare
-        |> take 40
+        |> take path_probe_parent_entries_limit
       with
       | Sys_error _ | Unix.Unix_error _ -> []
     else []
@@ -72,6 +81,7 @@ let path_probe ~cwd path_argument =
   ; resolved_parent
   ; parent_exists
   ; parent_is_directory
+  ; parent_within_cwd
   ; wildcard_like = path_contains_glob_meta path_argument
   ; parent_entries
   }
@@ -84,6 +94,7 @@ let path_probe_json probe =
     ; "resolved_parent", `String probe.resolved_parent
     ; "parent_exists", `Bool probe.parent_exists
     ; "parent_is_directory", `Bool probe.parent_is_directory
+    ; "parent_within_cwd", `Bool probe.parent_within_cwd
     ; "wildcard_like", `Bool probe.wildcard_like
     ; ( "parent_entries"
       , `List (List.map (fun name -> `String name) probe.parent_entries) )

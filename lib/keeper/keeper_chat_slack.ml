@@ -128,7 +128,9 @@ let slack_block_of_chat_block = function
   | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Fusion _ -> None
 
 let content_blocks_of_text text =
-  Keeper_chat_blocks.parse_text_to_blocks text
+  text
+  |> redact
+  |> Keeper_chat_blocks.parse_text_to_blocks
   |> List.filter_map slack_block_of_chat_block
 
 let final_message_blocks ~content ~event_blocks =

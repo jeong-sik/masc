@@ -86,6 +86,27 @@ let test_rich_embeds_of_text_projects_links_and_images () =
   check bool "image caption" true
     (contains image_json "\"description\":\"diagram\"")
 
+let test_rich_embeds_redacts_text_derived_image_secrets () =
+  let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz" in
+  let embeds =
+    D.rich_embeds_of_text
+      (Printf.sprintf "![%s](https://example.com/diagram.png?token=%s)"
+         secret secret)
+  in
+  check int "one image embed" 1 (List.length embeds);
+  let image_json =
+    Discord_rest_client.embed_to_json (List.hd embeds) |> Yojson.Safe.to_string
+  in
+  check bool "raw secret removed" false (contains image_json secret);
+  check bool "redaction marker present" true
+    (contains image_json "[REDACTED]")
+
+let test_rich_embeds_suppresses_credential_url () =
+  let embeds =
+    D.rich_embeds_of_text "https://user:pass@example.com/diagram.png"
+  in
+  check int "credential URL does not become embed" 0 (List.length embeds)
+
 let () =
   run "keeper_chat_discord"
     [ ( "streaming-redaction"
@@ -109,5 +130,9 @@ let () =
             test_public_voice_audio_url_strips_trailing_slash
         ; test_case "projects text links and images to embeds" `Quick
             test_rich_embeds_of_text_projects_links_and_images
+        ; test_case "redacts text-derived image secrets" `Quick
+            test_rich_embeds_redacts_text_derived_image_secrets
+        ; test_case "suppresses credential URL embeds" `Quick
+            test_rich_embeds_suppresses_credential_url
         ] )
     ]

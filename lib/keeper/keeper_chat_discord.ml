@@ -263,7 +263,9 @@ let rich_embed_of_chat_block = function
   | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Fusion _ -> None
 
 let rich_embeds_of_text text =
-  Keeper_chat_blocks.parse_text_to_blocks text
+  text
+  |> Observability_redact.redact_text
+  |> Keeper_chat_blocks.parse_text_to_blocks
   |> List.filter_map rich_embed_of_chat_block
 
 let send_text_rich_embeds ~token ~channel_id text =

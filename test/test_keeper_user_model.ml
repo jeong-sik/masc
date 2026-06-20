@@ -20,9 +20,8 @@ let contains substring s =
 ;;
 
 let with_temp_keepers_dir f =
-  let marker = Filename.temp_file "keeper-user-model-" ".tmp" in
-  Sys.remove marker;
-  Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
+  let dir = Filename.temp_dir "keeper-user-model-" "" in
+  Memory_io.For_testing.with_keepers_dir dir (fun () -> f dir)
 ;;
 
 let fact
@@ -150,6 +149,35 @@ let test_render_empty_model_is_none () =
   check bool "empty render" true (Option.is_none (User_model.render_prompt_block model))
 ;;
 
+let test_render_truncates_on_utf8_boundary () =
+  let claim = String.make 218 'a' ^ "한글" in
+  let item : User_model.item =
+    { claim
+    ; category = Types.Preference
+    ; source = User_model.Keeper_private
+    ; turn = 1
+    ; first_seen = 1.0
+    ; last_verified_at = None
+    }
+  in
+  let model =
+    { User_model.preferences = [ item ]
+    ; constraints = []
+    ; source_fact_count = 1
+    ; shared_fact_count = 0
+    }
+  in
+  let rendered =
+    match User_model.render_prompt_block model with
+    | None -> fail "expected rendered user model"
+    | Some block -> block
+  in
+  check bool "rendered prompt remains valid UTF-8" true
+    (String.is_valid_utf_8 rendered);
+  check bool "rendered prompt shows truncation marker" true
+    (contains "..." rendered)
+;;
+
 let () =
   run
     "Keeper_user_model"
@@ -159,6 +187,10 @@ let () =
             `Quick
             test_build_filters_user_model_categories_and_private_precedence
         ; test_case "empty model renders no block" `Quick test_render_empty_model_is_none
+        ; test_case
+            "render truncates on UTF-8 boundary"
+            `Quick
+            test_render_truncates_on_utf8_boundary
         ] )
     ]
 ;;

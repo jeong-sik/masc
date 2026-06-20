@@ -34,7 +34,7 @@ let truncate ~max_len s =
   then ""
   else if String.length s <= max_len
   then s
-  else String.sub s 0 (max 0 (max_len - 3)) ^ "..."
+  else String_util.utf8_safe ~max_bytes:max_len ~suffix:"..." s |> String_util.to_string
 ;;
 
 let sanitize_text ~max_len text =

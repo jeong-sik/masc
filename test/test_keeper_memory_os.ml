@@ -1905,6 +1905,210 @@ let test_recall_no_prefix_for_non_volatile_fact () =
             (contains "[UNVERIFIED — re-check before acting]" block))))
 ;;
 
+(* RFC-0259 recall suppression validation harness ------------------------------
+   The P4 unit tests above pin the mechanism on single crafted facts. This
+   harness measures the end-to-end effect on a mixed, realistic population:
+   render the live recall block (P1 TTL filter + P4 demote/prefix) once and
+   classify every claim. It is a before/after measurement — the naive "before"
+   recall would assert every claim as unqualified-live; the assertions below fail
+   if either protection regresses (nothing filtered, or nothing qualified), so a
+   change that disables suppression turns the harness red. The counts are
+   evaluation only; no score is added to the product's recall ordering. *)
+
+type recall_treatment =
+  | Absent (* claim does not appear — P1 TTL filtered it out *)
+  | Qualified (* claim appears, its line led by the UNVERIFIED prefix — P4 *)
+  | Plain (* claim appears with no UNVERIFIED prefix — durable or fresh *)
+
+let treatment_to_string = function
+  | Absent -> "absent"
+  | Qualified -> "qualified"
+  | Plain -> "plain"
+;;
+
+let unverified_volatile_prefix_text = "[UNVERIFIED — re-check before acting]"
+
+(* Classify one claim by the (unique) rendered line that contains it. *)
+let treatment_of_claim ~block ~claim =
+  match
+    String.split_on_char '\n' block |> List.find_opt (fun l -> contains claim l)
+  with
+  | None -> Absent
+  | Some line ->
+    if contains unverified_volatile_prefix_text line then Qualified else Plain
+;;
+
+(* A mixed fact population spanning every recall class, each tagged with the
+   treatment a correct P1+P4 recall must produce. Expectations are reasoned from
+   the scenario (age vs the 12h horizon and 24h TTL), NOT computed from the code
+   under test, so the harness is non-circular. [valid_until] is set by the real
+   write-side producer [fact_valid_until]. *)
+let suppression_corpus ~now =
+  let horizon = Reconcile.default_grounding_horizon_seconds in
+  let ttl = Types.volatile_external_ttl_seconds in
+  let volatile ~claim ~kind ~id ~first_seen ~last_verified =
+    let external_ref = Some { Types.kind; Types.id } in
+    { (fact_fixture ~now ()) with
+      Types.claim
+    ; Types.category = Types.Blocker
+    ; Types.external_ref
+    ; Types.first_seen
+    ; Types.valid_until = Types.fact_valid_until ~now:first_seen ~external_ref Types.Blocker
+    ; Types.last_verified_at = last_verified
+    }
+  in
+  let durable ~claim ~age_days =
+    { (fact_fixture ~now ()) with
+      Types.claim
+    ; Types.category = Types.Fact
+    ; Types.external_ref = None
+    ; Types.first_seen = now -. days age_days
+    ; Types.valid_until = None
+    ; Types.last_verified_at = None
+    }
+  in
+  [ durable ~claim:"Deployment uses a blue-green rollout" ~age_days:90, Plain, "durable"
+  ; ( durable ~claim:"The repository builds with dune on OCaml 5.x" ~age_days:30
+    , Plain
+    , "durable" )
+  ; ( volatile
+        ~claim:"PR #100 just opened for review"
+        ~kind:Types.Pr
+        ~id:"100"
+        ~first_seen:(now -. (horizon /. 4.0))
+        ~last_verified:(Some (now -. (horizon /. 4.0)))
+    , Plain
+    , "volatile_fresh" )
+  ; ( volatile
+        ~claim:"PR #21515 is blocked and needs a fix"
+        ~kind:Types.Pr
+        ~id:"21515"
+        ~first_seen:(now -. (horizon *. 1.5))
+        ~last_verified:(Some (now -. (horizon *. 1.5)))
+    , Qualified
+    , "volatile_stale" )
+  ; ( volatile
+        ~claim:"Issue #4242 is still open"
+        ~kind:Types.Issue
+        ~id:"4242"
+        ~first_seen:(now -. (horizon *. 1.5))
+        ~last_verified:(Some (now -. (horizon *. 1.5)))
+    , Qualified
+    , "volatile_stale" )
+  ; ( volatile
+        ~claim:"PR #300 is open"
+        ~kind:Types.Pr
+        ~id:"300"
+        ~first_seen:(now -. (ttl *. 3.0))
+        ~last_verified:None
+    , Absent
+    , "volatile_expired" )
+  ]
+;;
+
+let test_rfc0259_suppression_harness () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _dir ->
+      let keeper_id = "rfc0259-suppression-harness" in
+      let now = 2_000_000.0 in
+      let corpus = suppression_corpus ~now in
+      List.iter (fun (f, _, _) -> Memory_io.append_fact ~keeper_id f) corpus;
+      let block = Recall.render_context ~keeper_id ~now ~max_facts:50 ~max_episodes:0 () in
+      let observed =
+        List.map
+          (fun (f, expected, klass) ->
+            klass, expected, treatment_of_claim ~block ~claim:f.Types.claim)
+          corpus
+      in
+      let count p = List.length (List.filter p observed) in
+      let is_stale k = String.equal k "volatile_stale" || String.equal k "volatile_expired" in
+      let stale_total = count (fun (k, _, _) -> is_stale k) in
+      let stale_neutralized =
+        count (fun (k, _, a) -> is_stale k && (a = Absent || a = Qualified))
+      in
+      let durable_total = count (fun (k, _, _) -> String.equal k "durable") in
+      let durable_preserved =
+        count (fun (k, _, a) -> String.equal k "durable" && a = Plain)
+      in
+      (* measured report — printed so a run emits the numbers (evaluation only) *)
+      Printf.printf "\n[RFC-0259 recall suppression harness] (horizon=12h, TTL=24h)\n";
+      Printf.printf
+        "  stale external claims neutralized (filtered|qualified): %d/%d\n"
+        stale_neutralized
+        stale_total;
+      Printf.printf
+        "  durable claims preserved (present, unqualified): %d/%d\n"
+        durable_preserved
+        durable_total;
+      List.iter
+        (fun (k, e, a) ->
+          Printf.printf
+            "    %-17s expect=%-9s actual=%s\n"
+            k
+            (treatment_to_string e)
+            (treatment_to_string a))
+        observed;
+      (* (1) every claim is treated exactly as its scenario requires *)
+      List.iter
+        (fun (k, expected, actual) ->
+          Alcotest.(check bool)
+            (Printf.sprintf "%s claim treated as %s" k (treatment_to_string expected))
+            true
+            (expected = actual))
+        observed;
+      (* (2) measured outcome: every stale claim neutralized, every durable kept *)
+      Alcotest.(check int)
+        "all stale external claims neutralized"
+        stale_total
+        stale_neutralized;
+      Alcotest.(check int)
+        "all durable claims preserved unqualified"
+        durable_total
+        durable_preserved;
+      (* (3) anti-theater sensitivity: the protections actually act on this corpus,
+         so the treated block differs from the naive "everything unqualified-live"
+         block. If P1 were removed nothing is Absent; if P4 were removed nothing is
+         Qualified — either regression fails one of these. *)
+      Alcotest.(check bool)
+        "P1 TTL filter removed at least one expired claim"
+        true
+        (count (fun (_, _, a) -> a = Absent) >= 1);
+      Alcotest.(check bool)
+        "P4 qualified at least one stale-but-current claim"
+        true
+        (count (fun (_, _, a) -> a = Qualified) >= 1)))
+;;
+
+(* RFC-0259 §3.5: demotion orders every durable claim ahead of every qualified
+   volatile claim, so under a tight recall cap durable knowledge is kept and the
+   possibly-stale external claim is dropped first. Measured as a strict ordering
+   over line positions in the rendered block. *)
+let test_rfc0259_suppression_demote_ordering () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _dir ->
+      let keeper_id = "rfc0259-demote-ordering" in
+      let now = 2_000_000.0 in
+      let corpus = suppression_corpus ~now in
+      List.iter (fun (f, _, _) -> Memory_io.append_fact ~keeper_id f) corpus;
+      let block = Recall.render_context ~keeper_id ~now ~max_facts:50 ~max_episodes:0 () in
+      let position claim =
+        match index_of claim block with
+        | Some i -> i
+        | None -> max_int (* filtered: never ahead of a durable claim *)
+      in
+      let positions klass =
+        corpus
+        |> List.filter (fun (_, _, k) -> String.equal k klass)
+        |> List.map (fun (f, _, _) -> position f.Types.claim)
+      in
+      let last_durable = List.fold_left max min_int (positions "durable") in
+      let first_qualified = List.fold_left min max_int (positions "volatile_stale") in
+      Alcotest.(check bool)
+        "every durable claim renders before every qualified volatile claim"
+        true
+        (last_durable < first_qualified)))
+;;
+
 let test_recall_filters_expired_episodes () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -3061,6 +3265,14 @@ let () =
             "non-volatile fact never gets the hard prefix"
             `Quick
             test_recall_no_prefix_for_non_volatile_fact
+        ; Alcotest.test_case
+            "RFC-0259 suppression harness: stale neutralized, durable preserved"
+            `Quick
+            test_rfc0259_suppression_harness
+        ; Alcotest.test_case
+            "RFC-0259 suppression harness: durable demoted ahead of stale volatile"
+            `Quick
+            test_rfc0259_suppression_demote_ordering
         ; Alcotest.test_case
             "expired episodes are omitted"
             `Quick

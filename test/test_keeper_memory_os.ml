@@ -3247,6 +3247,41 @@ let test_reobserve_volatile_inherits_anchor () =
   Alcotest.(check (float 0.001)) "first_seen preserved" older merged.Types.first_seen
 ;;
 
+let test_reobserve_nonvolatile_advances_anchor_and_preserves_expiry () =
+  let now = 5_000_000.0 in
+  let older = now -. 100_000.0 in
+  let expiry = older +. 3600.0 in
+  let existing =
+    { (fact_fixture ~now:older ()) with
+      Types.category = Types.Ephemeral
+    ; Types.external_ref = None
+    ; Types.first_seen = older
+    ; Types.last_verified_at = Some older
+    ; Types.valid_until = Some expiry
+    }
+  in
+  let incoming =
+    { existing with
+      Types.last_verified_at = Some now
+    ; Types.valid_until = Some (now +. Types.volatile_external_ttl_seconds)
+    }
+  in
+  let merged = Policy.reobserve_fact ~now ~existing ~incoming in
+  Alcotest.(check (option (float 0.001)))
+    "last_verified_at advanced for non-volatile re-observation"
+    (Some now)
+    merged.Types.last_verified_at;
+  Alcotest.(check (option (float 0.001)))
+    "existing valid_until preserved for non-volatile re-observation"
+    (Some expiry)
+    merged.Types.valid_until;
+  Alcotest.(check (float 0.001)) "first_seen preserved" older merged.Types.first_seen;
+  Alcotest.(check bool)
+    "external_ref remains absent"
+    true
+    (Option.is_none merged.Types.external_ref)
+;;
+
 let test_retention_rank_demotes_volatile () =
   let now = 1_000_000.0 in
   let durable = { (fact_fixture ~now ()) with Types.category = Types.Fact } in
@@ -3567,6 +3602,10 @@ let () =
             "reobserve inherits a volatile claim's anchor (RFC-0259 P6/F)"
             `Quick
             test_reobserve_volatile_inherits_anchor
+        ; Alcotest.test_case
+            "reobserve advances a non-volatile claim's anchor"
+            `Quick
+            test_reobserve_nonvolatile_advances_anchor_and_preserves_expiry
         ; Alcotest.test_case
             "retention rank demotes a volatile fact below durable"
             `Quick

@@ -14,6 +14,7 @@ describe('routeWantsRefreshTarget', () => {
     expect(routeWantsRefreshTarget(current, 'operator')).toBe(false)
     expect(routeWantsRefreshTarget(current, 'board')).toBe(false)
     expect(routeWantsRefreshTarget(current, 'activity')).toBe(false)
+    expect(routeWantsRefreshTarget(current, 'fusion')).toBe(false)
   })
 
   it('matches execution-backed routes without broadening fleet-health defaults', () => {
@@ -36,5 +37,12 @@ describe('routeWantsRefreshTarget', () => {
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'observatory' }), 'activity')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'observatory', view: 'activity' }), 'activity')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'fleet-health' }), 'activity')).toBe(false)
+  })
+
+  it('keeps fusion refreshes scoped to the top-level fusion route', () => {
+    expect(routeWantsRefreshTarget(route('fusion'), 'fusion')).toBe(true)
+    expect(routeWantsRefreshTarget(route('board'), 'fusion')).toBe(false)
+    expect(routeWantsRefreshTarget(route('workspace', { section: 'board' }), 'fusion')).toBe(false)
+    expect(routeWantsRefreshTarget(route('monitoring', { section: 'agents' }), 'fusion')).toBe(false)
   })
 })

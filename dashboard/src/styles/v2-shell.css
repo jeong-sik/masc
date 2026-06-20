@@ -687,13 +687,6 @@ aside.v2-status-tray .tray-action-link:hover {
   color: var(--ss-brand);
 }
 
-.v2-shell-header .v2-header-title {
-  color: var(--ss-text-primary);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
 /* Surface tabs inside the header */
 .v2-shell-tabs [role="tablist"] {
   border-color: var(--ss-border);

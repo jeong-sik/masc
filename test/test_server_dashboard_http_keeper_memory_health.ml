@@ -4,6 +4,8 @@ module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Health = Server_dashboard_http_keeper_memory_health
 
+let test_now = 1_700_000_000.0
+
 let fresh_dir prefix =
   let path = Filename.temp_file prefix ".dir" in
   Sys.remove path;
@@ -96,7 +98,7 @@ let with_env name value f =
 let test_uses_explicit_base_path_not_ambient_resolver () =
   Eio_main.run
   @@ fun _env ->
-  let now = 1_700_000_000.0 in
+  let now = test_now in
   let target_base = fresh_dir "masc-memory-health-target" in
   let ambient_base = fresh_dir "masc-memory-health-ambient" in
   let target_keepers_dir =
@@ -128,7 +130,7 @@ let test_uses_explicit_base_path_not_ambient_resolver () =
 let test_reports_per_keeper_metric_values () =
   Eio_main.run
   @@ fun _env ->
-  let now = 1_700_000_000.0 in
+  let now = test_now in
   let base = fresh_dir "masc-memory-health-metrics" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
@@ -165,14 +167,16 @@ let test_reports_per_keeper_metric_values () =
     "cadence_counter_entries non-negative"
     true
     (int_field "cadence_counter_entries" json >= 0);
-  (* [generated_at] is present as a wall-clock float. *)
-  ignore (float_field "generated_at" json)
+  Alcotest.(check bool)
+    "generated_at is present as wall-clock float"
+    true
+    (float_field "generated_at" json >= 0.0)
 ;;
 
 let test_dry_run_gc_reports_expired_and_duplicates () =
   Eio_main.run
   @@ fun _env ->
-  let now = 1_700_000_000.0 in
+  let now = test_now in
   let base = fresh_dir "masc-memory-health-gc" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
@@ -196,7 +200,7 @@ let test_dry_run_gc_reports_expired_and_duplicates () =
 let test_sorts_keepers_by_facts_bytes_desc () =
   Eio_main.run
   @@ fun _env ->
-  let now = 1_700_000_000.0 in
+  let now = test_now in
   let base = fresh_dir "masc-memory-health-sort" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id:"small" [ fact ~now "x" ];
@@ -227,7 +231,7 @@ let test_empty_store_has_no_keepers_and_zero_totals () =
 let test_skips_corrupt_jsonl_keeper () =
   Eio_main.run
   @@ fun _env ->
-  let now = 1_700_000_000.0 in
+  let now = test_now in
   let base = fresh_dir "masc-memory-health-corrupt" in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir

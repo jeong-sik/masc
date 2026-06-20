@@ -83,14 +83,16 @@ val set_store_for_testing : base_dir:string -> unit
 (** Set store to a custom directory.  For testing only. *)
 
 val resolve_record_verdicts_store :
+  ?cwd:string ->
   record_verdicts:bool ->
   verdict_store_dir:string option ->
   live_store_dir:string option ->
   (string option, string) result
 (** Decide where an offline eval's [--record-verdicts] verdicts go, refusing to
-    write the live store. [Ok None] = not recording; [Ok (Some dir)] = isolated
-    store; [Error] = missing/colliding-with-live store dir. Pure: pass
-    [~live_store_dir:(base_path ())]. *)
+    write the live store or any child path under it after best-effort
+    lexical/realpath normalization. [Ok None] = not recording; [Ok (Some dir)] =
+    isolated store; [Error] = missing/colliding-with-live store dir. Pass [~cwd]
+    in tests to make relative-path normalization deterministic. *)
 
 (** {1 Hashing} *)
 

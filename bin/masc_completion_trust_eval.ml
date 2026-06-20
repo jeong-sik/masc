@@ -519,18 +519,19 @@ let () =
       exit 0);
     if cfg.runtime_id = "" then
       error "missing --runtime ID (required for a live run; use --list to inspect the corpus)";
+    let base_path = resolve_base cfg.base in
     (* Fail fast: --record-verdicts must target an isolated store, never the live
        ledger ($MASC_BASE_PATH/data/verdicts). Resolve before any heavy init. *)
     let verdict_store =
       match
-        Cal.resolve_record_verdicts_store ~record_verdicts:cfg.record_verdicts
+        Cal.resolve_record_verdicts_store ~cwd:(Sys.getcwd ())
+          ~record_verdicts:cfg.record_verdicts
           ~verdict_store_dir:cfg.verdict_store_dir
-          ~live_store_dir:(Cal.base_path_opt ())
+          ~live_store_dir:(Some (Filename.concat base_path "data/verdicts"))
       with
       | Ok v -> v
       | Error msg -> error msg
     in
-    let base_path = resolve_base cfg.base in
     Eio_main.run @@ fun env ->
     Mirage_crypto_rng_unix.use_default ();
     Time_compat.set_clock (Eio.Stdenv.clock env);

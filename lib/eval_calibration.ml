@@ -132,19 +132,72 @@ let set_store_for_testing ~base_dir =
     a silent default to the live store (an "unknown -> permissive default" is the
     exact failure mode this guards against) and require an explicit isolated
     scratch path that is not the live store. [live_store_dir] is the caller's
-    {!base_path_opt} ([None] when no live store exists), passed in so the
-    decision stays pure and testable.
+    live verdict store ([None] when no live store exists), passed in so tests can
+    supply a deterministic base path.
 
     - [record_verdicts = false] -> [Ok None] (nothing to record).
     - no [verdict_store_dir] -> [Error] (no silent fallback to the live store).
-    - [verdict_store_dir] equal to [live_store_dir] -> [Error] (would pollute).
+    - [verdict_store_dir] equal to or below [live_store_dir] -> [Error] (would
+      pollute).
     - otherwise -> [Ok (Some dir)]. *)
-let resolve_record_verdicts_store ~record_verdicts ~verdict_store_dir
+let lexical_normalize_abs abs =
+  let parts = String.split_on_char '/' abs in
+  let stack = ref [] in
+  List.iter
+    (function
+      | "" | "." -> ()
+      | ".." ->
+        (match !stack with
+         | _ :: rest -> stack := rest
+         | [] -> ())
+      | part -> stack := part :: !stack)
+    parts;
+  "/" ^ String.concat "/" (List.rev !stack)
+;;
+
+let lexical_abs ?cwd raw =
+  let abs =
+    if Filename.is_relative raw then
+      Filename.concat (match cwd with Some d -> d | None -> Sys.getcwd ()) raw
+    else
+      raw
+  in
+  lexical_normalize_abs abs
+;;
+
+let rec realpath_existing_prefix abs =
+  try Unix.realpath abs with
+  | Unix.Unix_error _ | Invalid_argument _ | Sys_error _ ->
+    let parent = Filename.dirname abs in
+    if String.equal parent abs then abs
+    else
+      let parent_real = realpath_existing_prefix parent in
+      lexical_normalize_abs (Filename.concat parent_real (Filename.basename abs))
+;;
+
+let normalize_for_store_collision ?cwd raw =
+  raw |> lexical_abs ?cwd |> realpath_existing_prefix |> lexical_normalize_abs
+;;
+
+let same_or_child_path ~parent child =
+  String.equal child parent
+  || (not (String.equal parent "/")
+      && String.length child > String.length parent
+      && child.[String.length parent] = '/'
+      && String.sub child 0 (String.length parent) = parent)
+;;
+
+let resolve_record_verdicts_store ?cwd ~record_verdicts ~verdict_store_dir
     ~(live_store_dir : string option) : (string option, string) result =
   if not record_verdicts then Ok None
   else
     let is_live d =
-      match live_store_dir with Some l -> String.equal d l | None -> false
+      match live_store_dir with
+      | Some l ->
+        let candidate = normalize_for_store_collision ?cwd d in
+        let live = normalize_for_store_collision ?cwd l in
+        same_or_child_path ~parent:live candidate
+      | None -> false
     in
     match verdict_store_dir with
     | None ->
@@ -154,8 +207,9 @@ let resolve_record_verdicts_store ~record_verdicts ~verdict_store_dir
     | Some d when is_live d ->
       Error
         (Printf.sprintf
-           "--verdict-store-dir %s is the live verdict store; pick an isolated \
-            scratch path so the eval does not contaminate production calibration."
+           "--verdict-store-dir %s is inside the live verdict store; pick an \
+            isolated scratch path so the eval does not contaminate production \
+            calibration."
            d)
     | Some d -> Ok (Some d)
 ;;

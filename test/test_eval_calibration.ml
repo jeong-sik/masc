@@ -491,6 +491,34 @@ let test_store_rejects_live () =
   | Error msg -> check bool "mentions live store" true (contains ~sub:"live" msg)
   | Ok _ -> fail "expected Error when store dir is the live store"
 
+let test_store_rejects_live_aliases () =
+  let cases = [
+    "trailing slash", live_store ^ "/";
+    "dot segment", "/live/base/data/./verdicts";
+    "dotdot segment", "/live/base/data/tmp/../verdicts";
+    "relative live path", "data/verdicts";
+  ] in
+  List.iter
+    (fun (name, dir) ->
+      match
+        Cal.resolve_record_verdicts_store ~cwd:"/live/base"
+          ~record_verdicts:true ~verdict_store_dir:(Some dir)
+          ~live_store_dir:(Some live_store)
+      with
+      | Error msg ->
+        check bool (name ^ " mentions live store") true (contains ~sub:"live" msg)
+      | Ok _ -> fail (name ^ " should be rejected as a live-store alias"))
+    cases
+
+let test_store_rejects_live_child () =
+  let child = Filename.concat live_store "eval-scratch" in
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:true
+      ~verdict_store_dir:(Some child) ~live_store_dir:(Some live_store)
+  with
+  | Error msg -> check bool "mentions live store" true (contains ~sub:"live" msg)
+  | Ok _ -> fail "expected Error when store dir is under the live store"
+
 let test_store_accepts_isolated () =
   let isolated = "/scratch/verdicts" in
   match
@@ -550,6 +578,8 @@ let () =
       test_case "not recording -> none" `Quick test_store_not_recording;
       test_case "requires store dir" `Quick test_store_requires_dir;
       test_case "rejects live store" `Quick test_store_rejects_live;
+      test_case "rejects live store aliases" `Quick test_store_rejects_live_aliases;
+      test_case "rejects live store child" `Quick test_store_rejects_live_child;
       test_case "accepts isolated" `Quick test_store_accepts_isolated;
       test_case "no live store -> no collision" `Quick test_store_no_live_no_collision;
     ];

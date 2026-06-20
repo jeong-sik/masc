@@ -445,7 +445,9 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
                  timeout_done_status ~request_id ~keeper_name ~timeout_sec))
       with
       | CancelledByOperator -> operator_cancelled_status ()
-      | Eio.Cancel.Cancelled _ -> runtime_cancelled_status ()
+      | Eio.Cancel.Cancelled _ as e ->
+        set_status_protected ~preserve_terminal:true request_id (runtime_cancelled_status ());
+        raise e
       | exn ->
         Done
           { ok = false

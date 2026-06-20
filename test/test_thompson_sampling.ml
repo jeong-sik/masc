@@ -426,6 +426,56 @@ let test_persistence_loads_and_saves_pending_votes () =
         (json |> member "total_votes_up" |> to_int)
   | None -> fail "pending vote row not persisted"
 
+let test_persistence_load_skips_corrupt_and_nameless_rows () =
+  with_temp_dir "thompson-corrupt-persistence" @@ fun base_path ->
+  let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
+  Fs_compat.mkdir_p masc_dir;
+  let path = Filename.concat masc_dir "autonomy_stats.jsonl" in
+  let valid_agent = "persist-valid-after-corrupt" in
+  let valid =
+    `Assoc
+      [
+        ("name", `String valid_agent);
+        ("alpha", `Float 4.0);
+        ("beta", `Float 1.5);
+        ("selections", `Int 9);
+        ("last_selected_at", `Float 12.0);
+        ("total_votes_up", `Int 5);
+        ("total_votes_down", `Int 2);
+        ("posts_created", `Int 1);
+        ("comments_created", `Int 0);
+        ("skips", `Int 0);
+        ("guard_penalties_total", `Int 0);
+        ("updated_at", `Float 13.0);
+      ]
+  in
+  let nameless =
+    `Assoc
+      [
+        ("alpha", `Float 99.0);
+        ("beta", `Float 99.0);
+        ("selections", `Int 99);
+      ]
+  in
+  Fs_compat.save_file path
+    (String.concat "\n"
+       [
+         "{not-json";
+         Yojson.Safe.to_string nameless;
+         Yojson.Safe.to_string valid;
+         "";
+       ]);
+  Thompson_sampling.set_base_path base_path;
+  Thompson_sampling.load_stats ();
+  let loaded = Thompson_sampling.get_stats valid_agent in
+  check (float 0.01) "valid row loaded despite corrupt file prefix" 4.0 loaded.alpha;
+  check int "valid row selections loaded" 9 loaded.selections;
+  let has_empty_name =
+    Thompson_sampling.get_all_stats ()
+    |> List.exists (fun (s : Thompson_sampling.agent_stats) -> String.equal s.name "")
+  in
+  check bool "nameless schema row skipped" false has_empty_name
+
 (** {1 Test Runner} *)
 
 let () =
@@ -479,5 +529,7 @@ let () =
     "persistence", [
       test_case "load stats and save pending votes" `Quick
         test_persistence_loads_and_saves_pending_votes;
+      test_case "load skips corrupt and nameless rows" `Quick
+        test_persistence_load_skips_corrupt_and_nameless_rows;
     ];
   ]

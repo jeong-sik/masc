@@ -566,6 +566,43 @@ let test_delegation_request_from_execution_result_uses_selected_action () =
         (json_string_field "title" task_seed)
   | None -> fail "expected task_seed"
 
+let test_delegation_request_multistep_first_spawn_wins () =
+  let action =
+    D.MultiStep
+      [
+        D.BoardPost { content = "announce intent"; hearth = None };
+        D.ProposeSpawn
+          { topic = "First delegation"; reason = "primary projection" };
+        D.ProposeSpawn
+          { topic = "Second delegation"; reason = "must not replace first" };
+      ]
+  in
+  match R.of_action ~requester:"planner" action with
+  | Some request ->
+      check string "first spawn topic" "First delegation" request.topic;
+      check string "first spawn reason" "primary projection" request.reason
+  | None -> fail "expected first delegation request"
+
+let test_delegation_request_id_includes_goal () =
+  let a =
+    R.make ~requester:"planner" ~goal:"goal-a" ~topic:"same topic"
+      ~reason:"same reason" ()
+  in
+  let b =
+    R.make ~requester:"planner" ~goal:"goal-b" ~topic:"same topic"
+      ~reason:"same reason" ()
+  in
+  check bool "goal changes id" true (not (String.equal a.id b.id))
+
+let test_delegation_request_title_truncates_utf8_boundary () =
+  let topic = String.make 79 'a' ^ "\xed\x95\x9c" in
+  let request =
+    R.make ~requester:"planner" ~topic ~reason:"unicode boundary" ()
+  in
+  check string "title stops before partial codepoint"
+    ("Delegate: " ^ String.make 79 'a')
+    request.task_seed.title
+
 let test_parse_json_with_code_fences_rejected () =
   let raw =
     "```json\n{\"action\":\"noop\",\"params\":{\"reason\":\"quiet\"},\"reasoning\":\"nothing\",\"confidence\":0.9}\n```"
@@ -1168,6 +1205,12 @@ let () =
             test_delegation_request_from_propose_spawn_action;
           test_case "delegation request from selected execution" `Quick
             test_delegation_request_from_execution_result_uses_selected_action;
+          test_case "delegation request multi_step first spawn wins" `Quick
+            test_delegation_request_multistep_first_spawn_wins;
+          test_case "delegation request id includes goal" `Quick
+            test_delegation_request_id_includes_goal;
+          test_case "delegation request truncates utf8 at boundary" `Quick
+            test_delegation_request_title_truncates_utf8_boundary;
         ] );
       ( "parse_deliberation_response",
         [

@@ -424,6 +424,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
         <button
           type="button"
           class="dock-iconbtn"
+          aria-label=${docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'}
           title=${docked ? '플로팅으로 띄우기' : '오른쪽에 도킹'}
           onMouseDown=${(e: MouseEvent) => e.stopPropagation()}
           onClick=${() => dock.setMode(docked ? 'float' : 'dock')}
@@ -435,6 +436,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
         <button
           type="button"
           class="dock-iconbtn"
+          aria-label="닫기"
           title="닫기 (Esc)"
           onMouseDown=${(e: MouseEvent) => e.stopPropagation()}
           onClick=${dock.close}
@@ -544,6 +546,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
           <button
             type="button"
             class="dock-send"
+            aria-label="메시지 전송"
             disabled=${!val.trim() || !!dock.streaming.value}
             onClick=${() => doSend()}
           >

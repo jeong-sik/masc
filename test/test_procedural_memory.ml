@@ -3,6 +3,7 @@
 open Alcotest
 module P = Masc.Procedural_memory
 module S = Masc.Skill_candidate_projection
+module Store = Masc.Skill_candidate_store
 module M = Masc.Keeper_memory_os_types
 
 let procedure ?(evidence = []) ?(success_count = 0) ?(failure_count = 0)
@@ -168,6 +169,82 @@ let test_skill_candidate_json_and_draft_are_candidate_only () =
     (contains_substring ~needle:"requires human approval" draft)
 ;;
 
+let read_file path =
+  let ic = open_in path in
+  let len = in_channel_length ic in
+  let content = really_input_string ic len in
+  close_in ic;
+  content
+;;
+
+let with_temp_base_path f =
+  let marker = Filename.temp_file "skill-candidate-store-" ".tmp" in
+  Sys.remove marker;
+  Unix.mkdir marker 0o755;
+  f marker
+;;
+
+let test_skill_candidate_store_writes_reviewable_draft_files () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let p =
+    procedure ~id:"Repeatable Debug Loop" ~evidence:[ "proof-store://abc" ]
+      ~success_count:3 ~failure_count:0 ~confidence:1.0 ()
+  in
+  let c = require_candidate p in
+  let stored =
+    match Store.write_candidate ~base_path c with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check string "draft dir"
+    (Filename.concat
+       (Filename.concat (Filename.concat base_path ".masc") "draft-skills")
+       c.id)
+    stored.dir;
+  check bool "candidate json exists" true (Sys.file_exists stored.json_path);
+  check bool "candidate toml exists" true (Sys.file_exists stored.toml_path);
+  check bool "skill md exists" true (Sys.file_exists stored.skill_md_path);
+  check bool "index exists" true (Sys.file_exists stored.index_path);
+  let toml = read_file stored.toml_path in
+  check bool "toml is candidate only" true
+    (contains_substring ~needle:"promotion_state = \"candidate\"" toml);
+  check bool "toml is not installable" true
+    (contains_substring ~needle:"installable = false" toml);
+  check bool "approval remains required" true
+    (contains_substring ~needle:"requires_human_approval = true" toml);
+  let skill_md = read_file stored.skill_md_path in
+  check bool "skill draft status is explicit" true
+    (contains_substring ~needle:"Status: candidate" skill_md);
+  let index = read_file stored.index_path in
+  check bool "index references candidate" true (contains_substring ~needle:c.id index)
+;;
+
+let test_skill_candidate_store_sanitizes_candidate_id_path () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let base =
+    require_candidate
+      (procedure ~id:"Normal" ~evidence:[ "proof-store://abc" ] ~success_count:3
+         ~failure_count:0 ~confidence:1.0 ())
+  in
+  let c : S.skill_candidate = { base with id = "../Escape Candidate" } in
+  in
+  let stored =
+    match Store.write_candidate ~base_path c with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check string "sanitized draft dir"
+    (Filename.concat
+       (Filename.concat (Filename.concat base_path ".masc") "draft-skills")
+       "escape-candidate")
+    stored.dir;
+  check bool "escaped parent not written" false
+    (Sys.file_exists
+       (Filename.concat (Filename.concat base_path ".masc") "Escape Candidate"))
+;;
+
 let () =
   run "procedural_memory"
     [
@@ -195,6 +272,10 @@ let () =
             test_skill_candidate_rejects_generic_memory_fact;
           test_case "renders candidate-only JSON and draft" `Quick
             test_skill_candidate_json_and_draft_are_candidate_only;
+          test_case "writes durable reviewable draft files" `Quick
+            test_skill_candidate_store_writes_reviewable_draft_files;
+          test_case "sanitizes candidate id path" `Quick
+            test_skill_candidate_store_sanitizes_candidate_id_path;
         ] );
     ]
 ;;

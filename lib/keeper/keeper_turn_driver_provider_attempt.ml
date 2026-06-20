@@ -331,6 +331,7 @@ let sdk_error_is_server_error (err : Agent_sdk.Error.sdk_error) : bool =
     when status >= 500 -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
     when code >= 500 -> true
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> true
   | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError _)
   | Agent_sdk.Error.Api
@@ -352,7 +353,6 @@ let sdk_error_is_server_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Llm_provider.Error.NotFound _
       | Llm_provider.Error.CapacityExhausted _
       | Llm_provider.Error.HardQuota _
-      | Llm_provider.Error.ProviderUnavailable _
       | Llm_provider.Error.ProviderTerminal _
       | Llm_provider.Error.ParseError _
       | Llm_provider.Error.InvalidConfig _

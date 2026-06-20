@@ -59,7 +59,7 @@ let truncate ~max_len text =
     in
     String.sub text 0 (utf8_boundary max_len)
 
-let digest_id ~requester ?goal ~topic ~reason =
+let digest_id ~requester ?goal ~topic ~reason () =
   let goal_text =
     match goal with
     | Some text -> text
@@ -139,7 +139,7 @@ let make ~requester ?goal ~topic ~reason () =
     deliberation_action_to_string (ProposeSpawn { topic; reason })
   in
   {
-    id = digest_id ~requester ?goal ~topic ~reason;
+    id = digest_id ~requester ?goal ~topic ~reason ();
     requester;
     topic;
     reason;

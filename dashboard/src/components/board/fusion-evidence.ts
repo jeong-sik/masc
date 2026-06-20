@@ -50,6 +50,9 @@ function numberField(record: Record<string, unknown>, key: string): number | und
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+// Legacy-only migration for board posts written before fusion_sink emitted
+// reason_detail/reason_code. Fusion board posts use a one-week TTL, so this
+// raw-constructor parser should be removed after that compatibility window.
 function decodeOcamlStringLiteral(value: string): string {
   return value
     .replace(/\\\\/g, '\u0000')

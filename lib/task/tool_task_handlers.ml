@@ -319,6 +319,49 @@ let handle_add_task ~tool_name ~start_time ctx args =
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description)
 
+(* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
+   over [Goal_task_assignment.set_task_goal] — the single validated backend
+   shared with the dashboard HTTP route, so neither surface re-implements the
+   precondition checks. All caller-input violations are [Workflow_rejection]. *)
+let handle_set_goal ~tool_name ~start_time ctx args =
+  let valid_keys = [ "task_id"; "goal_id" ] in
+  let unknown = unknown_args ~valid_keys args in
+  if Stdlib.List.length unknown > 0 then
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
+        (String.concat ", " unknown)
+        (String.concat ", " valid_keys))
+  else
+    let task_id = String.trim (get_string args "task_id" "") in
+    let goal_id = String.trim (get_string args "goal_id" "") in
+    if String.equal task_id "" then
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~tool_name ~start_time
+        "task_id is required and cannot be empty"
+    else if String.equal goal_id "" then
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~tool_name ~start_time
+        "goal_id is required and cannot be empty"
+    else (
+      match Goal_task_assignment.set_task_goal ctx.config ~task_id ~goal_id with
+      | Ok () ->
+        Tool_result.ok ~tool_name ~start_time
+          (Yojson.Safe.to_string
+            (`Assoc
+              [ ("ok", `Bool true)
+              ; ("task_id", `String task_id)
+              ; ("goal_id", `String goal_id)
+              ]))
+      | Error err ->
+        Tool_result.error
+          ~failure_class:(Some Tool_result.Workflow_rejection)
+          ~tool_name ~start_time
+          (Goal_task_assignment.set_task_goal_error_to_string err))
+
 let handle_batch_add_tasks ~tool_name ~start_time ctx args =
   let valid_item_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
   let tasks_json = match Json_util.assoc_member_opt "tasks" args with

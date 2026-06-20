@@ -373,6 +373,39 @@ let add_delete_action_routes router =
          )
        ) request reqd)
 
+  (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Operator
+     surface (CanAdmin); shares the validated backend
+     [Goal_task_assignment.set_task_goal] with the masc_task_set_goal MCP tool,
+     so the precondition checks live in exactly one place. *)
+  |> Http.Router.post "/api/v1/dashboard/tasks/assign-goal" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state _agent_name req reqd ->
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let json = Yojson.Safe.from_string body_str in
+             match
+               ( Safe_ops.json_string_opt "task_id" json
+               , Safe_ops.json_string_opt "goal_id" json )
+             with
+             | None, _ -> respond_error ~request:req reqd (invalid_request "task_id")
+             | _, None -> respond_error ~request:req reqd (invalid_request "goal_id")
+             | Some task_id, Some goal_id ->
+             let config = (Mcp_server.workspace_config state) in
+             (match Goal_task_assignment.set_task_goal config ~task_id ~goal_id with
+              | Ok () -> respond_ok ~request:req reqd
+              | Error
+                  (( Goal_task_assignment.Unknown_task _
+                   | Goal_task_assignment.Unknown_goal _ ) as err) ->
+                respond_error ~status:`Not_found ~request:req reqd
+                  (Goal_task_assignment.set_task_goal_error_to_string err)
+              | Error (Goal_task_assignment.Already_assigned _ as err) ->
+                respond_error ~status:`Conflict ~request:req reqd
+                  (Goal_task_assignment.set_task_goal_error_to_string err))
+           with Yojson.Json_error _ ->
+             respond_error ~request:req reqd (invalid_request "task_id")
+         )
+       ) request reqd)
+
   |> Http.Router.post "/api/v1/dashboard/goals/delete" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name req reqd ->

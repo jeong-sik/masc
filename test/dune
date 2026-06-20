@@ -676,6 +676,14 @@
  (modules test_dashboard_goal_id_projection)
  (libraries masc_test_deps))
 
+; RFC-0267 Phase 2: validated task->goal assignment
+; (Task.Goal_assignment.set_task_goal).
+
+(test
+ (name test_goal_task_assignment)
+ (modules test_goal_task_assignment)
+ (libraries masc_test_deps unix))
+
 ; Group 2: Property-based tests (QCheck)
 
 (tests

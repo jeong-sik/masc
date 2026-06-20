@@ -1761,6 +1761,46 @@ let test_recall_prefixes_unverified_volatile_fact () =
             (contains "[UNVERIFIED — re-check before acting]" block))))
 ;;
 
+(* RFC-0259 §3.5: suppression is not only a prefix. An unverified-volatile
+   external fact is ranked after durable facts, so a small recall cap drops it
+   before it can crowd out older durable knowledge. *)
+let test_recall_demotes_unverified_volatile_below_durable_cap () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "volatile-demote-cap-keeper" in
+      let now = 1_000_000.0 in
+      let horizon = Reconcile.default_grounding_horizon_seconds in
+      let volatile_recent =
+        { (fact_fixture ~now ()) with
+          Types.claim = "PR #21515 is still open"
+        ; Types.external_ref = Some { Types.kind = Types.Pr; id = "21515" }
+        ; Types.first_seen = now -. (horizon *. 2.0)
+        ; Types.last_verified_at = Some (now -. (horizon *. 2.0))
+        ; Types.valid_until = Some (now +. horizon)
+        }
+      in
+      let durable_older =
+        { (fact_fixture ~now ()) with
+          Types.claim = "The repository uses the Memory OS recall prompt"
+        ; Types.external_ref = None
+        ; Types.first_seen = now -. days 90
+        ; Types.last_verified_at = Some (now -. days 60)
+        ; Types.valid_until = None
+        }
+      in
+      Memory_io.append_fact ~keeper_id volatile_recent;
+      Memory_io.append_fact ~keeper_id durable_older;
+      let block = Recall.render_context ~keeper_id ~now ~max_facts:1 ~max_episodes:0 () in
+      Alcotest.(check bool)
+        "durable fact survives max_facts cap"
+        true
+        (contains durable_older.Types.claim block);
+      Alcotest.(check bool)
+        "unverified volatile fact is dropped before durable fact"
+        false
+        (contains volatile_recent.Types.claim block)))
+;;
+
 (* RFC-0259 §3.5: a non-volatile (no external_ref) claim never gets the hard
    prefix, however old — durable knowledge does not decay into "re-check". *)
 let test_recall_no_prefix_for_non_volatile_fact () =
@@ -2935,6 +2975,10 @@ let () =
             "unverified-volatile fact gets the hard prefix"
             `Quick
             test_recall_prefixes_unverified_volatile_fact
+        ; Alcotest.test_case
+            "unverified-volatile fact is demoted below durable cap"
+            `Quick
+            test_recall_demotes_unverified_volatile_below_durable_cap
         ; Alcotest.test_case
             "non-volatile fact never gets the hard prefix"
             `Quick

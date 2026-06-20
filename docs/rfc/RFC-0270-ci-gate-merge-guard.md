@@ -155,6 +155,11 @@ this RFC can gate without changing branch protection.
   masks a recurring symptom. Per the `software-development.md` workaround bar,
   §4.1 (A) is the root fix; §4.2 (D) is a bounded backstop with an explicit
   removal target (§4.2).
+- **Call out the all-actor root boundary.** A bot-layer guard is a meaningful
+  reduction, but it is not equivalent to GitHub server-side enforcement. If the
+  invariant is "no actor with admin rights may land a non-green head on `main`,"
+  then option C (`enforce_admins=true`) is the complete boundary. Leaving C open
+  is an explicit governance trade-off, not a technical closure of hole 3.
 
 ## 4. Proposed mechanism (A + D)
 
@@ -230,6 +235,26 @@ A + D is the minimal pair that prevents bot bad-merges (A) and bounds the blast
 radius if one slips through (D), without unilaterally changing branch-protection
 governance.
 
+### 4.4 Root-fix boundary for option C
+
+From an adversarial root-cause standard, C is the only single lever that closes
+the bypass for every current and future merge issuer that uses an admin-capable
+token. A and D can stop known bot paths and bound damage, but they are still
+path-specific: a missed conveyor implementation, a new merger, or a human admin
+merge can bypass them until C is accepted. Therefore a deployment may stage A and
+D first, but it should not claim the incident class is closed while
+`enforce_admins=false` remains the branch-protection state.
+
+The smallest server-side hardening is:
+
+```
+gh api -X POST repos/jeong-sik/masc/branches/main/protection/enforce_admins
+```
+
+Rollback is the corresponding DELETE on the same endpoint (§7). If the emergency
+merge valve must remain, the exception must be recorded as operational risk
+against this RFC rather than treated as equivalent to the bot guard.
+
 ## 5. Implementation plan
 
 1. **A, keeper executor:** add the effectful pre-execution guard described in
@@ -248,6 +273,10 @@ governance.
    the same predicate stated two ways; the implementation keys on
    `conclusion == "success"`, which rejects `cancelled` and `failure` and
    distinguishes them from `pending`/`missing`.
+5. **C, governance hardening:** if the project chooses complete all-actor
+   closure, enable `enforce_admins` and measure admin-bypass merges at zero. This
+   is the only step that makes the branch-protection server reject non-green
+   admin merges without relying on each merge path being correctly wrapped.
 
 ## 6. Verification
 
@@ -264,6 +293,9 @@ governance.
 - **Regression guard:** replay the 2026-06-20 incidents (`#21714` head
   `e4211cc887` and `#21750` head `444bdf0261`, both `CI Gate=cancelled`) against
   the guard and assert the merge is refused.
+- **C acceptance:** after enabling `enforce_admins`, an admin-capable token cannot
+  merge a head whose required `CI Gate` is `failure`, `cancelled`, `pending`, or
+  missing; admin-bypass merge count remains zero against the §1.2 baseline.
 
 ## 7. Rollback
 
@@ -279,7 +311,8 @@ restore there.
   `anyang-keepers`; A's precondition must be added wherever that actor runs.
 - **`enforce_admins`:** is option C acceptable as a later hardening for *human*
   admin merges, accepting the loss of the emergency-merge valve? This is a human
-  decision and is out of scope for A + D.
+  decision and is out of scope for A + D, but it is the only complete all-actor
+  closure of the observed bypass.
 - **Revert vs halt on red main:** should D auto-open a revert PR, or only halt
   the conveyor and page an operator? Auto-revert is faster but can fight a human
   already fixing forward (as #21739 and #21768 did on 2026-06-20).

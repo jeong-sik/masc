@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tasks } from '../../store'
+import { navigate } from '../../router'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 
@@ -21,18 +22,8 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
   }
 })
 
-vi.mock('../../api/mcp', () => ({
-  callMcpTool: vi.fn().mockResolvedValue(JSON.stringify({
-    before_tokens: 124000,
-    after_tokens: 62000,
-    saved_tokens: 62000,
-    phase: 'Running',
-    trigger: 'manual_operator_compact',
-  })),
-}))
-
-vi.mock('../common/toast', () => ({
-  showToast: vi.fn(),
+vi.mock('../../router', () => ({
+  navigate: vi.fn(),
 }))
 
 function mkKeeper(partial: Partial<Keeper>): Keeper {
@@ -40,11 +31,6 @@ function mkKeeper(partial: Partial<Keeper>): Keeper {
 }
 function mkTask(partial: Partial<Task>): Task {
   return { id: 'T-0', title: 'task', ...partial } as Task
-}
-
-async function flushPromises(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
 }
 
 beforeEach(() => {
@@ -57,7 +43,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   tasks.value = []
-  vi.useRealTimers()
+  vi.clearAllMocks()
 })
 
 describe('KeeperWorkspaceRail', () => {
@@ -77,6 +63,15 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('oas·seoul-1')
   })
 
+  it('hides the model cell when no model was reported', () => {
+    const k = mkKeeper({ runtime_canonical: 'runpod_gemma' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    expect(container.textContent).toContain('런타임 · 처리량')
+    expect(container.textContent).toContain('runpod_gemma')
+    expect(container.textContent).not.toContain('모델')
+    expect(container.textContent).not.toContain('—')
+  })
+
   it('renders the context-window occupancy percent', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
     expect(container.textContent).toContain('컨텍스트 점유')
@@ -88,6 +83,12 @@ describe('KeeperWorkspaceRail', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
     expect(container.textContent).toContain('T-4412')
     expect(container.textContent).not.toContain('T-9999')
+  })
+
+  it('opens the planning task detail when an owned task is clicked', () => {
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
+    fireEvent.click(getByRole('button', { name: /태스크 열기: T-4412/ }))
+    expect(navigate).toHaveBeenCalledWith('workspace', { section: 'planning', task: 'T-4412' })
   })
 
   it('renders the attention section from live blocked-task signal', () => {
@@ -102,16 +103,50 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('차단된 태스크')
   })
 
+  it('uses explicit attention reason text instead of a vague maintenance label', () => {
+    const k = mkKeeper({ needs_attention: true, attention_reason: 'approval_pending', next_human_action: 'resolve_approval' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    expect(container.textContent).toContain('approval_pending · resolve_approval')
+    expect(container.textContent).not.toContain('점검이 필요합니다')
+  })
+
+  it('labels unqualified attention flags as missing cause data', () => {
+    const k = mkKeeper({ needs_attention: true })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    expect(container.textContent).toContain('주의 플래그 있음 · 원인 미전달')
+    expect(container.textContent).not.toContain('점검이 필요합니다')
+  })
+
   it('renders the auto-compact threshold label', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
     expect(container.textContent).toContain('compact 85%')
   })
 
-  it('fires onToggleDetail from the 상세 보기 button', () => {
+  it('renders context metrics as missing when only a zero default exists', () => {
+    const k = mkKeeper({ context_ratio: 0, compaction_count: 0, last_compaction_ago_s: 0 })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    expect(container.textContent).toContain('컨텍스트 사용량 미수신')
+    expect(container.textContent).toContain('컴팩트 기록 없음')
+    expect(container.textContent).not.toContain('0%')
+    expect(container.textContent).not.toContain('마지막 컴팩트 0초 전')
+    expect(container.querySelector('.kw-compact-btn')).toBeNull()
+  })
+
+  it('shows token-only context without a fake window percentage', () => {
+    const k = mkKeeper({ context_ratio: 0, context_tokens: 37800 })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} onToggleDetail=${() => {}} />`)
+    expect(container.textContent).toContain('윈도우 사용률 미수신')
+    expect(container.textContent).toContain('37.8k')
+    expect(container.textContent).not.toContain('0%')
+    expect(container.textContent).not.toContain('compact 85%')
+  })
+
+  it('fires onToggleDetail from the 운영 상세 button', () => {
     const onToggle = vi.fn()
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${onToggle} />`)
     const btn = container.querySelector('.kw-detail-btn') as HTMLElement
     expect(btn).toBeTruthy()
+    expect(btn.textContent).toContain('운영 상세')
     fireEvent.click(btn)
     expect(onToggle).toHaveBeenCalled()
   })
@@ -120,62 +155,5 @@ describe('KeeperWorkspaceRail', () => {
     tasks.value = []
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
     expect(container.textContent).toContain('할당된 태스크 없음')
-  })
-
-  it('shows the manual compact button in idle state', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-    const btn = container.querySelector('.kw-compact-btn') as HTMLButtonElement
-    expect(btn).toBeTruthy()
-    expect(btn.textContent).toContain('지금 컴팩트')
-    expect(btn.disabled).toBe(false)
-  })
-
-  it('runs manual compaction, shows busy/done states, and adds a snapshot', async () => {
-    vi.useFakeTimers()
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-    const btn = container.querySelector('.kw-compact-btn') as HTMLButtonElement
-
-    fireEvent.click(btn)
-    expect(container.textContent).toContain('압축 중…')
-    expect((container.querySelector('.kw-compact-btn') as HTMLButtonElement).disabled).toBe(true)
-
-    await flushPromises()
-
-    expect(container.textContent).toContain('컴팩션 스냅샷')
-    expect(container.textContent).toContain('124.0k → 62.0k tok')
-    expect(container.textContent).toContain('절약 62.0k tok')
-    expect(container.textContent).toContain('manual_operator_compact')
-    expect(container.textContent).toContain('완료')
-
-    await vi.advanceTimersByTimeAsync(2600)
-    await flushPromises()
-
-    expect((container.querySelector('.kw-compact-btn') as HTMLButtonElement).textContent).toContain('지금 컴팩트')
-  })
-
-  it('accumulates multiple compaction snapshots', async () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-
-    for (let i = 0; i < 2; i++) {
-      fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
-      await flushPromises()
-    }
-
-    expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(2)
-  })
-
-  it('resets snapshots when the keeper changes', async () => {
-    const { container, rerender } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} onToggleDetail=${() => {}} />`)
-
-    fireEvent.click(container.querySelector('.kw-compact-btn') as HTMLButtonElement)
-    await flushPromises()
-
-    expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(1)
-
-    const other = mkKeeper({ name: 'other-keeper', context_ratio: 0.3, context_tokens: 60000, context_max: 200000 })
-    rerender(html`<${KeeperWorkspaceRail} keeper=${other} onToggleDetail=${() => {}} />`)
-
-    expect(container.querySelectorAll('.kw-cmp-snap').length).toBe(0)
-    expect(container.textContent).toContain('30%')
   })
 })

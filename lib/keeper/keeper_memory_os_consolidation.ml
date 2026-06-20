@@ -271,6 +271,7 @@ let consolidated_fact ~now ~members (group : merge_group) =
   ; valid_until = valid_until_for_group ~now ~external_ref ~members group.category
   ; last_verified_at = last_verified_for_members members
   ; schema_version
+  ; claim_id = None
   }
 ;;
 

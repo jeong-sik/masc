@@ -84,6 +84,7 @@ let fact_fixture ~now ~claim ?valid_until () =
   ; valid_until
   ; last_verified_at = Some (now -. 30.0)
   ; schema_version = Memory_types.schema_version
+  ; claim_id = None
   }
 ;;
 

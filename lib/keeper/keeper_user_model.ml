@@ -60,7 +60,7 @@ let dedup_facts_by_claim (facts : Keeper_memory_os_types.fact list) =
   let seen = Hashtbl.create 16 in
   List.filter
     (fun (memory_fact : Keeper_memory_os_types.fact) ->
-      let key = normalize_claim memory_fact.claim in
+      let key = claim_identity memory_fact in
       if Hashtbl.mem seen key
       then false
       else (
@@ -126,7 +126,7 @@ let build ~keeper_id ~now ?(max_preferences = default_max_preferences)
       in
       let private_keys =
         List.map
-          (fun (fact : Keeper_memory_os_types.fact) -> normalize_claim fact.claim)
+          (fun (fact : Keeper_memory_os_types.fact) -> claim_identity fact)
           private_facts
       in
       let shared_facts : Keeper_memory_os_types.fact list =
@@ -136,7 +136,7 @@ let build ~keeper_id ~now ?(max_preferences = default_max_preferences)
           Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
           |> rank_facts ~now
           |> List.filter (fun (fact : Keeper_memory_os_types.fact) ->
-            not (List.mem (normalize_claim fact.claim) private_keys))
+            not (List.mem (claim_identity fact) private_keys))
       in
       private_facts, shared_facts)
   in

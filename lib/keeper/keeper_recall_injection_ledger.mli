@@ -13,9 +13,9 @@
     - Bounded: uses the shared [Dated_jsonl] day-split layout
       ([masc_root/recall_injections/YYYY-MM/DD.jsonl]), same per-day mutex
       registry as the cost / receipt appenders.
-    - Deterministic: keys are [normalize_claim] outputs (the identity SSOT) and
-      [trace_id:gN] episode keys, so the same trace renders a byte-identical
-      record. *)
+    - Deterministic: keys are [claim_identity] outputs (the identity SSOT — the
+      producer [claim_id] when present, else [normalize_claim]) and [trace_id:gN]
+      episode keys, so the same trace renders a byte-identical record. *)
 
 val to_json
   :  keeper_id:string

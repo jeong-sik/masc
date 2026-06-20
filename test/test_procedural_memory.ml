@@ -116,6 +116,7 @@ let memory_fact ?(category = M.Validated_approach) ?(trace_id = "trace-1") ?(tur
     valid_until = None;
     last_verified_at = None;
     schema_version = M.schema_version;
+    claim_id = None;
   }
 ;;
 

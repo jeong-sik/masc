@@ -28,6 +28,7 @@ let fact ?(external_ref = None) ?last_verified_at ~first_seen claim =
   ; valid_until = None
   ; last_verified_at
   ; schema_version = Types.schema_version
+  ; claim_id = None
   }
 ;;
 

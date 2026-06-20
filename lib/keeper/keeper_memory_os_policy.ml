@@ -39,25 +39,32 @@ let retention_rank ~now (f : fact) =
 
 (* RFC-0247 (purge): fold a re-observation of an existing fact into that fact.
    [existing] is the persisted row; [incoming] is the newly extracted claim with
-   the same normalized identity. The librarian re-extracting the same claim is
-   fresh evidence that the claim still holds, so [last_verified_at] advances to
-   [now] and the staleness marker resets. Identity and first-seen provenance are
-   preserved.
+   the same producer identity. Identity and first-seen provenance are preserved.
 
-   RFC-0259 §3.2(b): re-observing IS re-verification, so a volatile (external-ref)
-   claim's decay horizon is refreshed from [now] — the disk re-derive anchors to
-   [first_seen], this anchors to the fresh sighting, so an actively-re-seen status
-   claim survives while an abandoned one decays. A non-volatile fact keeps its
-   [valid_until] (durable [None] or the original Ephemeral expiry).
+   RFC-0259 §3.7 (P6/F): for a volatile (external-ref) claim the prior row is
+   inherited entirely — producer re-extraction is NOT re-verification. Only the
+   reconciler ([Stale_open], an external GitHub re-check) advances a volatile
+   claim's anchors. A non-volatile fact's [last_verified_at] still advances on
+   re-observe (it has no decay horizon to reset).
 
    The prior merge also blended a confidence float and bumped an access counter;
    both fed the deleted composite score and are gone. There is no numeric
    strength to move — re-observation is a binary "seen again now". *)
 let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
-  let valid_until =
-    match existing.external_ref with
-    | Some _ -> Some (now +. volatile_external_ttl_seconds)
-    | None -> existing.valid_until
-  in
-  { existing with last_verified_at = Some now; valid_until }
+  match existing.external_ref with
+  | Some _ ->
+    (* RFC-0259 §3.7 (P6/F): the librarian re-extracting a volatile (external-ref)
+       claim — possibly reworded — is NOT re-verification; it is the same self-
+       narrative re-emitted from memory. Inherit the prior row entirely so a
+       re-mint cannot reset the volatile TTL or grounding horizon. Only the
+       reconciler ([Stale_open], an external GitHub re-check) advances a volatile
+       claim's [last_verified_at]. This reverses the pre-P6 "re-observing IS
+       re-verification" rule for volatile claims. *)
+    existing
+  | None ->
+    (* Non-volatile (durable [None] / Ephemeral expiry) re-observe: the librarian
+       re-asserting a durable claim is fresh evidence it still holds, so advance
+       the staleness marker. There is no decay horizon to reset (durable
+       [valid_until] is unchanged), so F does not apply. *)
+    { existing with last_verified_at = Some now }
 ;;

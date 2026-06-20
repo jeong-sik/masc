@@ -107,11 +107,21 @@ let consolidate_into_shared ~now ~min_keepers contribs =
           (* The consolidation IS the verification of the shared fact. *)
         ; last_verified_at = Some now
         ; schema_version
+          (* RFC-0259 §3.7: carry the group's [claim_id] onto the promoted shared
+             fact. The group is keyed on [claim_identity] (see [promote_facts]), so
+             every contribution shares one identity and the representative's
+             [claim_id] is the group's. Without this the shared fact would key on
+             [normalize_claim] while the contributing keepers' private rows key on
+             [id:…], so recall's private-precedence dedup (recall.ml) and the user
+             model would fail to match across tiers and inject the same conclusion
+             twice. *)
+        ; claim_id = rep.fact.claim_id
         }
 ;;
 
 (* Pure core: given each keeper's Tier-1 facts, return the Tier-2 shared facts in
-   normalized-claim order. No IO, no clock read — [now] is injected. *)
+   claim-identity order (RFC-0259 §3.7 SSOT key). No IO, no clock read — [now] is
+   injected. *)
 let promote_facts ?(min_keepers = default_min_keepers) ~now ~keeper_facts () =
   let groups : (string, contribution list) Hashtbl.t = Hashtbl.create 256 in
   List.iter
@@ -120,7 +130,7 @@ let promote_facts ?(min_keepers = default_min_keepers) ~now ~keeper_facts () =
          (fun fact ->
             if eligible fact
             then (
-              let key = normalize_claim fact.claim in
+              let key = claim_identity fact in
               let prev = Option.value (Hashtbl.find_opt groups key) ~default:[] in
               Hashtbl.replace groups key ({ keeper_id; fact } :: prev)))
          facts)

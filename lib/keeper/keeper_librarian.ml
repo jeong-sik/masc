@@ -209,6 +209,12 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
      with
      | Some claim, Some category_str, Some turn when turn >= 0 ->
        let tool_call_id = optional_string_field "source_tool_call_id" fields in
+      (* RFC-0259 §3.7 (P6): a stable conclusion slug the model emits so a reworded
+         re-extraction of the same conclusion reuses the id and UPSERTs the existing
+         row (defect E/F). Pass-through only — absent => [None] (conservative
+         fallback to [normalize_claim] keying); we never derive/hash an id in code,
+         which would be the string-classifier workaround the RFC rejects. *)
+      let claim_id = optional_string_field "claim_id" fields in
       (* Parse-once at the producer boundary: the LLM's free-text category becomes
          a typed [category] here, so no surface string reaches the store or the
          consolidator (RFC-0244 §2.3 / #21241; RFC-0247 §2.5). The category drives
@@ -232,6 +238,7 @@ let fact_of_json ~trace_id ~now (json : Yojson.Safe.t) : fact option =
          ; valid_until = fact_valid_until ~now ~external_ref category
          ; last_verified_at = Some now
          ; schema_version
+         ; claim_id
          }
      | (Some _, Some _, Some _)
      | (Some _, Some _, None)

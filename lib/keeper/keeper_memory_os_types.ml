@@ -262,6 +262,13 @@ type fact =
   ; valid_until : float option
   ; last_verified_at : float option
   ; schema_version : string
+  ; claim_id : string option
+    (* RFC-0259 §3.7 (P6): a producer (librarian) -emitted stable slug for the
+       claim's CONCLUSION (not its wording), so a reworded re-extraction of the
+       same conclusion reuses the id and UPSERTs, while a changed conclusion gets
+       a new id and stays a distinct row. Omitted from JSON when [None]; legacy
+       rows and id-less claims fall back to [normalize_claim] in [claim_identity].
+       Keyed by the librarian's judgment, not a classifier we author. *)
   }
 
 let fact_is_current ~now (fact : fact) =
@@ -422,6 +429,25 @@ let normalize_claim s =
   if n > 0 && r.[n - 1] = ' ' then String.sub r 0 (n - 1) else r
 ;;
 
+(* RFC-0259 §3.7 (P6): the producer-identity dedup key. When the librarian emits a
+   [claim_id] — a stable slug for the claim's CONCLUSION (not its wording) — that id
+   is the key, so a reworded re-extraction of the same conclusion UPSERTs the one
+   row (defect E) and inherits its [first_seen] anchor instead of resetting the
+   volatile TTL (defect F), while a changed conclusion (e.g. "PR #N open" ->
+   "PR #N merged") carries a different id and stays a distinct row. A claim with no
+   [claim_id] (legacy row, or the model omitting it) falls back to the exact-text
+   [normalize_claim] key = pre-P6 append behavior, so the degrade never over-merges.
+   This is NOT a fuzzy / embedding / substring classifier: the id is the librarian's
+   own judgment "is this the same conclusion?", surfaced as a typed key, not one we
+   author here (RFC-0259 §3.7 and RFC-0247 §3 reject deriving it in code). This is
+   the single dedup SSOT: the write upsert, recall dedup, GC dedup, and Tier-2
+   consolidation MUST all key on this one function. *)
+let claim_identity (f : fact) =
+  match f.claim_id with
+  | Some id when String.trim id <> "" -> "id:" ^ id
+  | Some _ | None -> "claim:" ^ normalize_claim f.claim
+;;
+
 let optional_float_field key = function
   | Some value -> [ key, `Float value ]
   | None -> []
@@ -448,6 +474,12 @@ let fact_to_json f =
        existing key order stable for the snapshot fingerprint. *)
     @ (match f.external_ref with
        | Some r -> [ "external_ref", external_ref_to_json r ]
+       | None -> [])
+    (* RFC-0259 §3.7 (P6): the producer-emitted conclusion slug. Omitted when
+       [None] so legacy / id-less rows stay byte-identical, and appended LAST to
+       keep the prior key order stable for the snapshot fingerprint. *)
+    @ (match f.claim_id with
+       | Some id -> [ "claim_id", `String id ]
        | None -> [])
   in
   `Assoc fields
@@ -498,6 +530,9 @@ let fact_of_json (json : Yojson.Safe.t) =
           let observed_by =
             Option.value (json_string_list_field "observed_by" fields) ~default:[]
           in
+          (* RFC-0259 §3.7 (P6): absent on legacy / id-less rows, defaulting to
+             [None] so [claim_identity] falls back to [normalize_claim] for them. *)
+          let claim_id = json_string_field "claim_id" fields in
           Some
             { claim
             ; (* Parse-once at the read boundary; legacy free-string categories
@@ -512,6 +547,7 @@ let fact_of_json (json : Yojson.Safe.t) =
             ; schema_version =
                 (* DET-OK: default to current schema for forward compatibility. *)
                 Option.value (json_string_field "schema_version" fields) ~default:schema_version
+            ; claim_id
             }
         | None -> None)
      | (Some _, Some _, None)

@@ -94,6 +94,7 @@ let fact ?(category = Types.Preference) ?(trace_id = "trace-user-model")
   ; valid_until = None
   ; last_verified_at
   ; schema_version = Types.schema_version
+  ; claim_id = None
   }
 ;;
 

@@ -433,6 +433,23 @@ describe('thread history merge & persistence', () => {
     expect(entries[1]?.label).toBe('echo')
   })
 
+  it('preserves turn_ref on persisted chat history entries', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: 'query', ts: 1_780_000_000, turn_ref: 'trace-a#1' },
+      {
+        role: 'tool',
+        content: '{"q":1}',
+        ts: 1_780_000_000,
+        tool_call_id: 'toolu_turn',
+        tool_call_name: 'masc_status',
+        turn_ref: 'trace-a#1',
+      },
+      { role: 'assistant', content: 'answer', ts: 1_780_000_000, turn_ref: 'trace-a#1' },
+    ])
+
+    expect(entries.map(e => e.turnRef)).toEqual(['trace-a#1', 'trace-a#1', 'trace-a#1'])
+  })
+
   it('dedups a rehydrated tool row against the live tool entry', () => {
     appendThreadEntry('echo', entry({
       id: 'tool-toolu_3',

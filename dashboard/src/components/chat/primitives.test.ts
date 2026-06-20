@@ -1641,12 +1641,13 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     render(
       html`<${ChatTranscript}
         entries=${[
-          toolEntry({ id: 'tool-t1', label: 'keeper_board_list' }),
+          toolEntry({ id: 'tool-t1', label: 'keeper_board_list', turnRef: 'trace-a#1' }),
           entry({
             id: 'a',
             text: '도구 결과로 답합니다',
             role: 'assistant',
             source: 'direct_assistant',
+            turnRef: 'trace-a#1',
             traceSteps: [{ kind: 'think', text: 'reading tool output' }],
           }),
         ]}
@@ -1665,6 +1666,32 @@ describe('ChatTranscript — tool-call grouping (작업 과정)', () => {
     expect(bundle?.textContent).toContain('reading tool output')
     expect(bundle?.textContent).toContain('keeper_board_list')
     expect(bundle?.textContent).toContain('도구 결과로 답합니다')
+  })
+
+  it('does not attach a turn_ref-mismatched tool run to the following assistant', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          toolEntry({ id: 'tool-t1', label: 'keeper_board_list', turnRef: 'trace-a#1' }),
+          entry({
+            id: 'a',
+            text: '다른 턴 답변',
+            role: 'assistant',
+            source: 'direct_assistant',
+            turnRef: 'trace-b#2',
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const trace = container.querySelector('[data-chat-tool-trace]')
+    expect(container.querySelector('[data-chat-turn-bundle]')).toBeNull()
+    expect(trace?.textContent).toContain('keeper_board_list')
+    expect(trace?.textContent).not.toContain('다른 턴 답변')
   })
 
   it('renders assistant thinking as 작업 과정 even without tool calls', () => {

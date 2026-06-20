@@ -887,6 +887,7 @@ export interface KeeperConversationEntry {
   text: string
   rawText?: string | null
   timestamp?: string | null
+  turnRef?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   attachments?: KeeperConversationAttachment[]

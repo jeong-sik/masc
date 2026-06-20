@@ -702,6 +702,7 @@ function normalizeHistoryEntry(
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
+  const turnRef = asString(raw.turn_ref) ?? null
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
   // apart from a real reply. Map it to the existing error delivery state so
@@ -725,6 +726,7 @@ function normalizeHistoryEntry(
     text,
     rawText,
     timestamp,
+    turnRef,
     delivery,
     streamState: null,
     details: null,
@@ -985,6 +987,7 @@ interface RestChatHistoryMessage {
   tool_call_name?: string
   source?: string
   surface?: SurfaceRef
+  turn_ref?: string
   audio?: unknown
   // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
   // KeeperConversationAttachment at consume time so reload keeps the cards.
@@ -1024,6 +1027,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     streamState: null,
     details: null,
     surface: message.surface ?? null,
+    turnRef: message.turn_ref ?? null,
   }
 }
 
@@ -1053,6 +1057,7 @@ export function chatHistoryEntriesFromRest(
         attachments: message.attachments,
         kind: message.kind,
         blocks: message.blocks,
+        turn_ref: message.turn_ref,
       },
       keeperName,
       previousSource,

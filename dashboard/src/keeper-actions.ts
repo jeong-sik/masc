@@ -185,9 +185,10 @@ export async function hydrateKeeperChatHistory(
   }
 }
 
-// Recent-window size for the tool-call output fetch; mirrors the inspector's
-// fetchKeeperToolCalls(name, 100) so the chat join covers the same horizon.
-const TOOL_OUTPUT_FETCH_LIMIT = 100
+// Match the visible chat history window. A keeper that calls many tools can
+// easily have >100 tool rows inside the 200-row transcript; using the same
+// horizon keeps every visible row eligible for output join.
+const TOOL_OUTPUT_FETCH_LIMIT = KEEPER_HISTORY_TAIL_MESSAGES
 
 /** Best-effort hydration of tool-call outputs into the shared store so the
  *  chat ToolCallBubble can join results onto transcript rows by tool_use_id.

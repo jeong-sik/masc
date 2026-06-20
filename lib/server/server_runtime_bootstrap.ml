@@ -935,38 +935,97 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
       Server_ws_standalone.start ~sw ~env
         ~on_message:(fun ws_session_id body_str ->
-          Eio.Fiber.fork ~sw (fun () ->
-            try
-              let response_json =
-                Mcp_eio.handle_request ~clock ~sw
-                  ~mcp_session_id:ws_session_id state body_str
-              in
-              let response_str = Yojson.Safe.to_string response_json in
-              if response_str <> "null" then begin
-                (* #10648: split the single conflated WARN into two paths so
-                   operators can distinguish "client disconnected" (expected,
-                   noise) from "transport write failed" (real bug warranting
-                   attention). *)
-                match
-                  Server_mcp_transport_ws.send_to_session_result
-                    ws_session_id response_str
-                with
-                | Sent -> ()
-                | Session_gone ->
-                    Log.Server.debug
-                      "WS send dropped: session=%s gone (client disconnected, \
-                       expected)"
-                      ws_session_id
-                | Send_failed ->
-                    Log.Server.warn
-                      "WS send_to_session WRITE FAILED for session=%s \
-                       (transport-side error; session cleaned up)"
-                      ws_session_id
-              end
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn)));
+          let jsonrpc_id_opt body =
+            match Yojson.Safe.from_string body with
+            | `Assoc fields -> (
+                match List.assoc_opt "id" fields with
+                | Some ((`Int _ | `String _ | `Null) as id) -> Some id
+                | Some _ -> Some `Null
+                | None -> None)
+            | _ -> None
+            | exception _ -> None
+          in
+          let send_overloaded_response rejection =
+            Log.Server.debug
+              "WS inbound dispatch rejected: session=%s reason=%s in_flight=%d limit=%d"
+              ws_session_id
+              rejection.Server_mcp_transport_ws.reason
+              rejection.in_flight
+              rejection.limit;
+            match jsonrpc_id_opt body_str with
+            | None -> ()
+            | Some id ->
+                let response_json =
+                  `Assoc
+                    [
+                      ("jsonrpc", `String "2.0");
+                      ("id", id);
+                      ( "error",
+                        `Assoc
+                          [
+                            ("code", `Int (-32000));
+                            ( "message",
+                              `String
+                                "WebSocket inbound dispatch limit exceeded" );
+                            ( "data",
+                              `Assoc
+                                [
+                                  ("reason", `String rejection.reason);
+                                  ("limit", `Int rejection.limit);
+                                  ("in_flight", `Int rejection.in_flight);
+                                ] );
+                          ] );
+                    ]
+                in
+                let response_str = Yojson.Safe.to_string response_json in
+                ignore
+                  (Server_mcp_transport_ws.send_to_session_result
+                     ws_session_id response_str)
+          in
+          match Server_mcp_transport_ws.try_begin_inbound_dispatch ws_session_id with
+          | Server_mcp_transport_ws.Inbound_dispatch_session_gone ->
+              Log.Server.debug
+                "WS inbound dispatch dropped: session=%s gone before dispatch"
+                ws_session_id
+          | Server_mcp_transport_ws.Inbound_dispatch_rejected rejection ->
+              send_overloaded_response rejection
+          | Server_mcp_transport_ws.Inbound_dispatch_admitted session ->
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio_guard.protect
+                  ~finally:(fun () ->
+                    Server_mcp_transport_ws.finish_inbound_dispatch session)
+                  (fun () ->
+                    try
+                      let response_json =
+                        Mcp_eio.handle_request ~clock ~sw
+                          ~mcp_session_id:ws_session_id state body_str
+                      in
+                      let response_str = Yojson.Safe.to_string response_json in
+                      if response_str <> "null" then begin
+                        (* #10648: split the single conflated WARN into two paths so
+                           operators can distinguish "client disconnected" (expected,
+                           noise) from "transport write failed" (real bug warranting
+                           attention). *)
+                        match
+                          Server_mcp_transport_ws.send_to_session_result
+                            ws_session_id response_str
+                        with
+                        | Sent -> ()
+                        | Session_gone ->
+                            Log.Server.debug
+                              "WS send dropped: session=%s gone (client disconnected, \
+                               expected)"
+                              ws_session_id
+                        | Send_failed ->
+                            Log.Server.warn
+                              "WS send_to_session WRITE FAILED for session=%s \
+                               (transport-side error; session cleaned up)"
+                              ws_session_id
+                      end
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                      Log.Server.warn "WS dispatch error %s: %s" ws_session_id (Printexc.to_string exn))));
       (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
       if Server_webrtc_transport.is_enabled () then (
         Log.Server.info "WebRTC DataChannel transport enabled";

@@ -94,11 +94,22 @@ describe('app-shell-v2.css `.v2-app > *` stacking rule', () => {
     }
   })
 
-  it('declares app-shell before utilities so Tailwind positioning wins', () => {
+  it('declares app-shell first and never redeclares a Tailwind-owned layer', () => {
+    // This top-level @layer statement is hoisted above Tailwind's own
+    // `@layer theme, base, components, utilities` in the built stylesheet, so
+    // it is what pins each named layer's order. Naming a Tailwind-owned layer
+    // here fixes that layer's slot and pushes the REST of Tailwind's layers
+    // behind it: naming `utilities` forced base/components above utilities, so
+    // Preflight (base) beat every utility class (#21846 regression). A
+    // single-file source check is the only place that catches it — the built
+    // cascade is invisible to happy-dom. app-shell must come first (lowest
+    // priority) so `.v2-app > *` ranks below Tailwind's `.fixed`/`.absolute`.
     const order = topLevelLayerOrder()
-    expect(order).toContain('app-shell')
-    expect(order).toContain('utilities')
-    expect(order.indexOf('app-shell')).toBeLessThan(order.indexOf('utilities'))
+    expect(order[0]).toBe('app-shell')
+    const tailwindOwned = ['theme', 'base', 'components', 'utilities']
+    for (const owned of tailwindOwned) {
+      expect(order).not.toContain(owned)
+    }
   })
 
   it('does not bake overlay class exclusions into the shell child selector', () => {

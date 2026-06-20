@@ -219,10 +219,11 @@ let handle_create ~tool_name ~start_time ctx args =
     let* risk_class = risk_class_of_arg args in
     let* source = source_of_arg args in
     let* recurrence = recurrence_of_arg args in
-    (* NDT-OK: absent requested_at_unix means "schedule this from the tool
-       dispatch boundary now"; replay/tests can pass requested_at_unix
-       explicitly. *)
-    let requested_at = optional_float args "requested_at_unix" |> Option.value ~default:start_time in
+    let requested_at =
+      (* NDT-OK: absent requested_at_unix means "schedule this from the tool
+         dispatch boundary now"; replay/tests can pass requested_at_unix explicitly. *)
+      optional_float args "requested_at_unix" |> Option.value ~default:start_time
+    in
     let* due_at = resolve_due_at ~requested_at recurrence args in
     let* requested_by =
       actor_from_args args ~prefix:"requested_by" ~default_id:"operator"

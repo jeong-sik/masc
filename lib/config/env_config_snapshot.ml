@@ -116,6 +116,9 @@ let transport_entries =
       "Startup watchdog timeout (seconds)";
     entry ~default:"(none)" "MASC_AGENT_TRANSPORT"
       "Agent transport preference";
+    entry ~default:"32" "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION"
+      "Maximum concurrent JSON-RPC request dispatch fibers admitted from one \
+       WebSocket session. 0 disables the per-session admission gate.";
   ]
 
 let inference_entries =

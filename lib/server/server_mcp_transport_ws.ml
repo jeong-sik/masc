@@ -69,6 +69,7 @@ type ws_session = {
   mutable dashboard_last_delta_at: float;
   mutable inbound_partial_text: Buffer.t option;
   mutable inbound_partial_text_bytes: int;
+  inbound_dispatches: int Atomic.t;
 }
 
 (** [true] when the dashboard handshake has completed for this state. *)
@@ -221,6 +222,7 @@ let new_session ~id ~wsd =
     dashboard_last_delta_at = now;
     inbound_partial_text = None;
     inbound_partial_text_bytes = 0;
+    inbound_dispatches = Atomic.make 0;
   }
 
 (** [true] when the session has been closed locally or the httpun-ws writer has
@@ -932,6 +934,10 @@ let max_inbound_message_bytes () =
   Env_config_core.get_int_nonneg ~default:2097152
     "MASC_WS_MAX_INBOUND_MESSAGE_BYTES"
 
+let max_inbound_dispatches_per_session () =
+  Env_config_core.get_int_nonneg ~default:32
+    "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION"
+
 let classify_inbound_frame_size ~len ~max_frame_bytes =
   if len < 0 then
     Inbound_reject
@@ -1021,6 +1027,51 @@ let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
   | Inbound_accept ->
       read_payload_string payload ~len ~on_complete:(fun text ->
           handle_inbound_text session ~on_message ~is_fin text)
+
+type inbound_dispatch_rejection = {
+  reason: string;
+  limit: int;
+  in_flight: int;
+}
+
+type inbound_dispatch_admission =
+  | Inbound_dispatch_admitted of ws_session
+  | Inbound_dispatch_rejected of inbound_dispatch_rejection
+  | Inbound_dispatch_session_gone
+
+let try_begin_inbound_dispatch session_id =
+  let session_opt =
+    with_sessions_rw (fun () -> Hashtbl.find_opt sessions session_id)
+  in
+  match session_opt with
+  | None -> Inbound_dispatch_session_gone
+  | Some session ->
+      if Atomic.get session.closed then Inbound_dispatch_session_gone
+      else
+        let limit = max_inbound_dispatches_per_session () in
+        let rec loop () =
+          let in_flight = Atomic.get session.inbound_dispatches in
+          if limit > 0 && in_flight >= limit then
+            Inbound_dispatch_rejected
+              { reason = "too_many_inbound_dispatches";
+                limit;
+                in_flight }
+          else if
+            Atomic.compare_and_set session.inbound_dispatches in_flight
+              (in_flight + 1)
+          then Inbound_dispatch_admitted session
+          else loop ()
+        in
+        loop ()
+
+let finish_inbound_dispatch session =
+  let rec loop () =
+    let in_flight = Atomic.get session.inbound_dispatches in
+    let next = if in_flight <= 0 then 0 else in_flight - 1 in
+    if not (Atomic.compare_and_set session.inbound_dispatches in_flight next)
+    then loop ()
+  in
+  loop ()
 
 (** Remove a session and unsubscribe from SSE. *)
 let cleanup_session session_id =

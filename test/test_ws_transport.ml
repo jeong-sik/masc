@@ -667,6 +667,73 @@ let test_inbound_size_env_defaults () =
     Alcotest.(check int) "default message cap is 2 MiB"
       2097152 (Ws.max_inbound_message_bytes ()))
 
+(* ====== Inbound dispatch admission ====== *)
+
+let with_registered_test_session sid f =
+  let session = Ws.new_session ~id:sid ~wsd:(Obj.magic ()) in
+  Ws.with_sessions_rw (fun () -> Hashtbl.replace Ws.sessions sid session);
+  Fun.protect
+    ~finally:(fun () ->
+      Ws.with_sessions_rw (fun () -> Hashtbl.remove Ws.sessions sid))
+    (fun () -> f session)
+
+let test_inbound_dispatch_default_limit () =
+  with_env_var "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION" "" (fun () ->
+    Alcotest.(check int) "default concurrent dispatch cap"
+      32 (Ws.max_inbound_dispatches_per_session ()))
+
+let test_inbound_dispatch_rejects_at_session_limit () =
+  with_env_var "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION" "2" (fun () ->
+    with_registered_test_session "ws-dispatch-limit" (fun session ->
+      let first =
+        match Ws.try_begin_inbound_dispatch session.id with
+        | Ws.Inbound_dispatch_admitted s -> s
+        | _ -> Alcotest.fail "first dispatch should be admitted"
+      in
+      let second =
+        match Ws.try_begin_inbound_dispatch session.id with
+        | Ws.Inbound_dispatch_admitted s -> s
+        | _ -> Alcotest.fail "second dispatch should be admitted"
+      in
+      (match Ws.try_begin_inbound_dispatch session.id with
+       | Ws.Inbound_dispatch_rejected r ->
+           Alcotest.(check string) "reason"
+             "too_many_inbound_dispatches" r.reason;
+           Alcotest.(check int) "limit" 2 r.limit;
+           Alcotest.(check int) "in_flight" 2 r.in_flight
+       | _ -> Alcotest.fail "third dispatch should be rejected");
+      Ws.finish_inbound_dispatch first;
+      let third =
+        match Ws.try_begin_inbound_dispatch session.id with
+        | Ws.Inbound_dispatch_admitted s -> s
+        | _ -> Alcotest.fail "slot released after finish"
+      in
+      Ws.finish_inbound_dispatch second;
+      Ws.finish_inbound_dispatch third;
+      Alcotest.(check int) "all slots released"
+        0 (Atomic.get session.inbound_dispatches)))
+
+let test_inbound_dispatch_zero_limit_disables_gate () =
+  with_env_var "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION" "0" (fun () ->
+    with_registered_test_session "ws-dispatch-disabled" (fun session ->
+      for _ = 1 to 5 do
+        match Ws.try_begin_inbound_dispatch session.id with
+        | Ws.Inbound_dispatch_admitted _ -> ()
+        | _ -> Alcotest.fail "zero limit should admit every dispatch"
+      done;
+      Alcotest.(check int) "all five admitted"
+        5 (Atomic.get session.inbound_dispatches)))
+
+let test_inbound_dispatch_rejects_gone_or_closed_session () =
+  (match Ws.try_begin_inbound_dispatch "ws-dispatch-missing" with
+   | Ws.Inbound_dispatch_session_gone -> ()
+   | _ -> Alcotest.fail "missing session should be gone");
+  with_registered_test_session "ws-dispatch-closed" (fun session ->
+    Atomic.set session.closed true;
+    match Ws.try_begin_inbound_dispatch session.id with
+    | Ws.Inbound_dispatch_session_gone -> ()
+    | _ -> Alcotest.fail "closed session should be gone")
+
 (* ====== External Subscriber Broadcast (WS delivery path) ====== *)
 
 let test_ws_external_subscriber_receives_broadcast () =
@@ -926,7 +993,9 @@ let test_new_session_initializes_pong_state () =
     true
     (session.dashboard_last_delta_at <= Unix.gettimeofday ());
   Alcotest.(check int) "partial inbound byte count starts empty"
-    0 session.inbound_partial_text_bytes
+    0 session.inbound_partial_text_bytes;
+  Alcotest.(check int) "inbound dispatch count starts empty"
+    0 (Atomic.get session.inbound_dispatches)
 
 let test_record_pong_refreshes_last_pong_at () =
   let session = Ws.new_session ~id:"pong-refresh" ~wsd:(Obj.magic ()) in
@@ -1062,6 +1131,16 @@ let () =
         test_inbound_message_size_rejects_overflow_sum;
       Alcotest.test_case "size cap env defaults" `Quick
         test_inbound_size_env_defaults;
+    ]);
+    ("inbound_dispatch_admission", [
+      Alcotest.test_case "default concurrent dispatch cap is bounded" `Quick
+        test_inbound_dispatch_default_limit;
+      Alcotest.test_case "session cap rejects excess dispatches" `Quick
+        test_inbound_dispatch_rejects_at_session_limit;
+      Alcotest.test_case "zero cap disables admission gate" `Quick
+        test_inbound_dispatch_zero_limit_disables_gate;
+      Alcotest.test_case "missing or closed sessions are rejected" `Quick
+        test_inbound_dispatch_rejects_gone_or_closed_session;
     ]);
     ("external_subscriber", [
       Alcotest.test_case "single subscriber receives broadcast" `Quick

@@ -157,7 +157,7 @@ export function RuntimeTomlEditor() {
       const saved = await saveRuntimeTomlConfig(nextSourceText)
       setConfig(saved)
       setDraft(saved.source_text)
-      setNotice('저장됨')
+      setNotice('적용됨')
     } catch (err: unknown) {
       setError(errorToString(err))
     } finally {
@@ -170,7 +170,7 @@ export function RuntimeTomlEditor() {
       const confirmed =
         typeof window === 'undefined' ||
         typeof window.confirm !== 'function' ||
-        window.confirm('저장하지 않은 runtime.toml 변경을 버리고 다시 불러올까요?')
+        window.confirm('적용하지 않은 runtime.toml 변경을 버리고 다시 불러올까요?')
       if (!confirmed) return
     }
     await refresh()

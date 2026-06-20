@@ -252,14 +252,9 @@ let dashboard_memory_subsystems_http_json
              (_, (a : Keeper_memory_os_types.fact))
             (_, (b : Keeper_memory_os_types.fact))
             ->
-            (* DET-OK: absent [last_verified_at] falls back to [first_seen] so
-               legacy facts keep a deterministic dashboard ordering. *)
-            let a_ts = Option.value ~default:a.first_seen a.last_verified_at in
-            let b_ts =
-              Option.value ~default:b.first_seen b.last_verified_at
-              (* DET-OK: same deterministic legacy fallback as [a_ts]. *)
-            in
-            Float.compare b_ts a_ts)
+            Float.compare
+              (Keeper_memory_os_types.reference_time b)
+              (Keeper_memory_os_types.reference_time a))
     |> take limit
   in
   let filtered =

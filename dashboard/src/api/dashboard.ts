@@ -3552,6 +3552,31 @@ export interface MemorySubsystemsMemoryEntryError {
   error_class: string
 }
 
+export interface MemorySubsystemsUserModelItem {
+  keeper: string
+  kind: 'preference' | 'constraint' | string
+  claim: string
+  source_ref: string
+  source_trace_id: string
+  source_turn: number
+  first_seen: number
+  last_verified_at: number | null
+  observed_by: string[]
+}
+
+export interface MemorySubsystemsUserModelError {
+  keeper: string
+  error: string
+}
+
+export interface MemorySubsystemsUserModelPrompt {
+  enabled: boolean
+  block_id: string
+  injection: string
+  runtime_hook: string
+  producer?: string
+}
+
 export interface MemorySubsystemsResponse {
   generated_at: string
   hebbian: {
@@ -3576,6 +3601,17 @@ export interface MemorySubsystemsResponse {
      *  the corresponding rows are absent from `items`; the rest of
      *  `items` is still trustworthy. */
     errors?: MemorySubsystemsMemoryEntryError[]
+  }
+  user_model?: {
+    schema: string
+    source: string
+    prompt?: MemorySubsystemsUserModelPrompt
+    total: number
+    filtered: number
+    shown: number
+    limit: number
+    items: MemorySubsystemsUserModelItem[]
+    errors?: MemorySubsystemsUserModelError[]
   }
   filters: {
     keepers: string[]

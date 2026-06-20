@@ -2,6 +2,8 @@ open Alcotest
 
 module Json = Yojson.Safe.Util
 module Memory_subsystems = Server_dashboard_http_memory_subsystems
+module Memory_io = Masc.Keeper_memory_os_io
+module Types = Masc.Keeper_memory_os_types
 
 let request target =
   Httpun.Request.create ~headers:(Httpun.Headers.of_list []) `GET target
@@ -16,10 +18,7 @@ let check_include target expected =
 ;;
 
 let temp_dir () =
-  let path = Filename.temp_file "memory_subsystems_dashboard_test" "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  path
+  Filename.temp_dir "memory_subsystems_dashboard_test" ""
 ;;
 
 let rm_rf dir =
@@ -82,6 +81,106 @@ let test_http_json_explicitly_disabled_entries_surface () =
         Json.(memory_entries |> member "items" |> to_list |> List.length))
 ;;
 
+let fact ?(category = Types.Preference) ?(trace_id = "trace-user-model")
+      ?(turn = 3) ?(first_seen = 10.0) ?last_verified_at claim
+  : Types.fact
+  =
+  { claim
+  ; category
+  ; external_ref = None
+  ; source = { trace_id; turn; tool_call_id = None }
+  ; observed_by = []
+  ; first_seen
+  ; valid_until = None
+  ; last_verified_at
+  ; schema_version = Types.schema_version
+  }
+;;
+
+let test_http_json_surfaces_user_model_projection () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
+      Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+        Memory_io.append_fact
+          ~keeper_id:"sangsu"
+          (fact ~category:Types.Preference ~last_verified_at:20.0
+             "User prefers terse operational summaries");
+        Memory_io.append_fact
+          ~keeper_id:"sangsu"
+          (fact ~category:Types.Constraint ~trace_id:"trace-constraint" ~turn:4
+             "User requires worktree-first changes");
+        Memory_io.append_fact
+          ~keeper_id:"sangsu"
+          (fact ~category:Types.Fact "The repo uses OCaml");
+        let json =
+          Memory_subsystems.dashboard_memory_subsystems_http_json
+            ~config
+            ~include_memory_entries:false
+            (request "/dashboard/memory-subsystems?limit=100")
+        in
+        let user_model = Json.(json |> member "user_model") in
+        check string "schema" "masc.user_model.memory_projection.v1"
+          Json.(user_model |> member "schema" |> to_string);
+        let prompt = Json.(user_model |> member "prompt") in
+        check string "prompt block id" "user_model"
+          Json.(prompt |> member "block_id" |> to_string);
+        check string "prompt injection" "extra_system_context"
+          Json.(prompt |> member "injection" |> to_string);
+        check string "prompt hook" "keeper_run_tools_hooks.before_turn_params"
+          Json.(prompt |> member "runtime_hook" |> to_string);
+        check int "total" 2 Json.(user_model |> member "total" |> to_int);
+        check int "shown" 2 Json.(user_model |> member "shown" |> to_int);
+        let items = Json.(user_model |> member "items" |> to_list) in
+        let claims =
+          items |> List.map (fun item -> Json.(item |> member "claim" |> to_string))
+        in
+        check
+          (list string)
+          "preference and constraint only"
+          [ "User prefers terse operational summaries"
+          ; "User requires worktree-first changes"
+          ]
+          claims))
+;;
+
+let test_http_json_user_model_uses_config_base_path () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+      let config = Workspace_utils.default_config dir in
+      let base_keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
+      Memory_io.For_testing.with_keepers_dir base_keepers_dir (fun () ->
+        Memory_io.append_fact
+          ~keeper_id:"target"
+          (fact ~category:Types.Preference "Target workspace preference"));
+      let ambient_keepers_dir = Filename.concat dir "ambient-keepers" in
+      Memory_io.For_testing.with_keepers_dir ambient_keepers_dir (fun () ->
+        Memory_io.append_fact
+          ~keeper_id:"ambient"
+          (fact ~category:Types.Preference "Ambient workspace preference");
+        let json =
+          Memory_subsystems.dashboard_memory_subsystems_http_json
+            ~config
+            ~include_memory_entries:false
+            (request "/dashboard/memory-subsystems?limit=100")
+        in
+        let user_model = Json.(json |> member "user_model") in
+        let items = Json.(user_model |> member "items" |> to_list) in
+        let claims =
+          items |> List.map (fun item -> Json.(item |> member "claim" |> to_string))
+        in
+        check (list string) "scoped claims" [ "Target workspace preference" ] claims))
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   Alcotest.run
@@ -101,6 +200,14 @@ let () =
             "explicit disabled entries keeps empty surface"
             `Quick
             test_http_json_explicitly_disabled_entries_surface
+        ; test_case
+            "surfaces user model projection"
+            `Quick
+            test_http_json_surfaces_user_model_projection
+        ; test_case
+            "user model projection reads config base path"
+            `Quick
+            test_http_json_user_model_uses_config_base_path
         ] )
     ]
 ;;

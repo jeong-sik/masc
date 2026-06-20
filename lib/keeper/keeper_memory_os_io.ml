@@ -74,6 +74,11 @@ let list_fact_store_keeper_ids () =
   list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir:(keepers_dir ())
 ;;
 
+let list_fact_store_keeper_ids_for_base_path ~base_path =
+  list_fact_store_keeper_ids_for_keepers_dir
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+;;
+
 let events_path_for_keepers_dir ~keepers_dir ~keeper_id =
   Filename.concat keepers_dir (keeper_id ^ ".events.jsonl")
 ;;
@@ -448,10 +453,22 @@ let read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
 let read_facts_all_strict ~keeper_id =
   read_facts_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
-let read_facts_tail ~keeper_id ~n =
-  read_lines_tail (facts_path ~keeper_id) ~n
+
+let read_facts_tail_for_keepers_dir ~keepers_dir ~keeper_id ~n =
+  read_lines_tail (facts_path_for_keepers_dir ~keepers_dir ~keeper_id) ~n
   |> List.filter_map (parse_json_line fact_of_json)
   |> take_last n
+;;
+
+let read_facts_tail ~keeper_id ~n =
+  read_facts_tail_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id ~n
+;;
+
+let read_facts_tail_for_base_path ~base_path ~keeper_id ~n =
+  read_facts_tail_for_keepers_dir
+    ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+    ~keeper_id
+    ~n
 ;;
 
 (* RFC-0239 Q4: the per-keeper fact recall *retention target* — the size the

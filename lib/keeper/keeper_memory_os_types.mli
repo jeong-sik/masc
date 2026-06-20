@@ -149,10 +149,14 @@ type fact =
 val fact_is_current : now:float -> fact -> bool
 
 (** The time a fact was last known good: [last_verified_at] if set, else
-    [first_seen]. The SSOT staleness anchor shared by the reconciler (re-ground
-    horizon) and recall (staleness marker, recall ordering, unverified-volatile
-    suppression) so those paths cannot drift on the anchor rule. *)
+    [first_seen]. The SSOT staleness anchor shared by the reconciler, recall,
+    and dashboard user-model ordering so those paths cannot drift on the anchor
+    rule. *)
 val reference_time : fact -> float
+
+(** Whether the fact belongs to the operator/user-model projection. *)
+val fact_is_user_model : fact -> bool
+
 (** A librarian extraction result: a summary plus structured claims. *)
 type episode =
   { trace_id : string

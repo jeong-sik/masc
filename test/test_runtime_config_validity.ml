@@ -383,6 +383,47 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
          | Some _ -> ())
       runtimes
 
+let test_repo_oas_model_catalog_modality_priorities_resolve () =
+  with_repo_oas_model_catalog @@ fun catalog ->
+  let rows =
+    List.filter
+      (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+         Option.is_some entry.modality_priority)
+      catalog
+  in
+  check bool "repo OAS catalog has modality priority rows" true (rows <> []);
+  List.iter
+    (fun (entry : Llm_provider.Model_catalog.model_entry) ->
+       match entry.modality_priority with
+       | None -> ()
+       | Some raw ->
+         let expected =
+           match String.lowercase_ascii (String.trim raw) with
+           | "visual_first" | "visual-first" -> Llm_provider.Modality.Visual_first
+           | "preserve_input_order" | "preserve-input-order" | "preserve" ->
+             Llm_provider.Modality.Preserve_input_order
+           | normalized ->
+             failf
+               "unsupported modality_priority %S (normalized %S) in %s"
+               raw
+               normalized
+               entry.id_prefix
+         in
+         (match
+            Llm_provider.Capabilities.for_model_id_catalog entry.id_prefix
+          with
+          | None ->
+            failf
+              "modality_priority row %s must resolve through repo OAS catalog"
+              entry.id_prefix
+          | Some caps ->
+            check
+              bool
+              (entry.id_prefix ^ " modality_priority resolves")
+              true
+              (caps.modality_priority = expected)))
+    rows
+
 let test_repo_runtime_toml_loads () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
@@ -901,6 +942,9 @@ let () =
           test_case
             "repo runtime bindings resolve through the OAS catalog"
             `Quick test_repo_runtime_bindings_resolve_through_oas_catalog;
+          test_case
+            "repo OAS catalog modality priority strings resolve"
+            `Quick test_repo_oas_model_catalog_modality_priorities_resolve;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case

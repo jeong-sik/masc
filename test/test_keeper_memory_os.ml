@@ -1685,6 +1685,99 @@ let test_render_if_enabled_renders_persisted_memory () =
             (contains "Gated recall should surface saved facts" block))))
 ;;
 
+let string_list_field name = function
+  | `Assoc fields -> (
+    match List.assoc_opt name fields with
+    | Some (`List values) ->
+      Some
+        (List.filter_map
+           (function
+             | `String value -> Some value
+             | _ -> None)
+           values)
+    | _ -> None)
+  | _ -> None
+;;
+
+let test_recall_context_splits_user_model_section () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun keepers_dir ->
+        let keeper_id = "user-model-recall-keeper" in
+        let now = 1_000_000.0 in
+        let base = fact_fixture ~now () in
+        let preference =
+          { base with
+            Types.claim = "User prefers terse delivery."
+          ; Types.category = Types.Preference
+          ; Types.source = { base.source with turn = 9 }
+          ; Types.last_verified_at = Some now
+          }
+        in
+        let constraint_fact =
+          { base with
+            Types.claim = "Do not change OAS when the issue is MASC-local."
+          ; Types.category = Types.Constraint
+          ; Types.source = { base.source with turn = 8 }
+          ; Types.last_verified_at = Some (now -. 10.0)
+          }
+        in
+        let repo_fact =
+          { base with
+            Types.claim = "Schedule runner records wake signals."
+          ; Types.category = Types.Fact
+          ; Types.source = { base.source with turn = 7 }
+          ; Types.last_verified_at = Some (now -. 20.0)
+          }
+        in
+        List.iter
+          (Memory_io.append_fact ~keeper_id)
+          [ preference; constraint_fact; repo_fact ];
+        match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
+        | None -> Alcotest.fail "expected Some recall block for user-model facts"
+        | Some block ->
+          Alcotest.(check bool) "contains User model section" true (contains "User model:" block);
+          Alcotest.(check bool) "contains Facts section" true (contains "Facts:" block);
+          Alcotest.(check bool)
+            "preference is in recall block"
+            true
+            (contains preference.claim block);
+          Alcotest.(check bool)
+            "constraint is in recall block"
+            true
+            (contains constraint_fact.claim block);
+          Alcotest.(check bool)
+            "general fact is in recall block"
+            true
+            (contains repo_fact.claim block);
+          (match index_of "User model:" block, index_of "Facts:" block with
+           | Some user_model_idx, Some facts_idx ->
+             Alcotest.(check bool)
+               "user model renders before general facts"
+               true
+               (user_model_idx < facts_idx)
+           | _ -> Alcotest.fail "expected both User model and Facts sections");
+          let ledger_store =
+            Dated_jsonl.create
+              ~base_dir:(Filename.concat keepers_dir "recall_injections")
+              ()
+          in
+          let rows = Dated_jsonl.read_recent ledger_store 1 in
+          (match rows with
+           | row :: _ -> (
+             match string_list_field "injected_fact_keys" row with
+             | Some keys ->
+               List.iter
+                 (fun fact ->
+                   Alcotest.(check bool)
+                     ("ledger includes " ^ fact.Types.claim)
+                     true
+                     (List.mem (Types.normalize_claim fact.claim) keys))
+                 [ preference; constraint_fact; repo_fact ]
+             | None -> Alcotest.fail "missing injected_fact_keys in recall ledger")
+           | [] -> Alcotest.fail "expected recall injection ledger row"))))
+;;
+
 (* RFC-0239 Q4 window invariant: when the store sits in the
    (fact_recall_window, fact_store_max] band, a retention cap leaves the
    highest-ranked durable facts at the file head while newer appends land at the
@@ -1851,6 +1944,7 @@ let test_recall_demotes_unverified_volatile_below_durable_cap () =
       let volatile_recent =
         { (fact_fixture ~now ()) with
           Types.claim = "PR #21515 is still open"
+        ; Types.category = Types.Fact
         ; Types.external_ref = Some { Types.kind = Types.Pr; id = "21515" }
         ; Types.first_seen = now -. (horizon *. 2.0)
         ; Types.last_verified_at = Some (now -. (horizon *. 2.0))
@@ -1860,6 +1954,7 @@ let test_recall_demotes_unverified_volatile_below_durable_cap () =
       let durable_older =
         { (fact_fixture ~now ()) with
           Types.claim = "The repository uses the Memory OS recall prompt"
+        ; Types.category = Types.Fact
         ; Types.external_ref = None
         ; Types.first_seen = now -. days 90
         ; Types.last_verified_at = Some (now -. days 60)
@@ -2121,7 +2216,8 @@ let test_recall_filters_expired_episodes () =
              ~generation:1
              ~summary:"expired episode should not render")
           with
-          Types.valid_until = Some (now -. 1.0)
+          Types.claims = []
+        ; Types.valid_until = Some (now -. 1.0)
         }
       in
       let active =
@@ -2131,7 +2227,8 @@ let test_recall_filters_expired_episodes () =
              ~generation:2
              ~summary:"active episode should render")
           with
-          Types.valid_until = Some (now +. 1.0)
+          Types.claims = []
+        ; Types.valid_until = Some (now +. 1.0)
         }
       in
       Memory_io.append_episode_bundle ~keeper_id expired;
@@ -3241,6 +3338,10 @@ let () =
             "render_if_enabled renders persisted memory"
             `Quick
             test_render_if_enabled_renders_persisted_memory
+        ; Alcotest.test_case
+            "recall splits user model section"
+            `Quick
+            test_recall_context_splits_user_model_section
         ; Alcotest.test_case
             "recall scans the whole bounded store, not just the tail window"
             `Quick

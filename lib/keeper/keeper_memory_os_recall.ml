@@ -4,11 +4,13 @@ open Keeper_memory_os_types
 
 let default_max_facts = 8
 let default_max_episodes = 2
+let default_max_user_model_facts = 4
 
 (* RFC-0244 Tier 2: how many shared-semantic facts to append after the keeper's
    own (private-precedence) facts. Kept small so the communal tier informs
    without crowding out keeper-local memory. *)
 let default_max_shared_facts = 4
+let default_max_shared_user_model_facts = 2
 let episode_tail_scan = 32
 let max_fact_text_len = 260
 let max_episode_text_len = 360
@@ -54,6 +56,19 @@ let fact_is_current ~now (fact : fact) =
   match fact.valid_until with
   | None -> true
   | Some ts -> ts >= now
+;;
+
+let fact_is_user_model (fact : fact) =
+  match fact.category with
+  | Preference | Constraint -> true
+  | Blocker
+  | Code_change
+  | Ephemeral
+  | Fact
+  | Goal
+  | Lesson
+  | Validated_approach
+  | Unknown _ -> false
 ;;
 
 let episode_is_current ~now (episode : episode) =
@@ -210,7 +225,15 @@ let render_nonempty_section key variable lines =
   | _ -> render_prompt_template key [ variable, String.concat "\n" lines ]
 ;;
 
-let render_recall_context ~fact_lines ~episode_lines =
+let render_recall_context ~user_model_lines ~fact_lines ~episode_lines =
+  match
+    render_nonempty_section
+      Keeper_prompt_names.memory_os_recall_user_model_section
+      "user_model"
+      user_model_lines
+  with
+  | Error msg -> Error msg
+  | Ok user_model_section ->
   match
     render_nonempty_section
       Keeper_prompt_names.memory_os_recall_facts_section
@@ -229,7 +252,10 @@ let render_recall_context ~fact_lines ~episode_lines =
      | Ok episodes_section ->
        render_prompt_template
          Keeper_prompt_names.memory_os_recall_context
-         [ "facts_section", facts_section; "episodes_section", episodes_section ])
+         [ "user_model_section", user_model_section
+         ; "facts_section", facts_section
+         ; "episodes_section", episodes_section
+         ])
 ;;
 
 (* RFC-0239 R2 / RFC-0243: recall-time dedup keys on the shared
@@ -318,7 +344,7 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
      facts. RFC-0247: order by the structural truth anchor (most-recently-verified
      first); the composite score, lexical seed-rerank, and spreading-activation
      reranking were all removed in the purge. *)
-  let facts, private_keys, shared_facts, n_facts_in_store =
+  let user_model_facts, facts, private_keys, shared_user_model_facts, shared_facts, n_facts_in_store =
     let fact_store_ids =
       if String.equal keeper_id shared_store_id
       then [ keeper_id ]
@@ -331,7 +357,17 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
           ~n:Keeper_memory_os_io.fact_store_max
       in
       let n_facts_in_store = List.length all_facts in
-      let facts = all_facts |> facts_recency_ranked ~now |> take max_facts in
+      let ranked_facts = all_facts |> facts_recency_ranked ~now in
+      let user_model_facts =
+        ranked_facts
+        |> List.filter fact_is_user_model
+        |> take default_max_user_model_facts
+      in
+      let facts =
+        ranked_facts
+        |> List.filter (fun fact -> not (fact_is_user_model fact))
+        |> take max_facts
+      in
       (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own,
          with private precedence — a claim already surfaced from this keeper's
          store is not repeated from the shared store. Both stores are read under
@@ -340,17 +376,32 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
          per-keeper stores, the consolidator rewrites the shared tier directly
          and does not apply [fact_store_max], so recall must scan every shared
          fact before ranking and taking the small communal slice. *)
-      let private_keys = List.map (fun f -> normalize_claim f.claim) facts in
-      let shared_facts =
-        if String.equal keeper_id shared_store_id
-        then []
-        else
-          Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
-          |> facts_recency_ranked ~now
-          |> List.filter (fun f -> not (List.mem (normalize_claim f.claim) private_keys))
-          |> take default_max_shared_facts
+      let private_keys =
+        List.map (fun f -> normalize_claim f.claim) (user_model_facts @ facts)
       in
-      facts, private_keys, shared_facts, n_facts_in_store)
+      let shared_user_model_facts, shared_facts =
+        if String.equal keeper_id shared_store_id
+        then [], []
+        else
+          let ranked_shared =
+            Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
+            |> facts_recency_ranked ~now
+            |> List.filter (fun f ->
+              not (List.mem (normalize_claim f.claim) private_keys))
+          in
+          ( ranked_shared
+            |> List.filter fact_is_user_model
+            |> take default_max_shared_user_model_facts
+          , ranked_shared
+            |> List.filter (fun fact -> not (fact_is_user_model fact))
+            |> take default_max_shared_facts )
+      in
+      ( user_model_facts
+      , facts
+      , private_keys
+      , shared_user_model_facts
+      , shared_facts
+      , n_facts_in_store ))
   in
   let episodes =
     Keeper_memory_os_io.read_episodes_tail
@@ -360,7 +411,10 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
     |> take max_episodes
   in
   let injected_fact_keys =
-    private_keys @ List.map (fun f -> normalize_claim f.claim) shared_facts
+    private_keys
+    @ List.map
+        (fun f -> normalize_claim f.claim)
+        (shared_user_model_facts @ shared_facts)
   in
   let injected_episode_keys =
     List.map
@@ -368,15 +422,19 @@ let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
       episodes
   in
   let block =
-    match facts, shared_facts, episodes with
-    | [], [], [] -> ""
+    match user_model_facts, facts, shared_user_model_facts, shared_facts, episodes with
+    | [], [], [], [], [] -> ""
     | _ ->
+      let user_model_lines =
+        List.map (render_fact ~now) user_model_facts
+        @ List.map (render_shared_fact ~now) shared_user_model_facts
+      in
       let fact_lines =
         List.map (render_fact ~now) facts
         @ List.map (render_shared_fact ~now) shared_facts
       in
       let episode_lines = List.map render_episode episodes in
-      (match render_recall_context ~fact_lines ~episode_lines with
+      (match render_recall_context ~user_model_lines ~fact_lines ~episode_lines with
        | Ok context -> context
        | Error msg ->
          Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;

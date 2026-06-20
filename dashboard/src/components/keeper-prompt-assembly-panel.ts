@@ -157,6 +157,7 @@ const STAGES: AssemblyStageSpec[] = [
     summary: 'Memory and tool hints added at the end.',
     promptKeys: [
       'keeper.memory_os_recall.context',
+      'keeper.memory_os_recall.user_model_section',
       'keeper.memory_os_recall.facts_section',
       'keeper.memory_os_recall.episodes_section',
       'keeper.tool_preferred_header',

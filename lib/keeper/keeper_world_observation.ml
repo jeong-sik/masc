@@ -276,10 +276,7 @@ let pending_board_event_of_fusion_completion
   : pending_board_event
   =
   let self_ids = self_ids meta in
-  let post_id =
-    if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
-    else fc.board_post_id
-  in
+  let post_id = Keeper_event_queue.fusion_completion_post_id fc in
   let title =
     if fc.ok
     then Printf.sprintf "Fusion deliberation complete (run %s)" fc.run_id

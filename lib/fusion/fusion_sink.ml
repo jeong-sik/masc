@@ -120,17 +120,15 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
 let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id =
   try
-    (* post_id 폴백 규칙은 keeper_world_observation.pending_board_event_of_fusion_completion
-       과 동일해야 한다(둘 다 board_post_id에서 유도) — dedup 일관성. *)
-    let post_id =
-      if String.equal board_post_id "" then "fusion-run:" ^ run_id else board_post_id
+    let fusion_completion =
+      Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id }
     in
+    let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
     let stimulus : Keeper_event_queue.stimulus =
       { Keeper_event_queue.post_id
       ; urgency = Keeper_event_queue.Normal
       ; arrived_at = Time_compat.now ()
-      ; payload =
-          Keeper_event_queue.Fusion_completed { run_id; ok; resolved_answer; board_post_id }
+      ; payload = Keeper_event_queue.Fusion_completed fusion_completion
       }
     in
     Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;

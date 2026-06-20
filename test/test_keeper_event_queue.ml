@@ -26,6 +26,16 @@ let () =
   in
   assert (not (is_board_signal (fusion_payload ())));
   assert (String.equal (payload_kind_label (fusion_payload ())) "fusion_completed");
+  assert (
+    String.equal
+      (fusion_completion_post_id
+         { run_id = "fus-1"; ok = true; resolved_answer = "ok"; board_post_id = "post-1" })
+      "post-1");
+  assert (
+    String.equal
+      (fusion_completion_post_id
+         { run_id = "fus-2"; ok = false; resolved_answer = "sink_failed"; board_post_id = "" })
+      "fusion-run:fus-2");
 
   (* --- queue operations preserved --- *)
   let board_stim =

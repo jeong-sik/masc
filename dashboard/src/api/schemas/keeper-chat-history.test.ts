@@ -194,6 +194,10 @@ describe('safeParseKeeperChatHistoryMessage', () => {
         role: 'assistant',
         blocks: [
           { t: 'p', html: 'hello' },
+          { t: 'code', cap: 'ocaml', html: 'let x = 1', source: 'let x = 1' },
+          { t: 'table', head: ['name', { v: 'count', num: true }], rows: [['a', '1']] },
+          { t: 'voice', secs: 3, wave: [0.2, 0.8], transcript: 'memo' },
+          { t: 'attach', name: 'clip.mp4', src: 'https://cdn.example/clip.mp4', kind: 'video' },
           { t: 'image', src: 'https://cdn.example/x.png', cap: 'screen' },
           { t: 'link', url: 'https://example.com', title: 'Example' },
         ],
@@ -201,6 +205,10 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     )
     expect(out?.blocks).toEqual([
       { t: 'p', html: 'hello' },
+      { t: 'code', cap: 'ocaml', html: 'let x = 1', source: 'let x = 1' },
+      { t: 'table', head: ['name', { v: 'count', num: true }], rows: [['a', '1']] },
+      { t: 'voice', secs: 3, wave: [0.2, 0.8], transcript: 'memo' },
+      { t: 'attach', name: 'clip.mp4', src: 'https://cdn.example/clip.mp4', kind: 'video' },
       { t: 'image', src: 'https://cdn.example/x.png', cap: 'screen' },
       { t: 'link', url: 'https://example.com', title: 'Example' },
     ])

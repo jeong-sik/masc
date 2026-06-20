@@ -84,6 +84,14 @@ class TestStructuredHtmlText:
             {
                 "blocks": [
                     {"t": "p", "html": "hello &lt;world&gt;"},
+                    {"t": "h4", "html": "Plan"},
+                    {"t": "ul", "items": ["one", "two"]},
+                    {"t": "callout", "severity": "warn", "html": "careful"},
+                    {
+                        "t": "table",
+                        "head": ["name", {"v": "count", "num": True}],
+                        "rows": [["alpha", "2"]],
+                    },
                     {
                         "t": "code",
                         "cap": "python",
@@ -95,11 +103,30 @@ class TestStructuredHtmlText:
                         "src": "https://example.com/chart.png?a=1&b=2",
                         "cap": "Chart <A>",
                     },
+                    {"t": "mermaid", "source": "graph TD\nA-->B"},
+                    {"t": "svg", "svg": "<svg><path /></svg>", "cap": "Icon"},
                     {
                         "t": "link",
                         "url": "https://example.com/post",
                         "title": "Post <one>",
                         "meta": "example.com",
+                    },
+                    {
+                        "t": "voice",
+                        "src": "https://example.com/a.mp3",
+                        "transcript": "spoken memo",
+                        "via": "tts",
+                    },
+                    {
+                        "t": "attach",
+                        "name": "clip.mp4",
+                        "src": "https://example.com/clip.mp4",
+                        "kind": "video",
+                    },
+                    {
+                        "t": "video",
+                        "src": "https://example.com/demo.mp4",
+                        "cap": "Demo",
                     },
                     {"t": "fusion", "board_post_id": "p-123", "run_id": "fus-9"},
                 ]
@@ -107,13 +134,25 @@ class TestStructuredHtmlText:
         )
 
         assert "hello &lt;world&gt;" in result
+        assert "<b>Plan</b>" in result
+        assert "- one\n- two" in result
+        assert "<b>Callout (warn):</b> careful" in result
+        assert "<pre>name | count\nalpha | 2</pre>" in result
         assert "<b>Code: python</b>" in result
         assert '<pre><code>print(&quot;&lt;ok&gt;&quot;)</code></pre>' in result
         assert (
             'Image: <a href="https://example.com/chart.png?a=1&amp;b=2">'
             "Chart &lt;A&gt;</a>"
         ) in result
+        assert "<b>Mermaid</b>" in result
+        assert "graph TD\nA--&gt;B" in result
+        assert "<b>SVG: Icon</b>" in result
+        assert "&lt;svg&gt;&lt;path /&gt;&lt;/svg&gt;" in result
         assert '<a href="https://example.com/post">Post &lt;one&gt;</a>' in result
+        assert "<b>Audio (tts)</b>" in result
+        assert '<a href="https://example.com/a.mp3">https://example.com/a.mp3</a>' in result
+        assert "<b>Attachment (video):</b> clip.mp4" in result
+        assert "<b>Video:</b> Demo" in result
         assert "<b>Fusion result</b>" in result
         assert "board_post_id: <code>p-123</code>" in result
 

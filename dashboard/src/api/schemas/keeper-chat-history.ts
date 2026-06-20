@@ -80,14 +80,80 @@ export const KeeperChatHistoryAudioClipSchema = object({
 
 export type KeeperChatHistoryAudioClip = InferOutput<typeof KeeperChatHistoryAudioClipSchema>
 
+const KeeperChatTableCellSchema = union([
+  string(),
+  object({
+    v: string(),
+    num: optional(boolean()),
+    muted: optional(boolean()),
+  }),
+])
+
 // RFC-0235 P3: server-parsed rich chat blocks carried on persisted history
-// rows. Only the block types the backend currently emits are accepted at the
-// boundary; malformed block arrays cause the whole row to be dropped by
-// safeParseKeeperChatHistoryMessage so the transcript stays clean.
+// rows. Keep this aligned with keeper_chat_blocks.ml and the dashboard
+// renderer's ChatBlock union; malformed block arrays cause the whole row to be
+// dropped by safeParseKeeperChatHistoryMessage so the transcript stays clean.
 export const KeeperChatBlockSchema = union([
   object({
     t: literal('p'),
     html: string(),
+  }),
+  object({
+    t: literal('h4'),
+    html: string(),
+  }),
+  object({
+    t: literal('ul'),
+    items: array(string()),
+  }),
+  object({
+    t: literal('callout'),
+    severity: optional(union([literal('info'), literal('warn'), literal('bad')])),
+    html: string(),
+  }),
+  object({
+    t: literal('table'),
+    head: array(KeeperChatTableCellSchema),
+    rows: array(array(KeeperChatTableCellSchema)),
+  }),
+  object({
+    t: literal('code'),
+    cap: optional(string()),
+    html: string(),
+    source: optional(string()),
+  }),
+  object({
+    t: literal('mermaid'),
+    source: string(),
+    caption: optional(string()),
+  }),
+  object({
+    t: literal('svg'),
+    svg: string(),
+    cap: optional(string()),
+  }),
+  object({
+    t: literal('voice'),
+    secs: optional(number()),
+    wave: optional(array(number())),
+    via: optional(string()),
+    size: optional(string()),
+    transcript: optional(string()),
+    src: optional(string()),
+  }),
+  object({
+    t: literal('attach'),
+    name: string(),
+    dims: optional(string()),
+    src: optional(string()),
+    svg: optional(string()),
+    ph: optional(string()),
+    via: optional(string()),
+    size: optional(string()),
+    data: optional(string()),
+    mimeType: optional(string()),
+    sizeBytes: optional(number()),
+    kind: optional(string()),
   }),
   object({
     t: literal('image'),

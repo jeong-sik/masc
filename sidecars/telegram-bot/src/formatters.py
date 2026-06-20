@@ -107,6 +107,26 @@ def _html_link(url: str, label: str) -> str:
     return f'<a href="{safe_url}">{safe_label}</a>'
 
 
+def _structured_table_cell(raw: Any) -> str:
+    if isinstance(raw, dict):
+        return _structured_text(raw.get("v")).strip()
+    return _structured_text(raw).strip()
+
+
+def _structured_table_text(raw: dict[str, Any]) -> str:
+    head = raw.get("head")
+    rows = raw.get("rows")
+    if not isinstance(head, list) or not isinstance(rows, list):
+        return ""
+    rendered_rows = [[_structured_table_cell(cell) for cell in head]]
+    for row in rows:
+        if isinstance(row, list):
+            rendered_rows.append([_structured_table_cell(cell) for cell in row])
+    if not any(any(cell for cell in row) for row in rendered_rows):
+        return ""
+    return "\n".join(" | ".join(row) for row in rendered_rows)
+
+
 def _telegram_part_from_structured(raw: Any) -> str:
     if not isinstance(raw, dict):
         return ""
@@ -114,6 +134,29 @@ def _telegram_part_from_structured(raw: Any) -> str:
     if block_type == "p":
         text = html.unescape(_structured_text(raw.get("html")))
         return html.escape(text).strip()
+    if block_type == "h4":
+        text = html.unescape(_structured_text(raw.get("html"))).strip()
+        return f"<b>{html.escape(text)}</b>" if text else ""
+    if block_type == "ul":
+        items = raw.get("items")
+        if not isinstance(items, list):
+            return ""
+        lines = [
+            f"- {html.escape(html.unescape(_structured_text(item)).strip())}"
+            for item in items
+            if html.unescape(_structured_text(item)).strip()
+        ]
+        return "\n".join(lines)
+    if block_type == "callout":
+        body = html.unescape(_structured_text(raw.get("html"))).strip()
+        if not body:
+            return ""
+        severity = _structured_text(raw.get("severity")).strip()
+        label = f"Callout ({severity})" if severity else "Callout"
+        return f"<b>{html.escape(label)}:</b> {html.escape(body)}"
+    if block_type == "table":
+        table = _structured_table_text(raw)
+        return f"<pre>{html.escape(table)}</pre>" if table else ""
     if block_type == "image":
         src = _structured_text(raw.get("src")).strip()
         if not src:
@@ -128,6 +171,18 @@ def _telegram_part_from_structured(raw: Any) -> str:
             return ""
         cap = _structured_text(raw.get("cap")).strip()
         label = f"<b>Code: {html.escape(cap)}</b>\n" if cap else ""
+        return f"{label}<pre><code>{html.escape(source)}</code></pre>"
+    if block_type == "mermaid":
+        source = _structured_text(raw.get("source"))
+        if not source:
+            return ""
+        return f"<b>Mermaid</b>\n<pre><code>{html.escape(source)}</code></pre>"
+    if block_type == "svg":
+        source = _structured_text(raw.get("svg"))
+        if not source:
+            return ""
+        caption = _structured_text(raw.get("cap")).strip()
+        label = f"<b>SVG: {html.escape(caption)}</b>\n" if caption else "<b>SVG</b>\n"
         return f"{label}<pre><code>{html.escape(source)}</code></pre>"
     if block_type == "link":
         url = _structured_text(raw.get("url")).strip()
@@ -148,6 +203,39 @@ def _telegram_part_from_structured(raw: Any) -> str:
         ]
         if run_id:
             lines.append(f"run_id: <code>{html.escape(run_id)}</code>")
+        return "\n".join(lines)
+    if block_type in ("voice", "audio"):
+        src = _structured_text(raw.get("src")).strip()
+        transcript = _structured_text(raw.get("transcript")).strip()
+        via = _structured_text(raw.get("via")).strip()
+        if not src and not transcript:
+            return ""
+        label = f"Audio ({via})" if via else "Audio"
+        lines = [f"<b>{html.escape(label)}</b>"]
+        if transcript:
+            lines.append(html.escape(transcript))
+        if src:
+            lines.append(_html_link(src, src))
+        return "\n".join(lines)
+    if block_type == "attach":
+        name = _structured_text(raw.get("name")).strip()
+        src = _structured_text(raw.get("src")).strip()
+        kind = _structured_text(raw.get("kind")).strip()
+        if not name and not src:
+            return ""
+        label = f"Attachment ({kind})" if kind else "Attachment"
+        lines = [f"<b>{html.escape(label)}:</b> {html.escape(name or src)}"]
+        if src and src != name:
+            lines.append(_html_link(src, src))
+        return "\n".join(lines)
+    if block_type == "video":
+        src = _structured_text(raw.get("src")).strip()
+        caption = _structured_text(raw.get("cap")).strip() or _structured_text(raw.get("name")).strip()
+        if not src and not caption:
+            return ""
+        lines = [f"<b>Video:</b> {html.escape(caption or src)}"]
+        if src and src != caption:
+            lines.append(_html_link(src, src))
         return "\n".join(lines)
     return ""
 

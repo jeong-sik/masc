@@ -154,6 +154,91 @@ def _code_block(source: str, cap: str = "") -> dict[str, Any]:
     return _section_block(f"{title}```\n{body}\n```")
 
 
+def _structured_list_block(raw: dict[str, Any]) -> dict[str, Any] | None:
+    items = raw.get("items")
+    if not isinstance(items, list):
+        return None
+    lines = [
+        f"- {escape_mrkdwn_text(_structured_text(item).strip())}"
+        for item in items
+        if _structured_text(item).strip()
+    ]
+    if not lines:
+        return None
+    return _section_block("\n".join(lines))
+
+
+def _structured_table_cell(raw: Any) -> str:
+    if isinstance(raw, dict):
+        return _structured_text(raw.get("v")).strip()
+    return _structured_text(raw).strip()
+
+
+def _structured_table_block(raw: dict[str, Any]) -> dict[str, Any] | None:
+    head = raw.get("head")
+    rows = raw.get("rows")
+    if not isinstance(head, list) or not isinstance(rows, list):
+        return None
+    rendered_rows = [[_structured_table_cell(cell) for cell in head]]
+    for row in rows:
+        if isinstance(row, list):
+            rendered_rows.append([_structured_table_cell(cell) for cell in row])
+    if not any(any(cell for cell in row) for row in rendered_rows):
+        return None
+    body = "\n".join(" | ".join(row) for row in rendered_rows)
+    return _section_block(f"```\n{escape_mrkdwn_text(body)}\n```")
+
+
+def _callout_block(raw: dict[str, Any]) -> dict[str, Any] | None:
+    body = _structured_text(raw.get("html")).strip()
+    if not body:
+        return None
+    severity = _structured_text(raw.get("severity")).strip()
+    label = f"*Callout ({escape_mrkdwn_text(severity)}):*" if severity else "*Callout:*"
+    return _section_block(f"{label} {escape_mrkdwn_text(body)}")
+
+
+def _voice_block(raw: dict[str, Any]) -> dict[str, Any] | None:
+    src = _structured_text(raw.get("src")).strip()
+    transcript = _structured_text(raw.get("transcript")).strip()
+    via = _structured_text(raw.get("via")).strip()
+    if not src and not transcript:
+        return None
+    label = f"*Audio ({escape_mrkdwn_text(via)}):*" if via else "*Audio:*"
+    lines = [label]
+    if transcript:
+        lines.append(escape_mrkdwn_text(transcript))
+    if src:
+        lines.append(escape_mrkdwn_text(src))
+    return _section_block("\n".join(lines))
+
+
+def _attach_block(raw: dict[str, Any]) -> dict[str, Any] | None:
+    name = _structured_text(raw.get("name")).strip()
+    src = _structured_text(raw.get("src")).strip()
+    kind = _structured_text(raw.get("kind")).strip()
+    if not name and not src:
+        return None
+    label = "Attachment"
+    if kind:
+        label = f"Attachment ({escape_mrkdwn_text(kind)})"
+    lines = [f"*{label}:* {escape_mrkdwn_text(name or src)}"]
+    if src and src != name:
+        lines.append(escape_mrkdwn_text(src))
+    return _section_block("\n".join(lines))
+
+
+def _video_block(raw: dict[str, Any]) -> dict[str, Any] | None:
+    src = _structured_text(raw.get("src")).strip()
+    caption = _structured_text(raw.get("cap")).strip() or _structured_text(raw.get("name")).strip()
+    if not src and not caption:
+        return None
+    lines = [f"*Video:* {escape_mrkdwn_text(caption or src)}"]
+    if src and src != caption:
+        lines.append(escape_mrkdwn_text(src))
+    return _section_block("\n".join(lines))
+
+
 def _slack_block_from_structured(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -163,6 +248,17 @@ def _slack_block_from_structured(raw: Any) -> dict[str, Any] | None:
         if not text:
             return None
         return _section_block(escape_mrkdwn_text(text))
+    if block_type == "h4":
+        text = _structured_text(raw.get("html")).strip()
+        if not text:
+            return None
+        return _section_block(f"*{escape_mrkdwn_text(text)}*")
+    if block_type == "ul":
+        return _structured_list_block(raw)
+    if block_type == "callout":
+        return _callout_block(raw)
+    if block_type == "table":
+        return _structured_table_block(raw)
     if block_type == "image":
         src = _structured_text(raw.get("src")).strip()
         if not src:
@@ -173,6 +269,16 @@ def _slack_block_from_structured(raw: Any) -> dict[str, Any] | None:
         if not source:
             return None
         return _code_block(source, _structured_raw_text(raw.get("cap")).strip())
+    if block_type == "mermaid":
+        source = _structured_raw_text(raw.get("source"))
+        if not source:
+            return None
+        return _code_block(source, "mermaid")
+    if block_type == "svg":
+        source = _structured_raw_text(raw.get("svg"))
+        if not source:
+            return None
+        return _code_block(source, "svg")
     if block_type == "link":
         url = _structured_text(raw.get("url")).strip()
         if not url:
@@ -185,6 +291,12 @@ def _slack_block_from_structured(raw: Any) -> dict[str, Any] | None:
         if not board_post_id:
             return None
         return _fusion_block(board_post_id, _structured_text(raw.get("run_id")).strip())
+    if block_type in ("voice", "audio"):
+        return _voice_block(raw)
+    if block_type == "attach":
+        return _attach_block(raw)
+    if block_type == "video":
+        return _video_block(raw)
     return None
 
 

@@ -97,6 +97,19 @@ let test_code_fence_preserves_markdown_image_literal () =
     ]
     (blocks_to_json_list blocks)
 
+let test_mermaid_fence_becomes_mermaid_block () =
+  let blocks = B.parse_text_to_blocks "```mermaid\ngraph TD\nA-->B\n```" in
+  Alcotest.(check (list yojson_testable))
+    "mermaid block"
+    [
+      `Assoc
+        [
+          ("t", `String "mermaid");
+          ("source", `String "graph TD\nA-->B");
+        ];
+    ]
+    (blocks_to_json_list blocks)
+
 let test_multiple_images_and_text_lines () =
   let blocks = B.parse_text_to_blocks "intro\n![a](https://x.com/1.jpg)\nhttps://x.com/2.gif\noutro" in
   Alcotest.(check (list yojson_testable))
@@ -160,8 +173,58 @@ let test_code_block_roundtrip () =
     Alcotest.(check (list yojson_testable))
       "code roundtrip json"
       (blocks_to_json_list original)
-      (blocks_to_json_list parsed)
+    (blocks_to_json_list parsed)
   | None -> Alcotest.fail "blocks_of_yojson rejected valid code block"
+
+let test_dashboard_rich_blocks_roundtrip () =
+  let original =
+    [
+      B.Heading { html = "Plan" };
+      B.Unordered_list { items = [ "one"; "two" ] };
+      B.Callout { severity = Some "warn"; html = "check this" };
+      B.Table
+        {
+          head =
+            [
+              B.Cell_text "name";
+              B.Cell_value { v = "count"; num = Some true; muted = None };
+            ];
+          rows = [ [ B.Cell_text "alpha"; B.Cell_text "2" ] ];
+        };
+      B.Mermaid { source = "graph TD\nA-->B"; caption = Some "flow" };
+      B.Svg { svg = "<svg></svg>"; cap = Some "mark" };
+      B.Voice
+        {
+          secs = Some 3.5;
+          wave = Some [ 0.1; 0.8 ];
+          via = Some "tts";
+          size = Some "24 KB";
+          transcript = Some "hello";
+          src = Some "https://example.com/a.mp3";
+        };
+      B.Attach
+        {
+          name = "clip.mp4";
+          dims = Some "1920x1080";
+          src = Some "https://example.com/clip.mp4";
+          svg = None;
+          ph = None;
+          via = Some "gate";
+          size = Some "8 MB";
+          data = None;
+          mime_type = Some "video/mp4";
+          size_bytes = Some 42;
+          kind = Some "video";
+        };
+    ]
+  in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some parsed ->
+    Alcotest.(check (list yojson_testable))
+      "dashboard rich block json"
+      (blocks_to_json_list original)
+      (blocks_to_json_list parsed)
+  | None -> Alcotest.fail "blocks_of_yojson rejected valid dashboard rich blocks"
 
 let test_non_http_markdown_image_becomes_text () =
   let blocks = B.parse_text_to_blocks "before ![alt](ftp://example.com/a.png) after" in
@@ -256,6 +319,8 @@ let () =
             test_code_fence_becomes_code_block;
           Alcotest.test_case "code fence preserves markdown image literal" `Quick
             test_code_fence_preserves_markdown_image_literal;
+          Alcotest.test_case "mermaid fence becomes mermaid block" `Quick
+            test_mermaid_fence_becomes_mermaid_block;
           Alcotest.test_case "multiple images and text lines" `Quick
             test_multiple_images_and_text_lines;
           Alcotest.test_case "empty lines ignored" `Quick
@@ -277,6 +342,8 @@ let () =
             test_blocks_of_yojson_roundtrip;
           Alcotest.test_case "code block roundtrip" `Quick
             test_code_block_roundtrip;
+          Alcotest.test_case "dashboard rich blocks roundtrip" `Quick
+            test_dashboard_rich_blocks_roundtrip;
           Alcotest.test_case "blocks_of_yojson rejects malformed" `Quick
             test_blocks_of_yojson_rejects_malformed;
           Alcotest.test_case "fusion block roundtrip" `Quick

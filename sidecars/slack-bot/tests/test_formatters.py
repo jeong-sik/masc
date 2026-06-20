@@ -190,3 +190,49 @@ class TestStructuredResponseBlocks:
         assert blocks[2]["alt_text"] == "image"
         assert "*<https://example.com|Example>*" in blocks[3]["text"]["text"]
         assert "p-abc" in blocks[4]["text"]["text"]
+
+    def test_projects_extended_dashboard_block_shapes(self) -> None:
+        blocks = structured_response_blocks(
+            {
+                "blocks": [
+                    {"t": "h4", "html": "Plan"},
+                    {"t": "ul", "items": ["one", "two"]},
+                    {"t": "callout", "severity": "warn", "html": "careful"},
+                    {
+                        "t": "table",
+                        "head": ["name", {"v": "count", "num": True}],
+                        "rows": [["alpha", "2"]],
+                    },
+                    {"t": "mermaid", "source": "graph TD\nA-->B"},
+                    {"t": "svg", "svg": "<svg><path /></svg>"},
+                    {
+                        "t": "voice",
+                        "src": "https://example.com/a.mp3",
+                        "transcript": "spoken memo",
+                        "via": "tts",
+                    },
+                    {
+                        "t": "attach",
+                        "name": "clip.mp4",
+                        "src": "https://example.com/clip.mp4",
+                        "kind": "video",
+                    },
+                    {
+                        "t": "video",
+                        "src": "https://example.com/demo.mp4",
+                        "cap": "Demo",
+                    },
+                ]
+            }
+        )
+
+        assert len(blocks) == 9
+        assert blocks[0]["text"]["text"] == "*Plan*"
+        assert "- one\n- two" in blocks[1]["text"]["text"]
+        assert "*Callout (warn):* careful" in blocks[2]["text"]["text"]
+        assert "name | count\nalpha | 2" in blocks[3]["text"]["text"]
+        assert "*Code:* `mermaid`" in blocks[4]["text"]["text"]
+        assert "*Code:* `svg`" in blocks[5]["text"]["text"]
+        assert "*Audio (tts):*" in blocks[6]["text"]["text"]
+        assert "Attachment (video)" in blocks[7]["text"]["text"]
+        assert "*Video:* Demo" in blocks[8]["text"]["text"]

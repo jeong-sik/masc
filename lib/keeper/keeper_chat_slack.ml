@@ -125,7 +125,17 @@ let slack_block_of_chat_block = function
       Some (image_block_json ~url:src ~caption:cap)
   | Keeper_chat_blocks.Link { url; title; meta = _ } ->
       Some (link_block_json ~url ~title ~description:None)
-  | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Code _ | Keeper_chat_blocks.Fusion _ -> None
+  | Keeper_chat_blocks.Text _
+  | Keeper_chat_blocks.Heading _
+  | Keeper_chat_blocks.Unordered_list _
+  | Keeper_chat_blocks.Callout _
+  | Keeper_chat_blocks.Table _
+  | Keeper_chat_blocks.Code _
+  | Keeper_chat_blocks.Mermaid _
+  | Keeper_chat_blocks.Svg _
+  | Keeper_chat_blocks.Voice _
+  | Keeper_chat_blocks.Attach _
+  | Keeper_chat_blocks.Fusion _ -> None
 
 let content_blocks_of_text text =
   text

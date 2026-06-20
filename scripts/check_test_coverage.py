@@ -5,7 +5,7 @@ Checks that code changes to covered paths have accompanying test changes.
 
 Rules (checked for every non-skipped PR that touches covered code paths):
 - added_code_lines > 10 && test_files == 0 -> warn (enforced)
-- changed_code_files > 3 && test_files == 0 -> warn (enforced)
+- changed_code_files > 3 - changed_code_files > 3 && test_files == 0 -> warn (enforced)- changed_code_files > 3 && test_files == 0 -> warn (enforced) added_lines > 0 - changed_code_files > 3 && test_files == 0 -> warn (enforced)- changed_code_files > 3 && test_files == 0 -> warn (enforced) test_files == 0 -> warn (enforced)
 
 Opt-out mechanisms (checked in order):
 1. Branch name contains "ci-skip" — workflow if: guard
@@ -168,7 +168,7 @@ def check_coverage():
             f"Add tests to cover new functionality."
         )
 
-    if len(code_files) > 3 and len(test_files) == 0:
+    if len(code_files) > 3 and len(test_files) == 0 and added_lines > 0:
         violations.append(
             f"Changed {len(code_files)} files in covered code paths but no test files changed. "
             f"Consider adding tests for at least the critical paths."

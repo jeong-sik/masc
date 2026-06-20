@@ -1848,28 +1848,17 @@ let schedule_operator_action ~now state (request : Schedule_domain.schedule_requ
 ;;
 
 let schedule_keeper_next_tool = function
-  | "blocked_approval" | "awaiting_approval" | "due_pending_refresh" | "expired"
-  | "ready" | "approved" ->
-    `String "masc_schedule_get"
-  | "scheduled" | "running" | "terminal" -> `Null
-  | _ -> `Null
+  | readiness ->
+    (match Schedule_projection.keeper_next_tool_for_execution_readiness readiness with
+     | Some tool -> `String tool
+     | None -> `Null)
 ;;
 
 let schedule_keeper_next_action = function
-  | "blocked_approval" | "awaiting_approval" ->
-    `String
-      "Inspect details, then wait for an explicit human decision before calling masc_schedule_approve or masc_schedule_reject."
-  | "due_pending_refresh" ->
-    `String
-      "The schedule is due but the runner has not refreshed it yet; inspect if needed, otherwise wait for the runner tick."
-  | "expired" ->
-    `String
-      "Inspect the expired schedule and recreate it with masc_schedule_create only if the operator still wants it."
-  | "ready" | "approved" ->
-    `String
-      "Monitor dispatch; do not create a duplicate schedule for this due item."
-  | "scheduled" | "running" | "terminal" -> `Null
-  | _ -> `Null
+  | readiness ->
+    (match Schedule_projection.keeper_next_action_for_execution_readiness readiness with
+     | Some action -> `String action
+     | None -> `Null)
 ;;
 
 let schedule_fsm_state ~now state schedules =

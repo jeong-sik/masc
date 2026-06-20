@@ -262,17 +262,12 @@ let schedule_blocked_approval ~now state (request : Schedule_domain.schedule_req
   | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled | Expired -> false
 ;;
 
-let keeper_next_tool_for_schedule_action = function
-  | "dispatch_ready" | "approve_or_reject" -> Some "masc_schedule_get"
-  | _ -> None
+let keeper_next_tool_for_schedule_action =
+  Schedule_projection.keeper_next_tool_for_attention_action
 ;;
 
-let keeper_next_action_for_schedule_action = function
-  | "dispatch_ready" ->
-    "Inspect the schedule if needed and monitor dispatch; do not create a duplicate schedule."
-  | "approve_or_reject" ->
-    "Inspect details, then wait for an explicit human decision before calling masc_schedule_approve or masc_schedule_reject."
-  | _ -> "Inspect the schedule before taking action."
+let keeper_next_action_for_schedule_action =
+  Schedule_projection.keeper_next_action_for_attention_action
 ;;
 
 let schedule_attention_item action (request : Schedule_domain.schedule_request) =

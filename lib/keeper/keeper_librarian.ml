@@ -278,8 +278,8 @@ let episode_of_output ?now ?generation (inp : input) (raw : string) : episode op
           | Some claims ->
             Some
               { trace_id = inp.trace_id
-              (* sound-partial: allow: callers without a fresh generation keep inp.generation. *)
-              ; generation = Option.value generation ~default:inp.generation
+              (* FIXED: ?generation no longer falls back to inp.generation; defaults to None. *)
+              ; generation = Option.value generation ~default:None
               ; episode_summary
               ; claims
               ; open_items

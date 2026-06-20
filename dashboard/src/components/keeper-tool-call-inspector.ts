@@ -30,6 +30,7 @@ import { isKeeperToolActivityEvent, sseEventMatchesKeeper } from './keeper-sse-m
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
+const NO_DURATION_LABEL = '—'
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   const gap = coverageGapDisplay(data)
@@ -276,7 +277,7 @@ export function deriveKeeperToolCallDossier(
       label: 'latest',
       value: latest?.tool ?? 'none',
       detail: latest
-        ? `${formatTimestamp(latest.ts)} · ${toolCallStatusLabel(latest)} · ${latest.duration_ms != null ? formatMsCompact(latest.duration_ms) : 'duration 없음'}`
+        ? `${formatTimestamp(latest.ts)} · ${toolCallStatusLabel(latest)} · ${latest.duration_ms != null ? formatMsCompact(latest.duration_ms) : NO_DURATION_LABEL}`
         : 'no recent tool call',
       tone: latestTone,
       title: latest ? entryScopeLabel(latest) : undefined,
@@ -293,7 +294,7 @@ export function deriveKeeperToolCallDossier(
     {
       key: 'slowest',
       label: 'slowest',
-      value: slowest?.duration_ms != null ? formatMsCompact(slowest.duration_ms) : 'none',
+      value: slowest?.duration_ms != null ? formatMsCompact(slowest.duration_ms) : NO_DURATION_LABEL,
       detail: slowest ? `${slowest.tool} · ${entryScopeLabel(slowest)}` : 'no duration sample',
       tone: slowest?.duration_ms != null ? durationTone(slowest.duration_ms) : 'neutral',
     },
@@ -498,7 +499,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         <span class="font-mono text-[var(--color-fg-secondary)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
         <span class="font-mono font-medium text-[var(--color-fg-secondary)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>
         <span class=${`font-mono flex-shrink-0 w-16 text-right ${entry.duration_ms != null ? durationColor(entry.duration_ms) : 'text-[var(--color-fg-disabled)]'}`}>
-          ${entry.duration_ms != null ? formatMsCompact(entry.duration_ms) : '—'}
+          ${entry.duration_ms != null ? formatMsCompact(entry.duration_ms) : NO_DURATION_LABEL}
         </span>
         <span
           class=${`flex-shrink-0 w-5 text-center ${toolCallSucceeded(entry) ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}`}

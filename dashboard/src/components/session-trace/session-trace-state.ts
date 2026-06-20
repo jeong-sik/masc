@@ -505,7 +505,7 @@ function enrichToolCallTrace(
     toolName: entry.tool,
     toolArgs: normalizeToolCallInput(entry.input) ?? event.toolArgs,
     toolResult: entry.success ? outputText : null,
-    duration_ms: entry.duration_ms ?? undefined,
+    duration_ms: entry.duration_ms ?? event.duration_ms,
     // Trajectory turn is trace-relative and pairs with `round`; the log's
     // session-absolute turn stays readable as detail.turn. Mixing the two
     // vocabularies in one T#R# badge would mislabel the row.

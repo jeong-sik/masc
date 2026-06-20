@@ -1,5 +1,7 @@
 module Types = Masc_domain
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 module Lib = Masc
 module Auth = Masc.Auth
 module Workspace = Masc.Workspace

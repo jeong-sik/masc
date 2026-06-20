@@ -771,16 +771,18 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            | other -> other
          in
          let chat_queue =
+           (* [Keeper_chat_queue.length] reads behind a raw [Eio.Mutex], which
+              performs effects and raises [Effect.Unhandled] when no Eio scheduler
+              is running.  Production dispatch runs under [Eio_main.run] with
+              [Eio_guard.enable ()] (bin/main_eio.ml, bin/main_stdio_eio.ml,
+              bin/masc_worker_run.ml), so the depth is read there.  Pre-Eio /
+              non-Eio init paths (and unit tests that do not enable the guard)
+              report [`Null] instead of probing the scheduler via a side-effecting
+              [Eio.Fiber.yield] + [Effect.Unhandled] catch. *)
            let pending_messages =
-             match
-               try
-                 Eio.Fiber.yield ();
-                 Some ()
-               with
-               | Effect.Unhandled _ -> None
-             with
-             | None -> `Null
-             | Some () -> `Int (Keeper_chat_queue.length ~keeper_name:m.name)
+             if Eio_guard.is_ready ()
+             then `Int (Keeper_chat_queue.length ~keeper_name:m.name)
+             else `Null
            in
            `Assoc
              [

@@ -30,6 +30,27 @@ val dispatch :
     connector fields are injected into the keeper-visible message body so
     external user identity survives memory and handoff boundaries. *)
 
+val dispatch_with_text_snapshot :
+  on_text_snapshot:(string -> unit) ->
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
+  config:Workspace.config ->
+  channel:string ->
+  channel_user_id:string ->
+  channel_user_name:string ->
+  channel_workspace_id:string ->
+  keeper_name:string ->
+  metadata:(string * string) list ->
+  content:string ->
+  Gate_protocol.dispatch_result
+(** Streaming-capable variant of {!dispatch}. The callback receives the
+    accumulated assistant text after keeper-scoped secret redaction, so
+    connector transports can update one visible message without leaking raw
+    provider deltas. The final {!Gate_protocol.dispatch_result} remains the
+    authoritative turn result. *)
+
 val agent_name_for_channel_actor :
   channel:string ->
   channel_workspace_id:string ->

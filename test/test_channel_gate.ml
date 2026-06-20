@@ -261,6 +261,53 @@ let test_handle_inbound_passes_metadata_to_dispatch () =
       | None -> fail "dispatch should receive metadata")
   | Error e -> fail (Channel_gate.gate_error_to_string e)
 
+let test_handle_inbound_streaming_forwards_snapshot_callback () =
+  reset_dedup ();
+  let snapshots = ref [] in
+  let dispatch ~on_text_snapshot ~channel:_ ~channel_user_id:_
+      ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_
+      ~content:_ =
+    on_text_snapshot "partial";
+    Gate_protocol.Reply { content = "ok"; structured = None; stats = None }
+  in
+  let msg =
+    make_message ~idempotency_key:(unique_key "dispatch-stream") ()
+  in
+  match
+    Channel_gate.handle_inbound_streaming ~dispatch
+      ~on_text_snapshot:(fun text -> snapshots := text :: !snapshots)
+      msg
+  with
+  | Ok out ->
+      check string "reply content" "ok" out.content;
+      check (list string) "snapshots" [ "partial" ] (List.rev !snapshots)
+  | Error e -> fail (Channel_gate.gate_error_to_string e)
+
+let test_handle_inbound_streaming_validation_blocks_callback () =
+  reset_dedup ();
+  let dispatch_called = ref false in
+  let snapshot_called = ref false in
+  let dispatch ~on_text_snapshot:_ ~channel:_ ~channel_user_id:_
+      ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_
+      ~content:_ =
+    dispatch_called := true;
+    Gate_protocol.Reply { content = "ok"; structured = None; stats = None }
+  in
+  let msg =
+    make_message ~content:"   "
+      ~idempotency_key:(unique_key "dispatch-stream-invalid") ()
+  in
+  match
+    Channel_gate.handle_inbound_streaming ~dispatch
+      ~on_text_snapshot:(fun _ -> snapshot_called := true)
+      msg
+  with
+  | Error (Channel_gate.Validation Channel_gate.Empty_content) ->
+      check bool "dispatch not called" false !dispatch_called;
+      check bool "snapshot not called" false !snapshot_called
+  | Error _ -> fail "expected Validation(Empty_content)"
+  | Ok _ -> fail "expected validation to block dispatch"
+
 let () =
   Alcotest.run "Channel_gate"
     [
@@ -295,6 +342,10 @@ let () =
             test_handle_inbound_passes_channel_context_to_dispatch;
           test_case "passes metadata to dispatch" `Quick
             test_handle_inbound_passes_metadata_to_dispatch;
+          test_case "streaming forwards snapshot callback" `Quick
+            test_handle_inbound_streaming_forwards_snapshot_callback;
+          test_case "streaming validation blocks callback" `Quick
+            test_handle_inbound_streaming_validation_blocks_callback;
           test_case "returns keeper error" `Quick
             test_handle_inbound_keeper_error;
           test_case "returns unavailable" `Quick

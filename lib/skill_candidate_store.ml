@@ -252,7 +252,8 @@ let write_candidate_if_changed ~base_path candidate =
   (* Artifact files and the index are intentionally checked together: a prior
      write can leave complete artifacts but miss the final index append. The
      next post-turn pass should repair that listing row instead of treating the
-     draft as fully persisted. *)
+     draft as fully persisted. This is a safety net until #21871 makes the
+     index/artifact persistence atomic or derives one side from the other. *)
   let artifacts_unchanged =
     candidate_artifacts ~base_path candidate
     |> List.for_all (fun (path, expected) ->

@@ -37,6 +37,19 @@ let provider_error_detail ~runtime_id detail =
 let timeout_budget_opt timeout_s =
   if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
 
+let apply_timeout_budget ?timeout_s base_config =
+  match Option.bind timeout_s timeout_budget_opt with
+  | None -> base_config
+  | Some timeout_s ->
+    (* Fusion owns the structural wall-clock budget via the outer
+       Masc_oas_bridge.run_safe call. Do not arm Runtime_agent's total
+       max_execution_time_s here; it can kill an active stream with the
+       wrong failure attribution. *)
+    { base_config with
+      stream_idle_timeout_s = Some timeout_s
+    ; body_timeout_s = Some timeout_s
+    }
+
 (** [Keeper_tool_descriptor]에서 날것의 web tool descriptor를 찾아
     [Agent_sdk.Tool.t]로 변환한다. 패널/심판이 web_search/web_fetch를
     호출할 수 있게 하는 목적으로만 쓰인다. *)
@@ -80,19 +93,7 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
     let base_config =
       Runtime_agent.default_config ~name:model ~provider_cfg ~system_prompt ~tools
     in
-    let base_config =
-      match Option.bind timeout_s timeout_budget_opt with
-      | None -> base_config
-      | Some timeout_s ->
-        (* Fusion owns the structural wall-clock budget via the outer
-           Masc_oas_bridge.run_safe call. Do not arm Runtime_agent's total
-           max_execution_time_s here; it can kill an active stream with the
-           wrong failure attribution. *)
-        { base_config with
-          stream_idle_timeout_s = Some timeout_s
-        ; body_timeout_s = Some timeout_s
-        }
-    in
+    let base_config = apply_timeout_budget ?timeout_s base_config in
     (* max_tool_calls는 OpenRouter Fusion의 per-panel tool budget에 대응.
        Runtime_agent의 max_turns로 근사: tool 호출 횟수 + 최종 답변 1턴. *)
     let config =
@@ -105,3 +106,7 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
        Error
          (Fusion_types.Provider_error
             (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e))))
+
+module For_testing = struct
+  let apply_timeout_budget = apply_timeout_budget
+end

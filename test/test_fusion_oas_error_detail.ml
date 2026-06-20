@@ -1,29 +1,19 @@
 open Masc
 
-let contains substring s =
-  let sub_len = String.length substring in
-  let str_len = String.length s in
-  let rec aux i =
-    if i + sub_len > str_len
-    then false
-    else if String.sub s i sub_len = substring
-    then true
-    else aux (i + 1)
-  in
-  if sub_len = 0 then true else aux 0
+let provider_cfg () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Anthropic
+    ~model_id:"fusion-test"
+    ~base_url:"http://localhost"
+    ()
 ;;
 
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
-;;
-
-let read_file path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic (in_channel_length ic))
+let runtime_config () =
+  Runtime_agent.default_config
+    ~name:"fusion-test"
+    ~provider_cfg:(provider_cfg ())
+    ~system_prompt:""
+    ~tools:[]
 ;;
 
 let test_rewrites_unknown_provider () =
@@ -60,11 +50,23 @@ let test_keeps_already_attributed_error () =
 ;;
 
 let test_timeout_budget_does_not_set_total_execution_ceiling () =
-  let source = read_file (Filename.concat (repo_root ()) "lib/fusion/fusion_oas.ml") in
-  Alcotest.(check bool)
-    "fusion structural budget must not map to OAS max_execution_time_s"
-    false
-    (contains "max_execution_time_s = Some timeout_s" source)
+  let config =
+    Fusion_oas.For_testing.apply_timeout_budget
+      ~timeout_s:300.0
+      (runtime_config ())
+  in
+  Alcotest.(check (option (float 0.001)))
+    "stream idle timeout"
+    (Some 300.0)
+    config.stream_idle_timeout_s;
+  Alcotest.(check (option (float 0.001)))
+    "body timeout"
+    (Some 300.0)
+    config.body_timeout_s;
+  Alcotest.(check (option (float 0.001)))
+    "no total execution ceiling"
+    None
+    config.max_execution_time_s
 ;;
 
 let () =

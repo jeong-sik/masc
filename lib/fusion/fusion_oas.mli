@@ -25,6 +25,16 @@ val build_agent
   -> string
   -> (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
 
+(** Test seam for Fusion-local OAS runtime config mapping. Production callers
+    should use [build_agent], which also resolves runtime providers and builds
+    the OAS agent. *)
+module For_testing : sig
+  val apply_timeout_budget
+    :  ?timeout_s:float
+    -> Runtime_agent.config
+    -> Runtime_agent.config
+end
+
 (** Attach Fusion's runtime id to an OAS provider error string.
     OAS transport errors may surface as ["Provider 'unknown' ..."] because the
     public SDK error type does not carry MASC runtime ids. Fusion owns the

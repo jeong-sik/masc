@@ -145,6 +145,14 @@ export const KeeperChatHistoryMessageSchema = object({
   speaker_id: optional(string()),
   speaker_name: optional(string()),
   speaker_authority: optional(string()),
+  // RFC-0233 §7: turn join key "<trace_id>#<absolute_turn>" the keeper minted
+  // onto every row of the turn (keeper_chat_store.ml to_json_array emits it).
+  // Read-only here; the board post that the same turn produced carries the
+  // identical string in its origin, so a board post can anchor to the exact
+  // chat turn. Optional for the deploy window and legacy rows (absent ->
+  // undefined, never drops the message). Consumed for navigation in a
+  // follow-up (KeeperConversationEntry.turnRef).
+  turn_ref: optional(string()),
   // RFC-0235 P1/P3: audio clip field. The wire object is accepted as
   // `unknown` at the boundary so malformed clips do not cause the whole
   // message to be dropped; `normalizeAudioClip` validates before use.

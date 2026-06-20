@@ -136,21 +136,25 @@ let build ~keeper_id ~now ?(max_preferences = default_max_preferences)
   in
   let private_facts, shared_facts =
     with_fact_store_locks fact_store_ids (fun () ->
-      let private_facts =
+      let private_facts : Keeper_memory_os_types.fact list =
         Keeper_memory_os_io.read_facts_tail
           ~keeper_id
           ~n:Keeper_memory_os_io.fact_store_max
         |> rank_facts ~now
       in
-      let private_keys = List.map (fun f -> normalize_claim f.claim) private_facts in
-      let shared_facts =
+      let private_keys =
+        List.map
+          (fun (fact : Keeper_memory_os_types.fact) -> normalize_claim fact.claim)
+          private_facts
+      in
+      let shared_facts : Keeper_memory_os_types.fact list =
         if String.equal keeper_id shared_store_id
         then []
         else
           Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
           |> rank_facts ~now
-          |> List.filter (fun f ->
-            not (List.mem (normalize_claim f.claim) private_keys))
+          |> List.filter (fun (fact : Keeper_memory_os_types.fact) ->
+            not (List.mem (normalize_claim fact.claim) private_keys))
       in
       private_facts, shared_facts)
   in

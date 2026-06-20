@@ -2961,12 +2961,42 @@ export type MemoryOsTurnRecordSnapshot = {
   }
 }
 
+export type KeeperUserModelItem = {
+  claim: string
+  category: string
+  source: 'keeper' | 'shared' | string
+  observed_by: string[]
+  turn: number
+  first_seen: number
+  first_seen_iso: string | null
+  last_verified_at: number | null
+  last_verified_at_iso: string | null
+}
+
+export type KeeperUserModelSnapshot = {
+  schema: string
+  keeper: string
+  source: string
+  producer: string
+  facts_store: string
+  shared_facts_store: string
+  enabled: boolean
+  now: number | null
+  now_iso: string | null
+  read_errors: { scope: string; error: string }[]
+  source_fact_count: number
+  shared_fact_count: number
+  preferences: KeeperUserModelItem[]
+  constraints: KeeperUserModelItem[]
+}
+
 export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   keeper: string
   count: number
   // malformed JSONL rows the server refused to decode (never repaired)
   skipped_rows: number
   memory_os: MemoryOsTurnRecordSnapshot | null
+  user_model: KeeperUserModelSnapshot | null
   entries: TurnRecordRow[]
 }
 
@@ -3119,6 +3149,68 @@ function decodeMemoryOsSnapshot(raw: unknown): MemoryOsTurnRecordSnapshot | null
   }
 }
 
+function decodeKeeperUserModelItem(raw: unknown): KeeperUserModelItem | null {
+  if (!isRecord(raw)) return null
+  const claim = asString(raw.claim)
+  const category = asString(raw.category)
+  const source = asString(raw.source)
+  const turn = asNumber(raw.turn)
+  const first_seen = asNumber(raw.first_seen)
+  if (!claim || !category || !source || turn == null || first_seen == null) {
+    return null
+  }
+  return {
+    claim,
+    category,
+    source,
+    observed_by: normalizeStringList(raw.observed_by),
+    turn,
+    first_seen,
+    first_seen_iso: asNullableString(raw.first_seen_iso),
+    last_verified_at: asNumber(raw.last_verified_at) ?? null,
+    last_verified_at_iso: asNullableString(raw.last_verified_at_iso),
+  }
+}
+
+function decodeKeeperUserModelSnapshot(raw: unknown): KeeperUserModelSnapshot | null {
+  if (!isRecord(raw)) return null
+  const schema = asString(raw.schema)
+  const keeper = asString(raw.keeper)
+  const source = asString(raw.source)
+  const producer = asString(raw.producer)
+  const facts_store = asString(raw.facts_store)
+  const shared_facts_store = asString(raw.shared_facts_store)
+  if (!schema || !keeper || !source || !producer || !facts_store || !shared_facts_store) {
+    return null
+  }
+  return {
+    schema,
+    keeper,
+    source,
+    producer,
+    facts_store,
+    shared_facts_store,
+    enabled: asBoolean(raw.enabled, true) ?? true,
+    now: asNumber(raw.now) ?? null,
+    now_iso: asNullableString(raw.now_iso),
+    read_errors: asRecordArray(raw.read_errors)
+      .map((item) => {
+        const scope = asString(item.scope)
+        const error = asString(item.error)
+        return scope && error ? { scope, error } : null
+      })
+      .filter((item): item is { scope: string; error: string } => item !== null),
+    source_fact_count: asNumber(raw.source_fact_count, 0) ?? 0,
+    shared_fact_count: asNumber(raw.shared_fact_count, 0) ?? 0,
+    preferences: asRecordArray(raw.preferences)
+      .map(decodeKeeperUserModelItem)
+      .filter((item): item is KeeperUserModelItem => item !== null),
+    constraints: asRecordArray(raw.constraints)
+      .map(decodeKeeperUserModelItem)
+      .filter((item): item is KeeperUserModelItem => item !== null),
+  }
+}
+
 function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
   if (!isRecord(raw)) return null
   const keeper = asString(raw.keeper)
@@ -3129,6 +3221,7 @@ function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
     count: asNumber(raw.count, 0),
     skipped_rows: asNumber(raw.skipped_rows, 0),
     memory_os: decodeMemoryOsSnapshot(raw.memory_os),
+    user_model: decodeKeeperUserModelSnapshot(raw.user_model),
     entries: asRecordArray(raw.entries)
       .map(decodeTurnRecordRow)
       .filter((row): row is TurnRecordRow => row !== null),

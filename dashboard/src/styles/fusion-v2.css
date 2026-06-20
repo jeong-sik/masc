@@ -478,3 +478,131 @@
     width: 100%;
   }
 }
+
+/* RFC-0266 §7 Phase 4 — fusion run status panel (registry-backed live strip).
+   Reuses the `.fus-status.tone-*` chip; only layout is defined here. */
+.v2-fusion-surface .fus-runs-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-2);
+  background: var(--fus-panel);
+  padding: 12px 14px;
+}
+
+.v2-fusion-surface .fus-runs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.v2-fusion-surface .fus-runs-head h2 {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fus-muted);
+  margin: 0;
+}
+
+.v2-fusion-surface .fus-runs-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.v2-fusion-surface .fus-runs-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--warn-fg);
+}
+
+.v2-fusion-surface .fus-runs-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn-fg);
+  animation: fus-runs-pulse 1.6s ease-in-out infinite;
+}
+
+.v2-fusion-surface .fus-runs-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fus-muted);
+}
+
+.v2-fusion-surface .fus-runs-empty {
+  font-size: 12px;
+  color: var(--fus-muted);
+  margin: 0;
+  padding: 4px 0;
+}
+
+.v2-fusion-surface .fus-runs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.v2-fusion-surface .fus-runs-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-1);
+  background: var(--fus-panel-strong);
+  padding: 7px 10px;
+}
+
+.v2-fusion-surface .fus-runs-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fus-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v2-fusion-surface .fus-runs-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--fus-muted);
+  flex: 0 0 auto;
+}
+
+.v2-fusion-surface .fus-runs-preset {
+  border: 1px solid var(--fus-line);
+  border-radius: var(--r-1);
+  padding: 2px 6px;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+
+@keyframes fus-runs-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v2-fusion-surface .fus-runs-live-dot {
+    animation: none;
+  }
+}

@@ -306,6 +306,17 @@ export const goals = signal<Goal[]>([])
 export const goalsLoading = signal(false)
 export const workspaceFsmSnapshot = signal<DashboardWorkspaceFsmSnapshot | null>(null)
 
+// --- Fusion run registry state (RFC-0266 §7 Phase 4) ---
+
+import type { FusionRunRecord } from './api/dashboard'
+
+// In-progress + recently completed fusion deliberations from the in-memory
+// registry endpoint. Distinct from `boardPosts` (the board-derived detail the
+// FusionSurface already renders): the registry is the only source that shows a
+// run while it is still `running`, before any board post exists.
+export const fusionRuns = signal<FusionRunRecord[]>([])
+export const fusionRunsLoading = signal(false)
+
 // --- OAS monitoring state ---
 
 import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from './types/oas'
@@ -1219,6 +1230,25 @@ export async function refreshGoals(): Promise<void> {
     console.warn('[Planning] fetch error:', err)
   } finally {
     goalsLoading.value = false
+  }
+}
+
+// --- Fusion run registry fetcher (RFC-0266 §7 Phase 4) ---
+
+// Re-fetched on route visit (tab-refresh) and on each `fusion_run_status` SSE
+// event. The endpoint is the SSOT for run status; the dashboard never
+// reconstructs registry state from the event payload, so a dropped/duplicated
+// event self-heals on the next fetch.
+export async function refreshFusionRuns(): Promise<void> {
+  fusionRunsLoading.value = true
+  try {
+    const { fetchFusionRuns } = await import('./api/dashboard')
+    const data = await fetchFusionRuns()
+    fusionRuns.value = data.runs
+  } catch (err) {
+    console.warn('[Fusion] runs fetch error:', err)
+  } finally {
+    fusionRunsLoading.value = false
   }
 }
 

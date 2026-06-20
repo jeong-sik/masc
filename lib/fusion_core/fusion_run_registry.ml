@@ -84,6 +84,30 @@ let get (t : t) ~run_id : run option =
   List.find_opt (fun r -> String.equal r.run_id run_id) (Atomic.get t)
 ;;
 
+(* Stable status vocabulary shared by every fusion-run surface (Phase 3 keeper
+   tool, Phase 4 dashboard route, the [fusion_run_status] SSE event). Hand-
+   written rather than [@@deriving] so the on-wire labels stay
+   "running"/"completed"/"failed" regardless of the variant shape — a consumer
+   never reconstructs run state from the variant, only reads these labels. *)
+let status_label = function
+  | Running -> "running"
+  | Completed { ok = true } -> "completed"
+  | Completed { ok = false } -> "failed"
+;;
+
+(* The single per-run JSON object. The HTTP list endpoint, the SSE delta, and the
+   keeper status tool all serialize a run through here so the field set and the
+   status label never drift between surfaces. *)
+let run_to_yojson (r : run) : Yojson.Safe.t =
+  `Assoc
+    [ ("run_id", `String r.run_id)
+    ; ("keeper", `String r.keeper)
+    ; ("preset", `String r.preset)
+    ; ("started_at", `Float r.started_at)
+    ; ("status", `String (status_label r.status))
+    ]
+;;
+
 (* Process-wide registry the fusion tool/sink write to (server-lifetime). Tests
    use a fresh [create ()] for state isolation, avoiding a reset backdoor. *)
 let global : t = create ()

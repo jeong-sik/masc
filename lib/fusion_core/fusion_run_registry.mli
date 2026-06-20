@@ -40,5 +40,16 @@ val list_runs : t -> run list
 val get : t -> run_id:string -> run option
 (** The run with [run_id], if still tracked. *)
 
+val status_label : run_status -> string
+(** Stable wire label: [Running -> "running"], [Completed {ok=true} ->
+    "completed"], [Completed {ok=false} -> "failed"]. The one place the status
+    vocabulary is defined, shared by the Phase 3 tool, the Phase 4 dashboard
+    route, and the [fusion_run_status] SSE event so it never drifts. *)
+
+val run_to_yojson : run -> Yojson.Safe.t
+(** Canonical per-run JSON: [{run_id, keeper, preset, started_at, status}]. The
+    single serializer for every fusion-run surface (tool / HTTP list / SSE
+    delta). *)
+
 val global : t
 (** Process-wide registry the fusion tool/sink write to (server-lifetime). *)

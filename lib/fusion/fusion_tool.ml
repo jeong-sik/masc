@@ -38,6 +38,7 @@ let append_chat_failure ~base_dir ~keeper ~run_id content =
   (* RFC-0266 §7: registry를 Completed{ok=false}로 갱신(가시성). wake와 무관하게
      run 상태를 반영해야 하므로 별도 호출(Running 키퍼만 깨우는 wake와 달리 무조건). *)
   Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok:false;
+  Fusion_sink.broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
   Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
     ~resolved_answer:content ~board_post_id:""
 
@@ -71,6 +72,10 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
          뿐, 키퍼를 깨우지 않는다(wake는 별개). *)
       Fusion_run_registry.register_running Fusion_run_registry.global ~run_id ~keeper
         ~preset ~started_at:now_unix;
+      (* RFC-0266 §7 Phase 4: push the new [Running] card to the dashboard panel
+         (no polling). wake-free, broadcast-failure-safe; see
+         Fusion_sink.broadcast_run_status. *)
+      Fusion_sink.broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
       (* out-of-band: fiber fork → 키퍼 턴은 즉시 진행, 결과는 sink가 chat lane에.
          예산은 orchestrator가 원자적으로 소비한다. 배경 fiber 실패/거부/싱크
          실패는 동일한 chat lane에 기록해 started-but-failed 상태가 남지 않도록 한다.

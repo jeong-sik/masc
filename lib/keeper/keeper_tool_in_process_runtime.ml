@@ -415,21 +415,12 @@ let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
    the process-wide [global] the fusion tool/sink write to and scopes by the
    calling keeper. *)
 let fusion_status_json ~(registry : Fusion_run_registry.t) ~keeper ~run_id : string =
-  let status_label (status : Fusion_run_registry.run_status) =
-    match status with
-    | Fusion_run_registry.Running -> "running"
-    | Fusion_run_registry.Completed { ok = true } -> "completed"
-    | Fusion_run_registry.Completed { ok = false } -> "failed"
-  in
-  let run_to_yojson (r : Fusion_run_registry.run) : Yojson.Safe.t =
-    `Assoc
-      [ "run_id", `String r.run_id
-      ; "keeper", `String r.keeper
-      ; "preset", `String r.preset
-      ; "started_at", `Float r.started_at
-      ; "status", `String (status_label r.status)
-      ]
-  in
+  (* Per-run serialization (field set + status vocabulary) is owned by
+     Fusion_run_registry.run_to_yojson — the single serializer shared with the
+     Phase 4 dashboard HTTP route and the fusion_run_status SSE event, so the
+     shape never drifts between the tool and the dashboard. This function only
+     adds the tool envelope + per-keeper scoping. *)
+  let run_to_yojson = Fusion_run_registry.run_to_yojson in
   let belongs_to_keeper (r : Fusion_run_registry.run) =
     String.equal r.keeper keeper
   in

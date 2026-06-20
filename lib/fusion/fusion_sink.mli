@@ -52,3 +52,13 @@ val wake_keeper_on_fusion_completion :
   -> resolved_answer:string
   -> board_post_id:string
   -> unit
+
+(** RFC-0266 §7 Phase 4: broadcast a [fusion_run_status] SSE event carrying the
+    current registry snapshot of [run_id] so the dashboard fusion-runs panel
+    reflects running→completed transitions live. Reads the canonical run back
+    from [registry] and serializes it via [Fusion_run_registry.run_to_yojson]
+    (same shape as the HTTP list endpoint). Best-effort: an unknown [run_id] is a
+    no-op, and every exception except [Eio.Cancel.Cancelled] is swallowed +
+    logged so a broadcast failure never aborts the fusion tool/sink. Callers
+    invoke it right after [register_running] / [mark_completed]. *)
+val broadcast_run_status : registry:Fusion_run_registry.t -> run_id:string -> unit

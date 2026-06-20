@@ -25,17 +25,10 @@ let rec ensure_dir path =
 
 let keepers_dir_override : string option ref = ref None
 
-let resolved_keepers_dir ?keepers_dir () =
-  match keepers_dir with
-  | Some path -> path
-  | None ->
-    (match !keepers_dir_override with
-     | Some path -> path
-     | None -> Config_dir_resolver.keepers_dir ())
-;;
-
 let keepers_dir () =
-  resolved_keepers_dir ()
+  match !keepers_dir_override with
+  | Some path -> path
+  | None -> Config_dir_resolver.keepers_dir ()
 ;;
 
 module For_testing = struct
@@ -49,8 +42,12 @@ module For_testing = struct
   ;;
 end
 
-let facts_path ?keepers_dir ~keeper_id =
-  Filename.concat (resolved_keepers_dir ?keepers_dir ()) (keeper_id ^ ".facts.jsonl")
+let facts_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ ".facts.jsonl")
+;;
+
+let facts_path ~keeper_id =
+  facts_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
 (* RFC-0244 Tier 2: the keeper ids that currently have a Tier-1 fact store, for
@@ -59,8 +56,8 @@ let facts_path ?keepers_dir ~keeper_id =
    keepers with persisted facts. The reserved shared id is excluded so a prior
    sweep's output is never folded back in as a source keeper. Sorted for
    deterministic sweep order. *)
-let list_fact_store_keeper_ids ?keepers_dir () =
-  let dir = resolved_keepers_dir ?keepers_dir () in
+let list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir =
+  let dir = keepers_dir in
   if not (Sys.file_exists dir && Sys.is_directory dir)
   then []
   else
@@ -73,8 +70,16 @@ let list_fact_store_keeper_ids ?keepers_dir () =
     |> List.sort String.compare
 ;;
 
-let events_path ?keepers_dir ~keeper_id =
-  Filename.concat (resolved_keepers_dir ?keepers_dir ()) (keeper_id ^ ".events.jsonl")
+let list_fact_store_keeper_ids () =
+  list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir:(keepers_dir ())
+;;
+
+let events_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ ".events.jsonl")
+;;
+
+let events_path ~keeper_id =
+  events_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
 let episode_bundle_lock_path ~keeper_id =
@@ -269,8 +274,8 @@ let append_episode_bundle ~keeper_id episode =
     append_event ~keeper_id episode)
 ;;
 
-let rewrite_facts_atomically ?keepers_dir ~keeper_id facts =
-  let path = facts_path ?keepers_dir ~keeper_id in
+let rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts =
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let content =
     facts
     |> List.map (fun fact -> fact_to_json fact |> Yojson.Safe.to_string)
@@ -278,6 +283,10 @@ let rewrite_facts_atomically ?keepers_dir ~keeper_id facts =
   in
   let content = if String.equal content "" then "" else content ^ "\n" in
   write_file_atomically path content
+;;
+
+let rewrite_facts_atomically ~keeper_id facts =
+  rewrite_facts_atomically_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id facts
 ;;
 
 (* ---------- Facts snapshot CAS (optimistic concurrency) ---------- *)
@@ -427,13 +436,17 @@ let parse_fact_json_line_strict ~path ~line_number line =
     Error (Printf.sprintf "%s:%d: invalid fact JSON: %s" path line_number message)
 ;;
 
-let read_facts_all ?keepers_dir ~keeper_id =
-  read_lines_all (facts_path ?keepers_dir ~keeper_id)
+let read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id =
+  read_lines_all (facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
   |> List.filter_map (parse_json_line fact_of_json)
 ;;
 
-let read_facts_all_strict ?keepers_dir ~keeper_id =
-  let path = facts_path ?keepers_dir ~keeper_id in
+let read_facts_all ~keeper_id =
+  read_facts_all_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
+;;
+
+let read_facts_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
+  let path = facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
   let rec loop line_number acc = function
     | [] -> Ok (List.rev acc)
     | line :: rest ->
@@ -441,6 +454,10 @@ let read_facts_all_strict ?keepers_dir ~keeper_id =
       loop (line_number + 1) (fact :: acc) rest
   in
   loop 1 [] (read_lines_all path)
+;;
+
+let read_facts_all_strict ~keeper_id =
+  read_facts_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 let read_facts_tail ~keeper_id ~n =
   read_lines_tail (facts_path ~keeper_id) ~n

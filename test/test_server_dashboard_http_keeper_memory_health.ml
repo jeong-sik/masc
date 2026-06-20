@@ -63,11 +63,11 @@ let test_uses_explicit_base_path_not_ambient_resolver () =
   let ambient_keepers_dir =
     Config_dir_resolver.keepers_dir_for_base_path ~base_path:ambient_base
   in
-  Io.rewrite_facts_atomically
+  Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir:target_keepers_dir
     ~keeper_id:"target"
     [ fact ~now "target workspace fact" ];
-  Io.rewrite_facts_atomically
+  Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir:ambient_keepers_dir
     ~keeper_id:"ambient"
     [ fact ~now "ambient workspace fact" ];

@@ -65,18 +65,28 @@ let keeper_health ~keepers_dir ~now keeper_id =
   let facts_count, external_ref_count =
     (* [read_facts_all] raises on malformed JSONL — treated as a read failure
        for this keeper; the caller catches and skips it. *)
-    let fs = Keeper_memory_os_io.read_facts_all ~keepers_dir ~keeper_id in
+    let fs =
+      Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
+    in
     List.length fs, count_external_ref_facts fs
   in
   let facts_bytes =
-    file_size_bytes (Keeper_memory_os_io.facts_path ~keepers_dir ~keeper_id)
+    file_size_bytes
+      (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
   in
-  let events_p = Keeper_memory_os_io.events_path ~keepers_dir ~keeper_id in
+  let events_p =
+    Keeper_memory_os_io.events_path_for_keepers_dir ~keepers_dir ~keeper_id
+  in
   let events_bytes = file_size_bytes events_p in
   (* dry_run keeps the scan read-only: it reports what TTL-expiry + dedup WOULD
      prune without rewriting the store. *)
   let gc_report =
-    Keeper_memory_os_gc.run_gc ~keepers_dir ~dry_run:true ~keeper_id ~now ()
+    Keeper_memory_os_gc.run_gc_for_keepers_dir
+      ~keepers_dir
+      ~dry_run:true
+      ~keeper_id
+      ~now
+      ()
   in
   { keeper_id
   ; facts = facts_count
@@ -113,7 +123,7 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   let cadence_counter_entries = Keeper_librarian_runtime.cadence_counter_entries () in
   let entries =
-    Keeper_memory_os_io.list_fact_store_keeper_ids ~keepers_dir ()
+    Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir
     |> List.filter_map (fun keeper_id ->
       match keeper_health ~keepers_dir ~now keeper_id with
       | h -> Some h

@@ -142,18 +142,19 @@ function parseParagraph(token: Tokens.Paragraph): ChatBlock | ChatBlock[] | null
   return html ? { t: 'p', html } : null
 }
 
-// A fenced code block opens with ``` or ~~~ at the start of the token's raw
-// source. When the model never writes the matching closing fence, CommonMark
-// (and marked, verified against 18.0.3) absorbs every following line — including
+// A fenced code block opens with ``` or ~~~ after at most three leading spaces.
+// When the model never writes the matching closing fence, CommonMark (and
+// marked, verified against 18.0.3) absorbs every following line — including
 // plain prose — into the single code token. The resulting code block traps the
 // prose in a monospace box, which is the user-reported symptom.
-const FENCE_OPEN_RE = /^\s*(`{3,}|~{3,})/
+const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/
 
 function hasMatchingClosingFence(raw: string, opener: string): boolean {
   const fenceChar = opener[0]
   const lines = raw.trimEnd().split(/\r?\n/)
-  const closingLine = lines[lines.length - 1]?.trim() ?? ''
-  return closingLine.length >= opener.length && [...closingLine].every((ch) => ch === fenceChar)
+  const closingLine = lines[lines.length - 1] ?? ''
+  const closing = closingLine.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/)?.[1]
+  return !!closing && closing[0] === fenceChar && closing.length >= opener.length
 }
 
 /**
@@ -164,7 +165,8 @@ function hasMatchingClosingFence(raw: string, opener: string): boolean {
  * - Closed fence: raw ends with same-char ``` / ~~~  → real code, keep as {t:'code'}.
  * - Unterminated: raw ends with absorbed prose, not a fence → demote to text.
  * - Indented code block (4-space, no fence): raw does not start with a fence,
- *   so it is left untouched.
+ *   so it is left untouched. A 4-space line that looks like a closing fence is
+ *   also literal content, not a close marker.
  */
 export function isUnterminatedFence(token: Tokens.Code): boolean {
   const raw = token.raw

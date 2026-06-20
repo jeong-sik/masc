@@ -251,6 +251,14 @@ describe('parseMarkdownToBlocks', () => {
     expect(p.html).toContain('some code')
   })
 
+  it('does not treat the opposite mismatched closing fence as closed', () => {
+    const blocks = parseMarkdownToBlocks('```\nsome code\n~~~')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('some code')
+  })
+
   it('leaves a 4-space indented code block untouched', () => {
     const blocks = parseMarkdownToBlocks('    line1\n    line2')
     expect(blocks).toHaveLength(1)
@@ -258,6 +266,23 @@ describe('parseMarkdownToBlocks', () => {
     expect(code.t).toBe('code')
     expect(code.html).toContain('line1')
     expect(code.html).toContain('line2')
+  })
+
+  it('leaves 4-space indented code whose first literal line looks fenced untouched', () => {
+    const blocks = parseMarkdownToBlocks('    ```\n    literal fence inside indented code')
+    expect(blocks).toHaveLength(1)
+    const code = blocks[0] as Extract<ChatBlock, { t: 'code' }>
+    expect(code.t).toBe('code')
+    expect(code.html).toContain('```')
+    expect(code.html).toContain('literal fence inside indented code')
+  })
+
+  it('does not treat a 4-space indented closing-looking line as a closing fence', () => {
+    const blocks = parseMarkdownToBlocks('```\nsome code\n    ```')
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0]).toMatchObject({ t: 'p' })
+    const p = blocks[0] as Extract<ChatBlock, { t: 'p' }>
+    expect(p.html).toContain('some code')
   })
 
   it('keeps a closed fence followed by prose as separate code + paragraph blocks', () => {

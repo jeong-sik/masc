@@ -40,4 +40,21 @@ describe('SurfaceHeader', () => {
     expect(container.querySelector('.v2-surface-header-actions')).not.toBeNull()
     expect(container.querySelector('[data-testid="dashboard-widget-solo-link"]')).not.toBeNull()
   })
+
+  it('renders parent breadcrumbs for section routes', () => {
+    route.value = { tab: 'lab', params: { section: 'keeper-memory-health' }, postId: null }
+    render(h(SurfaceHeader, {}), container)
+    const breadcrumb = container.querySelector('[data-testid="surface-breadcrumb"]')
+    expect(breadcrumb).not.toBeNull()
+    expect(breadcrumb?.getAttribute('data-surface-breadcrumb')).toBe('true')
+    expect(breadcrumb?.textContent).toContain('Lab')
+    expect(breadcrumb?.textContent).toContain('키퍼 메모리 상태')
+  })
+
+  it('does not duplicate the body header in widget solo mode', () => {
+    route.value = { tab: 'lab', params: { section: 'tools', solo: '1' }, postId: null }
+    render(h(SurfaceHeader, {}), container)
+    expect(container.querySelector('.v2-surface-header')).toBeNull()
+    expect(container.querySelector('[data-testid="dashboard-widget-solo-link"]')).toBeNull()
+  })
 })

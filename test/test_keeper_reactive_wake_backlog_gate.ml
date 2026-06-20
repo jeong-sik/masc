@@ -75,9 +75,10 @@ let make_meta name =
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 
 (* Warm, non-bootstrap meta: a recent-but-past scheduled-autonomous turn so
-   [since_last] is small and finite. This avoids the bootstrap / min_interval /
-   entropic-oscillation paths (all time-based), isolating the global-backlog
-   decision branch. Uses the same clock ([Time_compat.now]) the decision reads. *)
+   [since_last] is small and finite. This avoids the bootstrap / min_interval
+   time-based liveness paths, isolating the global-backlog decision branch.
+   Uses the same clock ([Time_compat.now]) the decision reads. (The
+   entropic-oscillation path this comment used to list was removed in #21685.) *)
 let warm_backlog_meta () =
   let meta = make_meta "herd" in
   let now = Time_compat.now () in

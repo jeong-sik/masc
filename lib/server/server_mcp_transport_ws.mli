@@ -45,6 +45,8 @@
     [next_dashboard_seq], [valid_dashboard_slice] /
     [dashboard_slice_for_sse_type],
     [dashboard_session_result], [find_session],
+    [detach_session_for_close] / [close_detached_session_wsd] /
+    [update_ws_session_count_metric],
     [dashboard_snapshot_provider] cell,
     [dashboard_auth_success_payload],
     [verify_dashboard_token], [dashboard_snapshot],

@@ -27,14 +27,7 @@ let default_max_constraints = 5
 let max_claim_len = 220
 let max_atom_len = 56
 
-let rec take n xs =
-  if n <= 0
-  then []
-  else (
-    match xs with
-    | [] -> []
-    | x :: rest -> x :: take (n - 1) rest)
-;;
+let take = List.take
 
 let truncate ~max_len s =
   if max_len <= 0
@@ -75,17 +68,17 @@ let eligible_category = function
   | Unknown _ -> false
 ;;
 
-let truth_anchor (fact : fact) =
-  match fact.last_verified_at with
+let fact_truth_anchor (memory_fact : Keeper_memory_os_types.fact) =
+  match memory_fact.last_verified_at with
   | Some ts -> ts
-  | None -> fact.first_seen
+  | None -> memory_fact.first_seen
 ;;
 
-let dedup_facts_by_claim facts =
+let dedup_facts_by_claim (facts : Keeper_memory_os_types.fact list) =
   let seen = Hashtbl.create 16 in
   List.filter
-    (fun fact ->
-      let key = normalize_claim fact.claim in
+    (fun (memory_fact : Keeper_memory_os_types.fact) ->
+      let key = normalize_claim memory_fact.claim in
       if Hashtbl.mem seen key
       then false
       else (
@@ -98,7 +91,8 @@ let rank_facts ~now facts =
   facts
   |> List.filter (fact_is_current ~now)
   |> List.filter (fun (fact : fact) -> eligible_category fact.category)
-  |> List.sort (fun a b -> compare (truth_anchor b) (truth_anchor a))
+  |> List.sort (fun (a : fact) (b : fact) ->
+    compare (fact_truth_anchor b) (fact_truth_anchor a))
   |> dedup_facts_by_claim
 ;;
 

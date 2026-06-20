@@ -5,6 +5,11 @@
     blocks verbatim.
 
     Supported shapes:
+    - Explicit server-provided dashboard blocks round-trip through the
+      codec: p, h4, ul, callout, table, code, mermaid, svg, voice, attach,
+      image, link, and fusion.
+    - Matched fenced code blocks become code blocks with escaped HTML and raw source.
+    - Mermaid fenced code blocks become mermaid blocks with raw source.
     - Markdown images [![alt](url)] become image blocks.
     - Bare image URLs (png/jpg/gif/webp/svg) on their own line become image blocks.
     - Other standalone URLs become link blocks with a hostname-derived title.
@@ -23,6 +28,65 @@ type link_block = {
 
 type text_block = { html : string }
 
+type list_block = { items : string list }
+
+type callout_block = {
+  severity : string option;
+  html : string;
+}
+
+type table_cell =
+  | Cell_text of string
+  | Cell_value of {
+      v : string;
+      num : bool option;
+      muted : bool option;
+    }
+
+type table_block = {
+  head : table_cell list;
+  rows : table_cell list list;
+}
+
+type code_block = {
+  cap : string option;
+  html : string;
+  source : string option;
+}
+
+type mermaid_block = {
+  source : string;
+  caption : string option;
+}
+
+type svg_block = {
+  svg : string;
+  cap : string option;
+}
+
+type voice_block = {
+  secs : float option;
+  wave : float list option;
+  via : string option;
+  size : string option;
+  transcript : string option;
+  src : string option;
+}
+
+type attach_block = {
+  name : string;
+  dims : string option;
+  src : string option;
+  svg : string option;
+  ph : string option;
+  via : string option;
+  size : string option;
+  data : string option;
+  mime_type : string option;
+  size_bytes : int option;
+  kind : string option;
+}
+
 (** A reference from a keeper chat message to a fusion deliberation's board
     post (RFC-0252). Carries only ids — the dashboard lazy-fetches the board
     post by [board_post_id] and renders the panel answers + judge synthesis
@@ -35,6 +99,15 @@ type fusion_block = {
 
 type chat_block =
   | Text of text_block
+  | Heading of text_block
+  | Unordered_list of list_block
+  | Callout of callout_block
+  | Table of table_block
+  | Code of code_block
+  | Mermaid of mermaid_block
+  | Svg of svg_block
+  | Voice of voice_block
+  | Attach of attach_block
   | Image of image_block
   | Link of link_block
   | Fusion of fusion_block

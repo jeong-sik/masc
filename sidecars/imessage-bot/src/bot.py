@@ -13,15 +13,23 @@ import asyncio
 import logging
 import os
 import signal
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from gate_shared.bindings_store import load_bindings
+# Add shared module to path for direct imports in tests and tools. The
+# package entry point does the same before importing this module.
+_shared_root = Path(__file__).resolve().parent.parent.parent / "shared"
+if str(_shared_root) not in sys.path:
+    sys.path.insert(0, str(_shared_root))
 
-from .config import get_config
-from .gate_client import GateClient
-from .imessage_bridge import (
+from gate_shared.bindings_store import load_bindings  # noqa: E402
+from gate_shared.structured_content import response_text  # noqa: E402
+
+from .config import get_config  # noqa: E402
+from .gate_client import GateClient, GateResponse  # noqa: E402
+from .imessage_bridge import (  # noqa: E402
     InboundMessage,
     advance_cursor,
     redact_chat_guid,
@@ -29,7 +37,7 @@ from .imessage_bridge import (
     resolve_self_chat_guid,
     send_message,
 )
-from .status_store import ConnectorRuntimeStatus, StatusStore
+from .status_store import ConnectorRuntimeStatus, StatusStore  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -109,6 +117,9 @@ class IMessageBot:
     def _log_chat_ref(self, msg: InboundMessage) -> str:
         return redact_chat_guid(msg.chat_guid or msg.chat_identifier)
 
+    def _response_text(self, response: GateResponse) -> str:
+        return response_text(response)
+
     async def _handle_message(self, msg: InboundMessage) -> bool:
         """Process one inbound message: gate dispatch + reply.
 
@@ -131,7 +142,8 @@ class IMessageBot:
             message_rowid=msg.rowid,
         )
 
-        if response.ok and response.reply:
+        reply_text = self._response_text(response) if response.ok else ""
+        if response.ok and reply_text:
             target_chat_guid = self._resolve_reply_chat_guid(msg)
             if not target_chat_guid:
                 logger.error(
@@ -145,7 +157,7 @@ class IMessageBot:
                 self._last_message_at = datetime.now(tz=timezone.utc).isoformat()
                 return True
             sent = send_message(
-                text=response.reply,
+                text=reply_text,
                 chat_guid=target_chat_guid,
             )
             if sent:
@@ -154,7 +166,7 @@ class IMessageBot:
                     msg.sender,
                     self._log_chat_ref(msg) or "unknown",
                     redact_chat_guid(target_chat_guid),
-                    len(response.reply),
+                    len(reply_text),
                     response.keeper_name,
                     response.model_used,
                     response.duration_ms,

@@ -228,7 +228,10 @@ let generic_payload_from_args args =
 
 let payload_from_args args =
   match Json_util.assoc_member_opt "payload" args with
-  | Some (`Assoc _ as payload) -> Ok payload
+  | Some (`Assoc _ as payload) ->
+    if has_board_convenience_args args
+    then Error "use either payload or board_* convenience fields, not both"
+    else Ok payload
   | Some _ -> Error "payload must be an object envelope"
   | None ->
     if has_board_convenience_args args

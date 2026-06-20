@@ -1,6 +1,7 @@
 module Tool = Tool_task
 module Anti_rationalization = Anti_rationalization
 module Dispatch = Task_dispatch
+module Goal_assignment = Task_goal_assignment
 module Transition_state = Task_transition_state
 module Schemas = Tool_task_schemas
 module Payloads = Tool_task_payloads

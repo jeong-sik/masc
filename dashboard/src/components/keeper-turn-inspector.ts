@@ -10,12 +10,14 @@
 
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { fetchKeeperTurnRecords } from '../api/dashboard'
+import { fetchKeeperToolCalls, fetchKeeperTurnRecords } from '../api/dashboard'
 import type {
   KeeperUserModelItem,
   KeeperUserModelSnapshot,
   MemoryOsEpisodeSummary,
   MemoryOsTurnRecordSnapshot,
+  ToolCallEntry,
+  ToolCallsResponse,
   TurnBlock,
   TurnBlockDiff,
   TurnRecordEntry,
@@ -24,6 +26,7 @@ import type {
   TelemetryFreshnessMetadata,
 } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
+import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { coverageGapDisplay, sourceHealthClass, freshnessText } from './common/source-health'
@@ -409,8 +412,11 @@ type TurnPhase = {
   label: string
   kind: 'ctx' | 'reason' | 'tool' | 'gen'
   mono?: boolean
-  dur: number
-  offset: number
+  durationMs: number | null
+  durationSource: 'tool_call_log' | 'estimated' | 'not_recorded'
+  visualDurationMs: number
+  visualOffsetMs: number
+  meta?: string
 }
 
 type TurnDetail = {
@@ -419,11 +425,26 @@ type TurnDetail = {
   tokOut: number
   ctxPct: number
   cost: number
-  total: number
+  measuredDurationMs: number | null
+  visualTotalMs: number
   phases: TurnPhase[]
-  tools: { id: string; status: 'ok' | 'bad' }[]
+  tools: TurnToolDetail[]
   systemPrompt: string
   injectedCtx: string
+}
+
+type TurnToolDetail = {
+  id: string
+  toolName: string | null
+  status: 'ok' | 'bad' | 'unknown'
+  durationMs: number | null
+  agentSubturn: number | null
+  keeperTurn: number | null
+}
+
+type TurnInspectorData = {
+  turns: TurnRecordsResponse
+  toolCalls: ToolCallsResponse | null
 }
 
 function approxTokens(str: string): number {
@@ -443,10 +464,25 @@ trace id          : ${record.trace_id}
 - 답변은 근거(도구 결과·trace)를 함께 제시한다.`
 }
 
+function thinkingStateLabel(record: TurnRecordEntry): string {
+  if (record.enable_thinking === true) return 'enabled'
+  if (record.enable_thinking === false) return 'disabled'
+  return 'unknown'
+}
+
+function thinkingChipLabel(record: TurnRecordEntry): string {
+  if (record.enable_thinking === true) return 'on'
+  if (record.enable_thinking === false) return 'off'
+  return 'unknown'
+}
+
 function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number, tokIn: number): string {
   return `# namespace snapshot
 fsm.state      = —
 ctx.window     = ${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / 200,000 tok)
+keeper.turn    = T${record.absolute_turn}
+thinking       = ${thinkingStateLabel(record)}
+thinking.budget= ${record.thinking_budget ?? '—'}
 
 # context blocks (조립 순서)
 ${record.blocks.length
@@ -459,36 +495,164 @@ ${record.execution_ids.length
     : '  (none)'}`
 }
 
-function buildTurnDetail(keeperName: string, record: TurnRecordEntry): TurnDetail {
+function toolCallStatus(entry: ToolCallEntry | null): 'ok' | 'bad' | 'unknown' {
+  if (!entry) return 'unknown'
+  return entry.success && entry.semantic_success !== false ? 'ok' : 'bad'
+}
+
+function toolStatusClass(status: TurnToolDetail['status']): string {
+  if (status === 'ok') return 'ok'
+  if (status === 'bad') return 'bad'
+  return ''
+}
+
+function toolStatusLabel(status: TurnToolDetail['status']): string {
+  if (status === 'ok') return 'success'
+  if (status === 'bad') return 'error'
+  return 'unmatched'
+}
+
+function toolCallIndexByExecutionId(entries: readonly ToolCallEntry[]): Map<string, ToolCallEntry> {
+  const index = new Map<string, ToolCallEntry>()
+  for (const entry of entries) {
+    if (entry.execution_id) index.set(entry.execution_id, entry)
+  }
+  return index
+}
+
+function uniqueNumbers(values: Array<number | null>): number[] {
+  return [...new Set(values.filter((value): value is number => typeof value === 'number'))]
+    .sort((a, b) => a - b)
+}
+
+function formatTurnList(values: number[]): string {
+  if (values.length === 0) return '—'
+  if (values.length <= 4) return values.map(value => `T${value}`).join(', ')
+  return `${values.slice(0, 3).map(value => `T${value}`).join(', ')} +${values.length - 3}`
+}
+
+function phaseDurationLabel(phase: TurnPhase): string {
+  if (phase.durationMs != null) return formatMsCompact(phase.durationMs)
+  if (phase.durationSource === 'estimated') return '추정'
+  return '측정 없음'
+}
+
+function phaseDurationTitle(phase: TurnPhase): string {
+  switch (phase.durationSource) {
+    case 'tool_call_log':
+      return 'duration_ms from /api/v1/keepers/:name/tool-calls'
+    case 'estimated':
+      return 'estimated only; no durable duration for this phase'
+    case 'not_recorded':
+      return 'duration not recorded for this phase'
+  }
+}
+
+function finalizePhaseOffsets(phases: TurnPhase[]): { visualTotalMs: number; measuredDurationMs: number | null } {
+  let visualOffsetMs = 0
+  let measuredDurationMs = 0
+  let measuredCount = 0
+  for (const phase of phases) {
+    phase.visualOffsetMs = visualOffsetMs
+    phase.visualDurationMs = phase.durationMs ?? 100
+    visualOffsetMs += phase.visualDurationMs
+    if (phase.durationMs != null) {
+      measuredDurationMs += phase.durationMs
+      measuredCount += 1
+    }
+  }
+  return {
+    visualTotalMs: Math.max(visualOffsetMs, 1),
+    measuredDurationMs: measuredCount > 0 ? measuredDurationMs : null,
+  }
+}
+
+function buildTurnDetail(
+  keeperName: string,
+  record: TurnRecordEntry,
+  toolEntries: readonly ToolCallEntry[],
+): TurnDetail {
   const traceId = `${record.trace_id}_${String(record.absolute_turn).padStart(4, '0')}`
   const tokIn = record.input_tokens ?? Math.max(1, Math.round(record.blocks.reduce((sum, b) => sum + b.bytes, 0) / 4))
   const tokOut = record.output_tokens ?? 120
   const ctxPct = Math.min(100, (tokIn / 200_000) * 100)
   const cost = (tokIn * 3 + tokOut * 15) / 1e6
+  const toolIndex = toolCallIndexByExecutionId(toolEntries)
 
-  const phases: TurnPhase[] = [{ label: '컨텍스트 조립', kind: 'ctx', dur: 0.16, offset: 0 }]
-  record.execution_ids.forEach(id => {
-    phases.push({ label: id.slice(0, 24), kind: 'tool', mono: true, dur: 0.5, offset: 0 })
+  const phases: TurnPhase[] = [{
+    label: '컨텍스트 조립',
+    kind: 'ctx',
+    durationMs: null,
+    durationSource: 'not_recorded',
+    visualDurationMs: 0,
+    visualOffsetMs: 0,
+    meta: 'keeper turn pre-dispatch',
+  }]
+  if (record.enable_thinking === true || record.thinking_budget != null) {
+    phases.push({
+      label: 'Thinking',
+      kind: 'reason',
+      durationMs: null,
+      durationSource: 'not_recorded',
+      visualDurationMs: 0,
+      visualOffsetMs: 0,
+      meta: record.thinking_budget != null ? `budget ${record.thinking_budget}` : 'enabled',
+    })
+  }
+
+  const tools = record.execution_ids.map((id): TurnToolDetail => {
+    const entry = toolIndex.get(id) ?? null
+    return {
+      id,
+      toolName: entry?.tool ?? null,
+      status: toolCallStatus(entry),
+      durationMs: entry?.duration_ms ?? null,
+      agentSubturn: entry?.turn ?? null,
+      keeperTurn: entry?.keeper_turn_id ?? null,
+    }
   })
-  const genSec = Math.max(0.4, Math.round((tokOut / 52) * 100) / 100)
-  phases.push({ label: '응답 생성', kind: 'gen', dur: genSec, offset: 0 })
-
-  let acc = 0
-  phases.forEach(p => {
-    p.offset = acc
-    acc += p.dur
+  tools.forEach(tool => {
+    phases.push({
+      label: tool.toolName ?? tool.id.slice(0, 24),
+      kind: 'tool',
+      mono: true,
+      durationMs: tool.durationMs,
+      durationSource: tool.durationMs != null ? 'tool_call_log' : 'not_recorded',
+      visualDurationMs: 0,
+      visualOffsetMs: 0,
+      meta: [
+        tool.agentSubturn != null ? `agent subturn T${tool.agentSubturn}` : null,
+        `execution ${tool.id.slice(0, 24)}`,
+      ].filter(Boolean).join(' · '),
+    })
   })
-  const total = acc
-
-  const tools = record.execution_ids.map((id, i) => ({
-    id,
-    status: (i % 5 === 0 ? 'bad' : 'ok') as 'ok' | 'bad',
-  }))
+  phases.push({
+    label: '응답 생성',
+    kind: 'gen',
+    durationMs: null,
+    durationSource: 'not_recorded',
+    visualDurationMs: 0,
+    visualOffsetMs: 0,
+    meta: 'provider/OAS duration is not recorded in turn-records',
+  })
+  const { visualTotalMs, measuredDurationMs } = finalizePhaseOffsets(phases)
 
   const systemPrompt = buildSystemPrompt(keeperName, record)
   const injectedCtx = buildInjectedCtx(record, ctxPct, tokIn)
 
-  return { traceId, tokIn, tokOut, ctxPct, cost, total, phases, tools, systemPrompt, injectedCtx }
+  return {
+    traceId,
+    tokIn,
+    tokOut,
+    ctxPct,
+    cost,
+    measuredDurationMs,
+    visualTotalMs,
+    phases,
+    tools,
+    systemPrompt,
+    injectedCtx,
+  }
 }
 
 function CopyBtn({ text, label = '복사' }: { text: string; label?: string }) {
@@ -532,29 +696,34 @@ function jsonHighlight(obj: unknown): string {
 }
 
 function TimelineTab({ t }: { t: TurnDetail }) {
+  const measuredCount = t.phases.filter(p => p.durationMs != null).length
+  const unknownCount = t.phases.length - measuredCount
   return html`
     <div class="kti-sec">
       <div class="kti-sec-h">
         <h4>턴 워터폴</h4>
-        <span class="n">${t.phases.length} 단계 · ${t.total.toFixed(2)}s</span>
+        <span class="n">
+          ${t.phases.length} 단계 · 실측 ${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '없음'} · 미측정 ${unknownCount}
+        </span>
       </div>
       <div class="kti-wf">
         ${t.phases.map((p, i) => html`
           <div key=${i} class="kti-wf-row">
             <div class="kti-wf-lbl">
               <span class="kti-wf-ico kti-k-${p.kind}"></span>
-              <span class="nm ${p.mono ? 'mono' : ''}">${p.label}</span>
+              <span class="nm ${p.mono ? 'mono' : ''}" title=${p.meta ?? p.label}>${p.label}</span>
             </div>
             <div class="kti-wf-track">
               <div
                 class="kti-wf-bar kti-k-${p.kind}"
+                title=${phaseDurationTitle(p)}
                 style=${{
-                  left: `${(p.offset / t.total) * 100}%`,
-                  width: `${Math.max(0.6, (p.dur / t.total) * 100)}%`,
+                  left: `${(p.visualOffsetMs / t.visualTotalMs) * 100}%`,
+                  width: `${Math.max(0.6, (p.visualDurationMs / t.visualTotalMs) * 100)}%`,
                 }}
               />
             </div>
-            <span class="kti-wf-dur">${p.dur.toFixed(2)}s</span>
+            <span class="kti-wf-dur" title=${phaseDurationTitle(p)}>${phaseDurationLabel(p)}</span>
           </div>
         `)}
       </div>
@@ -564,7 +733,7 @@ function TimelineTab({ t }: { t: TurnDetail }) {
           <span><i class="kti-k-tool"></i>도구</span>
           <span><i class="kti-k-gen"></i>생성</span>
         </div>
-        <span>총 소요 <b>${t.total.toFixed(2)}s</b></span>
+        <span>실측 합계 <b>${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '없음'}</b></span>
       </div>
     </div>
   `
@@ -607,14 +776,34 @@ function MessagesTab({ keeperName, t }: { keeperName: string; t: TurnDetail }) {
           <div key=${i} class="kti-tool">
             <div class="kti-tool-h">
               <span class="seq">#${++seq}</span>
-              <span class="tnm mono">${tool.id}</span>
-              <span class="pill ${tool.status === 'ok' ? 'ok' : 'bad'}">${tool.status === 'ok' ? 'success' : 'error'}</span>
+              <span class="tnm mono">${tool.toolName ?? tool.id}</span>
+              <span class="pill ${toolStatusClass(tool.status)}">
+                ${toolStatusLabel(tool.status)}
+              </span>
+              ${tool.agentSubturn != null
+                ? html`<span class="seq">agent subturn T${tool.agentSubturn}</span>`
+                : null}
+              ${tool.durationMs != null
+                ? html`<span class="seq">${formatMsCompact(tool.durationMs)}</span>`
+                : html`<span class="seq">duration 없음</span>`}
             </div>
             <div class="kti-tool-b">
               <${CodeCard}
-                cap="요청 · args"
-                text=${JSON.stringify({ execution_id: tool.id }, null, 2)}
-                htmlContent=${jsonHighlight({ execution_id: tool.id })}
+                cap="실행 식별자"
+                text=${JSON.stringify({
+                  execution_id: tool.id,
+                  tool_name: tool.toolName,
+                  keeper_turn: tool.keeperTurn,
+                  agent_subturn: tool.agentSubturn,
+                  duration_ms: tool.durationMs,
+                }, null, 2)}
+                htmlContent=${jsonHighlight({
+                  execution_id: tool.id,
+                  tool_name: tool.toolName,
+                  keeper_turn: tool.keeperTurn,
+                  agent_subturn: tool.agentSubturn,
+                  duration_ms: tool.durationMs,
+                })}
                 tokens=${approxTokens(JSON.stringify({ execution_id: tool.id }))}
               />
               <${CodeCard}
@@ -682,8 +871,11 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
         <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
         <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>
         <span class="k">ctx window</span><span class="v">${t.ctxPct.toFixed(1)}% / 200K</span>
+        <span class="k">keeper turn</span><span class="v">T${record.absolute_turn}</span>
+        <span class="k">agent subturns</span><span class="v">${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}</span>
+        <span class="k">thinking</span><span class="v">${thinkingStateLabel(record)}</span>
         <span class="k">tool calls</span><span class="v">${t.tools.length}</span>
-        <span class="k">duration</span><span class="v">${t.total.toFixed(2)}s</span>
+        <span class="k">measured phase duration</span><span class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : 'none'}</span>
         <span class="k">est. cost</span><span class="v">$${t.cost.toFixed(3)}</span>
         <span class="k">finish_reason</span><span class="v">stop</span>
         <span class="k">source</span><span class="v">${source}</span>
@@ -703,15 +895,17 @@ function TurnDetailDrawer({
   keeperName,
   row,
   source,
+  toolEntries,
   onClose,
 }: {
   keeperName: string
   row: TurnRecordRow
   source: string
+  toolEntries: readonly ToolCallEntry[]
   onClose: () => void
 }) {
   const [tab, setTab] = useState('timeline')
-  const t = buildTurnDetail(keeperName, row.record)
+  const t = buildTurnDetail(keeperName, row.record, toolEntries)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -748,7 +942,13 @@ function TurnDetailDrawer({
             <span class="sub-k">keeper</span>${keeperName}
           </span>
           <span class="kti-chip">
-            <span class="sub-k">turn</span>T${row.record.absolute_turn}
+            <span class="sub-k">keeper turn</span>T${row.record.absolute_turn}
+          </span>
+          <span class="kti-chip">
+            <span class="sub-k">agent subturns</span>${formatTurnList(uniqueNumbers(t.tools.map(tool => tool.agentSubturn)))}
+          </span>
+          <span class="kti-chip">
+            <span class="sub-k">thinking</span>${thinkingChipLabel(row.record)}
           </span>
           <span class="kti-chip ok">
             stop
@@ -760,8 +960,8 @@ function TurnDetailDrawer({
 
         <div class="kti-summary" data-testid="turn-summary-stats">
           <div class="kti-stat">
-            <div class="k">소요</div>
-            <div class="v">${t.total.toFixed(1)}<small>s</small></div>
+            <div class="k">실측</div>
+            <div class="v">${t.measuredDurationMs != null ? formatMsCompact(t.measuredDurationMs) : '—'}</div>
           </div>
           <div class="kti-stat">
             <div class="k">입력</div>
@@ -925,21 +1125,26 @@ export function KeeperTurnInspector({
   // window). Callers thread it as the turn_ref data flows (PR-C / follow-up).
   initialTurnRef?: string | null
 }) {
-  const resource = useManagedAsyncResource<TurnRecordsResponse | null>(null)
+  const resource = useManagedAsyncResource<TurnInspectorData | null>(null)
   const [selectedRow, setSelectedRow] = useState<TurnRecordRow | null>(null)
   const [initialMatchState, setInitialMatchState] = useState<'idle' | 'matched' | 'missed'>('idle')
   const appliedInitialTurnKey = useRef<string | null>(null)
 
   useEffect(() => {
     void resource.load(async (signal) => {
-      return await fetchKeeperTurnRecords(keeperName, 50, { signal })
+      const [turns, toolCalls] = await Promise.all([
+        fetchKeeperTurnRecords(keeperName, 50, { signal }),
+        fetchKeeperToolCalls(keeperName, 200, { signal }).catch(() => null),
+      ])
+      return { turns, toolCalls }
     })
     return () => {
       resource.cancel()
     }
   }, [keeperName, resource])
 
-  const response = resource.state.value.data
+  const response = resource.state.value.data?.turns
+  const toolEntries = resource.state.value.data?.toolCalls?.entries ?? []
   const rows = response?.entries ?? EMPTY_TURN_RECORD_ROWS
   // Server returns oldest-first; show newest first.
   const sorted = useMemo(() => [...rows].reverse(), [rows])
@@ -1039,6 +1244,7 @@ export function KeeperTurnInspector({
             keeperName=${keeperName}
             row=${selectedRow}
             source=${response?.source ?? 'turn_record'}
+            toolEntries=${toolEntries}
             onClose=${() => setSelectedRow(null)}
           />`
         : null}

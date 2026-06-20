@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchKeeperTurnRecords, type TurnRecordsResponse } from '../api/dashboard'
+import { fetchKeeperToolCalls, fetchKeeperTurnRecords, type ToolCallsResponse, type TurnRecordsResponse } from '../api/dashboard'
 import {
   initialTurnRowForTimestamp,
   initialTurnRowForTurnRef,
@@ -12,11 +12,51 @@ import {
 
 vi.mock('../api/dashboard', () => {
   return {
+    fetchKeeperToolCalls: vi.fn(),
     fetchKeeperTurnRecords: vi.fn(),
   }
 })
 
+const fetchKeeperToolCallsMock = vi.mocked(fetchKeeperToolCalls)
 const fetchKeeperTurnRecordsMock = vi.mocked(fetchKeeperTurnRecords)
+
+function emptyToolCalls(): ToolCallsResponse {
+  return {
+    source: 'tool_call_io',
+    health: 'ok',
+    keeper: 'albini',
+    count: 0,
+    entries: [],
+  }
+}
+
+function toolCallsForTurn(): ToolCallsResponse {
+  return {
+    source: 'tool_call_io',
+    health: 'ok',
+    keeper: 'albini',
+    count: 1,
+    entries: [
+      {
+        ts: 1_781_587_556,
+        keeper: 'albini',
+        tool: 'keeper_board_post_get',
+        input: { post_id: 'p-1' },
+        output: 'ok',
+        success: true,
+        semantic_success: true,
+        semantic_outcome: 'success',
+        duration_ms: 54,
+        trace_id: 'trace-active',
+        session_id: 'trace-active',
+        turn: 9001,
+        keeper_turn_id: 42,
+        execution_id: 'exec-42',
+        tool_use_id: 'tool-use-42',
+      },
+    ],
+  }
+}
 
 function turnRecordsWithMemoryOs(): TurnRecordsResponse {
   return {
@@ -158,6 +198,10 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
   }
 }
 
+beforeEach(() => {
+  fetchKeeperToolCallsMock.mockResolvedValue(emptyToolCalls())
+})
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -239,6 +283,7 @@ describe('KeeperMemoryOsRecallPanel', () => {
 
 describe('KeeperTurnInspector v2 drawer', () => {
   beforeEach(() => {
+    fetchKeeperToolCallsMock.mockResolvedValue(toolCallsForTurn())
     Object.defineProperty(navigator, 'clipboard', {
       value: {
         writeText: vi.fn().mockResolvedValue(undefined),
@@ -432,7 +477,8 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
 
     const stats = container.querySelector('[data-testid="turn-summary-stats"]')?.textContent ?? ''
-    expect(stats).toContain('소요')
+    expect(stats).toContain('실측')
+    expect(stats).toContain('54ms')
     expect(stats).toContain('입력')
     expect(stats).toContain('2.4k')
     expect(stats).toContain('출력')
@@ -440,6 +486,41 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(stats).toContain('도구')
     expect(stats).toContain('1')
     expect(stats).toContain('추정비용')
+  })
+
+  it('joins tool-call duration and agent subturn by execution_id', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    fireEvent.click(container.querySelector('.kti-turn-summary')!)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="turn-detail-drawer"]')).toBeTruthy()
+    })
+
+    const drawerText = container.querySelector('[data-testid="turn-detail-drawer"]')?.textContent ?? ''
+    expect(fetchKeeperToolCallsMock).toHaveBeenCalledWith(
+      'albini',
+      200,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(drawerText).toContain('keeper turn')
+    expect(drawerText).toContain('agent subturns')
+    expect(drawerText).toContain('T9001')
+    expect(drawerText).toContain('keeper_board_post_get')
+    expect(drawerText).toContain('54ms')
+    expect(drawerText).not.toContain('0.50s')
+
+    fireEvent.click(container.querySelector('[data-testid="turn-tab-messages"]')!)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('agent subturn T9001')
+    })
   })
 
   it('displays the token-economics stacked bar', async () => {

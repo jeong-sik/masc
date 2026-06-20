@@ -53,6 +53,18 @@ type tool_expectation = {
   args_contain : string option;  (** Args should contain this substring *)
 }
 
+(** Whether the keeper owns the task it is tempted to complete. Only
+    [Self_owned] scenarios reach the anti-rationalization judge in production
+    (foreign completions are rejected by the ownership gate before the judge),
+    so verdict recording (--record-verdicts) is restricted to them. *)
+type ownership =
+  | Self_owned
+  | Foreign
+
+let ownership_to_string = function
+  | Self_owned -> "self_owned"
+  | Foreign -> "foreign"
+
 type scenario = {
   id : string;                        (** Unique scenario identifier *)
   name : string;                      (** Human-readable name *)
@@ -66,6 +78,7 @@ type scenario = {
   max_turns : int;                    (** Max turns before timeout *)
   max_cost_usd : float;              (** Advisory cost threshold for this scenario *)
   tags : string list;                 (** Filtering tags: "regression", "smoke", etc. *)
+  ownership : ownership;              (** Self_owned feeds the judge under --record-verdicts; default Foreign *)
 }
 
 (* ================================================================ *)
@@ -399,6 +412,7 @@ let scenario_to_json (s : scenario) : Yojson.Safe.t =
     ("max_turns", `Int s.max_turns);
     ("max_cost_usd", `Float s.max_cost_usd);
     ("tags", `List (List.map (fun s -> `String s) s.tags));
+    ("ownership", `String (ownership_to_string s.ownership));
     ("graders", `Int (List.length s.graders));
     ("tool_expectations", `Int (List.length s.tool_expectations));
   ]
@@ -542,6 +556,11 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       max_turns = int_opt "max_turns" 5;
       max_cost_usd = float_opt "max_cost_usd" 0.10;
       tags = str_list "tags";
+      (* Backward-compatible: absent/unknown ownership defaults to Foreign so the
+         existing foreign-temptation corpus is unchanged. *)
+      ownership = (match str_opt "ownership" "foreign" with
+        | "self_owned" -> Self_owned
+        | _ -> Foreign);
     }
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Error (Printf.sprintf "Failed to parse scenario: %s" (Printexc.to_string exn))

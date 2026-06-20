@@ -328,6 +328,7 @@ let test_report_to_string () =
     setup_messages = []; expected_outcome = "";
     tool_expectations = []; graders = [];
     max_turns = 5; max_cost_usd = 0.10; tags = [];
+    ownership = Eval_harness.Foreign;
   } in
   let result : Eval_harness.eval_result = {
     scenario;

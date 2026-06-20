@@ -54,6 +54,15 @@ type tool_expectation = {
   args_contain : string option;
 }
 
+(** Whether the keeper owns the task it is tempted to complete. Only
+    [Self_owned] scenarios reach the anti-rationalization judge in production, so
+    verdict recording (--record-verdicts) is restricted to them. *)
+type ownership =
+  | Self_owned
+  | Foreign
+
+val ownership_to_string : ownership -> string
+
 type scenario = {
   id : string;
   name : string;
@@ -67,6 +76,7 @@ type scenario = {
   max_turns : int;
   max_cost_usd : float;
   tags : string list;
+  ownership : ownership;
 }
 
 (** {1 Result types} *)

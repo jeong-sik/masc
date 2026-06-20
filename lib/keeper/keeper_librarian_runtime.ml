@@ -418,8 +418,7 @@ let truncate_utf8_prefix max_len s =
     in
     String.sub s 0 (boundary len))
 
-let unstructured_episode ~generation (inp : Keeper_librarian.input) ~reason ~raw =
-  let now = Unix.gettimeofday () in
+let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason ~raw =
   let raw_excerpt =
     raw
     |> collapse_for_unstructured_note
@@ -512,13 +511,18 @@ let extract_with_provider
      | Ok episode -> Ok episode
      | Error (Retry_transport_failed msg) -> Error msg
      | Error (Retry_exhausted_unparseable msg) ->
-       let raw = Option.value !last_unparseable_raw ~default:"" in
+       let raw =
+         match !last_unparseable_raw with
+         | Some raw -> raw
+         | None -> ""
+       in
+       let now = Time_compat.now () in
        Log.Keeper.warn
          "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
          inp.trace_id
          generation
          msg;
-       Ok (unstructured_episode ~generation inp ~reason:msg ~raw))
+       Ok (unstructured_episode ~now ~generation inp ~reason:msg ~raw))
 ;;
 
 let extract_and_append_with_provider

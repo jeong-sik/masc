@@ -190,7 +190,11 @@ let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
   let source_ids =
     List.filter (fun id -> not (String.equal id shared_store_id)) keeper_ids
   in
-  let min_keepers = Option.value min_keepers ~default:default_min_keepers in
+  let min_keepers =
+    match min_keepers with
+    | Some value -> value
+    | None -> default_min_keepers
+  in
   let run_unlocked () =
     let rec read_sources acc = function
       | [] -> Ok (List.rev acc)

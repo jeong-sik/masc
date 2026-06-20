@@ -11,6 +11,10 @@
 open Alcotest
 module Io = Masc.Keeper_memory_os_io
 
+(* A dedicated exception so the body-raises test does not pattern-match on a
+   literal Failure string (warning 52, fragile-literal-pattern). *)
+exception Boom
+
 (* A closed out_channel raises Sys_error "Bad file descriptor" on further use;
    that is our portable proxy for "the descriptor was released". *)
 let channel_is_closed oc =
@@ -26,10 +30,10 @@ let test_closes_on_body_exception () =
   let oc = open_out tmp in
   let raised =
     try
-      Io.with_out_channel oc ~f:(fun _ -> failwith "boom");
+      Io.with_out_channel oc ~f:(fun _ -> raise Boom);
       false
     with
-    | Failure "boom" -> true
+    | Boom -> true
   in
   check bool "body exception propagates unchanged" true raised;
   check bool "channel closed after exception (fd released)" true (channel_is_closed oc);

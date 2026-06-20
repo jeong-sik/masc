@@ -8,6 +8,7 @@ import { formatCost } from './lib/format-number'
 import { isRecord } from './lib/type-guards'
 import {
   removeBoardPost,
+  refreshFusionRuns,
 } from './store'
 import {
   defaultJournalSeverity,
@@ -556,6 +557,13 @@ function handleEvent(event: SSEEvent): void {
         )
         break
       }
+    case 'fusion_run_status':
+      // RFC-0266 §7 Phase 4: a fusion run changed state (running →
+      // completed/failed). Re-fetch the registry snapshot, which is the SSOT;
+      // the event is only a change trigger, never the source of truth, so a
+      // missed/duplicated event self-heals on the next change or route visit.
+      void refreshFusionRuns()
+      break
     case 'keeper_turn_complete':
       {
         const keeperName = keeperTraceNameFromEvent(event, agent)

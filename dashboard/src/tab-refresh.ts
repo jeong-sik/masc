@@ -1,5 +1,5 @@
 import type { RouteState } from './types'
-import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './store'
+import { refreshExecution, refreshBoard, refreshFusionRuns, refreshGoals, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
 import { refreshOperatorWorkspaceDigest, refreshOperatorSnapshot } from './operator-store'
@@ -48,6 +48,7 @@ type RefreshTask =
   | 'surfaceReadiness'
   | 'operatorSnapshot'
   | 'operatorWorkspaceDigest'
+  | 'fusionRuns'
 
 // Monitor data ownership is partitioned by section. Two tiers:
 //   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
@@ -69,7 +70,10 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
     case 'board':
       return ['board']
     case 'fusion':
-      return ['board']
+      // 'board' feeds the board-meta-derived detail browser; 'fusionRuns' feeds
+      // the registry-backed live status panel (running + recent) that the SSE
+      // `fusion_run_status` event also re-fetches.
+      return ['board', 'fusionRuns']
     case 'monitoring':
       if (routeState.params.section === 'observatory') {
         return ['namespaceTruth', 'observatory']
@@ -154,6 +158,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   surfaceReadiness: () => { void refreshSurfaceReadinessSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorWorkspaceDigest: () => { void refreshOperatorWorkspaceDigest({ force: true }) },
+  fusionRuns: () => { void refreshFusionRuns() },
 }
 
 // --- Tab visit counter (localStorage-persisted) ---

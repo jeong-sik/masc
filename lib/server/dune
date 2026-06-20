@@ -19,6 +19,10 @@
   ;; #20929: server bootstrap converges <base>/.masc/config/prompts onto the
   ;; binary-embedded config/ tree so merged prompt edits ship on restart.
   masc.embedded_config
+  ;; RFC-0266 Phase 4: GET /api/v1/dashboard/fusion-runs names
+  ;; Fusion_run_registry directly; dune does not re-export it through the masc
+  ;; dep, so masc_server lists masc.fusion_core explicitly.
+  masc.fusion_core
   masc.masc_tool_surface
   masc.operator
   masc.voice_bridge_core

@@ -117,6 +117,29 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, string) result) : Yojson.
    Eio 구조적 취소(Cancelled)는 재전파한다(record_recovery_stimulus_turn_started 패턴).
    Paused 키퍼는 강제 재개하지 않는다(board wake와 동일 보수적 기본값, wakeup_keeper가
    Running 항목만 깨움) — 결과는 board/chat 영속으로 남는다. *)
+(* RFC-0266 §7 Phase 4: push the registry delta to the dashboard fusion-runs
+   panel so a [Running] card flips to completed/failed live (no polling). Reads
+   the canonical run back from the registry and serializes it through the shared
+   [Fusion_run_registry.run_to_yojson] so the SSE payload matches the HTTP list
+   endpoint exactly. Like wake, this is best-effort: a broadcast failure must not
+   abort the fusion sink, so every non-cancel exception is swallowed + logged
+   (mirrors Keeper_chat_broadcast). An unknown run_id is a no-op. *)
+let broadcast_run_status ~registry ~run_id =
+  try
+    match Fusion_run_registry.get registry ~run_id with
+    | None -> ()
+    | Some run ->
+      Sse.broadcast
+        (`Assoc
+           [ ("type", `String "fusion_run_status")
+           ; ("run", Fusion_run_registry.run_to_yojson run)
+           ])
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn "fusion_run_broadcast run_id=%s failed: %s" run_id
+      (Printexc.to_string exn)
+
 let wake_keeper_on_fusion_completion
       ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id =
   try
@@ -232,6 +255,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judge_usage :
        (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake와 무관하게 run
           상태를 반영해야 하므로 wake 직전 무조건 호출. *)
        Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok;
+       broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
        wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok ~resolved_answer
          ~board_post_id:(Board.Post_id.to_string post.id);
        Ok ()

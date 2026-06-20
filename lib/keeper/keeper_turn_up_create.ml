@@ -444,7 +444,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_preview = "";
             consecutive_noop_count = 0;
           };
-          generation = Keeper_memory_os_io.next_generation ~keeper_id:p.name;
+          generation = Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id:trace_id_t;
           trace_id = trace_id_t;
           trace_history = [];
           last_handoff_ts = 0.0;
@@ -479,7 +479,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~session
             ~agent_name:meta.agent_name
             ~ctx:ctx0
-            ~generation:(Keeper_memory_os_io.next_generation ~keeper_id:p.name)
+            ~generation:(Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id:trace_id_t)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

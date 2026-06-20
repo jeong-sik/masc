@@ -5,6 +5,7 @@ import { waitFor } from '@testing-library/preact'
 import { App, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
 import { route } from './router'
 import { serverStatus, shellCounts } from './store'
+import { selectedKeeper } from './components/keeper-detail-state'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -17,6 +18,7 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     shellCounts.value = null
     serverStatus.value = null
+    selectedKeeper.value = null
   })
 
   afterEach(() => {
@@ -26,6 +28,7 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     shellCounts.value = null
     serverStatus.value = null
+    selectedKeeper.value = null
   })
 
   function renderApp() {
@@ -99,6 +102,21 @@ describe('App v2 header chrome', () => {
     expect(
       status?.querySelector('.v2-statchip.live span')?.classList.contains('motion-safe:animate-pulse'),
     ).toBe(true)
+  })
+
+  it('falls back to selectedKeeper for the breadcrumb tail when no route keeper param', () => {
+    // Mirrors keeper-detail-page resolution tier 2: with no route keeper param
+    // the crumb still tracks the keeper the chat is showing via selectedKeeper.
+    window.innerWidth = 1280
+    route.value = { tab: 'keepers', params: {}, postId: null }
+    selectedKeeper.value = { name: 'grimja' } as NonNullable<typeof selectedKeeper.value>
+    renderApp()
+
+    const crumb = container.querySelector('.v2-header-crumb')
+    expect(crumb?.textContent).toContain('Keepers')
+    expect(crumb?.textContent).toContain('grimja')
+    // No dangling slash when a tail is present.
+    expect(crumb?.textContent?.trim().endsWith('/')).toBe(false)
   })
 
   it('renders the main stage as a StyleSeed card (white, rounded-2xl, soft shadow)', () => {

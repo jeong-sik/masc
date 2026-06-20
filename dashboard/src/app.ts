@@ -35,6 +35,7 @@ import { TransportBeacon } from './components/transport-beacon'
 import { DashboardNavRail } from './components/mobile-nav'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
+import { selectedKeeper } from './components/keeper-detail-state'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
@@ -269,10 +270,15 @@ export function App() {
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
   // Keepers surface is sectionless (navigation `keepers: []`), so its breadcrumb
-  // tail is the selected keeper id carried on the route params — the same source
-  // other surfaces read via `params.keeper`. Mirrors the v2 design crumb
-  // `<surface> / <keeper.id>`.
-  const breadcrumbKeeper = currentTab === 'keepers' ? route.value.params.keeper : undefined
+  // tail is the keeper the chat is showing. Prefer the explicit route param,
+  // then fall back to the `selectedKeeper` signal (mirrors keeper-detail-page's
+  // tier-2 resolution) so the crumb still tracks the keeper when no route param
+  // is present. Reading `selectedKeeper.value` subscribes App to a single
+  // low-frequency signal — NOT the high-frequency keepers list (P0 perf).
+  // Mirrors the v2 design crumb `<surface> / <keeper.id>`.
+  const breadcrumbKeeper = currentTab === 'keepers'
+    ? (route.value.params.keeper?.trim() || selectedKeeper.value?.name || undefined)
+    : undefined
   const isCodeSurface = currentTab === 'code'
   const widgetSoloMode = isWidgetSoloRoute(route.value)
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
@@ -348,7 +354,7 @@ export function App() {
           </div>
 
           <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
-            <div class="v2-app-header-status flex items-center gap-2 max-[900px]:hidden" aria-label="Dashboard summary">
+            <div class="v2-app-header-status v2-desktop-header-only flex items-center gap-2" aria-label="대시보드 요약">
               <span class="v2-statchip live" title="실행 중인 keeper 수 (shell 스냅샷 기준)">
                 <span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)] motion-safe:animate-pulse"></span>
                 ${shellCounts.value?.keepers ?? 0} 실행 중

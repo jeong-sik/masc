@@ -35,6 +35,7 @@ import { TransportBeacon } from './components/transport-beacon'
 import { DashboardNavRail } from './components/mobile-nav'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
+import { selectedKeeper } from './components/keeper-detail-state'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
@@ -268,6 +269,17 @@ export function App() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
+  // Breadcrumb trail for the keepers surface ends at the selected keeper, mirroring
+  // the design's `Keepers / {keeper.id}` crumb. Tracks the keeper the chat actually shows
+  // by following keeper-detail-page.ts's resolution: route param first (roster writes
+  // navigate('keepers', { keeper: name })), then the explicit `selectedKeeper` selection.
+  // The detail page's final `keepers.value[0]` fallback is intentionally NOT mirrored here:
+  // subscribing the root App to the high-frequency `keepers` list would re-render the whole
+  // tree on every heartbeat (the same P0 perf reason keeper-detail-page isolates that
+  // subscription). With no param and no selection the tail is omitted (honest under-display).
+  const crumbKeeper = currentTab === 'keepers'
+    ? (route.value.params.keeper?.trim() || selectedKeeper.value?.name || '')
+    : ''
   const isCodeSurface = currentTab === 'code'
   const widgetSoloMode = isWidgetSoloRoute(route.value)
   const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
@@ -325,6 +337,12 @@ export function App() {
                           <span class="truncate">${currentSection.label}</span>
                         `
                       : null}
+                    ${crumbKeeper
+                      ? html`
+                          <span class="text-[var(--color-warn)]">/</span>
+                          <span class="truncate">${crumbKeeper}</span>
+                        `
+                      : null}
                   </div>
                   <h1 class="v2-header-title mt-1 min-w-0 truncate font-display text-xs font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
                     ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
@@ -336,13 +354,13 @@ export function App() {
           </div>
 
           <div class="v2-header-actions flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
-            <div class="v2-app-header-status hidden items-center gap-2 max-[900px]:hidden" aria-label="Dashboard summary">
-              <span class="v2-statchip live" title="Live keepers reported by the shell snapshot">
-                <span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]"></span>
-                ${shellCounts.value?.keepers ?? 0} running
+            <div class="v2-app-header-status v2-desktop-header-only flex items-center gap-2" aria-label="대시보드 요약">
+              <span class="v2-statchip live" title="셸 스냅샷 기준 실행 중 keeper 수">
+                <span class="inline-block size-2 animate-pulse rounded-full bg-[var(--color-status-ok)] shadow-[0_0_7px_rgb(var(--ok-glow)/0.75)]"></span>
+                ${shellCounts.value?.keepers ?? 0} 실행 중
               </span>
-              <span class="v2-statchip" title="Scheduler health inferred from server status">
-                scheduler <b>${serverStatus.value ? 'healthy' : '—'}</b>
+              <span class="v2-statchip" title="서버 상태로 추정한 스케줄러 상태">
+                스케줄러 <b>${serverStatus.value ? '정상' : '—'}</b>
               </span>
             </div>
             <${AttentionIndicator} />

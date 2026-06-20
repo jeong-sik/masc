@@ -4,6 +4,7 @@ import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
 import { App, shouldSuppressFloatingChrome, shouldUseCompactDashboardChrome } from './app'
 import { route } from './router'
+import { selectedKeeper } from './components/keeper-detail-state'
 
 describe('App v2 header chrome', () => {
   let container: HTMLDivElement
@@ -14,6 +15,7 @@ describe('App v2 header chrome', () => {
     document.body.appendChild(container)
     window.location.hash = originalHash
     route.value = { tab: 'overview', params: {}, postId: null }
+    selectedKeeper.value = null
   })
 
   afterEach(() => {
@@ -21,6 +23,7 @@ describe('App v2 header chrome', () => {
     container.remove()
     window.location.hash = originalHash
     route.value = { tab: 'overview', params: {}, postId: null }
+    selectedKeeper.value = null
   })
 
   function renderApp() {
@@ -63,6 +66,76 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('.v2-shell-tabs')).toBeNull()
     expect(container.querySelector('.v2-app-header-status')).not.toBeNull()
     expect(container.querySelector('.v2-statchip.live')).not.toBeNull()
+  })
+
+  it('un-hides the header status chips on desktop (Unit 2 TopBar resurrection)', () => {
+    renderApp()
+    const status = container.querySelector('.v2-app-header-status')
+    expect(status).not.toBeNull()
+    // The wrapper was previously `hidden` with no un-hiding rule → display:none at
+    // all widths. It must now be `flex` (visible desktop, max-[900px]:hidden mobile).
+    expect(status?.classList.contains('hidden')).toBe(false)
+    expect(status?.classList.contains('flex')).toBe(true)
+    // Hidden ≤900px via the canonical desktop-only mechanism (single breakpoint SSOT,
+    // app-shell-v2.css @media (max-width:900px) .v2-desktop-header-only), matching the
+    // other desktop-only header items rather than a one-off Tailwind variant.
+    expect(status?.classList.contains('v2-desktop-header-only')).toBe(true)
+  })
+
+  it('pulses the live dot and renders Korean topbar copy', () => {
+    renderApp()
+    const live = container.querySelector('.v2-statchip.live')
+    expect(live).not.toBeNull()
+    // Live dot uses the LivePulseDot convention (animate-pulse) instead of a static dot.
+    expect(live?.querySelector('span.animate-pulse')).not.toBeNull()
+    expect(live?.textContent).toContain('실행 중')
+    expect(live?.textContent).not.toContain('running')
+    const sched = Array.from(container.querySelectorAll('.v2-app-header-status .v2-statchip'))
+      .find(el => !el.classList.contains('live'))
+    expect(sched?.textContent).toContain('스케줄러')
+    expect(sched?.textContent).not.toContain('scheduler')
+  })
+
+  it('appends the selected keeper to the breadcrumb on the keepers surface', () => {
+    route.value = { tab: 'keepers', params: { keeper: 'miso' }, postId: null }
+    renderApp()
+    const crumb = container.querySelector('.v2-header-crumb')
+    expect(crumb).not.toBeNull()
+    expect(crumb?.textContent).toContain('miso')
+  })
+
+  it('omits the keeper breadcrumb segment off the keepers surface', () => {
+    route.value = { tab: 'overview', params: { keeper: 'miso' }, postId: null }
+    renderApp()
+    const crumb = container.querySelector('.v2-header-crumb')
+    expect(crumb?.textContent).not.toContain('miso')
+  })
+
+  it('renders no keeper segment on keepers with no selection (no dangling slash)', () => {
+    // keepers is sectionless → with no keeper the crumb is exactly one span (the label),
+    // i.e. no trailing '/' and no empty keeper segment.
+    route.value = { tab: 'keepers', params: {}, postId: null }
+    renderApp()
+    const crumb = container.querySelector('.v2-header-crumb')
+    expect(crumb?.querySelectorAll('span').length).toBe(1)
+    expect(crumb?.textContent?.trim().endsWith('/')).toBe(false)
+  })
+
+  it('drops a whitespace-only keeper param from the breadcrumb', () => {
+    route.value = { tab: 'keepers', params: { keeper: '   ' }, postId: null }
+    renderApp()
+    const crumb = container.querySelector('.v2-header-crumb')
+    expect(crumb?.querySelectorAll('span').length).toBe(1)
+  })
+
+  it('falls back to the selected keeper when the route has no keeper param', () => {
+    // Mirrors keeper-detail-page resolution tier 2 (selectedKeeper) so the breadcrumb
+    // tracks the keeper the chat shows even when reached without a route param.
+    route.value = { tab: 'keepers', params: {}, postId: null }
+    selectedKeeper.value = { name: 'grimja' } as NonNullable<typeof selectedKeeper.value>
+    renderApp()
+    const crumb = container.querySelector('.v2-header-crumb')
+    expect(crumb?.textContent).toContain('grimja')
   })
 
   it('renders the main stage as a StyleSeed card (white, rounded-2xl, soft shadow)', () => {

@@ -75,60 +75,32 @@ let candidate_skill_md_path ~base_path candidate =
   Filename.concat (draft_dir ~base_path candidate) "SKILL.md"
 ;;
 
-let string_escape_toml s =
-  let buf = Buffer.create (String.length s + 8) in
-  String.iter
-    (function
-      | '\\' -> Buffer.add_string buf "\\\\"
-      | '"' -> Buffer.add_string buf "\\\""
-      | '\n' -> Buffer.add_string buf "\\n"
-      | '\r' -> Buffer.add_string buf "\\r"
-      | '\t' -> Buffer.add_string buf "\\t"
-      | c -> Buffer.add_char buf c)
-    s;
-  Buffer.contents buf
-;;
-
-let toml_string s = Printf.sprintf "\"%s\"" (string_escape_toml s)
-
-let toml_string_list name values =
-  Printf.sprintf "%s = [%s]\n" name
-    (values |> List.map toml_string |> String.concat ", ")
+let toml_string_array values =
+  Otoml.TomlArray (List.map (fun s -> Otoml.TomlString s) values)
 ;;
 
 let render_candidate_toml (c : Skill_candidate_projection.skill_candidate) =
-  String.concat ""
-    [ "schema = \"masc.skill_candidate.draft.v1\"\n"
-    ; "promotion_state = "
-    ; toml_string (Skill_candidate_projection.promotion_state_to_string c.promotion_state)
-    ; "\n"
-    ; "installable = false\n"
-    ; "requires_human_approval = true\n"
-    ; "id = "
-    ; toml_string c.id
-    ; "\n"
-    ; "agent_name = "
-    ; toml_string c.agent_name
-    ; "\n"
-    ; "source_kind = "
-    ; toml_string c.source_kind
-    ; "\n"
-    ; "source_id = "
-    ; toml_string c.source_id
-    ; "\n"
-    ; "source_ref = "
-    ; toml_string c.source_ref
-    ; "\n"
-    ; "pattern = "
-    ; toml_string c.pattern
-    ; "\n"
-    ; Printf.sprintf "success_count = %d\n" c.success_count
-    ; Printf.sprintf "failure_count = %d\n" c.failure_count
-    ; Printf.sprintf "confidence = %.6f\n" c.confidence
-    ; toml_string_list "evidence_refs" c.evidence_refs
-    ; toml_string_list "applicable_tools" c.applicable_tools
-    ; toml_string_list "risk_notes" c.risk_notes
+  Otoml.TomlTable
+    [ "schema", Otoml.string "masc.skill_candidate.draft.v1"
+    ; ( "promotion_state"
+      , Otoml.string
+          (Skill_candidate_projection.promotion_state_to_string c.promotion_state) )
+    ; "installable", Otoml.boolean false
+    ; "requires_human_approval", Otoml.boolean true
+    ; "id", Otoml.string c.id
+    ; "agent_name", Otoml.string c.agent_name
+    ; "source_kind", Otoml.string c.source_kind
+    ; "source_id", Otoml.string c.source_id
+    ; "source_ref", Otoml.string c.source_ref
+    ; "pattern", Otoml.string c.pattern
+    ; "success_count", Otoml.integer c.success_count
+    ; "failure_count", Otoml.integer c.failure_count
+    ; "confidence", Otoml.TomlFloat c.confidence
+    ; "evidence_refs", toml_string_array c.evidence_refs
+    ; "applicable_tools", toml_string_array c.applicable_tools
+    ; "risk_notes", toml_string_array c.risk_notes
     ]
+  |> Otoml.Printer.to_string
 ;;
 
 let write_file path content =
@@ -171,6 +143,14 @@ let candidate_json_content candidate =
   Yojson.Safe.pretty_to_string (Skill_candidate_projection.to_json candidate) ^ "\n"
 ;;
 
+let candidate_artifacts ~base_path candidate =
+  [ candidate_json_path ~base_path candidate, candidate_json_content candidate
+  ; candidate_toml_path ~base_path candidate, render_candidate_toml candidate
+  ; ( candidate_skill_md_path ~base_path candidate
+    , Skill_candidate_projection.render_skill_draft candidate )
+  ]
+;;
+
 let write_candidate ~base_path (candidate : Skill_candidate_projection.skill_candidate) =
   let dir = draft_dir ~base_path candidate in
   let json_path = candidate_json_path ~base_path candidate in
@@ -200,12 +180,18 @@ let write_candidates ~base_path candidates =
 let read_file_opt = Fs_compat.load_file_opt
 
 let write_candidate_if_changed ~base_path candidate =
-  let json_path = candidate_json_path ~base_path candidate in
-  match read_file_opt json_path with
-  | Some content when String.equal content (candidate_json_content candidate) -> Ok None
-  | Some _ | None ->
+  let unchanged =
+    candidate_artifacts ~base_path candidate
+    |> List.for_all (fun (path, expected) ->
+      match read_file_opt path with
+      | Some content -> String.equal content expected
+      | None -> false)
+  in
+  if unchanged
+  then Ok None
+  else (
     let* stored = write_candidate ~base_path candidate in
-    Ok (Some stored)
+    Ok (Some stored))
 ;;
 
 let dedup_candidates candidates =

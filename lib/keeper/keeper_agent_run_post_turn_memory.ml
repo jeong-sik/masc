@@ -2,6 +2,8 @@
 
     Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-4). *)
 
+let default_post_turn_procedure_candidate_limit = 8
+
 let run
   ~config
   ~meta
@@ -101,7 +103,7 @@ let run
          ~base_path:config.base_path
          ~keeper_id:meta.name
          ~fact_tail_limit:Keeper_memory_os_io.fact_store_max
-         ~procedure_limit:8
+         ~procedure_limit:default_post_turn_procedure_candidate_limit
      with
      | Ok [] -> ()
      | Ok stored ->

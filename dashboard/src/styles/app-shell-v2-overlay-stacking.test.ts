@@ -3,16 +3,15 @@
 // Regression guard for the `.v2-app > *` stacking rule (app-shell-v2.css).
 //
 // Tailwind v4's `.fixed` / `.absolute` / `.top-5` / `.right-5` utilities are
-// emitted inside `@layer utilities`, while every custom rule in app-shell-v2.css
-// is unlayered. Per the CSS cascade, unlayered declarations always beat layered
-// ones regardless of specificity — so a bare `.v2-app > * { position: relative }`
-// silently overrides the layered `.fixed` of any direct-child overlay, dropping
-// it into normal flow. That is exactly what pushed the toast host off-screen to
-// the bottom of the `h-screen; overflow-hidden` shell column.
+// emitted inside `@layer utilities`. A bare unlayered `.v2-app > * { position:
+// relative }` silently overrides the layered `.fixed` of any direct-child
+// overlay, dropping it into normal flow. That is exactly what pushed the toast
+// host off-screen to the bottom of the `h-screen; overflow-hidden` shell column.
 //
 // happy-dom resolves no cascade/layout, so this defect is invisible to a normal
-// component test. This guard asserts the SOURCE selector keeps positioned
-// overlays excluded, locking the fix against a future revert to the bare form.
+// component test. This guard asserts the SOURCE rule stays in a lower cascade
+// layer than Tailwind utilities, locking the fix against a future unlayered
+// revert or overlay-class allowlist.
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -23,6 +22,26 @@ const css = readFileSync(resolve(__dirname, 'app-shell-v2.css'), 'utf-8')
 interface ChildRule {
   selector: string
   decls: Record<string, string>
+  layers: string[]
+}
+
+interface CssParent {
+  type: string
+  name?: string
+  params?: string
+  parent?: CssParent
+}
+
+function layerAncestors(rule: { parent?: CssParent }): string[] {
+  const layers: string[] = []
+  let parent = rule.parent
+  while (parent !== undefined) {
+    if (parent.type === 'atrule' && parent.name === 'layer' && parent.params !== undefined) {
+      layers.push(parent.params.trim())
+    }
+    parent = parent.parent
+  }
+  return layers
 }
 
 /** Every rule whose selector targets the direct children of `.v2-app`
@@ -36,15 +55,27 @@ function v2AppChildRules(): ChildRule[] {
       rule.walkDecls((decl) => {
         decls[decl.prop] = decl.value.trim()
       })
-      rules.push({ selector, decls })
+      rules.push({
+        selector,
+        decls,
+        layers: layerAncestors(rule),
+      })
     }
   })
   return rules
 }
 
-// The overlay classes that position themselves (Tailwind utility or custom
-// class) and therefore must NOT be forced back to position:relative.
-const EXCLUDED_OVERLAY_CLASSES = [':not(.fixed)', ':not(.absolute)', ':not(.dock-fab)', ':not(.twk-panel)']
+function topLevelLayerOrder(): string[] {
+  const order: string[] = []
+  parse(css).walkAtRules('layer', (rule) => {
+    if (rule.parent?.type !== 'root') return
+    if (rule.nodes !== undefined) return
+    for (const name of rule.params.split(',')) {
+      order.push(name.trim())
+    }
+  })
+  return order
+}
 
 describe('app-shell-v2.css `.v2-app > *` stacking rule', () => {
   it('positions in-flow children with position:relative and z-index:1', () => {
@@ -56,19 +87,25 @@ describe('app-shell-v2.css `.v2-app > *` stacking rule', () => {
     }
   })
 
-  it('excludes every positioned overlay so the unlayered rule never clobbers a layered .fixed', () => {
+  it('keeps the shell child positioning rule in the app-shell cascade layer', () => {
     const positionRules = v2AppChildRules().filter((r) => r.decls.position !== undefined)
     for (const rule of positionRules) {
-      for (const exclusion of EXCLUDED_OVERLAY_CLASSES) {
-        expect(rule.selector).toContain(exclusion)
-      }
+      expect(rule.layers).toContain('app-shell')
     }
   })
 
-  it('has no bare `.v2-app > *` rule that would force position onto overlays', () => {
-    const bare = v2AppChildRules().find(
-      (r) => /^\.v2-app\s*>\s*\*$/.test(r.selector) && r.decls.position !== undefined,
-    )
-    expect(bare).toBeUndefined()
+  it('declares app-shell before utilities so Tailwind positioning wins', () => {
+    const order = topLevelLayerOrder()
+    expect(order).toContain('app-shell')
+    expect(order).toContain('utilities')
+    expect(order.indexOf('app-shell')).toBeLessThan(order.indexOf('utilities'))
+  })
+
+  it('does not bake overlay class exclusions into the shell child selector', () => {
+    const positionRules = v2AppChildRules().filter((r) => r.decls.position !== undefined)
+    for (const rule of positionRules) {
+      expect(rule.selector).toBe('.v2-app > *')
+      expect(rule.selector).not.toContain(':not(')
+    }
   })
 })

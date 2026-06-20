@@ -14,7 +14,7 @@
    Defined at :root so v2-shell.css and shell components can share them.
    ═══════════════════════════════════════════════════════════════ */
 
-@layer theme-defaults, theme-overrides;
+@layer app-shell, theme-defaults, theme-overrides, utilities;
 
 @layer theme-defaults {
   :root {
@@ -166,19 +166,14 @@
 }
 
 /* Lift in-flow shell children above the decorative .v2-app::before plane
-   (z-index:0). Fixed/absolute overlays are excluded: they carry their own
-   position + z-[var(--z-overlay-*)] stacking, and forcing position:relative on
-   them would drop them into normal flow — which is what pushed the toast host
-   off-screen to the bottom of the h-screen column. The Tailwind .fixed/.absolute
-   utilities live in @layer utilities, which this unlayered rule would otherwise
-   override (unlayered styles always win over layered ones). .dock-fab and
-   .twk-panel position via custom classes rather than the utility, so they are
-   excluded by name as well.
-   Follow-up: migrate every overlay onto the .fixed utility or a shared overlay
-   class so this rule no longer has to enumerate them. */
-.v2-app > *:not(.fixed):not(.absolute):not(.dock-fab):not(.twk-panel) {
-  position: relative;
-  z-index: 1;
+   (z-index:0). Keep this in a lower cascade layer so Tailwind utilities and
+   unlayered overlay classes can define their own positioning without being
+   forced back into normal flow. */
+@layer app-shell {
+  .v2-app > * {
+    position: relative;
+    z-index: 1;
+  }
 }
 
 /* Density variants (data-density mirrors v2 tweak panel). */

@@ -154,4 +154,21 @@ api-name = "extra"
     expect(impact.lineDelta).toBeGreaterThan(0)
     expect(impact.charDelta).toBeGreaterThan(0)
   })
+
+  it('does not report assignment-only reformatting as an assignment change', () => {
+    const before = `${sourceText}
+
+[runtime.assignments]
+sangsu = "runpod_mtp.qwen"
+`
+    const after = `${sourceText}
+
+[runtime.assignments]
+  sangsu   =   "runpod_mtp.qwen" # same assignment
+`
+
+    const impact = runtimeTomlImpactSummary(before, after)
+
+    expect(impact.runtimeAssignmentsChanged).toBe(false)
+  })
 })

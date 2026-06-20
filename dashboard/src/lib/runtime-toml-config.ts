@@ -256,10 +256,14 @@ function sourceLineCount(sourceText: string): number {
   return sourceText.length === 0 ? 1 : sourceText.split('\n').length
 }
 
-function sectionSource(document: TomlDocument, sectionName: string): string {
-  const section = sectionOf(document, sectionName)
-  if (!section) return ''
-  return document.lines.slice(section.start, section.end).join('\n').trim()
+function sortedSectionEntries(document: TomlDocument, sectionName: string): Array<[string, TomlScalar]> {
+  return Object.entries(sectionValues(document, sectionName)).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )
+}
+
+function runtimeAssignmentsSignature(document: TomlDocument): string {
+  return JSON.stringify(sortedSectionEntries(document, 'runtime.assignments'))
 }
 
 export function runtimeTomlImpactSummary(
@@ -276,8 +280,7 @@ export function runtimeTomlImpactSummary(
     defaultRuntimeAfter: afterEnvironment.defaultRuntimeId,
     defaultRuntimeChanged: beforeEnvironment.defaultRuntimeId !== afterEnvironment.defaultRuntimeId,
     runtimeAssignmentsChanged:
-      sectionSource(beforeDocument, 'runtime.assignments') !==
-      sectionSource(afterDocument, 'runtime.assignments'),
+      runtimeAssignmentsSignature(beforeDocument) !== runtimeAssignmentsSignature(afterDocument),
     providerCountDelta: afterEnvironment.providers.length - beforeEnvironment.providers.length,
     modelCountDelta: afterEnvironment.models.length - beforeEnvironment.models.length,
     bindingCountDelta: afterEnvironment.bindings.length - beforeEnvironment.bindings.length,

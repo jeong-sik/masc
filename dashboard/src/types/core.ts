@@ -887,6 +887,10 @@ export interface KeeperConversationEntry {
   text: string
   rawText?: string | null
   timestamp?: string | null
+  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" join key. Carries the
+  // chat message's originating turn so turn consumers can prefer exact matching
+  // over timestamp-window fallback.
+  turnRef?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   attachments?: KeeperConversationAttachment[]

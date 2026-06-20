@@ -182,7 +182,7 @@ describe('hydrateKeeperChatHistory', () => {
 
     await hydrateKeeperChatHistory('echo')
 
-    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 100)
+    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
   })
 
   it('allows a retry after a failed fetch', async () => {
@@ -493,7 +493,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     await sendKeeperThreadMessage('echo', '진행 상황?')
 
-    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 100)
+    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
   })
 
   it('derives text and media user blocks when only attachments are supplied', async () => {

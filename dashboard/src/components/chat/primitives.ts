@@ -19,7 +19,7 @@ import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatLinkBlock, Ch
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
-import { lookupToolCallOutput } from '../../tool-call-output-store'
+import { lookupToolCallOutput, toolCallOutputsById } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
@@ -2201,10 +2201,41 @@ type ChatRenderUnit =
   | { kind: 'toolGroup'; id: string; entries: KeeperConversationEntry[] }
   | { kind: 'turnBundle'; id: string; entries: KeeperConversationEntry[]; entry: KeeperConversationEntry }
 
-// Fold maximal runs of consecutive tool-call entries into one group. When the
-// run is immediately followed by an assistant entry, render both as one turn
-// bundle so "작업 과정" visually belongs to the answer it produced. Assistant
-// traceSteps can also produce a bundle without tools (thinking-only turns).
+function entryTurnRef(entry: KeeperConversationEntry): string | null {
+  const value = entry.turnRef?.trim()
+  return value ? value : null
+}
+
+function canAppendToolToRun(run: KeeperConversationEntry[], entry: KeeperConversationEntry): boolean {
+  if (run.length === 0) return true
+  const first = run[0]
+  if (!first) return true
+  const firstTurnRef = entryTurnRef(first)
+  const nextTurnRef = entryTurnRef(entry)
+  if (firstTurnRef || nextTurnRef) {
+    return firstTurnRef !== null && nextTurnRef !== null && firstTurnRef === nextTurnRef
+  }
+  return true
+}
+
+function canBundleToolsWithAssistant(run: KeeperConversationEntry[], assistant: KeeperConversationEntry): boolean {
+  if (run.length === 0) return true
+  const first = run[0]
+  if (!first) return true
+  const toolTurnRef = entryTurnRef(first)
+  const assistantTurnRef = entryTurnRef(assistant)
+  if (toolTurnRef || assistantTurnRef) {
+    return toolTurnRef !== null && assistantTurnRef !== null && toolTurnRef === assistantTurnRef
+  }
+  return true
+}
+
+// Fold maximal runs of consecutive tool-call entries into one group. Persisted
+// rows carry turnRef; use it as the hard join key when present, falling back to
+// adjacency only for legacy/live rows that have no turn provenance. When the run
+// belongs to the following assistant entry, render both as one turn bundle so
+// "작업 과정" visually belongs to the answer it produced. Assistant traceSteps
+// can also produce a bundle without tools (thinking-only turns).
 function buildChatRenderUnits(
   entries: KeeperConversationEntry[],
   groupToolCalls: boolean,
@@ -2214,14 +2245,21 @@ function buildChatRenderUnits(
   let run: KeeperConversationEntry[] = []
   const flush = () => {
     if (run.length === 0) return
-    units.push({ kind: 'toolGroup', id: `tracegroup-${run[0]!.id}`, entries: run })
+    const first = run[0]
+    if (!first) return
+    units.push({ kind: 'toolGroup', id: `tracegroup-${first.id}`, entries: run })
     run = []
   }
   for (const entry of entries) {
     if (entry.role === 'tool') {
+      if (!canAppendToolToRun(run, entry)) flush()
       run.push(entry)
     } else {
-      if (entry.role === 'assistant' && (run.length > 0 || (entry.traceSteps?.length ?? 0) > 0)) {
+      if (
+        entry.role === 'assistant'
+        && (run.length > 0 || (entry.traceSteps?.length ?? 0) > 0)
+        && canBundleToolsWithAssistant(run, entry)
+      ) {
         units.push({
           kind: 'turnBundle',
           id: `turn-${run[0]?.id ?? entry.id}`,
@@ -2232,6 +2270,15 @@ function buildChatRenderUnits(
         continue
       }
       flush()
+      if (entry.role === 'assistant' && (entry.traceSteps?.length ?? 0) > 0) {
+        units.push({
+          kind: 'turnBundle',
+          id: `turn-${entry.id}`,
+          entries: [],
+          entry,
+        })
+        continue
+      }
       units.push({ kind: 'entry', entry })
     }
   }
@@ -2338,6 +2385,18 @@ export function ChatTranscript({
     () => entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}:${entry.streamState ?? ''}:${traceStepsSignature(entry)}`).join('|'),
     [entries],
   )
+  const toolOutputSignature = useMemo(
+    () => entries
+      .filter(entry => entry.role === 'tool')
+      .map((entry) => {
+        const output = lookupToolCallOutput(entry.id)
+        return output
+          ? `${entry.id}:${output.success}:${output.semantic_success ?? ''}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
+          : `${entry.id}:pending`
+      })
+      .join('|'),
+    [entries, toolCallOutputsById.value],
+  )
 
   const scrollToBottom = () => {
     const el = scrollerRef.current
@@ -2366,7 +2425,7 @@ export function ChatTranscript({
     } else {
       setUnread(true)
     }
-  }, [lastSignature])
+  }, [lastSignature, toolOutputSignature])
 
   const isPrimary = size === 'primary'
   const heightClass = isPrimary

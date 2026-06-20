@@ -408,6 +408,57 @@ let handle_masc_fusion ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
          ])
 ;;
 
+(* RFC-0266 §7 Phase 3 — masc_fusion_status: read-only view of the fusion run
+   registry (in-progress + recently completed). [fusion_status_json] is the
+   pure projection over any registry instance, so tests exercise it on an
+   isolated [Fusion_run_registry.create ()]; [handle_masc_fusion_status] binds
+   the process-wide [global] the fusion tool/sink write to. *)
+let fusion_status_json ~(registry : Fusion_run_registry.t) ~run_id : string =
+  let status_label (status : Fusion_run_registry.run_status) =
+    match status with
+    | Fusion_run_registry.Running -> "running"
+    | Fusion_run_registry.Completed { ok = true } -> "completed"
+    | Fusion_run_registry.Completed { ok = false } -> "failed"
+  in
+  let run_to_yojson (r : Fusion_run_registry.run) : Yojson.Safe.t =
+    `Assoc
+      [ "run_id", `String r.run_id
+      ; "keeper", `String r.keeper
+      ; "preset", `String r.preset
+      ; "started_at", `Float r.started_at
+      ; "status", `String (status_label r.status)
+      ]
+  in
+  if String.equal run_id ""
+  then begin
+    let runs = Fusion_run_registry.list_runs registry in
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool true
+         ; "count", `Int (List.length runs)
+         ; "runs", `List (List.map run_to_yojson runs)
+         ])
+  end
+  else (
+    match Fusion_run_registry.get registry ~run_id with
+    | Some run ->
+      Yojson.Safe.to_string
+        (`Assoc [ "ok", `Bool true; "found", `Bool true; "run", run_to_yojson run ])
+    | None ->
+      Yojson.Safe.to_string
+        (`Assoc
+           [ "ok", `Bool true
+           ; "found", `Bool false
+           ; "run_id", `String run_id
+           ; "status", `String "not_found"
+           ]))
+;;
+
+let handle_masc_fusion_status ~args () =
+  let run_id = Safe_ops.json_string ~default:"" "run_id" args |> String.trim in
+  fusion_status_json ~registry:Fusion_run_registry.global ~run_id
+;;
+
 (* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]
    returns the older [(bool * Yojson.Safe.t)] tuple (predates RFC-0189
    typed-result migration), same shape as Tool_local_runtime.  Tool_shard

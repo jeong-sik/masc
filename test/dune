@@ -643,6 +643,14 @@
  (modules test_fusion_wake)
  (libraries masc_test_deps))
 
+; RFC-0266 Phase 3: masc_fusion_status tool — JSON projection of the run
+; registry + keeper-LLM visibility (Pass B Default gate). Needs masc.fusion_core
+; for the Fusion_run_registry module (not re-exported via masc_test_deps).
+(test
+ (name test_fusion_status_tool)
+ (modules test_fusion_status_tool)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 
 (test

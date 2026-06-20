@@ -219,6 +219,24 @@ val handle_masc_fusion
   -> unit
   -> string
 
+(** RFC-0266 §7 Phase 3 — [fusion_status_json] projects a fusion run registry
+    to the masc_fusion_status tool's JSON string. With an empty [run_id] it
+    lists every tracked run ([{ ok; count; runs }]); with a non-empty [run_id]
+    it returns the single run ([{ ok; found; run }]) or a not-found envelope
+    ([{ ok; found = false; run_id; status = "not_found" }]). Each run's status
+    is rendered as ["running"], ["completed"] (ok), or ["failed"] (denied /
+    sink-failed / aborted). Pure over [registry] so tests can pass an isolated
+    [Fusion_run_registry.create ()]. *)
+val fusion_status_json
+  :  registry:Fusion_run_registry.t
+  -> run_id:string
+  -> string
+
+(** RFC-0266 §7 Phase 3 — in-process handler for the [masc_fusion_status]
+    read-only tool. Parses the optional [run_id] argument and projects the
+    process-wide [Fusion_run_registry.global] via {!fusion_status_json}. *)
+val handle_masc_fusion_status : args:Yojson.Safe.t -> unit -> string
+
 (** RFC-0182 §3.1 — [handle_masc_keeper] is the descriptor-projection
     cluster handler for the [masc_keeper_*] ctx-free tool surface.
     Dispatches via [Keeper_dispatch_ref] registered by [Keeper_tool_surface] at

@@ -83,9 +83,11 @@ let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
   | Tool_voice_dispatch
   | Tool_task_dispatch
   | Board_tool_dispatch
-  (* masc_fusion is a keeper-native in-process tool (own orchestrator), not a
-     masc-MCP coordination proxy — routed via descriptors, not this alias path. *)
-  | Tool_masc_fusion_dispatch -> false
+  (* masc_fusion / masc_fusion_status are keeper-native in-process tools (own
+     orchestrator / registry read), not masc-MCP coordination proxies — routed
+     via descriptors, not this alias path. *)
+  | Tool_masc_fusion_dispatch
+  | Tool_masc_fusion_status -> false
 ;;
 
 let add_internal_names t (d : Keeper_tool_descriptor.t) =

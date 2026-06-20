@@ -53,6 +53,24 @@ let test_mark_completed () =
   | None -> fail "failed run must remain visible as Completed{ok=false}"
 ;;
 
+let test_completed_status_survives_later_notification_failure () =
+  let t = R.create () in
+  R.register_running t ~run_id:"r-cancel-window" ~keeper:"k" ~preset:"deep" ~started_at:3.0;
+  (try
+     R.mark_completed t ~run_id:"r-cancel-window" ~ok:false;
+     raise Exit
+   with
+   | Exit -> ());
+  match R.get t ~run_id:"r-cancel-window" with
+  | Some run ->
+    check
+      (option bool)
+      "completion is durable before later append/wake failure"
+      (Some false)
+      (status_completed_ok run.R.status)
+  | None -> fail "run must remain visible after completion"
+;;
+
 let test_mark_unknown_is_noop () =
   let t = R.create () in
   R.mark_completed t ~run_id:"ghost" ~ok:true;
@@ -123,6 +141,10 @@ let () =
     [ ( "rfc-0266-phase2"
       , [ test_case "register then query" `Quick test_register_then_query
         ; test_case "mark completed (ok true/false)" `Quick test_mark_completed
+        ; test_case
+            "completed status survives later notification failure"
+            `Quick
+            test_completed_status_survives_later_notification_failure
         ; test_case "mark unknown run_id is a no-op" `Quick test_mark_unknown_is_noop
         ; test_case "list_runs is newest-first" `Quick test_list_newest_first
         ; test_case "prune keeps Running + recent completed" `Quick test_prune_keeps_running_and_recent

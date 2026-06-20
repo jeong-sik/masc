@@ -37,7 +37,7 @@ let provider_error_detail ~runtime_id detail =
 let timeout_budget_opt timeout_s =
   if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
 
-let apply_timeout_budget ?timeout_s base_config =
+let apply_timeout_budget ?timeout_s (base_config : Runtime_agent.config) =
   match Option.bind timeout_s timeout_budget_opt with
   | None -> base_config
   | Some timeout_s ->
@@ -46,7 +46,7 @@ let apply_timeout_budget ?timeout_s base_config =
        max_execution_time_s here; it can kill an active stream with the
        wrong failure attribution. *)
     { base_config with
-      stream_idle_timeout_s = Some timeout_s
+      Runtime_agent.stream_idle_timeout_s = Some timeout_s
     ; body_timeout_s = Some timeout_s
     }
 

@@ -488,6 +488,12 @@ let delete_goal config ~goal_id =
              goals = List.filter (fun goal -> not (String.equal goal.id goal_id)) state.goals;
              updated_at = Masc_domain.now_iso ();
            }));
+    (* Clean up dangling goal_task_links for the deleted goal. *)
+    let links = Workspace_goal_index.read_goal_task_links config in
+    let filtered_links =
+      List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links
+    in
+    Workspace_goal_index.write_goal_task_links config filtered_links;
     Ok ()
   end
 

@@ -332,6 +332,18 @@ let provider_unavailable =
        { provider = "server-error-test"; detail = "HTTP 503 retry-after exhausted" })
 ;;
 
+let read_only_no_progress_err =
+  KTD.sdk_error_of_masc_internal_error
+    (KTD.Accept_rejected
+       { scope = "same.b"
+       ; model = None
+       ; reason_kind = Some KTD.Accept_no_usable_progress
+       ; reason =
+           "response rejected by accept (runtime=same.b): shape=thinking_only; \
+            stop_reason=end_turn; last_tool=WebFetch; last_tool_effect=read_only"
+       })
+;;
+
 let test_soft_rate_limit_skips_same_credential_pool () =
   init_rate_limit_pool_runtime ();
   let retry =
@@ -465,6 +477,32 @@ let test_provider_unavailable_records_server_error_cooldown () =
        ~window_s:BH.window_sec)
 ;;
 
+let test_read_only_no_progress_rotates_to_default_runtime () =
+  init_rate_limit_pool_runtime ();
+  (match EC.recoverable_runtime_failure_reason read_only_no_progress_err with
+   | Some EC.Read_only_no_progress -> ()
+   | Some reason ->
+     Alcotest.failf
+       "expected read_only_no_progress, got %s"
+       (EC.degraded_retry_reason_to_string reason)
+   | None -> Alcotest.fail "expected read_only_no_progress recoverable reason");
+  match
+    EC.degraded_rotation_after_recoverable_error
+      ~base_runtime:"same.b"
+      ~effective_runtime:"same.b"
+      ~attempted_runtimes:[ "same.b" ]
+      read_only_no_progress_err
+  with
+  | Some { EC.next_runtime = "same.a"; fallback_reason = EC.Read_only_no_progress } ->
+    ()
+  | Some { next_runtime; fallback_reason } ->
+    Alcotest.failf
+      "expected read_only_no_progress -> same.a, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None -> Alcotest.fail "expected read-only no-progress rotation"
+;;
+
 let () =
   Alcotest.run
     "keeper_sdk_error_typed_bridge"
@@ -521,6 +559,10 @@ let () =
             "provider unavailable records server_error cooldown"
             `Quick
             test_provider_unavailable_records_server_error_cooldown
+        ; Alcotest.test_case
+            "read-only no-progress accept rejection rotates to default runtime"
+            `Quick
+            test_read_only_no_progress_rotates_to_default_runtime
         ] )
     ]
 ;;

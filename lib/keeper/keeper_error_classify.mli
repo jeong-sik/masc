@@ -106,6 +106,7 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
+  | Read_only_no_progress
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
@@ -128,8 +129,10 @@ val fallback_runtime_for_unavailable_profile :
 
 (** Classifies an SDK error into a fallback reason label when the runtime
     failure is recoverable via [fallback_runtime] or [degraded_rotation].
-    Returns [None] for terminal errors (e.g. accept-rejected, ambiguous
-    post-commit) that should not trigger same-turn escalation.
+    Returns [None] for terminal errors (e.g. generic accept-rejected,
+    ambiguous post-commit) that should not trigger same-turn escalation. A
+    narrow built-in progress-contract rejection is recoverable only when the
+    response was thinking-only after a read-only tool.
 
     Status-code-aware rotation: raw API errors that are not wrapped in a MASC
     internal error are also classified when a different runtime may succeed:

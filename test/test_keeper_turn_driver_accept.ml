@@ -188,7 +188,13 @@ let test_reject_reason_describes_thinking_only_response () =
     false
     (Masc.Keeper_turn_driver.For_testing
      .accept_no_progress_read_only_should_try_next
-       err)
+       err);
+  Alcotest.(check (option string))
+    "thinking-only without read-only tool is not runtime-recoverable"
+    None
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
 let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
   let result =
@@ -316,7 +322,13 @@ let test_accept_reason_includes_last_tool_context () =
     false
     (Masc.Keeper_turn_driver.For_testing
      .accept_no_progress_read_only_should_try_next
-       err)
+       err);
+  Alcotest.(check (option string))
+    "thinking-only after mutating tool is not runtime-recoverable"
+    None
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
 let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
   let checkpoint =
@@ -365,7 +377,13 @@ let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
     true
     (Masc.Keeper_turn_driver.For_testing
      .accept_no_progress_read_only_should_try_next
-       err)
+       err);
+  Alcotest.(check (option string))
+    "thinking-only after read-only tool is runtime-recoverable"
+    (Some "read_only_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
 
 let test_thinking_with_text_is_accepted () =
   let result =

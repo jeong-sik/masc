@@ -482,6 +482,14 @@ let test_store_requires_dir () =
       (contains ~sub:"--verdict-store-dir" msg)
   | Ok _ -> fail "expected Error when --record-verdicts lacks a store dir"
 
+let test_store_rejects_empty_dir () =
+  match
+    Cal.resolve_record_verdicts_store ~record_verdicts:true
+      ~verdict_store_dir:(Some "  ") ~live_store_dir:(Some live_store)
+  with
+  | Error msg -> check bool "mentions empty" true (contains ~sub:"empty" msg)
+  | Ok _ -> fail "expected Error when --verdict-store-dir is empty"
+
 let test_store_rejects_live () =
   (* Explicitly pointing the store at the live ledger must also error. *)
   match
@@ -577,6 +585,7 @@ let () =
     "record_verdicts_store", [
       test_case "not recording -> none" `Quick test_store_not_recording;
       test_case "requires store dir" `Quick test_store_requires_dir;
+      test_case "rejects empty store dir" `Quick test_store_rejects_empty_dir;
       test_case "rejects live store" `Quick test_store_rejects_live;
       test_case "rejects live store aliases" `Quick test_store_rejects_live_aliases;
       test_case "rejects live store child" `Quick test_store_rejects_live_child;

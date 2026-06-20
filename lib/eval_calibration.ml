@@ -102,13 +102,6 @@ let store_ref : Dated_jsonl.t option ref = ref None
 let base_path () =
   Filename.concat (Env_config_core.base_path ()) "data/verdicts"
 
-(* Live store directory, or [None] when MASC_BASE_PATH is unset (no live store
-   exists to read or collide with). Non-raising, unlike [base_path]. *)
-let base_path_opt () =
-  match Env_config_core.base_path_source_opt () with
-  | Some _ -> Some (base_path ())
-  | None -> None
-
 let get_store () =
   match !store_ref with
   | Some s -> s
@@ -204,6 +197,8 @@ let resolve_record_verdicts_store ?cwd ~record_verdicts ~verdict_store_dir
       Error
         "--record-verdicts requires --verdict-store-dir DIR (an isolated scratch \
          path); refusing to write the live verdict store."
+    | Some d when String.trim d = "" ->
+      Error "--verdict-store-dir must not be empty."
     | Some d when is_live d ->
       Error
         (Printf.sprintf

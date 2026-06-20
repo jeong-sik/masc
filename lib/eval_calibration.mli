@@ -68,14 +68,6 @@ type calibration_example = {
 val get_store : unit -> Dated_jsonl.t
 (** Get or create the global verdict store at [data/verdicts/]. *)
 
-val base_path : unit -> string
-(** Directory of the live verdict store ($MASC_BASE_PATH/data/verdicts). Raises
-    if MASC_BASE_PATH is unset. *)
-
-val base_path_opt : unit -> string option
-(** Live verdict store directory, or [None] when MASC_BASE_PATH is unset (no live
-    store). Non-raising; pass to {!resolve_record_verdicts_store}. *)
-
 val reset_store_for_testing : unit -> unit
 (** Reset the store reference.  For testing only. *)
 

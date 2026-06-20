@@ -1446,7 +1446,7 @@ let test_run_reconcile_preserves_corrupt_store () =
 ;;
 
 let test_run_reconcile_cas_abandons_on_concurrent_write () =
-  with_eio (fun ~sw:_ ~net:_ ~clock:_ ->
+  with_eio (fun ~sw:_ ~net:_ ~clock ->
     with_temp_keepers_dir (fun _keepers_dir ->
       let keeper_id = "reconcile-cas-keeper" in
       let now = 1_000_000.0 in
@@ -1454,25 +1454,38 @@ let test_run_reconcile_cas_abandons_on_concurrent_write () =
       (* One still-open ref: classify routes it to verify, and [Still_open] makes the
          pass want to advance (advanced>0 -> it would rewrite). *)
       Memory_io.append_fact ~keeper_id (stale_ref_fact ~now ~id:"2" "PR #2 in review");
-      (* A verify that, on its first call, commits a concurrent write to the store (a
-         fresh fact) before returning. Because verify now runs with the facts lock
-         RELEASED, this append lands during the verify window. The reconciler must
-         then re-read under the lock, see the snapshot changed, and abandon its (now
-         stale) rewrite rather than clobbering the concurrent fact. *)
+      (* A verify that, on its first call, commits a concurrent write through the
+         same facts-lock helper real writers use before returning. Because verify
+         now runs with the facts lock RELEASED, this write acquires the lock during
+         the verify window. The reconciler must then re-read under the lock, see the
+         snapshot changed, and abandon its stale rewrite rather than clobbering the
+         concurrent fact. *)
       let injected = ref false in
+      let lock_honoring_writer_completed = ref false in
       let verify : Reconcile.verify_fn =
         fun _r ->
         if not !injected
         then (
           injected := true;
-          Memory_io.append_fact
+          Memory_io.with_facts_lock
+            ~clock
             ~keeper_id
-            (stale_ref_fact ~now ~id:"99" "PR #99 concurrent append"));
+            ~on_timeout:(fun msg ->
+              Alcotest.fail ("writer could not acquire facts lock during verify: " ^ msg))
+            (fun () ->
+              Memory_io.append_fact
+                ~keeper_id
+                (stale_ref_fact ~now ~id:"99" "PR #99 concurrent append");
+              lock_honoring_writer_completed := true));
         Reconcile.Still_open
       in
       let report =
         Reconcile.run_reconcile ~dry_run:false ~keeper_id ~now ~horizon ~verify ()
       in
+      Alcotest.(check bool)
+        "lock-honoring writer acquired facts lock during verify"
+        true
+        !lock_honoring_writer_completed;
       Alcotest.(check int)
         "the still-open ref was classified as an advance"
         1
@@ -1489,8 +1502,9 @@ let test_run_reconcile_cas_abandons_on_concurrent_write () =
       in
       (* MUTATION: replacing the [same_fact_snapshot] CAS with an unconditional rewrite
          persists the stale survivors (just "PR #2"), dropping the concurrently-appended
-         "PR #99" — this membership check then fails. That is the lost-update teeth, and
-         it also proves the lock was released during verify (the append could commit). *)
+         "PR #99" — this membership check then fails. That is the lost-update teeth. The
+         explicit writer-completed assertion above proves the lock was released during
+         verify for a writer that also honors the facts lock. *)
       Alcotest.(check bool)
         "concurrently-appended fact survived (not clobbered by a stale rewrite)"
         true

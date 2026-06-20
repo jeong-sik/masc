@@ -896,6 +896,11 @@ export interface KeeperConversationEntry {
   error?: string | null
   surface?: SurfaceRef | null
   audio?: KeeperConversationAudioClip | null
+  // RFC-0233 §7: turn join key "<trace_id>#<absolute_turn>" carried from the
+  // chat row's turn_ref. The turn inspector consumes it (KeeperTurnInspector
+  // initialTurnRef) for an exact-match initial selection instead of the
+  // 30-min timestamp window. Undefined on legacy rows that predate turn_ref.
+  turnRef?: string | null
 }
 
 export interface KeeperStatusDetail {

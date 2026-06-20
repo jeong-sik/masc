@@ -732,6 +732,9 @@ function normalizeHistoryEntry(
     audio,
     attachments,
     blocks,
+    // RFC-0233 §7: carry the row's turn_ref so the turn inspector can anchor
+    // to this exact turn (consumed via KeeperTurnInspector initialTurnRef).
+    turnRef: asString(raw.turn_ref) ?? null,
   }
 }
 

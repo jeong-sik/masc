@@ -42,6 +42,7 @@ async function loadChat() {
                   text: 'done',
                   timestamp: '2026-03-24T00:02:00.000Z',
                   delivery: 'history',
+                  turnRef: 'trace-xyz#3',
                 })}
               >턴 상세</button>
             `
@@ -53,15 +54,18 @@ async function loadChat() {
     KeeperTurnInspector: ({
       keeperName,
       initialTurnTimestamp,
+      initialTurnRef,
     }: {
       keeperName: string
       initialTurnTimestamp?: string | null
+      initialTurnRef?: string | null
     }) =>
       html`
         <div
           data-testid="kw-turn-inspector"
           data-keeper=${keeperName}
           data-initial-turn-timestamp=${initialTurnTimestamp ?? ''}
+          data-initial-turn-ref=${initialTurnRef ?? ''}
         >TurnInspector</div>
       `,
   }))
@@ -221,6 +225,9 @@ describe('KeeperWorkspaceChat', () => {
     expect(drawer?.textContent).toContain('2026-03-24T00:02:00.000Z')
     expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-keeper')).toBe('sangsu')
     expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-initial-turn-timestamp')).toBe('2026-03-24T00:02:00.000Z')
+    // RFC-0233 §7: the triggered entry's turn_ref flows through to the
+    // inspector so it can exact-match the turn instead of the timestamp window.
+    expect(container.querySelector('[data-testid="kw-turn-inspector"]')?.getAttribute('data-initial-turn-ref')).toBe('trace-xyz#3')
   })
 
   it('toggles the artifact panel when the artifacts button is clicked', async () => {

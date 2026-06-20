@@ -82,6 +82,28 @@ describe('normalizeStatusDetail', () => {
 
     expect(detail.history.every(isVisibleDirectConversationEntry)).toBe(true)
   })
+
+  it('carries turn_ref onto the entry turnRef (RFC-0233 §7), null on legacy rows', () => {
+    const detail = normalizeStatusDetail('sangsu', '', {
+      history_tail: [
+        {
+          role: 'assistant',
+          source: 'direct_assistant',
+          content: 'reply with a turn ref',
+          ts_unix: 40,
+          turn_ref: 'trace-abc#7',
+        },
+        {
+          role: 'assistant',
+          source: 'direct_assistant',
+          content: 'legacy reply without one',
+          ts_unix: 41,
+        },
+      ],
+    })
+
+    expect(detail.history.map(entry => entry.turnRef)).toEqual(['trace-abc#7', null])
+  })
 })
 
 describe('default conversation visibility (tool calls vs internal)', () => {

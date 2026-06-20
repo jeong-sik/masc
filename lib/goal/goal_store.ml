@@ -476,12 +476,22 @@ let update_goal config ~goal_id f =
           write_state config next_state;
           Ok updated_goal)
 
+type delete_goal_outcome =
+  | Deleted
+  | Deleted_with_orphaned_links of string
+
+type delete_goal_error =
+  | Unknown_goal of string
+
+let delete_goal_error_to_string = function
+  | Unknown_goal msg -> msg
+
 let delete_goal config ~goal_id =
   let deleted =
     Workspace_utils.with_file_lock config (goals_path config) (fun () ->
       let state = read_state config in
       if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
-        Error "Goal not found"
+        Error (Unknown_goal "Goal not found")
       else (
         write_state
           config
@@ -500,7 +510,7 @@ let delete_goal config ~goal_id =
        covers every goal/link mutation path. *)
     (try
        Workspace_goal_index.prune_links_for_goal config ~goal_id;
-       Ok ()
+       Ok Deleted
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
@@ -509,11 +519,13 @@ let delete_goal config ~goal_id =
          "goal_store.delete_goal: goal %s removed but goal_task_links prune failed: %s"
          goal_id
          detail;
-       Error
-         (Printf.sprintf
-            "goal deleted but failed to prune goal_task_links for %s: %s"
-            goal_id
-            detail))
+       let warning =
+         Printf.sprintf
+           "goal deleted but failed to prune goal_task_links for %s: %s"
+           goal_id
+           detail
+       in
+       Ok (Deleted_with_orphaned_links warning))
 
 let sort_goals goals =
   let horizon_rank = function

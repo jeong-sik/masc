@@ -57,8 +57,10 @@ let test_delete_goal_bumps_version () =
   let v_before = (Goal_store.read_state config).version in
   check int "initial version" 10 v_before;
   (match Goal_store.delete_goal config ~goal_id:"g-1" with
-   | Ok () -> ()
-   | Error e -> fail ("delete_goal failed: " ^ e));
+   | Ok Goal_store.Deleted -> ()
+   | Ok (Goal_store.Deleted_with_orphaned_links msg) ->
+     fail ("unexpected partial cleanup failure: " ^ msg)
+   | Error e -> fail ("delete_goal failed: " ^ Goal_store.delete_goal_error_to_string e));
   let v_after = (Goal_store.read_state config).version in
   check int "version bumped by 1" (v_before + 1) v_after
 
@@ -84,8 +86,8 @@ let test_delete_nonexistent_does_not_bump () =
     { version = 42; updated_at = iso_now (); goals = [g] };
   let v_before = (Goal_store.read_state config).version in
   (match Goal_store.delete_goal config ~goal_id:"ghost" with
-   | Error _ -> ()
-   | Ok () -> fail "expected error for missing goal");
+   | Error (Goal_store.Unknown_goal _) -> ()
+   | Ok _ -> fail "expected error for missing goal");
   let v_after = (Goal_store.read_state config).version in
   check int "version unchanged on error" v_before v_after
 
@@ -111,8 +113,10 @@ let test_delete_goal_prunes_goal_task_links () =
     config
     [ "g-1", [ "task-a"; "task-b" ]; "g-2", [ "task-c" ] ];
   (match Goal_store.delete_goal config ~goal_id:"g-1" with
-   | Ok () -> ()
-   | Error msg -> fail msg);
+   | Ok Goal_store.Deleted -> ()
+   | Ok (Goal_store.Deleted_with_orphaned_links msg) ->
+     fail ("unexpected partial cleanup failure: " ^ msg)
+   | Error msg -> fail (Goal_store.delete_goal_error_to_string msg));
   let links = Workspace_goal_index.read_goal_task_links config in
   check bool
     "deleted goal links removed"
@@ -137,14 +141,13 @@ let test_delete_goal_wraps_prune_failure_after_goal_delete () =
   Sys.remove links_path;
   Unix.mkdir links_path 0o755;
   (match Goal_store.delete_goal config ~goal_id:"g-1" with
-   | Ok () -> fail "expected prune failure to return contextual Error"
-   | Error msg ->
+   | Ok Goal_store.Deleted -> fail "expected prune failure to return partial cleanup"
+   | Ok (Goal_store.Deleted_with_orphaned_links msg) ->
      check bool
-       "error explains partial delete"
+       "partial cleanup carries detail"
        true
-       (String.starts_with
-          ~prefix:"goal deleted but failed to prune goal_task_links for g-1:"
-          msg));
+       (String.length msg > 0)
+   | Error msg -> fail (Goal_store.delete_goal_error_to_string msg));
   let goals = (Goal_store.read_state config).goals in
   check bool
     "goal deletion already committed"

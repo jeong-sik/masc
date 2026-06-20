@@ -182,7 +182,7 @@ def oas_catalog(
         raise RuntimeError("oas-models.toml: [[models]] must parse as an array")
 
     provider_qualified: dict[str, dict[str, Any]] = {}
-    bare_membership: set[str] = set()
+    bare_prefixes: set[str] = set()
     for row in rows:
         if not isinstance(row, dict):
             raise RuntimeError(f"oas-models.toml: malformed model row {row!r}")
@@ -192,8 +192,8 @@ def oas_catalog(
         if id_prefix.startswith("ollama_cloud/"):
             provider_qualified[id_prefix.removeprefix("ollama_cloud/")] = row
         elif "/" not in id_prefix:
-            bare_membership.add(id_prefix)
-    return provider_qualified, bare_membership
+            bare_prefixes.add(id_prefix)
+    return provider_qualified, bare_prefixes
 
 
 def check_catalog(
@@ -204,7 +204,7 @@ def check_catalog(
     official_by_name = {model.name: model for model in official}
     official_names = set(official_by_name)
     runtime_api_to_slug, runtime_bindings, runtime_models = runtime_catalog(runtime)
-    oas_provider_qualified, oas_bare = oas_catalog(oas_models)
+    oas_provider_qualified, oas_bare_prefixes = oas_catalog(oas_models)
 
     errors: list[str] = []
     runtime_names = set(runtime_api_to_slug)
@@ -220,8 +220,13 @@ def check_catalog(
         errors.append(
             f"OAS provider-qualified model no longer official: ollama_cloud/{name}"
         )
-    for name in sorted(official_names - oas_bare):
-        errors.append(f"missing OAS bare membership model: {name}")
+    oas_bare_route_names = {
+        name
+        for name in official_names
+        if any(name.startswith(prefix) for prefix in oas_bare_prefixes)
+    }
+    for name in sorted(official_names - oas_bare_route_names):
+        errors.append(f"missing OAS bare route model: {name}")
 
     for name, model in sorted(official_by_name.items()):
         slug = runtime_api_to_slug.get(name)
@@ -307,7 +312,8 @@ def check_catalog(
             1 for slug in runtime_bindings if slug.startswith("ollama-cloud-")
         ),
         "oas_provider_qualified_count": len(oas_provider_names),
-        "oas_bare_membership_count": len(official_names & oas_bare),
+        "oas_bare_exact_membership_count": len(official_names & oas_bare_prefixes),
+        "oas_bare_route_count": len(oas_bare_route_names),
         "vision_models": vision_models,
     }
     return report, errors
@@ -321,7 +327,8 @@ def print_text_report(report: dict[str, Any], errors: list[str]) -> None:
     print(f"runtime_canonical_count={report['runtime_canonical_count']}")
     print(f"runtime_binding_count={report['runtime_binding_count']}")
     print(f"oas_provider_qualified_count={report['oas_provider_qualified_count']}")
-    print(f"oas_bare_membership_count={report['oas_bare_membership_count']}")
+    print(f"oas_bare_exact_membership_count={report['oas_bare_exact_membership_count']}")
+    print(f"oas_bare_route_count={report['oas_bare_route_count']}")
     print("vision_models=" + ",".join(report["vision_models"]))
     if errors:
         print("status=FAIL")

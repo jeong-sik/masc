@@ -509,8 +509,8 @@ let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
 
 let vision_provider_cfg () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Glm
-    ~model_id:"glm-5v-turbo"
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"minimax-m3"
     ~base_url:"http://127.0.0.1.invalid"
     ()
 

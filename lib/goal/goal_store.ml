@@ -477,25 +477,25 @@ let update_goal config ~goal_id f =
           Ok updated_goal)
 
 let delete_goal config ~goal_id =
-  let before = read_state config in
-  if not (List.exists (fun goal -> String.equal goal.id goal_id) before.goals) then
-    Error "Goal not found"
-  else begin
-    ignore
-      (update_state config (fun state ->
-           {
-             version = state.version + 1;
-             goals = List.filter (fun goal -> not (String.equal goal.id goal_id)) state.goals;
-             updated_at = Masc_domain.now_iso ();
-           }));
-    (* Clean up dangling goal_task_links for the deleted goal. *)
-    let links = Workspace_goal_index.read_goal_task_links config in
-    let filtered_links =
-      List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links
-    in
-    Workspace_goal_index.write_goal_task_links config filtered_links;
+  let deleted =
+    Workspace_utils.with_file_lock config (goals_path config) (fun () ->
+      let state = read_state config in
+      if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
+        Error "Goal not found"
+      else (
+        write_state
+          config
+          { version = state.version + 1
+          ; goals = List.filter (fun goal -> not (String.equal goal.id goal_id)) state.goals
+          ; updated_at = Masc_domain.now_iso ()
+          };
+        Ok ()))
+  in
+  match deleted with
+  | Error _ as error -> error
+  | Ok () ->
+    Workspace_goal_index.prune_links_for_goal config ~goal_id;
     Ok ()
-  end
 
 let sort_goals goals =
   let horizon_rank = function

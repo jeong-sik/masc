@@ -102,6 +102,33 @@ let test_updated_at_also_refreshed () =
   let after = Goal_store.read_state config in
   check bool "updated_at refreshed" true (after.updated_at <> stale_ts)
 
+let test_delete_goal_prunes_goal_task_links () =
+  with_workspace
+  @@ fun config ->
+  let deleted = make_goal "g-1" "deleted goal" in
+  let preserved = make_goal "g-2" "preserved goal" in
+  Goal_store.write_state
+    config
+    { version = 1; updated_at = iso_now (); goals = [ deleted; preserved ] };
+  Workspace_goal_index.write_goal_task_links
+    config
+    [ "g-1", [ "task-a"; "task-b" ]; "g-2", [ "task-c" ] ];
+  (match Goal_store.delete_goal config ~goal_id:"g-1" with
+   | Ok () -> ()
+   | Error msg -> fail msg);
+  let links = Workspace_goal_index.read_goal_task_links config in
+  check bool
+    "deleted goal links removed"
+    false
+    (List.exists (fun (goal_id, _) -> String.equal goal_id "g-1") links);
+  check bool
+    "other goal links preserved"
+    true
+    (List.exists
+       (fun (goal_id, task_ids) ->
+          String.equal goal_id "g-2" && List.mem "task-c" task_ids)
+       links)
+
 let test_legacy_status_defaults_phase () =
   with_workspace @@ fun config ->
   Workspace.write_json config (Goal_store.goals_path config)
@@ -225,6 +252,8 @@ let () =
             test_delete_nonexistent_does_not_bump;
           test_case "updated_at also refreshed" `Quick
             test_updated_at_also_refreshed;
+          test_case "delete prunes goal_task_links" `Quick
+            test_delete_goal_prunes_goal_task_links;
           test_case "legacy status defaults phase" `Quick
             test_legacy_status_defaults_phase;
           test_case "blocked phase projects legacy status" `Quick

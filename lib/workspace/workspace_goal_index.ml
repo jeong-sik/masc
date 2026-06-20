@@ -156,6 +156,16 @@ let add_link_to_links links ~goal_id ~task_id =
   if !updated then links else links @ [ goal_id, [ task_id ] ]
 ;;
 
+let prune_links_for_goal config ~goal_id =
+  let goal_id = String.trim goal_id in
+  if String.equal goal_id "" then ()
+  else
+    with_file_lock config (goal_task_links_lock_path config) (fun () ->
+      let links = read_goal_task_links config in
+      let links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
+      write_goal_task_links config links)
+;;
+
 let link_task_to_goal config ~goal_id ~task_id =
   let goal_id = String.trim goal_id in
   let task_id = String.trim task_id in

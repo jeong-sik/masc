@@ -206,6 +206,26 @@ let test_add_task_persists_goal_link () =
        | Not_found -> false))
 ;;
 
+let test_prune_goal_links_preserves_other_goals () =
+  with_test_env (fun config ->
+    Workspace_goal_index.write_goal_task_links
+      config
+      [ "goal-a", [ "task-001"; "task-002" ]; "goal-b", [ "task-003" ] ];
+    Workspace_goal_index.prune_links_for_goal config ~goal_id:"goal-a";
+    let links = Workspace_goal_index.read_goal_task_links config in
+    check_bool
+      "deleted goal links removed"
+      false
+      (List.exists (fun (goal_id, _) -> String.equal goal_id "goal-a") links);
+    check_bool
+      "other goal links preserved"
+      true
+      (List.exists
+         (fun (goal_id, task_ids) ->
+            String.equal goal_id "goal-b" && List.mem "task-003" task_ids)
+         links))
+;;
+
 (* ── test suite ─────────────────────────────────────────────────────── *)
 
 let () =
@@ -228,6 +248,10 @@ let () =
               "add_task persists explicit goal link"
               `Quick
               test_add_task_persists_goal_link
+          ; test_case
+              "prune removes only deleted goal links"
+              `Quick
+              test_prune_goal_links_preserves_other_goals
           ] )
     ]
 ;;

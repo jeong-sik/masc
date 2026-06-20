@@ -148,6 +148,11 @@ type fact =
     [valid_until] are durable and current. *)
 val fact_is_current : now:float -> fact -> bool
 
+(** The time a fact was last known good: [last_verified_at] if set, else
+    [first_seen]. The SSOT staleness anchor shared by the reconciler (re-ground
+    horizon) and recall (staleness marker, recall ordering, unverified-volatile
+    suppression) so those paths cannot drift on the anchor rule. *)
+val reference_time : fact -> float
 (** A librarian extraction result: a summary plus structured claims. *)
 type episode =
   { trace_id : string

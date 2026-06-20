@@ -270,6 +270,19 @@ let fact_is_current ~now (fact : fact) =
   | Some ts -> ts >= now
 ;;
 
+(* The time a fact was last known good: [last_verified_at] if set, else
+   [first_seen] (a never-re-verified fact is as old as its extraction). The SSOT
+   anchor for "how stale is this claim": the reconciler measures the re-ground
+   horizon from it, and recall measures staleness/ordering and unverified-volatile
+   suppression from it — they share this one definition rather than each inlining
+   the match, so a future change to the anchor rule (e.g. a [last_verified_at >=
+   first_seen] guard) cannot make those paths drift. *)
+let reference_time (f : fact) =
+  match f.last_verified_at with
+  | Some t -> t
+  | None -> f.first_seen
+;;
+
 type episode =
   { trace_id : string
   ; generation : int

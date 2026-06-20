@@ -88,7 +88,7 @@ type eval_run = {
   passed : bool;
   tool_calls_made : string list;
   total_turns : int;
-  total_cost_usd : float;
+  total_cost_usd : float option;
   duration_ms : int;
   outcome : Trajectory.trajectory_outcome;
   error : string option;
@@ -100,7 +100,7 @@ type eval_result = {
   pass_at_k : float;
   mean_score : float;
   consistency : float;
-  total_cost_usd : float;
+  total_cost_usd : float option;
   ci95_low : float;
   ci95_high : float;
   min_runs_met : bool;
@@ -112,7 +112,7 @@ type eval_suite_result = {
   ended_at : float;
   results : eval_result list;
   overall_pass_rate : float;
-  total_cost_usd : float;
+  total_cost_usd : float option;
   total_runs : int;
 }
 

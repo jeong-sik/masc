@@ -334,7 +334,7 @@ let test_report_to_string () =
     pass_at_k = 0.8;
     mean_score = 0.75;
     consistency = 0.9;
-    total_cost_usd = 0.05;
+    total_cost_usd = Some 0.05;
     ci95_low = 0.75;
     ci95_high = 0.75;
     min_runs_met = false;
@@ -346,7 +346,7 @@ let test_report_to_string () =
     ended_at = 1010.0;
     results = [result];
     overall_pass_rate = 0.8;
-    total_cost_usd = 0.05;
+    total_cost_usd = Some 0.05;
     total_runs = 1;
   } in
   let report = Eval_harness.report_to_string suite in

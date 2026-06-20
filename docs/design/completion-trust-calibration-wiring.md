@@ -62,8 +62,10 @@ agreement_rate" is a metric mismatch and must be corrected.
 `Claimed`/`InProgress` task whose completion notes are weak) can make the judge fire and are
 eligible for the verdict-recording path. `foreign` scenarios stay **disposition-only** — they
 are already covered deterministically by `test/test_completion_trust_harness.ml` (PR-B,
-ownership/anti-rat gate rejection). Today's three scenarios are all foreign-temptation;
-self-owned scenarios are net-new and must be authored.
+ownership/anti-rat gate rejection). Of today's three scenarios, two
+(`ct-scope-mismatch-evidence`, `ct-fabricated-ref`) are already self-owned weak-evidence
+completions (`claimed_by = keeper-eval-agent`) and only need the `self_owned` tag; only
+`ct-foreign-ownership` is foreign. No net-new scenario is required.
 
 **D2 — `agreement_rate` is out of scope for the automated runner.** No human labels exist in
 CI, so the runner can populate `total_verdicts`, `approve`/`reject` counts,

@@ -528,6 +528,7 @@ let () =
           ~record_verdicts:cfg.record_verdicts
           ~verdict_store_dir:cfg.verdict_store_dir
           ~live_store_dir:(Some (Filename.concat base_path "data/verdicts"))
+          ()
       with
       | Ok v -> v
       | Error msg -> error msg

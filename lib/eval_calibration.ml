@@ -181,7 +181,7 @@ let same_or_child_path ~parent child =
 ;;
 
 let resolve_record_verdicts_store ?cwd ~record_verdicts ~verdict_store_dir
-    ~(live_store_dir : string option) : (string option, string) result =
+    ~(live_store_dir : string option) () : (string option, string) result =
   if not record_verdicts then Ok None
   else
     let is_live d =

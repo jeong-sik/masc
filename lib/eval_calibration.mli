@@ -79,6 +79,7 @@ val resolve_record_verdicts_store :
   record_verdicts:bool ->
   verdict_store_dir:string option ->
   live_store_dir:string option ->
+  unit ->
   (string option, string) result
 (** Decide where an offline eval's [--record-verdicts] verdicts go, refusing to
     write the live store or any child path under it after best-effort

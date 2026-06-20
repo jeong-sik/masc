@@ -466,6 +466,7 @@ let test_store_not_recording () =
   match
     Cal.resolve_record_verdicts_store ~record_verdicts:false
       ~verdict_store_dir:None ~live_store_dir:(Some live_store)
+      ()
   with
   | Ok None -> ()
   | _ -> fail "expected Ok None when not recording"
@@ -476,6 +477,7 @@ let test_store_requires_dir () =
   match
     Cal.resolve_record_verdicts_store ~record_verdicts:true
       ~verdict_store_dir:None ~live_store_dir:(Some live_store)
+      ()
   with
   | Error msg ->
     check bool "mentions --verdict-store-dir" true
@@ -486,6 +488,7 @@ let test_store_rejects_empty_dir () =
   match
     Cal.resolve_record_verdicts_store ~record_verdicts:true
       ~verdict_store_dir:(Some "  ") ~live_store_dir:(Some live_store)
+      ()
   with
   | Error msg -> check bool "mentions empty" true (contains ~sub:"empty" msg)
   | Ok _ -> fail "expected Error when --verdict-store-dir is empty"
@@ -495,6 +498,7 @@ let test_store_rejects_live () =
   match
     Cal.resolve_record_verdicts_store ~record_verdicts:true
       ~verdict_store_dir:(Some live_store) ~live_store_dir:(Some live_store)
+      ()
   with
   | Error msg -> check bool "mentions live store" true (contains ~sub:"live" msg)
   | Ok _ -> fail "expected Error when store dir is the live store"
@@ -512,6 +516,7 @@ let test_store_rejects_live_aliases () =
         Cal.resolve_record_verdicts_store ~cwd:"/live/base"
           ~record_verdicts:true ~verdict_store_dir:(Some dir)
           ~live_store_dir:(Some live_store)
+          ()
       with
       | Error msg ->
         check bool (name ^ " mentions live store") true (contains ~sub:"live" msg)
@@ -523,6 +528,7 @@ let test_store_rejects_live_child () =
   match
     Cal.resolve_record_verdicts_store ~record_verdicts:true
       ~verdict_store_dir:(Some child) ~live_store_dir:(Some live_store)
+      ()
   with
   | Error msg -> check bool "mentions live store" true (contains ~sub:"live" msg)
   | Ok _ -> fail "expected Error when store dir is under the live store"
@@ -532,6 +538,7 @@ let test_store_accepts_isolated () =
   match
     Cal.resolve_record_verdicts_store ~record_verdicts:true
       ~verdict_store_dir:(Some isolated) ~live_store_dir:(Some live_store)
+      ()
   with
   | Ok (Some d) -> check string "uses the isolated dir" isolated d
   | _ -> fail "expected Ok (Some isolated) for an isolated store dir"
@@ -542,6 +549,7 @@ let test_store_no_live_no_collision () =
   match
     Cal.resolve_record_verdicts_store ~record_verdicts:true
       ~verdict_store_dir:(Some live_store) ~live_store_dir:None
+      ()
   with
   | Ok (Some d) -> check string "accepts dir when no live store" live_store d
   | _ -> fail "expected Ok (Some _) when there is no live store to collide with"

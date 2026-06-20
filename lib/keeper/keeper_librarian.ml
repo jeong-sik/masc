@@ -250,7 +250,7 @@ let source_turn_range claims =
     Some (lo, hi)
 ;;
 
-let episode_of_output ?now ?generation (inp : input) (raw : string) : episode option =
+let episode_of_output ?now ~generation (inp : input) (raw : string) : episode option =
   let now =
     match now with
     | Some now -> now

@@ -21,7 +21,7 @@ val prompt_variables : input -> (string * string) list
     [now] is optional so tests can keep timestamps deterministic. *)
 val episode_of_output
   :  ?now:float
-  -> ?generation:int
+  -> generation:int
   -> input
   -> string
   -> Keeper_memory_os_types.episode option

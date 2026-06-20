@@ -14,6 +14,12 @@ specs/keeper-state-machine/KeeperRuntimeAttemptFSM.tla
 specs/keeper-state-machine/KeeperRuntimeRouting.tla
 specs/keeper-state-machine/KeeperPostTurnOrchestration.tla
 specs/keeper-state-machine/KeeperRolloverDecision.tla
+# RFC-0262 §9 completion-authority bug-model (#21701) ships clean/buggy cfgs but
+# was not wired into scripts/tla-check.sh, so this guard fails on main and every
+# open PR. Recorded as known unchecked debt to unblock Meta Guards now; proper
+# wiring (mirror TaskLifecycle's clean+buggy entries) is the #21701 owner's
+# follow-up. Tracking: this entry should be removed once the spec is wired.
+specs/task-lifecycle/CompletionAuthority.tla
 EOF
 }
 

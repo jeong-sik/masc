@@ -6,7 +6,8 @@
 
     Once [configure_persistence] is called from server bootstrap, queue
     mutations are mirrored to a per-keeper durable snapshot and replayed on
-    restart.
+    restart. Snapshot rewrite failure aborts the mutation before a dequeued
+    message is acknowledged, keeping in-memory state and durable replay aligned.
 
     Queue drain is handled by [Keeper_chat_consumer], started from
     server bootstrap.  The [source] field preserves connector context
@@ -82,4 +83,5 @@ val all_keeper_names : unit -> string list
 
 module For_testing : sig
   val reset : unit -> unit
+  val fail_next_persist : unit -> unit
 end

@@ -31,6 +31,9 @@ type queue_entry = {
 let schema = "keeper_chat_queue.v1"
 let persistence_file = "chat-queue.json"
 let persistence_base_path : string option Atomic.t = Atomic.make None
+let fail_next_persist_for_testing = Atomic.make false
+
+exception Persistence_failed of string
 
 (** Global registry protected by a single mutex.
     Per-keeper queues have their own mutex for independent enqueue/dequeue
@@ -128,6 +131,10 @@ let queue_of_list items =
   List.iter (fun item -> Queue.push item q) items;
   q
 
+let replace_queue q items =
+  Queue.clear q;
+  List.iter (fun item -> Queue.push item q) items
+
 let queue_to_yojson q =
   `Assoc
     [ ("schema", `String schema)
@@ -193,31 +200,47 @@ let load_snapshot ~base_path ~keeper_name =
            Queue.create ()))
 
 let persist_snapshot ~base_path ~keeper_name q =
-  match snapshot_path ~base_path ~keeper_name with
-  | Error msg -> Log.Keeper.warn "chat_queue_snapshot: %s" msg
+  if Atomic.exchange fail_next_persist_for_testing false
+  then Error "injected chat queue persist failure"
+  else match snapshot_path ~base_path ~keeper_name with
+  | Error msg -> Error msg
   | Ok path ->
     (try
        match save_json_atomic path (queue_to_yojson q) with
-       | Ok () -> ()
+       | Ok () -> Ok ()
        | Error msg ->
-         Log.Keeper.warn
-           "chat_queue_snapshot: failed to persist keeper=%s path=%s: %s"
-           keeper_name
-           path
-           msg
+         Error
+           (Printf.sprintf
+              "failed to persist keeper=%s path=%s: %s"
+              keeper_name
+              path
+              msg)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Log.Keeper.warn
-         "chat_queue_snapshot: persist raised keeper=%s path=%s: %s"
-         keeper_name
-         path
-         (Printexc.to_string exn))
+       Error
+         (Printf.sprintf
+            "persist raised keeper=%s path=%s: %s"
+            keeper_name
+            path
+            (Printexc.to_string exn)))
 
 let persist_if_configured ~keeper_name q =
   match Atomic.get persistence_base_path with
   | None -> ()
-  | Some base_path -> persist_snapshot ~base_path ~keeper_name q
+  | Some base_path ->
+    (match persist_snapshot ~base_path ~keeper_name q with
+     | Ok () -> ()
+     | Error msg -> raise (Persistence_failed msg))
+
+let persist_or_rollback ~keeper_name q ~before =
+  try persist_if_configured ~keeper_name q with
+  | Eio.Cancel.Cancelled _ as exn ->
+    replace_queue q before;
+    raise exn
+  | exn ->
+    replace_queue q before;
+    raise exn
 
 let persistence_configured () =
   match Atomic.get persistence_base_path with
@@ -232,25 +255,33 @@ let get_or_create_entry keeper_name =
       Hashtbl.add registry keeper_name entry;
       entry
 
-let enqueue ~keeper_name msg =
+let get_or_create_entry_locked keeper_name =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      let entry = get_or_create_entry keeper_name in
-      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
-          Queue.push msg entry.q;
-          persist_if_configured ~keeper_name entry.q))
+      get_or_create_entry keeper_name)
+
+let find_entry keeper_name =
+  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
+      Hashtbl.find_opt registry keeper_name)
+
+let enqueue ~keeper_name msg =
+  let entry = get_or_create_entry_locked keeper_name in
+  Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+      let before = queue_to_list entry.q in
+      Queue.push msg entry.q;
+      persist_or_rollback ~keeper_name entry.q ~before)
 
 let dequeue ~keeper_name =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      match Hashtbl.find_opt registry keeper_name with
-      | None -> None
-      | Some entry ->
-          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
-              if Queue.is_empty entry.q
-              then None
-              else (
-                let msg = Queue.pop entry.q in
-                persist_if_configured ~keeper_name entry.q;
-                Some msg)))
+  match find_entry keeper_name with
+  | None -> None
+  | Some entry ->
+      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+          if Queue.is_empty entry.q
+          then None
+          else (
+            let before = queue_to_list entry.q in
+            let msg = Queue.pop entry.q in
+            persist_or_rollback ~keeper_name entry.q ~before;
+            Some msg))
 
 let same_source a b =
   match (a, b) with
@@ -267,24 +298,24 @@ let same_source a b =
       false
 
 let dequeue_batch ~keeper_name =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      match Hashtbl.find_opt registry keeper_name with
-      | None -> []
-      | Some entry ->
-          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
-              match Queue.take_opt entry.q with
-              | None -> []
-              | Some first ->
-                  let rec drain acc =
-                    match Queue.peek_opt entry.q with
-                    | Some next when same_source first.source next.source ->
-                        let next = Queue.pop entry.q in
-                        drain (next :: acc)
-                    | Some _ | None -> List.rev acc
-                  in
-                  let batch = first :: drain [] in
-                  persist_if_configured ~keeper_name entry.q;
-                  batch))
+  match find_entry keeper_name with
+  | None -> []
+  | Some entry ->
+      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+          let before = queue_to_list entry.q in
+          match Queue.take_opt entry.q with
+          | None -> []
+          | Some first ->
+              let rec drain acc =
+                match Queue.peek_opt entry.q with
+                | Some next when same_source first.source next.source ->
+                    let next = Queue.pop entry.q in
+                    drain (next :: acc)
+                | Some _ | None -> List.rev acc
+              in
+              let batch = first :: drain [] in
+              persist_or_rollback ~keeper_name entry.q ~before;
+              batch)
 
 let merge_batch batch =
   match batch with
@@ -301,21 +332,20 @@ let merge_batch batch =
         }
 
 let length ~keeper_name =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      match Hashtbl.find_opt registry keeper_name with
-      | None -> 0
-      | Some entry ->
-          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
-              Queue.length entry.q))
+  match find_entry keeper_name with
+  | None -> 0
+  | Some entry ->
+      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+          Queue.length entry.q)
 
 let clear ~keeper_name =
-  Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-      match Hashtbl.find_opt registry keeper_name with
-      | None -> ()
-      | Some entry ->
-          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
-              Queue.clear entry.q;
-              persist_if_configured ~keeper_name entry.q))
+  match find_entry keeper_name with
+  | None -> ()
+  | Some entry ->
+      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+          let before = queue_to_list entry.q in
+          Queue.clear entry.q;
+          persist_or_rollback ~keeper_name entry.q ~before)
 
 let all_keeper_names () =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
@@ -333,19 +363,18 @@ let configure_persistence ~base_path =
         let q = load_snapshot ~base_path ~keeper_name in
         if Queue.length q > 0
         then
-          Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
-              match Hashtbl.find_opt registry keeper_name with
-              | Some entry ->
-                Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
-                    if Queue.is_empty entry.q then (
-                      Queue.iter (fun item -> Queue.push item entry.q) q;
-                      persist_if_configured ~keeper_name entry.q))
-              | None ->
-                let entry = { mutex = Eio.Mutex.create (); q } in
-                Hashtbl.add registry keeper_name entry))
+          let snapshot_items = queue_to_list q in
+          let entry = get_or_create_entry_locked keeper_name in
+          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+              let before = queue_to_list entry.q in
+              replace_queue entry.q (snapshot_items @ before);
+              persist_or_rollback ~keeper_name entry.q ~before))
 
 module For_testing = struct
   let reset () =
+    Atomic.set fail_next_persist_for_testing false;
     Atomic.set persistence_base_path None;
     Eio.Mutex.use_rw ~protect:true registry_mutex (fun () -> Hashtbl.clear registry)
+
+  let fail_next_persist () = Atomic.set fail_next_persist_for_testing true
 end

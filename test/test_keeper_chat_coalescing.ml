@@ -30,6 +30,15 @@ let check name cond =
     Printf.printf "  ✗ %s\n%!" name)
 ;;
 
+let raises f =
+  try
+    f ();
+    false
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ -> true
+;;
+
 let msg ?(attachments = []) ~content ~ts source =
   { Keeper_chat_queue.content; user_blocks = []; attachments; timestamp = ts; source }
 ;;
@@ -228,6 +237,56 @@ let test_persistence_replay () =
         (Keeper_chat_queue.dequeue_batch ~keeper_name = []))
 ;;
 
+let test_persist_failure_does_not_acknowledge_dequeue () =
+  Printf.printf "Test 6: failed dequeue persist keeps queue and snapshot aligned\n%!";
+  let base_path = temp_dir "keeper-chat-queue-persist-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "chat-queue-persist-failure" in
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      Keeper_chat_queue.enqueue ~keeper_name
+        (msg ~content:"must-not-ack" ~ts:1.0 Keeper_chat_queue.Dashboard);
+      Keeper_chat_queue.For_testing.fail_next_persist ();
+      check
+        "dequeue raises before acknowledging when snapshot rewrite fails"
+        (raises (fun () -> ignore (Keeper_chat_queue.dequeue_batch ~keeper_name)));
+      check
+        "in-memory queue rolls back after failed dequeue persist"
+        (Keeper_chat_queue.length ~keeper_name = 1);
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      check
+        "stale snapshot replays the unacknowledged message exactly once"
+        (contents (Keeper_chat_queue.dequeue_batch ~keeper_name) = [ "must-not-ack" ]))
+;;
+
+let test_configure_persistence_prepends_snapshot_to_live_queue () =
+  Printf.printf "Test 7: restart snapshot prepends ahead of live bootstrap messages\n%!";
+  let base_path = temp_dir "keeper-chat-queue-prepend" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "chat-queue-prepend" in
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      Keeper_chat_queue.enqueue ~keeper_name
+        (msg ~content:"snapshot-before-restart" ~ts:1.0 Keeper_chat_queue.Dashboard);
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.enqueue ~keeper_name
+        (msg ~content:"live-during-bootstrap" ~ts:2.0 Keeper_chat_queue.Dashboard);
+      Keeper_chat_queue.configure_persistence ~base_path;
+      check
+        "snapshot messages are not dropped when live queue is non-empty"
+        (contents (Keeper_chat_queue.dequeue_batch ~keeper_name)
+         = [ "snapshot-before-restart"; "live-during-bootstrap" ]))
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_same_source ();
@@ -235,6 +294,8 @@ let () =
   test_merge_batch ();
   test_in_flight_accessor ();
   test_persistence_replay ();
+  test_persist_failure_does_not_acknowledge_dequeue ();
+  test_configure_persistence_prepends_snapshot_to_live_queue ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

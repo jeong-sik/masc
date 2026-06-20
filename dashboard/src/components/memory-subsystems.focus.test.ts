@@ -221,6 +221,75 @@ describe('MemorySubsystems focus targets', () => {
     expect(container.querySelector('[data-testid="draft-skill-candidates"]')).not.toBeNull()
   })
 
+  it('renders draft skill candidate empty and error states', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        ...baseResponse,
+        draft_skill_candidates: {
+          total: 0,
+          shown: 0,
+          limit: 100,
+          index_path: '<base-path>/.masc/draft-skills/index.jsonl',
+          items: [],
+          error: 'draft skill index read failed',
+        },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(html`<${MemorySubsystems} />`, container)
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="draft-skill-candidates"]')).not.toBeNull()
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+        'draft skill index read failed',
+      )
+      expect(container.textContent).toContain('draft skill 후보 없음')
+      expect(container.textContent).toContain('total 0 · shown 0')
+    })
+  })
+
+  it('renders non-candidate draft skill states with nullable creation time', async () => {
+    const original = baseResponse.draft_skill_candidates!.items[0]!
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        ...baseResponse,
+        draft_skill_candidates: {
+          ...baseResponse.draft_skill_candidates!,
+          total: 2,
+          shown: 2,
+          items: [
+            {
+              ...original,
+              id: 'skill-promoted-debug-loop',
+              promotion_state: 'promoted',
+              skill_md_path: '<base-path>/.masc/skills/debug-loop/SKILL.md',
+              created_at: null,
+            },
+            {
+              ...original,
+              id: 'skill-rejected-debug-loop',
+              promotion_state: 'rejected',
+              skill_md_path: '<base-path>/.masc/draft-skills/rejected/SKILL.md',
+              created_at: null,
+            },
+          ],
+        },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(html`<${MemorySubsystems} />`, container)
+
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('skill-promoted-debug-loop')
+      expect(container.textContent).toContain('promoted')
+      expect(container.textContent).toContain('skill-rejected-debug-loop')
+      expect(container.textContent).toContain('rejected')
+      expect(container.textContent).toContain('<base-path>/.masc/skills/debug-loop/SKILL.md')
+    })
+  })
+
   it('focuses the episodes section without requesting memory entries for episodes focus', async () => {
     const responseWithoutEntries: MemorySubsystemsResponse = {
       ...baseResponse,

@@ -14,45 +14,115 @@
    Defined at :root so v2-shell.css and shell components can share them.
    ═══════════════════════════════════════════════════════════════ */
 
-:root {
-  /* Surfaces */
-  --ss-page: #FAFAFA;
-  --ss-card: #FFFFFF;
-  --ss-surface: #F5F5F5;
-  --ss-surface-subtle: #FAFAFA;
-  --ss-surface-muted: #E8E8E8;
+@layer theme-defaults, theme-overrides;
 
-  /* Text hierarchy (darkest is #2A2A2A, never pure black) */
-  --ss-text-primary: #2A2A2A;
-  --ss-text-secondary: #6A6A6A;
-  --ss-text-tertiary: #7A7A7A;
-  --ss-text-disabled: #9B9B9B;
+@layer theme-defaults {
+  :root {
+    /* Surfaces */
+    --theme-background: #FAFAFA;
+    --theme-surface-page: #FAFAFA;
+    --theme-card: #FFFFFF;
+    --theme-card-raised: #FFFFFF;
+    --theme-card-hover: #F5F5F5;
+    --theme-surface: #F5F5F5;
+    --theme-surface-subtle: #FAFAFA;
+    --theme-surface-muted: #E8E8E8;
+    --theme-sunken: #EFEFEF;
 
-  /* Hairlines */
-  --ss-border: rgba(0, 0, 0, 0.08);
-  --ss-border-subtle: rgba(0, 0, 0, 0.05);
-  --ss-border-strong: rgba(0, 0, 0, 0.12);
+    /* Text hierarchy (darkest is #2A2A2A, never pure black) */
+    --theme-text-strong: #2A2A2A;
+    --theme-text-primary: #2A2A2A;
+    --theme-text-secondary: #6A6A6A;
+    --theme-text-tertiary: #7A7A7A;
+    --theme-text-disabled: #9B9B9B;
+    --theme-icon-default: #7A7A7A;
 
-  /* Single accent (--brand) */
-  --ss-brand: #721FE5;
-  --ss-brand-tint: rgba(114, 31, 229, 0.10);
-  --ss-brand-dim: rgba(114, 31, 229, 0.06);
-  --ss-brand-glow: 114 31 229;
+    /* Hairlines */
+    --theme-border: rgba(0, 0, 0, 0.08);
+    --theme-border-subtle: rgba(0, 0, 0, 0.05);
+    --theme-border-strong: rgba(0, 0, 0, 0.12);
+    --theme-border-1: var(--theme-border-subtle);
+    --theme-border-2: var(--theme-border);
+    --theme-border-3: var(--theme-border-strong);
 
-  /* Status */
-  --ss-success: #6B9B7A;
-  --ss-warning: #D97706;
-  --ss-destructive: #d4183d;
+    /* Single accent (--brand) */
+    --theme-brand: #721FE5;
+    --theme-brand-tint: rgba(114, 31, 229, 0.10);
+    --theme-brand-dim: rgba(114, 31, 229, 0.06);
+    --theme-brand-glow: 114 31 229;
+    --theme-brand-wash: rgba(114, 31, 229, 0.08);
 
-  /* Shadows (<= 8% opacity) */
-  --ss-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
-  --ss-shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.08);
-  --ss-shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --ss-shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
+    /* Status */
+    --theme-success: #6B9B7A;
+    --theme-warning: #D97706;
+    --theme-destructive: #d4183d;
+    --theme-info: #2563eb;
 
-  /* Shape */
-  --ss-radius-card: 1rem;       /* 16px = rounded-2xl */
-  --ss-radius-input: 0.375rem;  /* 6px */
+    /* Shadows (<= 8% opacity) */
+    --theme-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04);
+    --theme-shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.08);
+    --theme-shadow-elevated: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --theme-shadow-modal: 0 8px 24px rgba(0, 0, 0, 0.12);
+
+    /* Shape */
+    --theme-radius-card: 1rem;       /* 16px = rounded-2xl */
+    --theme-radius-input: 0.375rem;  /* 6px */
+
+    --background: var(--theme-background);
+    --surface-page: var(--theme-surface-page);
+    --card: var(--theme-card);
+    --surface-subtle: var(--theme-surface-subtle);
+    --surface-muted: var(--theme-surface-muted);
+    --text-primary: var(--theme-text-primary);
+    --text-secondary: var(--theme-text-secondary);
+    --text-tertiary: var(--theme-text-tertiary);
+    --text-disabled: var(--theme-text-disabled);
+    --icon-default: var(--theme-icon-default);
+    --border: var(--theme-border);
+    --border-subtle: var(--theme-border-subtle);
+    --border-strong: var(--theme-border-strong);
+    --brand: var(--theme-brand);
+    --brand-dim: var(--theme-brand-dim);
+    --brand-wash: var(--theme-brand-wash);
+    --brand-tint: var(--theme-brand-tint);
+    --success: var(--theme-success);
+    --warning: var(--theme-warning);
+    --destructive: var(--theme-destructive);
+    --info: var(--theme-info);
+
+    --ss-page: var(--theme-surface-page);
+    --ss-card: var(--theme-card);
+    --ss-card-raised: var(--theme-card-raised);
+    --ss-card-hover: var(--theme-card-hover);
+    --ss-surface: var(--theme-surface);
+    --ss-surface-subtle: var(--theme-surface-subtle);
+    --ss-surface-muted: var(--theme-surface-muted);
+    --ss-sunken: var(--theme-sunken);
+    --ss-text-strong: var(--theme-text-strong);
+    --ss-text-primary: var(--theme-text-primary);
+    --ss-text-secondary: var(--theme-text-secondary);
+    --ss-text-tertiary: var(--theme-text-tertiary);
+    --ss-text-disabled: var(--theme-text-disabled);
+    --ss-border: var(--theme-border);
+    --ss-border-subtle: var(--theme-border-subtle);
+    --ss-border-strong: var(--theme-border-strong);
+    --ss-border-1: var(--theme-border-1);
+    --ss-border-2: var(--theme-border-2);
+    --ss-border-3: var(--theme-border-3);
+    --ss-brand: var(--theme-brand);
+    --ss-brand-tint: var(--theme-brand-tint);
+    --ss-brand-dim: var(--theme-brand-dim);
+    --ss-brand-glow: var(--theme-brand-glow);
+    --ss-success: var(--theme-success);
+    --ss-warning: var(--theme-warning);
+    --ss-destructive: var(--theme-destructive);
+    --ss-shadow-card: var(--theme-shadow-card);
+    --ss-shadow-card-hover: var(--theme-shadow-card-hover);
+    --ss-shadow-elevated: var(--theme-shadow-elevated);
+    --ss-shadow-modal: var(--theme-shadow-modal);
+    --ss-radius-card: var(--theme-radius-card);
+    --ss-radius-input: var(--theme-radius-input);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════

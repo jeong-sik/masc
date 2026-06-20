@@ -7,6 +7,9 @@ val hard_quota_cooldown_sec : float
 val terminal_failure_cooldown_sec : float
 val soft_rate_limit_cooldown_sec : float
 val soft_rate_limit_max_clamp_sec : float
+val server_error_cooldown_sec : float
+(** Cooldown applied immediately for upstream HTTP 5xx server errors.
+    Tunable via [MASC_RUNTIME_SERVER_ERROR_COOLDOWN_SEC]. *)
 val default_capacity_backpressure_backoff_sec : float
 (** Synthetic backoff applied when a [Capacity_backpressure] error arrives
     without an explicit [retry_after_sec] hint.  Sized below

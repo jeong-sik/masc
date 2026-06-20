@@ -153,6 +153,9 @@ module For_testing : sig
 
   val success_selected_model_raw : Runtime_candidate.t -> string option
 
+  val record_candidate_health_error :
+    keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
+
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_sdk_response.api_response -> bool) ->

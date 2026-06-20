@@ -38,6 +38,14 @@ val terminal_failure_cooldown_sec : float
 
     Env: [MASC_RUNTIME_TERMINAL_FAILURE_COOLDOWN_SEC]. *)
 
+val server_error_cooldown_sec : float
+(** Cooldown duration applied immediately on upstream HTTP 5xx server errors.
+    Default 300.0 (5 min), env [MASC_RUNTIME_SERVER_ERROR_COOLDOWN_SEC].
+
+    This is intentionally separate from {!cooldown_sec}: thresholded 30s
+    failure cooldown can expire between scheduled keeper cycles, repeatedly
+    paging operators for the same unhealthy provider lane. *)
+
 val soft_rate_limit_cooldown_sec : float
 (** Default cooldown applied immediately on a transient HTTP 429 (soft
     rate-limit) when no Retry-After hint is available.  Distinct from
@@ -238,6 +246,19 @@ val record_terminal_failure :
   unit ->
   unit
 
+(** Record an upstream HTTP 5xx server error.
+
+    A single 5xx triggers a medium cooldown so autonomous keeper cycles do not
+    repeatedly dispatch into the same unhealthy cloud lane after OAS has already
+    exhausted its provider-owned retry/backoff. *)
+val record_server_error :
+  t ->
+  provider_key:string ->
+  ?error_kind:error_kind ->
+  ?error_reason:string ->
+  unit ->
+  unit
+
 (** Record a transient HTTP 429 (rate-limit) response.
 
     Unlike {!record_failure}, a single soft rate-limit triggers an
@@ -400,6 +421,7 @@ type outcome_kind =
   | Outcome_rejected
   | Outcome_hard_quota
   | Outcome_terminal_failure
+  | Outcome_server_error
   | Outcome_soft_rate_limited
   | Outcome_capacity_backpressure
 

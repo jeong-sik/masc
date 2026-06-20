@@ -325,6 +325,46 @@ let sdk_error_runtime_fallback_class (err : Agent_sdk.Error.sdk_error) :
   else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
   else None
 
+let sdk_error_is_server_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError { status; _ })
+    when status >= 500 -> true
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code; _ })
+    when code >= 500 -> true
+  | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError _)
+  | Agent_sdk.Error.Api
+      ( Llm_provider.Retry.RateLimited _
+      | Llm_provider.Retry.Overloaded _
+      | Llm_provider.Retry.AuthError _
+      | Llm_provider.Retry.InvalidRequest _
+      | Llm_provider.Retry.NotFound _
+      | Llm_provider.Retry.ContextOverflow _
+      | Llm_provider.Retry.NetworkError _
+      | Llm_provider.Retry.Timeout _ )
+  | Agent_sdk.Error.Provider
+      ( Llm_provider.Error.NetworkError _
+      | Llm_provider.Error.Timeout _
+      | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.AuthError _
+      | Llm_provider.Error.MissingApiKey _
+      | Llm_provider.Error.InvalidRequest _
+      | Llm_provider.Error.NotFound _
+      | Llm_provider.Error.CapacityExhausted _
+      | Llm_provider.Error.HardQuota _
+      | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.ProviderTerminal _
+      | Llm_provider.Error.ParseError _
+      | Llm_provider.Error.InvalidConfig _
+      | Llm_provider.Error.UnknownVariant _ )
+  | Agent_sdk.Error.Agent _
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ -> false
+
 let record_candidate_health_error ~keeper_name candidate sdk_err =
   let error_reason = Agent_sdk.Error.to_string sdk_err in
   let health_keys = Runtime_candidate.health_keys candidate in
@@ -347,6 +387,18 @@ let record_candidate_health_error ~keeper_name candidate sdk_err =
     |> List.iter (fun provider_key ->
       let provider_key = scoped_provider_key ~keeper_name provider_key in
       Keeper_binding_health.record_terminal_failure
+        Keeper_binding_health.global
+        ~provider_key
+        ~error_kind
+        ~error_reason
+        ()))
+  else if sdk_error_is_server_error sdk_err
+  then (
+    let error_kind = health_error_kind "server_error" in
+    health_keys
+    |> List.iter (fun provider_key ->
+      let provider_key = scoped_provider_key ~keeper_name provider_key in
+      Keeper_binding_health.record_server_error
         Keeper_binding_health.global
         ~provider_key
         ~error_kind

@@ -323,6 +323,7 @@ let operator_disposition (receipt : t)
           ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Unmapped_disposition) ]
           ();
         Log.Keeper.warn
+          ~keeper_name:receipt.keeper_name
           "operator_disposition: unmapped (outcome=%s runtime_outcome=%s \
            terminal_reason=%s completion_contract_result=%s error_kind=%s) — investigate \
            regression of #11651 silent-path fix"
@@ -631,6 +632,7 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
       ()
   in
   Log.Keeper.warn
+    ~keeper_name:receipt.keeper_name
     "%s: operator_broadcast_required emitted disposition=%s reason=%s seq=%d"
     receipt.keeper_name
     (operator_disposition_kind_to_string disposition)
@@ -660,6 +662,7 @@ let append (config : Workspace.config) (receipt : t) =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Keeper.warn
+       ~keeper_name:receipt.keeper_name
        "%s: reaction ledger receipt append failed trace_id=%s: %s"
        receipt.keeper_name
        receipt.trace_id
@@ -682,6 +685,7 @@ let append (config : Workspace.config) (receipt : t) =
           ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
           ();
         Log.Keeper.error
+          ~keeper_name:receipt.keeper_name
           "%s: operator_broadcast_required EMIT FAILED disposition=%s reason=%s exn=%s"
           receipt.keeper_name
           disposition_s
@@ -693,6 +697,7 @@ let append (config : Workspace.config) (receipt : t) =
         ~labels:[ "keeper", receipt.keeper_name; "reason", reason_s ]
         ();
       Log.Keeper.info
+        ~keeper_name:receipt.keeper_name
         "%s: operator_broadcast_required suppressed duplicate disposition=%s reason=%s turn=%s"
         receipt.keeper_name
         disposition_s
@@ -823,6 +828,7 @@ let emit_stale_keeper_broadcast
     ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
     ();
   Log.Keeper.warn
+    ~keeper_name
     "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
     keeper_name
     stale_seconds

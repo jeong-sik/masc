@@ -240,6 +240,7 @@ let run_named
 module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
+  let record_candidate_health_error = record_candidate_health_error
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
   let last_tool_progress_context_string_of_messages messages =
     messages

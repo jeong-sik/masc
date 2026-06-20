@@ -127,6 +127,7 @@
   test_sse_stream
   test_health
   test_masc_oas_bridge_timeout_guard
+  test_fusion_oas_error_detail
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
@@ -425,6 +426,7 @@
   test_sse_stream
   test_health
   test_masc_oas_bridge_timeout_guard
+  test_fusion_oas_error_detail
   test_keeper_llm_bridge
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric

@@ -17,8 +17,8 @@ let base_policy : Fusion_policy.t =
         ; judge = "a"
         ; panel_system_prompt = "panel"
         ; judge_system_prompt = "judge"
-        ; panel_timeout_s = 120.0
-        ; judge_timeout_s = 120.0
+        ; panel_timeout_s = 300.0
+        ; judge_timeout_s = 300.0
         ; web_tools = false
         ; max_tool_calls_per_panel = 0
         }
@@ -307,8 +307,8 @@ panel = [
 judge = "deepseek.deepseek-v4-pro"
 panel_system_prompt = "answer independently"
 judge_system_prompt = "synthesize the panel"
-panel_timeout_s = 120.0
-judge_timeout_s = 120.0
+panel_timeout_s = 300.0
+judge_timeout_s = 300.0
 |}
 
 let test_config_disabled_with_preset () =

@@ -17,6 +17,26 @@ let usage_of (resp : Agent_sdk.Types.api_response) : Fusion_types.usage =
     }
   | None -> Fusion_types.zero_usage
 
+let provider_error_detail ~runtime_id detail =
+  let runtime_id = String.trim runtime_id in
+  let detail = String.trim detail in
+  if String.equal runtime_id "" || String.equal detail "" then detail
+  else
+    let unknown_prefix = "Provider 'unknown'" in
+    let runtime_provider_prefix = Printf.sprintf "Provider '%s'" runtime_id in
+    let runtime_context_prefix = runtime_id ^ ": " in
+    if String.starts_with ~prefix:unknown_prefix detail then
+      runtime_provider_prefix
+      ^ String.sub detail (String.length unknown_prefix)
+          (String.length detail - String.length unknown_prefix)
+    else if String.starts_with ~prefix:runtime_provider_prefix detail
+            || String.starts_with ~prefix:runtime_context_prefix detail
+    then detail
+    else Printf.sprintf "%s: %s" runtime_id detail
+
+let timeout_budget_opt timeout_s =
+  if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
+
 (** [Keeper_tool_descriptor]에서 날것의 web tool descriptor를 찾아
     [Agent_sdk.Tool.t]로 변환한다. 패널/심판이 web_search/web_fetch를
     호출할 수 있게 하는 목적으로만 쓰인다. *)
@@ -48,7 +68,8 @@ let web_tool_bundle () : Agent_sdk.Tool.t list =
   |> List.concat
   |> List.filter_map oas_tool_of_descriptor
 
-let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0) (model : string)
+let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
+    ?timeout_s (model : string)
   : (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
   =
   match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:model () with
@@ -59,6 +80,16 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0) (mod
     let base_config =
       Runtime_agent.default_config ~name:model ~provider_cfg ~system_prompt ~tools
     in
+    let base_config =
+      match Option.bind timeout_s timeout_budget_opt with
+      | None -> base_config
+      | Some timeout_s ->
+        { base_config with
+          stream_idle_timeout_s = Some timeout_s
+        ; max_execution_time_s = Some timeout_s
+        ; body_timeout_s = Some timeout_s
+        }
+    in
     (* max_tool_calls는 OpenRouter Fusion의 per-panel tool budget에 대응.
        Runtime_agent의 max_turns로 근사: tool 호출 횟수 + 최종 답변 1턴. *)
     let config =
@@ -67,4 +98,7 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0) (mod
     in
     (match Runtime_agent.build ~sw ~net ~config with
      | Ok agent -> Ok agent
-     | Error e -> Error (Fusion_types.Provider_error (Agent_sdk.Error.to_string e)))
+     | Error e ->
+       Error
+         (Fusion_types.Provider_error
+            (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e))))

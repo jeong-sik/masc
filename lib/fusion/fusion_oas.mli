@@ -18,8 +18,15 @@ val build_agent
   -> system_prompt:string
   -> ?tools:Agent_sdk.Tool.t list
   -> ?max_tool_calls:int
+  -> ?timeout_s:float
   -> string
   -> (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
+
+(** Attach Fusion's runtime id to an OAS provider error string.
+    OAS transport errors may surface as ["Provider 'unknown' ..."] because the
+    public SDK error type does not carry MASC runtime ids. Fusion owns the
+    panel/judge runtime id, so it patches that display boundary locally. *)
+val provider_error_detail : runtime_id:string -> string -> string
 
 (** [masc_web_search] / [masc_web_fetch]를 [Agent_sdk.Tool.t]로 변환한 목록.
     [Keeper_tool_descriptor]에서 descriptor를 찾지 못하면 빈 목록을 반환한다. *)

@@ -65,11 +65,11 @@ let voice_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_voice_agent"
     ; description =
         "Get your own voice capability and configuration. Reports assigned voice, \
-         available voices, active turn-based voice session state, and \
-         voice_loop guidance: operator audio is transcribed to normal keeper text \
-         turns, while keeper output uses keeper_voice_speak and dashboard audio \
-         clips. realtime_supported=false means no full-duplex live audio stream is \
-         bound to keeper turns. No network required."
+         available voices, active voice session state, available conversation \
+         modes, and voice_loop guidance. Without MASC_VOICE_REALTIME_WS_URL, \
+         operator audio is transcribed to normal keeper text turns and keeper \
+         output uses keeper_voice_speak/dashboard audio clips. No network \
+         required."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ; { name = "keeper_voice_sessions"
@@ -78,9 +78,11 @@ let voice_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_voice_session_start"
     ; description =
-        "Start a turn-based voice session for this keeper. The result includes \
-         voice_loop guidance that tells the keeper and dashboard how operator \
-         speech is transcribed and how keeper output is played."
+        "Start a voice session for this keeper. Defaults to turn_based batch \
+         STT/TTS. conversation_mode=realtime_bridge is accepted only when \
+         MASC_VOICE_REALTIME_WS_URL points at a configured realtime audio bridge; \
+         otherwise the tool fails closed instead of pretending a duplex stream \
+         exists."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -90,6 +92,16 @@ let voice_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; "description", `String "Optional session name"
+                      ] )
+                ; ( "conversation_mode"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "enum"
+                        , `List [ `String "turn_based"; `String "realtime_bridge" ] )
+                      ; ( "description"
+                        , `String
+                            "Optional mode. realtime_bridge requires \
+                             MASC_VOICE_REALTIME_WS_URL." )
                       ] )
                 ] )
           ]

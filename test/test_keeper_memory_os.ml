@@ -913,19 +913,33 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
           ; messages = [ text_message "Please remember the fallback path." ]
           }
         in
-        (match
-           Librarian_runtime.extract_and_append_with_provider
-             ~complete
-             ~clock
-             ~timeout_sec:1.0
-             ~sw
-             ~net
-             ~keeper_id
-             ~provider_cfg:(test_provider_cfg ())
-             inp
-         with
+        let fallback_started_at = Eio.Time.now clock in
+        let fallback_result =
+          Librarian_runtime.extract_and_append_with_provider
+            ~complete
+            ~clock
+            ~timeout_sec:1.0
+            ~sw
+            ~net
+            ~keeper_id
+            ~provider_cfg:(test_provider_cfg ())
+            inp
+        in
+        let fallback_finished_at = Eio.Time.now clock in
+        let fallback_created_at = ref None in
+        let check_in_clock_window label value =
+          Alcotest.(check bool)
+            label
+            true
+            (value >= fallback_started_at && value <= fallback_finished_at +. 0.001)
+        in
+        (match fallback_result with
          | Error msg -> Alcotest.fail msg
          | Ok episode ->
+           fallback_created_at := Some episode.Types.created_at;
+           check_in_clock_window
+             "fallback created_at derives from injected clock"
+             episode.Types.created_at;
            Alcotest.(check int)
              "initial attempt + parse retries"
              (1 + Librarian_runtime.librarian_max_parse_retries)
@@ -947,8 +961,21 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
               Alcotest.(check bool)
                 "fallback is ephemeral"
                 true
-                (fact.Types.category = Types.Ephemeral)
+                (fact.Types.category = Types.Ephemeral);
+              Alcotest.(check (float 0.001))
+                "fallback fact first_seen uses episode timestamp"
+                episode.Types.created_at
+                fact.Types.first_seen;
+              Alcotest.(check (option (float 0.001)))
+                "fallback fact last_verified_at uses episode timestamp"
+                (Some episode.Types.created_at)
+                fact.Types.last_verified_at
             | facts -> Alcotest.failf "expected one fallback fact, got %d" (List.length facts)));
+        let fallback_created_at =
+          match !fallback_created_at with
+          | Some ts -> ts
+          | None -> Alcotest.fail "fallback result timestamp was not captured"
+        in
         Alcotest.(check int)
           "episode file persisted"
           1
@@ -958,14 +985,22 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
            Alcotest.(check (option string))
              "event persisted with fallback marker"
              (Some "librarian_unstructured_fallback")
-             episode.Types.terminal_marker
+             episode.Types.terminal_marker;
+           Alcotest.(check (float 0.001))
+             "event persisted with injected-clock timestamp"
+             fallback_created_at
+             episode.Types.created_at
          | events -> Alcotest.failf "expected one event, got %d" (List.length events));
         match Memory_io.read_facts_tail ~keeper_id ~n:1 with
         | [ fact ] ->
           Alcotest.(check bool)
             "fact persisted as unstructured note"
             true
-            (contains "unstructured_note" fact.Types.claim)
+            (contains "unstructured_note" fact.Types.claim);
+          Alcotest.(check (float 0.001))
+            "persisted fact first_seen uses injected clock"
+            fallback_created_at
+            fact.Types.first_seen
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 

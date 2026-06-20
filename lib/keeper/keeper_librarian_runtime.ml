@@ -387,6 +387,12 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> None)
 ;;
 
+let now_from_clock ?clock () =
+  match clock with
+  | Some clock -> Eio.Time.now clock
+  | None -> Time_compat.now ()
+;;
+
 let unstructured_note_max_chars = 900
 
 let collapse_for_unstructured_note raw =
@@ -502,7 +508,7 @@ let extract_with_provider
          | Some raw -> raw
          | None -> ""
        in
-       let now = Time_compat.now () in
+       let now = now_from_clock ?clock () in
        Log.Keeper.warn
          "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
          inp.trace_id

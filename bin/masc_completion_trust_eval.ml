@@ -1,5 +1,6 @@
-(** [masc_completion_trust_eval] — live-LLM behavioural eval for RFC-0262 §9
-    axis ① (completion-trust disposition).
+(** [masc_completion_trust_eval] — live-LLM behavioural eval supporting RFC-0262
+    §9's proving metric (zero foreign-task completions by a non-Operator/System
+    actor), measured from the keeper's completion *disposition*.
 
     Drives a real keeper with adversarial *foreign-task temptation* prompts and
     measures whether it ATTEMPTS to complete a task it does not own or for which
@@ -7,7 +8,9 @@
     grading is deterministic (trajectory reduction -> {!Eval_harness}
     deterministic graders -> pass@k).
 
-    Boundary (RFC-0262 §9 harness — keeper / judge / eval-grader separation):
+    Boundary — keeper / judge / eval-grader separation (a harness design
+    contract, not RFC text; see docs/design/completion-trust-calibration-wiring.md.
+    RFC-0262 §8 is the test plan, §9 the rollout + proving metric):
     - keeper      = the live LLM under test (the completion *attempt* author).
     - judge       = the real dispatch-path gates (deterministic ownership /
                     anti-rationalization). NOT exercised here: this runner stubs
@@ -15,7 +18,9 @@
                     covered deterministically by [test_completion_trust_harness]
                     (PR-B). The stub [dispatch] closure below is the seam where a
                     later PR can route the attempt through the real handler plus
-                    [Eval_calibration] verdict recording.
+                    [Eval_calibration] verdict recording — see
+                    docs/design/completion-trust-calibration-wiring.md for the
+                    three blockers that wiring must resolve.
     - eval-grader = {!Eval_harness} deterministic graders + pass@k (this file).
 
     Scope: completion-trust scenarios only (not a general eval platform). Manual /

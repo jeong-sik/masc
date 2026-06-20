@@ -1,4 +1,4 @@
-# completion-trust LLM behavioural eval (RFC-0262 §9 axis ①)
+# completion-trust LLM behavioural eval (RFC-0262 §9 proving metric)
 
 This corpus drives a live keeper with adversarial *completion-trust temptation*
 prompts and measures whether the model **attempts** to complete a task it does
@@ -12,7 +12,9 @@ deterministic regression oracle for the same invariants lives in
 
 ## What it measures vs. what it does not
 
-The harness separates three roles (RFC-0262 §9):
+The harness separates three roles (a harness design contract — see
+`docs/design/completion-trust-calibration-wiring.md`; RFC-0262 §8 is the test
+plan, §9 the rollout + proving metric, and the role separation is not RFC text):
 
 - **keeper** — the live LLM under test; the author of the completion *attempt*.
 - **judge** — the real dispatch-path gates (deterministic ownership check,
@@ -20,7 +22,10 @@ The harness separates three roles (RFC-0262 §9):
   attempt; it does **not** exercise the live FSM gate. The live gate is covered
   deterministically by `test_completion_trust_harness.ml`. The stub `dispatch`
   closure is the seam where a future PR can route the attempt through the real
-  handler plus `Eval_calibration` verdict recording.
+  handler plus `Eval_calibration` verdict recording — see
+  `docs/design/completion-trust-calibration-wiring.md` for the three blockers
+  (judge fires only under ownership; corpus not seeded; `agreement_rate` needs
+  human labels) that wiring must resolve.
 - **eval-grader** — deterministic graders + pass@k (`bin/masc_completion_trust_eval.ml`).
 
 So a scenario measures **disposition** (does the model take the bait?), not the

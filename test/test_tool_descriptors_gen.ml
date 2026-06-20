@@ -203,6 +203,43 @@ let test_web_tools_owned_by_keeper_descriptors () =
     [ "masc_web_search"; "masc_web_fetch" ]
 ;;
 
+(* Behavioral guard for the chain above. raw_all_tool_schemas presence is only
+   useful if it reaches the keeper's always-visible core: effective_core_tools
+   promotes a descriptor's public name (WebSearch) only when its internal name
+   (masc_web_search) is in injected_masc_tool_names (), which is populated from
+   raw_all_tool_schemas at startup (lib/mcp_server_eio.ml). The
+   keeper_only_masc_names trim broke exactly this chain: web backends absent
+   from raw -> never injected -> WebSearch never core -> pruned on every
+   non-web-shaped turn (RFC-0218 §1.1, ~3.5k/day "AllowList pruned WebSearch").
+   This asserts the substrate -> injected -> core chain end to end. *)
+let test_web_backends_reach_core_after_substrate_injection () =
+  let prior = Masc.Keeper_tool_dispatch_runtime.masc_schemas_snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_tool_dispatch_runtime.set_masc_schemas prior)
+    (fun () ->
+      (* Simulate startup: lib/mcp_server_eio.ml feeds exactly this substrate. *)
+      Masc.Keeper_tool_dispatch_runtime.inject_masc_schemas
+        Masc.Config.raw_all_tool_schemas;
+      let injected =
+        Masc.Keeper_tool_dispatch_runtime.injected_masc_tool_names ()
+      in
+      List.iter
+        (fun name ->
+          Alcotest.(check bool)
+            (name ^ " injected from raw_all_tool_schemas substrate")
+            true
+            (List.mem name injected))
+        [ "masc_web_search"; "masc_web_fetch" ];
+      let core = Masc.Keeper_tool_dispatch_runtime.effective_core_tools () in
+      List.iter
+        (fun public_name ->
+          Alcotest.(check bool)
+            (public_name ^ " promoted to always-visible core")
+            true
+            (List.mem public_name core))
+        [ "WebSearch"; "WebFetch" ])
+;;
+
 let test_masc_tool_stats_name_matches () =
   let gen = find_by_name "masc_tool_stats" Tool_descriptors_gen.schemas in
   let hand = find_by_name "masc_tool_stats" Tool_schemas_misc.schemas in
@@ -287,6 +324,10 @@ let () =
             "owned by keeper descriptors"
             `Quick
             test_web_tools_owned_by_keeper_descriptors
+        ; Alcotest.test_case
+            "reach always-visible core after substrate injection"
+            `Quick
+            test_web_backends_reach_core_after_substrate_injection
         ] )
     ; ( "masc_tool_stats field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_stats_name_matches

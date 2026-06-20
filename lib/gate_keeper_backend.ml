@@ -128,9 +128,14 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
     Keeper_chat_broadcast.chat_appended ~keeper_name ~source ~content ()
   end
 
+(* The trailing [()] makes the leading optional [?on_text_snapshot] erasable
+   (warning 16 [unerasable-optional-argument]). Without it the unerased
+   optional leaks into the inferred type of callers that omit it (e.g.
+   [dispatch]), so that inferred type no longer matches the .mli that
+   declares [dispatch] without [?on_text_snapshot]. *)
 let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~metadata ~content =
+    ~keeper_name ~metadata ~content () =
   let keeper_name = String.trim keeper_name in
   let redaction =
     Keeper_secret_redaction.snapshot
@@ -271,11 +276,11 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
 let dispatch ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
     ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content =
   dispatch_core ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
-    ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content
+    ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content ()
 
 let dispatch_with_text_snapshot ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
     ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~metadata ~content =
   dispatch_core ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
-    ~metadata ~content
+    ~metadata ~content ()

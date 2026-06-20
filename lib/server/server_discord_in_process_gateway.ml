@@ -507,7 +507,7 @@ let handle_message_create ~dispatch
               Discord_observability.record_inbound_dispatch
                 Discord_observability.Reply_send_error;
               Discord_observability.record_reply
-                Discord_observability.Reply_send_failed)
+                Discord_observability.Reply_send_failed))
 
 let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
   match ev with

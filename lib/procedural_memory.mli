@@ -31,24 +31,24 @@ type procedure = {
 
 (** {1 Paths} *)
 
-(** [.masc/procedures/{agent_name}/procedures.jsonl] under
-    [Env_config.base_path ()]. *)
-val procedures_path : agent_name:string -> string
+(** [.masc/procedures/{agent_name}/procedures.jsonl] under [base_path].
+    Defaults to [Env_config.base_path ()] for existing callers. *)
+val procedures_path : ?base_path:string -> agent_name:string -> string
 
 (** {1 File I/O} *)
 
 (** Load all persisted procedures for [agent_name]. Malformed JSONL
     lines are silently skipped (via [of_json]). Returns [[]] if the
     file does not exist. *)
-val load_procedures : agent_name:string -> procedure list
+val load_procedures : ?base_path:string -> agent_name:string -> procedure list
 
 (** Append [p] to the agent's procedures file. Creates the directory
     if it does not exist. *)
-val save_procedure : agent_name:string -> procedure -> unit
+val save_procedure : ?base_path:string -> agent_name:string -> procedure -> unit
 
 (** Rewrite the full procedures file atomically. On write error,
     logs via [Log.Config.warn] and returns [()]. *)
-val rewrite_procedures : agent_name:string -> procedure list -> unit
+val rewrite_procedures : ?base_path:string -> agent_name:string -> procedure list -> unit
 
 (** {1 Crystallisation} *)
 
@@ -59,4 +59,4 @@ val rewrite_procedures : agent_name:string -> procedure list -> unit
 val is_crystallized : procedure -> bool
 
 (** Top-N crystallised procedures sorted by confidence (descending). *)
-val top_procedures : agent_name:string -> limit:int -> procedure list
+val top_procedures : ?base_path:string -> agent_name:string -> limit:int -> procedure list

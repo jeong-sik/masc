@@ -216,8 +216,9 @@ let candidates_of_memory_facts ~agent_name facts =
   |> List.sort (fun a b -> Float.compare b.confidence a.confidence)
 ;;
 
-let top_candidates ~agent_name ~limit =
-  Procedural_memory.top_procedures ~agent_name ~limit |> candidates_of_procedures
+let top_candidates ~base_path ~agent_name ~limit =
+  Procedural_memory.top_procedures ~base_path ~agent_name ~limit
+  |> candidates_of_procedures
 ;;
 
 let string_list_json xs = `List (List.map (fun s -> `String s) xs)

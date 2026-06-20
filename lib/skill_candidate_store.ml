@@ -271,7 +271,9 @@ let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure
   let facts =
     if fact_tail_limit <= 0
     then []
-    else Keeper_memory_os_io.read_facts_tail ~keeper_id ~n:fact_tail_limit
+    else
+      Keeper_memory_os_io.read_facts_tail_for_base_path ~base_path ~keeper_id
+        ~n:fact_tail_limit
   in
   let fact_candidates =
     Skill_candidate_projection.candidates_of_memory_facts ~agent_name:keeper_id facts
@@ -279,7 +281,9 @@ let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure
   let procedure_candidates =
     if procedure_limit <= 0
     then []
-    else Skill_candidate_projection.top_candidates ~agent_name:keeper_id ~limit:procedure_limit
+    else
+      Skill_candidate_projection.top_candidates ~base_path ~agent_name:keeper_id
+        ~limit:procedure_limit
   in
   let candidates = dedup_candidates (fact_candidates @ procedure_candidates) in
   let rec loop acc = function

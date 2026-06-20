@@ -6,6 +6,7 @@ module S = Masc.Skill_candidate_projection
 module Store = Masc.Skill_candidate_store
 module M = Masc.Keeper_memory_os_types
 module Memory_io = Masc.Keeper_memory_os_io
+module Config_dirs = Masc.Config_dir_resolver
 
 let procedure ?(evidence = []) ?(success_count = 0) ?(failure_count = 0)
     ?(confidence = 0.0) ?(id = "proc-test") ?(pattern = "When a pattern appears, reuse the learned action") () : P.procedure =
@@ -179,6 +180,22 @@ let write_file_or_fail path content =
   | Error msg -> fail msg
 ;;
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some value -> Unix.putenv name value
+      | None -> Unix.putenv name "")
+    f
+;;
+
+let write_facts_for_base_path ~base_path ~keeper_id facts =
+  let keepers_dir = Config_dirs.keepers_dir_for_base_path ~base_path in
+  Memory_io.rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts
+;;
+
 let with_temp_base_path f =
   let marker = Filename.temp_file "skill-candidate-store-" ".tmp" in
   Sys.remove marker;
@@ -317,122 +334,177 @@ let test_skill_candidate_store_lists_newest_unique_draft_per_id () =
 let test_skill_candidate_store_writes_post_turn_memory_fact_candidates () =
   with_temp_base_path
   @@ fun base_path ->
-  let keepers_dir = Filename.concat base_path "keepers" in
-  Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
-    let fact =
-      memory_fact ~category:M.Lesson ~trace_id:"trace-skill" ~turn:11
-        ~tool_call_id:"tool-skill"
-        "When a recurring review succeeds, preserve the review checklist"
-    in
-    Memory_io.append_fact ~keeper_id:"keeper" fact;
-    let stored =
-      match
-        Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
-          ~fact_tail_limit:16 ~procedure_limit:0
-      with
-      | Ok stored -> stored
-      | Error msg -> fail msg
-    in
-    check int "one draft written" 1 (List.length stored);
-    let summary =
-      match stored with
-      | [ item ] -> item
-      | _ -> fail "expected one stored candidate"
-    in
-    check string "source kind" "memory_os_fact" summary.candidate.source_kind;
-    check bool "candidate json exists" true (Sys.file_exists summary.json_path);
-    let second =
-      match
-        Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
-          ~fact_tail_limit:16 ~procedure_limit:0
-      with
-      | Ok stored -> stored
-      | Error msg -> fail msg
-    in
-    check int "unchanged candidate skipped" 0 (List.length second))
+  let fact =
+    memory_fact ~category:M.Lesson ~trace_id:"trace-skill" ~turn:11
+      ~tool_call_id:"tool-skill"
+      "When a recurring review succeeds, preserve the review checklist"
+  in
+  write_facts_for_base_path ~base_path ~keeper_id:"keeper" [ fact ];
+  let stored =
+    match
+      Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+        ~fact_tail_limit:16 ~procedure_limit:0
+    with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check int "one draft written" 1 (List.length stored);
+  let summary =
+    match stored with
+    | [ item ] -> item
+    | _ -> fail "expected one stored candidate"
+  in
+  check string "source kind" "memory_os_fact" summary.candidate.source_kind;
+  check bool "candidate json exists" true (Sys.file_exists summary.json_path);
+  let second =
+    match
+      Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+        ~fact_tail_limit:16 ~procedure_limit:0
+    with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check int "unchanged candidate skipped" 0 (List.length second)
 ;;
 
 let test_skill_candidate_store_recovers_partial_candidate_artifacts () =
   with_temp_base_path
   @@ fun base_path ->
-  let keepers_dir = Filename.concat base_path "keepers" in
-  Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
-    let fact =
-      memory_fact ~category:M.Lesson ~trace_id:"trace-partial-skill" ~turn:12
-        ~tool_call_id:"tool-partial-skill"
-        "When a draft candidate write is partial, rewrite the missing artifacts"
-    in
-    let c =
-      match S.candidates_of_memory_facts ~agent_name:"keeper" [ fact ] with
-      | [ candidate ] -> candidate
-      | _ -> fail "expected one projected candidate"
-    in
-    let dir = Store.draft_dir ~base_path c in
-    let json_path = Filename.concat dir "candidate.json" in
-    let toml_path = Filename.concat dir "candidate.toml" in
-    let skill_md_path = Filename.concat dir "SKILL.md" in
-    Fs_compat.mkdir_p dir;
-    write_file_or_fail json_path (Yojson.Safe.pretty_to_string (S.to_json c) ^ "\n");
-    check bool "partial json preexists" true (Sys.file_exists json_path);
-    check bool "partial toml absent" false (Sys.file_exists toml_path);
-    Memory_io.append_fact ~keeper_id:"keeper" fact;
-    let stored =
-      match
-        Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
-          ~fact_tail_limit:16 ~procedure_limit:0
-      with
-      | Ok stored -> stored
-      | Error msg -> fail msg
-    in
-    check int "partial candidate rewritten" 1 (List.length stored);
-    check bool "toml recovered" true (Sys.file_exists toml_path);
-    check bool "skill draft recovered" true (Sys.file_exists skill_md_path))
+  let fact =
+    memory_fact ~category:M.Lesson ~trace_id:"trace-partial-skill" ~turn:12
+      ~tool_call_id:"tool-partial-skill"
+      "When a draft candidate write is partial, rewrite the missing artifacts"
+  in
+  let c =
+    match S.candidates_of_memory_facts ~agent_name:"keeper" [ fact ] with
+    | [ candidate ] -> candidate
+    | _ -> fail "expected one projected candidate"
+  in
+  let dir = Store.draft_dir ~base_path c in
+  let json_path = Filename.concat dir "candidate.json" in
+  let toml_path = Filename.concat dir "candidate.toml" in
+  let skill_md_path = Filename.concat dir "SKILL.md" in
+  Fs_compat.mkdir_p dir;
+  write_file_or_fail json_path (Yojson.Safe.pretty_to_string (S.to_json c) ^ "\n");
+  check bool "partial json preexists" true (Sys.file_exists json_path);
+  check bool "partial toml absent" false (Sys.file_exists toml_path);
+  write_facts_for_base_path ~base_path ~keeper_id:"keeper" [ fact ];
+  let stored =
+    match
+      Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+        ~fact_tail_limit:16 ~procedure_limit:0
+    with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check int "partial candidate rewritten" 1 (List.length stored);
+  check bool "toml recovered" true (Sys.file_exists toml_path);
+  check bool "skill draft recovered" true (Sys.file_exists skill_md_path)
 ;;
 
 let test_skill_candidate_store_recovers_missing_index_for_complete_artifacts () =
   with_temp_base_path
   @@ fun base_path ->
-  let keepers_dir = Filename.concat base_path "keepers" in
-  Memory_io.For_testing.with_keepers_dir keepers_dir (fun () ->
-    let fact =
-      memory_fact ~category:M.Lesson ~trace_id:"trace-index-skill" ~turn:13
-        ~tool_call_id:"tool-index-skill"
-        "When draft candidate artifacts already exist, missing index rows are repaired"
-    in
-    let c =
-      match S.candidates_of_memory_facts ~agent_name:"keeper" [ fact ] with
-      | [ candidate ] -> candidate
-      | _ -> fail "expected one projected candidate"
-    in
-    let dir = Store.draft_dir ~base_path c in
-    let json_path = Filename.concat dir "candidate.json" in
-    let toml_path = Filename.concat dir "candidate.toml" in
-    let skill_md_path = Filename.concat dir "SKILL.md" in
-    Fs_compat.mkdir_p dir;
-    write_file_or_fail json_path (Yojson.Safe.pretty_to_string (S.to_json c) ^ "\n");
-    write_file_or_fail toml_path (Store.render_candidate_toml c);
-    write_file_or_fail skill_md_path (S.render_skill_draft c);
-    check bool "index absent before recovery" false
-      (Sys.file_exists (Store.index_path ~base_path));
-    Memory_io.append_fact ~keeper_id:"keeper" fact;
-    let stored =
-      match
-        Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
-          ~fact_tail_limit:16 ~procedure_limit:0
-      with
-      | Ok stored -> stored
-      | Error msg -> fail msg
-    in
-    check int "complete artifacts re-indexed" 1 (List.length stored);
-    let listing =
-      match Store.list_drafts ~base_path ~limit:10 with
-      | Ok listing -> listing
-      | Error msg -> fail msg
-    in
-    check int "missing index repaired" 1 listing.total;
-    match listing.items with
-    | [ item ] -> check string "indexed candidate id" c.id item.id
-    | _ -> fail "expected one indexed draft")
+  let fact =
+    memory_fact ~category:M.Lesson ~trace_id:"trace-index-skill" ~turn:13
+      ~tool_call_id:"tool-index-skill"
+      "When draft candidate artifacts already exist, missing index rows are repaired"
+  in
+  let c =
+    match S.candidates_of_memory_facts ~agent_name:"keeper" [ fact ] with
+    | [ candidate ] -> candidate
+    | _ -> fail "expected one projected candidate"
+  in
+  let dir = Store.draft_dir ~base_path c in
+  let json_path = Filename.concat dir "candidate.json" in
+  let toml_path = Filename.concat dir "candidate.toml" in
+  let skill_md_path = Filename.concat dir "SKILL.md" in
+  Fs_compat.mkdir_p dir;
+  write_file_or_fail json_path (Yojson.Safe.pretty_to_string (S.to_json c) ^ "\n");
+  write_file_or_fail toml_path (Store.render_candidate_toml c);
+  write_file_or_fail skill_md_path (S.render_skill_draft c);
+  check bool "index absent before recovery" false
+    (Sys.file_exists (Store.index_path ~base_path));
+  write_facts_for_base_path ~base_path ~keeper_id:"keeper" [ fact ];
+  let stored =
+    match
+      Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+        ~fact_tail_limit:16 ~procedure_limit:0
+    with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check int "complete artifacts re-indexed" 1 (List.length stored);
+  let listing =
+    match Store.list_drafts ~base_path ~limit:10 with
+    | Ok listing -> listing
+    | Error msg -> fail msg
+  in
+  check int "missing index repaired" 1 listing.total;
+  match listing.items with
+  | [ item ] -> check string "indexed candidate id" c.id item.id
+  | _ -> fail "expected one indexed draft"
+;;
+
+let test_skill_candidate_store_scopes_post_turn_reads_to_base_path () =
+  with_temp_base_path
+  @@ fun global_base ->
+  with_temp_base_path
+  @@ fun target_base ->
+  with_env "MASC_BASE_PATH" global_base
+  @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" global_base
+  @@ fun () ->
+  let global_fact =
+    memory_fact ~category:M.Lesson ~trace_id:"trace-global-skill" ~turn:21
+      ~tool_call_id:"tool-global-skill"
+      "When a global workspace lesson exists, it must not seed target drafts"
+  in
+  write_facts_for_base_path ~base_path:global_base ~keeper_id:"keeper" [ global_fact ];
+  let global_procedure =
+    procedure ~id:"Global Workspace Procedure"
+      ~pattern:"When global workspace procedure exists, keep it out of target drafts"
+      ~evidence:[ "global-a"; "global-b"; "global-c" ] ~success_count:3
+      ~failure_count:0 ~confidence:1.0 ()
+  in
+  P.save_procedure ~base_path:global_base ~agent_name:"keeper" global_procedure;
+  let leaked =
+    match
+      Store.write_post_turn_candidates ~base_path:target_base ~keeper_id:"keeper"
+        ~fact_tail_limit:16 ~procedure_limit:5
+    with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check int "global post-turn candidates ignored" 0 (List.length leaked);
+  let empty_listing =
+    match Store.list_drafts ~base_path:target_base ~limit:10 with
+    | Ok listing -> listing
+    | Error msg -> fail msg
+  in
+  check int "target draft store stays empty" 0 empty_listing.total;
+  let target_procedure =
+    procedure ~id:"Target Workspace Procedure"
+      ~pattern:"When target workspace procedure exists, write a target draft"
+      ~evidence:[ "target-a"; "target-b"; "target-c" ] ~success_count:3
+      ~failure_count:0 ~confidence:1.0 ()
+  in
+  P.save_procedure ~base_path:target_base ~agent_name:"keeper" target_procedure;
+  let target_stored =
+    match
+      Store.write_post_turn_candidates ~base_path:target_base ~keeper_id:"keeper"
+        ~fact_tail_limit:16 ~procedure_limit:5
+    with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  let target_summary =
+    match target_stored with
+    | [ item ] -> item
+    | _ -> fail "expected one target-scoped procedure candidate"
+  in
+  check string "target source kind" "procedure" target_summary.candidate.source_kind;
+  check string "target source id" target_procedure.id target_summary.candidate.source_id
 ;;
 
 let test_skill_candidate_store_sanitizes_candidate_id_path () =
@@ -506,6 +578,8 @@ let () =
             test_skill_candidate_store_recovers_partial_candidate_artifacts;
           test_case "recovers missing index for complete artifacts" `Quick
             test_skill_candidate_store_recovers_missing_index_for_complete_artifacts;
+          test_case "scopes post-turn reads to base path" `Quick
+            test_skill_candidate_store_scopes_post_turn_reads_to_base_path;
           test_case "sanitizes candidate id path" `Quick
             test_skill_candidate_store_sanitizes_candidate_id_path;
         ] );

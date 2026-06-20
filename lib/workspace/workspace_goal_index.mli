@@ -56,6 +56,10 @@ val read_goal_task_links_r :
 val write_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list -> unit
 
+(** Remove all links for [goal_id] under the goal-task-links file lock. *)
+val prune_links_for_goal :
+  Workspace_utils_backend_setup.config -> goal_id:string -> unit
+
 (** Add one task-to-goal link to the persistent registry. *)
 val link_task_to_goal :
   Workspace_utils_backend_setup.config -> goal_id:string -> task_id:string -> unit

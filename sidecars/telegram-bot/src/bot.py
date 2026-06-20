@@ -382,13 +382,26 @@ class TelegramGateBot:
             try:
                 await thinking_msg.edit_text(first_text, parse_mode=parse_mode)
             except Exception:
-                await update.effective_chat.send_message(first_text, parse_mode=parse_mode)
+                # HTML chunking is not tag-aware (chunk_text splits on
+                # newline/space at TELEGRAM_MESSAGE_LIMIT), so a chunk can land
+                # inside a tag/entity and Telegram rejects it with HTTP 400
+                # "can't parse entities". Degrade to plain text so the reply is
+                # never dropped instead of re-sending the same unparseable HTML.
+                await update.effective_chat.send_message(first_text, parse_mode=None)
 
             for i, chunk in enumerate(chunks[1:], 1):
                 msg_text = chunk
                 if footer and i == len(chunks) - 1:
                     msg_text = f"{chunk}\n\n{footer}"
-                await update.effective_chat.send_message(msg_text, parse_mode=parse_mode)
+                try:
+                    await update.effective_chat.send_message(
+                        msg_text, parse_mode=parse_mode
+                    )
+                except Exception:
+                    # Same tag-unaware chunking risk as above: fall back to
+                    # plain text so a parse error on one continuation chunk does
+                    # not drop the rest of the reply.
+                    await update.effective_chat.send_message(msg_text, parse_mode=None)
 
             self._messages_processed += 1
         elif response.error:

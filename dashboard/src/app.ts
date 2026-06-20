@@ -330,7 +330,7 @@ export function App() {
                        (single source of truth), so the global chrome shows only the
                        crumb — matching the v2 design top bar, which carries a slim
                        breadcrumb and no page title. A title here duplicated every
-                       surface's own <h1>. */ ''}
+                       surface-level heading/header. */ ''}
                 </div>
               </div>
             </div>

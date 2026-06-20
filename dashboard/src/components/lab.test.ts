@@ -23,6 +23,9 @@ async function loadLab() {
   vi.doMock('./memory/memory-explore', () => ({
     MemoryExplore: () => html`<div data-testid="lab-memory-explore">MemoryExplore</div>`,
   }))
+  vi.doMock('./memory/keeper-memory-health', () => ({
+    KeeperMemoryHealth: () => html`<div data-testid="lab-keeper-memory-health">KeeperMemoryHealth</div>`,
+  }))
   return import('./lab')
 }
 
@@ -47,6 +50,7 @@ describe('Lab', () => {
     vi.doUnmock('./design-canvas')
     vi.doUnmock('./lab-perf')
     vi.doUnmock('./memory/memory-explore')
+    vi.doUnmock('./memory/keeper-memory-health')
   })
 
   it('renders tools section by default', async () => {
@@ -88,6 +92,14 @@ describe('Lab', () => {
 
     render(html`<${Lab} />`, container)
     expect(container.querySelector('[data-testid="lab-memory-explore"]')).not.toBeNull()
+  })
+
+  it('renders keeper memory health section', async () => {
+    route.value.params = { section: 'keeper-memory-health' }
+    const { Lab } = await loadLab()
+
+    render(html`<${Lab} />`, container)
+    expect(container.querySelector('[data-testid="lab-keeper-memory-health"]')).not.toBeNull()
   })
 
   it('falls back to tools for unknown lab section', async () => {

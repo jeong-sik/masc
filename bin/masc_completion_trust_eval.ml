@@ -300,6 +300,7 @@ let run_one (scenario : EH.scenario) ~runtime_id ~run_index : EH.eval_run =
       ~system_prompt:eval_system_prompt ~masc_tools:completion_tools ~dispatch
       ~temperature:Runtime_provider_defaults.deterministic_temperature
       ~approval:Masc.Approval_callbacks.auto_approve
+      ~max_turns:scenario.EH.max_turns
       ~max_idle_turns:default_max_idle_turns ()
   in
   let duration_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in

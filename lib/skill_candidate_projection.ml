@@ -217,7 +217,7 @@ let candidates_of_memory_facts ~agent_name facts =
 ;;
 
 let top_candidates ~base_path ~agent_name ~limit =
-  Procedural_memory.top_procedures ~base_path ~agent_name ~limit
+  Procedural_memory.top_procedures ~base_path ~agent_name ~limit ()
   |> candidates_of_procedures
 ;;
 

@@ -60,6 +60,8 @@ val append_episode_bundle : keeper_id:string -> episode -> unit
 val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
 val rewrite_facts_atomically_for_keepers_dir :
   keepers_dir:string -> keeper_id:string -> fact list -> unit
+val rewrite_facts_atomically_for_base_path :
+  base_path:string -> keeper_id:string -> fact list -> unit
 
 (** {1 Facts snapshot CAS} *)
 

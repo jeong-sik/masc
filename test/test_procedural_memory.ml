@@ -6,7 +6,6 @@ module S = Masc.Skill_candidate_projection
 module Store = Masc.Skill_candidate_store
 module M = Masc.Keeper_memory_os_types
 module Memory_io = Masc.Keeper_memory_os_io
-module Config_dirs = Masc.Config_dir_resolver
 
 let procedure ?(evidence = []) ?(success_count = 0) ?(failure_count = 0)
     ?(confidence = 0.0) ?(id = "proc-test") ?(agent_name = "keeper")
@@ -193,8 +192,7 @@ let with_env name value f =
 ;;
 
 let write_facts_for_base_path ~base_path ~keeper_id facts =
-  let keepers_dir = Config_dirs.keepers_dir_for_base_path ~base_path in
-  Memory_io.rewrite_facts_atomically_for_keepers_dir ~keepers_dir ~keeper_id facts
+  Memory_io.rewrite_facts_atomically_for_base_path ~base_path ~keeper_id facts
 ;;
 
 let with_temp_base_path f =

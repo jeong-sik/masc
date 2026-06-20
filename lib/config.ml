@@ -14,18 +14,25 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   List.rev unique
 
 
-(* Tools that are keeper-only (called via public_name by the keeper agent)
-   and must NOT be exposed as operator MCP tool calls.
-   masc_web_search / masc_web_fetch are reached via WebSearch / WebFetch
-   public_names from keeper context; operator never calls them directly. *)
-let keeper_only_masc_names =
-  [ "masc_web_search"; "masc_web_fetch" ]
+(* Project every descriptor-owned masc_* backend schema into the substrate so
+   the keeper tool universe knows the tool exists.  This includes the web
+   backends (masc_web_search / masc_web_fetch), which the LLM reaches via their
+   WebSearch / WebFetch public_names.
 
+   Do NOT trim "keeper-only" tools out of this projection to keep them off the
+   operator MCP surface.  [raw_all_tool_schemas] feeds BOTH the keeper universe
+   AND the public MCP surface (RFC-0218 §1.1), and the operator-surface
+   exclusion is enforced separately and downstream by [Tool_catalog.is_public_mcp]
+   / [public_mcp_surface_tools] (contract stated in tool_schemas_misc.mli).
+   Excluding the web backends here re-creates the #19864/#20060 split-brain:
+   the substrate denies a tool the keeper still dispatches, so [masc_web_search]
+   never enters [injected_masc_tool_names ()], [effective_core_tools] drops
+   WebSearch from the always-visible core, and every keeper turn prunes + WARNs
+   (~3.5k/day "AllowList pruned ... WebSearch"). *)
 let descriptor_owned_internal_tool_schemas : Masc_domain.tool_schema list =
   Keeper_tool_descriptor.public_descriptors
   |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
     if String.starts_with ~prefix:"masc_" descriptor.internal_name
-       && not (List.mem descriptor.internal_name keeper_only_masc_names)
     then
       Some
         { Masc_domain.name = descriptor.internal_name

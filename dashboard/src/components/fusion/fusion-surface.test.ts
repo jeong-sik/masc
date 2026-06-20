@@ -1,10 +1,19 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { BoardPost } from '../../types'
 import { route } from '../../router'
-import { boardLoading, boardPosts } from '../../store'
+import { boardLoading, boardPosts, fusionRunsLoading, refreshBoard, refreshFusionRuns } from '../../store'
 import { FusionSurface } from './fusion-surface'
+
+// Mock only the refresh side effects; keep the real signals (boardLoading /
+// fusionRunsLoading) via ...actual so the component reads live state. The manual
+// Refresh button must fan out to BOTH refreshers — the run-status panel is a
+// second data source the board refresh cannot reach (RFC-0266 Phase 4).
+vi.mock('../../store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../store')>()
+  return { ...actual, refreshBoard: vi.fn(), refreshFusionRuns: vi.fn() }
+})
 
 function boardPost(overrides: Partial<BoardPost> & { id: string; meta: BoardPost['meta'] }): BoardPost {
   const { id, meta, ...rest } = overrides
@@ -43,6 +52,9 @@ describe('FusionSurface', () => {
     route.value = { tab: 'fusion', params: {}, postId: null }
     boardLoading.value = false
     boardPosts.value = []
+    fusionRunsLoading.value = false
+    vi.mocked(refreshBoard).mockClear()
+    vi.mocked(refreshFusionRuns).mockClear()
   })
 
   afterEach(() => {
@@ -50,6 +62,7 @@ describe('FusionSurface', () => {
     container.remove()
     boardLoading.value = false
     boardPosts.value = []
+    fusionRunsLoading.value = false
     route.value = { tab: 'overview', params: {}, postId: null }
     window.location.hash = '#overview'
   })
@@ -183,5 +196,24 @@ describe('FusionSurface', () => {
 
     expect(container.querySelector('[data-testid="fusion-empty"]')).not.toBeNull()
     expect(container.textContent).toContain('No fusion runs found')
+  })
+
+  it('manual Refresh fans out to both the board-meta detail and the run-status registry', () => {
+    render(html`<${FusionSurface} />`, container)
+    const refresh = container.querySelector<HTMLButtonElement>('.fus-refresh')
+    expect(refresh).not.toBeNull()
+    refresh?.click()
+    // The run-status panel reads the fusionRuns signal, a source refreshBoard
+    // never touches; the button must trigger refreshFusionRuns too.
+    expect(vi.mocked(refreshBoard)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(refreshFusionRuns)).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables Refresh while the run registry is loading even when the board is idle', () => {
+    fusionRunsLoading.value = true
+    render(html`<${FusionSurface} />`, container)
+    const refresh = container.querySelector<HTMLButtonElement>('.fus-refresh')
+    expect(refresh?.disabled).toBe(true)
+    expect(refresh?.textContent).toContain('Refreshing')
   })
 })

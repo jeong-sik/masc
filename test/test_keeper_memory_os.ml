@@ -510,6 +510,59 @@ let test_librarian_ephemeral_fact_has_ttl () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
+(* RFC-0259 §3.2 producer boundary: a freshly extracted claim that names an
+   external referent is born volatile even when the librarian labels it as a
+   durable Fact. This locks the initial writer path, not just the pure
+   [fact_valid_until] helper: the first row gets a finite [valid_until] anchored
+   to its first extraction timestamp, and P6/F re-observe later inherits that
+   anchor instead of refreshing it. *)
+let test_librarian_external_ref_fact_is_born_volatile () =
+  let now = 1_000_000.0 in
+  let output =
+    `Assoc
+      [ "episode_summary", `String "external state claim"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "PR #42 is OPEN and mergeable"
+                ; "confidence", `Float 0.9
+                ; "category", `String "fact"
+                ; "source_turn", `Int 0
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-volatile-birth"
+    ; generation = 0
+    ; messages = [ text_message "PR #42 is OPEN and mergeable" ]
+    }
+  in
+  match Librarian.episode_of_output ~now ~generation:inp.generation inp output with
+  | Some { Types.claims = [ fact ]; _ } ->
+    Alcotest.(check string) "claim parsed" "PR #42 is OPEN and mergeable" fact.claim;
+    (match fact.external_ref with
+     | Some { Types.kind = Types.Pr; id = "42" } -> ()
+     | Some _ -> Alcotest.fail "expected PR #42 external_ref"
+     | None -> Alcotest.fail "expected external_ref at producer boundary");
+    Alcotest.(check (float 0.001)) "first_seen anchored to extraction time" now fact.first_seen;
+    Alcotest.(check (option (float 0.001)))
+      "volatile valid_until anchored to initial extraction"
+      (Some (now +. Types.volatile_external_ttl_seconds))
+      fact.valid_until;
+    Alcotest.(check (option (float 0.001)))
+      "initial extraction is the initial verification anchor"
+      (Some now)
+      fact.last_verified_at
+  | Some episode ->
+    Alcotest.failf "expected one claim, got %d" (List.length episode.Types.claims)
+  | None -> Alcotest.fail "expected librarian output to parse"
+;;
+
 let test_librarian_accepts_wrapped_json_output () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-wrapped-json"
@@ -3320,6 +3373,10 @@ let () =
             "librarian-born ephemeral fact has TTL (RFC-0247 §2.3)"
             `Quick
             test_librarian_ephemeral_fact_has_ttl
+        ; Alcotest.test_case
+            "librarian-born external-ref fact has volatile TTL (RFC-0259 §3.2)"
+            `Quick
+            test_librarian_external_ref_fact_is_born_volatile
         ; Alcotest.test_case
             "librarian accepts wrapped json output"
             `Quick

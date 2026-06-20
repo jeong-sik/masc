@@ -139,6 +139,38 @@ let test_dispatch_create_persists_recurrence () =
          (Schedule_domain.recurrence_kind_to_string request.recurrence))
 ;;
 
+let test_dispatch_create_derives_due_at_for_cron_recurrence () =
+  with_config
+  @@ fun config ->
+  let args =
+    `Assoc
+      [ "schedule_id", `String "sched-cron"
+      ; "requested_at_unix", `Float 32400.0
+      ; "risk_class", `String "read_only"
+      ; "payload", payload
+      ; "requested_by_id", `String "operator"
+      ; "scheduled_by_id", `String "scheduler-agent"
+      ; "recurrence_kind", `String "cron"
+      ; "recurrence_cron", `String "0 9 * * 1-5"
+      ; "recurrence_timezone", `String "UTC"
+      ]
+  in
+  match
+    Tool_schedule.dispatch (schedule_ctx config)
+      ~name:(schedule_tool_name Tool_schemas_schedule.Create_request)
+      ~args
+  with
+  | None -> fail "dispatch returned None"
+  | Some result ->
+    check bool "create succeeds" true (Tool_result.is_success result);
+    (match Schedule_store.get_schedule config ~schedule_id:"sched-cron" with
+     | None -> fail "schedule missing"
+     | Some request ->
+       check string "recurrence" "cron"
+         (Schedule_domain.recurrence_kind_to_string request.recurrence);
+       check (float 0.001) "derived due_at" 118800.0 request.due_at)
+;;
+
 let test_dispatch_cancel_persists_status () =
   with_config
   @@ fun config ->
@@ -334,6 +366,8 @@ let () =
             test_dispatch_create_persists_schedule
         ; test_case "dispatch create persists recurrence" `Quick
             test_dispatch_create_persists_recurrence
+        ; test_case "dispatch create derives due_at for cron recurrence" `Quick
+            test_dispatch_create_derives_due_at_for_cron_recurrence
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
         ; test_case "dashboard projection surfaces schedule FSM" `Quick

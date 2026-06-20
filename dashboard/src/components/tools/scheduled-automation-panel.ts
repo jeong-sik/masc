@@ -64,6 +64,10 @@ function recurrenceLabel(request: DashboardScheduledAutomationRequest): string {
       return `${hh}:${mm}:${ss}${timezone ? ` ${timezone}` : ''}`
     }
   }
+  if (kind === 'cron' && typeof recurrence?.expression === 'string' && recurrence.expression.trim()) {
+    const timezone = recurrence.timezone
+    return `cron ${recurrence.expression}${timezone ? ` ${timezone}` : ''}`
+  }
   return enumLabel(kind)
 }
 

@@ -92,13 +92,19 @@ let statuses =
 let actor_kinds = [ "human_operator"; "automated_actor"; "system" ]
 
 let sources = [ "operator_request"; "automated_request"; "system_request" ]
-let recurrence_kinds = [ "one_shot"; "interval"; "daily" ]
+let recurrence_kinds = [ "one_shot"; "interval"; "daily"; "cron" ]
 
 let create_schema =
   object_schema
     ~required:[ "risk_class" ]
-    [ number_prop ~description:"Unix timestamp in seconds. Provide this or due_at_iso." "due_at_unix"
-    ; string_prop ~description:"ISO-8601 timestamp. Provide this or due_at_unix." "due_at_iso"
+    [ number_prop
+        ~description:
+          "Unix timestamp in seconds. Provide this, due_at_iso, or a calendar recurrence (daily/cron) that can derive the first due time."
+        "due_at_unix"
+    ; string_prop
+        ~description:
+          "ISO-8601 timestamp. Provide this, due_at_unix, or a calendar recurrence (daily/cron) that can derive the first due time."
+        "due_at_iso"
     ; object_prop
         ~description:
           "Typed schedule payload envelope: {kind:string, schema_version:int, body:object}."
@@ -132,7 +138,11 @@ let create_schema =
         "recurrence_second"
     ; string_prop
         ~description:
-          "Required when recurrence_kind is daily. Fixed-offset only: UTC, Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. DST-aware IANA zones are not supported."
+          "Required when recurrence_kind is cron. Standard 5-field cron expression: minute hour day-of-month month day-of-week. Supports wildcards, comma lists, numeric ranges, and steps such as */15 or 1-5/2."
+        "recurrence_cron"
+    ; string_prop
+        ~description:
+          "Required when recurrence_kind is daily or cron. Fixed-offset only: UTC, Asia/Seoul/KST as +09:00 aliases, or offsets like +09:00/UTC+09:00. DST-aware IANA zones are not supported."
         "recurrence_timezone"
     ; string_prop ~description:"Requester actor id. Defaults to operator." "requested_by_id"
     ; string_prop ~enum:actor_kinds "requested_by_kind"

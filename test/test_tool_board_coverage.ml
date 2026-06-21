@@ -604,6 +604,35 @@ let test_post_create_structured_payload () =
   Alcotest.(check bool) "state_block absent after strip" true
     (Yojson.Safe.Util.(json |> member "meta" |> member "state_block") = `Null)
 
+(* Regression guard: board_post must return STRUCTURED [data] (`Assoc), not a
+   `String that embeds stringified JSON. The `String form double-encodes the
+   payload — a consumer that re-serializes the result (e.g. the dashboard's
+   JSON.stringify) escapes the inner newlines back to literal "\n". Unlike
+   [test_post_create_structured_payload], which parses [message] (and passes for
+   either shape via parse_create_response_json's `\n`-suffix branch), this test
+   inspects [Tool_result.data] directly and fails on the `String shape. Guards
+   against reverting to [make_ok ~data:(`String "Post created:\n...")]. *)
+let test_post_create_data_is_structured () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let result =
+    dispatch_result "masc_board_post"
+      (make_args
+         [ ("content", `String "Structured body"); ("author", `String "tester") ])
+  in
+  Alcotest.(check bool) "create ok" true (Tool_result.is_success result);
+  (match Tool_result.data result with
+   | `Assoc fields ->
+     Alcotest.(check bool) "structured data carries post id" true
+       (List.mem_assoc "id" fields)
+   | `String _ ->
+     Alcotest.fail
+       "board_post data is a raw `String (double-encoded JSON); expected structured `Assoc"
+   | other ->
+     Alcotest.failf "unexpected board_post data shape: %s"
+       (Yojson.Safe.to_string other))
+
 let test_post_create_judgment_roundtrip () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1869,6 +1898,8 @@ let () =
           Alcotest.test_case "create success" `Quick test_post_create_success;
           Alcotest.test_case "create structured payload" `Quick
             test_post_create_structured_payload;
+          Alcotest.test_case "create data is structured not double-encoded" `Quick
+            test_post_create_data_is_structured;
           Alcotest.test_case "create judgment roundtrip" `Quick
             test_post_create_judgment_roundtrip;
           Alcotest.test_case "create judgment list roundtrip (#16300)" `Quick

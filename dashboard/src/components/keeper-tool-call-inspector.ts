@@ -12,7 +12,7 @@ import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
 import { asRecord, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { SectionCap } from './common/section-cap'
-import { toolCategory, durationColor } from './tool-call-shared'
+import { toolCategory, durationColor, prettyJsonDeep } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { parseToolBlobMarker, type ToolBlobMarker } from '../lib/tool-blob-marker'
 import { fetchToolBlob } from '../api/tool-blob'
@@ -65,12 +65,10 @@ export function formatInput(input: unknown): string {
   }
 }
 
+// Pretty-print and recursively un-nest double-encoded JSON (mirror of the
+// OCaml Tool_result structured-payload extraction). Returns null for non-JSON.
 function tryPrettyJson(s: string): string | null {
-  try {
-    return JSON.stringify(JSON.parse(s), null, 2)
-  } catch {
-    return null
-  }
+  return prettyJsonDeep(s)
 }
 
 function parseInputRecord(input: string): Record<string, unknown> | null {

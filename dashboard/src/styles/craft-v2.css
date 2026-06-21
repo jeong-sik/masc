@@ -283,8 +283,15 @@
    variant — user bubbles render `.chat-bubble.user` directly, covered above. */
 
 /* ── Scrollbar treatment ──────────────────────────────────────── */
+/* Keeper workspace scroll areas render `.kw-thread`/`.kw-rail-scroll`/
+   `.kw-roster-list`; the design class names (`.thread`/`.ctx-scroll`/
+   `.roster-list`) are kept for other surfaces, the `.kw-*` ones added so the
+   keeper workspace gets the same 10px themed scrollbar (verified live). */
 .v2-app .dashboard-main-scroll::-webkit-scrollbar,
 .v2-app .v2-shell-rail::-webkit-scrollbar,
+.v2-app .kw-thread::-webkit-scrollbar,
+.v2-app .kw-rail-scroll::-webkit-scrollbar,
+.v2-app .kw-roster-list::-webkit-scrollbar,
 .v2-app .thread::-webkit-scrollbar,
 .v2-app .ctx-scroll::-webkit-scrollbar,
 .v2-app .roster-list::-webkit-scrollbar,
@@ -300,6 +307,9 @@
 
 .v2-app .dashboard-main-scroll::-webkit-scrollbar-thumb,
 .v2-app .v2-shell-rail::-webkit-scrollbar-thumb,
+.v2-app .kw-thread::-webkit-scrollbar-thumb,
+.v2-app .kw-rail-scroll::-webkit-scrollbar-thumb,
+.v2-app .kw-roster-list::-webkit-scrollbar-thumb,
 .v2-app .thread::-webkit-scrollbar-thumb,
 .v2-app .ctx-scroll::-webkit-scrollbar-thumb,
 .v2-app .roster-list::-webkit-scrollbar-thumb,
@@ -317,6 +327,9 @@
   transition: background var(--dur);
 }
 
+.v2-app .kw-thread::-webkit-scrollbar-thumb:hover,
+.v2-app .kw-rail-scroll::-webkit-scrollbar-thumb:hover,
+.v2-app .kw-roster-list::-webkit-scrollbar-thumb:hover,
 .v2-app .thread::-webkit-scrollbar-thumb:hover,
 .v2-app .ctx-scroll::-webkit-scrollbar-thumb:hover,
 .v2-app .roster-list::-webkit-scrollbar-thumb:hover,

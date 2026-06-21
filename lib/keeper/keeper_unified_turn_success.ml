@@ -48,7 +48,32 @@ let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_block
   lifecycle
 ;;
 
-let apply_loop_detectors ~config ~social_state updated_meta result =
+let no_work_budget_threshold_override
+      ~stop_reason
+      ~has_current_task
+      ~active_goal_ids
+      ~strong_evidence
+      ~surface_requires_evidence
+      ~observation
+  =
+  let budget_exhausted =
+    match stop_reason with
+    | Runtime_agent.TurnBudgetExhausted _ -> true
+    | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
+  in
+  let no_work_scope = (not has_current_task) && active_goal_ids = [] in
+  if
+    budget_exhausted
+    && no_work_scope
+    && (not strong_evidence)
+    && surface_requires_evidence
+    && Keeper_unified_metrics_support.is_scheduled_autonomous_cycle_of_observation
+         observation
+  then Some 1
+  else None
+;;
+
+let apply_loop_detectors ~config ~observation ~social_state updated_meta result =
   (* RFC-0239 §3 R3: feed the loop detector a semantic no-progress verdict
      instead of the literal speech_act. A turn makes progress if it produced
      durable evidence (substantive tool calls or validated output); a turn that
@@ -71,10 +96,21 @@ let apply_loop_detectors ~config ~social_state updated_meta result =
       ~strong_evidence
       ~surface_requires_evidence
   in
+  let threshold_override =
+    no_work_budget_threshold_override
+      ~stop_reason:result.Keeper_agent_run.stop_reason
+      ~has_current_task:(Option.is_some updated_meta.Keeper_meta_contract.current_task_id)
+      ~active_goal_ids:updated_meta.Keeper_meta_contract.active_goal_ids
+      ~strong_evidence
+      ~surface_requires_evidence
+      ~observation
+  in
   match
     Keeper_no_progress_loop_detector.record_turn
+      ?threshold_override
       ~keeper_name:updated_meta.Keeper_meta_contract.name
       ~made_progress
+      ()
   with
   | Keeper_no_progress_loop_detector.Normal -> updated_meta
   | Keeper_no_progress_loop_detector.Loop_detected { streak; threshold } ->
@@ -90,6 +126,10 @@ let apply_loop_detectors ~config ~social_state updated_meta result =
       ~previous_streak
       ~was_latched
 ;;
+
+module For_testing = struct
+  let no_work_budget_threshold_override = no_work_budget_threshold_override
+end
 
 let append_metrics_snapshot
       ~config
@@ -480,7 +520,9 @@ let handle
       ~update_proactive_rt:true
       result
   in
-  let updated_meta = apply_loop_detectors ~config ~social_state updated_meta result in
+  let updated_meta =
+    apply_loop_detectors ~config ~observation ~social_state updated_meta result
+  in
   append_metrics_snapshot
     ~config
     ~meta

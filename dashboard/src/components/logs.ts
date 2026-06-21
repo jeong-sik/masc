@@ -60,13 +60,13 @@ const latestSeq = signal<number | null>(null)
 const categoryFilter = signal('')
 const hideFsmTransitions = signal(false)
 const expandedLogSeq = signal<number | null>(null)
-// "load older" backward paging: [displayCap] is the max rows kept in view. It
-// starts at the per-request limit and grows as older pages are appended AND as
-// the delta poller adds newer rows on top of a paged-open view, so neither path
-// evicts history the operator paged into. [pagedOlder] records whether the view
-// has been expanded past the base limit; while it is false the delta poller
-// keeps a fixed newest-N sliding window (bounded memory, steady state).
-const displayCap = signal(DEFAULT_LOG_LIMIT)
+// "load older" backward paging: the merge cap is derived per-poll by
+// [deltaMergeCap] from the currently shown rows, so it does not need to persist
+// in a signal. [pagedOlder] records whether the view has been expanded past the
+// base limit; while it is false the delta poller keeps a fixed newest-N sliding
+// window (bounded memory, steady state), and once true the cap grows to cover
+// every shown row plus genuinely-new rows so neither path evicts history the
+// operator paged into.
 const pagedOlder = signal(false)
 const olderLoading = signal(false)
 const noMoreOlder = signal(false)
@@ -502,7 +502,6 @@ async function loadLogs(mode: LoadMode = 'reset') {
 
   if (mode === 'reset') {
     logQueryGeneration += 1
-    displayCap.value = logLimit.value
     pagedOlder.value = false
     noMoreOlder.value = false
     return logResource.load(async () => {
@@ -540,7 +539,6 @@ async function loadLogs(mode: LoadMode = 'reset') {
     const incoming = sortLogEntries(resp.entries)
     const cap = deltaMergeCap(currentEntries, incoming, pagedOlder.value, logLimit.value)
     const nextEntries = mergeLogEntries(currentEntries, incoming, cap)
-    displayCap.value = Math.max(logLimit.value, nextEntries.length)
 
     latestSeq.value = latestLogSeq(nextEntries)
     logResource.state.value = loaded({
@@ -560,8 +558,9 @@ function oldestLogSeq(entries: readonly LogEntry[]): number | null {
 }
 
 // "load older" backward paging: fetch entries strictly older than the smallest
-// seq currently shown and append them, growing displayCap so neither this merge
-// nor the delta poller trims the existing rows.
+// seq currently shown and append them. The merge cap here covers current + newly
+// loaded rows so this merge keeps them, and [pagedOlder] then makes the delta
+// poller grow its cap so it does not trim them on the next poll.
 export async function loadOlder() {
   const s = logResource.state.value
   if (s.status !== 'loaded') return
@@ -594,7 +593,6 @@ export async function loadOlder() {
     const latestEntries = latestState.data.entries
     const cap = latestEntries.length + incoming.length
     const nextEntries = mergeLogEntries(latestEntries, incoming, cap)
-    displayCap.value = Math.max(displayCap.value, nextEntries.length)
     // Mark the view as paged-open so the delta poller grows its cap for new
     // rows instead of slicing the just-loaded older rows back off.
     pagedOlder.value = true

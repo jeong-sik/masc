@@ -65,6 +65,8 @@ The validation is a pure helper (`unknown_added_tool_names`) so it is unit-teste
 
 **Out (deferred / not needed):** the typed `keeper_config_action` sum spanning persona/instructions (duplicates `/config`), the v2-panel swap (regresses production), the panel reshape (already masc-tool-keyed in production), and a static risk badge (no SSOT — risk is computed). A persona editor, if ever wanted, is a separate follow-up exposing `keeper_meta.persona` (the field exists but no production UI edits it).
 
+> **Governance note (deferred, not abandoned):** the typed `keeper_config_action` sum is intentionally postponed while `/api/v1/keepers/:name/tools` has only one action (`set_policy`). When a second keeper config action is introduced, the stringly dispatch must be promoted to a typed sum so the compiler enforces exhaustiveness and unknown actions are rejected (AI anti-pattern §2 / `#4`). Until then, a single-variant sum would be over-engineering (Simplicity First).
+
 ### 3.2 Tier B — runtime.toml writes (model/runtime assignment + Settings runtime-defaults)
 
 A new host_config write endpoint editing `runtime.toml`:

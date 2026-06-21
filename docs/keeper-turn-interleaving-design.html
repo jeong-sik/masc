@@ -97,7 +97,7 @@ flowchart TD
   subgraph S["라이브 스트림 · keeper-stream.ts"]
     direction TB
     THv["THINKING_DELTA"] -->|"appendAssistantThinkingDelta()"| TS["assistant.traceSteps<br/>kind:'think' 만 누적"]
-    TCv["TOOL_CALL_START (:76)"] -->|"insertThreadEntryBefore(assistantEntryId) (:81)"| TE["tool entry 들<br/>assistant entry <b>앞</b>으로 hoist"]
+    TCv["TOOL_CALL_START"] -->|"insertThreadEntryBefore() (anchor 36ac1ebd)"| TE["tool entry 들<br/>assistant entry <b>앞</b>으로 hoist"]
   end
   TS --> CARD
   TE --> CARD

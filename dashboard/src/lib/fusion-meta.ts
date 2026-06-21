@@ -3,6 +3,9 @@
 // `meta.source === 'fusion'` payload emitted by `fusion_sink.ml`; this module
 // is the single source of truth for that normalization.
 
+import { isRecord } from './type-guards'
+import { asRecord, asString } from '../components/common/normalize'
+
 function decodeOcamlStringLiteral(value: string): string {
   return value
     .replace(/\\\\/g, '\u0000')
@@ -38,19 +41,10 @@ export function normalizeFusionPanelReason(model: string, reason: string | undef
 // Generic defensive helpers for loose wire metadata
 // ---------------------------------------------------------------------------
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function asRecord(value: unknown): Record<string, unknown> | null {
-  return isRecord(value) ? value : null
-}
-
-export function asString(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
+// Reuse `asString` / `asRecord` / `asStringArray` from `common/normalize` and
+// `isRecord` from `lib/type-guards`. `asNumber` is kept local because the
+// fusion wire format emits token counts as both numbers and numeric strings,
+// whereas `common/normalize.asNumber` rejects strings by design.
 
 export function asNumber(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
@@ -59,14 +53,6 @@ export function asNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
-}
-
-export function asStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.flatMap((item) => {
-    const text = asString(item)
-    return text ? [text] : []
-  })
 }
 
 export function firstString(source: Record<string, unknown>, keys: string[]): string | null {

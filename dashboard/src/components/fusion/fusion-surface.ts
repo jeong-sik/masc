@@ -15,10 +15,8 @@ import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { FusionRunsPanel } from './fusion-runs-panel'
+import { asRecord, asString, asStringArray } from '../common/normalize'
 import {
-  asRecord,
-  asString,
-  asStringArray,
   firstString,
   firstNumber,
   normalizeFusionPanel,

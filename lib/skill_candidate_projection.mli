@@ -56,9 +56,9 @@ val candidates_of_memory_facts
   -> Keeper_memory_os_types.fact list
   -> skill_candidate list
 
-(** Load the top crystallized procedures for [agent_name] and project them to
-    candidates. *)
-val top_candidates : agent_name:string -> limit:int -> skill_candidate list
+(** Load the top crystallized procedures for [agent_name] under [base_path] and
+    project them to candidates. *)
+val top_candidates : base_path:string -> agent_name:string -> limit:int -> skill_candidate list
 
 val to_json : skill_candidate -> Yojson.Safe.t
 

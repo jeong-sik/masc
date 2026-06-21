@@ -31,20 +31,24 @@ type procedure = {
 (* Paths                                                            *)
 (* ================================================================ *)
 
-let procedures_dir ~agent_name =
+let base_path_or_default = function
+  | Some base_path -> base_path
+  | None -> Env_config.base_path ()
+;;
+
+let procedures_dir ?base_path ~agent_name () =
+  let base_path = base_path_or_default base_path in
   Filename.concat
-    (Filename.concat
-       (Common.masc_dir_from_base_path ~base_path:(Env_config.base_path ()))
-       "procedures")
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "procedures")
     agent_name
 
-let procedures_path ~agent_name =
-  sprintf "%s/procedures.jsonl" (procedures_dir ~agent_name)
+let procedures_path ?base_path ~agent_name () =
+  sprintf "%s/procedures.jsonl" (procedures_dir ?base_path ~agent_name ())
 
-let with_procedures_lock ~agent_name f =
-  let dir = procedures_dir ~agent_name in
+let with_procedures_lock ?base_path ~agent_name f =
+  let dir = procedures_dir ?base_path ~agent_name () in
   Fs_compat.mkdir_p dir;
-  File_lock_eio.with_lock (procedures_path ~agent_name) f
+  File_lock_eio.with_lock (procedures_path ?base_path ~agent_name ()) f
 
 (* ================================================================ *)
 (* JSON Serialization                                               *)
@@ -91,20 +95,20 @@ let of_json (json : Yojson.Safe.t) : procedure option =
 (* File I/O                                                         *)
 (* ================================================================ *)
 
-let load_procedures ~agent_name : procedure list =
-  with_procedures_lock ~agent_name (fun () ->
-    let path = procedures_path ~agent_name in
+let load_procedures ?base_path ~agent_name () : procedure list =
+  with_procedures_lock ?base_path ~agent_name (fun () ->
+    let path = procedures_path ?base_path ~agent_name () in
     Fs_compat.load_jsonl path
     |> List.filter_map of_json)
 
-let save_procedure ~agent_name (p : procedure) =
-  with_procedures_lock ~agent_name (fun () ->
-    let path = procedures_path ~agent_name in
+let save_procedure ?base_path ~agent_name (p : procedure) =
+  with_procedures_lock ?base_path ~agent_name (fun () ->
+    let path = procedures_path ?base_path ~agent_name () in
     Fs_compat.append_jsonl path (to_json p))
 
-let rewrite_procedures ~agent_name (procs : procedure list) =
-  with_procedures_lock ~agent_name (fun () ->
-    let path = procedures_path ~agent_name in
+let rewrite_procedures ?base_path ~agent_name (procs : procedure list) =
+  with_procedures_lock ?base_path ~agent_name (fun () ->
+    let path = procedures_path ?base_path ~agent_name () in
     let content =
       procs
       |> List.map (fun p -> Yojson.Safe.to_string (to_json p))
@@ -142,8 +146,8 @@ let is_crystallized (p : procedure) : bool =
 (** Get top-N crystallized procedures by confidence.
     Uses adaptive thresholding: standard (3+ evidence, 70% confidence)
     plus rare-but-perfect (2+ evidence, 100% confidence). *)
-let top_procedures ~agent_name ~limit : procedure list =
-  let procs = load_procedures ~agent_name in
+let top_procedures ?base_path ~agent_name ~limit () : procedure list =
+  let procs = load_procedures ?base_path ~agent_name () in
   procs
   |> List.filter is_crystallized
   |> List.sort (fun a b -> Float.compare b.confidence a.confidence)

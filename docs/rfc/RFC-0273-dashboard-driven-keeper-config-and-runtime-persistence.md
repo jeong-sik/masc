@@ -64,12 +64,19 @@ type keeper_config_action =
 
 ### 3.2 Tier B — runtime.toml writes (model/runtime assignment + Settings runtime-defaults)
 
-A new host_config write endpoint editing `runtime.toml`:
+> **Amendment (grounded correction — Tier B is largely already implemented).** Grounding `origin/main` corrected the premise that Tier B needs a *new* runtime.toml write endpoint:
+>
+> - **Keeper→runtime assignment is ALREADY implemented end-to-end and backed.** `Runtime.set_runtime_id_for_keeper` (runtime.ml:666) already does the full operation — load → surgical `[[runtime.assignments]]` single-keeper edit → validate (rejects unknown runtime_id via `validate_keeper_assignments`) → `Fs_compat.save_file_atomic` → `init_default` reload of the singletons `#21903` reads. It is reachable from the dashboard today: `KeeperRuntimeModelEditor` (keeper-detail page, NOT preview-locked) and the keeper-config-panel `InlineSelectRow` both call `patchKeeperConfig(name, { runtime_id })` → `POST /api/v1/keepers/:name/config` → `Keeper_turn_up_update.update_keeper` → `set_runtime_id_for_keeper`. The route is `CanAdmin`-gated. **#21943's "set_runtime_id_for_keeper is HTTP-unexposed" was a direct-caller blind spot** — it is exposed transitively via `/config`. A new structured route would duplicate this.
+> - **The Settings runtime-defaults editor (part b) has NO backed home — it is preview-locked.** The Settings `runtime` (singular, defaults) section is a read-only prototype (`settings-surface.ts:587` "Prototype — changes are local-only"; `defRuntime`/`defModel` `onChange` are bare `useState` setters with no POST). Wiring a global-defaults write there reproduces the **#21949 preview-lock trap**. Also, no granular `set_default_runtime`/`set_librarian_runtime` setter exists — only whole-file `save_config_text` (already wired to `POST /api/v1/runtime/config/raw` via `runtime-toml-editor.ts`). So part b is blocked on lifting the preview lock first (separate from Tier B) — deferred.
+> - **Concurrency serialization** is the only candidate net-new delta, but its real-world hazard is **unconfirmed**: the load-modify-save in `set_runtime_id_for_keeper`/`save_config_text` is yield-free blocking Unix IO, so on a single domain fibers cannot interleave (no lost update). A cross-domain write race would require concurrent writers on different domains, which is not established for these paths. Tracked as a low-priority hardening (an `Eio`-context-safe `Stdlib.Mutex` shared by both writers in `Runtime`) gated on confirming the cross-domain write hazard — not shipped speculatively (Simplicity First). See issue #21983.
+>
+> **Net:** Tier B's keeper→runtime assignment is done; part b is deferred behind the preview lock; the concurrency mutex is a documented optional follow-up. No new endpoint is built.
 
-- **Keeper→runtime assignment**: the v2 panel's model/runtime dropdowns set the keeper's runtime assignment (the routing *intent*, RFC-0038-runtime-routing-intent-preservation). Persisting must preserve the intent and not silently substitute (RFC-0001 det/nondet boundary).
-- **Settings runtime-defaults editor**: writes the default runtime id + model routing that `#21903` currently serves read-only.
-- Mechanics: parse current `runtime.toml` → apply a typed delta → `save_file_atomic` → `Runtime.reload` (re-populate the resolved singletons `#21903` reads). Concurrency: a write must not corrupt a config being read by in-flight keeper admission; reload is atomic at the singleton swap.
-- This is the highest-risk surface (global routing). It is gated stricter than Tier A (§3.3) and behind a feature flag for rollout (§7).
+~~A new host_config write endpoint editing `runtime.toml`:~~ (superseded — see amendment)
+
+- **Keeper→runtime assignment** (DONE): the routing *intent* (RFC-0038-runtime-routing-intent-preservation) is persisted via the existing `/config` → `set_runtime_id_for_keeper` path, which validates against the configured runtimes and does not silently substitute (RFC-0001 det/nondet boundary; `get_runtime_by_id` returns `None` for an unknown id so dispatch fails fast).
+- **Settings runtime-defaults editor** (DEFERRED — preview-locked frontend, no granular setter).
+- Mechanics already in place: `set_runtime_id_for_keeper` = load → surgical assignment edit → validate → `save_file_atomic` → `init_default` reload (atomic at the singleton swap).
 
 ### 3.3 Auth / operator gating
 
